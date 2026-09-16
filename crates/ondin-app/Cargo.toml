@@ -1,0 +1,62 @@
+[package]
+name = "ondin-app"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# The `ondin` binary: GUI shell + `serve`/`export` subcommands. Only this crate
+# may depend on egui/winit (§3). Ties the whole graph together.
+#
+# ⚠️ **And it is the second crate allowed `wgpu`, which §3 denied until 2026-09-15**
+# (§15 D774, `[A2-L7-04]`). eframe owns the device; vello renders the canvas and
+# egui-wgpu composites it, so the two must share one wgpu — and `ondin-render`'s
+# seam takes `&Device`, `&Queue` and `&TextureView`, so this crate cannot call it
+# without naming the types. `canvas.rs` is where they are named — count them with
+# `grep -cE '(^|[^A-Za-z0-9_])wgpu::' src/canvas.rs`, not with a number written
+# here, and note that the path is `use eframe::wgpu`: there is no `use wgpu::`
+# anywhere in `src/`, so this line is an interop *pin* rather than what makes the
+# source compile. **vello and vello_cpu are still this crate's to never
+# declare**, which is the half of the old rule that was true, and it is now
+# tested (`ondin-core/tests/deps_forbidden.rs`).
+[[bin]]
+name = "ondin"
+path = "src/main.rs"
+
+[dependencies]
+ondin-core = { path = "../ondin-core" }
+ondin-render = { path = "../ondin-render" }
+ondin-export = { path = "../ondin-export" }
+ondin-mcp = { path = "../ondin-mcp" }
+# eframe (default features) brings egui + egui-wgpu + winit at matching versions.
+eframe.workspace = true
+egui.workspace = true
+egui-wgpu.workspace = true
+wgpu.workspace = true
+rfd.workspace = true
+# Image decoding and content hashing for placement (§5.5a). Both are already in
+# the workspace lock — `image` through `arboard`/`eframe`, `ring` through
+# `ureq`/`rustls` — so these declare edges at versions already compiled, the same
+# reasoning §3 records for `skrifa`/`read-fonts` in core.
+image.workspace = true
+arboard.workspace = true
+ring = "0.17.14"
+fontdb.workspace = true
+ureq.workspace = true
+dirs.workspace = true
+woff2.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+# The desktop cursor position a Windows file drag never sends (§15 D241). One
+# function, `GetCursorPos`, behind `canvas::os_cursor_desktop_px`; the crate and
+# both its features are already compiled here by `winit`.
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
+# `build.rs` only. The app icon is two separate things and this is the half that
+# is not code: the resource compiler writes the `.ico` into `ondin.exe` itself,
+# where Explorer reads it. The *window's* icon is `main::window_icon`, decoded
+# RGBA handed to winit at startup, and neither one covers the other's surfaces.
+[target.'cfg(windows)'.build-dependencies]
+winresource.workspace = true

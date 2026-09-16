@@ -1,0 +1,66 @@
+# Build artifacts
+/target/
+**/*.rs.bk
+
+# Generated per-crate license manifest. The curated notices are tracked as
+# THIRD-PARTY-NOTICES.md; this is the machine-generated long form, regenerated
+# with `cargo about generate about.hbs > THIRD-PARTY-LICENSES.html`.
+/THIRD-PARTY-LICENSES.html
+
+# Claude Code: everything under .claude/ is per-machine by default — permissions
+# in settings.local.json, shell snapshots, session state — EXCEPT the shared
+# subagent and skill definitions and the preview launcher, which are checked in
+# so a fresh clone gets them.
+.claude/*
+!.claude/agents/
+!.claude/skills/
+!.claude/launch.json
+
+# The maintainer's private scratchpad. The tracked record is docs/roadmap.md.
+/todo.md
+
+# Codebase-review working notes — plan, fact sheet, ledger, index, snapshots.
+# Findings that survive triage become §15 entries or roadmap items; the ledger
+# itself is scaffolding and is not a project record.
+#
+# 🚨 Nothing here has a `git checkout` behind it, which is why CLAUDE.md's ban on
+# scripted rewrites matters most for `review/findings.md` (23k lines) — a bad
+# splice there is unrecoverable, not a revert.
+/review/
+
+# Design working files — mockups, handoff notes and their uploads. Local scratch
+# for designing a feature, regenerated between sessions, never part of a commit.
+/design/
+
+# Throwaway probe binaries and their symbols. A `#[test]` that measures something
+# is deleted once it has answered (CLAUDE.md, *Checking the chrome without a
+# window*); a probe compiled to a binary leaves artifacts behind, and they are
+# not a project record — the measurement belongs in §15.
+/panicdetect.rs
+/pd[0-9]
+*.pdb
+
+# Headless export scratch — `ondin export … -o out.svg` is the routine way to
+# check rendering without a window (CLAUDE.md, *Checking rendering without a
+# window*), and its output lands wherever the command was run.
+/out.svg
+/out.png
+/out.json
+/*.exe
+
+# Editor / IDE folders
+.vscode/
+.idea/
+.vs/
+.zed/
+*.iml
+
+# Editor swap / backup files
+*.swp
+*.swo
+*~
+
+# OS cruft
+.DS_Store
+Thumbs.db
+desktop.ini

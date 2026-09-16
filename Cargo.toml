@@ -1,0 +1,235 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2024"
+version = "0.0.0"
+license = "MIT"
+repository = "https://github.com/fadion/ondin"
+
+# All *shared* external versions are pinned here and referenced from crates via
+# `<dep>.workspace = true`; a dependency used by exactly one crate is declared in
+# that crate's manifest, with its reasoning on it. Versions were taken from the
+# current registry at scaffold time, not guessed (§2).
+#
+# ⚠️ **This used to read "all external versions are pinned here" and five are
+# not** (§15 D703, `[A2-L3-06]`'s sibling `[S22-L3-05]`): `base64`, `roxmltree`
+# and `flo_curves` in `ondin-core`, `ring` in `ondin-app`, and `pollster` as a
+# dev-dependency of `ondin-render`. Each carries its own justification paragraph,
+# so the second home is deliberate — the opening sentence simply did not admit it
+# existed, in the block whose whole subject is this project's pinning story.
+#
+# 🚨 **`flo_curves` is worth a maintainer's minute and is deliberately left
+# alone.** It is declared `"0.8.0"` — a caret range — and `Cargo.lock` has
+# already moved to **0.8.1**. That is the crate whose non-transitive comparator
+# makes `boolean::evaluate` panic, i.e. the library the `panic = "abort"` note at
+# the foot of this file and §15 D239's `catch_unwind` guard are written about, so
+# it bumps patch-to-patch with no manifest change and nothing to review while
+# `vello`, `vello_cpu`, `wgpu` and the four egui crates are all `=`-pinned. An
+# `=` pin at the already-resolved 0.8.1 would cost nothing and change no build;
+# it is a dependency-policy call rather than a repair, which is why it is
+# recorded here instead of taken.
+#
+# Everything else in this block was re-verified against `Cargo.lock` at the same
+# time and holds — see D703 for the list, so a later pass need not re-derive it.
+#
+# INTEROP PINS (do not bump independently):
+#   * wgpu is pinned to exactly what vello 0.9 AND egui-wgpu 0.35 both require
+#     (29.0.4). vello renders the canvas; egui-wgpu composites it. They must
+#     share one wgpu, so this version is dictated by them, never chosen freely.
+#   * kurbo/peniko unify to a single version shared by ondin-core and vello, so
+#     the model's geometry/paint types ARE the types the renderer consumes
+#     (§6.3 "near-zero translation").
+[workspace.dependencies]
+# --- ondin-core (headless; no GPU/UI) ---
+kurbo = { version = "0.13.1", features = ["serde"] }
+peniko = { version = "0.6.1", features = ["serde"] }
+rstar = "0.13.0"
+rustc-hash = "2.1.3"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.19"
+# Text shaping/layout (CPU, headless). `system` feature OFF: core never scans
+# system fonts — layout uses only the bundled Inter fonts (deterministic, FS-free).
+parley = { version = "0.11.0", default-features = false, features = ["std"] }
+# Font metadata the Font tab builds itself from: `fvar` axes and named
+# instances (skrifa), GSUB/GPOS feature tags (read-fonts). Both are ALREADY in
+# ondin-core's tree via parley/fontique at exactly these versions, so naming
+# them directly adds nothing to the dependency closure — and neither is a GPU or
+# UI crate, so `deps_forbidden` stays green.
+skrifa = "0.43.2"
+read-fonts = "0.40.2"
+
+# --- ondin-render (GPU + CPU backends) — pinned exactly ---
+vello = "=0.9.0"
+vello_cpu = "=0.2.0"
+wgpu = "=29.0.4"
+# Image decoding for the decode cache (§5.5a). `default-features = false` and the
+# four formats v1 accepts: the crate's defaults pull in a dozen more decoders we
+# would never reach. Already in the workspace lock at this version through
+# `arboard`/`eframe`, so this declares an edge rather than adding a tree.
+#
+# 🚨 This list bounds what *we ask for*, and NOT what is compiled. It used to say
+# "named here so adding a fifth is a decision" and that was false (§15 D600,
+# `[S22-L2-02]`): cargo unifies features across the graph, and `arboard` asks the
+# same `image` build for `bmp` under `cfg(windows)` and `tiff` under
+# `cfg(target_os = "macos")` — TIFF being the exact format `ImageFormat`'s own doc
+# names as excluded on purpose. Measured: `cargo tree --workspace` reports
+# `bmp,gif,jpeg,png,webp` here, `cargo tree -p ondin-render` the declared four.
+# The four are decided in `ondin-render/src/images.rs · signature_is_accepted`,
+# which reads magic bytes and so is not a function of what cargo resolved.
+image = { version = "0.25.10", default-features = false, features = [
+  "png",
+  "jpeg",
+  "webp",
+  "gif",
+] }
+
+# --- ondin-export ---
+png = "0.18.1"
+# *Export as zip* — one archive holding a whole export set (§7). Hand-rolling the
+# container was the alternative and is the same argument core's `base64` note
+# records: it is a format with edge cases (the central directory, the
+# separator, a name a tool refuses to extract), and this is the same code with
+# somebody else's tests behind it.
+#
+# `default-features = false` and **`deflate-flate2` alone**, which is the one of
+# the five deflate backends that uses `flate2` — already in the workspace lock
+# through `png` — rather than pulling zopfli or a second zlib. The plain
+# `deflate` feature enables three of them at once. What it adds to the tree is
+# `zip` itself and `typed-path`; every other codec (bzip2, lzma, zstd, AES) is
+# off, and turning one on would be a decision rather than a bump.
+zip = { version = "8.6.0", default-features = false, features = [
+  "deflate-flate2",
+] }
+
+# --- ondin-app (UI chrome + windowing) — egui trio pinned exactly, moves together ---
+# eframe (default features) owns the window + wgpu device + event loop; it pulls
+# egui/egui-wgpu/egui-winit/winit at matching versions (§9.1 harness decision).
+winit = "0.30.13"
+egui = "=0.35.0"
+egui-wgpu = "=0.35.0"
+egui-winit = "=0.35.0"
+eframe = "=0.35.0"
+rfd = "0.17.2"
+# The OS clipboard, for pasting an image (§5.5a). **Already in the lock at this
+# version through `egui-winit`**, whose `clipboard` feature enables it with
+# `image-data` — so this declares an edge rather than adding a tree, the same
+# reasoning the `image` note above records. It is needed *directly* because
+# `egui::Event::Paste` carries a `String` and there is no image variant: an image
+# paste has to read the clipboard itself (§15 D183).
+arboard = { version = "3.6.1", features = ["image-data"] }
+# Font service (app-only I/O): system enumeration, web-font download, cache dir.
+fontdb = "0.23.0"
+ureq = "3.3.0"
+dirs = "6.0.0"
+# `GetCursorPos`, and nothing else. A Windows file drag carries no position at
+# any point — winit's `IDropTarget` is handed the cursor point by the OS and
+# discards it — so the desktop cursor is the only way that gesture can be aimed
+# (§15 D184, D241). **Already in the lock at exactly this version through
+# `winit`**, whose own 25-entry feature list carries `Win32_Foundation` and
+# `Win32_UI_WindowsAndMessaging`, so those two declare an edge rather than adding
+# a tree — the same reasoning the `image` and `arboard` notes above record.
+# Windows-only, by `[target.'cfg(windows)']` in `ondin-app`.
+#
+# ⚠️ **Named rather than counted, and that is the fix rather than the style.** This
+# read *"carries the first two named here"* until 2026-09-06, which contradicted
+# the ⚠️ four lines below it: the features are declared alphabetically, so "the
+# first two" claims `Win32_System_Time` is one winit already asks for, and it is
+# precisely the one it does not. A reader trimming this block to the edge-only
+# lines would have kept `Win32_System_Time` and dropped
+# `Win32_UI_WindowsAndMessaging` — which is where `GetCursorPos` lives, the one
+# call the whole block exists for. The sentence was true when the list held two
+# entries and D384's local-time work inserted the third *in the middle*, which is
+# CLAUDE.md's "anchor above" hazard reaching a manifest.
+#
+# ⚠️ **`Win32_System_Time` is the one feature here `winit` does *not* already
+# ask for**, so it is the only line in this block that turns something on rather
+# than naming it. It costs a module of `extern` declarations and no code:
+# `GetDynamicTimeZoneInformation` and `SystemTimeToTzSpecificLocalTimeEx`, which
+# are how the *Created* column reads a local date whose offset is right for the
+# instant being shown rather than for today (`library::clock::local_offset`).
+# Windows keeps the zone's *history* and this is the API that asks it; the
+# alternative was a date-library dependency with its own copy of the tz database.
+windows-sys = { version = "0.52.0", features = [
+  "Win32_Foundation",
+  "Win32_System_Time",
+  "Win32_UI_WindowsAndMessaging",
+] }
+# Fontsource serves *variable* fonts as woff2 only, and a family's variable file
+# is one download covering every weight where the static cuts are one each. This
+# decodes it back to sfnt so core's shaper (which only knows sfnt) can take it.
+woff2 = { package = "woff2-patched", version = "0.4.0" }
+# The icon *inside* `ondin.exe` — the one Explorer, a pinned taskbar button and a
+# file association draw, none of which have a window to read a runtime icon from.
+# A **build** dependency, and the only one in the workspace: it shells out to the
+# Windows SDK's `rc.exe` and hands the linker a `.res`, so none of it survives
+# into the binary. `default-features = false` drops its `toml` feature, which
+# exists only to read `[package.metadata.winresource]` out of a Cargo.toml —
+# properties `crates/ondin-app/build.rs` sets explicitly instead, and the only
+# thing here that would have added a tree to the lock rather than an edge
+# (`version_check` is already in it; `toml` is not).
+winresource = { version = "0.1.31", default-features = false }
+
+# No debug symbols for dependencies. `"*"` is every package that is *not* a
+# workspace member, so ondin-core/render/export/app/mcp keep theirs in full and
+# only wgpu, vello, naga and friends lose them.
+#
+# This is a disk decision with a measurement behind it (2026-08-13): a 50 GB
+# working directory, 46 GB of it `target/debug`, and **22 GB of that was `.pdb`
+# files** — one set per build hash, never collected, ~300 MB for a single test
+# binary. Nearly all of it is symbols for code nobody here steps into; a
+# backtrace through wgpu is a wall of frames you read the top of.
+[profile.dev.package."*"]
+debug = false
+
+# `ondin-render` optimized even in a debug build.
+#
+# A second decision with a measurement behind it (2026-08-15). This crate holds
+# the per-pixel loops — the image-adjustment pass, the reduction that feeds its
+# preview, the CPU premultiply — and they are the one kind of code in this
+# workspace where the debug penalty is not a nuisance but a different product.
+# One adjustment pass over an 800×500 photograph, with the pass ALREADY compiled
+# to lookup tables (`images::AdjustLut`), measured **51.7 ms** unoptimized and
+# **2.1 ms** here — twenty-five times — and a scrub rebuilds that buffer every
+# frame. Reported as adjustment sliders being "noticeably laggy in scrubbing",
+# with the values jumping, which is what three frames a second looks like.
+#
+# **The two fixes are separate and their factors do not multiply**, which is easy
+# to write down wrong: the tables are worth 6× in a release build and only 2× in
+# a debug one, and this is the 25× on top of them. Crediting the profile with the
+# whole 101.5 ms → 2.1 ms would be counting the tables twice.
+#
+# `opt-level` only — symbols and debug-assertions are untouched, so a panic here
+# still names its line. The cost was measured too, since it is the reason not to
+# do this: an edit to `ondin-render` alone rebuilds in 1.5–3.7 s, and the whole
+# app in about 4. That is the price of the crate no longer being worth stepping
+# through line by line — and the alternative was optimising the pass until it was
+# fast enough *unoptimized*, which is not a thing that can be done.
+[profile.dev.package.ondin-render]
+opt-level = 3
+
+# **Do not set `panic = "abort"` on any profile here without reading §15 D239.**
+#
+# `boolean::evaluate` catches an unwind out of `flo_curves`, which panics on some
+# operand sets through a comparator that is not transitive. That guard is the only
+# thing standing between a boolean over the wrong geometry and the editor going
+# down with the document open in it, and under `panic = "abort"` it is inert —
+# `catch_unwind` never returns and the process dies. The usual reasons to reach
+# for `abort` (a smaller binary, a faster build) do not buy anything worth that
+# here.
+#
+# It is not set anywhere today, and **the absence is now enforced rather than
+# merely asked for** (§15 D445): `crates/ondin-core/src/boolean.rs` carries a
+# `#[cfg(panic = "abort")] compile_error!` that stops the build with the reason
+# attached.
+#
+# ⚠️ **This note argued against writing that gate, on two claims that are both
+# false.** It said *"nothing in the code can detect the setting or warn about
+# it"* — `#[cfg(panic = "abort")]` is a stable rustc cfg, measured on this
+# toolchain with a two-line probe — and *"there is no test that can fail if it
+# stops being"*, when `boolean::guarded`'s synthetic panic aborts its test binary
+# under the setting, which cargo reports as a hard failure of the whole target,
+# louder than an assertion rather than quieter. A note that exists to keep an
+# absence deliberate had been telling every reader the absence was undefendable.

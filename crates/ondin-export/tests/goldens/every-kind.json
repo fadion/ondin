@@ -1,0 +1,800 @@
+{
+  "snapshot_version": 10,
+  "root": "601d:1",
+  "nodes": [
+    {
+      "id": "601d:1",
+      "kind": "root",
+      "name": "Root",
+      "parent": null,
+      "children": [
+        "601d:2"
+      ],
+      "artboard": null,
+      "local_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "world_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "world_bounds": [
+        10.0,
+        10.0,
+        410.0,
+        330.0
+      ],
+      "visible": true,
+      "locked": false,
+      "proportions_locked": false,
+      "opacity": 1.0,
+      "clip": false,
+      "mask": false,
+      "mask_mode": "Shape",
+      "geometry": {
+        "type": "None"
+      },
+      "fills": [],
+      "strokes": []
+    },
+    {
+      "id": "601d:10",
+      "kind": "rect",
+      "name": "Rectangle 1",
+      "parent": "601d:9",
+      "children": [],
+      "artboard": "601d:2",
+      "local_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "world_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        250.0,
+        110.0
+      ],
+      "world_bounds": [
+        250.0,
+        110.0,
+        290.0,
+        150.0
+      ],
+      "visible": true,
+      "locked": false,
+      "proportions_locked": false,
+      "opacity": 1.0,
+      "clip": false,
+      "mask": false,
+      "mask_mode": "Shape",
+      "geometry": {
+        "type": "Rect",
+        "width": 40.0,
+        "height": 40.0,
+        "corner_radii": {
+          "top_left": 0.0,
+          "top_right": 0.0,
+          "bottom_right": 0.0,
+          "bottom_left": 0.0
+        }
+      },
+      "fills": [
+        {
+          "type": "Solid",
+          "color": "#28282d",
+          "alpha": 1.0
+        }
+      ],
+      "strokes": []
+    },
+    {
+      "id": "601d:11",
+      "kind": "boolean-subtract",
+      "name": "Notched",
+      "parent": "601d:2",
+      "children": [
+        "601d:12",
+        "601d:13"
+      ],
+      "artboard": "601d:2",
+      "local_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        20.0,
+        170.0
+      ],
+      "world_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        30.0,
+        180.0
+      ],
+      "world_bounds": [
+        30.0,
+        180.0,
+        110.0,
+        240.0
+      ],
+      "visible": true,
+      "locked": false,
+      "proportions_locked": false,
+      "opacity": 1.0,
+      "clip": false,
+      "mask": false,
+      "mask_mode": "Shape",
+      "geometry": {
+        "type": "None"
+      },
+      "fills": [
+        {
+          "type": "Solid",
+          "color": "#0f82be",
+          "alpha": 1.0
+        }
+      ],
+      "strokes": []
+    },
+    {
+      "id": "601d:12",
+      "kind": "rect",
+      "name": "Rectangle 1",
+      "parent": "601d:11",
+      "children": [],
+      "artboard": "601d:2",
+      "local_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0
+      ],
+      "world_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        30.0,
+        180.0
+      ],
+      "world_bounds": [
+        30.0,
+        180.0,
+        110.0,
+        240.0
+      ],
+      "visible": true,
+      "locked": false,
+      "proportions_locked": false,
+      "opacity": 1.0,
+      "clip": false,
+      "mask": false,
+      "mask_mode": "Shape",
+      "geometry": {
+        "type": "Rect",
+        "width": 80.0,
+        "height": 60.0,
+        "corner_radii": {
+          "top_left": 0.0,
+          "top_right": 0.0,
+          "bottom_right": 0.0,
+          "bottom_left": 0.0
+        }
+      },
+      "fills": [
+        {
+          "type": "Solid",
+          "color": "#0f82be",
+          "alpha": 1.0
+        }
+      ],
+      "strokes": []
+    },
+    {
+      "id": "601d:13",
+      "kind": "ellipse",
+      "name": "Ellipse 1",
+      "parent": "601d:11",
+      "children": [],
+      "artboard": "601d:2",
+      "local_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        55.0,
+        20.0
+      ],
+      "world_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        85.0,
+        200.0
+      ],
+      "world_bounds": [
+        85.0,
+        200.0,
+        135.0,
+        250.0
+      ],
+      "visible": true,
+      "locked": false,
+      "proportions_locked": false,
+      "opacity": 1.0,
+      "clip": false,
+      "mask": false,
+      "mask_mode": "Shape",
+      "geometry": {
+        "type": "Ellipse",
+        "width": 50.0,
+        "height": 50.0
+      },
+      "fills": [],
+      "strokes": []
+    },
+    {
+      "id": "601d:14",
+      "kind": "text",
+      "name": "Text 1",
+      "parent": "601d:2",
+      "children": [],
+      "artboard": "601d:2",
+      "local_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        160.0,
+        250.0
+      ],
+      "world_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        170.0,
+        260.0
+      ],
+      "world_bounds": [
+        170.0,
+        260.0,
+        347.943359375,
+        282.5
+      ],
+      "visible": true,
+      "locked": false,
+      "proportions_locked": false,
+      "opacity": 1.0,
+      "clip": false,
+      "mask": false,
+      "mask_mode": "Shape",
+      "geometry": {
+        "type": "Text",
+        "content": "Golden & <escaped>",
+        "font_family": "Inter",
+        "font_size": 18.0,
+        "weight": 500,
+        "italic": false,
+        "line_height": "125%",
+        "align": "start",
+        "sizing": {
+          "type": "Auto"
+        },
+        "styled_runs": 0
+      },
+      "fills": [],
+      "strokes": []
+    },
+    {
+      "id": "601d:2",
+      "kind": "artboard",
+      "name": "Board",
+      "parent": "601d:1",
+      "children": [
+        "601d:3",
+        "601d:4",
+        "601d:5",
+        "601d:6",
+        "601d:7",
+        "601d:8",
+        "601d:9",
+        "601d:11",
+        "601d:14"
+      ],
+      "artboard": null,
+      "local_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        10.0,
+        10.0
+      ],
+      "world_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        10.0,
+        10.0
+      ],
+      "world_bounds": [
+        10.0,
+        10.0,
+        410.0,
+        330.0
+      ],
+      "visible": true,
+      "locked": false,
+      "proportions_locked": false,
+      "opacity": 1.0,
+      "clip": true,
+      "mask": false,
+      "mask_mode": "Shape",
+      "geometry": {
+        "type": "Artboard",
+        "width": 400.0,
+        "height": 320.0
+      },
+      "fills": [
+        {
+          "type": "Solid",
+          "color": "#fafafc",
+          "alpha": 1.0
+        }
+      ],
+      "strokes": []
+    },
+    {
+      "id": "601d:3",
+      "kind": "rect",
+      "name": "Rounded",
+      "parent": "601d:2",
+      "children": [],
+      "artboard": "601d:2",
+      "local_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        20.0,
+        20.0
+      ],
+      "world_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        30.0,
+        30.0
+      ],
+      "world_bounds": [
+        28.75,
+        28.75,
+        121.25,
+        81.25
+      ],
+      "visible": true,
+      "locked": false,
+      "proportions_locked": false,
+      "opacity": 1.0,
+      "clip": false,
+      "mask": false,
+      "mask_mode": "Shape",
+      "geometry": {
+        "type": "Rect",
+        "width": 90.0,
+        "height": 50.0,
+        "corner_radii": {
+          "top_left": 8.0,
+          "top_right": 4.0,
+          "bottom_right": 0.0,
+          "bottom_left": 12.0
+        }
+      },
+      "fills": [
+        {
+          "type": "Solid",
+          "color": "#3c78dc",
+          "alpha": 1.0
+        }
+      ],
+      "strokes": [
+        {
+          "paint": {
+            "type": "Solid",
+            "color": "#141e3c",
+            "alpha": 1.0
+          },
+          "width": 2.5
+        }
+      ],
+      "effects": [
+        {
+          "kind": "DropShadow",
+          "offset": [
+            3.0,
+            4.0
+          ],
+          "blur": 6.0,
+          "spread": 1.0,
+          "color": "#000000",
+          "opacity": 0.3529412
+        },
+        {
+          "kind": "InnerShadow",
+          "offset": [
+            -2.0,
+            -1.0
+          ],
+          "blur": 4.0,
+          "spread": 0.0,
+          "color": "#141428",
+          "opacity": 0.47058824
+        },
+        {
+          "kind": "LayerBlur",
+          "blur": 2.0
+        },
+        {
+          "kind": "Filters",
+          "brightness": 1.1,
+          "contrast": 0.9,
+          "saturation": 1.2,
+          "hue": 15.0
+        }
+      ]
+    },
+    {
+      "id": "601d:4",
+      "kind": "ellipse",
+      "name": "Ellipse 1",
+      "parent": "601d:2",
+      "children": [],
+      "artboard": "601d:2",
+      "local_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        140.0,
+        20.0
+      ],
+      "world_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        150.0,
+        30.0
+      ],
+      "world_bounds": [
+        150.0,
+        30.0,
+        220.0,
+        75.0
+      ],
+      "visible": true,
+      "locked": false,
+      "proportions_locked": false,
+      "opacity": 1.0,
+      "clip": false,
+      "mask": false,
+      "mask_mode": "Shape",
+      "pivot": [
+        17.5,
+        33.75
+      ],
+      "geometry": {
+        "type": "Ellipse",
+        "width": 70.0,
+        "height": 45.0
+      },
+      "fills": [
+        {
+          "type": "Gradient",
+          "kind": "linear",
+          "opacity": 1.0,
+          "stops": [
+            {
+              "offset": 0.0,
+              "color": "#ff6000",
+              "alpha": 1.0
+            },
+            {
+              "offset": 0.5,
+              "color": "#ffc828",
+              "alpha": 1.0
+            },
+            {
+              "offset": 1.0,
+              "color": "#005ac8",
+              "alpha": 1.0
+            }
+          ]
+        }
+      ],
+      "strokes": []
+    },
+    {
+      "id": "601d:5",
+      "kind": "polygon",
+      "name": "Polygon 1",
+      "parent": "601d:2",
+      "children": [],
+      "artboard": "601d:2",
+      "local_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        240.0,
+        20.0
+      ],
+      "world_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        250.0,
+        30.0
+      ],
+      "world_bounds": [
+        247.0,
+        27.0,
+        313.0,
+        93.0
+      ],
+      "visible": true,
+      "locked": false,
+      "proportions_locked": false,
+      "opacity": 1.0,
+      "clip": false,
+      "mask": false,
+      "mask_mode": "Shape",
+      "geometry": {
+        "type": "Polygon",
+        "width": 60.0,
+        "height": 60.0,
+        "sides": 6
+      },
+      "fills": [
+        {
+          "type": "Solid",
+          "color": "#1ea06e",
+          "alpha": 1.0
+        }
+      ],
+      "strokes": [
+        {
+          "paint": {
+            "type": "Solid",
+            "color": "#0a4632",
+            "alpha": 1.0
+          },
+          "width": 3.0
+        }
+      ]
+    },
+    {
+      "id": "601d:6",
+      "kind": "star",
+      "name": "Star 1",
+      "parent": "601d:2",
+      "children": [],
+      "artboard": "601d:2",
+      "local_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        310.0,
+        20.0
+      ],
+      "world_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        320.0,
+        30.0
+      ],
+      "world_bounds": [
+        320.0,
+        30.0,
+        380.0,
+        90.0
+      ],
+      "visible": true,
+      "locked": false,
+      "proportions_locked": false,
+      "opacity": 1.0,
+      "clip": false,
+      "mask": false,
+      "mask_mode": "Shape",
+      "geometry": {
+        "type": "Star",
+        "width": 60.0,
+        "height": 60.0,
+        "points": 5,
+        "inner_ratio": 0.382
+      },
+      "fills": [
+        {
+          "type": "Solid",
+          "color": "#dc3c5a",
+          "alpha": 1.0
+        }
+      ],
+      "strokes": []
+    },
+    {
+      "id": "601d:7",
+      "kind": "line",
+      "name": "Line 1",
+      "parent": "601d:2",
+      "children": [],
+      "artboard": "601d:2",
+      "local_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        20.0,
+        100.0
+      ],
+      "world_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        30.0,
+        110.0
+      ],
+      "world_bounds": [
+        28.5,
+        108.5,
+        151.5,
+        141.5
+      ],
+      "visible": true,
+      "locked": false,
+      "proportions_locked": false,
+      "opacity": 1.0,
+      "clip": false,
+      "mask": false,
+      "mask_mode": "Shape",
+      "geometry": {
+        "type": "Line",
+        "end_x": 120.0,
+        "end_y": 30.0
+      },
+      "fills": [],
+      "strokes": [
+        {
+          "paint": {
+            "type": "Solid",
+            "color": "#5a5a64",
+            "alpha": 1.0
+          },
+          "width": 3.0
+        }
+      ]
+    },
+    {
+      "id": "601d:8",
+      "kind": "path",
+      "name": "Triangle",
+      "parent": "601d:2",
+      "children": [],
+      "artboard": "601d:2",
+      "local_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        160.0,
+        100.0
+      ],
+      "world_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        170.0,
+        110.0
+      ],
+      "world_bounds": [
+        176.25700676110398,
+        113.94101629613779,
+        210.0,
+        150.52304455586304
+      ],
+      "visible": true,
+      "locked": false,
+      "proportions_locked": false,
+      "opacity": 1.0,
+      "clip": false,
+      "mask": false,
+      "mask_mode": "Shape",
+      "geometry": {
+        "type": "Path",
+        "svg": "M13.98114035132503,4.194342105397509 L40,12 L26.567658471409693,38.86468305718061 C26.06809832847759,39.86380334304482 25.054795217295293,40.50262657740027 23.93792272398045,40.522564373377094 C22.82105023066561,40.54250216935392 21.78559216219418,39.940252297356004 21.250690179666794,38.959598662722456 L6.989679600440649,12.81441260080786 C5.824786830354146,10.678775855649272 6.064706391300903,8.051124565301814 7.597104221067473,6.161765847535895 C9.129502050834041,4.272407129769975 11.651057966462,3.4953173899385988 13.981140351325026,4.194342105397505 Z"
+      },
+      "fills": [
+        {
+          "type": "Solid",
+          "color": "#8c64dc",
+          "alpha": 1.0
+        }
+      ],
+      "strokes": []
+    },
+    {
+      "id": "601d:9",
+      "kind": "group",
+      "name": "Pair",
+      "parent": "601d:2",
+      "children": [
+        "601d:10"
+      ],
+      "artboard": "601d:2",
+      "local_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        240.0,
+        100.0
+      ],
+      "world_transform": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        250.0,
+        110.0
+      ],
+      "world_bounds": [
+        250.0,
+        110.0,
+        290.0,
+        150.0
+      ],
+      "visible": true,
+      "locked": false,
+      "proportions_locked": false,
+      "opacity": 0.6,
+      "clip": false,
+      "mask": false,
+      "mask_mode": "Shape",
+      "geometry": {
+        "type": "None"
+      },
+      "fills": [],
+      "strokes": []
+    }
+  ],
+  "warnings": []
+}

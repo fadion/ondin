@@ -1,0 +1,26 @@
+[package]
+name = "ondin-mcp"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Thin adapter (invariant 10). No rendering/UI deps (§3).
+#
+# ⚠️ **`ondin-export`, `serde` and `serde_json` were declared here and used by
+# no line of this crate**, and the first of the three was the *entire* reason
+# §3's "`ondin-mcp` contains no rendering or UI dependency" was false: the edge
+# `ondin-mcp → ondin-export → ondin-render` pulls vello, wgpu and naga into the
+# closure, and it was a manifest line with zero call sites. Deleting it makes
+# the documented rule true at no cost, which is the option the review's own fix
+# menu for that finding was missing.
+#
+# ⚠️ **No gate in this workspace can see an unused dependency.**
+# `unused_crate_dependencies` is a rustc lint, allow-by-default, and none of the
+# five crate roots enables it; clippy has no equivalent. It cannot simply be
+# switched on here either — this crate is an M0 scaffold whose `dead_code` is
+# already allowed, and the lint fires per *target*, so a dependency used only by
+# a test or an example reads as unused. Re-add a line here only with the `use`
+# that needs it.
+[dependencies]
+ondin-core = { path = "../ondin-core" }

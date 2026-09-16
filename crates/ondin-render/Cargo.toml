@@ -1,0 +1,34 @@
+[package]
+name = "ondin-render"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Only this crate may depend on vello/vello_cpu (§3), enforced by
+# `ondin-core/tests/deps_forbidden.rs::only_ondin_render_declares_vello`. Holds
+# both backends: vello (GPU, interactive canvas) and vello_cpu (deterministic,
+# export/CI/headless).
+#
+# ⚠️ **This said "vello/wgpu" and the wgpu half was unsatisfiable** (§15 D774,
+# `[A2-L7-04]`): `VelloGpuRenderer::new` takes `&Device` and `render` takes
+# `&Device`, `&Queue` and `&TextureView`, so the app cannot call this crate
+# without naming wgpu, and `ondin-app` really does declare it. wgpu is shared
+# with `ondin-app` deliberately — eframe owns the device, and vello and
+# egui-wgpu must composite onto one. A rule nobody can obey is a false
+# statement rather than an aspiration.
+[dependencies]
+ondin-core = { path = "../ondin-core" }
+image.workspace = true
+kurbo.workspace = true
+rustc-hash.workspace = true
+peniko.workspace = true
+vello.workspace = true
+vello_cpu.workspace = true
+wgpu.workspace = true
+
+[dev-dependencies]
+pollster = "1.0.1"
+# Writes the 2×2 fixture the decode tests read back. The decoder under test is
+# `image`; encoding with a different crate keeps the fixture honest.
+png.workspace = true

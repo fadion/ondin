@@ -1,0 +1,53 @@
+[package]
+name = "ondin-export"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# SVG needs core plus `ondin_render::effects` for the filter maths; PNG and JPEG
+# additionally use the CPU renderer (§3).
+#
+# This said "SVG needs core only" and was false in three places (§15 D702,
+# `[A2-L3-06]`): the SVG writer calls `effects::filter_matrix` once from the
+# `<filter>` emitter and `effects::any_ink` twice. Sharing the effect maths is
+# the right choice — duplicating it is the opposite and worse mistake — so the
+# code is not the problem; the sentence was, because it is the one a reader
+# would cite to budget an SVG-only path (a `--svg` build, a wasm target, an MCP
+# `export_svg` handler) for `ondin-core` alone and get the whole GPU tree.
+#
+# ⚠️ **The other repair is open and now costed.** Moving `filter_matrix` and
+# `any_ink` into `ondin-core` would make the original sentence true rather than
+# soften it: both are pure functions of `&[Effect]` / `&Filters` over
+# `ondin_core::effect` types — no device, no texture — so it is two functions and
+# their call sites. **Count those rather than trusting a number here**:
+# `grep -rnE '\b(any_ink|filter_matrix) *\(' crates/` read 14 on 2026-09-09,
+# eleven of them inside `ondin-render` — two in `scene.rs`, two in `fx_gpu.rs`,
+# one in `effects::run` and six in that module's own tests — and three in
+# `svg.rs`. It touches the render boundary, which §3 and §6.4 own between them,
+# so it is a decision rather than a tidy-up and is left to the maintainer.
+#
+# 🚨 **Ruled on and declined** (§15 D783). The move is **not** made and the
+# sentence above stays softened rather than being made true. §3 would permit it —
+# its rule is an allow/deny list of *external* crates and neither helper needs
+# one — so nothing in the dependency rules stands in the way. **§6.4 is what
+# gives**: it puts `effects.rs` where it is on the ground that *"these functions
+# are the specification, the CPU backend is the reference, and the GPU shaders
+# are written against it"*, with `fx.wgsl` carrying one entry point per step of
+# `effects::run` and packing `filter_matrix`'s twenty coefficients five to a row.
+# Moving two of those functions **splits the specification**, leaving a shader's
+# colour-matrix order in a crate that has no backend and is cited across two
+# crate boundaries. Buying a literal dependency comment with a split spec is the
+# wrong trade; the comment is corrected instead, which costs nothing and is what
+# a reader of it actually needs.
+[dependencies]
+ondin-core = { path = "../ondin-core" }
+ondin-render = { path = "../ondin-render" }
+png.workspace = true
+# The JPEG *encoder* (§7.2). Already compiled here — `ondin-render`, which this
+# crate depends on, uses the same crate at the same version for the decode cache
+# (§5.5a) — so this declares an edge rather than adding a tree.
+image.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+zip.workspace = true

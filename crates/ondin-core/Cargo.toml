@@ -1,0 +1,68 @@
+[package]
+name = "ondin-core"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# HEADLESS ENGINE. Permitted deps only (§3, invariant 1): no vello/wgpu/winit/egui
+# or any GPU/windowing/UI crate. The `deps_forbidden` test enforces this.
+# parley = CPU text shaping/layout (permitted). We DISABLE its `system` feature so
+# core cannot enumerate system fonts — text is laid out only with the bundled Inter
+# fonts, keeping measurement deterministic and the engine filesystem-free (§5.4a).
+[dependencies]
+# The image table's embedded bytes, written into the JSON as text (§5.5a). Its
+# own dependency count is zero, and it is already in the workspace lock via
+# `ureq`, so this adds an edge to core's closure and nothing to the build. The
+# alternative was hand-rolling an encoder into the save path, which is the same
+# code with nobody else's tests behind it.
+base64 = "0.22.1"
+# SVG *import* — the XML half of it, and the only piece of it that is not already
+# here (`svg_in`). `kurbo::BezPath::from_svg` parses the `d` grammar and
+# `peniko::color::parse_color` the colour grammar, both of them core's own crates,
+# so this is the whole of the dependency the feature costs. **Already in the
+# workspace lock at this version** through `fontdb` → `fontconfig-parser`, though
+# only on Linux, so on Windows it declares a compile rather than an edge — the
+# same reasoning the `base64` note above records, one step weaker. Zero
+# dependencies of its own, and a read-only tree, which is what an importer wants.
+roxmltree = "0.20.0"
+kurbo.workspace = true
+parley.workspace = true
+peniko.workspace = true
+read-fonts.workspace = true
+skrifa.workspace = true
+rstar.workspace = true
+rustc-hash.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+# Path booleans (`boolean::evaluate`). **`=`-pinned, on the maintainer's ruling**
+# (§15 D703, `[S22-L3-05]`): this is the crate whose non-transitive comparator
+# panics on some operand geometries, so it is the library §15 D239's
+# `catch_unwind` guard and the `panic = "abort"` note in the workspace manifest
+# are both written about — and it was the one dependency behind a safety guard
+# that could bump patch-to-patch with nothing to review. It was declared `"0.8.0"`
+# while `Cargo.lock` had already moved to 0.8.1, so the pin is **at the version
+# that was already resolving**: it changed no build and no byte of output.
+#
+# ⚠️ **The cost is that an upstream fix now needs a hand to reach us** — and 0.8.1
+# *is* one, the very release D239 waited for. That is the trade taken deliberately:
+# for this crate, finding out from a review rather than from a panic is worth a
+# manifest edit.
+#
+# ⚠️ It was also the only one of the five crate-local dependencies with **no**
+# justification paragraph, while the workspace manifest's note said each carries
+# one. That sentence is true now.
+#
+# 🚨 **D703's own body still said this was *"deliberately not pinned"* for a day
+# after the pin landed** (§15 D782). The ruling was taken and the line changed;
+# the entry that a reader consults to find out whether a decision has been made
+# went on saying the opposite, in the sentence that was its whole subject. That is
+# this project's most damaging drift class arriving in the file whose job is to
+# prevent it — and **no gate can see it**, because both the comment and the entry
+# are prose and the number resolves either way. Corrected at D782.
+flo_curves = "=0.8.1"
+
+[dev-dependencies]
+# Used by IO tests to synthesize an older-version file for the migration test.
+serde_json.workspace = true

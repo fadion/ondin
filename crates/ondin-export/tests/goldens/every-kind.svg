@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="320" viewBox="10 10 400 320">
+  <defs>
+    <filter id="fx-601d_3" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB" x="0.5139" y="1.5139" width="134.9721" height="94.9721">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="1" result="fx2"/>
+      <feColorMatrix in="fx2" type="matrix" values="1.0485 -0.3325 0.274 0 0.05 0.0104 1.0779 -0.0984 0 0.05 -0.2755 0.1072 1.1583 0 0.05 0 0 0 1 0" result="fx3"/>
+      <feColorMatrix in="fx3" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0" result="fxa0"/>
+      <feMorphology in="fxa0" operator="dilate" radius="1" result="fxm0"/>
+      <feOffset in="fxm0" dx="3" dy="4" result="fxo0"/>
+      <feGaussianBlur in="fxo0" stdDeviation="3" result="fxb0"/>
+      <feFlood flood-color="#000000" flood-opacity="0.3529" result="fxf0"/>
+      <feComposite in="fxf0" in2="fxb0" operator="in" result="fxc0"/>
+      <feColorMatrix in="fx3" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0" result="fxa1"/>
+      <feComponentTransfer in="fxa1" result="fxt1">
+        <feFuncA type="table" tableValues="1 0"/>
+      </feComponentTransfer>
+      <feOffset in="fxt1" dx="-2" dy="-1" result="fxo1"/>
+      <feGaussianBlur in="fxo1" stdDeviation="2" result="fxb1"/>
+      <feFlood flood-color="#141428" flood-opacity="0.4706" result="fxf1"/>
+      <feComposite in="fxf1" in2="fxb1" operator="in" result="fxc1"/>
+      <feComposite in="fxc1" in2="fxa1" operator="in" result="fxk1"/>
+      <feMerge>
+        <feMergeNode in="fxc0"/>
+        <feMergeNode in="fx3"/>
+        <feMergeNode in="fxk1"/>
+      </feMerge>
+    </filter>
+    <linearGradient id="grad-601d_4-fill-0" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="70" y2="45">
+      <stop offset="0" stop-color="#ff6000"/>
+      <stop offset="0.5" stop-color="#ffc828"/>
+      <stop offset="1" stop-color="#005ac8"/>
+    </linearGradient>
+  </defs>
+  <clipPath id="clip-601d_2"><rect x="0" y="0" width="400" height="320"/></clipPath>
+  <g data-name="Board" transform="matrix(1 0 0 1 10 10)" clip-path="url(#clip-601d_2)">
+    <rect x="0" y="0" width="400" height="320" fill="#fafafc"/>
+    <g filter="url(#fx-601d_3)">
+      <path data-name="Rounded" transform="matrix(1 0 0 1 20 20)" d="M0,8 C0,3.5817 3.5817,0 8,0 L86,0 C88.2091,0 90,1.7909 90,4 L90,50 C90,50 90,50 90,50 L12,50 C5.3726,50 0,44.6274 0,38 Z" fill="#3c78dc" stroke="#141e3c" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="6,3" stroke-dashoffset="1"/>
+    </g>
+    <ellipse data-name="Ellipse 1" transform="matrix(1 0 0 1 140 20)" cx="35" cy="22.5" rx="35" ry="22.5" fill="url(#grad-601d_4-fill-0)"/>
+    <g data-name="Polygon 1" transform="matrix(1 0 0 1 240 20)">
+      <polygon points="30,0 60,15 60,45 30,60 0,45 0,15" fill="#1ea06e"/>
+      <clipPath id="sa-601d-5-0" clip-rule="evenodd"><path d="M-132,-132 L192,-132 L192,192 L-132,192 Z M30,0 L60,15 L60,45 L30,60 L0,45 L0,15 Z"/></clipPath>
+      <g clip-path="url(#sa-601d-5-0)">
+        <polygon points="30,0 60,15 60,45 30,60 0,45 0,15" fill="none" stroke="#0a4632" stroke-width="6" stroke-linejoin="miter" stroke-linecap="butt"/>
+      </g>
+    </g>
+    <polygon data-name="Star 1" transform="matrix(1 0 0 1 310 20)" points="30,0 37.0827,22.917 60,22.918 41.46,37.0824 48.541,60 30,45.837 11.459,60 18.54,37.0824 0,22.918 22.9173,22.917" fill="#dc3c5a"/>
+    <line data-name="Line 1" transform="matrix(1 0 0 1 20 100)" x1="0" y1="0" x2="120" y2="30" stroke="#5a5a64" stroke-width="3" stroke-linejoin="miter" stroke-linecap="butt"/>
+    <path data-name="Triangle" transform="matrix(1 0 0 1 160 100)" d="M13.9811,4.1943 L40,12 L26.5677,38.8647 C26.0681,39.8638 25.0548,40.5026 23.9379,40.5226 C22.8211,40.5425 21.7856,39.9403 21.2507,38.9596 L6.9897,12.8144 C5.8248,10.6788 6.0647,8.0511 7.5971,6.1618 C9.1295,4.2724 11.6511,3.4953 13.9811,4.1943 Z" fill="#8c64dc"/>
+    <g data-name="Pair" transform="matrix(1 0 0 1 240 100)" opacity="0.6">
+      <rect data-name="Rectangle 1" x="0" y="0" width="40" height="40" fill="#28282d"/>
+    </g>
+    <path data-name="Notched" transform="matrix(1 0 0 1 20 170)" d="M0,0 C26.6667,0 53.3333,0 80,0 C80,6.6667 80,13.3333 80,20 C66.1929,20 55,31.1929 55,45 C55,50.628 56.8597,55.8217 59.9982,60 C39.9988,60 19.9994,60 0,60 C0,40 0,20 0,0 Z" fill="#0f82be"/>
+    <text data-name="Text 1" transform="matrix(1 0 0 1 160 250)" x="0" y="17" fill="#000000"><tspan font-family="Inter" font-size="18" font-weight="500">Golden &amp; &lt;escaped&gt;</tspan></text>
+  </g>
+</svg>

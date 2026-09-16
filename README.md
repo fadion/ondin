@@ -9,7 +9,7 @@ UI serves AI agents over MCP. The project is foundations-first — identity, the
 mutation path, the renderer boundary and serialization matter more than feature
 count, because features are cheap to add and seams are expensive to change.
 
-Still early, and not yet released.
+Still early — `v0.1.0` is the first tag, and the v1 feature list is not complete.
 
 ## Building
 

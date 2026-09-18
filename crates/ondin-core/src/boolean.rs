@@ -159,7 +159,21 @@ use flo_curves::bezier::path::{
 };
 use kurbo::{BezPath, PathEl, Point};
 
-/// Accuracy handed to every boolean, in world units.
+/// A hundredth of a world unit — the tolerance this module's tests read, and
+/// until 2026-09-19 the one handed to every boolean.
+///
+/// 🚨 **It is no longer what flo_curves is given**; [`FLO_ACCURACY`] is, and it is
+/// three orders finer (§15 D794). The paragraph below is still the reason the
+/// figure is a *constant* rather than a parameter, and that reason is untouched —
+/// but read it as being about which quantities may vary, not about this number
+/// reaching the boolean, because it no longer does.
+///
+/// ⚠️ **`cfg(test)` rather than `allow(dead_code)`**, so that "no production line
+/// reads this" is enforced by the compiler instead of asserted by the sentence
+/// above it — which is the half of D794 most likely to rot. The cost is that no
+/// production doc may *link* it (§15 D319, D699): two constants below explain
+/// themselves by contrast with this one and name it in plain backticks, which the
+/// doc gate cannot resolve and therefore cannot check.
 ///
 /// **A constant, not a parameter.** An accuracy that varied with zoom, or with
 /// the size of the shape, would make the *geometry a boolean produces* depend on
@@ -175,7 +189,68 @@ use kurbo::{BezPath, PathEl, Point};
 /// a guarantee nothing makes. 0.01 is
 /// flo_curves' own documented working value and is a hundredth of a world unit —
 /// finer than any pixel the canvas shows below 100× zoom.
+#[cfg(test)]
 const ACCURACY: f64 = 0.01;
+
+/// The factor [`c`] multiplies every coordinate by on the way into flo_curves, and
+/// [`k`] divides by on the way back out (§15 D794).
+///
+/// 🚨 **flo_curves has absolute tolerances of its own that no argument reaches.**
+/// `consts.rs` compiles in `CLOSE_DISTANCE = 0.01` and `SMALL_DISTANCE = 0.001`,
+/// and `GraphPath` merges two points closer than `CLOSE_DISTANCE` into one. So an
+/// edge shorter than a hundredth of a world unit is not approximated, it is
+/// *erased* — and erasing the two short ends of a thin `Intersect` result pinches
+/// a rectangle into a bow-tie with **exactly half** the area. Measured on a
+/// 400-wide slot against a 400×200 rect: correct at a thickness of 0.02, half at
+/// 0.01 and at 0.005, and `None` — nothing drawn at all — at 0.001.
+///
+/// 🚨 **Neither lever fixes this alone, and that is the whole shape of the bug.**
+/// There are two absolute tolerances the size of the lost feature, not one, and
+/// the four-cell matrix was measured rather than reasoned:
+///
+/// | scale | what flo_curves is handed | in world units | thin `Intersect` |
+/// | --- | --- | --- | --- |
+/// | 1 | 0.01 | 0.01 | **half** — the defect as found |
+/// | 1 | 0.0001 | 0.0001 | **half**, bit-identical to the row above |
+/// | 1000 | 10.0 | 0.01 | **half** |
+/// | 1000 | 0.01 | 0.00001 | exact, to 10⁻⁴ thickness |
+///
+/// The second row is the control that clears `ACCURACY`: taking it a hundred
+/// times finer changed not one digit, because `CLOSE_DISTANCE` was doing the
+/// erasing. The third row is the control that clears scaling on its own: scale the
+/// geometry and scale the tolerance with it and nothing moves, because the
+/// tolerance is once again the size of the feature. **Only the fourth works**, and
+/// the roadmap's guess that `ACCURACY` was "the first place to look" was half
+/// right in a way that would have stalled there.
+///
+/// At 1000 the effective floor is 10⁻⁵ world units, five orders below anything the
+/// model means to represent. It is a **constant** factor, not one derived from the
+/// shapes or the camera, so it keeps the invariant `ACCURACY`'s own doc is about:
+/// the same two shapes still combine to the same path wherever they sit and
+/// whatever the zoom.
+///
+/// ⚠️ **It costs nothing measurable**, which was not obvious — a tolerance three
+/// orders finer could have meant three orders more subdivision on the hot path
+/// §15 D614 is about. Timed in release on that entry's own fixture, N disjoint
+/// 20×20 rects folded as a `Union`: **0.37 / 1.00 / 2.61 / 7.33 ms** at N = 16,
+/// 64, 128, 256 against a baseline of **0.40 / 1.14 / 2.51 / 7.17**. Inside the
+/// run-to-run spread at every size, and the subpath count is identical.
+const FLO_SCALE: f64 = 1000.0;
+
+/// The tolerance handed to every flo_curves call, **in flo_curves' own space** —
+/// so it is [`FLO_SCALE`] times finer than it reads, 10⁻⁵ of a world unit.
+///
+/// 🚨 **This is not `ACCURACY`** (plain backticks: that constant is `cfg(test)`
+/// and a production doc cannot link it), **and it is the half of §15 D794 that
+/// contradicts
+/// a written rule.** `ACCURACY`'s doc says a hundredth of a world unit is "finer
+/// than any pixel the canvas shows below 100× zoom", which is true and is an
+/// argument about *rendering*. The failure above is not about rendering: a
+/// tolerance the size of the feature does not draw it coarsely, it deletes it.
+/// `ACCURACY` stays at 0.01 as the tolerance this module's own tests read for
+/// fold-associativity, where a hundredth of a unit is the right claim; what
+/// reaches flo_curves is this.
+const FLO_ACCURACY: f64 = 0.01;
 
 /// Combine `operands` with `op`, in the order given (which is z-order, bottom
 /// first). `None` when there is nothing to combine or the result is empty.
@@ -418,8 +493,10 @@ fn fold_operands(op: BoolOp, operands: &[BezPath]) -> Option<BezPath> {
     // Merging adjacent pairs and then pairs of pairs makes it log N levels of N
     // subpaths each. Same answer: union and intersection are associative, so the
     // *shape* cannot depend on the bracketing — only the floating-point path of
-    // getting there, to within `ACCURACY`, which every operand has already been
-    // rounded to on the way in.
+    // getting there, to within `FLO_ACCURACY`, which every operand has already been
+    // rounded to on the way in. (It was `ACCURACY` until §15 D794 moved the
+    // tolerance flo_curves is handed; the associativity argument is unchanged and
+    // the bound it names is now three orders tighter.)
     //
     // ⚠️ **`Subtract` is not associative and keeps the left fold.** `a − b − c` is
     // `(a − b) − c`, and `a − (b − c)` is a different shape; bracketing it freely
@@ -514,9 +591,9 @@ fn combine(
     rhs: &Vec<SimpleBezierPath>,
 ) -> Vec<SimpleBezierPath> {
     match op {
-        BoolOp::Union => path_add(acc, rhs, ACCURACY),
-        BoolOp::Subtract => path_sub(acc, rhs, ACCURACY),
-        BoolOp::Intersect => path_intersect(acc, rhs, ACCURACY),
+        BoolOp::Union => path_add(acc, rhs, FLO_ACCURACY),
+        BoolOp::Subtract => path_sub(acc, rhs, FLO_ACCURACY),
+        BoolOp::Intersect => path_intersect(acc, rhs, FLO_ACCURACY),
         // **XOR is the two exteriors, not union-minus-intersection.**
         //
         // flo_curves has no `path_xor`, and the obvious composition —
@@ -534,7 +611,7 @@ fn combine(
         // `a`, the other only in `b` — so they need no combining, just
         // concatenating.
         BoolOp::Exclude => {
-            let cut = path_full_intersect::<SimpleBezierPath>(acc, rhs, ACCURACY);
+            let cut = path_full_intersect::<SimpleBezierPath>(acc, rhs, FLO_ACCURACY);
             let [only_a, only_b] = cut.exterior_paths;
             only_a.into_iter().chain(only_b).collect()
         }
@@ -839,12 +916,16 @@ fn line_to(from: Point, to: Point) -> (Coord2, Coord2, Coord2) {
     (c(from + d * (1.0 / 3.0)), c(from + d * (2.0 / 3.0)), c(to))
 }
 
+/// Into flo_curves' space — **scaled**, see [`FLO_SCALE`]. Every coordinate that
+/// reaches flo_curves goes through here, so this and [`k`] are the whole seam.
 fn c(p: Point) -> Coord2 {
-    Coord2(p.x, p.y)
+    Coord2(p.x * FLO_SCALE, p.y * FLO_SCALE)
 }
 
+/// Back out of flo_curves' space, undoing [`c`]. The nesting and winding pass in
+/// [`from_flo`] runs on the other side of this, in world units.
 fn k(p: Coord2) -> Point {
-    Point::new(p.0, p.1)
+    Point::new(p.0 / FLO_SCALE, p.1 / FLO_SCALE)
 }
 
 #[cfg(test)]
@@ -1801,6 +1882,75 @@ mod tests {
             before,
             "no operand here panics, so `failures` must not move — a wrong shape \
              from this path is silent by construction"
+        );
+    }
+
+    /// A thin `Intersect` keeps its area all the way down to 10⁻⁴ world units.
+    ///
+    /// **The defect this pins was a bow-tie, not a rounding error** (§15 D794).
+    /// flo_curves' `GraphPath` merges two points closer than its own compiled-in
+    /// `CLOSE_DISTANCE` (0.01) into one, so the two *short* ends of a thin result
+    /// — each exactly the result's thickness — were collapsed to single points.
+    /// A rectangle pinched at both ends is two triangles, which is **exactly
+    /// half** the area, and that is what the sweep measured: 2.0 where 4.0 was
+    /// owed, 1.0 where 2.0 was, and at 0.001 — under `SMALL_DISTANCE` — `None`,
+    /// nothing drawn at all. [`FLO_SCALE`] is the fix.
+    ///
+    /// ⚠️ **Flipped both ways, and each flip alone reproduces the defect** —
+    /// which is why [`FLO_SCALE`] carries a four-cell matrix rather than a
+    /// sentence. `FLO_SCALE` to 1.0 fails here; `FLO_ACCURACY` to
+    /// `ACCURACY * FLO_SCALE` — the spelling that looks obviously right, since it
+    /// keeps the tolerance meaning a hundredth of a *world* unit — fails here
+    /// too, at the same thickness and with the same area. **The fix was written
+    /// that way first and this test is what caught it**, so the flip is not
+    /// hypothetical: it is the version that shipped for one `cargo test`.
+    ///
+    /// ⚠️ **The predicted site was right and the prediction under it was wrong.**
+    /// `t = 0.01` is where it fails, but only because the sweep runs coarse-first:
+    /// every thickness below it fails as well, and 0.0001 fails as `None` — the
+    /// `unwrap_or_else` rather than the area assertion. A sweep that stopped at
+    /// 0.005 would have reported a halving where the answer is an erasure.
+    #[test]
+    fn a_thin_intersect_keeps_its_area() {
+        use kurbo::Shape;
+
+        let before = failures();
+        let wide = kurbo::Rect::new(0.0, 0.0, 400.0, 200.0).to_path(0.001);
+
+        // 0.02 and above were always right; 0.01 and below were the defect, and
+        // 0.001 was where the shape disappeared entirely. The sweep spans all
+        // three so a regression cannot hide in the half nobody measured.
+        for t in [1.0f64, 0.1, 0.02, 0.01, 0.005, 0.001, 0.0001] {
+            let slot =
+                kurbo::Rect::new(0.0, 100.0 - t / 2.0, 400.0, 100.0 + t / 2.0).to_path(0.001);
+            let got = evaluate(BoolOp::Intersect, &[wide.clone(), slot])
+                .unwrap_or_else(|| panic!("t={t}: a sliver is a shape, not nothing"));
+            let want = 400.0 * t;
+            let area = got.area().abs();
+            assert!(
+                (area - want).abs() < want * 0.01,
+                "t={t}: area {area}, expected {want} — half of that is the bow-tie"
+            );
+        }
+
+        // **And the shape is a quadrilateral, which is the half of the claim area
+        // cannot make.** The bow-tie had four elements to the rectangle's six,
+        // because the two collapsed ends left no edge behind; an area assertion
+        // alone would pass against any shape of the right size.
+        let slot = kurbo::Rect::new(0.0, 99.995, 400.0, 100.005).to_path(0.001);
+        let got = evaluate(BoolOp::Intersect, &[wide, slot]).expect("a sliver is a shape");
+        assert_eq!(
+            got.elements().len(),
+            6,
+            "four sides, a move and a close: {:?}",
+            got.elements()
+        );
+
+        assert_eq!(
+            failures(),
+            before,
+            "nothing here panics, so this class of loss is silent and `failures` \
+             cannot be what reports it"
         );
     }
 }

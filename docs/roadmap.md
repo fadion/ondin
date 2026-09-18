@@ -38,7 +38,6 @@ which is this file's own §9.5 lesson: **check the section before believing the 
 | *Now · Canvas* | `Event::Zoom` (a macOS portability item, untestable here) and touchscreen pinch (needs a touchscreen) — **nothing else** *of the gestures*, as of 2026-09-01: the extreme-zoom crash closed with §15 D402 and the last unbounded term with **D403**, hours apart. ⚠️ **Two context-menu items are open under this section as of 2026-09-07** and the *"nothing else"* predates both — a frame's *Background…*, and C5's edge clause (§15 D469), which are decisions rather than work. 🚨 **And four context-menu tests plus a ruler-origin test, added 2026-09-09** (`[A7-L8-06]`), which are **work** — they had been queued in `context-menus.md` §10, §15 D226 and §15 D36, and in none of them was this table or the section bullet. *The row said "nothing else of the gestures" and was scoped so narrowly that it stayed technically true through three additions; a qualifier that survives everything is not doing the job.* |
 | *Now · Text* | Justify-all, tab stops, columns, widow/orphan — **four** now, and **not one of them is short of a dependency**; hyphenation was the last to hold that claim, lost it on 2026-09-01 and left this row the same day for §0 as a decided non-goal (§15 D399), and **text-on-path left it hours later by being built** (§15 D405). Plus the paragraph scope's absence from the MCP snapshot, parked with MCP — to which D405 adds `on_path` itself. |
 | *Now · Inspector* | Three items: the hex field commits through no shared valve, which is the routing half §15 D517 left standing when it closed both *measured* halves of `[S14.4-L1-04]` on 2026-09-07 — a **shape** argument, which is why it is one line and not a fix — `char_valve`'s third arm, the one the picker's raw sensed regions need, which §15 D523 measured as covered by nothing on 2026-09-08, and the menu-row border, which is a layout item rather than a valve one. 🚨 **This row was stale in *two* directions on 2026-09-09 and was corrected by `arch-scribe` reading it against the section.** It named the multi Transform card's **angle** fields, which §15 **D628** closed and struck from the section that same day, and it did not name the menu-row border, which had been the section's third bullet all along — so *"every one is a remainder of a landed fix"* and *"all three are valve remainders"* were both false. **A row that summarises a section is a second copy of it**, and this is §9.5's lesson at the table rather than in a bullet. |
-| *Now · Booleans* | One item, and it re-opened a section that had read *nothing open* since 2026-08-31: an `Intersect` result thinner than about 0.1 units loses **half its area**, silently. Found 2026-09-07 as a by-product of §15 D457's convex control, unattributed, and asserted nowhere. |
 | *Now · Path editing* | Two decisions: whole-path geometry patches, revisited with MCP; and which of three answers the `retain_valid`/`subpath_lengths` pair gets, now that the dead call keeping them alive is documented as dead (§15 D637, added 2026-09-09). |
 | *Now · Files, library and storage* | Three, all from the codebase review or from closing one of its findings: a dashboard cover rendered synchronously on the UI thread, a `.ondin` whose filename is not valid Unicode being invisible to the whole library, and the per-machine index having no injection point — so the suite writes to the developer's own cache (§15 D619). ⚠️ **This row did not exist until 2026-09-09** and the section had held open work since 2026-09-06; the *"nothing open"* line below was the half that got corrected first, and a missing row is the same failure with nothing to contradict. |
 | *Now · Text alignment* | Side bearings / optical margin alignment, marked *Later*. |
@@ -51,10 +50,15 @@ of one session: §15 D466 left an open question there — whether `Undo`, `Redo`
 should resolve in `Mode::TextInsert` at all — and the entry was written into *Now · Keyboard* while
 this line went on saying the section was clear. Which is the shape to watch: **this sentence is a
 claim about four other sections and is maintained nowhere but here.**
-⚠️ **Booleans was on this list from 2026-08-31 and came off it on 2026-09-07**, when a defect
-nobody was looking for fell out of a *control* written for §15 D457 — which is worth one clause here
-rather than only in the section: *nothing open* is a statement about what has been looked at, and the
-thing that re-opened it was found by writing the case that was supposed to stay green.
+⚠️ **Booleans was on this list from 2026-08-31, came off it on 2026-09-07 and has been clear again
+since 2026-09-19** (§15 D794), when a defect nobody was looking for fell out of a *control* written
+for §15 D457 and was then attributed and fixed — which is worth one clause here rather than only in
+the section: *nothing open* is a statement about what has been looked at, and the thing that
+re-opened it was found by writing the case that was supposed to stay green. 🚨 **It is not back on
+the list above, because it was never a section**: the item lived as a bullet under *Now · Canvas and
+interaction* while the table carried a row headed *Now · Booleans*, so the pointer named a heading
+this file does not have and *"check the section before believing the row"* would have sent a reader
+nowhere. That row is struck with the item; this clause is where Booleans' state is kept.
 🚨 **`Files, library and storage` came off it on 2026-09-09, and it is the worst of the four,
 because the contradiction was *inside the section it named*.** That section's own opening sentence
 reads **"Three things are open here"** — it has said some such number since 2026-09-06 — while this
@@ -479,26 +483,23 @@ carried. **Linked images are the one thing that does not work**, which is the wh
   decision this file used to restate. D116 belongs in the read list and said D117 until 2026-08-03 —
   it is the press-swallow trap, which the *Path editing* section names as one of the four that recur.
   One deferred decision is left, under that section.
-- **Booleans: one thing open as of 2026-09-07**, and the sub-bullets below are the record of how each
-  older item closed rather than a queue — §15 D87–D91, D230, D239 (six amendments), D244, D282–D286,
-  D298, D299, D453, D457. **Two flo_curves traps are recorded in `boolean.rs`'s module docs and D91 —
-  read them before touching that file**: it works even-odd where we fill non-zero, and `Exclude` cannot
-  be composed as `sub(add, intersect)`. ⚠️ **One consequence to know rather than to fix**: since
+- **Booleans: nothing open as of 2026-09-19**, and the sub-bullets below are the record of how each
+  item closed rather than a queue — §15 D87–D91, D230, D239 (six amendments), D244, D282–D286,
+  D298, D299, D453, D457, D794. **Three flo_curves traps are recorded in `boolean.rs`'s module docs
+  and in D91 and D794 — read them before touching that file**: it works even-odd where we fill
+  non-zero, `Exclude` cannot be composed as `sub(add, intersect)`, and it compiles in **absolute**
+  tolerances no argument reaches, which is why every coordinate is scaled by `FLO_SCALE` through `c`
+  and `k`. ⚠️ **One consequence to know rather than to fix**: since
   `Exclude` became a concatenation it never enters flo_curves, so D298's abandoned-boolean machinery —
   `failures`, the amber layers row, the placeholder — is unreachable for the one operation that most
-  needed it. The open one is the first sub-bullet; the rest are how each closed.
-  - ⚠️ **`Intersect` loses half a thin result's area, and it is a shape with no concavity and no
-    hole.** Found 2026-09-07 while writing D457's *convex control*, so it is not that defect and
-    nothing in D457's fix touches it. Swept in release, `Intersect` of a 400-wide slot with a 400×200
-    rect: at a slot thickness of 0.01 the true area is 4 and `evaluate` answers **2**; at 0.1, 1 and 10
-    it answers 40.0, 400.0 and 4 000.0, all correct. So the loss is **sharp rather than gradual**,
-    somewhere under about 0.1 units, and it is silent in D298's sense — nothing panics, `failures()`
-    does not move, and the layers row wears no mark. ⚠️ **`[S10.1-L1-01]` recorded that 2.0 as
-    *"correctly, area 2.0"***, so the finding's own control was wrong about it and this went unreported
-    for that reason; D457's control was moved to a 0.1 slot so that it controls for what it is meant
-    to, which means **nothing asserts this today**. Unattributed: it is neither
-    `representative_point`'s doing nor `from_flo`'s, and flo_curves' `ACCURACY` (0.01) is the first
-    place to look rather than an established cause.
+  needed it. Every sub-bullet below is how something closed.
+  - ~~**`Intersect` loses half a thin result's area, and it is a shape with no concavity and no
+    hole.**~~ **Closed 2026-09-19 (§15 D794)**: flo_curves compiles in absolute tolerances no argument
+    reaches — `CLOSE_DISTANCE = 0.01` merges two points into one — so the result's two short ends,
+    each exactly its thickness, were erased and the rectangle came back a bow-tie. Geometry is scaled
+    by `FLO_SCALE` on the way in and out. ⚠️ **This entry's own guess was half right in the way that
+    stalls a reader**: `ACCURACY` is load-bearing and only in combination, and the constant doing the
+    erasing is not one this crate can pass. `a_thin_intersect_keeps_its_area` asserts it now.
   - ~~**Booleans are untested at the pixel level.**~~ **Closed 2026-08-19**: two tests in
     `ondin-export/tests/boolean.rs` render a hole and assert it is `alpha == 0`, which is the cheap
     version this entry asked for. Worth knowing what flipping them found — **they are not one test

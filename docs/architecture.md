@@ -8850,8 +8850,16 @@ model said.
 **kurbo has no path booleans** (its tracking issue is open), so the arithmetic is `flo_curves`, which
 keeps curves as curves. The polygon-clipping alternatives are far faster and flatten everything first —
 a union of two circles would leave a thousand-segment polyline in the save file, the SVG, and anything
-edited afterwards. Accuracy is a **constant**, not a parameter, or a PNG export stops being reproducible
-(§7.2). `Exclude` is composed, since flo_curves has no XOR.
+edited afterwards. **Geometry is scaled by a constant factor on the way into flo_curves and back out
+again** — `boolean::c` multiplies and `boolean::k` divides, and they are the only two coordinate
+conversions, so they are the whole seam — because flo_curves compiles in absolute tolerances that no
+argument reaches: its `GraphPath` merges two points closer than a `CLOSE_DISTANCE` of 0.01 into one,
+which unscaled is a hundredth of a *world* unit, so an `Intersect` result thinner than that had its two
+short ends erased and came back as a bow-tie with exactly half the area (§15 D794). The accuracy handed
+to flo_curves is read in that scaled space. **Both figures are constants, not parameters**: an accuracy
+that varied with the zoom or with the size of the shape would make the geometry a boolean *produces*
+depend on the camera, and the same two shapes would combine to two different paths, each written into
+the document and kept. `Exclude` is composed, since flo_curves has no XOR.
 
 **Two conventions have to be reconciled, and both bit.** flo_curves works **even-odd** and Ondin fills
 **non-zero**: a hole comes back as a second subpath wound the *same* way as the outline around it, which

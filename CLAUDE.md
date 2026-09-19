@@ -7,7 +7,7 @@ documents, and is untracked.
 | File | Holds |
 | --- | --- |
 | `docs/architecture.md` | The design and the invariants. **Source of truth.** ~11,800 lines. |
-| `docs/decisions.md` | **§15** — every deviation from that design, **D1–D800**, each with a verdict. ~45,400 lines. |
+| `docs/decisions.md` | **§15** — every deviation from that design, **D1–D803**, each with a verdict. ~45,700 lines. |
 | `docs/roadmap.md` | Open work, decided non-goals, parked decisions, post-v1. |
 | `docs/shortcuts.md` | The whole keymap — bound, unbound and agreed. |
 | `docs/context-menus.md` | The context-menu spec and its own deviation ledger. |
@@ -64,8 +64,8 @@ count (two numbers, **D476 and D477**, are cited from `crates/` with no entry an
 been for twenty-plus sessions). Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 798 index rows, 798 body headings, next free
-D801** — but trust the procedure over any number written down here, including that one.
+anywhere cited either. **The live figures: 801 index rows, 801 body headings, next free
+D804** — but trust the procedure over any number written down here, including that one.
 ⚠️ **`decisions.md`'s own header carried that same sentence and it was deleted on 2026-09-19
 rather than corrected**, because a file that names its own next free number is a second copy
 of §15.0's last index line and it is the copy that rots. This table is the third copy; it
@@ -95,7 +95,7 @@ nothing. Put the number on the doc of whatever a reader meets the question at.
 grep -rhoE 'D[0-9]{1,3}\b' crates/ --include=*.rs | sort -u
 ```
 
-695 distinct numbers today, every one resolving except D476 and D477. Three separate
+698 distinct numbers today, every one resolving except D476 and D477. Three separate
 checks, and each catches something the others cannot:
 
 1. **Set-difference against the previous run.** Never compare totals — a count that moved
@@ -198,7 +198,7 @@ find crates -path '*/src/*' -name '*.rs' | xargs wc -l | awk '$1>1000 && $2!="to
 ```
 
 **40** modules over a thousand lines, `inspector.rs` at 24,801 and `canvas.rs` at 21,673,
-against `decisions.md`'s 45,410 and `architecture.md`'s 11,863.
+against `decisions.md`'s 45,676 and `architecture.md`'s 11,881.
 
 ⚠️ **On Windows a scripted rewrite also re-decides the line endings.** A three-line Python
 `read()`/`replace()`/`write()` used for a *flip-check* — the most tempting case, because
@@ -622,6 +622,20 @@ a diff you could re-apply ("*inside* the guard" and "*after* the block" are oppo
 and both read as "moved the collect"), and **when a flip's result confirms a claim you
 already believed, re-read the edit before believing it.**
 
+🚨 **A mutation named by the text it removes does not name a line, and the slip runs in the
+dangerous direction** (§15 D803). `ui.rs` calls `clamp_existing_to_range(false)` at **four**
+production sites and two are byte-identical — `badge_field`'s and `value_field_f64`'s, both
+twenty-space chained calls. D475's note said *"removing `.clamp_existing_to_range(false)`"*,
+which is precise about the text and identifies nothing. A re-run spent it on `badge_field`'s,
+which is **documented as inert** — both its callers pass an unranged `Scrub`, so there is
+nothing to clamp against — came back green, and came within one commit of being recorded as
+*a flip with no teeth*. On `value_field_f64`'s line it fails exactly as written.
+**A no-op is indistinguishable from a flip that does not bite**, so this manufactures a false
+negative, which reads as "the test has no teeth" and invites deleting the line it protects.
+The opposite slip announces itself. **Name the mutation by its *function*, not by its text** —
+and an inert copy of a decision is a decoy for anyone mutating the live one, which is a cost
+worth pricing before making the same opt-out in two places.
+
 ⚠️ **An intermittently *red* test may be no evidence of a bug at all.** A recovery test
 failed twice, always on a cold run: a file's mtime is whole seconds, and the test *hoped*
 two writes landed in the same one rather than arranging it. The red run and the green run
@@ -792,7 +806,7 @@ The real census cannot be scoped to its own answer:
 grep -rhoE 'cfg\(([a-z_]+)' crates/ --include=*.rs | sort | uniq -c
 ```
 
-Last run: **326 `test`, 6 `windows`, 3 `panic`, 3 `not`, 3 `debug_assertions`, 2
+Last run: **327 `test`, 6 `windows`, 3 `panic`, 3 `not`, 3 `debug_assertions`, 2
 `target_os`, 2 `all`, 1 `unix`.** ⚠️ Only `test` has moved across five sessions — **the
 interesting half of this census is the tail, not the total.**
 

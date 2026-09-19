@@ -7,7 +7,7 @@ documents, and is untracked.
 | File | Holds |
 | --- | --- |
 | `docs/architecture.md` | The design and the invariants. **Source of truth.** ~11,800 lines. |
-| `docs/decisions.md` | **§15** — every deviation from that design, **D1–D793**, each with a verdict. ~44,900 lines. |
+| `docs/decisions.md` | **§15** — every deviation from that design, **D1–D800**, each with a verdict. ~45,400 lines. |
 | `docs/roadmap.md` | Open work, decided non-goals, parked decisions, post-v1. |
 | `docs/shortcuts.md` | The whole keymap — bound, unbound and agreed. |
 | `docs/context-menus.md` | The context-menu spec and its own deviation ledger. |
@@ -64,8 +64,12 @@ count (two numbers, **D476 and D477**, are cited from `crates/` with no entry an
 been for twenty-plus sessions). Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 791 index rows, 791 body headings, next free
-D794** — but trust the procedure over any number written down here, including that one.
+anywhere cited either. **The live figures: 798 index rows, 798 body headings, next free
+D801** — but trust the procedure over any number written down here, including that one.
+⚠️ **`decisions.md`'s own header carried that same sentence and it was deleted on 2026-09-19
+rather than corrected**, because a file that names its own next free number is a second copy
+of §15.0's last index line and it is the copy that rots. This table is the third copy; it
+rots too, which is what the sentence above is for.
 
 🚨 **Reserve the *block*, before writing a single citation.** Take the range, run a
 negative grep over it from the repository root, write the numbers down in a scratchpad
@@ -91,7 +95,7 @@ nothing. Put the number on the doc of whatever a reader meets the question at.
 grep -rhoE 'D[0-9]{1,3}\b' crates/ --include=*.rs | sort -u
 ```
 
-687 distinct numbers today, every one resolving except D476 and D477. Three separate
+695 distinct numbers today, every one resolving except D476 and D477. Three separate
 checks, and each catches something the others cannot:
 
 1. **Set-difference against the previous run.** Never compare totals — a count that moved
@@ -193,8 +197,8 @@ whole-file mistake — and the files here are the worst size for that:
 find crates -path '*/src/*' -name '*.rs' | xargs wc -l | awk '$1>1000 && $2!="total"' | wc -l
 ```
 
-**40** modules over a thousand lines, `inspector.rs` at 24,801 and `canvas.rs` at 21,677,
-against `decisions.md`'s 44,904 and `architecture.md`'s 11,833.
+**40** modules over a thousand lines, `inspector.rs` at 24,801 and `canvas.rs` at 21,673,
+against `decisions.md`'s 45,410 and `architecture.md`'s 11,863.
 
 ⚠️ **On Windows a scripted rewrite also re-decides the line endings.** A three-line Python
 `read()`/`replace()`/`write()` used for a *flip-check* — the most tempting case, because
@@ -788,8 +792,8 @@ The real census cannot be scoped to its own answer:
 grep -rhoE 'cfg\(([a-z_]+)' crates/ --include=*.rs | sort | uniq -c
 ```
 
-Last run: **310 `test`, 6 `windows`, 3 `panic`, 3 `not`, 3 `debug_assertions`, 2
-`target_os`, 2 `all`, 1 `unix`.** ⚠️ Only `test` has moved across four sessions — **the
+Last run: **326 `test`, 6 `windows`, 3 `panic`, 3 `not`, 3 `debug_assertions`, 2
+`target_os`, 2 `all`, 1 `unix`.** ⚠️ Only `test` has moved across five sessions — **the
 interesting half of this census is the tail, not the total.**
 
 ⚠️ **So it is the first of a class, and the rest of the class has no gate at all.**
@@ -833,7 +837,7 @@ D699 bracket the same attribute from opposite sides).
 
 ### Gates that look like they cover the code and do not
 
-**Twelve, by twelve unrelated mechanisms.** The list matters less than the standing advice
+**Thirteen, by thirteen unrelated mechanisms.** The list matters less than the standing advice
 under it:
 
 1. Clippy without `--all-targets` never lints a test (D302).
@@ -866,15 +870,30 @@ under it:
     reported whatever the item's visibility"*. False, and never measured — reasoned from
     what a gate is *for* (D622).
 
+13. 🚨 **A green `cargo test` does not mean the tests are independent, and nothing here can
+    say which ones are not.** Any test touching a process-wide resource can be wrong only at
+    certain interleavings, so the harness's own parallelism decides whether it is seen.
+    Found the hard way (D796): four new tests that each opened a context menu aborted the
+    binary with `STATUS_HEAP_CORRUPTION` four runs in five, because a context menu snapshots
+    the **OS clipboard** and two `arboard` handles at once corrupt the heap. **The whole
+    1,290-odd-test suite was green throughout and stayed green** — the tests that could
+    collide already existed and were simply spread thin enough to rarely meet. ⚠️ **The tell
+    is a filtered run, not a full one**: `cargo test <filter>` on a handful of related tests
+    packs them onto every core at once, and that is what made it reproducible. **When a
+    module's tests share anything the OS owns, run that module's filter on its own a few
+    times.** ⚠️ And a fix for this class must not be checked at the lowest seam — the test
+    that proves the lock works has to keep reaching the real resource, which is why D798's
+    refusal sits in the four callers and not inside `with_clipboard`.
+
 **Three questions to ask of a gate**: does it check the rule, with a predicate wide enough,
 **against the thing that actually ships?** And two of an *absent* one: **when the record says
 a check is impossible, check** (D445), and **when the record says a check is unnecessary,
 check** (D622).
 
-⚠️ **Suspect a thirteenth.** None of the twelve was found by looking for it — two came from a
-subagent's aside, one from reading a doc link against the type it named. The cheap general
-move that found several: **take a gate, break something it claims to cover on purpose, and
-check it goes red.** It costs a minute.
+⚠️ **Suspect a fourteenth.** None of the thirteen was found by looking for it — two came from a
+subagent's aside, one from reading a doc link against the type it named, and one from writing
+an unrelated test. The cheap general move that found several: **take a gate, break something
+it claims to cover on purpose, and check it goes red.** It costs a minute.
 
 ⚠️ **The test-shaped version of the same failure is a different list**: an assertion that
 passes because a flip aborts on an earlier case, and an assertion that fails against its own

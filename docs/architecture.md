@@ -7732,8 +7732,10 @@ every selected layer, which is sound because the card's subject *is* the selecti
 the second door is the **detached picker**, which outlives the card, so a widening that stops the rows
 being drawn can leave a picker floating over a selection whose stacks disagree — and a clone then
 replaces another layer's whole stack with the anchor's. The widened write can only ever change one
-entry's colour, whatever the card and the picker disagree about (§15 D635; the code cites `D476`,
-which has no entry, and D553 carries the same argument at the `Grid` slot).
+entry's colour, whatever the card and the picker disagree about (§15 D476 is the repair and D635 the
+test that pins it; D553 is the same argument at the `Grid` slot. ⚠️ **D476's entry is a
+reconstruction**, written 2026-09-19 from the sites citing it, the number having been spent with no
+entry behind it for twenty-odd sessions).
 
 **Reordering the stack is a decided non-goal for v1** (§15 D340, `roadmap.md` §0), struck with a
 measurement behind it: order changes a pixel only between `Filters` and `LayerBlur`, and between two

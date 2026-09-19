@@ -35,7 +35,7 @@ which is this file's own §9.5 lesson: **check the section before believing the 
 | --- | --- |
 | *Now · Images* | *Embed*/*Link* and *Relink…*, plus *Embed all* — all three blocked on nothing being able to author a linked source. |
 | *Now · SVG import* | **Built the day it was asked for**, all of it (§15 D394). What is left: ~~a `<filter>` that is more than one `<feGaussianBlur>`,~~ `<foreignObject>`, CSS combinators, the rejoined **paragraph**, ~~and an **elliptical radial gradient**~~ — each skipped or approximated *and reported*, so **nothing here is lost silently**. **Filters left this row on 2026-09-03 by being read whole** (§15 D411): the shadow chain, `<feDropShadow>` and the writer's identity `<feOffset/>`, which is what closes *Copy as SVG* for a shadow — until then every effect this app **exported** came back as nothing, reported and lost. ⚠️ **The same audit found the gradient's reason wrong** — not "the model holds circles" but a missing gradient transform, both backends already having the mechanism — **and it left this row the next day by being built** (§15 D412), the field landing on the brush rather than on `Fill` so a gradient-stroked shape gets it too. **`<textPath>` left this row on 2026-09-01 by being read** (§15 D406), hours after the writer started emitting it. ⚠️ **This row was stale in two directions when D405 read it**: it still listed per-run **font** properties as the one silent loss, which §15 D398 built hours after it was written, and it named the elliptical gradient, which appears nowhere in the section below — the file's own §9.5 lesson, twice in one row. |
-| *Now · Canvas* | `Event::Zoom` (a macOS portability item, untestable here) and touchscreen pinch (needs a touchscreen) — **nothing else** *of the gestures*, as of 2026-09-01: the extreme-zoom crash closed with §15 D402 and the last unbounded term with **D403**, hours apart. ⚠️ **Two context-menu items are open under this section as of 2026-09-07** and the *"nothing else"* predates both — a frame's *Background…*, and C5's edge clause (§15 D469), which are decisions rather than work. 🚨 **And four context-menu tests plus a ruler-origin test, added 2026-09-09** (`[A7-L8-06]`), which are **work** — they had been queued in `context-menus.md` §10, §15 D226 and §15 D36, and in none of them was this table or the section bullet. *The row said "nothing else of the gestures" and was scoped so narrowly that it stayed technically true through three additions; a qualifier that survives everything is not doing the job.* |
+| *Now · Canvas* | `Event::Zoom` (a macOS portability item, untestable here) and touchscreen pinch (needs a touchscreen) — **nothing else** *of the gestures*, as of 2026-09-01: the extreme-zoom crash closed with §15 D402 and the last unbounded term with **D403**, hours apart. ⚠️ **Two context-menu items are open under this section as of 2026-09-07** and the *"nothing else"* predates both — a frame's *Background…*, and C5's edge clause (§15 D469), which are decisions rather than work. 🚨 **Four context-menu tests plus a ruler-origin test were added here on 2026-09-09** (`[A7-L8-06]`) as the only **work** in this row, and both are **closed 2026-09-19** — §15 D795 and D797 — leaving the two decisions above. They had been queued in `context-menus.md` §10, §15 **D214** (this row said D226, which is the panel's *Paste* slot) and §15 D36, and in none of them was this table or the section bullet. *The row said "nothing else of the gestures" and was scoped so narrowly that it stayed technically true through three additions; a qualifier that survives everything is not doing the job.* |
 | *Now · Text* | Justify-all, tab stops, columns, widow/orphan — **four** now, and **not one of them is short of a dependency**; hyphenation was the last to hold that claim, lost it on 2026-09-01 and left this row the same day for §0 as a decided non-goal (§15 D399), and **text-on-path left it hours later by being built** (§15 D405). Plus the paragraph scope's absence from the MCP snapshot, parked with MCP — to which D405 adds `on_path` itself. |
 | *Now · Inspector* | Three items: the hex field commits through no shared valve, which is the routing half §15 D517 left standing when it closed both *measured* halves of `[S14.4-L1-04]` on 2026-09-07 — a **shape** argument, which is why it is one line and not a fix — `char_valve`'s third arm, the one the picker's raw sensed regions need, which §15 D523 measured as covered by nothing on 2026-09-08, and the menu-row border, which is a layout item rather than a valve one. 🚨 **This row was stale in *two* directions on 2026-09-09 and was corrected by `arch-scribe` reading it against the section.** It named the multi Transform card's **angle** fields, which §15 **D628** closed and struck from the section that same day, and it did not name the menu-row border, which had been the section's third bullet all along — so *"every one is a remainder of a landed fix"* and *"all three are valve remainders"* were both false. **A row that summarises a section is a second copy of it**, and this is §9.5's lesson at the table rather than in a bullet. |
 | *Now · Path editing* | Two decisions: whole-path geometry patches, revisited with MCP; and which of three answers the `retain_valid`/`subpath_lengths` pair gets, now that the dead call keeping them alive is documented as dead (§15 D637, added 2026-09-09). |
@@ -429,10 +429,15 @@ carried. **Linked images are the one thing that does not work**, which is the wh
   `ondin export --scale` hazard with no watchdog to make it fail loudly. *This entry existed for
   about four hours, which is the useful ending: it was written as "a feature rather than a bound" and
   the feature was five hundred lines including its tests.*
-- **Context menus: one row, one clause and four tests open** — the first two are decisions and the
-  four are work. ⚠️ *This read "one row and one clause open, and both are decisions rather than
-  work" until 2026-09-09, which was true of everything it knew about and false of the section: the
-  four tests below had been queued in `context-menus.md` §10 and §15 D226 the whole time.* Chrome,
+- **Context menus: one row and one clause open, both decisions rather than work — plus one clause of
+  one test** — the four tests were written on 2026-09-19 (§15 D795) and are struck below, all but
+  the Escape bullet's wider fixture. ⚠️ *This headline read "one row and one clause open, and both
+  are decisions rather than work" until 2026-09-09, when it was corrected to "one row, one clause and
+  four tests open": it had been true of everything the bullet knew about and false of the section,
+  the four tests having been queued in `context-menus.md` §10 and **§15 D214** the whole time — this
+  sentence and the struck sub-bullet below both said **D226**, which is the panel's *Paste* slot and
+  carries no test queue at all. It is back
+  near the shorter form because the tests landed, not because the reading changed.* Chrome,
   keyboard navigation
   and every other row are built, and
   `context-menus.md` plus §15 D214–D218 and D223–D226 are the whole record. **That file is still the
@@ -456,27 +461,32 @@ carried. **Linked images are the one thing that does not work**, which is the wh
     shared chain to match wants a decision rather than arriving as a side effect of sharing a helper:
     it would make an already-selected frame's *interior* a right-click target, which is the half of C5
     that has never been true. **The decision, not the work** — the code is one `.or_else` either way.
-  - 🚨 **Four of the rules have no test, and this bullet is where that belongs** (`context-menus.md`
-    §10, §15 D226, `[A7-L8-06]`). **R1's spent click, R4's replacement, R3's single rung, and "no
-    document action fires while a menu is open"** — all four need `RawInput` driven through the whole
-    app, which read as impossible until `OndinApp::headless` (§15 D303, D318), **so the reason has
-    expired and only the gap survives**. Until they are written the four rules are verified by
-    reading and by hand, and they are the four things to check first on the machine.
-    ⚠️ **They were queued in two other documents and in neither of the places a reader looks for open
-    work**, which is the inverse of this file's own rule: *the roadmap holds open work only* has a
-    corollary nobody had written down — **it must hold all of it**. Open work recorded nowhere a
-    reader looks is the same defect as a closed item left here, and it is harder to see, because no
-    document is individually wrong. 🚨 **This bullet's own history is the proof**: the 2026-08-31 pass
-    read the §9.5 *row* ledger, found it empty, and rewrote the bullet to *"nothing open"* — while §10
-    of that same file, five hundred lines further down, held these four. **The correction moved it
-    from one wrong state to another.**
-- 🚨 **A ruler's origin on a rotated frame — writable now and unwritten** (§15 D36, `[A7-L8-06]`).
-  On a rotated frame the origin is a corner while the band is axis-aligned world bounds, so the band
-  can read −50 to 480 rather than 0 to the width. **The band's arithmetic is pinned**
-  (`rulers::the_selection_band_spans_its_axis_and_clips_to_the_bar`); the *origin* is not, and D303
-  retired the reason it used to give. ⚠️ **The only record of it was one clause inside a live *Keep*
-  entry**, where nothing looking for open work would ever meet it — the same shape as the four above
-  and a different subject, which is what says it is a habit rather than an accident.
+  - ~~🚨 **Four of the rules have no test, and this bullet is where that belongs**
+    (`context-menus.md` §10, §15 D226, `[A7-L8-06]`).~~ **Closed 2026-09-19 — §15 D795**:
+    `app::context_menu_rule_tests` is the four, every flip run, and they are the first test anywhere
+    in the workspace to drive a synthetic **secondary** button through the app —
+    `canvas_context_menu`'s door had never had one, every earlier context-menu test calling
+    `open_context_menu` by hand or building a `menu::Context` directly. ⚠️ **One clause is still
+    open and is kept in `context-menus.md` §10 rather than restated here**: that file's Escape
+    bullet asks for `entered_group` and the tool as well as the selection, and the test written
+    asserts the menu and the selection.
+    🚨 **The lesson stays because it is about this file rather than about the work**: these four were
+    queued in two other documents and in neither of the places a reader looks for open work, which is
+    the corollary of *the roadmap holds open work only* that nobody had written down — **it must hold
+    all of it**. Open work recorded nowhere a reader looks is the same defect as a closed item left
+    here, and it is harder to see, because no document is individually wrong. **This bullet's own
+    history is the proof**: the 2026-08-31 pass read the §9.5 *row* ledger, found it empty, and
+    rewrote the bullet to *"nothing open"* — while §10 of that same file, five hundred lines further
+    down, held these four. **The correction moved it from one wrong state to another.**
+- ~~🚨 **A ruler's origin on a rotated frame — writable now and unwritten** (§15 D36,
+  `[A7-L8-06]`).~~ **Closed 2026-09-19 — §15 D797**: `rulers::origin_tests` pins the upright origin
+  and the rotated rough edge. 🚨 **The rough edge is worse than D36's illustration** — that entry
+  said the band *"can read −50 to 480"*, and a 480×320 frame at 30° measures **−160 to 415.7**, a
+  band 575.7 wide for a frame of 480, the far end short of the width rather than past it. The edge
+  itself is D36's decision and stays; what was open was the test, and the figures are a measurement
+  now. ⚠️ **The only record of it was one clause inside a live *Keep* entry**, where nothing looking
+  for open work would ever meet it — the same shape as the four above and a different subject, which
+  is what says it was a habit rather than an accident.
 - **Vector paths are editable and the brief is closed** — pen, node tool, corner radius, segments,
   snapping, joining, the pen reachable from inside an edit, reverse-subpath (§15 D114, D116–D125).
   **Read D114 and D116–D125 before touching any of it**; between them they carry every rule and
@@ -1344,6 +1354,16 @@ would be wrong, and that is the drift this file exists to not have.
   this bullet wants. `save`'s own comment gives the reason in the words this entry needed: *"the damage
   is silent and permanent — the file it writes outlives the test by however long it takes somebody to
   notice."* **One module has the shape and one does not.**
+  🚨 **A second resource the suite reaches with no injection point, found 2026-09-19 (§15 D796): the
+  OS clipboard.** `OndinApp::headless` swaps the wgpu device, `FontService`'s threads and the
+  preferences file, and does **not** swap this — a headless app reads the developer's real clipboard
+  through `system_clipboard_text`, `system_clipboard_has_image` and `paste_image`, and `copy_as_png`
+  would write it. No test reaches that write arm — `copy_as_png`'s own test stops at
+  `png_for_the_clipboard` — so this is a decision rather than damage: what holds today is that every
+  clipboard test reads only, which is discipline where the other three are construction. The *where* has the same four answers as above and `Prefs::ephemeral` is again the
+  cheapest. **Separately fixed and not open**: two threads opening the global clipboard at once
+  corrupted the heap and took the whole test binary down, which is why every `arboard` handle now
+  opens under one `Mutex`.
 - **A partly-failed library migration has no way back, and the full list of what it lost is nowhere on
   screen.** `Moved::failed` names every file that stayed behind and `summary()` puts the first of them
   in the status line (§15 D620), which is enough to act on and is not enough to work from: the

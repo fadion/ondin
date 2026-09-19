@@ -1198,8 +1198,38 @@ pub enum TopMenu {
 /// `None` rather than an empty string for an empty clipboard, so callers cannot
 /// paste nothing and call it a paste.
 pub(crate) fn system_clipboard_text() -> Option<String> {
-    let text = arboard::Clipboard::new().ok()?.get_text().ok()?;
+    let text = with_clipboard(|c| c.get_text().ok())??;
     (!text.is_empty()).then_some(text)
+}
+
+/// Every `arboard` handle in the process is opened under this, and it is not a
+/// tidiness measure (§15 D796).
+///
+/// 🚨 **Two threads opening the clipboard at once corrupt the heap.** Measured on
+/// Windows with four `#[test]`s doing nothing but calling the two readers below
+/// in a loop — no app, no egui, no document: `STATUS_HEAP_CORRUPTION`, four runs
+/// in four, and green the moment the harness is given one thread. `arboard`'s
+/// Windows path opens the *global* clipboard, which is a per-process resource
+/// with no interior locking, so a second `Clipboard::new()` while the first is
+/// live is not a race we are entitled to lose gracefully.
+///
+/// ⚠️ **The app has one UI thread, so this is not a bug a user can reach today.**
+/// What it was reaching is the **test suite**: `ContextMenu` snapshots the
+/// clipboard on every open (`system_text`, `system_image`), so any two tests that
+/// open a menu could land on it together. The whole suite passed throughout —
+/// its tests spread thinly enough that two rarely overlapped — and four new
+/// context-menu tests in one module failed four runs in five. **A suite that
+/// passes because its tests are spread out is passing by luck**, and the luck
+/// was already being spent before those four existed.
+///
+/// ⚠️ **Poisoning is deliberately ignored.** A panic under this lock says nothing
+/// about the OS clipboard's state, and refusing every later paste because one
+/// earlier one panicked would turn a transient failure into a permanent one.
+fn with_clipboard<T>(f: impl FnOnce(&mut arboard::Clipboard) -> T) -> Option<T> {
+    static GATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _held = GATE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut clipboard = arboard::Clipboard::new().ok()?;
+    Some(f(&mut clipboard))
 }
 
 /// Whether the system clipboard holds a picture (§15 D224).
@@ -1219,7 +1249,7 @@ pub(crate) fn system_clipboard_text() -> Option<String> {
 /// checks format availability *before* it reads, so a clipboard with no picture on
 /// it — which is nearly every open — costs nothing but the handle.
 pub(crate) fn system_clipboard_has_image() -> bool {
-    arboard::Clipboard::new().is_ok_and(|mut c| c.get_image().is_ok())
+    with_clipboard(|c| c.get_image().is_ok()).unwrap_or(false)
 }
 
 /// One open context menu (`docs/context-menus.md` §0).
@@ -4594,7 +4624,10 @@ impl OndinApp {
         };
         // Opened here rather than through egui, which carries a *text* clipboard
         // only — the same reason `paste_image` opens `arboard` itself (§15 D183).
-        match arboard::Clipboard::new().and_then(|mut c| c.set_image(image)) {
+        // Under `with_clipboard`'s gate like every other handle (§15 D796).
+        let wrote = with_clipboard(|c| c.set_image(image))
+            .unwrap_or(Err(arboard::Error::ClipboardNotSupported));
+        match wrote {
             Ok(()) => self
                 .session
                 .info(format!("Copied {} layer(s) as PNG", ids.len())),
@@ -6606,10 +6639,11 @@ impl OndinApp {
     /// hash of *our* encoding, so the same screenshot pasted twice dedupes, while
     /// the same picture pasted and then placed from a file does not.
     pub(crate) fn paste_image(&mut self, at: Option<Point>) -> bool {
-        let Ok(mut clipboard) = arboard::Clipboard::new() else {
-            return false;
-        };
-        let Ok(img) = clipboard.get_image() else {
+        // **The whole read happens inside the gate**, not just the open (§15
+        // D796): `get_image` is what actually touches the global clipboard, so
+        // taking the handle under the lock and reading outside it would leave the
+        // race exactly where it was.
+        let Some(Ok(img)) = with_clipboard(|c| c.get_image()) else {
             return false;
         };
         let (w, h) = (img.width as u32, img.height as u32);
@@ -12203,7 +12237,9 @@ mod ungroup_tests {
 
     /// Four 20×20 rects in a row on the root, grouped into two pairs, with both
     /// groups selected — the fixture the finding measured.
-    fn app_with_two_groups(ctx: &egui::Context) -> (OndinApp, NodeId, NodeId, Vec<NodeId>) {
+    pub(super) fn app_with_two_groups(
+        ctx: &egui::Context,
+    ) -> (OndinApp, NodeId, NodeId, Vec<NodeId>) {
         let mut app = OndinApp::headless(ctx);
         let mut ids = IdSource::new(0x6E0);
         let root = ids.mint();
@@ -15220,7 +15256,7 @@ mod library_wiring_tests {
     }
 
     /// One frame of the whole app, with `events` delivered to it.
-    fn whole_frame(ctx: &egui::Context, app: &mut OndinApp, events: Vec<egui::Event>) {
+    pub(super) fn whole_frame(ctx: &egui::Context, app: &mut OndinApp, events: Vec<egui::Event>) {
         let mut frame = eframe::Frame::_new_kittest();
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -15587,6 +15623,360 @@ mod library_wiring_tests {
 
         assert!(!app.confirming_close, "the question left with the editor");
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod context_menu_rule_tests {
+    //! **The four rules `context-menus.md` §10 called "writable now and
+    //! unwritten"** (`[A7-L8-06]`, §15 D795).
+    //!
+    //! R1's spent click, R4's replacement, R3's single rung, and "no document
+    //! action fires while a menu is open". They are here rather than in `menu.rs`
+    //! because every one of them is about a rule that only exists **between**
+    //! frames or **between** subsystems: which of a press and a release opens the
+    //! menu, whether the dismissal beats the open, and whether `input::resolve`
+    //! runs at all. A `menu::Context` built by hand cannot be wrong about any of
+    //! those, which is why thirty-odd green tests in `menu.rs` left all four open.
+    //!
+    //! ⚠️ **Two helpers are borrowed from sibling test modules rather than
+    //! copied** — `whole_frame` and `app_with_two_groups`, each widened to
+    //! `pub(super)` for this. A second copy of `whole_frame` would be a second
+    //! statement of the warm-up rule its doc comment carries, and the rule is the
+    //! part worth having once.
+    use super::OndinApp;
+    use super::library_wiring_tests::whole_frame;
+    use super::ungroup_tests::app_with_two_groups;
+    use ondin_core::{Document, NodeId};
+
+    /// A secondary press, as two events, so a test can look between them.
+    ///
+    /// **The gap is the assertion in R1's test** — `whole_frame` per event is
+    /// what makes "the press has not opened it yet" a thing that can be read.
+    fn secondary(at: egui::Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Secondary,
+            pressed,
+            modifiers: Default::default(),
+        }
+    }
+
+    /// A key press with no modifiers, for the two rules that are about what a
+    /// keystroke does *not* reach.
+    fn key(k: egui::Key) -> egui::Event {
+        egui::Event::Key {
+            key: k,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        }
+    }
+
+    /// Right-click the canvas at `at`, one event per frame, and leave the menu up.
+    ///
+    /// ⚠️ **The warm-up frame is not padding.** egui resolves a press against the
+    /// widget rects it knew *last* frame, so a press on the frame a widget first
+    /// appears is assigned to nothing and the whole test passes while asserting
+    /// nothing — the same trap `canvas.rs`'s autopan probe records.
+    fn right_click(ctx: &egui::Context, app: &mut OndinApp, at: egui::Pos2) {
+        whole_frame(ctx, app, Vec::new());
+        whole_frame(ctx, app, vec![egui::Event::PointerMoved(at)]);
+        whole_frame(ctx, app, vec![secondary(at, true)]);
+        whole_frame(ctx, app, vec![secondary(at, false)]);
+    }
+
+    /// **R1 — the release opens the menu, and the press that cancelled spends the
+    /// click** (`context-menus.md` §1, `[A7-L8-06]`, §15 D795).
+    ///
+    /// The first of the four rules that `context-menus.md` §10 called *"writable
+    /// now and unwritten"*: this is the first test anywhere in the workspace that
+    /// drives a synthetic **secondary** button through the whole app. Everything
+    /// before it either called `open_context_menu` by hand or built a
+    /// `menu::Context` directly, so **no test had ever been through
+    /// `canvas_context_menu`'s door at all**.
+    ///
+    /// What it pins is the *ordering*, which is the half a unit test cannot see:
+    /// after the press frame the menu must still be absent, and after the release
+    /// frame it must be there. §10 names the failure exactly — a menu that opens
+    /// on the press "then has the release land inside it and activate the row
+    /// under the pointer", which is a right-click that silently runs a verb.
+    ///
+    /// ⚠️ **Flipped**, by giving `canvas_context_menu` the press rather than the
+    /// click (`ctx.input(|i| i.pointer.button_pressed(Secondary))` in place of
+    /// `resp.secondary_clicked()`, which is the plausible wrong spelling rather
+    /// than a deletion): **red on the press assertion**, the predicted site, with
+    /// the menu already up a frame early. The release assertion stays green under
+    /// that flip, which is the point — a test that only asked "is there a menu at
+    /// the end" would have passed against the bug §10 describes.
+    #[test]
+    fn a_right_click_opens_its_menu_on_the_release_and_not_on_the_press() {
+        let ctx = egui::Context::default();
+        let (mut app, _, _, _) = app_with_two_groups(&ctx);
+        let at = egui::pos2(660.0, 410.0);
+
+        whole_frame(&ctx, &mut app, Vec::new());
+        whole_frame(&ctx, &mut app, vec![egui::Event::PointerMoved(at)]);
+        assert!(
+            app.context_menu.is_none(),
+            "the fixture is not in the state this test is about"
+        );
+
+        whole_frame(&ctx, &mut app, vec![secondary(at, true)]);
+        assert!(
+            app.context_menu.is_none(),
+            "R1: the press cancels, it does not open — a menu here is one the \
+             release would land inside of"
+        );
+
+        whole_frame(&ctx, &mut app, vec![secondary(at, false)]);
+        let menu = app.context_menu.as_ref().expect("R1: the release opens it");
+        assert_eq!(
+            menu.at, at,
+            "and it opens at the press position, which is why `secondary_press` \
+             is recorded on the way past"
+        );
+    }
+
+    /// **R4 — the right-click that opens the next menu is what closes the last**
+    /// (`context-menus.md` §1, `[A7-L8-06]`, §15 D795).
+    ///
+    /// R4 is "by construction" in the sense that the app holds one
+    /// `Option<ContextMenu>`, so two menus cannot coexist whatever the code does.
+    /// **That is not the part worth a test.** The part worth a test is that the
+    /// second right-click leaves a menu at all: the dismissal in
+    /// `context_menu_ui` and the open in `open_context_menu` run in the same
+    /// frame, and if they ran in the other order the second right-click would
+    /// close the first menu and open nothing. §10 predicts exactly that shape —
+    /// the failure is **zero** menus, not two.
+    ///
+    /// ⚠️ **Flipped** by giving `open_context_menu` an early
+    /// `if self.context_menu.is_some() { return; }` — "do not open a second menu
+    /// over the first", which is the plausible wrong reading of R4: **red on the
+    /// `expect`, the predicted site**, and red with **`None`** rather than with a
+    /// menu still at the first position. That is §10's predicted shape exactly,
+    /// and it arrives by a route worth naming: the refusal leaves the *first*
+    /// menu in the slot, whose `just_opened` is now false, so the same click that
+    /// was refused an open is taken as a click-away and dismisses it. **One
+    /// click, two rules, and the two answers cancel.**
+    ///
+    /// ⚠️ **The flip that looks obvious here is too broad to isolate anything.**
+    /// Removing `context_menu_ui`'s `!just_opened` guard fails **all four** tests
+    /// in this module, at their fixture assertions: without it no menu survives
+    /// the release that opened it, so there is nothing left to test a second
+    /// click against. `just_opened` holds up every rule here, not one of them.
+    #[test]
+    fn a_second_right_click_replaces_the_open_menu_rather_than_closing_it() {
+        let ctx = egui::Context::default();
+        let (mut app, _, _, _) = app_with_two_groups(&ctx);
+        let first = egui::pos2(400.0, 300.0);
+        let second = egui::pos2(900.0, 200.0);
+
+        right_click(&ctx, &mut app, first);
+        assert_eq!(
+            app.context_menu.as_ref().map(|m| m.at),
+            Some(first),
+            "the fixture is not in the state this test is about"
+        );
+
+        right_click(&ctx, &mut app, second);
+        let menu = app
+            .context_menu
+            .as_ref()
+            .expect("R4: the second right-click replaces the menu, it does not cancel it");
+        assert_eq!(
+            menu.at, second,
+            "and the menu that is up is the new one — the slot holds one, ever"
+        );
+    }
+
+    /// **R3 — one Escape pays out one rung, and the menu is the rung on top**
+    /// (`context-menus.md` §1, `[A7-L8-06]`, §15 D795).
+    ///
+    /// `escape_in_present_mode_closes_the_menu_first_and_the_mode_second` already
+    /// pins the ladder with *present mode* underneath. This one puts a
+    /// **selection** underneath instead, and opens the menu by right-clicking
+    /// rather than by calling `open_context_menu`, so it is the rule tested
+    /// through the door a user actually comes in by.
+    ///
+    /// ⚠️ **The two are not one test twice, and the reason is the door and the
+    /// state underneath rather than a ladder position.** This paragraph used to
+    /// read *"present mode is a `bool` that `escape` clears on a later rung; a
+    /// selection is cleared on the same rung the menu is"*, which is backwards
+    /// about `escape` itself: `self.present` is that function's **first** arm and
+    /// the selection clear is its **last**, the fall-through `else` under
+    /// everything. What this test adds is a menu opened by a synthetic
+    /// **right-click** rather than by a call to `open_context_menu` — the rule
+    /// asserted through the door a user comes in by — with the bottom of the
+    /// ladder underneath it instead of the top.
+    ///
+    /// ⚠️ **Whether the present-mode test also bites on the flip below was
+    /// asserted here and never run. It was run on 2026-09-19 and it does** —
+    /// under that mutation `escape_in_present_mode_closes_the_menu_first_and_the_mode_second`
+    /// fails at *"and left present mode alone"*, this one fails on the selection,
+    /// and the other six `escape_` tests stay green. So this test is **not** the
+    /// only cover for a fall-through and was never the reason to write it; the
+    /// door and the state underneath are (§15 D795).
+    ///
+    /// ⚠️ **Flipped** by running `input::resolve` in the menu arm right after
+    /// `self.context_menu = None` — the "closed it and then fell through" version
+    /// the arm's own comment warns about: **red on the selection assertion**,
+    /// with `[]` against the fixture's two group ids, and **green on the menu
+    /// assertion**, since the menu closes either way. That is the whole reason
+    /// the selection is asserted and not just the menu.
+    #[test]
+    fn escape_over_a_menu_closes_the_menu_and_keeps_the_selection() {
+        let ctx = egui::Context::default();
+        let (mut app, g1, g2, _) = app_with_two_groups(&ctx);
+        let before = app.session.selection.ids().to_vec();
+        assert_eq!(
+            before,
+            vec![g1, g2],
+            "the fixture is not in the state this test is about — an empty \
+             selection would make the assertion below true of nothing"
+        );
+
+        right_click(&ctx, &mut app, egui::pos2(660.0, 410.0));
+        assert!(app.context_menu.is_some(), "a menu to escape from");
+
+        whole_frame(&ctx, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.context_menu.is_none(), "R3: the press closed the menu");
+        assert_eq!(
+            app.session.selection.ids(),
+            before.as_slice(),
+            "R3: and it closed only the menu — the selection is the rung \
+             underneath and one press does not pay out two"
+        );
+    }
+
+    /// **No document action fires while a menu is open** (`context-menus.md` §1's
+    /// R3 keyboard clause and §10, `[A7-L8-06]`, §15 D795).
+    ///
+    /// §10 gives the test and its flip in one line: *"Open one over a layer, press
+    /// `Delete`, assert the document is byte-identical. Flip: without R3's gate
+    /// the layer is gone and the menu is left pointing at nothing."* The gate is
+    /// `input::resolve` not running at all while `context_menu.is_some()`.
+    ///
+    /// ⚠️ **"Byte-identical" is asserted as the node set plus the dirty flag**,
+    /// not as bytes: `Document` has no cheap serialization reachable from here,
+    /// and the two together fail for anything `Delete` could have done. The dirty
+    /// flag is the load-bearing half — a delete that was undone before the
+    /// assertion would leave the node set intact and the flag moved.
+    ///
+    /// ⚠️ **Flipped** by running `input::resolve` in the menu arm's `else`, so a
+    /// non-`Escape` key reaches the document with a menu up: **red on the
+    /// node-count assertion**, the predicted site, at **4 against 7** — a group
+    /// and both its children, not the one node the prediction said.
+    ///
+    /// ⚠️ **And the dirty assertion is not "also red" — it is never reached**,
+    /// because the count assertion panics first. It earns its place by covering
+    /// what the count cannot (an edit undone before the assertion), not by firing
+    /// alongside it, and the order is deliberate: §15 D453's lesson is to put the
+    /// *loss* before the mechanism, and the lost nodes are the loss. (D614 is the
+    /// balanced-tree union and carries no such rule; it was cited here by mistake
+    /// — §15 D795.)
+    #[test]
+    fn a_keystroke_does_not_reach_the_document_while_a_menu_is_open() {
+        let ctx = egui::Context::default();
+        let (mut app, g1, _, made) = app_with_two_groups(&ctx);
+        app.session.selection.set(vec![g1]);
+        let before = node_count(&app);
+        let dirty = app.session.is_dirty();
+
+        right_click(&ctx, &mut app, egui::pos2(660.0, 410.0));
+        assert!(
+            app.context_menu.is_some(),
+            "the fixture is not in the state this test is about"
+        );
+
+        whole_frame(&ctx, &mut app, vec![key(egui::Key::Delete)]);
+        assert_eq!(
+            node_count(&app),
+            before,
+            "the menu holds the keyboard: `Delete` must not reach the document \
+             while a menu is offering its own row for the same verb"
+        );
+        assert_eq!(
+            app.session.is_dirty(),
+            dirty,
+            "and nothing else reached it either — a delete undone before this \
+             line would leave the count alone and move this"
+        );
+        assert!(
+            app.session.doc.get(made[0]).is_some(),
+            "the layer the menu was pointing at is still there"
+        );
+    }
+
+    /// Every node reachable from the document's root, counted by walking.
+    fn node_count(app: &OndinApp) -> usize {
+        fn walk(doc: &Document, id: NodeId, n: &mut usize) {
+            let Some(node) = doc.get(id) else { return };
+            *n += 1;
+            for c in node.children() {
+                walk(doc, *c, n);
+            }
+        }
+        let mut n = 0;
+        walk(&app.session.doc, app.session.doc.root(), &mut n);
+        n
+    }
+}
+
+#[cfg(test)]
+mod clipboard_gate_tests {
+    //! **Two threads opening the OS clipboard at once corrupt the heap** (§15
+    //! D796).
+    //!
+    //! Found by writing the four context-menu rule tests above: each opens a
+    //! menu, `ContextMenu` snapshots the clipboard on every open, and four of
+    //! them in one module failed four runs in five with
+    //! `STATUS_HEAP_CORRUPTION`. The whole `ondin-app` suite passed throughout —
+    //! the tests that could collide were simply spread too thin to meet often.
+
+    /// The gate holds under eight threads doing nothing but opening it.
+    ///
+    /// **This test spawns its own threads rather than leaning on the harness.**
+    /// `cargo test`'s parallelism is what *found* the fault, and it is exactly
+    /// the wrong thing to assert against: the number of threads is the machine's,
+    /// the interleaving is the scheduler's, and a suite that grows by one test
+    /// changes both. What made the original failure so easy to miss is that it
+    /// only showed up when the colliding tests were the *only* ones selected.
+    ///
+    /// ⚠️ **The failure is not a panic, so there is no assertion under it.**
+    /// A corrupted heap takes the whole test binary down with
+    /// `STATUS_HEAP_CORRUPTION`, which cargo reports as a hard failure of the
+    /// target — the same shape as §15 D445's `panic = "abort"` guard, where the
+    /// evidence is the process dying rather than a line of `assert!`. The
+    /// `join` below is the real assertion: if a thread died, this does.
+    ///
+    /// ⚠️ **Flipped** by taking `with_clipboard`'s `GATE` lock out and opening
+    /// `arboard::Clipboard::new()` bare: the binary aborts, and the run reports
+    /// `process didn't exit successfully … (exit code: 0xc0000374,
+    /// STATUS_HEAP_CORRUPTION)` with **no test named** — so the flip's failure
+    /// message does not say which test did it. That is the argument for the
+    /// module doc above carrying the story rather than the assertion.
+    ///
+    /// ⚠️ **It reads and never writes.** Asserting on the *contents* would mean
+    /// setting the clipboard, and a test has no business overwriting what the
+    /// developer copied — the same rule that keeps `copy_as_png`'s own test on
+    /// `Self::png_for_the_clipboard` rather than on the arm that reaches the OS.
+    #[test]
+    fn eight_threads_can_read_the_clipboard_at_once() {
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                std::thread::spawn(|| {
+                    for _ in 0..16 {
+                        let _ = super::system_clipboard_text();
+                        let _ = super::system_clipboard_has_image();
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().expect("a reader thread came back");
+        }
     }
 }
 

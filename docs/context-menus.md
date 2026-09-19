@@ -1459,13 +1459,20 @@ been decided by `no_menu_label_runs_into_its_accelerator` — the specified word
 **Where they ended up.** The five that are about *placement, projection and chrome* are written and
 each was checked against the plausible wrong version — see below for what two of them caught; the
 keyboard bullet at the end arrived with the navigation and carries four more. The
-four that drive `RawInput` through the whole app are **not written — writable now and unwritten**. They
-read as impossible while `OndinApp::new` was the only constructor, since it takes an
-`eframe::CreationContext` with a live wgpu render state; `OndinApp::headless` exists as of 2026-08-22
-(§15 D303, D318) and several tests in `canvas.rs` pump events through one, so R1's spent click, R4's
-replacement, R3's single rung and "no document action fires while a menu is open" are a queue rather
-than a limit. Until they are written they are still verified by reading and by hand, and are the four
-things to check first on the machine.
+four that drive `RawInput` through the whole app — R1's spent click, R4's replacement, R3's single
+rung and "no document action fires while a menu is open" — **were written on 2026-09-19** (§15
+D795), in `app::context_menu_rule_tests`, and this paragraph said *"not written — writable now and
+unwritten"* until they were. They read as impossible while `OndinApp::new` was the only constructor,
+since it takes an `eframe::CreationContext` with a live wgpu render state; `OndinApp::headless`
+exists as of 2026-08-22 (§15 D303, D318), which turned them from a limit into a queue — and the
+queue then sat for four weeks. 🚨 **They are the first test anywhere in the workspace to drive a
+synthetic secondary button through the app**: every earlier context-menu test called
+`open_context_menu` by hand or built a `menu::Context` directly, so `canvas_context_menu`'s door had
+no test through it at all, which is how thirty-odd green tests in `menu.rs` left all four rules
+open. Each bullet's own flip was run and is recorded on the test it belongs to. ⚠️ **One clause of
+the queue survives**: the Escape bullet asks for `entered_group` and the tool as well as the
+selection, and what was written asserts the menu and the selection — so that half is still verified
+by reading and by hand.
 
 The rule this project applies to a green test is *what would also pass this* — so each of these
 names the plausible wrong implementation it is aimed at.
@@ -1473,7 +1480,10 @@ names the plausible wrong implementation it is aimed at.
 - **A right-click that cancels a gesture opens no menu, and the next one does.** Drive press ·
   move · press · release through `RawInput`. Flip against a menu that opens on the **press**: the
   release then lands inside the menu and activates the row under the pointer, which is R1's whole
-  argument and is invisible in the source.
+  argument and is invisible in the source. ⚠️ **Written** as
+  `a_right_click_opens_its_menu_on_the_release_and_not_on_the_press` (§15 D795), and that flip is
+  red on the **press** assertion while the release assertion stays green under it — a test asking
+  only whether a menu is up at the end passes against the bug.
 - **Right-clicking a member of a multi-selection leaves the selection whole; right-clicking a
   non-member replaces it.** Flip against "always select the hit" — with five layers selected, the
   wrong version leaves one and *Union* produces nothing.
@@ -1494,7 +1504,10 @@ names the plausible wrong implementation it is aimed at.
   somewhere else, assert exactly one menu `Area` exists and that it sits at the *second* press's
   position. Flip against close-on-click-away and open-on-secondary-click written as two independent
   rules in that order: the close then fires on the release that opened the new one and **no** menu
-  is left at all — §15 D82's one-frame bug wearing a different hat.
+  is left at all — §15 D82's one-frame bug wearing a different hat. ⚠️ **Written** as
+  `a_second_right_click_replaces_the_open_menu_rather_than_closing_it` (§15 D795), and the predicted
+  shape is what the flip produced: **`None`**, by the refusal leaving the first menu in the slot
+  with `just_opened` false, so the same click is then read as a click-away.
 - **The opening release does not dismiss the menu it opened.** One right-click, then five more
   frames with the pointer still, and the menu is there on every one of them. Flip by letting
   `dropdown`'s click-away test run on the opening frame: it passes at frame 0 and fails at frame 1,
@@ -1504,7 +1517,12 @@ names the plausible wrong implementation it is aimed at.
   group and the node tool active, press Escape *once*, and assert the menu is gone while the
   selection, `entered_group` and the tool are all untouched. Flip against a menu that closes without
   consuming the rung: the same press also leaves the group, and the ladder eats two states per
-  keystroke for the rest of the session.
+  keystroke for the rest of the session. ⚠️ **Written in part** as
+  `escape_over_a_menu_closes_the_menu_and_keeps_the_selection` (§15 D795): a **selection**
+  underneath rather than an entered group and the node tool, so the menu and the selection are
+  asserted and `entered_group` and the tool are not. The selection is the sharper of the three
+  anyway — it is cleared on the *same* rung, where present mode and an entered group are further
+  down the ladder — but this bullet is not closed.
 - **No document action fires while a menu is open.** Open one over a layer, press `Delete`, assert
   the document is byte-identical. Flip: without R3's gate the layer is gone and the menu is left
   pointing at nothing.

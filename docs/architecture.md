@@ -11724,6 +11724,15 @@ live on the canvas, participate in shared undo, and survive save/load.
   sites persisted its own temp folder into the real `%APPDATA%\ondin\prefs.json`. `Prefs::ephemeral` is
   now a `#[serde(skip)]` flag set by `headless` and checked on `save`'s first line — a flag on the value
   rather than a guard at each call site, because the call sites are the whole app.
+  🚨 **The swap list is three long and the machine offers a fourth: the OS clipboard is not swapped**
+  (§15 D796). A headless app reads the developer's real clipboard through `system_clipboard_text`,
+  `system_clipboard_has_image` and `paste_image`, and `copy_as_png` would write it — so on this path
+  the rule above holds by test discipline rather than by construction, and the only thing enforcing
+  it is that the one test here reads and never writes. **Every `arboard` handle in the process now
+  opens under one `Mutex` (`app::with_clipboard`)**, because two threads opening the global clipboard
+  at once corrupt the heap and take the whole test binary down; that is a fix for the suite, the app
+  having one UI thread. An inert twin is a maintainer decision and is queued in `roadmap.md` beside
+  the per-machine index, which is the same shape one module over.
 
 ---
 

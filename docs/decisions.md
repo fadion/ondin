@@ -1094,6 +1094,9 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D792** — **A per-segment walk is traversal-dependent, and the flip read every segment's interval backwards.** `PathWarp::at` maps `along` to `len − along` under `on_path_flip` (§15 **D406**, whose *"every consumer follows without knowing the flag exists — … the box sweep"* is the promise this broke). **D791's sampler walks `warp.segs`, which is in rail order and knows nothing about that**, and treated each segment's cumulative `s0` as an `along`: on a flipped rail its boundary samples landed mid-edge and the end nudge meant to ask a segment for *its own* end normal landed in the **next** segment. Measured on a closed 200×100 rectangle: uniform `x1 = 205.0`, sketch `x1 = 200.0` — the box exactly on the rail, five units narrow on the right, type hanging outside it; `flip = false` byte-identical, which is why nothing else saw it. 🚨 **The same defect the sketch was written to remove — the *"17.46 units narrow on the right"* — surviving on the other traversal.** The interval start is `warp.len - s0 - slen` when flipped, and the nudge goes **inward from both ends**, so the repair does not depend on which end `a0` turns out to be. 🚨 **The fixtures do not discriminate the two halves.** Reverting *only* the mirrored interval leaves every fixture green — straddling each mirrored boundary from both sides happens to leave a sample inside every segment of a rectangle at either aspect ratio, and a 20:1 rail did not break it either — so the mirroring is kept because reading an interval backwards is **wrong in general**, and a green run is not a licence to delete it. ⚠️ The rail that defeats the straddle exists on paper (a three-segment open polyline at roughly 100 : 20 : 10) and **has not been reduced to a fixture**. *(Fixed and tested 2026-09-15; Resolved — inside D791's sketch, which is still on trial. `text::tests::a_flipped_rails_box_clears_the_rail_on_every_side` asserts the clearance is non-zero and equal on four sides, both traversals, two aspect ratios; flipped against the original sampling it fails at *"a square-ish rectangle flip=true"* on the **right** clearance at `0.0000`. ⚠️ **One `Fix` left in that test's prose**: its doc says the full original sampling fails on the square-ish rail while the inline comment over the fixture list says that rail *"passes against the defect"* and calls the 20:1 one *"the one with teeth"*, which the paragraph above it denies for either ratio — one of the two is wrong and only a re-run says which. ⚠️ **The contrast with `the_bent_box_holds_the_rail_itself` is the durable lesson**: that guard's note records the 17.46 bug escaping **four** fixtures and being caught only by running the maintainer's document through both sweeps, because whether a lost offset strands *ink* depends on font, string and glyph placement — **this asserts the ribbon instead**, so a lost edge is a margin of exactly zero. Nothing amended in `architecture.md`, nothing struck from `roadmap.md`)*
 - **D793** — **The box sweep's reach is measured from the baseline, not from the text-local origin.** `PathWarp::place` offsets by `y - self.baseline`, so the reach D791's offset-curvature term wants is `(top − baseline)` and `(bottom − baseline)`. It read `top.abs().max(bottom.abs())` — the distance from the **origin** — and the two agree only when the baseline sits at `y = 0`, which parley does not do: at 20pt `top = 0, bottom = 20, baseline = 17`, so the old form said **20.000** against a true **17.000**, and at 24pt under `BoxTrim::CapToBaseline`, `top = 2.539, bottom = baseline = 20`, **20.000** against **17.461**. **It buys accuracy, not speed** — `κ·reach` is small unless the rail is tight, so the correction is a per-cent or two of the step and the `ceil` eats it: **r=25 233 → 233** (the `.min(0.5)` clamp binds either way), **r=40 293 → 273**, **r=60 311 → 301**, **r=120 391 → 386**, r≥300 and the arch, spike and rectangle unchanged, boxes moving by at most **0.005**, which is `BOX_SAG`. **The argument is the *sign***: the old frame over-estimated on every fixture tried, which is the safe direction, but nothing made that a rule, and a reach that came out **short** would thin the sampling on exactly the tight curves where the term is the only thing keeping the box honest. 🚨 **Reverting the line leaves the whole suite green, and that is a fact about the suite rather than about the change** — by construction the two frames differ only inside `BOX_SAG`, the tolerance every box test here is written against, and the rest is a sample count nothing asserts. **The line is guarded by its own derivation and by no test.** *(Fixed 2026-09-15; Resolved, and deliberately **untested** — the entry says so rather than implying coverage. ⚠️ **The pre-fix comment was left standing in the same commit and has been removed since**: it sat on the corrected line saying *"This is the wrong frame, and it is an open question rather than a fix"*, ended mid-sentence on the word *"which"*, and carried a **third** pair of numbers — `top = 0, bottom = 24, baseline = 19` labelled as 20pt — agreeing with neither measurement above. **A comment that states the defect is the one a fix leaves standing**, its author reading it as the problem statement rather than as a claim about the code; D784's `picker::ramp` two weeks earlier, and nothing gates it. Nothing amended in `architecture.md`: §5.9 already says `place` carries the baseline itself, which is the identity this restores. Nothing struck from `roadmap.md`)*
 - **D794** — **A thin `Intersect` lost exactly half its area to a tolerance no argument reaches.** Found 2026-09-07 beside D457's convex control, unattributed and asserted nowhere, and closed twelve days later. **flo_curves compiles in absolute tolerances of its own**: `consts.rs` carries `CLOSE_DISTANCE = 0.01` and `SMALL_DISTANCE = 0.001`, and `GraphPath` merges any two points closer than `CLOSE_DISTANCE` into one. A thin `Intersect` result's two **short** ends are each exactly the result's thickness, so at or below a hundredth of a unit they are not approximated but *erased*, pinching the rectangle into a **bow-tie** — two triangles, exactly half the area — and below `SMALL_DISTANCE` the result comes back `None` outright. **The element dump is the evidence rather than the area**: 6 path elements where it is right (move, four sides, close), **4** where it is wrong, the collapsed ends leaving no edge behind. 🚨 **Neither lever works alone, and the four-cell matrix was measured rather than reasoned** (400-wide slot against a 400×200 rect): scale 1 with 0.01 → half, the defect as found; scale 1 with 0.0001 → half, **bit-identical** to the row above, which is the control that clears our own `ACCURACY`; scale 1000 with 10.0 → half, the control that clears scaling on its own, the tolerance being once again the size of the feature; scale 1000 with 0.01 → exact, down to a thickness of 10⁻⁴. **`roadmap.md`'s guess that flo_curves' `ACCURACY` (0.01) was "the first place to look" was half right in the way that would have stalled a reader there** — the tolerance is load-bearing only in combination, and the constant doing the erasing cannot be reached from this crate at all. *(Fixed and tested 2026-09-19; **Resolved.** `FLO_SCALE: f64 = 1000.0` is applied in `c()` and `k()`, the only two coordinate conversions and therefore the whole seam — ⚠️ **a third conversion path, or any coordinate reaching flo_curves without going through them, reintroduces this and nothing in the code can say so** — and `FLO_ACCURACY: f64 = 0.01`, read in flo_curves' *scaled* space and so 10⁻⁵ of a world unit, replaces `ACCURACY` at the four call sites in `combine()`. 🚨 **`ACCURACY`'s doc opened *"Accuracy handed to every boolean, in world units"* and that is now false**, so it was amended in place rather than left standing: its *"finer than any pixel the canvas shows below 100× zoom"* argument is true and is about **rendering**, and this failure is not — a tolerance the size of the feature does not draw it coarsely, it deletes it. **Its *"a constant, not a parameter"* half is untouched**, `FLO_SCALE` being a fixed factor rather than one derived from the shapes or the camera, so the same two shapes still combine to the same path wherever they sit and at whatever zoom. **`ACCURACY` itself is now `#[cfg(test)]`** — D672's direction, the compiler enforcing "no production line reads this" rather than a sentence asserting it — kept because three assertions in the module's own tests read it and because D457 and D614 name it, at D319's and D699's cost: the two new constants name it in **plain backticks** with a sentence saying why, a production doc being unable to link a test-only item. **Cost: none measurable**, which mattered because three orders finer a tolerance could have meant three orders more subdivision on exactly D614's hot path — timed in release against D614's own fixture, N disjoint 20×20 rects folded as a `Union`: **0.37 / 1.00 / 2.61 / 7.33 ms** at N = 16, 64, 128, 256 against a baseline of **0.40 / 1.14 / 2.51 / 7.17**, inside the run-to-run spread at every size and in both directions, subpath counts identical. `a_thin_intersect_keeps_its_area` sweeps seven thicknesses from 1.0 to 0.0001 asserting area within 1%, asserts the **6** elements because an area assertion alone passes against any shape of the right size, and asserts `failures()` does not move — this loss is silent in D298's sense, exactly the mode D239's third amendment names. ⚠️ **Flipped both ways and each flip alone reproduces the defect**: `FLO_SCALE` → 1.0 fails at t = 0.01 with area 2 against 4, and `FLO_ACCURACY` → `ACCURACY * FLO_SCALE` — the spelling that *looks* obviously right, since it keeps the tolerance meaning a hundredth of a **world** unit — fails at the same thickness with 2.0000000208. 🚨 **The fix was written that way first and this test is what caught it**, so that flip shipped for exactly one `cargo test`. The predicted *site* was right and the prediction under it wrong: every thickness below 0.01 fails too, and 0.0001 fails at the `unwrap_or_else` as `None` rather than at the area assertion, so **a sweep stopping at 0.005 would have reported a halving where the answer is an erasure**. ⚠️ **`[S10.1-L1-01]`'s convex control had the wrong expected value in it**, recording a 400 × 0.01 sliver as *"correctly (area 2.0)"* where the true area is 4 — in the same finding whose scale-invariance argument ruled a tolerance problem out, correctly, in the bullet directly above the counter-example. **A control is only as good as the number it expects**, and nothing compares a finding's expected value against arithmetic. **§9.4 carried its own copy of the tolerance sentence** — *"Accuracy is a constant, not a parameter, or a PNG export stops being reproducible (§7.2)"* — and now states the scaling seam, the `CLOSE_DISTANCE` reason and the constant rule; ⚠️ its §7.2 clause went with it, that argument having been struck from `ACCURACY`'s own doc already as wrong twice over (§7.2 is the PNG bullet and promises nothing of the kind, and byte-identity across machines is not true today — §15 D304). **The `Intersect` sub-bullet and the *Now · Booleans* row are struck from `roadmap.md`**, and the row named a section that never existed — the item lived under *Now · Canvas and interaction* all along, which is that file's own §9.5 lesson at the table)*
+- **D795** — **The four context-menu rules that had no test have one each, and the first of them is the first synthetic right-click driven through the whole app.** D214 closed on *"Four of the rules have no test: writable now and unwritten"* and `context-menus.md` §10 carried the same four with the plausible wrong implementation each would fail against — R1's spent click, R4's replacement, R3's single rung, and *"no document action fires while a menu is open"*. **Every context-menu test before this either called `open_context_menu` by hand or built a `menu::Context` directly**, so `canvas::canvas_context_menu`'s door had no test through it at all, and thirty-odd green tests in `menu.rs` left all four rules open — each of them being about something that exists only *between* frames or *between* subsystems: which of a press and a release opens the menu, whether the dismissal beats the open, and whether `input::resolve` runs at all. *(Tested 2026-09-19; Resolved — no production line changed. `app::context_menu_rule_tests`, four tests, every flip run. **R1** asserts the menu **absent** after the press frame and present after the release, flipped against `ctx.input(|i| i.pointer.button_pressed(Secondary))` in place of `resp.secondary_clicked()` — the plausible wrong spelling rather than a deletion — and is **red on the press assertion, the predicted site**, the release assertion staying green under the same flip, which is the point: a test asking only *"is there a menu at the end"* passes against the bug §10 describes. **R4**'s flip is an early `if self.context_menu.is_some() { return; }` in `open_context_menu`, **red on the `expect` with `None`** — §10's predicted *zero menus, not two* — arriving by a route worth naming: the refusal leaves the first menu in the slot with `just_opened` now false, so the same click that was refused an open is read as a click-away and dismisses it. **One click, two rules, and the two answers cancel.** ⚠️ **The obvious flip here isolates nothing** — removing `context_menu_ui`'s `!just_opened` guard fails **all four** tests at their fixture assertions, because without it no menu survives the release that opened it; `just_opened` holds up every rule in the module rather than one of them. **R3** puts a *selection* under the menu rather than present mode and opens it by right-clicking rather than by calling `open_context_menu`, which is what it adds over `escape_in_present_mode_closes_the_menu_first_and_the_mode_second` — flipped by running `input::resolve` straight after `self.context_menu = None`, red on the selection assertion with `[]` against two group ids and green on the menu assertion. 🚨 **That test's own argument for existing was wrong and is corrected at the site**: it said present mode is cleared *"on a later rung"* than a selection, where `self.present` is `escape`'s **first** arm and the selection clear is its **last**, and it claimed the present-mode test does not bite on this flip — asserted from a read and never run. ***Fix:* re-run the flip against `escape_in_present_mode_…`** before treating either as the only cover for a fall-through. The **fourth** asserts the reachable node count *plus* `is_dirty()`, `Document` having no cheap serialization reachable from a test and the flag covering what the count cannot; its flip is `input::resolve` in the menu arm's `else`, **red on the node count at 4 against 7** — a group and both its children, not the single node predicted — and the dirty assertion is not "also red" but never reached, the order being deliberate (§15 D453's *loss before the mechanism*). ⚠️ **That citation read D614 until this entry was written** — the balanced-tree union, which carries no such rule — and both numbers resolve, so nothing here could have seen it. ⚠️ **§10's Escape bullet is wider than the test written for it**, also asking for `entered_group` and the tool, so that clause is what survives of the queue and §10 now says so. Two helpers were widened to `pub(super)` rather than copied — `library_wiring_tests::whole_frame` and `ungroup_tests::app_with_two_groups` — a second copy of the first being a second statement of the egui warm-up-frame rule its doc carries. D214's closing paragraph and `context-menus.md` §10's head are amended; the `[A7-L8-06]` sub-bullet is **struck from `roadmap.md`** along with the clause in the *Now · Canvas* table row that named it. 🚨 **Writing these four is what found D796**)*
+- **D796** — **Two threads opening the OS clipboard corrupt the heap, and the whole suite had been passing on scheduler luck.** 🚨 Found by writing D795's four tests, and a real defect rather than a test artefact: each of them opens a context menu, `ContextMenu` snapshots the clipboard on every open (`system_text`, `system_image`), and running just those four failed **four runs in five** with `STATUS_HEAP_CORRUPTION`, exit `0xc0000374` — the whole test binary down, **no test named**. **Attributed by bisection, and the final probe has no app in it at all**: four `#[test]`s doing nothing but calling `system_clipboard_text` and `system_clipboard_has_image` in a loop — no `OndinApp`, no egui, no document — corrupt the heap **four runs in four**, while each of them alone is green. `arboard`'s Windows path opens the **global** clipboard, a per-process resource with no interior locking. **Three intermediate probes came back clean and are recorded because they are what a reader suspects first**: four concurrent tests pumping `whole_frame` over a document with content, four pumping it over an empty app, and the pre-existing whole-app `close_card` tests, three of them over six runs. It is not the renderer, not the document and not `eframe`. *(Fixed and tested 2026-09-19; Keep — **two consequences are deliberately not fixed and this entry is where they are stated.** Every `arboard` handle in the process is now opened under one `static GATE: Mutex<()>` in `app::with_clipboard`, and all four call sites go through it: `system_clipboard_text`, `system_clipboard_has_image`, `copy_as_png`'s `set_image` and `paste_image`. ⚠️ **In `paste_image` the whole read is inside the gate and not just the open** — `get_image` is what touches the global clipboard, so taking the handle under the lock and reading outside it would have left the race exactly where it was. **Poisoning is ignored on purpose** (`unwrap_or_else(|e| e.into_inner())`): a panic under the lock says nothing about the OS clipboard's state, and refusing every later paste because one earlier one panicked turns a transient failure into a permanent one. ⚠️ **The app has one UI thread, so no user can reach this today** — what it was reaching is the test suite. 🚨 **And the larger half: the whole `ondin-app` suite was passing on scheduler luck.** The colliding tests existed before today and were simply spread thin enough to rarely meet; four new ones in a single module made it reproducible. *A suite that passes because its tests are spread out is passing by luck, and the luck was already being spent.* **Test** `app::clipboard_gate_tests::eight_threads_can_read_the_clipboard_at_once`, which **spawns its own threads rather than leaning on the harness** — `cargo test`'s parallelism is what *found* the fault and is exactly the wrong thing to assert against, the thread count being the machine's and the interleaving the scheduler's. ⚠️ **There is no `assert!` under it**: a corrupted heap takes the binary down, which cargo reports as a hard failure of the whole target — D445's shape, where the evidence is the process dying rather than a line of `assert!` — so the `join` is the assertion, and the flip that takes the `GATE` lock out aborts with `STATUS_HEAP_CORRUPTION` and **no test named**, which is the argument for the module doc carrying the story. ⚠️ **It reads and never writes**, because a test has no business overwriting what the developer copied — the reason D303's own *Declined* paragraph gives for leaving `owns_the_clipboard` untested. 🚨 **The clipboard is a fourth thing `OndinApp::headless` does not swap**, beside the wgpu device, `FontService`'s threads and the preferences file: a headless app reads the developer's **real** clipboard and `copy_as_png` would write it, so §11's *"a test may not write outside the repository"* bullet holds on this path by test discipline and not by construction. **D303's swap paragraph and §11's bullet both say so now**, and the `Prefs::ephemeral` shape one module away is the model if it is ever stubbed — left as a maintainer decision and queued inside `roadmap.md`'s per-machine-index bullet, beside the other resource with no injection point)*
+- **D797** — **The ruler origin is pinned, and D36's rough edge is a measurement now rather than an illustration.** D36 has said since it was written that *"the band's own arithmetic is pinned by `the_selection_band_spans_its_axis_and_clips_to_the_bar`; the origin is not — writable now and unwritten, D303 having retired the reason this used to give."* `rulers::origin_tests` is that. 🚨 **The rotated case is worse than D36's own illustration**: that entry says the band *"can read -50 to 480 rather than 0 to the width"*, and a 480×320 frame at 30° measures **−160 to 415.7**, a band **575.7** wide for a frame of 480. D36's figures are the right shape and were never offered as a measurement; these are, and D36 now points here. *(Tested 2026-09-19; Keep — **the rough edge is a decided one and the test pins its size rather than demanding the useful answer.** `an_upright_frame_puts_the_origin_on_its_corner` is the positive control and the useful half: origin on the frame's mapped local (0,0), bands reading 0 to the width and 0 to the height. `a_rotated_frames_band_does_not_start_at_zero` pins what D36 calls *"honest, and not useful"* — the origin follows the rotation while `selection_extent` is the axis-aligned world bounds, so the two answer different questions — because **a test demanding the useful answer would be asserting a decision nobody has taken**; what it buys is that anyone who does special-case it has the number they are changing written down beside the reason. ⚠️ **The upper end goes *down*, not up, and the first draft asserted it the other way** at 575.7, on the reasoning that a wider band must end further out. It does not: the width is `480·cos30 + 320·sin30`, only the first term is on the `to` side, and the second is what pushes `from` negative. **The two ends come from two different corners**, which is exactly why the number is unhelpful, and asserting the width alone would have hidden it. ⚠️ **The first flip tried was a no-op and is recorded as one** — taking the origin from the affine's `translation()` rather than from `w * Point::ZERO` leaves both tests green, those being the same point for any affine by definition. *A mutation that cannot change the answer is not a weak flip, it is not a flip.* ⚠️ **The flip that works** takes the origin from `preview_world_bounds(id).origin()`, the axis-aligned top-left, which is what somebody reaching for the useful answer writes first: **red on the rotated origin assertion, green on the upright test beside it**, and that pair is the finding — the two implementations agree *exactly* while a frame is upright, which is why this has never been noticed from inside the app and why the upright test cannot stand in for the other. ⚠️ **And that flip does not close the rough edge**: it moves `from` to 0 and leaves `to` at 575.7, so the band still does not read the frame's width. Making the bars read 0-to-480 on a rotated frame needs the **band** to stop being axis-aligned world bounds — a change to what a ruler means, not to where its zero is. A third arm rides on the rotated test rather than taking one of its own: nothing selected answers `Point::ZERO`, which is why the bars show *document* coordinates most of the time and is one `matches!` away from being silently lost. D36's rough-edge paragraph is amended; the ruler-origin bullet is **struck from `roadmap.md`** with the clause in the *Now · Canvas* table row that named it)*
 
 ---
 
@@ -4288,15 +4291,73 @@ for its contents. *Adopting Figma's fuller behaviour means changing the inspecto
 first, not just the ruler's.*
 
 One known rough edge: on a **rotated** frame the origin is a corner while the band is axis-aligned
-world bounds, so the band can read -50 to 480 rather than 0 to the width. Honest, and not useful —
+world bounds, so the band does not read 0 to the width. Honest, and not useful —
 but rotated frames are unusual and it was not worth special-casing. The band's own arithmetic is
-pinned by `the_selection_band_spans_its_axis_and_clips_to_the_bar`; the origin is not — writable now
-and unwritten, D303 having retired the reason this used to give.
+pinned by `the_selection_band_spans_its_axis_and_clips_to_the_bar`, and ⚠️ **the origin is pinned
+too as of 2026-09-19 — D797**, which spends the *"writable now and unwritten"* this paragraph used
+to end on. 🚨 **The figures it used to give — *"-50 to 480"* — were an illustration and read like a
+measurement.** Measured, on a 480×320 frame at 30°: **−160 to 415.7**, a band 575.7 wide for a frame
+of 480, the far end coming out **short** of the width rather than past it because the two ends are
+two different corners. **D797 has the numbers and the reason.**
 
 ⚠️ **The band's *numbers* were a separate defect and this entry did not cover them either.** The
 `0`-to-width reading above is the whole point of the band, and on the left bar the second of those
 two numbers went missing for every frame over about a thousand units — D33's fallback being scoped to
 ticks and nothing having given the band one. **D547** has it.
+
+**D797 — The ruler origin is pinned, and D36's rough edge is a measurement now rather than an
+illustration. *Tested 2026-09-19; Keep — the rough edge is a decided one, and the test pins its size
+rather than demanding the useful answer.***
+
+D36 has said since it was written that *"the band's own arithmetic is pinned by
+`the_selection_band_spans_its_axis_and_clips_to_the_bar`; the origin is not — writable now and
+unwritten, D303 having retired the reason this used to give."* `rulers::origin_tests` is that, two
+tests, and the second pins a behaviour the same entry calls *"honest, and not useful"*.
+
+`an_upright_frame_puts_the_origin_on_its_corner` is the positive control and the half that is
+actually useful: a 480×320 frame translated to (100, 60) puts the origin on its mapped local (0,0),
+and the bands then read 0 to the width and 0 to the height — the `W` the inspector is already
+showing, which is D36's whole argument for moving the origin at all.
+
+🚨 **The rotated case is worse than D36's own illustration, and that entry is amended rather than
+left standing.** It says the band *"can read -50 to 480 rather than 0 to the width"*. Measured on a
+480×320 frame at 30°: **−160 to 415.7**, a band **575.7** wide for a frame of 480. D36's figures are
+the right shape and were never offered as a measurement; these are.
+
+⚠️ **The upper end goes *down*, not up, and the first draft of the test asserted it the other way** —
+575.7, on the reasoning that a band wider than the frame must end further out. It does not. The
+width is `480·cos30 + 320·sin30`, only the first term is on the `to` side, and the second is what
+pushes `from` negative. **The two ends come from two different corners**, which is exactly why the
+number is unhelpful, and asserting the width alone would have hidden it.
+
+**A test demanding the useful answer would be asserting a decision nobody has taken**, which is why
+`a_rotated_frames_band_does_not_start_at_zero` pins the disagreement's *size* instead. The rough
+edge is decided: the origin is a mapped corner, the band is `selection_extent`'s axis-aligned world
+bounds, they answer different questions, and D36 judged rotated frames unusual enough not to
+special-case. What the assertion buys is that whoever does special-case it has the number they are
+changing written down beside the reason it is what it is.
+
+⚠️ **The first flip tried was a no-op, and it is recorded as one because it looks like a flip.**
+Taking the origin from the affine's `translation()` rather than from `w * Point::ZERO` leaves both
+tests green — for *any* affine those are the same point by definition. *A mutation that cannot
+change the answer is not a weak flip, it is not a flip.*
+
+⚠️ **The flip that works** takes the origin from `preview_world_bounds(id).origin()`, the
+axis-aligned top-left, which is what somebody reaching for the useful answer writes first: **red on
+the rotated origin assertion, the predicted site, and green on the upright test beside it.** That
+pair is the finding — the two implementations agree *exactly* while a frame is upright, which is why
+this has never been noticed from inside the app, and why the upright test cannot stand in for the
+rotated one. ⚠️ **And that flip does not close the rough edge either**, which the next person to
+take this on should know before starting: it moves `from` to 0 and leaves `to` at 575.7, so the band
+still does not read the frame's width. Making the bars read 0-to-480 on a rotated frame needs the
+**band** to stop being axis-aligned world bounds — a change to what a ruler means, not to where its
+zero is.
+
+A third arm rides on the rotated test rather than taking a test of its own: with nothing selected
+`ruler_origin` answers `Point::ZERO`, which is why the bars show *document* coordinates most of the
+time and is one `matches!` away from being silently lost. ⚠️ The same function answers `ZERO` for a
+single selection that is **not** a frame, and that arm is stated in the test's doc and asserted by
+nothing.
 
 **D37 — The View menu outgrew the design's three rows, and Open/Save stayed in the top bar. *Keep,
 both.*** The
@@ -8216,7 +8277,8 @@ consulting it.
 differ on one case.*
 
 **D214 — Right-click had one meaning and now has two, and four rules are what keep them apart.
-*Built; four of the rules are unpinned and named as such.*** `roadmap.md` carried "no context menus
+*Built; the four rules were unpinned and named as such until 2026-09-19 — D795 has one test
+each.*** `roadmap.md` carried "no context menus
 anywhere, `grep context_menu` → 0" from the beginning, and what kept it there was a real collision:
 the right button was already spent on abandoning a gesture (D31, D168), so a menu on that button
 either takes the click away from the cancel or shares it. `context-menus.md` §0 is where that was
@@ -8275,12 +8337,15 @@ a bug rather than as a design: **a click that dismisses a menu is spent doing so
 skips its mode input and a layers row skips its click while a menu is open. Without it, getting rid
 of a menu retargets the selection and dismissal becomes an edit.
 
-**Four of the rules have no test: writable now and unwritten.** R1's spent click, R4's replacement,
+**Four of the rules had no test, and now have one each — D795.** R1's spent click, R4's replacement,
 R3's single rung and "no document action fires while a menu is open" each need `RawInput` driven
-through the whole app, which read as impossible until D303 built `OndinApp::headless` — several tests
-now pump events through one, so the reason has expired and only the gap survives. `context-menus.md`
-§10 lists those four with the plausible wrong implementation each would fail against; that list is a
-queue rather than a set of things to check on the machine.
+through the whole app, which read as impossible until D303 built `OndinApp::headless` — and then
+went unwritten for the four weeks after that reason expired. `app::context_menu_rule_tests` is the
+four, driven through `canvas_context_menu`'s own door, which **no test in the workspace had ever
+been through**: every earlier context-menu test either called `open_context_menu` by hand or built a
+`menu::Context` directly. `context-menus.md` §10 listed them with the plausible wrong implementation
+each would fail against and every one of those flips was run; ⚠️ **what survives of that list is the
+Escape bullet's wider fixture**, which also asks for `entered_group` and the tool to be untouched.
 What *is* pinned is placement, projection and chrome, and two of those were vacuous until they were
 flipped: "the menu is on screen" passes against a placement with **no flip in it at all**, because
 the clamp alone shoves the card back inside, so the assertion had to become *the card lies wholly on
@@ -8864,6 +8929,156 @@ is where the rule it replaces was able to hide — so the arithmetic and both `N
 without an `OndinApp`. The fixture is asserted first, because every number below it is an index into
 one. **Flipped by dropping the `+ 1`**, which fails all four slot assertions; a blunt flip, and the
 right one here, since there is no arm of the rule the wrong version gets right.
+
+**D795 — The four context-menu rules that had no test have one each, and the first of them is the
+first synthetic right-click driven through the whole app. *Tested 2026-09-19; Resolved — D214's
+"writable now and unwritten" clause is spent, and writing these is what found D796.***
+
+D214 closed on *"Four of the rules have no test: writable now and unwritten"* — R1's spent click,
+R4's replacement, R3's single rung and *"no document action fires while a menu is open"* — and
+`context-menus.md` §10 carried the same four, each with the plausible wrong implementation it would
+fail against. `app::context_menu_rule_tests` is those four.
+
+**What thirty-odd green tests in `menu.rs` could not reach.** Every context-menu test written before
+these either called `open_context_menu` by hand or built a `menu::Context` directly, so **nothing in
+the workspace had ever driven a synthetic secondary button through the whole app** and
+`canvas::canvas_context_menu`'s door had no test through it at all. ⚠️ The one earlier synthetic
+secondary press — `typography::a_right_click_short_enough_to_fit_one_frame_takes_the_drag_away` —
+goes into a bare egui `Context` and a `DragValue`, not through `OndinApp`, so it is not a
+counter-example to that sentence and should not be read as one. **The gap was not an accident of
+coverage**: each of the four rules is about something that exists only *between* frames or *between*
+subsystems — which of a press and a release opens the menu, whether the dismissal beats the open, and
+whether `input::resolve` runs at all — and a `menu::Context` built by hand cannot be wrong about any
+of them.
+
+**R1 — `a_right_click_opens_its_menu_on_the_release_and_not_on_the_press`.** It asserts the menu is
+**absent** after the press frame and present after the release, which is the half a unit test cannot
+see. Flipped by giving `canvas_context_menu` the press —
+`ctx.input(|i| i.pointer.button_pressed(Secondary))` in place of `resp.secondary_clicked()`, the
+plausible wrong spelling rather than a deletion: **red on the press assertion, the predicted site**,
+and the release assertion stays green under it. That is the point. A test asking only *"is there a
+menu at the end"* passes against the bug §10 describes, where the release lands inside the menu and
+runs the row under the pointer.
+
+**R4 — `a_second_right_click_replaces_the_open_menu_rather_than_closing_it`.** Right-click at one
+position, then far away, and assert one menu at the *second* position. Flipped with an early
+`if self.context_menu.is_some() { return; }` in `open_context_menu` — the plausible wrong reading of
+R4 — which is **red on the `expect`, with `None`**: §10's predicted *zero menus, not two*, arriving
+by a route worth naming. The refusal leaves the **first** menu in the slot with `just_opened` now
+false, so the same click that was refused an open is read as a click-away and dismisses it. **One
+click, two rules, and the two answers cancel.** ⚠️ **The obvious flip here is too broad to isolate
+anything**: removing `context_menu_ui`'s `!just_opened` guard fails **all four** tests at their
+fixture assertions, because without it no menu survives the release that opened it. `just_opened`
+holds up every rule in the module, not one of them.
+
+**R3 — `escape_over_a_menu_closes_the_menu_and_keeps_the_selection`**, with a **selection**
+underneath rather than present mode, and opened by a right-click rather than by a call to
+`open_context_menu` — the rule asserted through the door a user comes in by, which
+`escape_in_present_mode_closes_the_menu_first_and_the_mode_second` does not use. Flipped by running
+`input::resolve` right after `self.context_menu = None`, the *closed it and then fell through*
+version the arm's own comment warns about: **red on the selection assertion** with `[]` against the
+fixture's two group ids, and **green on the menu assertion**, since the menu closes either way.
+
+🚨 **That test's own argument for existing was wrong and is corrected at the site.** It read
+*"present mode is a `bool` that `escape` clears on a later rung; a selection is cleared on the same
+rung the menu is"*, which is backwards about `escape`: `self.present` is that function's **first**
+arm and the selection clear is its **last**, the fall-through `else` under everything. And it went
+on to claim the present-mode test does *not* bite on this flip — **asserted from a read and never
+run**, with that test's own flip note recording the neighbouring mutation failing at *"and left
+present mode alone"*. The verdict was right and the argument was not: what this test adds is the
+door and the state at the bottom of the ladder. ⚠️ ***Fix:* re-run this flip against
+`escape_in_present_mode_…` before relying on either test as the only cover for a fall-through**;
+the comment now says so rather than answering it.
+
+**And `a_keystroke_does_not_reach_the_document_while_a_menu_is_open`**, which is §10's own wording —
+open a menu over a layer, press `Delete`, assert the document is unchanged. ⚠️ **"Byte-identical" is
+asserted as the reachable node count plus `is_dirty()`**, because `Document` has no cheap
+serialization reachable from a test; the flag covers the one case the count cannot, an edit undone
+before the assertion. Flipped by running `input::resolve` in the menu arm's `else`: **red on the
+node-count assertion, the predicted site, at 4 against 7** — a group and both its children, not the
+single node the prediction said. ⚠️ **The dirty assertion is not "also red", it is never reached**,
+the count assertion panicking first, and that order is deliberate — the *loss before the mechanism*
+(D453). ⚠️ **That citation read D614 until this entry was written**, which is the balanced-tree
+union and carries no such rule; both numbers resolve, so nothing in this project could have seen it.
+*A citation that resolves is not a citation that agrees.*
+
+⚠️ **§10's Escape bullet is wider than the test written for it.** That bullet asks for the menu
+opened with a layer selected inside an entered group and the node tool active, and for
+`entered_group` and the tool to be untouched as well as the selection; what is asserted is the menu
+and the selection. **That clause is what survives of the queue**, and §10 says so rather than
+reading as closed.
+
+**Two helpers were widened to `pub(super)` rather than copied** — `library_wiring_tests::whole_frame`
+and `ungroup_tests::app_with_two_groups`. A second copy of `whole_frame` would be a second statement
+of the egui warm-up-frame rule its doc comment carries, and that rule is the part worth having once:
+egui resolves a press against the widget rects it knew *last* frame, so a press on the frame a widget
+first appears is assigned to nothing and the whole test passes while asserting nothing.
+
+**D796 — Two threads opening the OS clipboard corrupt the heap, and the whole suite had been passing
+on scheduler luck. *Fixed and tested 2026-09-19; Keep — and two consequences are deliberately not
+fixed, which is half of what this entry is for.***
+
+🚨 **Found by writing D795's four tests, and it is a real defect rather than a test artefact.** Each
+of those four opens a context menu; `ContextMenu` snapshots the clipboard on every open
+(`system_text`, `system_image`); and running just those four failed **four runs in five** with
+`STATUS_HEAP_CORRUPTION`, exit `0xc0000374` — the whole test binary down, **no test named**.
+
+**Attributed by bisection, and the final probe has no app in it at all.** Four `#[test]`s doing
+nothing but calling `system_clipboard_text` and `system_clipboard_has_image` in a loop — no
+`OndinApp`, no egui, no document — corrupt the heap **four runs in four**, while each of them alone
+is green. `arboard`'s Windows path opens the **global** clipboard, which is a per-process resource
+with no interior locking, so a second `Clipboard::new()` while the first is live is not a race this
+app is entitled to lose gracefully.
+
+**Three intermediate probes came back clean, and they are recorded because they are what a reader
+suspects first**: four concurrent tests pumping `whole_frame` over a document with content; four
+pumping `whole_frame` over an empty app; and the pre-existing whole-app tests, `close_card`'s three,
+over six runs. It is not the renderer, not the document and not `eframe`.
+
+**The fix is one lock at one seam.** Every `arboard` handle in the process is now opened inside
+`app::with_clipboard`, behind a `static GATE: Mutex<()>`, and all four call sites go through it —
+`system_clipboard_text`, `system_clipboard_has_image`, `copy_as_png`'s `set_image` and
+`paste_image`. ⚠️ **In `paste_image` the whole read is inside the gate, not just the open**:
+`get_image` is what touches the global clipboard, so taking the handle under the lock and reading
+outside it would have left the race exactly where it was. **Poisoning is ignored on purpose**
+(`unwrap_or_else(|e| e.into_inner())`) — a panic under the lock says nothing about the OS
+clipboard's state, and refusing every later paste because one earlier one panicked turns a transient
+failure into a permanent one.
+
+⚠️ **The app has one UI thread, so no user can reach this today.** What it was reaching is the test
+suite. 🚨 **And that is the larger half: the whole `ondin-app` suite was passing on scheduler luck.**
+The colliding tests existed before today — anything that opens a menu takes a clipboard snapshot — and
+were simply spread thin enough to rarely meet. Four new ones in a single module made it
+reproducible. *A suite that passes because its tests are spread out is passing by luck, and the luck
+was already being spent.*
+
+**`clipboard_gate_tests::eight_threads_can_read_the_clipboard_at_once`** is the assertion, and three
+of its choices are load-bearing. ⚠️ **It spawns its own threads rather than leaning on the
+harness**: `cargo test`'s parallelism is what *found* the fault and is exactly the wrong thing to
+assert against, since the thread count is the machine's and the interleaving is the scheduler's, and
+a suite that grows by one test changes both. ⚠️ **There is no `assert!` under it** — a corrupted
+heap takes the binary down, which cargo reports as a hard failure of the whole target, the same
+shape as D445's `panic = "abort"` guard, where the evidence is the process dying rather than a line
+of `assert!`; the `join` is the assertion. ⚠️ **It reads and never writes**, because a test has no
+business overwriting what the developer copied — which is the reason D303's own *Declined* paragraph
+already gives for leaving `owns_the_clipboard` untested, and the reason `copy_as_png`'s own test
+stops at `png_for_the_clipboard`. ⚠️ That comment named `png_for_clipboard`, which is not a function
+in this workspace, and is corrected — **a name in plain backticks is a name no gate checks** (D319).
+Flipped by taking the `GATE` lock out: the binary aborts with `STATUS_HEAP_CORRUPTION` and **no test
+named**, which is the argument for the module doc carrying the story rather than an assertion
+message.
+
+🚨 **The clipboard is a fourth thing `OndinApp::headless` does not swap, and it is not on D303's
+list.** That entry swaps a device, five background threads and a file so that a probe cannot touch
+the developer's machine; a headless app nevertheless reads the developer's **real** clipboard, and
+`copy_as_png` would write it. So §11's *"a test may not write outside the repository"* bullet holds
+on this path by test discipline and not by construction. **It is the per-machine index's shape one
+step worse**: there (D619) a mitigation exists and no production path is routed through it; here
+there is no mitigation to route to. **D303's swap paragraph and §11's bullet both say so now.**
+*Stubbing it is a maintainer decision rather than
+work* — `Prefs::ephemeral` is the shape one module away, a `#[serde(skip)]` flag `headless` sets and
+the writer reads on its first line — and it is queued in `roadmap.md` beside the per-machine index,
+the other resource the suite reaches with no injection point.
 
 **D227 — The missing-font warning gets its UI half, and the third state it needed first.
 *Built 2026-08-19.*** §5.4a carried this as a **gap rather than a decision** for as long as it was one,
@@ -10333,6 +10548,15 @@ it inert rather than half-built: `poll` gets `Disconnected`, which is precisely 
 stopped arriving" signal `catalog_done` is documented to read off a closed channel, so `status_of`
 reaches its conclusions instead of waiting for ever. The three tests run in **0.01 s**, which is the
 evidence that none of it started.
+
+🚨 **There is a fourth machine-touching resource and it is *not* swapped: the OS clipboard** (D796).
+`system_clipboard_text`, `system_clipboard_has_image` and `paste_image` read the developer's real
+clipboard out of a headless app, and `copy_as_png` would overwrite it — so "naming them is the
+design" names three of four, and the one left out is the one with no inert twin. **The list above is
+what is swapped, not what a probe can reach.** What holds today is test discipline — the *Declined*
+paragraph below refuses a clipboard test for exactly this reason, and D796's own test reads and
+never writes — where the other three hold by construction. *Stubbing it is a maintainer decision;
+`Prefs::ephemeral` is the shape.*
 
 **`OndinApp::new` and `OndinApp::headless` share one field list** (`with`), so a new field still has one
 place to be initialised and cannot mean different things in the two builds. That was the whole risk of a

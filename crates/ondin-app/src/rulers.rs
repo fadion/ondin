@@ -3518,3 +3518,180 @@ mod guide_grab_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod origin_tests {
+    //! **The ruler origin, and the rough edge a rotated frame puts in it** (§15
+    //! D36, `[A7-L8-06]`, §15 D797).
+    //!
+    //! D36 has said since it was written that *"the band's own arithmetic is
+    //! pinned by `the_selection_band_spans_its_axis_and_clips_to_the_bar`; the
+    //! origin is not — writable now and unwritten"*. This is that.
+    //!
+    //! 🚨 **Two of these three assertions pin a behaviour D36 calls "honest, and
+    //! not useful", and that is deliberate.** The rotated case is a *decided*
+    //! rough edge, not a defect with a fix owed: the origin is a mapped corner
+    //! while the band is axis-aligned world bounds, so the two disagree, and D36
+    //! judged that rotated frames are unusual enough not to special-case. A test that
+    //! demanded the *useful* answer would be asserting a decision nobody has
+    //! taken. What this pins instead is the disagreement's **size**, so that if
+    //! anyone ever does special-case it, the number they have to change is
+    //! written down beside the reason it is what it is.
+    use super::*;
+    use ondin_core::kurbo::{Affine, Size};
+    use ondin_core::{NodeKind, Operation, Transaction};
+
+    /// A single frame of `size`, under `transform`, selected.
+    fn app_with_a_frame(
+        ctx: &egui::Context,
+        size: Size,
+        transform: Option<Affine>,
+    ) -> (OndinApp, ondin_core::NodeId) {
+        let mut app = OndinApp::headless(ctx);
+        let id = app.session.ids.mint();
+        let parent = app.session.doc.root();
+        app.session
+            .try_commit(Transaction(vec![Operation::CreateNode {
+                id,
+                parent,
+                index: 0,
+                kind: NodeKind::Artboard { size },
+                transform,
+                name: None,
+            }]))
+            .expect("create the frame");
+        app.session.selection.set(vec![id]);
+        (app, id)
+    }
+
+    /// An upright frame puts the origin on its own top-left corner, and the band
+    /// then reads 0 to the width.
+    ///
+    /// **The positive control for the rotated case below**, and it is the half
+    /// that is actually useful: the whole point of moving the origin onto a
+    /// selected frame is that the numbers on the bars become the frame's own
+    /// coordinates rather than the document's.
+    #[test]
+    fn an_upright_frame_puts_the_origin_on_its_corner() {
+        let ctx = egui::Context::default();
+        let (app, _) = app_with_a_frame(
+            &ctx,
+            Size::new(480.0, 320.0),
+            Some(Affine::translate((100.0, 60.0))),
+        );
+
+        let origin = app.ruler_origin();
+        assert_eq!(
+            (origin.x, origin.y),
+            (100.0, 60.0),
+            "the origin is the frame's local (0,0) carried into world space"
+        );
+
+        let ((x0, x1), (y0, y1)) = app.selection_extent().expect("a frame is selected");
+        assert_eq!(
+            (x0 - origin.x, x1 - origin.x),
+            (0.0, 480.0),
+            "so the horizontal band reads 0 to the width"
+        );
+        assert_eq!(
+            (y0 - origin.y, y1 - origin.y),
+            (0.0, 320.0),
+            "and the vertical band reads 0 to the height"
+        );
+    }
+
+    /// **A rotated frame's band does not read 0 to the width, and D36 says so.**
+    ///
+    /// The origin follows the rotation — it is the frame's own corner, wherever
+    /// that corner has gone — while `selection_extent` is the axis-aligned world
+    /// bounds of the rotated rectangle. The two are answers to different
+    /// questions, and subtracting one from the other is what puts a negative
+    /// number on a ruler that is supposed to start at zero.
+    ///
+    /// The fixture is deliberately D36's own example shape: a 480×320 frame,
+    /// rotated, whose band the entry describes as reading about *"-50 to 480"*.
+    /// At 30° the exact numbers are the ones below — and they are **worse than
+    /// D36's illustration**, −160 to 415.7 rather than −50 to 480, a band 575.7
+    /// wide for a frame of 480. D36's figures are the right shape and were never
+    /// claimed to be a measurement; these are.
+    ///
+    /// ⚠️ **The upper end goes *down*, not up, and the first draft of this test
+    /// asserted it the other way** — 575.7, on the reasoning that the band is
+    /// wider than the frame so its far end must be past 480. It is not: the
+    /// width is `480·cos30 + 320·sin30`, but only the first term is on the `to`
+    /// side and the second is what pushes `from` negative. **The two ends come
+    /// from two different corners**, which is the whole reason the number is
+    /// unhelpful, and asserting the width alone would have hidden it.
+    ///
+    /// ⚠️ **No selection and a non-frame both answer `Point::ZERO`**, which is a
+    /// third arm worth an assertion rather than a third test: it is the reason
+    /// the bars show *document* coordinates most of the time, and it is one
+    /// `matches!` away from being silently lost.
+    ///
+    /// ⚠️ **The first flip tried was a no-op, and it is worth recording because
+    /// it looks like a flip.** Taking the origin from the affine's `translation()`
+    /// instead of from `w * Point::ZERO` leaves both tests green — because for
+    /// *any* affine those are the same point by definition. A mutation that
+    /// cannot change the answer is not a weak flip, it is not a flip.
+    ///
+    /// ⚠️ **Flipped**, properly, by taking the origin from
+    /// `preview_world_bounds(id).origin()` — the axis-aligned bounds' top-left,
+    /// which is what somebody reaching for the *useful* answer writes first:
+    /// **red on the origin assertion**, the predicted site, and the upright test
+    /// beside it stays **green**. That pair is the finding: the two
+    /// implementations agree exactly while a frame is upright, which is why this
+    /// has never been noticed from inside the app, and it is also why the upright
+    /// test cannot stand in for this one.
+    ///
+    /// ⚠️ **That flip does not close the rough edge either**, and the next person
+    /// to take this on should know before starting: it moves `from` to 0 and
+    /// leaves `to` at 575.7, so the band still does not read the frame's width.
+    /// Making the bars read 0-to-480 on a rotated frame needs the *band* to stop
+    /// being axis-aligned world bounds, which is a change to what a ruler means,
+    /// not a change to where its zero is.
+    #[test]
+    fn a_rotated_frames_band_does_not_start_at_zero() {
+        let ctx = egui::Context::default();
+        let turn = Affine::rotate(std::f64::consts::FRAC_PI_6);
+        let (app, _) = app_with_a_frame(&ctx, Size::new(480.0, 320.0), Some(turn));
+
+        let origin = app.ruler_origin();
+        assert_eq!(
+            (origin.x, origin.y),
+            (0.0, 0.0),
+            "the frame's corner is still at the world origin — it is what the \
+             rest of the frame did that the band is about"
+        );
+
+        let ((x0, x1), _) = app.selection_extent().expect("a frame is selected");
+        let (from, to) = (x0 - origin.x, x1 - origin.x);
+        assert!(
+            (from + 160.0).abs() < 0.1,
+            "D36's rough edge: the band starts *before* the origin, at {from:.1} \
+             — the corner that used to be the bottom-left has swung out to \
+             −320·sin30, and the ruler shows it"
+        );
+        assert!(
+            (to - 415.7).abs() < 0.1,
+            "and it ends short of the width, not past it: {to:.1} against a frame \
+             480 wide, because the far corner's x is 480·cos30 and the 320·sin30 \
+             term went the *other* way, into `from`"
+        );
+        assert!(
+            (to - from - 575.7).abs() < 0.2,
+            "so the band is 575.7 wide for a frame of 480 — the axis-aligned \
+             bounds of a rotated rectangle, which is what D36 means by honest \
+             and not useful"
+        );
+
+        // The third arm, and the reason the bars are usually document-relative.
+        let (bare, _) = app_with_a_frame(&ctx, Size::new(480.0, 320.0), Some(turn));
+        let mut bare = bare;
+        bare.session.selection.clear();
+        assert_eq!(
+            bare.ruler_origin(),
+            ondin_core::kurbo::Point::ZERO,
+            "nothing selected is the document's own origin"
+        );
+    }
+}

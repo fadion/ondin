@@ -1115,6 +1115,7 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D803** — **A mutation named by the line it removes, in a file with four copies of that line and one of them inert.** §15 **D475**'s flip note — *"Flipped by restoring `clamp_existing_to_range(true)`: it fails with `Em(2.0)` where `Em(3.0)` was"* — was quoted from `[S6.2-L1-01]` rather than measured, so it was re-run; the first re-run removed `ui::badge_field`'s opt-out, came back **green, both cases**, and was very nearly written up as a flip with no teeth. Removed from `ui::value_field_f64` instead it **fails with `Em(2.0)` where `Em(3.0)` was, in-range control green** — the note is correct in every particular and the numbers are now this test's as well as the finding's. 🚨 **`ui.rs` makes that call at four production sites** — `badge_field`, `plain_drag_value`, `value_field_f64` and `bare_drag_value` (D552) — **and the two that are byte-identical are exactly the pair that was confused**, both a twenty-space-indented chained call with no semicolon. `CLAUDE.md`'s *"name the mutation precisely enough to be re-run"* failing in a new way: the note was precise about the *text*, and the text is what is ambiguous. ⚠️ **The failure mode runs the dangerous way** — `badge_field`'s line is documented **inert** (both callers pass an unranged `Scrub`), so removing it is a no-op indistinguishable from a flip that does not bite, which manufactures a **false negative** and invites deleting the line the test protects; an inert line is a decoy for anyone mutating the live one. *(Measured 2026-09-19; **Keep — D475's flip bites on `value_field_f64`'s own line; name a mutation by its function.** The ranged path and egui's write-back are confirmed rather than merely traced: `length_char_field` builds `Scrub::whole(0.5).range(Bounds::TRACKING.pct)`, `−50…200`, and `drag_value.rs` clamps into its local, `set`s it back on `old_value != value` and marks the response changed on `get(…) != old_value`. 🚨 **The failing run also answers D802's open question**: all three arms instrumented, **`char_valve`'s third arm is the one that fires** — a `changed()` frame on a control holding no focus walks past `engaged` and `was_engaged` into `commit_edit`, so the arm is **not dead**, and it is the mechanism by which `[S6.2-L1-01]`'s clamp became a committed document change and an undo step. Its only *known* user — seven call sites, two measured — and a hazard rather than a feature, D425's line being the whole of what keeps it from existing. **D802's ruling is better informed, not taken**: *delete the arm* is a second defence against the same bug. ⚠️ **This entry was first written the other way round**, as a flip in doubt on the premise the green run was real; rewritten rather than left standing, and D475's amendment with it. Nothing in the tree changed to pre-empt anything — the only edit is the test's own doc, which now names the function the mutation belongs to; `architecture.md` §9.2 says *measured* where it said *reasoned*, and `roadmap.md`'s *Now · Inspector* bullet and table row are re-scoped rather than struck)*
 - **D804** — **The last three of D624's six are reached, and two of them were a lift after all.** D624 named `list_section`'s gutter default, `wrap_section`'s `!= WrapMode::NoWrap` gate and `write_axis`'s `clear_at_default` as needing *"a live text session and a laid-out panel to enter"* — **a fixture rather than a lift**, and that was the stated reason they did not travel with the first three. 🚨 **True of one of them.** The gutter default and `clear_at_default` read nothing but their parameters; what needed the panel was their *callers*, so **D269**'s move reaches them and both are lifted — `marker_attrs(next, indent_start, font_size)` out of `list_section` and `axis_coords_after(axis, coords, value, clear_at_default)` out of `write_axis`, each pinned by a test that builds no `Ui`. **The question is what a decision *reads*, not where it is written.** 🚨 **`clear_at_default` was the same eight lines in two places**, `write_axis` and `axis_valve`, and only the valve's copy was covered (**D569**) — the exact shape D624's own ⚠️ warned about two sentences later, *"a grep for the name reads as though the decision were reached"*; **the warning was about the reader being misled and the duplication itself went unremarked**. One copy now, and one assertion over both arms. *(Fixed and tested 2026-09-19; **Resolved** — D624's queue is closed and the fixture-or-lift split it drew was wrong for two of three. ⚠️ **`marker_attrs` takes `font_size` because the zero test is on the *resolved* indent**, `Em(0.0)` and `Px(0.0)` being different values to the model and the same ink (**D537**, **D799**), so a predicate comparing variants passes a test that only tries `Px`. The wrap gate genuinely wanted the fixture and has one: `wrap_gate_tests` drives the real section on a headless app through real pointer events at coordinates found by a 4pt sweep. ⚠️ **The Wrap strip reads off-then-on, so its left cell is `NoWrap`** — `WrapMode::ALL` puts the cell that does nothing first — and the first draft named the constants the other way round, caught by *"the mode switched"*, a click on the cell already current changing nothing. **Three tests, every flip run, no two landing on one assertion.** `a_default_axis_value_is_dropped_except_on_opsz` carries four assertions for three flips: unconditional rule → red only on **`opsz`**; `value == axis.default` dropped → red on the **second**; the `!` inverted → red on the **first**. ⚠️ **The prediction for the second was wrong** — the first assertion is about a *default* value, which a flag-only rule still drops. `a_marker_opens_a_gutter_only_when_there_is_none` is built on the asymmetry, turning a marker **off** never touching the indent, a gutter the user can see being theirs once it exists. 🚨 **In `nowrap_kills_word_break_and_long_words_and_nothing_else` the control is the whole test**: every `NoWrap` assertion is that a click changed nothing, which a section nobody drew also produces, so the same fixture clicks the Wrap strip — the one control the gate must **not** catch — and requires it to work; **dimmed and not reset** is asserted too, a stored `word_break` surviving the trip, which a gate that cleared the fields would satisfy while losing the setting. 🚨 **And a doc-comment theft committed and repaired inside this change**: `marker_attrs` anchored on `agreed_zero`'s `fn` line moved all 22 lines of its doc, green through every gate, caught by running the neighbour grep **once more at the end** — the argument for running it as a routine rather than on suspicion; the tally stays in `CLAUDE.md` and not here (**D697**). §9.4's wrap paragraph names the test, and D624's *"`architecture.md` unchanged: none of the three is stated there"* is corrected — §9.4 states that gate in full; §9.3's D569 bullet says the rule is one function. **The *Now · Text* bullet is struck from `roadmap.md`**; that section's *"Four things are open here"* opener never counted it and is left where it was, short by one)*
 - **D805** — **The click-to-select policy is a free function and a table, and `[A5-L6-06]` closes whole.** `canvas::pick_preview` read its two modifiers out of `ui.input` and decided in the same body, so reaching its five arms meant driving egui five times rather than calling a function — and nobody did: §15 **D503** closed the `group_chain` half of the finding and left **three** of its five mutations measured green, `ctrl && !alt` widened to `ctrl`, the `[_outermost, next, ..]` arm collapsed, and `pick_for_click`'s `entered_group = None` guard. **D269**'s move, taken as `roadmap.md` prescribed it: `pick_from_chain(ctrl, alt, chain, leaf)` is a free function and the method is the input read, the chain build and a call. ⚠️ **One real behaviour change, named rather than glossed** — the chain is built on the `Ctrl`-only path too, where the early return used to skip it, which is one shallow parent walk and a small `Vec` per hover frame. 🚨 **Both flips' predicted sites were wrong**, in opposite ways: widening `ctrl && !alt` is red on the **`Ctrl+Alt`** assertion rather than the `Ctrl`-alone one, because widening that arm makes `Ctrl` alone *more* often right; and deleting the isolation guard is red on the **scope** assertion, which panics before the pick assertion the prediction named is reached. *(Fixed and tested 2026-09-19; **Resolved** — all three mutations are red and `[A5-L6-06]` has no half left open. ⚠️ **`Ctrl` alone is asserted against a *deep* chain, not an empty one**: against `[]` every arm answers the leaf, so the no-group case alone passes against every mutation here — and the leaf's id is distinct from every group's so a wrong arm cannot coincide with the right answer. ⚠️ **The guard stayed in `pick_for_click`**, being a side effect on `self`, so `a_click_outside_the_entered_group_leaves_it` drives a headless app through a real `Ui`; it runs **before** the chain is built, so both halves are asserted, and **the control is the click that stays inside** — without it *"the scope was cleared"* passes against a guard that clears it unconditionally. 🚨 **A doc-comment theft in a shape the neighbour grep cannot answer**: the new function was inserted *inside* `frame_covering`'s doc run and took its summary line, leaving the victim with a doc that opens mid-argument, so *"did the item below lose its comment"* answers **no** — repaired here, and the question that catches it is whether the run above your own new item begins by describing it. §9.4's selection-policy paragraph now names the function that holds the policy; D503's open-half ⚠️ is amended and `query.rs`'s chain-order test doc, which named `pick_preview` as the positional reader, names `pick_from_chain`. **The *Now · Canvas and interaction* bullet is struck from `roadmap.md`**; the *Now · Canvas* table row never named this item and is left alone)*
+- **D806** — **The SVG reader's CSS is a small cascade engine, and the line is drawn at the ancestor walk.** `roadmap.md` carried combinators as *"a cascade engine rather than a lookup"*, and the framing was what was wrong: the narrow engine an SVG file wants is a compound parser plus an ancestor walk. `svg_in::Css` reads **compounds** — an optional element name or `*`, any number of `.class`, at most one `#id` — joined by the **descendant** and **child** combinators in any chain. What is still refused needs something other than an ancestor walk (`+`, `~`, `:pseudo`, `[attr]`) and is still reported **once for the sheet** as `"style (complex selector)"`, so D394's contract is unchanged and narrower. 🚨 **`chain` is stored right-to-left** — `chain[0]` is the compound left of the subject — because that is the order matching walks in and the reason it is cheap, `Css::declaration` testing specificity and the declaration's presence before the tree is touched at all. ⚠️ **`match_chain` is recursive because the descendant combinator backtracks**, which a greedy walk gets wrong on any repeated class in a nested group. 🚨 **A malformed selector is refused rather than repaired** — `.a > > .b` read leniently is a *wider* rule than the one written — which is the module's *"nothing is lost silently"* contract aimed at its own parser. ⚠️ **Specificity is `100·ids + 10·classes + 1·types` summed over the whole selector, and more than nine classes on one side would carry**, named as a known bound. *(Built and tested 2026-09-19; **Resolved.** D394's *"a lookup, not a cascade engine"* sentence and §7's two copies are amended; `skipped` stays the bucket on D493's rule. **The *Now · SVG import* bullet is struck from `roadmap.md`** and the *CSS combinators* clause in that section's table row with it)*
 
 ---
 
@@ -18611,12 +18612,16 @@ the change was not about*. SVG's `<mask>` is a **luminance** mask and ours reads
 opaque white and are opposites on black, so a mask that is not opaque white is reported.
 
 **`<use>` is a deep copy** placed by `x`/`y`, capped at sixteen deep so a reference cycle stops; a
-`<symbol>` contributes its contents and is never drawn where it stands. **CSS `<style>` is a lookup,
-not a cascade engine**: type, class and id selectors with real specificity and the document-order
-tiebreak, which is what an Illustrator export needs. ⚠️ **A class beats a presentation attribute and
-loses to inline** — the one piece of precedence that is not obvious, and getting it backwards leaves
-an Illustrator file looking exactly as it did before the stylesheet existed. A selector needing a
-combinator is reported **once for the sheet**, not once per element it should have matched.
+`<symbol>` contributes its contents and is never drawn where it stands. **CSS `<style>` is** ~~**a
+lookup, not a cascade engine**~~: type, class and id selectors with real specificity and the
+document-order tiebreak, which is what an Illustrator export needs. ⚠️ **A class beats a presentation
+attribute and loses to inline** — the one piece of precedence that is not obvious, and getting it
+backwards leaves an Illustrator file looking exactly as it did before the stylesheet existed. A
+selector needing a combinator is reported **once for the sheet**, not once per element it should have
+matched. ⚠️ **It is a small cascade engine since 2026-09-19** (D806): compounds and the descendant and
+child combinators are read too, and the line is drawn at what needs something other than an ancestor
+walk — sibling order, a pseudo-class, an attribute. The reporting rule in the sentence above is
+unchanged and the set it covers is narrower.
 
 **`<image>` needed a host callback and that is the finding.** Core can do neither half of a picture:
 the intrinsic size comes from *decoding* (`ondin-render`) and the id from a content hash (`ring`,
@@ -18842,6 +18847,80 @@ Inkscape drawings reads. ⚠️ **That reason is wrong and was re-scoped on 2026
 elliptical radial gradient is a circular one under a non-uniform **brush transform**, and both
 backends already have that mechanism — what is missing is a gradient transform on the model's `Fill`,
 which is a model change rather than an upstream wall.
+
+**D806 — The SVG reader's CSS is a small cascade engine, and the line is drawn at the ancestor walk.
+*Built and tested 2026-09-19; Resolved — D394's "a lookup, not a cascade engine" is the rule that
+changed.***
+
+`roadmap.md`'s *Now · SVG import* carried this as *"a CSS selector needing a combinator, which is a
+cascade engine rather than a lookup"*, and the framing was the thing that was wrong: a cascade engine
+of the kind an SVG file wants is a compound parser and an ancestor walk, and what makes a real one
+large is everything this still refuses. `Css` reads **compounds** — one optional element name or `*`,
+any number of `.class`, at most one `#id`, all of which must match the same element — joined by the
+**descendant** (whitespace) and **child** (`>`) combinators in any chain, so `.outer .inner` and
+`#a > rect.b > .c` both resolve. **The contract is unchanged and the refused set is narrower**: `+`
+and `~` need sibling order, `:pseudo` needs state, `[attr]` needs attribute matching, and each still
+comes back as `"style (complex selector)"`, counted **once for the sheet** on D394's own argument.
+
+🚨 **Matching is right-to-left and `chain` is stored that way** — `chain[0]` is the compound
+immediately left of the subject. That is not a detail of the walk, it is the reason the walk is
+cheap: the subject is the filter most rules fail on before an ancestor is ever looked at, which is
+why real engines match in this direction too. `Sel::matches` is
+`subject.matches(el) && match_chain(&self.chain, el)`, and `Css::declaration` tests the specificity
+and the declaration's *presence* before it calls `matches` at all, so the tree is walked only for a
+rule that could win. **Storing `chain` left-to-right is the obvious simplification and it costs the whole
+ordering.**
+
+⚠️ **`match_chain` is recursive because the descendant combinator backtracks.** `.a .b .c` against a
+tree where the nearest `.b` above a `.c` has no `.a` above *it* has to keep looking further up; a
+greedy walk that takes the first matching ancestor and commits answers `false`. The case is not
+exotic — it is any repeated class in a nested group, which is exactly what a hand-written sheet
+produces.
+
+🚨 **A malformed selector is refused, not repaired**, which is this module's *"nothing is lost
+silently"* contract pointed at its own parser. `.a > > .b` read leniently becomes `.a > .b`, a
+**wider** rule than the one written, so it answers `None` and is reported — as do a leading or
+trailing `>`, two ids on one compound, and an empty class name. Half-understanding a selector paints
+the wrong shapes and says nothing, which is the one outcome this reader exists to avoid.
+⚠️ **`parse_compound` refuses an *empty* compound rather than reading it as `*`** for the same
+reason, and that is the line a later simplification will reach for.
+
+⚠️ **Specificity is summed as `100·ids + 10·classes + 1·types` across the whole selector**, which
+generalises the single-component 1/10/100 the old code used — **and a selector with more than nine
+classes on one side would carry into the next place.** Named as a known bound rather than left as an
+assumption: a real SVG stylesheet does not reach it, and comparing the triple instead is a different
+ordering to write and test for no case anybody has. *Revisit if a generated sheet ever produces one.*
+
+⚠️ **`skipped` rather than `approximated`, unchanged and right on the record's own rule.** D394's
+amendment draws that pair as *missing* against *there and slightly wrong*, and a rule that does not
+apply is D493's case exactly — the shape takes whatever it inherits, which is not the declaration in
+some other form. ⚠️ **The "D477 rule" both code comments cite for this is carried by D493's prose and
+by `svg_in.rs`; D477 has no body entry**, so re-deciding the bucket from that citation would be
+re-deciding it from nothing.
+
+*(Built and tested 2026-09-19; **Resolved.** Two tests, one amended.
+`a_selector_reads_combinators_and_compounds` builds a `<g class="outer">` over a `.a`, a direct-child
+`.kid`, a nested `<g>` holding a grandchild `.kid`, and a `rect.both`. ⚠️ **The child combinator is
+asserted against the grandchild that must *not* match**, without which a `>` implemented as a
+descendant walk passes. ⚠️ **Specificity is asserted by the rules *losing*, not by arithmetic**:
+`.outer .a` is written **first** and still beats the bare `.a` after it, so the later-wins tiebreak
+cannot explain the result. 🚨 **Both flips land on the grandchild assertion** — making `Child` walk
+every ancestor, and dropping the `chain` check from `Sel::matches` entirely — which says that one
+shape is carrying the test and that nothing else there would notice either mutation; whether the
+assertions after it stay green is **reasoned, not measured**, since it panics before them.
+`a_selector_this_cannot_read_is_refused_rather_than_guessed` is a table over nine refused selectors
+and eight accepted, the four malformed ones among them.
+⚠️ **`a_selector_that_needs_a_cascade_is_reported_once` went red and was amended**, its unreadable
+example having been `g > rect`: **a test that goes red because a feature landed is the test doing its
+job**, and the repair is to move the example — `rect + rect` now — rather than to weaken the
+assertion. D394's *"a lookup, not a cascade engine"* sentence is amended in place, and §7's two
+copies of that phrase with it; the `!important` half of one survives on its other leg, there being no
+important-vs-normal tier here either way. Three prose sites in `svg_in.rs` are corrected by the
+change and a fourth was found here —
+`Css::declaration`'s doc closed *"every selector here has exactly one"*, a claim about components
+that this entry makes false. **The *Now · SVG import* bullet is struck from `roadmap.md`** and the
+*CSS combinators* clause in that section's table row with it; `<foreignObject>` and the rejoined
+paragraph are what the row has left)*
 
 **D395 — A blur is rasterized coarser the further in you zoom, because its cost is otherwise
 unbounded. *Fixed and tested 2026-09-01; Keep, with a second timeout recorded and not fixed.***

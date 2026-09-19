@@ -4639,8 +4639,15 @@ other were right, which is why both exist.
   unpainted, and an unresolvable `url(#…)` is a valid declaration with a dead reference, which SVG
   itself leaves unpainted (§15 D477) — so keeping the inherited paint there would put **opaque black**
   under a missing image, the very failure D477 is named for. `!important` is stripped one level down in
-  `declaration`, because it is a *specificity* input and this reader is a lookup rather than a cascade
-  engine, so the marker could only ever make a good value unreadable.
+  `declaration`, because it is a *specificity* input and this reader has no important-vs-normal tier to
+  get wrong, so the marker could only ever make a good value unreadable.
+  ⚠️ **That argument was spelled *"a lookup rather than a cascade engine"* until 2026-09-19, and the
+  spelling stopped being true** (§15 D806). `svg_in::Css` reads **compounds** of type, class, id and
+  `*` joined by the **descendant** and **child** combinators, so `#a > rect.b > .c` resolves; what it
+  still refuses is what needs something other than an ancestor walk — `+` and `~` want sibling order,
+  `:pseudo` wants state, `[attr]` wants attribute matching — and that is reported once for the sheet as
+  before. **The important tier is the half that is still absent, and it is the half the stripping turns
+  on**, so the decision stands on a narrower reason than the sentence it used to give.
   ⚠️ **A `<style>` element is every one of its text children joined, and reading `roxmltree`'s
   `text()` truncated it** (§15 D544). That accessor answers the first child *and only when it is a
   text node*, so an XML comment inside the sheet ended it there — and a **leading** one,
@@ -4649,8 +4656,9 @@ other were right, which is why both exist.
   `approximated` both empty. The join is owned (`svg_in::style_sheets`) and built by `import` **above**
   the `Builder` it is handed to, because `Css`'s rules borrow it and Rust drops in reverse declaration
   order; a sheet split across two text nodes has no single `&str` in the document to point at. **This
-  is not what the lookup-rather-than-a-cascade-engine rule is about** — that decides which *selectors*
-  are read, not which bytes of the sheet reach the parser. **A paint that is genuinely
+  is not what the selector rule above is about** — that decides which *selectors* are read, which §15
+  D806 widened to compounds and combinators, not which bytes of the sheet reach the parser. **A paint
+  that is genuinely
   unreadable is reported**, through a fourth flag beside `Css::complex`, `Gradients::patterns` (§15
   D477) and `Gradients::resampled` (§15 D459) — one `skip` for the file rather than one per element,
   and `skip` rather than `approximate` because the paint is not there in some other form. It is a

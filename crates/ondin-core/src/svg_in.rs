@@ -55,7 +55,8 @@
 //! image **adjustments** do not come back (see [`FilterRead`]) — `<foreignObject>`,
 //! an `<image>` whose href points at a file
 //! this paste never had, a reference that resolves to nothing, and a CSS selector
-//! needing a combinator. **[`Import::approximated`]** is
+//! needing **sibling order, a pseudo-class or an attribute** — combinators
+//! themselves are read since §15 D806. **[`Import::approximated`]** is
 //! *there and slightly wrong*: an SVG `<mask>` whose luminance and alpha readings
 //! differ, `objectBoundingBox` clip units, a stretched image, a substituted font, a
 //! `<tspan>` whose own **gradient or stroke** was dropped — its *colour* and its
@@ -746,9 +747,11 @@ impl Style {
 /// inline `style="…"`.
 ///
 /// **`style` wins, which is CSS's own rule** (a declaration beats a presentation
-/// attribute), and it is the only piece of CSS this reads — a `<style>` element with
-/// selectors is skipped and counted, because resolving it is a cascade engine rather
-/// than a lookup.
+/// attribute), and it is not the only piece of CSS this reads: a `<style>` element's
+/// rules are resolved by [`Css`], which since §15 D806 is a small cascade engine —
+/// compounds of type, class, id and `*`, joined by descendant and child combinators.
+/// What is still skipped and counted is a selector needing sibling order, a
+/// pseudo-class or an attribute.
 fn property<'a>(el: roxmltree::Node<'a, '_>, name: &str, css: &Css<'a>) -> Option<&'a str> {
     // CSS's own cascade, in the order it puts them: an inline declaration beats a
     // stylesheet rule, and a stylesheet rule beats a presentation attribute. That
@@ -792,12 +795,20 @@ fn declaration<'a>(block: &'a str, name: &str) -> Option<&'a str> {
 
 /// The document's `<style>` rules, flattened to the three selectors that matter.
 ///
-/// ⚠️ **This is a lookup, not a cascade engine, and the line is drawn at the
-/// *selector*.** Illustrator's default export — the reason this exists — writes
-/// `.cls-1{fill:#231f20;}` and hangs `class="cls-1"` on every shape, so a type,
-/// class and id matcher covers it and most hand-written SVG besides. A combinator, a
-/// pseudo-class or an attribute selector needs a tree walk with state, which is a
-/// different program; those are **counted and ignored** rather than half-matched.
+/// ⚠️ **This is a small cascade engine, and the line is drawn at the *selector*.**
+/// Illustrator's default export — the reason this exists — writes
+/// `.cls-1{fill:#231f20;}` and hangs `class="cls-1"` on every shape, which a type,
+/// class and id matcher already covered. Since §15 D806 it also reads **compounds**
+/// (`rect.a#b`, `*`) and the **descendant** and **child** combinators, because a
+/// hand-written sheet reaches for `.outer .inner` immediately and that was the
+/// commonest thing this refused.
+///
+/// **What is still refused is what needs something other than an ancestor walk**:
+/// `+` and `~` need sibling order, `:pseudo` needs state, `[attr]` needs attribute
+/// matching. Those are **counted and ignored** rather than half-matched — as is a
+/// malformed selector, which is refused rather than repaired, since repairing
+/// `.a > > .b` into `.a > .b` would silently apply a *wider* rule than the one
+/// written.
 #[derive(Default)]
 struct Css<'a> {
     /// In document order, which is the tiebreak when specificity ties.
@@ -806,43 +817,264 @@ struct Css<'a> {
     complex: bool,
 }
 
-enum Sel<'a> {
-    Type(&'a str),
-    Class(&'a str),
-    Id(&'a str),
+/// The simple selectors that must all match **one** element — `rect.a#b`, or `*`.
+///
+/// `tag: None` is the universal selector, which matches any element and adds
+/// nothing to specificity, exactly as CSS has it.
+#[derive(Default)]
+struct Compound<'a> {
+    tag: Option<&'a str>,
+    classes: Vec<&'a str>,
+    id: Option<&'a str>,
+}
+
+impl Compound<'_> {
+    fn matches(&self, el: roxmltree::Node<'_, '_>) -> bool {
+        if let Some(t) = self.tag
+            && t != el.tag_name().name()
+        {
+            return false;
+        }
+        if let Some(i) = self.id
+            && el.attribute("id") != Some(i)
+        {
+            return false;
+        }
+        if self.classes.is_empty() {
+            return true;
+        }
+        let have: Vec<&str> = el
+            .attribute("class")
+            .map(|c| c.split_whitespace().collect())
+            .unwrap_or_default();
+        self.classes.iter().all(|c| have.contains(c))
+    }
+
+    /// `(ids, classes, types)`, CSS's three-part specificity for this compound.
+    fn specificity(&self) -> (u32, u32, u32) {
+        (
+            u32::from(self.id.is_some()),
+            self.classes.len() as u32,
+            u32::from(self.tag.is_some()),
+        )
+    }
+}
+
+/// How a compound is joined to the one on its right.
+enum Combinator {
+    /// `.a .b` — any ancestor.
+    Descendant,
+    /// `.a > .b` — the immediate parent.
+    Child,
+}
+
+/// A selector: the compound the element itself must match, and the chain of
+/// ancestors to its left (§15 D806).
+///
+/// **`chain` runs right to left**, so `chain[0]` is the compound immediately left
+/// of the subject. That is the order matching walks in, and it is why CSS engines
+/// match right-to-left too: the subject is the cheap filter, and most rules fail
+/// on it before an ancestor is ever looked at.
+struct Sel<'a> {
+    subject: Compound<'a>,
+    chain: Vec<(Combinator, Compound<'a>)>,
+}
+
+impl Sel<'_> {
+    fn matches(&self, el: roxmltree::Node<'_, '_>) -> bool {
+        self.subject.matches(el) && match_chain(&self.chain, el)
+    }
+
+    /// Specificity as one number, ids scaled over classes over types.
+    ///
+    /// ⚠️ **The scale is 100/10/1 and a selector with more than nine classes on
+    /// one side would carry into the next place.** That is the same scale the
+    /// single-component version used before combinators, kept because a real SVG
+    /// stylesheet does not reach it and because the alternative — comparing the
+    /// triple — is a different ordering to write and test for no case anybody has.
+    /// Named so it is a known bound rather than an assumption.
+    fn specificity(&self) -> u32 {
+        let (mut i, mut c, mut t) = self.subject.specificity();
+        for (_, comp) in &self.chain {
+            let (ci, cc, ct) = comp.specificity();
+            i += ci;
+            c += cc;
+            t += ct;
+        }
+        i * 100 + c * 10 + t
+    }
+}
+
+/// Whether `el`'s ancestors satisfy `chain`, which runs right to left.
+///
+/// **Recursive because a descendant combinator backtracks.** `.a .b .c` against a
+/// tree where the nearest `.b` above a `.c` has no `.a` above *it* must keep
+/// looking further up rather than failing — a greedy walk gets that wrong, and
+/// the case is not exotic: it is any repeated class in a nested group.
+fn match_chain(chain: &[(Combinator, Compound<'_>)], el: roxmltree::Node<'_, '_>) -> bool {
+    let Some(((comb, comp), rest)) = chain.split_first() else {
+        return true;
+    };
+    match comb {
+        Combinator::Child => el
+            .parent_element()
+            .is_some_and(|p| comp.matches(p) && match_chain(rest, p)),
+        Combinator::Descendant => {
+            let mut cur = el.parent_element();
+            while let Some(p) = cur {
+                if comp.matches(p) && match_chain(rest, p) {
+                    return true;
+                }
+                cur = p.parent_element();
+            }
+            false
+        }
+    }
 }
 
 impl<'a> Css<'a> {
     /// The winning declaration for `name` on `el`, or `None` if no rule matches.
     ///
     /// Specificity is scaled so one id beats any number of classes and one class beats
-    /// any number of types, which is what the real cascade does and is cheaper than
-    /// counting components — every selector here has exactly one.
+    /// any number of types, which is what the real cascade does. ⚠️ **It is summed
+    /// across the whole selector since §15 D806** — this sentence used to end
+    /// *"cheaper than counting components — every selector here has exactly one"*,
+    /// which combinators made false.
+    ///
+    /// ⚠️ **The tree walk is deliberately last.** `Sel::matches` is the only part of
+    /// this that touches ancestors, so the specificity test and the declaration's own
+    /// presence are checked first and most rules never reach it.
     fn declaration(&self, el: roxmltree::Node<'_, '_>, name: &str) -> Option<&'a str> {
-        let classes: Vec<&str> = el
-            .attribute("class")
-            .map(|c| c.split_whitespace().collect())
-            .unwrap_or_default();
-        let id = el.attribute("id");
-        let tag = el.tag_name().name();
         let mut best: Option<(u32, &'a str)> = None;
         for (sel, spec, block) in &self.rules {
-            let hit = match sel {
-                Sel::Type(t) => *t == tag,
-                Sel::Class(c) => classes.contains(c),
-                Sel::Id(i) => id == Some(*i),
-            };
             // `>=` rather than `>`: a later rule of equal specificity wins, which is
             // the tiebreak CSS uses and the reason the rules are kept in order.
-            if hit
+            if best.is_none_or(|(s, _)| *spec >= s)
                 && let Some(v) = declaration(block, name)
-                && best.is_none_or(|(s, _)| *spec >= s)
+                && sel.matches(el)
             {
                 best = Some((*spec, v));
             }
         }
         best.map(|(_, v)| v)
     }
+}
+
+/// One compound selector — `rect`, `.a`, `#b`, `*`, or any of those run together —
+/// or `None` if it holds anything this reader does not do.
+///
+/// ⚠️ **An empty compound is `None`, not the universal selector.** `.a > > .b`
+/// tokenizes to one, and reading it as `*` would silently widen the rule to every
+/// element rather than reporting a selector nobody can parse.
+fn parse_compound(s: &str) -> Option<Compound<'_>> {
+    if s.is_empty() {
+        return None;
+    }
+    let name_ok = |s: &str| {
+        !s.is_empty()
+            && s.chars()
+                .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    };
+    let mut out = Compound::default();
+    // The leading run, before any `.` or `#`, is the element name. `*` is the
+    // universal selector and leaves `tag` as `None`.
+    let head_len = s.find(['.', '#']).unwrap_or(s.len());
+    let (head, mut rest) = s.split_at(head_len);
+    match head {
+        "" => {}
+        "*" => {}
+        t if name_ok(t) => out.tag = Some(t),
+        _ => return None,
+    }
+    while !rest.is_empty() {
+        let (kind, tail) = rest.split_at(1);
+        let len = tail.find(['.', '#']).unwrap_or(tail.len());
+        let (name, next) = tail.split_at(len);
+        if !name_ok(name) {
+            return None;
+        }
+        match kind {
+            "." => out.classes.push(name),
+            "#" if out.id.is_none() => out.id = Some(name),
+            // Two ids on one compound match nothing; reporting beats pretending.
+            _ => return None,
+        }
+        rest = next;
+    }
+    Some(out)
+}
+
+/// A whole selector, with descendant and child combinators (§15 D806).
+///
+/// **What is read and what is still reported**: type, class, id, `*` and any
+/// compound of them, joined by whitespace or `>`. A `+` or `~` needs sibling
+/// order, and a `:pseudo` or `[attr]` needs state or attribute matching — each
+/// is a different program, and each still comes back `None` so the import says
+/// so rather than half-matching.
+fn parse_selector(sel: &str) -> Option<Sel<'_>> {
+    // Rejected up front rather than by falling through `parse_compound`, so the
+    // reason a selector was skipped stays readable in one place.
+    if sel.contains(['+', '~', '[', ']', ':', '(', ')', ',']) {
+        return None;
+    }
+    // Tokenize into compounds and the combinators between them. Whitespace is a
+    // descendant combinator unless a `>` is adjacent, in which case the `>` wins —
+    // which is why the combinator is decided when the *next* compound starts and
+    // not when the whitespace is seen.
+    let mut parts: Vec<(Combinator, &str)> = Vec::new();
+    let mut pending = Combinator::Descendant;
+    let mut first: Option<&str> = None;
+    for token in sel.split_whitespace().flat_map(|w| {
+        // `a>b` has no spaces in it, so `>` splits within a word too. The empty
+        // strings a leading or trailing `>` produces are kept, and
+        // `parse_compound` refuses them.
+        w.split_inclusive('>')
+    }) {
+        let (text, is_child) = match token.strip_suffix('>') {
+            Some(t) => (t, true),
+            None => (token, false),
+        };
+        if !text.is_empty() {
+            if first.is_none() {
+                first = Some(text);
+            } else {
+                parts.push((pending, text));
+            }
+            pending = Combinator::Descendant;
+        } else if !is_child && first.is_none() {
+            return None;
+        }
+        if is_child {
+            // A `>` with nothing before it anywhere is not a selector, and neither
+            // is a second one with no compound in between — `.a > > .b` would
+            // otherwise read as `.a > .b`, which is a *wider* rule than the one
+            // written and is the shape of silently accepting malformed input.
+            first?;
+            if matches!(pending, Combinator::Child) {
+                return None;
+            }
+            pending = Combinator::Child;
+        }
+    }
+    // A trailing `>` leaves a combinator with no compound after it.
+    if matches!(pending, Combinator::Child) {
+        return None;
+    }
+    let subject_text = *parts.last().map(|(_, t)| t).unwrap_or(&first?);
+    let subject = parse_compound(subject_text)?;
+    // `chain` runs right to left: the compound left of the subject first.
+    let mut chain = Vec::new();
+    let lefts = first.into_iter().chain(parts.iter().map(|(_, t)| *t));
+    let combs = parts.iter().map(|(c, _)| c);
+    let texts: Vec<&str> = lefts.collect();
+    for (i, comb) in combs.enumerate().rev() {
+        let comb = match comb {
+            Combinator::Child => Combinator::Child,
+            Combinator::Descendant => Combinator::Descendant,
+        };
+        chain.push((comb, parse_compound(texts[i])?));
+    }
+    Some(Sel { subject, chain })
 }
 
 /// Split a stylesheet into rules, reporting whether anything was too complex to read.
@@ -867,23 +1099,11 @@ fn parse_css(text: &str) -> (Vec<(Sel<'_>, u32, &str)>, bool) {
             if sel.is_empty() {
                 continue;
             }
-            let simple = |s: &str| {
-                !s.is_empty()
-                    && s.chars()
-                        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
-            };
-            let parsed = match sel.strip_prefix('.') {
-                Some(c) if simple(c) => Some((Sel::Class(c), 10)),
-                Some(_) => None,
-                None => match sel.strip_prefix('#') {
-                    Some(i) if simple(i) => Some((Sel::Id(i), 100)),
-                    Some(_) => None,
-                    None if simple(sel) => Some((Sel::Type(sel), 1)),
-                    None => None,
-                },
-            };
-            match parsed {
-                Some((s, spec)) => rules.push((s, spec, block)),
+            match parse_selector(sel) {
+                Some(s) => {
+                    let spec = s.specificity();
+                    rules.push((s, spec, block));
+                }
                 None => complex = true,
             }
         }
@@ -6311,6 +6531,132 @@ mod tests {
         );
     }
 
+    /// **Descendant and child combinators, and compound selectors** (§15 D806).
+    ///
+    /// `roadmap.md` held this as *"a CSS selector needing a combinator, which is a
+    /// cascade engine rather than a lookup"*. It is a cascade engine now, of the
+    /// narrow kind: type, class, id and `*`, compounded, and joined by whitespace
+    /// or `>`.
+    ///
+    /// ⚠️ **The child combinator is asserted against a *grandchild* that must not
+    /// match**, and the descendant against the same shape that must. Without the
+    /// pair, a `>` implemented as a descendant walk passes — which is the whole
+    /// difference between the two and the easiest thing to get wrong.
+    ///
+    /// ⚠️ **Specificity is asserted by the rules *losing*, not by arithmetic.**
+    /// `.outer .a` has two classes and beats the bare `.a` written after it; the
+    /// later-wins tiebreak is what would otherwise explain the same result, so the
+    /// higher-specificity rule is deliberately written **first**.
+    ///
+    /// ⚠️ **Flip-check, run, twice, and both land on the same assertion.** Making
+    /// `Combinator::Child` walk all ancestors like `Descendant` is red on the
+    /// grandchild, cyan against black — the predicted site. Dropping the `chain`
+    /// check from `Sel::matches` so only the subject is read is red on the
+    /// grandchild too, with the same two colours.
+    ///
+    /// ⚠️ **That both flips land there says the grandchild is carrying this
+    /// test**, and that nothing else here would notice either mutation: the
+    /// descendant rect is inside `.outer` so a chain-less match still gives it
+    /// green, and the compound has no chain to drop. Whether the assertions after
+    /// the grandchild stay green is **reasoned, not measured** — it panics before
+    /// them. **A single shape that must not be reached is the whole of what
+    /// separates a combinator from a lookup.**
+    #[test]
+    fn a_selector_reads_combinators_and_compounds() {
+        let (doc, out) = imported(
+            r##"<svg xmlns="http://www.w3.org/2000/svg">
+                  <style>
+                    .outer .a{fill:#00ff00}
+                    .a{fill:#0000ff}
+                    .outer > .kid{fill:#00ffff}
+                    rect.both{fill:#ff00ff}
+                  </style>
+                  <g class="outer">
+                    <rect class="a" width="10" height="10"/>
+                    <rect class="kid" width="10" height="10"/>
+                    <g><rect class="kid" width="10" height="10"/></g>
+                    <rect class="both" width="10" height="10"/>
+                  </g>
+                </svg>"##,
+        );
+        assert!(
+            out.skipped.is_empty(),
+            "every selector here is one this reads: {:?}",
+            out.skipped
+        );
+        // ⚠️ `shapes` walks every descendant, so the two `<g>`s are in this list
+        // too — the rects are 1, 2, 4 and 5, not 0..4.
+        let ids = shapes(&doc, &out);
+        let fill = |id| {
+            let Brush::Solid(c) = &doc.get(id).unwrap().paint().fills[0].brush else {
+                panic!("a solid fill")
+            };
+            c.to_rgba8().to_u8_array()
+        };
+
+        assert_eq!(
+            fill(ids[1]),
+            [0, 255, 0, 255],
+            "the descendant rule matched, and its two classes outrank the bare \
+             `.a` written after it — specificity, not document order"
+        );
+        assert_eq!(
+            fill(ids[2]),
+            [0, 255, 255, 255],
+            "a direct child matches the child combinator"
+        );
+        assert_eq!(
+            fill(ids[4]),
+            [0, 0, 0, 255],
+            "and a grandchild does not — this is the assertion that separates \
+             `>` from a descendant walk, and the only one that can. Black is \
+             SVG's own default fill, which is what a shape no rule reached gets"
+        );
+        assert_eq!(
+            fill(ids[5]),
+            [255, 0, 255, 255],
+            "a compound of a type and a class matches the element that is both"
+        );
+    }
+
+    /// **What a compound or a combinator refuses** (§15 D806).
+    ///
+    /// The parser's job is as much to say *no* as to match: a selector it
+    /// half-understood would paint the wrong shapes and report nothing, which is
+    /// the one thing this module's contract forbids.
+    ///
+    /// ⚠️ **The malformed cases matter as much as the unsupported ones.**
+    /// `.a > > .b` read leniently becomes `.a > .b` — a **wider** rule than the
+    /// one written — and a trailing or leading `>` has no compound to attach to.
+    /// Each is refused rather than repaired.
+    #[test]
+    fn a_selector_this_cannot_read_is_refused_rather_than_guessed() {
+        for sel in [
+            "rect + rect", // sibling order
+            "rect ~ rect", // sibling order
+            "rect:first",  // a pseudo-class needs state
+            "rect[fill]",  // attribute matching
+            ".a > > .b",   // malformed: would widen to `.a > .b`
+            ".a >",        // a combinator with nothing on its right
+            "> .a",        // and nothing on its left
+            ".a##b",       // two ids on one compound match nothing
+            ".a.",         // an empty class name
+        ] {
+            assert!(
+                parse_selector(sel).is_none(),
+                "{sel:?} must be refused and reported, not half-matched"
+            );
+        }
+        for sel in [
+            "*", "rect", ".a", "#b", "rect.a#b", ".a .b", ".a>.b", "* > .a",
+        ] {
+            assert!(
+                parse_selector(sel).is_some(),
+                "{sel:?} is one this reader does handle"
+            );
+        }
+    }
+
     /// ⚠️ **A selector this cannot read is ignored and reported once for the sheet**,
     /// not once per element it should have matched. "Some rules were too complex" is a
     /// fact a reader can act on; "nine shapes are the wrong colour" is a symptom they
@@ -6319,11 +6665,18 @@ mod tests {
     /// A CSS comment costs the rule it is in, for a reason worth stating: every value
     /// here is a *slice* of the document, so stripping comments would mean copying the
     /// sheet into a string this parser does not outlive.
+    ///
+    /// ⚠️ **This test used `g > rect` as its unreadable example until 2026-09-19**,
+    /// when §15 D806 made the child combinator readable and it went red — which is
+    /// the test doing its job. The example is a **sibling** combinator now, and
+    /// what is still out of reach is stated beside the parser rather than only
+    /// here: `+` and `~` need sibling order, `:pseudo` needs state, `[attr]` needs
+    /// attribute matching.
     #[test]
     fn a_selector_that_needs_a_cascade_is_reported_once() {
         let (doc, out) = imported(
             r##"<svg xmlns="http://www.w3.org/2000/svg">
-                  <style>g > rect{fill:#ff0000}.ok{fill:#00ff00}</style>
+                  <style>rect + rect{fill:#ff0000}.ok{fill:#00ff00}</style>
                   <rect class="ok" width="10" height="10"/>
                 </svg>"##,
         );

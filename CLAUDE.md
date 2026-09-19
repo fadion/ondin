@@ -7,7 +7,7 @@ documents, and is untracked.
 | File | Holds |
 | --- | --- |
 | `docs/architecture.md` | The design and the invariants. **Source of truth.** ~11,800 lines. |
-| `docs/decisions.md` | **§15** — every deviation from that design, **D1–D803**, each with a verdict. ~45,700 lines. |
+| `docs/decisions.md` | **§15** — every deviation from that design, **D1–D804**, each with a verdict. ~45,800 lines. |
 | `docs/roadmap.md` | Open work, decided non-goals, parked decisions, post-v1. |
 | `docs/shortcuts.md` | The whole keymap — bound, unbound and agreed. |
 | `docs/context-menus.md` | The context-menu spec and its own deviation ledger. |
@@ -64,8 +64,8 @@ count (two numbers, **D476 and D477**, are cited from `crates/` with no entry an
 been for twenty-plus sessions). Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 801 index rows, 801 body headings, next free
-D804** — but trust the procedure over any number written down here, including that one.
+anywhere cited either. **The live figures: 802 index rows, 802 body headings, next free
+D805** — but trust the procedure over any number written down here, including that one.
 ⚠️ **`decisions.md`'s own header carried that same sentence and it was deleted on 2026-09-19
 rather than corrected**, because a file that names its own next free number is a second copy
 of §15.0's last index line and it is the copy that rots. This table is the third copy; it
@@ -95,7 +95,7 @@ nothing. Put the number on the doc of whatever a reader meets the question at.
 grep -rhoE 'D[0-9]{1,3}\b' crates/ --include=*.rs | sort -u
 ```
 
-698 distinct numbers today, every one resolving except D476 and D477. Three separate
+699 distinct numbers today, every one resolving except D476 and D477. Three separate
 checks, and each catches something the others cannot:
 
 1. **Set-difference against the previous run.** Never compare totals — a count that moved
@@ -198,7 +198,7 @@ find crates -path '*/src/*' -name '*.rs' | xargs wc -l | awk '$1>1000 && $2!="to
 ```
 
 **40** modules over a thousand lines, `inspector.rs` at 24,801 and `canvas.rs` at 21,673,
-against `decisions.md`'s 45,676 and `architecture.md`'s 11,881.
+against `decisions.md`'s 45,763 and `architecture.md`'s 11,887.
 
 ⚠️ **On Windows a scripted rewrite also re-decides the line endings.** A three-line Python
 `read()`/`replace()`/`write()` used for a *flip-check* — the most tempting case, because
@@ -224,10 +224,14 @@ exactly as it found it only holds if the probe comes back out the way it went in
 and its doc comment — and the result compiles, tests, lints, formats and passes
 `cargo doc`, while paragraphs of reasoning now describe the wrong thing.
 
-**There are twenty-two recorded instances.** Twelve were committed by a session that spent
-the day fixing this exact class, and one was committed by the session that ran *two*
-whole-tree sweeps for it, between them. **Writing the trap down does not prevent the
-trap** — only the two habits do:
+**There are twenty-three recorded instances.** Twelve were committed by a session that spent
+the day fixing this exact class, one was committed by the session that ran *two*
+whole-tree sweeps for it, between them, and the twenty-third (§15 D804) by a session that had
+run the neighbour grep correctly on every earlier insertion that day and then anchored one
+`Edit` on the `fn` line — moving a 22-line doc block onto the new function, green through
+every gate. **Writing the trap down does not prevent the trap** — only the two habits do,
+and the thing that caught the twenty-third was running habit 2 *as a routine at the end*
+rather than because anything felt wrong:
 
 1. **Anchor on the line above**, and know that "the line above the `fn`" is not the same
    instruction: `#[derive]`, `#[allow]`, `#[test]` and `#[cfg]` all sit between an item
@@ -806,7 +810,7 @@ The real census cannot be scoped to its own answer:
 grep -rhoE 'cfg\(([a-z_]+)' crates/ --include=*.rs | sort | uniq -c
 ```
 
-Last run: **327 `test`, 6 `windows`, 3 `panic`, 3 `not`, 3 `debug_assertions`, 2
+Last run: **328 `test`, 6 `windows`, 3 `panic`, 3 `not`, 3 `debug_assertions`, 2
 `target_os`, 2 `all`, 1 `unix`.** ⚠️ Only `test` has moved across five sessions — **the
 interesting half of this census is the tail, not the total.**
 

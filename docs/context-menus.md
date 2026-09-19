@@ -523,7 +523,7 @@ The rows above group 2. Everything in §4 follows, filtered.
 | Row | Cost | |
 |---|---|---|
 | Clip content ✓ | wiring | `SetClip`, a checkable row. The frame's signature property and the only kind where `Node::clip` means anything (`NodeKind::clips_children`) |
-| Background… | wiring | ⚠️ **Not built, and the only row in this file whose status is an open question rather than a fact.** It was specified to open the picker on `Artboard::background` — second door to the inspector's field, deliberately, a frame's background being the thing people right-click a frame for — and there is no `Item` for it: `head_rows`' `Kind::Frame` arm pushes *Clip content* alone. The field it was a door to **no longer exists**: §15 D400 made a frame's fill its **fill list** and deleted `Operation::SetArtboardBackground` and `PaintSlot::Background` with it, and D397 renamed the inspector card to *Fill*. ⚠️ **No §15 entry records this row being dropped, deferred or made a non-goal** — the op went and the menu was never mentioned. So the row is neither landed nor struck nor blocked, which is a state this ledger has no bucket for. **Either it comes back against the fill list, or this line is struck** — reserved for the maintainer as question 2 of the codebase review's final triage (`review/findings.md`, *Eleven questions only the maintainer can answer*). *Do not resolve it by reading; the decision is what is missing, not the information.* |
+| ~~Background…~~ | **decided non-goal** | **Not built, and struck on 2026-09-19 rather than deferred (§15 D800).** It was specified to open the picker on `Artboard::background` — second door to the inspector's field, deliberately, a frame's background being the thing people right-click a frame for — and there was never an `Item` for it: `head_rows`' `Kind::Frame` arm pushes *Clip content* alone. The field it was a door to **no longer exists**: §15 D400 made a frame's fill its **fill list** and deleted `Operation::SetArtboardBackground` and `PaintSlot::Background` with it, and D397 renamed the inspector card to *Fill*. **The ruling takes D400's own reason**: the inspector's Fill row does this job for a frame exactly as it does for anything else, so a frame-only second door is the special case D400 deliberately removed from every fill verb in the workspace. 🚨 **A row would need no new operation** — it could open the picker through the ordinary paint path — **which is what makes it tempting and is also why it is redundant**; the same argument §6.1 already makes against *Canvas background…*. ⚠️ **Until the ruling, no §15 entry recorded this row being dropped, deferred or made a non-goal** — the op went and the menu was never mentioned — so it was neither landed nor struck nor blocked, a state this ledger had no bucket for; it was question 2 of the codebase review's final triage. **A row this file specified cannot leave without a §15 entry**, and that is the whole of why one was written for a row nobody built. |
 | ~~Export frame as SVG… / PNG…~~ | **subsumed** | **Not built, and a decided non-goal rather than a deferral (§15 D264).** It was retired on 2026-08-20 by *Export as…* — this line's own observation, `export::svg(doc, res, Some(artboard))` "is exactly this", being also exactly `svg_of(doc, res, &[artboard])` — and §3's Export group sits on **every** layer's menu, so with a frame right-clicked the frame *is* the selection. ⚠️ **The row that subsumed it was itself removed on 2026-08-22, and this one does not come back with it.** The subsumer is now the inspector's **Export panel** (§15 D274), which is what made the general row redundant in the first place and does so a fortiori here: if a one-off file export is not worth a row on *every* layer's menu, it is not worth a narrower one on a frame's. Re-opening this would be re-opening the verb that was just withdrawn, one kind at a time. What genuinely changed is the *reach*, and it changed for every kind rather than for frames — the panel wants a spec on the layer where the menu row wanted none, so a one-off is a click or two further away than it was; that cost belongs to D264's removal and is recorded there, not here. The one thing this row could have meant that neither door does — *export the frame this layer is in*, from a **child's** menu — is still not what it says, and is still a different row |
 
 *Ungroup* is absent, per §4: `build::ungroup` takes a Group or a Boolean and nothing else. Note
@@ -990,10 +990,10 @@ Cut · Copy · Duplicate · Delete · Group · Ungroup (Group and Boolean only) 
 Flatten · the four z-moves · Flip horizontal/vertical · Hide/Show (`SetVisible`) · Lock/Unlock
 (`SetLocked`) · Clip content (`SetClip`) · Rename (the panel's field) · the boolean op switch
 (`set_boolean_op`) · Edit text · Edit points · Enter group · Edit image · ~~Reset crop~~ · Original
-size · ~~Replace…~~ · **a frame's *Background…*, which is the one row in this bucket that never
-landed** (§5.1 — and the op it was wiring for, `SetArtboardBackground`, was itself deleted by §15
-D400, so the bucket is wrong as well as unspent; §5.1 has the open question and where it is reserved)
-· the base-operand and key-layer designations
+size · ~~Replace…~~ · ~~a frame's *Background…*~~ — **the one row in this bucket that never landed,
+and struck on 2026-09-19 as a decided non-goal** (§5.1, §15 D800; the op it was scored as wiring for,
+`SetArtboardBackground`, had itself been deleted by §15 D400, so the bucket was wrong about it as
+well as unspent) · the base-operand and key-layer designations
 (`designate_key`) · Delete guide · Lock/Show guides · Show rulers/grid · Select all · Zoom to fit ·
 Add point here · Delete points · Delete segment · Reverse subpath · the three text sizing
 modes (the Type panel's own segmented control).
@@ -1114,14 +1114,15 @@ first.
 
 ### 9.5 What landed, and what did not
 
-**Landed**: all of §9.1 **except a frame's *Background…***, and from §9.2 *Paste here*
+**Landed**: all of §9.1 **except a frame's *Background…*, which is struck rather than outstanding**
+(§15 D800), and from §9.2 *Paste here*
 (paste-at-pointer), *Zoom to selection*,
 *Reset origin*, *Clear all guides* and *Select all* inside a text session.
 ⚠️ **This said "all of §9.1" until 2026-09-07 and the row it counted was never built** — and the
-operation it was scored as wiring for has since been deleted (§15 D400), so the bucket was wrong about
-the row twice over. §5.1 carries the open question and where it is reserved; it is named here rather
-than quietly dropped from the sentence, because a bucket that reports itself empty is what stopped
-anyone checking. All four rules of §0. The
+operation it was scored as wiring for had been deleted (§15 D400), so the bucket was wrong about
+the row twice over. It is still named here rather than quietly dropped from the sentence, now that
+it is a decided non-goal, because a bucket that reports itself empty is what stopped anyone
+checking. All four rules of §0. The
 chrome of
 §8, all of it: the accelerator column, the separator, the destructive red, edge
 flipping and clamping. All six targets of §2 and §6 except the ruler — and the ruler is no longer an

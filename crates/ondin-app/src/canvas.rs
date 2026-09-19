@@ -6273,19 +6273,15 @@ impl OndinApp {
             // carried across a structural edit, which is exactly what that
             // function's own doc calls the silent failure.
             //
-            // ⚠️ **The line is left in place and that is a deliberate stop, not an
-            // omission.** Removing it makes `PointSet::retain_valid` and
-            // `tools::subpath_lengths` **production-dead** — clippy says so at
-            // once — and this is their only non-test caller. So the dead call has
-            // been the only thing keeping `dead_code` quiet about a pair that doc
-            // comments in **four** modules — `app.rs`, `preview.rs`, this file and
-            // `tools/mod.rs` — cite as the *statement of a rule*, and that two
-            // tests assert. Deleting them, moving them behind
-            // `#[cfg(test)]` (which breaks `preview.rs`'s real intra-doc link to
-            // one of them), or keeping them under an `allow` are three different
-            // answers and the choice is the maintainer's. **What was wrong here
-            // was the sentence, and the sentence is what has been fixed.**
-            self.points.retain_valid(&tools::subpath_lengths(&left));
+            // ⚠️ **The call is gone as of 2026-09-19, and the pair it was keeping
+            // alive is kept under a narrow `#[allow(dead_code)]` instead** — the
+            // maintainer's answer of the three D637 put up. `#[cfg(test)]` was
+            // the other candidate and costs `preview.rs` a real intra-doc link on
+            // a **production** item, which is the case §15 D699 landed on an
+            // `allow` for; deleting them takes out the statement of a rule that
+            // doc comments in four modules cite and two tests assert. What is
+            // lost by the `allow` is that nothing now fails if the pair's last
+            // *test* caller goes too, and that is named on each of them.
             self.points.clear();
         }
     }

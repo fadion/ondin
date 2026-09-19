@@ -1198,6 +1198,9 @@ pub enum TopMenu {
 /// `None` rather than an empty string for an empty clipboard, so callers cannot
 /// paste nothing and call it a paste.
 pub(crate) fn system_clipboard_text() -> Option<String> {
+    if !clipboard_is_reachable() {
+        return None;
+    }
     let text = with_clipboard(|c| c.get_text().ok())??;
     (!text.is_empty()).then_some(text)
 }
@@ -1232,6 +1235,43 @@ fn with_clipboard<T>(f: impl FnOnce(&mut arboard::Clipboard) -> T) -> Option<T> 
     Some(f(&mut clipboard))
 }
 
+/// Whether the OS clipboard is off limits — set once by `OndinApp::headless`
+/// and never cleared (§15 D798).
+///
+/// (Plain backticks: `headless` is `cfg(test)`, so a production doc cannot link
+/// it and the doc gate exits 101 on one that tries — §15 D319. This link was
+/// written as a link and caught by that gate, which is the gate working.)
+///
+/// 🚨 **A headless app read and could write the developer's real clipboard.**
+/// D303 swaps three things so a probe cannot touch the machine it runs on — the
+/// wgpu device, `FontService`'s five background threads and the preferences file
+/// — and this was a fourth it did not name. `§11`'s *"a test may not write
+/// outside the repository"* held on this path by test discipline rather than by
+/// construction: nothing stopped a test of `copy_as_png` from replacing whatever
+/// the developer had copied, and `owns_the_clipboard` was already reading it.
+///
+/// **A process-wide flag rather than a field, because the clipboard is a
+/// process-wide resource.** The two readers are free functions with eleven call
+/// sites across three modules, none of which is a natural place to thread a flag
+/// through; and the lock above is already a static for exactly the same reason —
+/// there is one OS clipboard per process, so "do not touch it" is a fact about
+/// the process, not about an `OndinApp`. ⚠️ It is deliberately **one-way**: a
+/// test that could turn it back off could turn it off for every other test in
+/// the binary, which is the property this exists to remove.
+static CLIPBOARD_OFF: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether this process may open the OS clipboard at all.
+///
+/// ⚠️ **Checked by the four callers and not inside [`with_clipboard`]**, which is
+/// the same split `Prefs::save` uses for `ephemeral` and is load-bearing for the
+/// same reason: `clipboard_gate_tests` calls `with_clipboard` directly to prove
+/// the lock holds under eight threads, and a check one level down would make that
+/// test return early and assert nothing. The seam that *opens* a handle stays
+/// honest; the seam that *decides to want one* is where the refusal goes.
+fn clipboard_is_reachable() -> bool {
+    !CLIPBOARD_OFF.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Whether the system clipboard holds a picture (§15 D224).
 ///
 /// **The half of a *Paste* row's predicate that had no way to be asked.**
@@ -1249,7 +1289,7 @@ fn with_clipboard<T>(f: impl FnOnce(&mut arboard::Clipboard) -> T) -> Option<T> 
 /// checks format availability *before* it reads, so a clipboard with no picture on
 /// it — which is nearly every open — costs nothing but the handle.
 pub(crate) fn system_clipboard_has_image() -> bool {
-    with_clipboard(|c| c.get_image().is_ok()).unwrap_or(false)
+    clipboard_is_reachable() && with_clipboard(|c| c.get_image().is_ok()).unwrap_or(false)
 }
 
 /// One open context menu (`docs/context-menus.md` §0).
@@ -1863,6 +1903,13 @@ impl OndinApp {
             ephemeral: true,
             ..Default::default()
         };
+        // ⚠️ **A fourth machine-wide resource, and it is not a constructor
+        // argument like the three below** (§15 D798). The OS clipboard is one per
+        // *process*, so the refusal is a process-wide flag rather than a field —
+        // see `CLIPBOARD_OFF`. It is set here and never cleared: once any test in
+        // a binary has built a headless app, nothing in that binary reads or
+        // writes the developer's clipboard again.
+        CLIPBOARD_OFF.store(true, std::sync::atomic::Ordering::Relaxed);
         Self::with(CanvasRenderer::headless(), FontService::inert(), prefs)
     }
 
@@ -4624,7 +4671,14 @@ impl OndinApp {
         };
         // Opened here rather than through egui, which carries a *text* clipboard
         // only — the same reason `paste_image` opens `arboard` itself (§15 D183).
-        // Under `with_clipboard`'s gate like every other handle (§15 D796).
+        // Under `with_clipboard`'s gate like every other handle (§15 D796), and
+        // refused outright on a headless app (§15 D798) — this is the one path
+        // that would *overwrite* what the developer had copied.
+        if !clipboard_is_reachable() {
+            self.session
+                .info("Copying to the clipboard is off in this build".to_string());
+            return;
+        }
         let wrote = with_clipboard(|c| c.set_image(image))
             .unwrap_or(Err(arboard::Error::ClipboardNotSupported));
         match wrote {
@@ -6643,6 +6697,9 @@ impl OndinApp {
         // D796): `get_image` is what actually touches the global clipboard, so
         // taking the handle under the lock and reading outside it would leave the
         // race exactly where it was.
+        if !clipboard_is_reachable() {
+            return false;
+        }
         let Some(Ok(img)) = with_clipboard(|c| c.get_image()) else {
             return false;
         };
@@ -9623,11 +9680,17 @@ mod guide_copy_tests {
     /// Which *caller* passes zero is read rather than reproduced, and **that one is
     /// deliberate rather than owed** (§15 D303, where it was queued and then
     /// declined). `paste_in_place` reaches `paste_guides` through
-    /// `Self::owns_the_clipboard`, which compares a receipt against the real
-    /// **system** clipboard — so a test of the wiring would read, and could disturb,
-    /// whatever the person running it had copied. The three call sites pass a named
-    /// constant or a literal `0.0` and the compiler checks both; what is worth
-    /// asserting is that a zero step is exact, and that is this test.
+    /// `Self::owns_the_clipboard`, which compares a receipt against the system
+    /// clipboard. 🚨 **That argument used to read "a test of the wiring would
+    /// read, and could disturb, whatever the person running it had copied", and
+    /// since §15 D798 it is false** — a headless app cannot reach the clipboard
+    /// at all. The verdict is unchanged and the reason is now **stronger**:
+    /// `owns_the_clipboard` is `system_clipboard_text() == Some(stamp)`, which
+    /// under `CLIPBOARD_OFF` is permanently `false`, so that wiring is
+    /// unreachable from a headless test **by construction** rather than merely
+    /// non-deterministic. The three call sites pass a named constant or a literal
+    /// `0.0` and the compiler checks both; what is worth asserting is that a zero
+    /// step is exact, and that is this test.
     #[test]
     fn a_guide_pasted_in_place_keeps_its_own_number() {
         let mut ids = IdSource::new(0x9A57E);
@@ -15968,8 +16031,7 @@ mod clipboard_gate_tests {
             .map(|_| {
                 std::thread::spawn(|| {
                     for _ in 0..16 {
-                        let _ = super::system_clipboard_text();
-                        let _ = super::system_clipboard_has_image();
+                        let _ = super::with_clipboard(|c| c.get_text().ok());
                     }
                 })
             })
@@ -15977,6 +16039,51 @@ mod clipboard_gate_tests {
         for h in handles {
             h.join().expect("a reader thread came back");
         }
+    }
+
+    /// A headless app takes the OS clipboard off the table for the whole process.
+    ///
+    /// **The point of §15 D798**, and the reason `clipboard_is_reachable` is
+    /// checked by the four callers rather than inside `with_clipboard`: the test
+    /// above has to keep reaching a real `arboard` handle to prove the lock
+    /// holds, and this one has to see the refusal. They would be the same test if
+    /// the check sat one level down, and it would be the vacuous one.
+    ///
+    /// ⚠️ **It asserts the readers answer *empty*, not that they were skipped**,
+    /// because that is all a caller can see — and it is the behaviour that
+    /// matters: a menu built in a probe offers no *Paste* row, deterministically,
+    /// instead of offering whatever the developer last copied.
+    ///
+    /// ⚠️ **Order-independent on purpose.** The flag is one-way and every other
+    /// test in this binary that builds a headless app sets it too, so this test
+    /// cannot be made to run "before" the others and does not try — it builds one
+    /// itself and asserts from there.
+    ///
+    /// ⚠️ **Flipped** by dropping the `CLIPBOARD_OFF.store` from
+    /// `OndinApp::headless`: **red on the first assertion**, which is the one
+    /// that does not depend on what the developer has copied. That ordering is
+    /// the whole reason the flag is asserted directly before the two readers are
+    /// — the reader assertions are the *behaviour*, but on an empty clipboard
+    /// they are also green under the flip, so on their own they would be a test
+    /// that passes whenever the machine happens to be quiet.
+    #[test]
+    fn a_headless_app_cannot_reach_the_clipboard() {
+        let ctx = egui::Context::default();
+        let _app = super::OndinApp::headless(&ctx);
+
+        assert!(
+            !super::clipboard_is_reachable(),
+            "building a headless app is what closes it"
+        );
+        assert_eq!(
+            super::system_clipboard_text(),
+            None,
+            "so the text reader answers an empty clipboard"
+        );
+        assert!(
+            !super::system_clipboard_has_image(),
+            "and the picture reader answers no"
+        );
     }
 }
 

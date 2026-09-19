@@ -1862,6 +1862,17 @@ fn head_rows(cx: &Context<'_>) -> Vec<Row> {
     if one {
         match cx.kinds.first() {
             Some(Kind::Frame) => {
+                // **A frame's menu has one row, and *Background…* is not the row
+                // that is missing — it is a decided non-goal** (§15 D800).
+                // `context-menus.md` §5.1 specified it, and §15 D400 then deleted
+                // the thing it was a door to: a frame's fill is `Node::paint`'s
+                // list like every other painted layer's, so the inspector's Fill
+                // row already does this job for a frame exactly as it does for
+                // anything else. A row here would need no new operation — it
+                // could open the picker through the ordinary paint path — and
+                // that is what makes it tempting rather than what makes it
+                // worth having. §6.1 makes the same argument about *Canvas
+                // background…*: a second door to a control that has one.
                 rows.push(
                     Row::new(Item::ClipContent)
                         .checked(st.clips)

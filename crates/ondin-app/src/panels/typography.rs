@@ -314,8 +314,27 @@ impl TypeSubject {
 
     /// The single value of one character attribute over the subject's range, or
     /// `None` when the range disagrees with itself.
+    ///
+    /// **Two zeroes in different units are one value here** (§15 D799,
+    /// `[S6.1-L1-03]`). `Spans::shared_in` compares structurally and has to:
+    /// `Em(0.0)` and `Px(0.0)` are different values to the *model*, and §15 D537
+    /// exists to keep them so, because that difference is where a user's choice
+    /// of unit lives when the amount is zero. But they are the same **ink**, so
+    /// text whose letter spacing is zero throughout was reading *Mixed* —
+    /// reliably, for anyone who sets the unit before the number.
     fn shared(&self, kind: CharAttrKind) -> Option<CharAttr> {
-        self.spans.shared_in(&self.style, kind, self.range.clone())
+        let direct = self.spans.shared_in(&self.style, kind, self.range.clone());
+        direct.or_else(|| {
+            agreed_zero(
+                self.spans.values_in(&self.style, kind, self.range.clone()),
+                |a| match a {
+                    CharAttr::LetterSpacing(l)
+                    | CharAttr::WordSpacing(l)
+                    | CharAttr::BaselineShift(l) => Some(*l),
+                    _ => None,
+                },
+            )
+        })
     }
 
     /// The value to *show* for an attribute: the shared one, or — where the range
@@ -403,9 +422,26 @@ impl TypeSubject {
 
     // --- the paragraph scope, mirroring the four above ---------------------
 
+    /// [`Self::shared`] for the paragraph scope, including its zero rule — D537
+    /// kept the unit on four `ParaAttr` lengths too, so the readout was wrong in
+    /// the same way on all four (§15 D799).
     fn para_shared(&self, kind: ParaAttrKind) -> Option<ParaAttr> {
-        self.para_spans
-            .shared_in(&self.paragraph, kind, self.para_range.clone())
+        let direct = self
+            .para_spans
+            .shared_in(&self.paragraph, kind, self.para_range.clone());
+        direct.or_else(|| {
+            agreed_zero(
+                self.para_spans
+                    .values_in(&self.paragraph, kind, self.para_range.clone()),
+                |a| match a {
+                    ParaAttr::Spacing(l)
+                    | ParaAttr::Indent(l)
+                    | ParaAttr::IndentStart(l)
+                    | ParaAttr::IndentEnd(l) => Some(*l),
+                    _ => None,
+                },
+            )
+        })
     }
 
     fn para_mixed(&self, kind: ParaAttrKind) -> bool {
@@ -4039,6 +4075,36 @@ fn mixed_text(d: egui::DragValue<'_>, mixed: bool) -> egui::DragValue<'_> {
     d
 }
 
+/// The one value to show for a set of attribute values that are **all zero
+/// lengths**, whatever units they are in — or `None` when they are not (§15 D799).
+///
+/// **This is the comparison on the *resolved* value that `Length::is_default_zero`
+/// says belongs at the reader.** `Length::resolve` turns a length into a number
+/// given a font size, and a zero is zero at every font size, so for this case
+/// "resolved" needs no size and cannot be wrong.
+///
+/// 🚨 **And that is exactly why it stops at zero.** The general resolved
+/// comparison — two lengths that resolve alike *at the current size* — was
+/// considered and not taken: `Em(0.02)` and `Px(0.32)` are the same ink at 16pt
+/// and different ink at 24, so a field would flip between a number and a dash as
+/// the user resized the text, and the unit chip would have to name one of two
+/// units the document actually holds. Zero is the only amount where the unit
+/// carries no information about the ink, which is the whole reason it was the
+/// only amount that read wrong. **Widening this is a decision, not an
+/// oversight.**
+///
+/// ⚠️ **It hands back the *first* value, not the default.** The unit chip reads
+/// its suffix off whatever comes back, so returning `Px(0.0)` for a document the
+/// user had set to `%` would flip the chip back to `px` under them — which is
+/// D537's own symptom arriving by a new road.
+fn agreed_zero<A>(values: Vec<A>, length_of: impl Fn(&A) -> Option<Length>) -> Option<A> {
+    values
+        .iter()
+        .all(|v| length_of(v).is_some_and(|l| l.is_zero()))
+        .then(|| values.into_iter().next())
+        .flatten()
+}
+
 fn length_attr(kind: CharAttrKind, l: Length) -> CharAttr {
     match kind {
         CharAttrKind::LetterSpacing => CharAttr::LetterSpacing(l),
@@ -7518,6 +7584,111 @@ mod tests {
             "an attribute nothing overrides is not mixed just because its neighbour is"
         );
         assert_eq!(across.shown_paragraph().indent_start, Length::ZERO);
+    }
+
+    /// **A letter spacing of zero everywhere is not *Mixed*, whatever units the
+    /// zeroes are in** (§15 D799, `[S6.1-L1-03]`).
+    ///
+    /// The reported move is the ordinary one for anyone who works in percent:
+    /// click the `%` chip before typing a number. That writes `Em(0.0)` over the
+    /// selection and leaves `Px(0.0)` — the default — everywhere else, and the
+    /// two are different values to `Spans::shared_in`, which compares
+    /// structurally and **must**: §15 D537 keeps that difference precisely
+    /// because it is where the unit choice lives at amount zero. So the field
+    /// went to a dash over text whose letter spacing is zero throughout.
+    ///
+    /// ⚠️ **The fixture guard is the first assertion, and it is not decoration.**
+    /// If `set` ever canonicalized `Em(0.0)` to `Px(0.0)` on the way in, the
+    /// spans would agree structurally, `shared_in` would answer on its own, and
+    /// every assertion below would pass **without `agreed_zero` existing**. That
+    /// is the vacuous version of this test and `assert_ne!` is what refuses it.
+    ///
+    /// ⚠️ **Flipped** by deleting `shared`'s `or_else(agreed_zero(…))` arm: red
+    /// on the `mixed` assertion, the predicted site.
+    ///
+    /// ⚠️ **And flipped a second way, which is why there are two assertions and
+    /// not one.** Returning a different one of the agreeing values — `.last()`
+    /// in place of `.next()` — leaves the `mixed` assertion **green** and fails
+    /// the second at `Px(0.0)` against `Em(0.0)`. Nothing about the dash-or-digits
+    /// question can see that, and what it breaks is the unit chip: it reads its
+    /// suffix off this value, so a `%` document would flip to `px` under the
+    /// user. **A test that only asked "is it mixed" would have shipped D537's
+    /// own symptom by a new road.**
+    #[test]
+    fn a_zero_letter_spacing_in_two_units_is_not_mixed() {
+        let style = TextStyle::default();
+        let mut spans = CharSpans::default();
+        spans.set(0..4, CharAttr::LetterSpacing(Length::Em(0.0)), &style);
+
+        assert_ne!(
+            Length::Em(0.0),
+            Length::Px(0.0),
+            "the fixture rests on these being different values — if they ever \
+             compare equal this test proves nothing"
+        );
+
+        let mut across = subject_of(style, spans);
+        across.partial = true;
+        across.range = 0..8;
+
+        assert!(
+            !across.mixed(CharAttrKind::LetterSpacing),
+            "zero over here and zero over there is zero: the ink is identical \
+             and the field must show a number, not a dash"
+        );
+        assert_eq!(
+            across.shared(CharAttrKind::LetterSpacing),
+            Some(CharAttr::LetterSpacing(Length::Em(0.0))),
+            "and it comes back in the unit the user chose, because the chip \
+             reads its suffix off this — handing back the Px default would flip \
+             a percent document to px under them, which is D537's symptom by a \
+             new road"
+        );
+    }
+
+    /// **A real disagreement still reads *Mixed*** — the control for the test
+    /// above, and the reason it is a separate one.
+    ///
+    /// `agreed_zero` is reached only where `shared_in` has already answered
+    /// `None`, so the risk it introduces is that it says "agreed" too often. A
+    /// non-zero amount on one side is the case that must not collapse, and a
+    /// zero against a non-zero is the case that is genuinely mixed and shares a
+    /// zero with the test above — so it is the one an over-broad predicate would
+    /// swallow.
+    ///
+    /// ⚠️ **Flipped** by dropping `agreed_zero`'s `is_zero` test — accepting any
+    /// two lengths as agreed — and **the predicted site was wrong**. It is red on
+    /// the **first** assertion, two non-zero amounts, and it never reaches the
+    /// second. The prediction assumed a zero beside a number is the harder case
+    /// for an over-broad predicate to get right; it is not, because that
+    /// predicate stopped looking at amounts at all, and the first pair it meets
+    /// is the one that fails. **Both assertions are kept** — the first is what
+    /// this flip catches, and the second is the one that would survive a
+    /// predicate that checked *one* side for zero rather than all of them.
+    #[test]
+    fn two_different_letter_spacings_still_read_mixed() {
+        let style = TextStyle::default();
+
+        let mut two_numbers = CharSpans::default();
+        two_numbers.set(0..4, CharAttr::LetterSpacing(Length::Em(0.02)), &style);
+        two_numbers.set(4..8, CharAttr::LetterSpacing(Length::Px(3.0)), &style);
+        let mut across = subject_of(style.clone(), two_numbers);
+        across.partial = true;
+        assert!(
+            across.mixed(CharAttrKind::LetterSpacing),
+            "two different amounts disagree however the zero rule reads"
+        );
+
+        let mut zero_and_number = CharSpans::default();
+        zero_and_number.set(0..4, CharAttr::LetterSpacing(Length::Em(0.0)), &style);
+        zero_and_number.set(4..8, CharAttr::LetterSpacing(Length::Px(3.0)), &style);
+        let mut across = subject_of(style, zero_and_number);
+        across.partial = true;
+        assert!(
+            across.mixed(CharAttrKind::LetterSpacing),
+            "a zero beside a number is the mixed case the zero rule must not \
+             swallow — one of these is ink and the other is not"
+        );
     }
 
     /// **The lit button that did nothing.** The hanging pair's click compares against

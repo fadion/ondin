@@ -1113,6 +1113,17 @@ impl PointSet {
     /// last one, `Ctrl+Z` — so the truncation is a no-op and the set goes on naming
     /// a *different* point, which is the precise near-miss the paragraph above says
     /// this type exists to refuse. `OndinApp::document_rewound` clears instead.
+    ///
+    /// ⚠️ **No production caller, on purpose, since 2026-09-19** (§15 D637). The
+    /// one that existed sat above a `PointSet::clear` and could not be observed;
+    /// removing it is what makes this `allow` necessary. `#[cfg(test)]` is the
+    /// stronger tool and is wrong here — this item is named by a **production**
+    /// intra-doc link, which the doc gate then exits 101 on (§15 D699, and D672
+    /// for the other direction). ⚠️ **What the `allow` gives up**: if the two
+    /// tests that assert this go, nothing will say so. It is kept because four
+    /// modules' doc comments cite it as the statement of a rule, and because a
+    /// whole-path geometry patch is the work that will want it back.
+    #[allow(dead_code)]
     pub fn retain_valid(&mut self, lengths: &[usize]) {
         let live = |(sub, anchor): &PointRef| lengths.get(*sub).is_some_and(|n| anchor < n);
         self.points.retain(live);

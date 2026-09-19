@@ -3959,6 +3959,13 @@ pub fn remove_points(subpaths: &[PenSubpath], points: &[PointRef]) -> Vec<PenSub
 
 /// The anchor count of each subpath — what `PointSet::retain_valid` checks a
 /// stale selection against.
+///
+/// ⚠️ **Dead in production since 2026-09-19 and kept deliberately** (§15 D637):
+/// it existed to feed `retain_valid` at one call site where neither could be
+/// observed, and it is allowed rather than `cfg(test)`-ed so that it stays
+/// callable from the same place its partner does. The two travel together — an
+/// `allow` on one and a `cfg` on the other would be the drift.
+#[allow(dead_code)]
 pub fn subpath_lengths(subpaths: &[PenSubpath]) -> Vec<usize> {
     subpaths.iter().map(|s| s.anchors.len()).collect()
 }

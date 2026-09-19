@@ -1160,6 +1160,14 @@ pub enum TextSizing {
   the *default* variant rather than about the number, which is what a `skip_serializing_if` on a
   non-scalar type has to do; `is_zero` survives for `svg.rs`, which asks a different question. No
   schema bump: it only adds a key an older reader already understands (§5.11).
+  ⚠️ **The panel half of that is the reader's, and it is a comparison on the *resolved* value** (§15
+  D799). Keeping the two distinct is what made `Spans::shared_in` — which compares structurally, and
+  must — report *Mixed* over text whose spacing is zero throughout, so the Type panel's `shared` and
+  `para_shared` fall through to `agreed_zero` for all seven lengths: every value a zero length means
+  one value, whatever units they are in, and it hands back the **first** one so the unit chip keeps
+  the suffix the user chose. **It stops at zero on purpose** — that is the only amount at which the
+  unit says nothing about the ink, and a general resolved comparison would flip a field between a
+  number and a dash as the text was resized.
 - **The boundary rule, stated once**: typing at the edge of a span inherits from the character to the
   left, unless the caret was explicitly restyled while empty (`TextEdit::pending`). Every rich-text
   bug in every editor lives in this question; `Spans::edited` is the single implementation, for the
@@ -11724,15 +11732,20 @@ live on the canvas, participate in shared undo, and survive save/load.
   sites persisted its own temp folder into the real `%APPDATA%\ondin\prefs.json`. `Prefs::ephemeral` is
   now a `#[serde(skip)]` flag set by `headless` and checked on `save`'s first line — a flag on the value
   rather than a guard at each call site, because the call sites are the whole app.
-  🚨 **The swap list is three long and the machine offers a fourth: the OS clipboard is not swapped**
-  (§15 D796). A headless app reads the developer's real clipboard through `system_clipboard_text`,
-  `system_clipboard_has_image` and `paste_image`, and `copy_as_png` would write it — so on this path
-  the rule above holds by test discipline rather than by construction, and the only thing enforcing
-  it is that the one test here reads and never writes. **Every `arboard` handle in the process now
-  opens under one `Mutex` (`app::with_clipboard`)**, because two threads opening the global clipboard
-  at once corrupt the heap and take the whole test binary down; that is a fix for the suite, the app
-  having one UI thread. An inert twin is a maintainer decision and is queued in `roadmap.md` beside
-  the per-machine index, which is the same shape one module over.
+  🚨 **The machine offered a fourth resource the swap list did not name — the OS clipboard — and it
+  is closed** (§15 D796, D798). A headless app used to read the developer's real clipboard through
+  `system_clipboard_text`, `system_clipboard_has_image` and `paste_image`, and `copy_as_png` would
+  write it, so on that one path the rule above held by test discipline rather than by construction.
+  `OndinApp::headless` now sets a process-wide `CLIPBOARD_OFF` flag which those readers and both
+  writers check, and `copy_as_png` says so in the status line rather than failing silently. ⚠️ **A
+  static rather than a constructor argument, because the OS clipboard is one per *process***, and the
+  check sits at the four callers rather than inside `app::with_clipboard` — the test that proves the
+  lock below holds has to keep opening a real handle, and a refusal one level down would make it
+  assert nothing. **Every `arboard` handle in the process opens under one `Mutex`
+  (`app::with_clipboard`)**, because two threads opening the global clipboard at once corrupt the
+  heap and take the whole test binary down; that is a fix for the suite, the app having one UI
+  thread. ⚠️ **The per-machine index is still the resource with no injection point** and is in
+  `roadmap.md`; this one no longer is.
 
 ---
 

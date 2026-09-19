@@ -146,13 +146,20 @@ impl Length {
     ///
     /// ⚠️ **This closes the *save* half of `[S6.1-L1-03]` and deliberately not
     /// the other half.** A zero-valued `Em` span is still kept by `normalize`
-    /// (which compares structurally) and so still reports *Mixed* through
+    /// (which compares structurally) and so still reported *Mixed* through
     /// `shared_in` for text whose letter spacing is zero everywhere. The two
     /// halves pull opposite ways — preserving the unit **requires** keeping the
     /// span, so making `Em(0.0)` and `Px(0.0)` compare equal would fix the
     /// readout by throwing away the very thing this predicate exists to keep.
     /// The readout is a comparison on the *resolved* value and belongs at the
-    /// reader; it is left open rather than guessed at.
+    /// reader, and **that is where it now is** (§15 D799):
+    /// `panels::typography`'s `agreed_zero`, reached from `TypeSubject::shared`
+    /// and `para_shared` only after `shared_in` has answered `None`, so nothing
+    /// here or in `normalize` had to change. ⚠️ **It stops at zero deliberately**
+    /// — zero is the one amount at which the unit says nothing about the ink,
+    /// which is why it was the only amount that read wrong; widening it to
+    /// lengths that merely resolve alike *at the current size* is a further
+    /// decision and is argued at `agreed_zero`.
     pub fn is_default_zero(&self) -> bool {
         matches!(self, Length::Px(v) if *v == 0.0)
     }

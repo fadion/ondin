@@ -10244,6 +10244,14 @@ plainly enough where you are. Load-bearing: `pick_for_click` opens the scope *af
 `pick_preview` what to select, because the preview must still see the scope as it was — the modifier
 decides what is picked and, separately, that isolation follows.
 
+**The policy itself is `canvas::pick_from_chain(ctrl, alt, chain, leaf)`, a free function** (§15
+**D805**): `pick_preview` reads the two modifiers out of `ui.input`, builds the chain with
+`group_chain` and calls it, so the five arms above are a table rather than five egui sessions, and
+the hover outline and the click share one statement of them by construction. The two side effects
+stay on the method — clearing the scope on the way out, opening it on a `Ctrl` reach — and the first
+of them runs *before* the chain is built, which is what makes the click that leaves isolation also
+select by the ordinary rule.
+
 **The canvas never selects a locked layer, by any gesture** (§15 D321, D746). A click refuses it
 (`query::hit_test`), and so does a rubber band: `canvas::apply_marquee` picks frame *contents* rather
 than the frames, plus the loose layers that belong to no frame, and the list it walks —

@@ -788,7 +788,7 @@ mod tests {
     /// **Outermost first, and the run stops at the frame** — the two halves of
     /// what *"clicking a grouped layer selects the group"* means.
     ///
-    /// The order is not cosmetic: `canvas::pick_preview` reads the slice
+    /// The order is not cosmetic: `canvas::pick_from_chain` reads the slice
     /// positionally (`[_outermost, next, ..]`), so a chain built the other way
     /// round would make a plain click select the innermost group and Ctrl+Alt the
     /// outermost — both gestures still doing *something*, which is why nothing

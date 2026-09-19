@@ -1857,19 +1857,8 @@ impl OndinApp {
     /// calls through.
     fn pick_preview(&self, leaf: NodeId, ui: &egui::Ui) -> NodeId {
         let (ctrl, alt) = ui.input(|i| (i.modifiers.ctrl || i.modifiers.command, i.modifiers.alt));
-        if ctrl && !alt {
-            return leaf;
-        }
         let chain = ondin_core::group_chain(&self.session.doc, leaf, self.entered_group);
-        match (ctrl && alt, chain.as_slice()) {
-            // No groups above it: the leaf is the whole story either way.
-            (_, []) => leaf,
-            // One level into the outermost group. With a single group that is
-            // the leaf itself; with nested ones it is the next group down.
-            (true, [_outermost, next, ..]) => *next,
-            (true, _) => leaf,
-            (false, [outermost, ..]) => *outermost,
-        }
+        pick_from_chain(ctrl, alt, &chain, leaf)
     }
 
     /// A double-click opens a text node, crops a picture, opens a path for point
@@ -12185,6 +12174,45 @@ fn click_box(start: Point, alt: bool) -> (Point, Point) {
     }
 }
 
+/// What a click selects, given the modifiers and the group chain above the leaf
+/// (§15 D805).
+///
+/// **The whole of the click-to-select policy, and the reason it is a free
+/// function**: `OndinApp::pick_preview` read its two modifiers out of `ui.input`
+/// and decided in the same body, so exercising five arms meant driving egui five
+/// times — and `[A5-L6-06]` measured three mutations of them as **green**. This
+/// is D269's move: the method is now the input read plus a call, and the policy
+/// is a table.
+///
+/// The four arms after the `Ctrl`-only one, in the order they are written:
+///
+/// - **No groups above the leaf** — the leaf is the whole story either way.
+/// - **`Ctrl+Alt` with two or more groups** — one level into the outermost, so a
+///   deep tree is walked a step at a time rather than all the way in.
+/// - **`Ctrl+Alt` with exactly one** — one level in *is* the leaf.
+/// - **No modifier** — the outermost group, which is what "clicking a group
+///   selects the group" means.
+///
+/// ⚠️ **`chain` is now built on the `Ctrl`-only path too, where the early return
+/// used to skip it.** That is one shallow parent walk and a small `Vec` per hover
+/// frame — `group_chain` climbs parents until it leaves the entered group or hits
+/// a kind it does not step into — and `pick_for_click` already does two of them on
+/// the click path. Named because it is a real change and not a free one.
+fn pick_from_chain(ctrl: bool, alt: bool, chain: &[NodeId], leaf: NodeId) -> NodeId {
+    // **`Ctrl` alone means "this exact thing"** — the deepest layer under the
+    // pointer, however buried. Nothing above it matters, which is why this arm
+    // reads no chain.
+    if ctrl && !alt {
+        return leaf;
+    }
+    match (ctrl && alt, chain) {
+        (_, []) => leaf,
+        (true, [_outermost, next, ..]) => *next,
+        (true, _) => leaf,
+        (false, [outermost, ..]) => *outermost,
+    }
+}
+
 /// Which of `frames` owns a layer whose world bounds are `bounds`: the topmost
 /// one covering more than half of it, or `None` for "no frame — the canvas".
 ///
@@ -21521,6 +21549,203 @@ mod zero_travel_release_tests {
             spent.is_empty(),
             "these arms spent an undo step on a gesture that ended where it began: \
              {spent:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod pick_policy_tests {
+    //! **The click-to-select policy, as a table** (§15 D805, `[A5-L6-06]`).
+    //!
+    //! 🚨 **`pick_preview` read its two modifiers out of `ui.input` and decided
+    //! in the same body**, so reaching its five arms meant driving egui five
+    //! times — and nobody did. The review measured three mutations of it as
+    //! **green**: `ctrl && !alt` widened to `ctrl`, the `[_outermost, next, ..]`
+    //! arm collapsed, and `pick_for_click`'s `entered_group = None` guard. Two of
+    //! the three are this module's; the third is a side effect on `self` and is
+    //! below.
+    use super::*;
+
+    fn n(i: u64) -> NodeId {
+        NodeId::from_wire(&format!("1:{i}")).expect("a well-formed id")
+    }
+
+    /// **All five arms, and the three the review flipped green.**
+    ///
+    /// The leaf is `9` throughout so that "the answer is the leaf" is never the
+    /// same id as any group — an arm returning the wrong thing cannot coincide
+    /// with the right one.
+    ///
+    /// ⚠️ **`Ctrl` alone is asserted against a *deep* chain**, not an empty one.
+    /// Against `[]` every arm answers the leaf, so a test that only tried the
+    /// no-group case would pass against every mutation here. That is the first
+    /// of the review's three and the one most easily made vacuous.
+    ///
+    /// ⚠️ **Flipped, all three run.**
+    ///
+    /// - `ctrl && !alt` widened to `ctrl`: red on the `Ctrl+Alt` **two-group**
+    ///   assertion, which is the one where "the leaf" and "one level in" differ.
+    ///   ⚠️ The predicted site was the `Ctrl`-alone assertion and that is wrong —
+    ///   widening the arm makes `Ctrl` alone *more* often right, not less.
+    /// - `(true, [_outermost, next, ..])` collapsed into `(true, _) => leaf`:
+    ///   red on the same assertion, which is why the two are asserted with
+    ///   different chains rather than once.
+    /// - `(false, [outermost, ..])` changed to return the leaf: red on the
+    ///   plain-click assertion.
+    #[test]
+    fn the_five_arms_of_the_click_policy() {
+        let leaf = n(9);
+        let (outer, inner) = (n(1), n(2));
+
+        // No groups above it: every modifier answers the leaf.
+        for (ctrl, alt) in [(false, false), (true, false), (true, true), (false, true)] {
+            assert_eq!(
+                pick_from_chain(ctrl, alt, &[], leaf),
+                leaf,
+                "ctrl={ctrl} alt={alt}: with no group above it the leaf is the \
+                 whole story"
+            );
+        }
+
+        // **Ctrl alone: the exact thing under the pointer, however deep.**
+        assert_eq!(
+            pick_from_chain(true, false, &[outer, inner], leaf),
+            leaf,
+            "Ctrl reaches past every group to the layer itself"
+        );
+
+        // **Ctrl+Alt: one level in, which is the outermost group's child.**
+        assert_eq!(
+            pick_from_chain(true, true, &[outer, inner], leaf),
+            inner,
+            "Ctrl+Alt steps one level in, not all the way — that is how a deep \
+             tree is walked without losing your place"
+        );
+        assert_eq!(
+            pick_from_chain(true, true, &[outer], leaf),
+            leaf,
+            "and with a single group one level in is the leaf"
+        );
+
+        // **No modifier: the outermost group.**
+        assert_eq!(
+            pick_from_chain(false, false, &[outer, inner], leaf),
+            outer,
+            "a plain click on something in a group selects the group"
+        );
+        assert_eq!(
+            pick_from_chain(false, true, &[outer, inner], leaf),
+            outer,
+            "and Alt alone is not a pick modifier — it belongs to the drag"
+        );
+    }
+
+    /// Root, two sibling groups, one rect in each. Returns the app, the groups
+    /// and the rects.
+    fn two_groups(ctx: &egui::Context) -> (OndinApp, [NodeId; 2], [NodeId; 2]) {
+        use ondin_core::{Document, IdSource, Operation, Transaction};
+        let mut app = OndinApp::headless(ctx);
+        let mut ids = IdSource::new(0x91C);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let groups = [ids.mint(), ids.mint()];
+        let leaves = [ids.mint(), ids.mint()];
+        let mut ops = Vec::new();
+        for (i, g) in groups.iter().enumerate() {
+            ops.push(Operation::CreateNode {
+                id: *g,
+                parent: root,
+                index: i,
+                kind: ondin_core::NodeKind::Group,
+                transform: None,
+                name: None,
+            });
+            ops.push(Operation::CreateNode {
+                id: leaves[i],
+                parent: *g,
+                index: 0,
+                kind: ondin_core::NodeKind::Rect {
+                    size: ondin_core::kurbo::Size::new(10.0, 10.0),
+                    corner_radii: Default::default(),
+                },
+                transform: None,
+                name: None,
+            });
+        }
+        doc.apply(&Transaction(ops)).expect("two groups");
+        app.session.adopt_document(doc, None);
+        (app, groups, leaves)
+    }
+
+    /// One frame, delivering `modifiers`, returning what the click picked.
+    fn pick(app: &mut OndinApp, ctx: &egui::Context, leaf: NodeId, ctrl: bool) -> NodeId {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(800.0, 600.0),
+            )),
+            modifiers: egui::Modifiers {
+                ctrl,
+                command: ctrl,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut picked = leaf;
+        let _ = ctx.run_ui(input, |ui| picked = app.pick_for_click(leaf, ui));
+        picked
+    }
+
+    /// **Clicking outside the group you stepped into ends the isolation** —
+    /// the third of the review's three green mutations (§15 D805).
+    ///
+    /// This one is a side effect on `self` rather than a return, so it stayed in
+    /// `pick_for_click` when the policy was lifted, and it is driven here through
+    /// a real `Ui` with real modifiers instead.
+    ///
+    /// ⚠️ **The guard runs *before* the chain is built**, which is what makes the
+    /// click that leaves also select by the normal rule — so the assertion is on
+    /// **both** halves: the isolation is gone *and* the pick is the outer group,
+    /// not the leaf. A version that cleared the scope afterwards would pass the
+    /// first assertion and fail the second.
+    ///
+    /// ⚠️ **The control is the click that stays inside.** Without it "the scope
+    /// was cleared" passes against a guard that clears it unconditionally, which
+    /// is the mutation that breaks isolation mode entirely.
+    ///
+    /// ⚠️ **Flipped** by deleting the `entered_group = None` guard: red on the
+    /// **scope** assertion, `Some(g1)` against `None`. ⚠️ The prediction said the
+    /// *pick* assertion, reasoning that a stale scope makes `group_chain` stop at
+    /// a group the leaf is not inside and come back empty — which it does, but
+    /// the scope assertion is written first and panics before the pick one is
+    /// reached, so whether that also fails is **reasoned and not measured**. The
+    /// order is deliberate anyway: the scope is the cause and the pick is the
+    /// consequence, so the failure a reader meets first is the one that explains
+    /// the other.
+    #[test]
+    fn a_click_outside_the_entered_group_leaves_it() {
+        let ctx = egui::Context::default();
+        let (mut app, groups, leaves) = two_groups(&ctx);
+        app.entered_group = Some(groups[0]);
+
+        // The control: a click *inside* the scope keeps it, and picks the leaf
+        // because the chain stops at the group we are in.
+        let picked = pick(&mut app, &ctx, leaves[0], false);
+        assert_eq!(
+            app.entered_group,
+            Some(groups[0]),
+            "a click inside the entered group stays inside it"
+        );
+        assert_eq!(picked, leaves[0], "and picks the layer, not the group");
+
+        // The rule: a click outside ends the isolation, and selects by the
+        // ordinary rule on the way out.
+        let picked = pick(&mut app, &ctx, leaves[1], false);
+        assert_eq!(app.entered_group, None, "the click left the group");
+        assert_eq!(
+            picked, groups[1],
+            "and it selected the other group, not the layer inside it — the \
+             guard runs before the chain is built so the same click does both"
         );
     }
 }

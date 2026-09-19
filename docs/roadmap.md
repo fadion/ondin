@@ -690,15 +690,13 @@ function it named.
 - **egui's own keyboard zoom is off** (`theme::install`, `zoom_with_keyboard`). `Ctrl`+`+`/`−` was
   scaling `pixels_per_point` *and* the canvas at once. Anything else the app wants to bind that egui
   also reads needs the same treatment — check `Options` before adding a chord.
-- **The click-to-select *policy* is still untestable, and that is the open half of `[A5-L6-06]`.**
-  §15 D503 gave `group_chain` its first tests; what those tests cannot reach is `canvas::pick_preview`,
-  a method on `OndinApp` that reads its two modifiers out of `ui.input` rather than taking them, so
-  exercising its five arms means driving egui input instead of calling a function. Three mutations the
-  review measured as green are still green — `ctrl && !alt` widened to `ctrl`, the
-  `[_outermost, next, ..]` arm collapsed, and `pick_for_click`'s `entered_group = None` guard. The
-  shape is D269's: lift the tail into a free `fn pick_from_chain(ctrl, alt, chain, leaf) -> NodeId`
-  and table-test its five arms, leaving the method as the input read plus a call. **Production code
-  rather than a test**, which is why the fix phase's session 6 did not take it.
+- ~~**The click-to-select *policy* is still untestable, and that is the open half of `[A5-L6-06]`.**~~
+  **Done 2026-09-19 exactly as this bullet prescribed it** (§15 **D805**): `pick_from_chain(ctrl, alt,
+  chain, leaf)` is a free function, `pick_preview` is the input read plus a call, and all three
+  mutations the review measured as green are red. `[A5-L6-06]` is closed whole, D503 having closed the
+  `group_chain` half. ⚠️ **The lift was not free** — the chain is now built on the `Ctrl`-only path
+  too, where the early return used to skip it — and ⚠️ **both flips' predicted sites were wrong**,
+  which is what the entry is worth reading for.
 - ~~**A rounded `Path`'s outline is rebuilt on every frame, and that is the open half of
   `[S4.2-L4-04]`** — the fix being a new map on `Resolved` holding the rounded outline, filled beside
   `boolean` so the walk is handed it.~~ **Closed 2026-09-15 by the maintainer's ruling** (§15

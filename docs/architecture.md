@@ -5823,8 +5823,9 @@ where the rule is tested twice**, because it reaches the widget by three routes 
 guard the rewrite would trip. ⚠️ **`char_valve` carries `edit_valve`'s engagement latch since §15
 D523 and this sentence is amended rather than deleted**: the latch commits on the falling edge of a
 *gesture*, but the valve's third arm commits a `changed()` frame on a control that was never engaged
-— which is exactly the shape of an egui-initiated rewrite — so the opt-out is still the whole of
-what stops the library writing to the document there
+— which is exactly the shape of an egui-initiated rewrite, **measured rather than reasoned since §15
+D803**, the opt-out removed and all three arms instrumented with the third the one that fires — so
+the opt-out is still the whole of what stops the library writing to the document there
 (`typography::…::a_stored_tracking_outside_the_fields_range_is_not_rewritten_on_an_idle_frame`).
 ⚠️ **The Layout grid panel is the third place it is tested, and the two image-card fields are a
 fourth door nothing drives** (§15 D539). Three of the four grid fields carry a range the model does

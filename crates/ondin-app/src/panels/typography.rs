@@ -8785,7 +8785,31 @@ mod skip_ink_tests {
     /// ⚠️ **Flip-check, run**: removing `.clamp_existing_to_range(false)` from
     /// `value_field_f64` fails on the first assertion with `Em(2.0)` where
     /// `Em(3.0)` was — the finding's own numbers — while the in-range control
-    /// stays green.
+    /// stays green. **Re-run and re-measured 2026-09-19** (§15 D803): still
+    /// exactly that, and the numbers are this test's as well as the finding's.
+    ///
+    /// 🚨 **`ui.rs` makes that call at four production sites and they are not
+    /// interchangeable — a re-run spent on the wrong one came back green and was
+    /// nearly written up as "the flip does not bite".** The one this test turns
+    /// on is `value_field_f64`'s. `badge_field`'s is **inert**, and says so on
+    /// its own line: *"both production callers pass an unranged `Scrub`, so
+    /// there is nothing to clamp against"* — removing it changes nothing while
+    /// that stays true. `plain_drag_value`'s and `bare_drag_value`'s (§15 D552)
+    /// are the other two. **The confusable pair is `badge_field`'s and this
+    /// one's, which are byte-identical** — same indentation, same chained call,
+    /// no semicolon — so naming the mutation as *"removing
+    /// `.clamp_existing_to_range(false)`"* does not identify it; naming the
+    /// **function** does (§15 D803).
+    ///
+    /// 🚨 **And the flip says which arm of `char_valve` does the damage.**
+    /// Instrumented on the failing run: **the third arm fires** — the
+    /// `changed() && !lost_focus()` one that D802 found the picker cannot reach.
+    /// So that arm is not dead; its only **known** user is this egui-initiated
+    /// rewrite — seven call sites, two of them measured — and
+    /// `clamp_existing_to_range(false)` is the only thing keeping that user from
+    /// existing. **The arm is the mechanism by which `[S6.2-L1-01]`'s clamp
+    /// became a committed document change and an undo step**, which makes
+    /// deleting it a second defence against the same bug rather than tidying.
     #[test]
     fn a_stored_tracking_outside_the_fields_range_is_not_rewritten_on_an_idle_frame() {
         fn tracking(app: &OndinApp, id: NodeId) -> Length {

@@ -6418,12 +6418,17 @@ input event (winit/egui)
   number does**: a `DragValue` reports `lost_focus()` with its old value still in place and writes
   the parsed edit string back on the frame after, when the field is already disengaged, so a valve
   committing from the falling edge has to be handed the typed value by the field rather than read it
-  off the response. ⚠️ **And `char_valve` has a third arm neither of the others needs**: the
-  picker's hue slider and alpha strip reach it as raw sensed regions, which report neither focus nor
-  `lost_focus` and so never latch, so a `changed()` frame on a control that was **never engaged**
-  still commits at once. That arm is guarded with `!lost_focus()` — otherwise a field *with* a latch
-  falls through it and commits on the second of the two `lost_focus` frames the number an `Escape`
-  had just abandoned (§15 D523).
+  off the response. ⚠️ **And `char_valve` has a third arm neither of the others needs**: a
+  `changed()` frame on a control that was **never engaged** commits at once, the case a
+  falling-edge-only valve has no transition to spend. That arm is guarded with `!lost_focus()` —
+  otherwise a field *with* a latch falls through it and commits on the second of the two
+  `lost_focus` frames the number an `Escape` had just abandoned (§15 D523). 🚨 **This sentence used
+  to name the arm's users — *"the picker's hue slider and alpha strip reach it as raw sensed
+  regions"* — and that half is false** (§15 D802). `picker::pointer_slot` answers a click through
+  `write_slot` before it would reach `valve_slot`, so those controls never enter the valve on a
+  click; a drag enters it as the engaged arm and its release as the falling edge, and on those
+  frames `changed()` is never true. **Whether anything reaches the arm is open**, and deleting it
+  breaks no test.
 - ⚠️ **The durable defence against a fifth is a test, and it is written now** (§15 D524). One
   superseded expression survived in three hand-rolled valves *and* in a fourth line predicting what one
   of them would do, and was found four times by four unrelated accidents — a photographed undo history

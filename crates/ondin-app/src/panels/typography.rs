@@ -3309,17 +3309,26 @@ impl OndinApp {
     /// engagement latch is D316's, spelled here for the same reason it is
     /// spelled in `multi_valve`.
     ///
-    /// ⚠️ **And a third arm, which the other two valves do not need.** Several
-    /// of the picker's controls reach here through `CharWrite::Valve` as **raw
-    /// sensed regions** — the hue slider, the alpha strip — and the comment on
-    /// that route already says why they are special: *"a raw sensed region
-    /// reports neither `changed` nor `lost_focus`"*. Such a control has no
-    /// focus to hold and, on a click that never becomes a drag, nothing to
-    /// latch: `engaged` is false on every frame it exists, so a
-    /// falling-edge-only valve would never commit it at all. So a `changed()`
-    /// frame on a control that was **never engaged** still commits at once,
-    /// which is exactly what this did before. A typed `DragValue` never takes
-    /// that arm, because its keystroke frames hold focus.
+    /// ⚠️ **And a third arm, which the other two valves do not need.** A
+    /// `changed()` frame on a control that was **never engaged** commits at
+    /// once, which is exactly what this did before — the case a
+    /// falling-edge-only valve has no transition to spend. A typed `DragValue`
+    /// never takes that arm, because its keystroke frames hold focus.
+    ///
+    /// 🚨 **The arm was kept for the picker's raw sensed regions and they do
+    /// not reach it** (§15 D802). This paragraph used to name them — the hue
+    /// slider and the alpha strip, arriving through `CharWrite::Valve` — and to
+    /// argue that without the arm *"a falling-edge-only valve would never commit
+    /// it at all"*. Measured with all three arms instrumented,
+    /// `picker::pointer_slot` answers
+    /// `if resp.clicked() { self.write_slot(…); return; }` **before** it would
+    /// reach `valve_slot`, so such a click never enters this function at all. A
+    /// *drag* enters it as the engaged arm and its release as the falling edge,
+    /// and on those frames `changed()` is never true — a raw sensed region is
+    /// written through `write_stop_colour` and is marked changed by nothing.
+    /// **Whether anything reaches this arm is open**, and is a maintainer
+    /// question rather than a missing test: there are seven call sites and D802
+    /// measured one. Deleting the arm breaks no test today.
     fn char_valve(&mut self, resp: &egui::Response, subject: &TypeSubject, attr: CharAttr) {
         if subject.partial {
             self.arm_session_scrub(resp, subject.id);
@@ -8636,16 +8645,27 @@ mod char_valve_tests {
         );
     }
 
-    // ⚠️ **The third arm — a `changed()` frame on a control that was never
-    // engaged — has no test here, and that is a gap rather than an oversight.**
-    // Its users are the picker's raw sensed regions arriving through
-    // `CharWrite::Valve` (the hue slider, the alpha strip), which report
-    // neither focus nor `lost_focus`, and reaching one of those headlessly
-    // means driving the whole picker. What stands in for a test: removing the
-    // arm was flip-checked against the full suite and **nothing went red**, so
-    // the arm is carried on the strength of the comment at
-    // `CharWrite::Valve`'s own gate rather than on coverage. Writable now and
-    // unwritten.
+    // 🚨 **The third arm — a `changed()` frame on a control that was never
+    // engaged — has no test here, and as of 2026-09-19 that is because its
+    // documented users cannot reach it** (§15 D802). This comment used to say
+    // *"writable now and unwritten"*; it was written, and what the writing found
+    // is that the route does not exist.
+    //
+    // §15 D523 kept the arm for the picker's raw sensed regions arriving through
+    // `CharWrite::Valve` — the hue slider and the alpha strip — on the reasoning
+    // that *"without it a click on the hue strip would commit nothing, ever"*.
+    // Measured by driving that click on a real picker over a text layer, with
+    // all three arms instrumented: `picker::pointer_slot` answers
+    // `if resp.clicked() { self.write_slot(…); return; }` **before** it would
+    // reach `valve_slot`, so a click never enters `char_valve` at all; a *drag*
+    // enters it as the engaged arm and its release as the falling edge; and on
+    // every frame it is entered here, `changed` is **false**, because a raw
+    // sensed region is written through `write_stop_colour` and is never marked
+    // changed by anything. The arm is carried on a reason that does not hold.
+    //
+    // ⚠️ **What is owed is not a test but a question**: does anything reach this
+    // arm? `char_valve` has seven call sites and this measured one of them.
+    // `picker::text_colour_route_tests` is the route that *is* covered now.
 }
 
 #[cfg(test)]
@@ -8746,13 +8766,18 @@ mod skip_ink_tests {
     /// `write_axis` whose only guard is `if value == current { return; }` — a
     /// guard the clamp had just made false.
     ///
-    /// ⚠️ **`char_valve` is still the pre-D316 shape and deliberately so**, its
-    /// own doc arguing the case: `resp.drag_stopped() || resp.lost_focus() ||
-    /// resp.changed()`, with no engagement latch. So this panel has **no second
-    /// guard** — the passing control one function away, `paragraph_length`, routes
-    /// through `edit_valve` and its latch — and the widget's opt-out is the whole
-    /// of what stops a library default writing to the document here. That is
-    /// exactly why it wants a test of its own rather than inheriting `ui.rs`'s.
+    /// ⚠️ **This panel has no second guard, and the widget's opt-out is the
+    /// whole of what stops a library default writing to the document here** —
+    /// where the passing control one function away, `paragraph_length`, routes
+    /// through `edit_valve` and its latch. That is exactly why it wants a test
+    /// of its own rather than inheriting `ui.rs`'s. 🚨 **The reason given here
+    /// was that `char_valve` is "still the pre-D316 shape … with no engagement
+    /// latch", and it has been false since §15 D523** gave the valve the latch;
+    /// the verdict survives the correction because the latch is not what would
+    /// absorb this. An idle egui-initiated rewrite is a `changed()` frame on a
+    /// control holding no focus, which is the valve's **third** arm — it
+    /// commits at once, having no engagement to wait on — so the opt-out is
+    /// still the only thing in the way (§9.2 says the same).
     ///
     /// ⚠️ **The in-range control is what keeps it honest**: without it, a field
     /// that had stopped reporting *any* change would pass.

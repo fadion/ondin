@@ -2787,3 +2787,158 @@ mod grid_orphan_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod text_colour_route_tests {
+    //! **How the picker reaches a text layer's colour, and which valve arm it
+    //! does not use** (§15 D802).
+    //!
+    //! Written while trying to cover `char_valve`'s third arm, which the roadmap
+    //! held as *"writable now and unwritten"*. It is not writable from here: the
+    //! controls §15 D523 kept that arm for do not reach it. What is here instead
+    //! is the route they *do* take, which had no test either.
+    use super::*;
+    use crate::app::OndinApp;
+    use crate::theme;
+    use ondin_core::{Document, IdSource, NodeId, NodeKind, Operation, Transaction};
+
+    const SCREEN: egui::Vec2 = egui::vec2(1200.0, 900.0);
+
+    fn frame(ctx: &egui::Context, app: &mut OndinApp, events: Vec<egui::Event>) {
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::pos2(0.0, 0.0), SCREEN)),
+                events,
+                ..Default::default()
+            },
+            |ui| app.picker_ui(ui.ctx()),
+        );
+    }
+
+    fn text_app(ctx: &egui::Context) -> (OndinApp, NodeId) {
+        theme::install(ctx);
+        let mut app = OndinApp::headless(ctx);
+        let mut ids = IdSource::new(0x7E5);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let id = ids.mint();
+        doc.apply(&Transaction(vec![Operation::CreateNode {
+            id,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Text {
+                content: "hello".into(),
+                style: Box::default(),
+                spans: Default::default(),
+                para_spans: Default::default(),
+                paragraph: Default::default(),
+                block: Default::default(),
+                sizing: ondin_core::TextSizing::Auto,
+                on_path: None,
+                on_path_flip: false,
+                on_path_offset: 0.0,
+            },
+            transform: None,
+            name: None,
+        }]))
+        .expect("a text node");
+        app.session.adopt_document(doc, None);
+        app.session.selection.set_one(id);
+        // Without this the picker orphans itself on its first frame: `TextColor`
+        // is only *shown* while the Type panel's Character tab is up, so a picker
+        // left over it would be editing something not on screen.
+        app.type_menu = Some(crate::app::TypeTab::Character);
+        app.picker = Some(Picker::new(
+            id,
+            PaintSlot::TextColor,
+            egui::pos2(400.0, 300.0),
+        ));
+        (app, id)
+    }
+
+    fn text_rgba(app: &OndinApp, id: NodeId) -> Option<[u8; 4]> {
+        match app.session.doc.get(id)?.kind() {
+            NodeKind::Text { style, .. } => style.color.map(|c| c.to_rgba8().to_u8_array()),
+            _ => None,
+        }
+    }
+
+    /// **A click on the picker's plane sets a text layer's colour, and it does
+    /// not go through `char_valve` at all** (§15 D802).
+    ///
+    /// The route is `hue_slider`/`sv_plane` → `write_stop_colour` →
+    /// `pointer_slot`, and the first thing `pointer_slot` does after the
+    /// cancelled-gesture bail is `if resp.clicked() { self.write_slot(…);
+    /// return; }`. **A click never reaches `valve_slot`**, so it never reaches
+    /// `char_valve`; a *drag* does, as the engaged arm, and its release as the
+    /// falling edge.
+    ///
+    /// 🚨 **Which makes `char_valve`'s third arm unreachable from the controls
+    /// §15 D523 kept it for.** That entry's reason reads *"without it a click on
+    /// the hue strip would commit nothing, ever"*. Measured by instrumenting all
+    /// three arms and driving this very click: `char_valve` is entered with
+    /// `changed=false dragged=false focus=false lost_focus=false` on every frame,
+    /// so no arm fires — and the colour commits anyway, through `write_slot`, one
+    /// call earlier. Flipping the third arm out entirely leaves this test green.
+    /// **The arm's users are not the ones named**, which is why removing it left
+    /// 1,042 tests green and why the roadmap's "write a test for it" is the wrong
+    /// next move: what is owed first is whether anything reaches it.
+    ///
+    /// ⚠️ **The fixture is two things, and the picker closes itself without the
+    /// second.** A text node selected is not enough: `TextColor` orphans unless
+    /// `type_menu` is on the Character tab, because the slot is only *shown*
+    /// there and a picker over an unshown control is what that guard prevents.
+    /// Without it `app.picker` is `None` by the second frame and every click in a
+    /// 5 × 66 sweep landed on nothing — which reads exactly like "the click does
+    /// not work" and is the fixture not being in the state the test is about.
+    ///
+    /// ⚠️ **The coordinate is measured, not derived.** With the picker spawned at
+    /// (400, 300), (500, 344) is on the saturation/value plane. The sweep that
+    /// found it also says what is *not* there: no column in x ∈ {420…600} over
+    /// y ∈ [280, 800] ever moved the hue off red, so the plane is what this
+    /// reaches and the hue strip's own band is still unlocated.
+    #[test]
+    fn a_click_on_the_picker_writes_a_text_layers_colour() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = text_app(&ctx);
+        frame(&ctx, &mut app, Vec::new());
+        frame(&ctx, &mut app, Vec::new());
+
+        assert!(
+            app.picker.is_some(),
+            "the fixture is not in the state this test is about — `TextColor` \
+             orphans the picker unless the Character tab is up, and a closed \
+             picker answers every click the same way"
+        );
+        assert_eq!(
+            text_rgba(&app, id),
+            None,
+            "the layer starts with no colour of its own, so anything below is \
+             this click's doing"
+        );
+        let depth = app.session.history.undo_depth();
+
+        let at = egui::pos2(500.0, 344.0);
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(&ctx, &mut app, vec![egui::Event::PointerMoved(at)]);
+        frame(&ctx, &mut app, vec![button(true)]);
+        frame(&ctx, &mut app, vec![button(false)]);
+        frame(&ctx, &mut app, Vec::new());
+
+        assert_eq!(
+            text_rgba(&app, id),
+            Some([255, 152, 152, 255]),
+            "the click writes the colour under it"
+        );
+        assert_eq!(
+            app.session.history.undo_depth(),
+            depth + 1,
+            "and it is one undo step, not a preview left on the floor"
+        );
+    }
+}

@@ -1113,20 +1113,6 @@ left:
   thing to reach for whenever a claim is about egui rather than about us. The fourth was the valve
   question this section used to carry (§15 D174), and it is the one to remember: the *user* reported that
   field working, because a preview and a commit look identical from the chair.
-- **Three of the Type panel's documented decisions are reachable by no test, and they are named rather
-  than described.** §15 D624 pinned three of the six the review broke simultaneously — the decoration
-  strip's cell mapping, the bold toggle's threshold and the variant matcher's tolerance — by lifting
-  two of them out of `&mut self` bodies. The other three are `list_section`'s gutter default,
-  `wrap_section`'s `!= WrapMode::NoWrap` gate and `write_axis`'s `clear_at_default`, all of which need
-  a live text session and a laid-out panel to enter. ⚠️ **This is a fixture rather than a lift**, which
-  is why it did not travel with the other three: the pattern one bullet up — *lift the decision into a
-  free function and pin that* — does not reach a decision taken while the panel is being drawn, and the
-  shape that does is `skip_ink_tests`' (a headless app, real frames, events in). ⚠️ **`write_axis`'s
-  guard is the one not to confuse with a covered one**: `axis_valve` carries the same
-  `clear_at_default` and *is* pinned (§15 D569), so a grep for the name reads as though the decision
-  were reached. The measurement that says why this is worth doing at all is D624's: six documented
-  decisions broken at once left the `ondin-app` suite at **975 passed / 0 failed**, with a control flip
-  biting, so the greens were about reach and not about harmlessness.
 - **One thing to watch on the next text edit, not a task.** D171 replaced `draw_canvas`'s unconditional
   `request_repaint()` for a live session with a `request_repaint_after` scheduled to the caret's next
   blink. The call it replaced carried no comment saying what it was for, and `draw_canvas` is not

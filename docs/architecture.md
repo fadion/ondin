@@ -6461,6 +6461,9 @@ input event (winit/egui)
   valved now, and the valve carries the `clear_at_default` the immediate write already had — without
   it, sliding onto the font's own value stores a coordinate where typing the same number drops one,
   and the same axis at the same value saves two different files depending on which control set it.
+  ⚠️ **The rule is one function both arms read** (§15 D804): it was the same eight lines in
+  `write_axis` and in `axis_valve`, only the valve's copy reached by a test, and it is now
+  `axis_coords_after` — which is also the only form of it a test can reach without drawing the panel.
 - **`edit_valve` reports whether it committed, and no caller may predict that for itself** (§15 D524).
   A caller that has to act *after* the commit — `inspector::valve_slot`, whose two retargets move a
   Group Colors row's key onto the colour it just became and follow the picker off a mixed row that has
@@ -8614,7 +8617,10 @@ alternatives. **Word break and Long words dim under `NoWrap`** — that mode rea
 `TextWrapMode(NoWrap)` and suppresses line breaking outright, so both are rules about breaks that
 cannot happen. Dimmed and *not reset*, the same rule `stroke_rule` follows for Join, so a stored
 `word_break` survives a trip through `NoWrap` and back; and the gate stops there, because hard breaks
-still break under `NoWrap` and the paragraph spacing and indent controls must go on working. A whole
+still break under `NoWrap` and the paragraph spacing and indent controls must go on working.
+`wrap_gate_tests` pins all three clauses — the two dead controls, the stored value surviving, and the
+Wrap strip itself still answering a click, which is the control without which the other assertions
+pass against a section nobody drew (§15 D804). A whole
 row of dimmed cells reads as "this does not apply" where a dimmed dropdown just reads as broken.
 
 **`ui::slider` is hand-painted, like `segmented` and `switch`.** The design specifies a 3pt rail, an 11pt

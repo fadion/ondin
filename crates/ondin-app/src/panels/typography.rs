@@ -2100,10 +2100,7 @@ impl OndinApp {
         if !subject.para_ragged(ParaAttrKind::Marker) && current == next {
             return;
         }
-        let mut attrs = vec![ParaAttr::Marker(next)];
-        if next.is_some() && shown.indent_start.resolve(subject.font_size()) == 0.0 {
-            attrs.push(ParaAttr::IndentStart(Length::Px(DEFAULT_LIST_GUTTER)));
-        }
+        let attrs = marker_attrs(next, shown.indent_start, subject.font_size());
         self.apply_para_attrs(subject, attrs);
     }
 
@@ -2671,11 +2668,8 @@ impl OndinApp {
 
     /// Write one axis coordinate, if it moved.
     ///
-    /// `clear_at_default` drops the coordinate rather than writing the font's own
-    /// value into it — which is what "reset" means and what keeps the file from
-    /// accumulating settings that say nothing. It is **off for `opsz`**, where the
-    /// absence of a coordinate is the Auto state and dropping one would silently
-    /// change the mode.
+    /// The decision is [`axis_coords_after`]; this is the arm that commits it
+    /// outright, and [`Self::axis_valve`] is the arm that valves it.
     fn write_axis(
         &mut self,
         subject: &TypeSubject,
@@ -2688,14 +2682,7 @@ impl OndinApp {
         if value == current {
             return;
         }
-        let mut next: Vec<AxisSetting> = coords
-            .iter()
-            .copied()
-            .filter(|a| a.tag != axis.tag)
-            .collect();
-        if !(clear_at_default && value == axis.default) {
-            next.push(AxisSetting::new(axis.tag, value));
-        }
+        let next = axis_coords_after(axis, coords, value, clear_at_default);
         self.apply_char_attrs(subject, vec![CharAttr::Variations(next)]);
     }
 
@@ -2719,14 +2706,7 @@ impl OndinApp {
         value: f64,
         clear_at_default: bool,
     ) {
-        let mut next: Vec<AxisSetting> = coords
-            .iter()
-            .copied()
-            .filter(|a| a.tag != axis.tag)
-            .collect();
-        if !(clear_at_default && value == axis.default) {
-            next.push(AxisSetting::new(axis.tag, value));
-        }
+        let next = axis_coords_after(axis, coords, value, clear_at_default);
         self.char_valve(resp, subject, CharAttr::Variations(next));
     }
 
@@ -4084,6 +4064,61 @@ fn mixed_text(d: egui::DragValue<'_>, mixed: bool) -> egui::DragValue<'_> {
     d
 }
 
+/// What picking list marker `next` writes — the marker, and a gutter for it if the
+/// paragraph has none (§15 D804).
+///
+/// **Turning a marker on opens a gutter once.** A marker is right-aligned on the
+/// paragraph's start edge, so with no indent it draws outside the box — an honest
+/// reading of "no gutter" and a poor first impression. ⚠️ **Only where the indent
+/// resolves to zero**, so a paragraph that already has one keeps it, and turning a
+/// marker off never touches the indent at all: a gutter the user can see is theirs
+/// once it exists.
+///
+/// ⚠️ **The zero test is on the *resolved* value, which is why `font_size` is a
+/// parameter** and not a detail — an `Em(0.0)` indent is zero at every size, but so
+/// is `Px(0.0)`, and the field can hold either (§15 D537).
+fn marker_attrs(next: Option<ListMarker>, indent_start: Length, font_size: f64) -> Vec<ParaAttr> {
+    let mut attrs = vec![ParaAttr::Marker(next)];
+    if next.is_some() && indent_start.resolve(font_size) == 0.0 {
+        attrs.push(ParaAttr::IndentStart(Length::Px(DEFAULT_LIST_GUTTER)));
+    }
+    attrs
+}
+
+/// The variation coordinates after setting `axis` to `value` — the whole of what
+/// `clear_at_default` decides (§15 D804).
+///
+/// `clear_at_default` **drops** the coordinate rather than writing the font's own
+/// value into it, which is what "reset" means and what keeps the file from
+/// accumulating settings that say nothing. It is **off for `opsz`**, where the
+/// absence of a coordinate is the Auto state and dropping one would silently
+/// change the mode — so for that axis a default value is written out like any
+/// other.
+///
+/// 🚨 **This was the same eight lines in two places** — `OndinApp::write_axis`
+/// and `OndinApp::axis_valve` — and only the valve's copy was reached by a test
+/// (§15 D569). `roadmap.md` warned about exactly that shape: *"a grep for the
+/// name reads as though the decision were reached"*. It also listed this as a
+/// decision needing *"a live text session and a laid-out panel"*, which was true
+/// of its two callers and never of the rule: every operand here is a parameter,
+/// so the lift §15 D269 prescribes reaches it after all.
+fn axis_coords_after(
+    axis: &FontAxis,
+    coords: &[AxisSetting],
+    value: f64,
+    clear_at_default: bool,
+) -> Vec<AxisSetting> {
+    let mut next: Vec<AxisSetting> = coords
+        .iter()
+        .copied()
+        .filter(|a| a.tag != axis.tag)
+        .collect();
+    if !(clear_at_default && value == axis.default) {
+        next.push(AxisSetting::new(axis.tag, value));
+    }
+    next
+}
+
 /// The one value to show for a set of attribute values that are **all zero
 /// lengths**, whatever units they are in — or `None` when they are not (§15 D799).
 ///
@@ -4106,6 +4141,15 @@ fn mixed_text(d: egui::DragValue<'_>, mixed: bool) -> egui::DragValue<'_> {
 /// its suffix off whatever comes back, so returning `Px(0.0)` for a document the
 /// user had set to `%` would flip the chip back to `px` under them — which is
 /// D537's own symptom arriving by a new road.
+///
+/// ⚠️ **This doc was stolen and put back on 2026-09-19** (§15 D804). Inserting
+/// `marker_attrs` above it, anchored on this `fn` line rather than on the line
+/// above the block, moved all of the above onto that function and left this one
+/// bare — `CLAUDE.md`'s insertion-anchor trap, done by a session that had spent
+/// the day on this class, and green through every gate. ⚠️ **The running count of
+/// this class lives in `CLAUDE.md` and deliberately not in a comment** (§15 D697);
+/// what caught this one was the neighbour grep run once more at the end, which is
+/// the argument for running it as a routine rather than on suspicion.
 fn agreed_zero<A>(values: Vec<A>, length_of: impl Fn(&A) -> Option<Length>) -> Option<A> {
     values
         .iter()
@@ -5575,8 +5619,8 @@ const MAX_TRACKING_PCT: f64 = 200.0;
 mod tests {
     use super::*;
 
-    /// **Three of the six decisions `[S6.2-L6-07]` broke without a single test
-    /// noticing** (§15 D624).
+    /// **The six decisions `[S6.2-L6-07]` broke without a single test noticing**
+    /// — five of them pinned here, the sixth in `wrap_gate_tests` (§15 D624, D804).
     ///
     /// 🚨 **37 of 38 production items in the panel's write half had zero test
     /// callers** — `char_valve`, the panel's central write seam with fifteen
@@ -5591,12 +5635,17 @@ mod tests {
     /// `decoration_section`, and the bold reading out of `type_weight_toggles`.
     /// The third, `matches_variant`, was already free and simply had no caller.
     ///
-    /// ⚠️ **Three of the six are still unreached and this test does not pretend
-    /// otherwise**: `list_section`'s gutter default, `wrap_section`'s
-    /// `!= WrapMode::NoWrap` gate and `write_axis`'s `clear_at_default` all sit
-    /// inside `&mut self` bodies that need a live text session and a laid-out
-    /// panel to enter, which is a fixture rather than a lift. They are named here
-    /// so the next reader does not take this module for coverage of the six.
+    /// 🚨 **The other three were called out of reach and two of them were not**
+    /// (§15 D804). `list_section`'s gutter default, `wrap_section`'s
+    /// `!= WrapMode::NoWrap` gate and `write_axis`'s `clear_at_default` were named
+    /// as sitting inside `&mut self` bodies needing a live text session and a
+    /// laid-out panel — *a fixture rather than a lift*. That was true of the wrap
+    /// gate, which `wrap_gate_tests` drives with real pointer events. The other two
+    /// read nothing but their parameters: what needed the panel was their
+    /// **callers**, so `marker_attrs` and `axis_coords_after` lifted like the rest
+    /// and are pinned in this module. ⚠️ **`clear_at_default` was also the same
+    /// eight lines in two places**, only `axis_valve`'s copy covered (§15 D569),
+    /// which is what made a grep for the name read as coverage.
     mod lifted_decisions {
         use super::*;
 
@@ -5756,6 +5805,151 @@ mod tests {
                 false,
                 &[at(wght, 123.0), at(opsz, 99.0)]
             ));
+        }
+
+        /// **Flip 5, and the gutter is the second of three said to need a
+        /// fixture** (§15 D804).
+        ///
+        /// ⚠️ **Turning a marker *off* must not touch the indent**, which is the
+        /// asymmetry the rule's own doc states and the one an "if the indent is
+        /// zero, set it" reading would lose. A gutter the user can see is theirs
+        /// once it exists.
+        ///
+        /// ⚠️ **The zero test is on the resolved value**, so an `Em(0.0)` indent
+        /// counts as no gutter exactly as `Px(0.0)` does — the two are different
+        /// values to the model and the same ink (§15 D537, D799), and a test that
+        /// only tried `Px` would pass against a predicate comparing variants.
+        ///
+        /// ⚠️ **Flipped**: dropping the `next.is_some() &&` writes a gutter when
+        /// the marker is turned off — red on the third assertion. Dropping the
+        /// `== 0.0` test writes one over an indent the user set — red on the
+        /// second. Neither is caught by the other.
+        #[test]
+        fn a_marker_opens_a_gutter_only_when_there_is_none() {
+            let dot = Some(ListMarker::Disc);
+            let em = 16.0;
+
+            assert_eq!(
+                marker_attrs(dot, Length::ZERO, em),
+                vec![
+                    ParaAttr::Marker(dot),
+                    ParaAttr::IndentStart(Length::Px(DEFAULT_LIST_GUTTER))
+                ],
+                "a marker over no indent opens a gutter for itself"
+            );
+            assert_eq!(
+                marker_attrs(dot, Length::Px(40.0), em),
+                vec![ParaAttr::Marker(dot)],
+                "and leaves an indent the paragraph already has"
+            );
+            assert_eq!(
+                marker_attrs(None, Length::ZERO, em),
+                vec![ParaAttr::Marker(None)],
+                "turning the marker off writes no gutter — the rule is one-way"
+            );
+            assert_eq!(
+                marker_attrs(dot, Length::Em(0.0), em),
+                vec![
+                    ParaAttr::Marker(dot),
+                    ParaAttr::IndentStart(Length::Px(DEFAULT_LIST_GUTTER))
+                ],
+                "and a zero in the other unit is still no gutter — the test is on \
+                 the resolved value, not on the variant"
+            );
+        }
+
+        /// **Flip 4, and it was said to be out of reach** (§15 D804).
+        ///
+        /// `roadmap.md` listed `write_axis`'s `clear_at_default` with two other
+        /// decisions as needing *"a live text session and a laid-out panel to
+        /// enter"* — *"a fixture rather than a lift"*. That was true of its
+        /// **callers** and never of the rule: every operand is a parameter, so
+        /// D269's move reaches it and this is the lift, not a fixture.
+        ///
+        /// 🚨 **It was also eight lines in two places**, `write_axis` and
+        /// `axis_valve`, of which only the valve's copy was covered (§15 D569) —
+        /// the exact shape the roadmap's own ⚠️ warns about, *"a grep for the
+        /// name reads as though the decision were reached"*. Both call
+        /// `axis_coords_after` now, so one assertion covers both arms.
+        ///
+        /// ⚠️ **`opsz` is the case the rule exists for and it is asserted first.**
+        /// For every other axis a value equal to the font's default is dropped,
+        /// because a stored coordinate that says what the font already says is
+        /// noise in the file. For `opsz` the *absence* of a coordinate is the Auto
+        /// state, so dropping one would silently change the mode rather than reset
+        /// a value — which is why the flag exists at all rather than the rule
+        /// being unconditional.
+        ///
+        /// ⚠️ **Flipped three ways, all run, and each lands on a different
+        /// assertion** — which is the argument for four of them rather than one.
+        ///
+        /// - Dropping the `clear_at_default &&` so the rule is unconditional:
+        ///   red on the **`opsz`** assertion, `[]` against a written coordinate.
+        ///   That is the only assertion that can see this flip, and it is the one
+        ///   saying the flag has a job at all.
+        /// - Dropping the `value == axis.default` so the flag alone decides: red
+        ///   on the **second** assertion, "any other value is written". ⚠️ The
+        ///   prediction said the first; the first is about a *default* value,
+        ///   which this flip still drops, so it stays green.
+        /// - Inverting the `!` so only defaults are kept: red on the **first**.
+        ///
+        /// So no two of the three share a site, and dropping any assertion here
+        /// would let one of the three through.
+        ///
+        /// ⚠️ **And the filter is asserted, not just the push.** Setting an axis
+        /// that is already present must *replace* it and not append a second
+        /// coordinate for the same tag, which no assertion about length alone
+        /// would catch if the filter also dropped a neighbour.
+        #[test]
+        fn a_default_axis_value_is_dropped_except_on_opsz() {
+            let wght = Tag::parse("wght").unwrap();
+            let opsz = Tag::parse("opsz").unwrap();
+            let at = |tag: Tag, value: f64| AxisSetting { tag, value };
+            let axis = |tag: Tag, default: f64| FontAxis {
+                tag,
+                min: 0.0,
+                default,
+                max: 1000.0,
+                name: tag.to_string(),
+                hidden: false,
+            };
+
+            let w = axis(wght, 400.0);
+            assert_eq!(
+                axis_coords_after(&w, &[], 400.0, true),
+                Vec::new(),
+                "a value equal to the font's own default is dropped, not written — \
+                 that is what reset means"
+            );
+            assert_eq!(
+                axis_coords_after(&w, &[], 700.0, true),
+                vec![at(wght, 700.0)],
+                "and any other value is written"
+            );
+
+            // **The `opsz` case, and the reason the flag is a parameter.**
+            let o = axis(opsz, 14.0);
+            assert_eq!(
+                axis_coords_after(&o, &[], 14.0, false),
+                vec![at(opsz, 14.0)],
+                "for optical size the absence of a coordinate is the Auto state, \
+                 so a default value is written out like any other — dropping it \
+                 would change the mode rather than reset the value"
+            );
+
+            // **Replacement, not accumulation.**
+            let before = [at(wght, 100.0), at(opsz, 14.0)];
+            let after = axis_coords_after(&w, &before, 700.0, true);
+            assert_eq!(
+                after,
+                vec![at(opsz, 14.0), at(wght, 700.0)],
+                "the axis being set is replaced and its neighbour is untouched"
+            );
+            assert_eq!(
+                axis_coords_after(&w, &before, 400.0, true),
+                vec![at(opsz, 14.0)],
+                "and clearing it removes the coordinate while leaving the rest"
+            );
         }
     }
 
@@ -10236,6 +10430,186 @@ mod feature_mixed_tests {
             per_run(&app, id, tag("liga")),
             vec![0, 0],
             "control: and the tag that was named really did change in both runs"
+        );
+    }
+}
+
+#[cfg(test)]
+mod wrap_gate_tests {
+    //! **Word break and Long words are dead under `NoWrap`** (§15 D804).
+    use super::*;
+    use crate::app::OndinApp;
+    use crate::theme;
+    use ondin_core::{Document, IdSource, NodeId, Operation, Transaction};
+
+    const AREA: egui::Rect = egui::Rect {
+        min: egui::pos2(0.0, 0.0),
+        max: egui::pos2(400.0, 600.0),
+    };
+
+    fn app_wrapping(wrap: WrapMode) -> (egui::Context, OndinApp, NodeId) {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(1);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let id = ids.mint();
+        doc.apply(&Transaction(vec![Operation::CreateNode {
+            id,
+            parent: root,
+            index: 0,
+            kind: ondin_core::NodeKind::Text {
+                content: "gypsy".into(),
+                style: Box::default(),
+                spans: CharSpans::default(),
+                para_spans: ParaSpans::default(),
+                paragraph: ParagraphStyle {
+                    wrap,
+                    ..ParagraphStyle::default()
+                },
+                block: BlockStyle::default(),
+                sizing: TextSizing::Auto,
+                on_path: None,
+                on_path_flip: false,
+                on_path_offset: 0.0,
+            },
+            transform: None,
+            name: None,
+        }]))
+        .expect("a text node");
+        app.session.adopt_document(doc, None);
+        app.session.selection.set_one(id);
+        (ctx, app, id)
+    }
+
+    fn frame(ctx: &egui::Context, app: &mut OndinApp, id: NodeId, events: Vec<egui::Event>) {
+        let subject = TypeSubject::of(app, id).expect("a text node has a subject");
+        let input = egui::RawInput {
+            screen_rect: Some(AREA),
+            events,
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input, |ui| {
+            ui.set_width(MENU_INNER);
+            app.wrap_section(ui, &subject);
+        });
+    }
+
+    fn para(app: &OndinApp, id: NodeId) -> ParagraphStyle {
+        match app.session.doc.get(id).map(|n| n.kind()) {
+            Some(ondin_core::NodeKind::Text { paragraph, .. }) => paragraph.clone(),
+            other => panic!("the fixture is a text node, got {other:?}"),
+        }
+    }
+
+    fn click(ctx: &egui::Context, app: &mut OndinApp, id: NodeId, at: egui::Pos2) {
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(ctx, app, id, Vec::new());
+        frame(ctx, app, id, vec![egui::Event::PointerMoved(at)]);
+        frame(ctx, app, id, vec![button(true)]);
+        frame(ctx, app, id, vec![button(false)]);
+        frame(ctx, app, id, Vec::new());
+    }
+
+    /// Where the three strips sit with the section drawn at `MENU_INNER` in a
+    /// 400×600 area, measured by a 4pt sweep over x ∈ {40, 120, 200, 280},
+    /// y ∈ [0, 260]. Each is a cell that is *not* the current one, so a click
+    /// there has something to do.
+    ///
+    /// ⚠️ **The Wrap strip reads off-then-on, so its left cell is `NoWrap`** —
+    /// `WrapMode::ALL` puts *"the cell that does nothing"* first. Naming these the
+    /// other way round is what the first draft did, and the failure was the
+    /// honest one: a click on the cell already current changes nothing, and the
+    /// "the mode switched" assertion caught it.
+    const WRAP_OFF: egui::Pos2 = egui::pos2(120.0, 30.0);
+    const WRAP_ON: egui::Pos2 = egui::pos2(200.0, 30.0);
+    const WORD_BREAK_BREAK_ALL: egui::Pos2 = egui::pos2(120.0, 84.0);
+    const LONG_WORDS_BREAK_WORD: egui::Pos2 = egui::pos2(120.0, 124.0);
+
+    /// **`NoWrap` makes Word break and Long words dead, and nothing else**
+    /// (§15 D804).
+    ///
+    /// The section's own doc states the rule and its boundary: both controls are
+    /// *"rules about breaks that cannot happen"* under `NoWrap`, dimmed and **not
+    /// reset**, while *"hard breaks still break … so the paragraph spacing and
+    /// indent controls in the tab beside this one go on working and must not be
+    /// caught by the same condition."* `roadmap.md` listed this among three
+    /// decisions reachable by no test, needing *"a live text session and a
+    /// laid-out panel"* — which is right, and is what this is.
+    ///
+    /// 🚨 **The control is the whole test.** Every assertion under `NoWrap` is
+    /// that a click changed *nothing*, which is exactly what a section that was
+    /// never drawn, or a coordinate that missed, also produces. So the same
+    /// fixture clicks the Wrap strip itself — the one control the gate must
+    /// **not** catch — and requires it to still work. Without that, this passes
+    /// against an empty `ui`.
+    ///
+    /// ⚠️ **Dimmed and not reset is asserted too.** The stored `word_break`
+    /// survives the trip: it is set under `Wrap`, the mode is switched to
+    /// `NoWrap`, and the value is still there. A gate that cleared the fields
+    /// instead of disabling them would satisfy every "the click did nothing"
+    /// assertion and still lose the user's setting.
+    ///
+    /// ⚠️ **Flipped**: removing the `if !wraps { ui.disable(); }` makes the two
+    /// `NoWrap` click assertions red — Word break first. Inverting it to
+    /// `if wraps` instead makes the **`Wrap`** half red, at the first assertion,
+    /// which is the half that proves the coordinates are live at all.
+    #[test]
+    fn nowrap_kills_word_break_and_long_words_and_nothing_else() {
+        // The positive half: with wrapping on, both strips take a click.
+        let (ctx, mut app, id) = app_wrapping(WrapMode::Wrap);
+        click(&ctx, &mut app, id, WORD_BREAK_BREAK_ALL);
+        assert_eq!(
+            para(&app, id).word_break,
+            WordBreak::BreakAll,
+            "with wrapping on, Word break takes a click — if this fails the \
+             coordinate is wrong and the negative half below proves nothing"
+        );
+        click(&ctx, &mut app, id, LONG_WORDS_BREAK_WORD);
+        assert_eq!(
+            para(&app, id).overflow_wrap,
+            OverflowWrap::BreakWord,
+            "and so does Long words"
+        );
+
+        // **Dimmed, not reset**: switching to NoWrap keeps what was stored.
+        click(&ctx, &mut app, id, WRAP_OFF);
+        assert_eq!(para(&app, id).wrap, WrapMode::NoWrap, "the mode switched");
+        assert_eq!(
+            para(&app, id).word_break,
+            WordBreak::BreakAll,
+            "and the stored value survived the trip — dimmed is not reset"
+        );
+
+        // The negative half, on a fixture that starts in the mode.
+        let (ctx, mut app, id) = app_wrapping(WrapMode::NoWrap);
+        let before = para(&app, id);
+        click(&ctx, &mut app, id, WORD_BREAK_BREAK_ALL);
+        assert_eq!(
+            para(&app, id).word_break,
+            before.word_break,
+            "under NoWrap a Word break click reaches nothing"
+        );
+        click(&ctx, &mut app, id, LONG_WORDS_BREAK_WORD);
+        assert_eq!(
+            para(&app, id).overflow_wrap,
+            before.overflow_wrap,
+            "and neither does a Long words click"
+        );
+
+        // 🚨 **The control.** The gate must stop at those two.
+        click(&ctx, &mut app, id, WRAP_ON);
+        assert_eq!(
+            para(&app, id).wrap,
+            WrapMode::Wrap,
+            "the Wrap strip itself is outside the gate and still works — without \
+             this assertion the two above pass against a section nobody drew"
         );
     }
 }

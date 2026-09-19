@@ -7,7 +7,7 @@ documents, and is untracked.
 | File | Holds |
 | --- | --- |
 | `docs/architecture.md` | The design and the invariants. **Source of truth.** ~11,800 lines. |
-| `docs/decisions.md` | **§15** — every deviation from that design, **D1–D805**, each with a verdict. ~45,800 lines. |
+| `docs/decisions.md` | **§15** — every deviation from that design, **D1–D806** with no gaps, each with a verdict. ~46,100 lines. |
 | `docs/roadmap.md` | Open work, decided non-goals, parked decisions, post-v1. |
 | `docs/shortcuts.md` | The whole keymap — bound, unbound and agreed. |
 | `docs/context-menus.md` | The context-menu spec and its own deviation ledger. |
@@ -60,12 +60,15 @@ routing the write through it is the cheapest way to keep this true.
 resolves — in `docs/decisions.md`.
 
 **Take the next free number from §15.0's *last index line*, plus one.** Not the entry
-count (two numbers, **D476 and D477**, are cited from `crates/` with no entry and have
-been for twenty-plus sessions). Not the file's own header prose, which has gone stale
+count — which happens to agree today and did not for twenty-odd sessions, **D476 and
+D477** having been cited from `crates/` with no entry behind them that whole time; they
+were reconstructed on 2026-09-19 and the two figures met. **The agreement is a coincidence
+of one day, not a rule**, and the moment a number is typed into a comment ahead of its
+entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 803 index rows, 803 body headings, next free
-D806** — but trust the procedure over any number written down here, including that one.
+anywhere cited either. **The live figures: 806 index rows, 806 body headings, next free
+D807** — but trust the procedure over any number written down here, including that one.
 ⚠️ **`decisions.md`'s own header carried that same sentence and it was deleted on 2026-09-19
 rather than corrected**, because a file that names its own next free number is a second copy
 of §15.0's last index line and it is the copy that rots. This table is the third copy; it
@@ -95,8 +98,24 @@ nothing. Put the number on the doc of whatever a reader meets the question at.
 grep -rhoE 'D[0-9]{1,3}\b' crates/ --include=*.rs | sort -u
 ```
 
-700 distinct numbers today, every one resolving except D476 and D477. Three separate
-checks, and each catches something the others cannot:
+700 distinct numbers today, and **every one of them resolves** — the first clean reading
+in twenty-odd sessions, D476 and D477 having been reconstructed from their citation sites
+on 2026-09-19 (§15 D806's neighbours; both entries say in their first line that they are
+reconstructions). ⚠️ **Do not read a clean census as the steady state.** It has been dirty
+far longer than it has been clean, it goes dirty the moment a number is typed into a
+comment ahead of its entry, and check 2 below is the *only* thing that sees that.
+
+🚨 **And a number resolving is now the only thing about a citation that can be checked.**
+`.git` was reset on 2026-09-16, so **every commit sha this project's documents cite is
+dangling**: measured 2026-09-19 over `decisions.md`, `roadmap.md` and `architecture.md`,
+**25 distinct backticked shas and not one resolves**, several of them inside §15 verdict
+parentheses. `review/`'s fix logs name a commit per finding on top of that, and `review/`
+is gitignored. The sieve was 7–10 hex characters with a letter in them, so **25 is a
+floor**. They are honest history and they stand — the repair is not to rewrite two dozen
+parentheses but to know that *"Fixed 2026-09-10 across `07db506`"* is a date you can use
+and a sha you cannot. `decisions.md`'s header carries the long form.
+
+Three separate checks, and each catches something the others cannot:
 
 1. **Set-difference against the previous run.** Never compare totals — a count that moved
    by one is equally consistent with one gained, and with two gained and one silently
@@ -198,7 +217,7 @@ find crates -path '*/src/*' -name '*.rs' | xargs wc -l | awk '$1>1000 && $2!="to
 ```
 
 **40** modules over a thousand lines, `inspector.rs` at 24,801 and `canvas.rs` at 21,673,
-against `decisions.md`'s 45,828 and `architecture.md`'s 11,895.
+against `decisions.md`'s 46,104 and `architecture.md`'s 11,905.
 
 ⚠️ **On Windows a scripted rewrite also re-decides the line endings.** A three-line Python
 `read()`/`replace()`/`write()` used for a *flip-check* — the most tempting case, because

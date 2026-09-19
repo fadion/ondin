@@ -6778,7 +6778,10 @@ gestures still armed and outline still drawn with the controls gone. **That one 
 clear and `OndinApp::a_popover_is_open` are two lists rather than one**: the lane test holds the six
 popovers *including* the image card, the clear holds five of them plus the dropdown slot and the
 picker, and a shared list would have to carry the exception — which is how a member comes to be
-quietly excluded from one of the two (§15 D533). Two consequences are not obvious. The release
+quietly excluded from one of the two (§15 D533). **There are three lists since 2026-09-19** (§15
+D801): `OndinApp::a_popover_owns_escape` is the lane's six minus the same card, for the same reason
+pointing the same way — `Escape` is how image editing is *left*, so a popover gate holding that key
+would swallow the way out of the mode. Two consequences are not obvious. The release
 that *opens* a menu would otherwise read as the click that dismisses it — D82's one-frame bug again,
 and neither of `dropdown`'s exemptions catches it, since `any_click()` counts the secondary button
 and a context menu has no head — so `ContextMenu::just_opened` makes the opening frame skip the
@@ -6814,14 +6817,19 @@ out one. ⚠️ **`TopMenu` was the one with no arm at all**, so one `Escape` ov
 menu closed the menu **and** dropped the tool to Select — R3's failure exactly, in a region R3 was never
 extended to. ⚠️ **`egui_wants_keyboard_input` is not a substitute for any of these**: a dropdown opened
 by clicking its head leaves `focused() == None`, so egui does not think anything wants the keyboard.
-⚠️ **Those four are the doors that *read* the key, which is not the same as every floating thing R4
-knows about**: the five inspector popovers are in the one-slot set above and are not in that
-enumeration. **Three of them do read it** — `type_menu`, `stroke_menu` and `effect_menu` each clear
-themselves on `key_pressed(Escape)` in their own popup — which is how §15 D533's second consequence
-worked, one press taking the context menu and the effects popover together while the popover still
-survived a right-click. **The Export card's two read no key at all.** What is still unmeasured is
-whether reading it *stops* the ladder paying out underneath, which is the question `roadmap.md`
-carries; the enumeration above is of mechanisms found, not an audit.
+⚠️ **Those four were the doors that *read* the key, and it is nine since 2026-09-19** (§15 D801). The
+five popovers R4 already knew about — `type_menu`, `stroke_menu`, `effect_menu`, `export_menu` and
+`export_row_open` — were outside the enumeration because nobody had measured them, and **all five were
+breaking the rule, in the two different ways the question predicted**. The three inspector popovers
+cleared themselves on `key_pressed(Escape)` in their own popup and **did not stop the ladder**, so one
+press closed a popover and dropped the tool — which is also how §15 D533's second consequence worked,
+one press taking the context menu and the effects popover together. **The Export card's two read no
+key at all**, so `Escape` left them up *and* paid out a rung: the one thing it should not, and none of
+the thing it should. The mechanism now is a fifth one, `OndinApp::a_popover_owns_escape` gating an arm
+in `update` whose **body is empty** — the popovers still close themselves later in the frame, and all
+the arm removes is the second thing the press was doing. ⚠️ **It gates `Escape` alone and not the
+keyboard**: a modal owns every key because the document behind it cannot be seen, and a popover sits
+over a canvas the user is still looking at.
 
 **The chrome is one row type for both surfaces.** `ui::MenuRow` adds an accelerator column, a checked
 state, a destructive tint and a dimmed-but-hoverable state to what `menu_item` drew, and `menu_item`
@@ -7762,9 +7770,13 @@ as of one, so blanking them would be a second wrong answer in the other directio
 menu is a second popover holding what belongs to no row — presets, copy/paste of a whole list, the
 folder rule, and re-export-on-save. **The two are mutually exclusive**, unlike the inspector's other
 popovers: they hang from one card a few points apart, so both open is one covering the other.
-**Both are in the lane and therefore in both of the sets that lane has** — `OndinApp::a_popover_is_open`,
-so the detached picker is pushed clear of them, and R4's clear, so a right-click dismisses them.
-⚠️ **They were in neither until 2026-09-08** (§15 D533): each is anchored at `POPOVER_W`, which is
+**Both are in the lane and therefore in all three of the sets that lane has** —
+`OndinApp::a_popover_is_open`, so the detached picker is pushed clear of them; R4's clear, so a
+right-click dismisses them; and `OndinApp::a_popover_owns_escape`, so `Escape` closes them without
+paying out a rung of the ladder underneath (§15 D801). ⚠️ **These two read no key at all until
+2026-09-19**, so `Escape` left them standing and dropped a rung behind them; one `key_pressed(Escape)`
+block at the foot of `export_buttons` clears both flags, the two being mutually exclusive anyway.
+⚠️ **They were in neither of the first two until 2026-09-08** (§15 D533): each is anchored at `POPOVER_W`, which is
 the width the lane's own clearance is computed from, so a picker opened after one of them landed
 underneath it with 236 of its 240 points inside the popover's span.
 **Over a multi-selection the header's `+` stays live where Fill's goes inert**, and over a selection

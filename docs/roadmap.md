@@ -867,26 +867,6 @@ ever wants it, the order should become a function rather than a third copy.
   is the decision rather than the work: either `text_insert_mode` grows the four chords, finishing the
   session the way the buttons do, or the disagreement is recorded as deliberate and the buttons are the
   only door.
-- **Does every floating thing answer `Escape`, and does answering it *stop* the ladder? Half of this
-  is now read off the code and neither half is measured.** §15 D527 wrote up the rule that a press
-  dismissing a floating thing is spent on it, and named the four doors that *read* the key — the
-  context menu, the top-bar dropdowns, the three modals and the colour picker. R4's one-slot set is
-  wider than that, and §15 D533 narrowed the question to two halves. **`type_menu`, `stroke_menu` and
-  `effect_menu` each clear themselves on `key_pressed(Escape)` in their own popup**, so for those the
-  question is whether the ladder pays out underneath on the same press — nothing gates
-  `input::resolve` on an open popover the way it is gated on a menu or a modal, and D533's second
-  consequence is one press taking two things. **The Export card's two popovers read no key at all**,
-  which is D527's failure shape in a region nobody has stood in: `Escape` should leave the popover up
-  and pay out a rung. Both are candidate findings, and the first move is still the measurement:
-  **measure before writing anything down** — D527's own dropdown case was red at the *tool* and green
-  at the *menu*, so the assertion has to be on the state that was supposed to survive.
-  ⚠️ ~~**And the enumeration is short by one screen** (§15 D558): the library's *All projects ⌄*
-  dropdown reads no key at all and is in none of the guards.~~ **Measured and closed 2026-09-08 —
-  §15 D578.** Every symptom the bullet predicted was real, with the ⋮ popup as the positive control in
-  the same probe: `Escape` left the dropdown open and cleared the card cursor behind it, `Delete`
-  opened the confirmation underneath it, an arrow stepped the cursor behind it. It shares the ⋮'s
-  early return through `library_menu_open()`. **What is left open above is the editor's side alone** —
-  the three type popovers and the Export card's two — and the measurement rule still stands for them.
 
 ## Now · Text
 

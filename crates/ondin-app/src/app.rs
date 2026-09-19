@@ -2297,6 +2297,17 @@ impl eframe::App for OndinApp {
             // card by name, with a note that `OndinApp::ui` draws that card and
             // `dashboard.rs` knows nothing about it (D383). The same question was
             // answered on one screen and not the other.
+        } else if self.a_popover_owns_escape() && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            // **The press is spent on the popover and must not also pay out a
+            // rung** (§15 D801, D527's rule). Nothing is done here on purpose:
+            // the three inspector popovers close themselves further down the
+            // frame on the same `key_pressed`, and the Export card's two now do
+            // the same. What this arm removes is the *second* thing the press was
+            // doing — dropping the tool, leaving a group, clearing the selection
+            // — which is the state the user could still see behind the popover.
+            //
+            // ⚠️ **It gates `Escape` alone and lets every other key through**,
+            // unlike the modal arm above. See `a_popover_owns_escape`.
         } else {
             for action in input::resolve(&ctx, self.mode, self.prefs.nudge) {
                 self.dispatch(&ctx, action);
@@ -8524,6 +8535,37 @@ impl OndinApp {
             || self.export_menu
             || self.export_row_open.is_some()
             || self.edited_image().is_some()
+    }
+
+    /// Whether an open popover has first claim on an `Escape` press (§15 D801).
+    ///
+    /// **D527's rule — a press that dismisses a floating thing is spent on it —
+    /// applied to the five popovers that were breaking it.** Measured before it
+    /// was written, on a headless app with the tool set to `Rect` so the ladder's
+    /// last rung is observable: `stroke_menu`, `effect_menu` and `type_menu` each
+    /// closed themselves **and** left the tool at `Select`, one press paying out
+    /// twice; `export_menu` and `export_row_open` read no key at all, so `Escape`
+    /// left them up **and** paid out a rung, which is D527's failure shape exactly.
+    ///
+    /// 🚨 **This is [`Self::a_popover_is_open`] minus the image-edit card, and the
+    /// difference is load-bearing rather than tidy.** Image editing is a
+    /// `Tool::ImageEdit`, so *leaving* it is the ladder's own `tool != Select`
+    /// rung — gating `Escape` on it would strand the user in the mode with the
+    /// key that exits it swallowed. **The two sets differ by exactly one member
+    /// for the same reason D533's clear-set does and in the same direction**: the
+    /// image card is what the mode looks like, not a floating thing somebody
+    /// opened over it.
+    ///
+    /// ⚠️ **`Escape` only, not the keyboard.** A modal owns every key because the
+    /// document behind it cannot be seen; a popover is a small control over a
+    /// canvas the user is still looking at, and nothing about it earns `Delete`
+    /// or an arrow. The narrow claim is the one D527 actually makes.
+    fn a_popover_owns_escape(&self) -> bool {
+        self.type_menu.is_some()
+            || self.stroke_menu.is_some()
+            || self.effect_menu.is_some()
+            || self.export_menu
+            || self.export_row_open.is_some()
     }
 
     /// The inspector: a column of individually floating panels over the right of
@@ -15984,6 +16026,228 @@ mod context_menu_rule_tests {
         let mut n = 0;
         walk(&app.session.doc, app.session.doc.root(), &mut n);
         n
+    }
+
+    fn probe_app(ctx: &egui::Context) -> (OndinApp, NodeId) {
+        use ondin_core::{NodeKind, Operation, Stroke, Transaction};
+        let mut app = OndinApp::headless(ctx);
+        let mut ids = ondin_core::IdSource::new(1);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let id = ids.mint();
+        doc.apply(&Transaction(vec![Operation::CreateNode {
+            id,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: ondin_core::kurbo::Size::new(100.0, 100.0),
+                corner_radii: Default::default(),
+            },
+            transform: None,
+            name: None,
+        }]))
+        .expect("a rect");
+        app.session.adopt_document(doc, None);
+        app.session
+            .try_commit(Transaction(vec![
+                Operation::SetStrokes {
+                    id,
+                    strokes: vec![Stroke {
+                        width: 2.0,
+                        ..Default::default()
+                    }],
+                },
+                Operation::SetEffects {
+                    id,
+                    effects: vec![ondin_core::Effect::new(ondin_core::EffectKind::DropShadow(
+                        Default::default(),
+                    ))],
+                },
+                Operation::SetExports {
+                    id,
+                    exports: vec![ondin_core::ExportSpec::new(
+                        ondin_core::ExportFormat::Png,
+                        ondin_core::ExportScale::Times(1.0),
+                    )],
+                },
+            ]))
+            .expect("a stroke, an effect and an export to draw");
+        app.session.selection.set_one(id);
+        (app, id)
+    }
+
+    /// A text node, for the one popover a shape cannot reach.
+    fn probe_text_app(ctx: &egui::Context) -> OndinApp {
+        use ondin_core::{NodeKind, Operation, Transaction};
+        let mut app = OndinApp::headless(ctx);
+        let mut ids = ondin_core::IdSource::new(1);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let id = ids.mint();
+        doc.apply(&Transaction(vec![Operation::CreateNode {
+            id,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Text {
+                content: "hello".into(),
+                style: Box::default(),
+                spans: Default::default(),
+                para_spans: Default::default(),
+                paragraph: Default::default(),
+                block: Default::default(),
+                sizing: ondin_core::TextSizing::Auto,
+                on_path: None,
+                on_path_flip: false,
+                on_path_offset: 0.0,
+            },
+            transform: None,
+            name: None,
+        }]))
+        .expect("a text node");
+        app.session.adopt_document(doc, None);
+        app.session.selection.set_one(id);
+        app
+    }
+
+    /// **One `Escape` closes a popover and pays out no rung of the ladder** — all
+    /// five of them (§15 D801, D527's rule, `roadmap.md`'s *Now · Keyboard*).
+    ///
+    /// The roadmap held this as a question with an instruction attached —
+    /// *"measure before writing anything down"* — because D527's own dropdown
+    /// case was red at the **tool** and green at the **menu**, so the assertion
+    /// has to be on the state that was supposed to survive. Measured first, on a
+    /// headless app with the tool set to `Rect` so the ladder's last rung is the
+    /// thing that moves:
+    ///
+    /// | popover | closed on `Escape`? | ladder paid out? |
+    /// | --- | --- | --- |
+    /// | none — the control | — | **yes**, `Rect` → `Select` |
+    /// | `stroke_menu` | yes | **yes** |
+    /// | `effect_menu` | yes | **yes** |
+    /// | `type_menu` | yes | **yes** |
+    /// | `export_menu` | **no** | **yes** |
+    /// | `export_row_open` | **no** | **yes** |
+    ///
+    /// **Both shapes the roadmap predicted were real, twice each.** The three
+    /// inspector popovers read `key_pressed`, which does not consume, so they
+    /// closed themselves *and* let the press through — D533's second consequence,
+    /// one press taking two things. The Export card's two read no key at all, so
+    /// the press did the one thing it should not and none of the thing it should.
+    ///
+    /// 🚨 **The fixture is what nearly made this wrong.** On a *rect*, `type_menu`
+    /// measured as `up_after = true` — looking exactly like the Export card's
+    /// failure — because a shape draws no Typography panel, so nothing ran the
+    /// handler and the flag merely survived. On a text node it measures the
+    /// opposite. **A popover that nothing is drawing answers every key the same
+    /// way**, which is indistinguishable from ignoring them, and it is why this
+    /// test keeps a `up_before` assertion per case rather than one at the end.
+    ///
+    /// ⚠️ **The control is not optional.** Every assertion here is that the tool
+    /// *did not* change, which is exactly what a broken ladder also produces —
+    /// so without a case that proves `Escape` still pays out when nothing is up,
+    /// the whole test would pass against an `escape` that had stopped working.
+    ///
+    /// ⚠️ **Flipped** three ways, all run.
+    ///
+    /// - **`a_popover_owns_escape`'s arm removed from `update`**: red on
+    ///   `stroke_menu`'s tool assertion, the first popover case.
+    /// - **`a_popover_owns_escape` narrowed to drop `type_menu`**: red on that
+    ///   case alone, with `Select` against `Rect`. The gate is per-popover and
+    ///   nothing else covers any one of the five.
+    /// - **The Export card's new `key_pressed` block removed**: red on
+    ///   `export_menu`'s *closed* assertion. ⚠️ **Whether its tool assertion also
+    ///   goes red is reasoned rather than measured** — the closed assertion
+    ///   panics first and the tool one is never reached. The reasoning:
+    ///   `export_menu` is still `true` under that flip, so
+    ///   `a_popover_owns_escape` still fires and the ladder stays gated. **The
+    ///   two halves are independent** — one arm stops the rung, one block closes
+    ///   the popover — which is the argument for asserting both per case and not
+    ///   one at the end.
+    #[test]
+    fn escape_over_a_popover_closes_it_and_pays_out_no_rung() {
+        use crate::tools::Tool;
+
+        let case = |name: &str,
+                    mut app: OndinApp,
+                    ctx: &egui::Context,
+                    open: &dyn Fn(&mut OndinApp),
+                    up: &dyn Fn(&OndinApp) -> bool| {
+            app.tool = Tool::Rect;
+            // egui resolves widget rects a frame late and the popovers' own
+            // click-away predicates read them, so an unsettled frame dismisses
+            // the popover before the key ever arrives.
+            whole_frame(ctx, &mut app, Vec::new());
+            open(&mut app);
+            whole_frame(ctx, &mut app, Vec::new());
+            assert!(
+                up(&app),
+                "{name}: the fixture is not in the state this case is about — a \
+                 popover nothing draws answers every key the same way"
+            );
+
+            whole_frame(ctx, &mut app, vec![key(egui::Key::Escape)]);
+            assert!(!up(&app), "{name}: Escape closes the popover");
+            assert_eq!(
+                app.tool,
+                Tool::Rect,
+                "{name}: and the press is spent on it — the tool is the rung \
+                 underneath and one press does not pay out two"
+            );
+        };
+
+        let ctx = egui::Context::default();
+        case(
+            "stroke_menu",
+            probe_app(&ctx).0,
+            &ctx,
+            &|a| a.stroke_menu = Some(0),
+            &|a| a.stroke_menu.is_some(),
+        );
+        case(
+            "effect_menu",
+            probe_app(&ctx).0,
+            &ctx,
+            &|a| {
+                let id = a.session.selection.ids()[0];
+                a.effect_menu = Some((id, 0));
+            },
+            &|a| a.effect_menu.is_some(),
+        );
+        case(
+            "type_menu",
+            probe_text_app(&ctx),
+            &ctx,
+            &|a| a.type_menu = Some(crate::app::TypeTab::Character),
+            &|a| a.type_menu.is_some(),
+        );
+        case(
+            "export_menu",
+            probe_app(&ctx).0,
+            &ctx,
+            &|a| a.export_menu = true,
+            &|a| a.export_menu,
+        );
+        case(
+            "export_row_open",
+            probe_app(&ctx).0,
+            &ctx,
+            &|a| a.export_row_open = Some(0),
+            &|a| a.export_row_open.is_some(),
+        );
+
+        // **The control, and it carries the whole test.** Every assertion above
+        // is that the tool did *not* move, which a broken ladder also produces.
+        let mut app = probe_app(&ctx).0;
+        app.tool = Tool::Rect;
+        whole_frame(&ctx, &mut app, Vec::new());
+        whole_frame(&ctx, &mut app, vec![key(egui::Key::Escape)]);
+        assert_eq!(
+            app.tool,
+            Tool::Select,
+            "with nothing open the press reaches the ladder and drops the tool — \
+             without this the five cases above pass against an `escape` that has \
+             stopped working entirely"
+        );
     }
 }
 

@@ -86,6 +86,13 @@ match on `Action::Escape if open_menu != TopMenu::None` in `dispatch`; the three
 answer by a third route (they are gated out of `input::resolve` altogether, §15 D464). ⚠️ **Write the
 rule down where it is general**: three sites arrived at it by three separate fixes, and the second and
 third were only found by somebody reading this paragraph and asking who else it was about.
+⚠️ **A fourth arrived 2026-09-19 by exactly that route** (§15 D801): the question *who else* reached
+the five inspector and Export popovers, and **all five were breaking this rule** — three closing
+themselves and letting the press through to the ladder anyway, two not reading the key at all, so
+`Escape` dropped a rung and left the popover standing. The mechanism is their own again —
+`OndinApp::a_popover_owns_escape` over an arm that does nothing but stop `input::resolve` running.
+**The image-editing card is excluded on R4's own reason**: it is a mode rather than a thing somebody
+opened, and `Escape` is how that mode is left, so a gate holding the key would swallow the way out.
 
 ⚠️ **And R3 was broken by a route the guard at the top of the frame cannot reach** (§15 D533). While
 the effects popover survived R4's clear, one `Escape` over an open context menu closed **both** — the
@@ -1423,11 +1430,14 @@ happened four times.
     this rule five call sites on one screen rather than one. 🚨 **Two doors are still unspent after
     that pass**: the sidebar's accent *New file* button, which is the create-a-document case again,
     and *Recent*'s project cards. Seven doors, five gated — the moral is that this rule is a property
-    of every **act** on a screen and not of the functions a finding happens to name. ⚠️ **The keyboard half is a different question and only half
-    open**: the ⋮ popup blocks the library's keymap and answers `Escape` (§15 D374), while the
-    *filter dropdown* reads no key at all and is in none of the guards, so the arrows and `Escape`
-    still reach the grid behind it. That one is `roadmap.md`'s open *Escape* question rather than
-    anything R4 decides.
+    of every **act** on a screen and not of the functions a finding happens to name.
+    ⚠️ **The keyboard half is a different question**: the ⋮ popup blocks the library's keymap and
+    answers `Escape` (§15 D374), while ~~the *filter dropdown* reads no key at all and is in none of
+    the guards, so the arrows and `Escape` still reach the grid behind it~~. ✅ **Closed 2026-09-08**
+    (§15 D578) — the dropdown shares the ⋮'s early return through `library_menu_open()`, every
+    symptom this predicted having been measured first. ⚠️ **And the editor's half of the same
+    question is closed too** (§15 D801), so *"does every floating thing answer `Escape`, and does
+    answering it stop the ladder"* is no longer in `roadmap.md` for this to point at.
 
 **And one item left this list rather than being struck**, which is worth a line because nothing else
 here has. The **old** item 8 — the row above took its number — recorded that §3's *Export selection…*

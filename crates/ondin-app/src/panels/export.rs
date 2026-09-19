@@ -1507,6 +1507,19 @@ impl OndinApp {
         if let Some(head) = head {
             self.export_menu_popup(ui, &head, subjects);
         }
+        // **Escape closes both of this card's popovers** (§15 D801). They read no
+        // key at all until 2026-09-19, which is §15 D527's failure shape in the
+        // one region nobody had stood in: measured on a headless app, `Escape`
+        // left the popover up **and** paid out a rung of the ladder behind it, so
+        // the press did the one thing it should not and none of the thing it
+        // should. `key_pressed` rather than `consume_key`, matching the three
+        // inspector popovers — `OndinApp::a_popover_owns_escape` is what stops the
+        // ladder seeing it, so consuming here would make the same claim twice and
+        // in the place that is harder to find.
+        if ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.export_menu = false;
+            self.export_row_open = None;
+        }
     }
 
     /// The panel's own menu: what to do with a set of settings, and the two

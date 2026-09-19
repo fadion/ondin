@@ -736,6 +736,16 @@ editing, which are modes you are either in or out of — and only ever goes **de
 because a group is a depth and `Enter` on a group inside a group has an obvious meaning. Coming back
 out of those is the ladder's job, and always was.
 
+**Anything floating takes the press before the ladder sees it, and takes only one thing with it**
+(§15 D527, D801). A context menu, a top-bar dropdown, a modal, the detached colour picker and the
+five inspector and Export popovers each answer `Escape` by closing, and none of them also pays out a
+rung — dismissing something opened by accident must not deselect, leave the group or drop the tool in
+the same keystroke. ⚠️ **The five popovers were the half nobody had measured**: until 2026-09-19 the
+typography, stroke and effects popovers closed *and* dropped a rung, and the Export card's two did
+not read the key at all, so `Escape` dropped a rung and left the popover standing. ⚠️ **Image
+editing's card is deliberately not in that set** — it is a tool, so `Escape` leaving it *is* the
+ladder's own last rung, and gating the key on it would swallow the way out of the mode.
+
 **For image editing `Enter` is now the *only* keyboard door**, since §15 D268 took the letter and the
 rail slot away. That raises what was a convenience to load-bearing: a picture selected with the mouse
 and `Enter`ed is the whole keyboard path in, and `Escape` or a second `Enter` is the path out.

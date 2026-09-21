@@ -747,6 +747,60 @@ fn text_insert_mode(ctx: &egui::Context) -> Vec<Action> {
             );
         }
 
+        // --- the four document chords, which were dead here by omission ---
+        //
+        // 🚨 **`Undo`, `Redo`, `Save` and `Open` were in `normal_mode` alone, and
+        // nothing had decided that** (§15 D815, `[S16.4-L1-02]`). §9.3 records
+        // only that `Mode::TextInsert` is *near* exclusive — *"no **bare** key
+        // resolves to an `Action` there"* — so a chord was never what that rule
+        // was about, and these four fell out of it by accident. Meanwhile the top
+        // bar's buttons for three of them were live the whole time and have
+        // finished the session before acting since §15 D466, so the button and its
+        // own chord disagreed: clicking Undo rewound the document, `Ctrl+Z` 30px
+        // away did nothing.
+        //
+        // **Resolved here and finished at the seam.** `OndinApp::dispatch` calls
+        // `finish_text_first` on the three arms that act on the document, which is
+        // the same spelling the buttons take — so the chord and the button are one
+        // behaviour rather than two that have to be kept equal. `Open` needs
+        // nothing of its own: `go_to_dashboard` has always finished the session.
+        //
+        // ⚠️ **The guards are `normal_mode`'s, term for term**, including every
+        // `!m.shift`: `Ctrl+Shift+O` and `Ctrl+Shift+Y` are unspent and must not
+        // become silent second spellings here, §15 D710 having removed them
+        // there. `Ctrl+Shift+S` is **not** one of D710's eight — `Save` carried
+        // `!m.shift` already, and its comment is the precedent D710 generalised
+        // from — so the guard here is that rule reaching a second mode rather
+        // than a fix repeated. `Ctrl+Shift+Z` is the documented alternate Redo
+        // and is the one arm that must *accept* Shift.
+        // `ctrl_shift_is_not_a_second_spelling_of_ctrl` covers `normal_mode`'s
+        // arms and not these, which is why they are written out rather than
+        // shared — the two modes' lists are deliberately different lengths.
+        for (pressed, action) in [
+            (
+                cmd_only && !m.shift && i.key_pressed(egui::Key::Z),
+                Action::Undo,
+            ),
+            (
+                cmd_only
+                    && ((m.shift && i.key_pressed(egui::Key::Z))
+                        || (!m.shift && i.key_pressed(egui::Key::Y))),
+                Action::Redo,
+            ),
+            (
+                cmd_only && !m.shift && i.key_pressed(egui::Key::S),
+                Action::Save,
+            ),
+            (
+                cmd_only && !m.shift && i.key_pressed(egui::Key::O),
+                Action::Open,
+            ),
+        ] {
+            if pressed {
+                out.push(action);
+            }
+        }
+
         out
     })
 }
@@ -3710,5 +3764,74 @@ mod text_insert_tests {
             )
             .is_empty()
         );
+    }
+
+    /// **The four document chords resolve in a session too**, and they carry
+    /// `normal_mode`'s guards rather than looser ones (§15 D815).
+    ///
+    /// 🚨 **They were dead here by omission, not by a decision.** §9.3 records
+    /// that `Mode::TextInsert` is *near* exclusive — *"no **bare** key resolves to
+    /// an `Action` there"* — which is a rule about bare keys and never about
+    /// chords; `Undo`, `Redo`, `Save` and `Open` simply lived in `normal_mode`
+    /// alone. Meanwhile the top bar's buttons for three of them were live the
+    /// whole time (§15 D466), so a click rewound the document and the chord 30px
+    /// away did nothing.
+    ///
+    /// ⚠️ **The `Shift` half is the load-bearing part of this test.** §15 D710
+    /// removed `Ctrl+Shift+Y` and `Ctrl+Shift+S` as second spellings in
+    /// `normal_mode`, and `ctrl_shift_is_not_a_second_spelling_of_ctrl` sweeps
+    /// *that* function's arms — not these. A copy of a keymap is where a removed
+    /// spelling comes back, so it is swept here separately.
+    ///
+    /// ⚠️ **What this cannot see is the finishing.** The session is ended by
+    /// `OndinApp::dispatch`, one seam further on, because it is a fact about the
+    /// action and not about the key.
+    ///
+    /// **Flip-check, run** by deleting the four-chord loop from
+    /// `text_insert_mode`: fails at the first assertion, `Ctrl+Z`, with `[]`
+    /// against `[Undo]`. Flipped the other way by dropping `!m.shift` from the
+    /// `Save` arm: fails in the Shift sweep at `Ctrl+Shift+S`, which is the
+    /// assertion that would otherwise never have been written.
+    #[test]
+    fn the_four_document_chords_resolve_in_a_session() {
+        let cmd = egui::Modifiers::COMMAND;
+        for (k, want) in [
+            (egui::Key::Z, Action::Undo),
+            (egui::Key::Y, Action::Redo),
+            (egui::Key::S, Action::Save),
+            (egui::Key::O, Action::Open),
+        ] {
+            assert_eq!(
+                actions(Mode::TextInsert, vec![key(k, cmd)], cmd),
+                vec![want],
+                "Ctrl+{k:?} in a session"
+            );
+            // And it is the same answer the canvas gives, which is the whole
+            // claim: one behaviour, not two that have to be kept equal.
+            assert_eq!(
+                actions(Mode::Normal, vec![key(k, cmd)], cmd),
+                vec![want],
+                "control: Ctrl+{k:?} outside one"
+            );
+        }
+
+        // `Ctrl+Shift+Z` is the *other* spelling of Redo and must still be one.
+        assert_eq!(
+            actions(
+                Mode::TextInsert,
+                vec![key(egui::Key::Z, cmd_shift())],
+                cmd_shift()
+            ),
+            vec![Action::Redo],
+            "Ctrl+Shift+Z is Redo in a session as well"
+        );
+
+        // And the three that D710 took away stay away.
+        for k in [egui::Key::Y, egui::Key::S, egui::Key::O] {
+            assert!(
+                actions(Mode::TextInsert, vec![key(k, cmd_shift())], cmd_shift()).is_empty(),
+                "Ctrl+Shift+{k:?} is not a second spelling here either"
+            );
+        }
     }
 }

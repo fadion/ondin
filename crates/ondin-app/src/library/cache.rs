@@ -82,7 +82,13 @@ impl LocalIndex {
     /// collapsed into "no file", and the *write* is what declines. Reading it as
     /// empty is still correct: the app has to run, and an empty Recent list is a
     /// survivable frame. What was not survivable was writing that emptiness back.
+    ///
+    /// Answers an empty index without looking when [`index_is_reachable`] says
+    /// the machine's file is off limits, which is what a test gets (§15 D807).
     pub fn load() -> Self {
+        if !index_is_reachable() {
+            return Self::default();
+        }
         match path() {
             Some(p) => Self::load_from(&p),
             None => Self::default(),
@@ -96,7 +102,10 @@ impl LocalIndex {
     /// `path()` reads `dirs::cache_dir()` with no injection point, so a probe
     /// driving `load` would read — and a probe driving `save` would *overwrite* —
     /// the developer's own library index. §15 D370 exists because a test once
-    /// did exactly that to `prefs.json`.
+    /// did exactly that to `prefs.json`, and §15 D807 because the suite was
+    /// doing it here: [`index_is_reachable`] is why a test now gets nothing out
+    /// of `load` and cannot write through `save` at all, and this pair is still
+    /// where every decision either of them makes is asserted.
     pub fn load_from(path: &std::path::Path) -> Self {
         match std::fs::read(path) {
             // No file yet is the ordinary state of a fresh install, and it is
@@ -120,7 +129,14 @@ impl LocalIndex {
     }
 
     /// Write it, ignoring failure.
+    ///
+    /// ⚠️ **First line, before anything resolves a path**, which is
+    /// `Prefs::save`'s own shape and is load-bearing for the same reason: the
+    /// damage is silent and permanent. See [`index_is_reachable`] (§15 D807).
     pub fn save(&self) {
+        if !index_is_reachable() {
+            return;
+        }
         let Some(path) = path() else { return };
         self.save_to(&path);
     }
@@ -199,6 +215,44 @@ impl LocalIndex {
     }
 }
 
+/// Whether this process may resolve [`path`] at all — `false` under
+/// `cfg(test)`, which is the injection point this module said it did not have
+/// (§15 D807).
+///
+/// 🚨 **Running the suite edited the developer's own *Recent searches*.**
+/// [`LocalIndex::save`] writes `dirs::cache_dir()/ondin/library.json` and
+/// [`LocalIndex::load`] reads it, and the app fixture redirects the **base
+/// folder**, which is a different knob — so anything driving the app reached the
+/// real file. The first run of `a_remembered_search_is_deduped_promoted_capped_and_shown`
+/// found its fixture already populated from a previous run, and the arrows test
+/// had been writing there for longer. §11's *"a test may not write outside the
+/// repository"* held here by test discipline rather than by construction.
+///
+/// **A `cfg!` rather than a flag set by a constructor, and the reason is
+/// [`super::state::Library::open`].** `Prefs::ephemeral` is a field because
+/// `Prefs` is built once, by the one function that knows a test's app is
+/// different; this index is built by `Library::open`, which **tests call
+/// directly after building the app** — `app.library = Library::open(root)` at
+/// two sites — so a field the constructor set would be silently discarded by the
+/// very fixture that needs it, and the second-cheapest answer (a process-wide
+/// flag stored by that constructor, `CLIPBOARD_OFF`'s spelling for §15 D798)
+/// would leave every `Library::open` in `library::state`'s own tests reading the
+/// machine's file until some *other* test in the binary happened to build an
+/// app first. A `cfg!` has no door to forget.
+///
+/// ⚠️ **What this does not cost is coverage, and that is the whole of why it is
+/// allowed to differ by profile.** [`LocalIndex::load`] and [`LocalIndex::save`]
+/// hold no behaviour beyond resolving [`path`]: every decision either one makes
+/// — the three-way read, the [`LocalIndex::unreadable`] write latch, the
+/// round trip — is in [`LocalIndex::load_from`] and [`LocalIndex::save_to`],
+/// which are `pub`, take a path and are asserted below. That is not true of the
+/// other two resources in this class, which is why neither took this answer:
+/// `prefs::Prefs`' latch test drives `save_to`, and `clipboard_gate_tests` has
+/// to open a *real* handle to prove the lock holds under eight threads.
+fn index_is_reachable() -> bool {
+    !cfg!(test)
+}
+
 /// Beside the font cache, which is the closest precedent for the path.
 fn path() -> Option<PathBuf> {
     Some(dirs::cache_dir()?.join("ondin").join("library.json"))
@@ -208,6 +262,47 @@ fn path() -> Option<PathBuf> {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    /// The machine's own `library.json` is out of reach from a test, and the two
+    /// functions that could resolve it both ask first (§15 D807).
+    ///
+    /// ⚠️ **It asserts the guard and does not perform the side effect**, which is
+    /// `an_ephemeral_prefs_never_reaches_the_disk`'s rule and for the same
+    /// reason: a probe that called `save()` to prove the negative *is* the bug.
+    /// So the first assertion is where the decision is, and the second is the
+    /// only consequence that can be observed without writing.
+    ///
+    /// ⚠️ **The second assertion has teeth exactly where the defect was and is
+    /// vacuous on a clean box**, which is worth stating rather than hiding: on a
+    /// machine that has used the app — or has run this suite before the fix —
+    /// `load()` returns somebody's real Recent list, and here it must not. On a
+    /// fresh CI runner there is no file and an unguarded `load` answers `Default`
+    /// too. It can therefore false-*pass* and never false-fail, and the first
+    /// assertion is what holds when it does.
+    ///
+    /// **Flip-check, run** by deleting the `if !index_is_reachable()` from
+    /// `LocalIndex::load`: fails on the second assertion with
+    /// `["alp", "d", "alpha", "gamma", "beta"]` — this suite's own fixture
+    /// strings, read back out of the developer's cache directory, which is the
+    /// reported symptom itself rather than a stand-in for it. Deleting the guard
+    /// in `LocalIndex::save` instead leaves this green, by construction: the
+    /// only thing that would catch it is a write nobody may perform, so that
+    /// half rests on the first assertion and on the `cfg!`.
+    ///
+    /// (Plain backticks above, not `[links]` — §15 D319's convention inside a
+    /// `cfg(test)` module, which `cargo doc` cannot see at all.)
+    #[test]
+    fn the_machines_own_index_is_unreachable_from_a_test() {
+        assert!(
+            !index_is_reachable(),
+            "a test may not read or write `dirs::cache_dir()/ondin/library.json`"
+        );
+        assert_eq!(
+            LocalIndex::load().recent_searches,
+            Vec::<String>::new(),
+            "so `load` answers an empty index without looking"
+        );
+    }
 
     #[test]
     fn an_unopened_document_has_no_time_and_an_unfiled_one_asks_nothing() {

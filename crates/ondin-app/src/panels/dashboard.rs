@@ -69,6 +69,17 @@ const MOSAIC_GAP: f32 = 7.0;
 /// growing a third row — at which point the cells are 36pt tall and stop being
 /// pictures of anything.
 const MOSAIC_MAX: usize = 5;
+/// How many stranded filenames the Settings modal lists before saying "and N
+/// more" (§15 D810).
+///
+/// **Six, which is a bound on the modal's height rather than a reading of the
+/// list.** That card has no scroll area, and a partly-failed migration can strand
+/// every document in the library — so an uncapped list grows the modal past the
+/// window and takes *Save changes* off screen with it. Six is enough to recognise
+/// what went wrong (all in one project, all version files, one file that is open
+/// elsewhere) and the folder is named above them, which is what the user actually
+/// opens.
+const STRANDED_ROWS: usize = 6;
 /// What a project card keeps clear of its own edges (the design's `padding:10px`).
 const PROJECT_PAD: f32 = 10.0;
 /// Between the mosaic, the name and the two facts under it (the design's `gap:9px`).
@@ -445,6 +456,23 @@ pub(crate) struct DashboardState {
     /// that state would freeze the highlight on whatever happened to be first.
     /// Cleared when the query changes and when the overlay opens.
     pub(crate) search_row: Option<usize>,
+}
+
+/// A migration that did not move everything, kept so the modal can report it and
+/// offer the run again (§15 D810, `OndinApp::stranded`).
+///
+/// **Not a `Moved`.** That type is the whole of what a migration did, including
+/// the path map a caller re-points an open document through; what survives the
+/// operation is the part nobody can reconstruct afterwards — which files are still
+/// in the old folder, and where the old folder is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Stranded {
+    /// The folder the files are still in.
+    pub(crate) from: PathBuf,
+    /// The folder they were going to, which is where the library now points.
+    pub(crate) to: PathBuf,
+    /// Every source path that did not move, in `relocate`'s own order.
+    pub(crate) failed: Vec<PathBuf>,
 }
 
 /// The Settings modal's draft — see [`OndinApp::library_settings_modal`] for why
@@ -5125,6 +5153,12 @@ impl OndinApp {
         let saved = LibrarySettings::from_prefs(&self.prefs, &self.library.root);
         let resolved_now = self.library.root.display().to_string();
         let mut decision: Option<settings::Decision> = None;
+        // **Cloned out and answered after the card**, which is `decision`'s own
+        // shape: the closure below cannot borrow `self` while the card holds a
+        // `&mut` to build it, and a retry runs a whole migration — the one thing
+        // that must not happen inside a paint (§15 D810).
+        let stranded = self.stranded.clone();
+        let mut retry = false;
 
         let modal = settings::card("library-settings", ctx, |ui| {
             ui.set_width(ui::menu_inner_w(settings::CARD_W, settings::PAD));
@@ -5216,6 +5250,58 @@ impl OndinApp {
                         "Your files stay where they are; the new folder starts empty."
                     },
                 );
+            }
+
+            // **What the last migration left behind** (§15 D810). Only drawn when
+            // there is something to say, which is why it is below the switch
+            // rather than beside it: the switch is a question about the *next*
+            // move and this is the report on the last one.
+            //
+            // ⚠️ **Named files and a count, not a count.** `Moved::summary` put
+            // the first one in the status line and the rest were unrecoverable
+            // the moment anything else wrote a message; what the user needs in
+            // order to act is which files and which folder, which is exactly what
+            // a status line cannot hold.
+            if let Some(report) = &stranded {
+                ui.add_space(settings::ROW_GAP);
+                warn_caption(
+                    ui,
+                    &match report.failed.len() {
+                        1 => "1 file could not be moved and is still in:".to_string(),
+                        n => format!("{n} files could not be moved and are still in:"),
+                    },
+                );
+                settings::caption(ui, &report.from.display().to_string());
+                // **Capped and then said out loud**, rather than scrolled: this
+                // card has no scroll area and a modal that grows past the window
+                // for a list nobody can act on twenty rows at a time is worse than
+                // one that says how many it is not showing. The folder above is
+                // what the user opens; these are the names to look for in it.
+                for path in report.failed.iter().take(STRANDED_ROWS) {
+                    let name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| path.display().to_string());
+                    settings::caption(ui, &format!("• {name}"));
+                }
+                if let Some(rest) = report.failed.len().checked_sub(STRANDED_ROWS)
+                    && rest > 0
+                {
+                    settings::caption(ui, &format!("…and {rest} more"));
+                }
+                ui.add_space(settings::ROW_GAP);
+                ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        retry = ui::label_button(
+                            ui,
+                            "Try again",
+                            egui::vec2(88.0, settings::FIELD_H),
+                            FieldButton::Off,
+                        )
+                        .on_hover_text("Move what is left of the old library across")
+                        .clicked();
+                    });
+                });
             }
 
             ui.add_space(settings::ROW_GAP);
@@ -5339,6 +5425,91 @@ impl OndinApp {
             // Still open: keep whatever was typed into it this frame.
             None => self.library_settings = Some(d),
         }
+        // **After the match, so a retry cannot race a Save** (§15 D810). Both
+        // touch the library, and `apply_library_settings` is the one that may
+        // *re-point* it — running the retry first would move files into a root the
+        // next line is about to change. Cancel takes the draft away and leaves the
+        // report standing, which is right: the files are still stranded whatever
+        // the user did with the card.
+        if retry {
+            self.retry_migration();
+        }
+    }
+
+    /// Re-point the open document, and *reopen last*, at where a migration put
+    /// them.
+    ///
+    /// ⚠️ **Without this the move quietly forks the open document.**
+    /// `session.path` is absolute, so it went on naming a file in the folder the
+    /// library had just abandoned: the next save recreated the document there, and
+    /// the new root already held a copy carrying the same `meta.id`. Two files,
+    /// one identity — the library listed only the pre-move one, and every edit
+    /// made afterwards went to the one it did not list. Version history and the
+    /// cover cache are keyed by that id, so both then answered for whichever copy
+    /// was scanned.
+    ///
+    /// **Looked up in the map rather than re-joined under the new root**, because
+    /// `relocate` renames into a collision: a reconstructed path can name a
+    /// *different* document that happened to be called the same thing at the
+    /// destination.
+    ///
+    /// `prefs.last_document` travels with it, or *reopen last* reopens the
+    /// abandoned copy on the next launch — the same bug, one launch later.
+    ///
+    /// **A function since §15 D810**, because the retry below is a second
+    /// migration and owes everything the first one did. It was inline in
+    /// `apply_library_settings` when there was only one caller.
+    fn follow_moved_documents(&mut self, moved: &crate::library::relocate::Moved) {
+        for path in [self.session.path.clone(), self.prefs.last_document.clone()]
+            .into_iter()
+            .flatten()
+        {
+            let Some(now) = moved.destination_of(&path).map(Path::to_path_buf) else {
+                continue;
+            };
+            if self.session.path.as_deref() == Some(path.as_path()) {
+                self.session.path = Some(now.clone());
+            }
+            if self.prefs.last_document.as_deref() == Some(path.as_path()) {
+                self.prefs.last_document = Some(now);
+            }
+        }
+    }
+
+    /// Run the stranded half of the last migration again (§15 D810).
+    ///
+    /// **The recovery `relocate`'s own defence already assumed somebody had.**
+    /// That module argues a migration *"run twice leaves duplicates rather than
+    /// being idempotent, which is the right way round"* — true, and it assumes a
+    /// second run is reachable, where until this the only route was a three-step
+    /// dance back through Settings whose middle step looks exactly like the
+    /// operation that lost the files.
+    ///
+    /// **It is not idempotent and does not need to be**, because a successful
+    /// move deletes its source: the first run's successes are no longer in the old
+    /// folder, so this walk meets only what was left behind. What fails again
+    /// fails for the same reason — a name already taken at the destination is
+    /// `Collision::Stranded`'s case and stays stranded however many times it is
+    /// asked.
+    ///
+    /// ⚠️ **It owes `follow_moved_documents` and a `refresh`.** A retry moves
+    /// documents, so the open one can be among them, and the library's listing is
+    /// a scan of a folder that has just changed. The `disk_settle` is the same one
+    /// the first run takes and for the same reason.
+    pub(crate) fn retry_migration(&mut self) {
+        let Some(stranded) = self.stranded.clone() else {
+            return;
+        };
+        self.disk_settle();
+        let moved = crate::library::relocate::relocate(&stranded.from, &stranded.to);
+        self.follow_moved_documents(&moved);
+        self.session.info(moved.summary());
+        self.stranded = (!moved.failed.is_empty()).then(|| Stranded {
+            failed: moved.failed.clone(),
+            ..stranded
+        });
+        self.library.refresh();
+        self.prefs.save();
     }
 
     /// Write the settings draft into preferences, moving the library if asked.
@@ -5404,39 +5575,23 @@ impl OndinApp {
                 // about to move every file they own.
                 self.disk_settle();
                 let moved = crate::library::relocate::relocate(&old_root, &new_root);
-                // ⚠️ **The open document follows the migration, and without this
-                // the move quietly forks it.** `session.path` is absolute, so it
-                // still named a file in the folder the library had just
-                // abandoned: the next save recreated the document there, and the
-                // new root already held a copy carrying the same `meta.id`. Two
-                // files, one identity — the library listed only the pre-move one,
-                // and every edit made afterwards went to the one it did not list.
-                // Version history and the cover cache are keyed by that id, so
-                // both then answered for whichever copy was scanned.
-                //
-                // **Looked up in the map rather than re-joined under the new
-                // root**, because `relocate` renames into a collision: a
-                // reconstructed path can name a *different* document that
-                // happened to be called the same thing at the destination.
-                //
-                // `prefs.last_document` travels with it, or *reopen last*
-                // reopens the abandoned copy on the next launch — the same bug,
-                // one launch later.
-                for path in [self.session.path.clone(), self.prefs.last_document.clone()]
-                    .into_iter()
-                    .flatten()
-                {
-                    let Some(now) = moved.destination_of(&path).map(Path::to_path_buf) else {
-                        continue;
-                    };
-                    if self.session.path.as_deref() == Some(path.as_path()) {
-                        self.session.path = Some(now.clone());
-                    }
-                    if self.prefs.last_document.as_deref() == Some(path.as_path()) {
-                        self.prefs.last_document = Some(now);
-                    }
-                }
+                // The open document and *reopen last* follow the move; the whole
+                // argument is on [`OndinApp::follow_moved_documents`], which the
+                // retry in the modal calls too (§15 D810).
+                self.follow_moved_documents(&moved);
                 self.session.info(moved.summary());
+                // **Kept, because the status line is a sentence and this is a
+                // list** (§15 D810). `summary` names the first stranded file and
+                // the count; the next status message replaces it, and the other
+                // twenty-two are then findable only by hand. Assigned in both
+                // directions so a clean migration *clears* a previous one's
+                // report — the modal must not go on offering to retry a move that
+                // has already succeeded.
+                self.stranded = (!moved.failed.is_empty()).then(|| Stranded {
+                    from: old_root.clone(),
+                    to: new_root.clone(),
+                    failed: moved.failed.clone(),
+                });
             }
             // ⚠️ **Why the folder is created at all — the call itself has moved
             // to the top of this block** (§15 D700). It is not tidiness: it is
@@ -6146,6 +6301,16 @@ fn mark_chip(ui: &egui::Ui, at: egui::Pos2, align: egui::Align2, mark: Mark) -> 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Mark {
     /// This build cannot load the file (§15 D613, `[S1.3-L3-05]`).
+    ///
+    /// 🚨 **The card's *Open* stays live over this mark, by decision** (§15
+    /// D818). D613 left the question open — whether *Open* should be disabled or
+    /// warning-styled on such a card — and the ruling is **neither**. The mark
+    /// here and the status line already say the file will not load, so a refusal
+    /// would be the third statement of one fact; and the case that actually
+    /// reaches a synced library is a document written by a **newer build**, which
+    /// is well-formed and merely ahead of this one. Refusing to open a file the
+    /// user may want to look at, or may be about to update the app for, is the
+    /// wrong way round: the mark warns, the click is still theirs.
     Unreadable,
     /// A sync client's copy (§15 D375).
     Conflict,
@@ -7491,6 +7656,137 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// **A partly-failed migration names every file it left behind, on the screen,
+    /// and the retry finishes the job** (§15 D810).
+    ///
+    /// 🚨 **The list existed and reached nothing.** `Moved::failed` has held every
+    /// stranded path since §15 D620 and `Moved::summary` put the *first* of them
+    /// in the status line, which the next message replaces — so a migration that
+    /// stranded a document was, a minute later, recoverable only by hunting the
+    /// old folder by hand, with `apply_library_settings` having re-pointed the app
+    /// at the new root either way.
+    ///
+    /// **The failure is arranged rather than mocked**, by `relocate`'s own trick:
+    /// a *file* where a project's *folder* has to go, so `create_dir_all` refuses
+    /// for exactly one document and the rest of the migration runs. Removing it is
+    /// then a real repair rather than a flag being flipped, which is what makes
+    /// the retry half of this test mean anything.
+    ///
+    /// ⚠️ **Three claims and they fail in different places on purpose.** The
+    /// record is a field, the report is *galleys* — a list nobody can see is the
+    /// defect this closes, and §15 D426 is the entry for asserting a message on a
+    /// `String` nobody draws — and the retry is the filesystem.
+    ///
+    /// ⚠️ **The loose document is the control.** A version that gave up at the
+    /// first failure would satisfy every assertion about the stranded one.
+    ///
+    /// **Flip-checks, both run, and the second is why the fourth assertion
+    /// exists.** Dropping the `self.stranded = …` assignment in
+    /// `apply_library_settings` fails at *"the migration left a report"*, the
+    /// predicted site. Dropping the `self.library.refresh()` from
+    /// `retry_migration` left every assertion here **green** on the first
+    /// reading — the file arrives and the record clears whatever the listing says
+    /// — which is a coverage finding rather than a failed experiment: the retry's
+    /// whole effect on the *dashboard behind the modal* was untested. The
+    /// `library.entries` assertion is what that flip bought, and it fails at
+    /// `["loose-sketch"]` now.
+    #[test]
+    fn a_partly_failed_migration_is_listed_and_can_be_run_again() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, from) = app(&ctx, "stranded");
+        let to =
+            std::env::temp_dir().join(format!("ondin-dash-stranded-to-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&to);
+        std::fs::create_dir_all(&to).unwrap();
+
+        let kestrel = crate::library::project::Project {
+            id: "p-1".into(),
+            name: "Kestrel".into(),
+            color: crate::library::project::PROJECT_COLORS[0].into(),
+            folder: Some("kestrel".into()),
+            created: 0,
+            archived: false,
+        };
+        crate::library::project::Projects {
+            version: 1,
+            projects: vec![kestrel.clone()],
+        }
+        .write(&from)
+        .unwrap();
+        let mut doc = ondin_core::Document::new(ondin_core::IdSource::new(0xD0C).mint());
+        let stuck =
+            crate::library::store::file_document(&from, Some(&kestrel), "Landing v4", &mut doc)
+                .unwrap();
+        let mut loose = ondin_core::Document::new(ondin_core::IdSource::new(0xD0D).mint());
+        crate::library::store::file_document(&from, None, "Loose sketch", &mut loose).unwrap();
+
+        // The obstruction: a file where the project folder has to be.
+        let blocker = to.join("kestrel");
+        std::fs::write(&blocker, b"not a directory").unwrap();
+
+        let mut d = LibrarySettings::from_prefs(&app.prefs, &app.library.root);
+        d.base_folder = to.display().to_string();
+        d.migrate = true;
+        app.library_settings = Some(d);
+        app.apply_library_settings();
+
+        let report = app
+            .stranded
+            .clone()
+            .expect("the migration left a report of what it could not move");
+        assert_eq!(report.failed, vec![stuck.clone()], "and it names the file");
+        assert_eq!(report.from, from, "and the folder the file is still in");
+        assert!(stuck.exists(), "which it is — a failed move loses nothing");
+        assert!(
+            to.join("loose-sketch.ondin").exists(),
+            "control: the rest of the migration ran"
+        );
+
+        // The modal is where it is readable, and that is the half that was missing.
+        app.library_settings = Some(LibrarySettings::from_prefs(&app.prefs, &app.library.root));
+        let shown = galleys(&mut app, &ctx);
+        let text = |needle: &str| shown.iter().any(|(_, _, t)| t.contains(needle));
+        assert!(
+            text("could not be moved"),
+            "the card says a migration left something behind: {:?}",
+            shown.iter().map(|(_, _, t)| t).collect::<Vec<_>>()
+        );
+        assert!(text("landing-v4.ondin"), "and names the file");
+        assert!(
+            text(&from.display().to_string()),
+            "and the folder to go and look in"
+        );
+        assert!(text("Try again"), "and offers to run it again");
+
+        // Clear the obstruction and take the offer.
+        std::fs::remove_file(&blocker).unwrap();
+        app.retry_migration();
+
+        assert!(
+            to.join("kestrel").join("landing-v4.ondin").is_file(),
+            "the retry moved what was left"
+        );
+        assert!(!stuck.exists(), "and it is not in two places");
+        assert!(
+            app.library.entries.iter().any(|e| e.stem == "landing-v4"),
+            "and the library behind the modal lists it: {:?}",
+            app.library
+                .entries
+                .iter()
+                .map(|e| &e.stem)
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            app.stranded.is_none(),
+            "and the report is gone, so the card stops offering: {:?}",
+            app.stranded
+        );
+
+        let _ = std::fs::remove_dir_all(&from);
+        let _ = std::fs::remove_dir_all(&to);
+    }
+
     /// The header's three controls are one row of one height, sharing one centre.
     ///
     /// ⚠️ **The centre is what this is really about, not the height.** A
@@ -8157,11 +8453,14 @@ mod tests {
     /// what lets the sentence through, so this asserts the harder of the five
     /// navs and the other four follow from the same branch.
     ///
-    /// ⚠️ **`LocalIndex` is replaced rather than used as found**: `Library::open`
-    /// reads the *developer's real* index off this machine, so a fixture that did
-    /// not overwrite it would be testing whatever is in the cache directory —
-    /// non-empty here, empty on a clean CI box, and the flag reads the
-    /// difference.
+    /// ⚠️ **The `mark_opened` is the fixture and not a formality**: the flag being
+    /// asserted is *"the folder could not be read **and** this machine has seen
+    /// documents in it"*, so the index has to say the second half. Until §15 D807
+    /// this line also had to *overwrite* the index, because `Library::open` read
+    /// the developer's real one off the machine and the fixture was therefore
+    /// whatever was in the cache directory — non-empty here, empty on a clean CI
+    /// box, with the flag reading the difference. It is empty by construction now,
+    /// which is why one `mark_opened` is the whole of it.
     ///
     /// **Two flips, both run.** Ungating `new_file_into` fails at *"the empty
     /// state names the fault"* rather than at the card assertion below it — the
@@ -8178,7 +8477,6 @@ mod tests {
         let (mut app, root) = app(&ctx, "offline");
         seed(&mut app, "p-1", "Alps", Some("Alps"));
         app.dash.nav = Nav::Project("p-1".into());
-        app.library.local = crate::library::cache::LocalIndex::default();
         app.library.local.mark_opened("doc-1");
         // The unplugged drive. Everything above this line is a library that was
         // working a moment ago.
@@ -8498,11 +8796,20 @@ mod tests {
     /// not decoration: `mark_of` reads two sources, and a version that marked
     /// every card would satisfy a one-card assertion perfectly.
     ///
-    /// ⚠️ **Two passes before the chip is asserted, and that is the cover cache's
-    /// laziness rather than a flake.** `Covers::get` is per-pass budgeted and only
-    /// learns a document is unloadable when it tries to render it, so the first
-    /// pass draws the card and the second draws the mark. `get` requests a
-    /// repaint, so in the app late arrives on its own; a probe has to pump.
+    /// 🚨 **A pass and then a `settle` before the chip is asserted, and the
+    /// difference between those two is what this test learned the hard way**
+    /// (§15 D820). `Covers::get` only learns a document is unloadable when it
+    /// **renders** it, so the first pass queues the work and the mark comes after.
+    /// While the render was inline, *"the next pass"* was a fact; with it on a
+    /// thread, *"the next pass"* is a **race** — this failed 2 runs in 20 of its
+    /// own filter, after six clean ones, which is `CLAUDE.md`'s §14 point and
+    /// §15 D796's lesson arriving from a second direction. `get` requests a
+    /// repaint, so in the app late still arrives on its own; a probe waits.
+    ///
+    /// ⚠️ **This paragraph said the two passes were *"the cover cache's laziness
+    /// rather than a flake"*.** That was true when it was written and is the
+    /// sentence most worth not leaving standing: the laziness is still there and
+    /// the *timing* it promised is gone.
     ///
     /// **Flip-check, run**: dropping `covers.unreadable` from `mark_of` — leaving
     /// the `unread` flag alone, which is what shipped — fails at 0 against 1. The
@@ -8545,8 +8852,17 @@ mod tests {
             2,
             "both documents are listed — hiding the broken one is the other bug"
         );
-        // The cover cache learns it on the pass that tries to render it.
+        // 🚨 **One pass queues the render; `settle` is what waits for it**
+        // (§15 D820). This was `let _ = chips(…)` — one extra pass — which was
+        // exactly right while `Covers::get` rendered inline, and became a **race**
+        // the day the render moved to a thread: whether the answer had arrived by
+        // the next pass depended on how loaded the machine was. Measured at 2
+        // failures in 20 paired runs of this filter, and **green in six** before
+        // that, which is D796's lesson arriving a second time — a filtered run
+        // packs the related tests onto every core at once, and a handful of clean
+        // ones is not evidence.
         let _ = chips(&mut app, &ctx);
+        app.covers.settle(&ctx);
         assert_eq!(chips(&mut app, &ctx), 1, "exactly the broken one is marked");
         app.dash.list_view = true;
         assert_eq!(chips(&mut app, &ctx), 1, "and the list marks it too");
@@ -8576,12 +8892,15 @@ mod tests {
     /// before drawing anything. The rows here are the first time that branch has
     /// been on screen.
     ///
-    /// 🚨 **`save()` writes to the user's real cache directory** — `dirs::cache_dir()`,
-    /// no injection point — so this asserts persistence through `save_to`/`load_from`
-    /// against a temp path instead. **The suite already writes there** through the
-    /// arrows test, which is a side effect worth a decision of its own and is
-    /// recorded rather than fixed here: running the tests edits the user's own
-    /// *Recent searches*.
+    /// ⚠️ **`save()` used to write to the user's real cache directory** —
+    /// `dirs::cache_dir()`, no injection point — which is why this asserts
+    /// persistence through `save_to`/`load_from` against a temp path. **It was
+    /// this test's own first run that found the defect**, on a fixture already
+    /// holding the strings below from a previous run, and the arrows test had been
+    /// writing there for longer. Closed by §15 D807: `library::cache`'s `load` and
+    /// `save` are both unreachable under `cfg(test)`, so the fixture starts empty
+    /// by construction. The temp-path round trip stays, because it is the only
+    /// thing that asserts what survives a restart.
     ///
     /// **Flip-check, run, four of them, all bite — and two land earlier than
     /// predicted:**
@@ -8602,13 +8921,17 @@ mod tests {
 
         let list = |app: &OndinApp| app.library.local.recent_searches.clone();
 
-        // 🚨 **Cleared, and having to is the finding's own evidence.** `app()`
-        // redirects the *base folder* and cannot redirect the local index, which
-        // `Library::open` loads from `dirs::cache_dir()`. So this fixture starts
-        // with whatever the person running the suite last searched for — and the
-        // first run of this test found exactly that. It is also why the suite
-        // *writes* there; see the doc above.
-        app.library.local.recent_searches.clear();
+        // ⚠️ **Asserted rather than cleared, which is what §15 D807 bought.**
+        // `app()` redirects the *base folder* and could not redirect the local
+        // index, which `Library::open` loaded from `dirs::cache_dir()` — so this
+        // fixture used to start with whatever the person running the suite last
+        // searched for, and the first run of this test found exactly that. Now the
+        // index is unreachable from a test, so the empty list is a fact about the
+        // fixture and worth demanding instead of arranging.
+        assert!(
+            list(&app).is_empty(),
+            "a headless app's index is empty by construction, not by being cleared"
+        );
 
         // ⚠️ **Blank first, so the guard is asserted against an empty list rather
         // than against a list it could not have changed anyway.**

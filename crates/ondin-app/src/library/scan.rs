@@ -288,8 +288,78 @@ pub fn read_meta(path: &Path) -> Option<(DocumentMeta, bool)> {
 /// one that is missing a row.
 pub fn scan(root: &Path) -> Vec<Entry> {
     let mut out = Vec::new();
-    collect(root, true, &mut out);
+    collect(root, true, &mut out, &mut Vec::new());
     out
+}
+
+/// The `.ondin` files in the library whose **filename is not valid Unicode**, so
+/// [`scan`] cannot name them and never made them entries (§15 D809).
+///
+/// 🚨 **Reproduced, which is what this function is for.** It was recorded as a
+/// hazard nobody had established — *"it is not established that a filename
+/// Windows accepts can fail `to_str`"* — and it is: a lone UTF-16 surrogate is a
+/// legal code unit and not a scalar value, `std::fs::write` on a path built from
+/// `OsString::from_wide(&[0xD800, …])` **succeeds** on NTFS, and the entry
+/// `read_dir` hands back answers `None` to `file_name().to_str()`. Measured on
+/// this machine over three shapes — a lone high surrogate, a lone low one and a
+/// reversed pair — with an ASCII name and a well-formed astral pair as controls.
+/// Nothing in this app can *create* one; a sync client or another tool can.
+///
+/// ⚠️ **What it exists for is the migration and not the list.** The document
+/// staying out of the library is a limitation — there is no honest label to draw
+/// for a name that is not text — and it being *silently left behind* by *Change
+/// base folder* is a loss: the file ends up alone in a folder the app no longer
+/// reads, which is the shape §15 D431 fixed for a `.trash` collision and did not
+/// fix here. `super::relocate` carries these across by their `OsStr` name.
+///
+/// **The same walk as [`scan`], by construction rather than by agreement** — one
+/// [`collect`], two outputs — so the two cannot come to disagree about the
+/// two-level rule or about which dot-directories are skipped.
+pub fn unnameable(root: &Path) -> Vec<PathBuf> {
+    let mut skipped = Vec::new();
+    collect(root, true, &mut Vec::new(), &mut skipped);
+    skipped
+}
+
+/// A filename the operating system accepts and `OsStr::to_str` refuses
+/// (§15 D809), with `.ondin` on the end.
+///
+/// **Beside `unnameable` rather than inside a test module**, because two
+/// modules' tests need it — this one's and `super::relocate`'s, which asserts the
+/// other half of D809 — and a platform fact spelled twice is a platform fact that
+/// can come to disagree with itself.
+///
+/// ⚠️ **The two arms are two different facts, not one fact spelled twice.** On
+/// Windows a name is UTF-16 and the gap is an **unpaired surrogate** — a legal
+/// code unit that is not a scalar value; on Unix it is bytes and the gap is any
+/// byte that is not valid UTF-8. Neither construction means anything on the other
+/// platform.
+///
+/// ⚠️ **`#[cfg(unix)]` is compiled by nothing on this machine** — `CLAUDE.md`
+/// lists four production functions in the same position and no gate for them — so
+/// the arm below is written to be read rather than trusted, and the Windows one is
+/// what the measurement behind D809 was taken on.
+///
+/// Plain backticks throughout: this item is `#[cfg(test)]`, so `cargo doc` never
+/// builds it and an intra-doc link here would resolve against nothing and be
+/// checked by no gate (§15 D319).
+#[cfg(test)]
+pub(crate) fn unnameable_doc_name() -> std::ffi::OsString {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStringExt;
+        // A lone high surrogate, then `.ondin`.
+        let mut units = vec![0xD800u16];
+        units.extend(".ondin".encode_utf16());
+        std::ffi::OsString::from_wide(&units)
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        let mut bytes = vec![0xFFu8];
+        bytes.extend_from_slice(b".ondin");
+        std::ffi::OsString::from_vec(bytes)
+    }
 }
 
 /// Whether the base folder can be listed at all.
@@ -322,19 +392,37 @@ pub fn readable(root: &Path) -> bool {
 /// one.
 pub fn scan_dir(dir: &Path) -> Vec<Entry> {
     let mut out = Vec::new();
-    collect(dir, false, &mut out);
+    collect(dir, false, &mut out, &mut Vec::new());
     out
 }
 
 /// One directory level. `descend` is false for the project folders, which is how
 /// the two-level limit is spelled.
-fn collect(dir: &Path, descend: bool, out: &mut Vec<Entry>) {
+///
+/// `unnameable` collects the documents this walk had to pass over because their
+/// filenames are not valid Unicode — see [`unnameable`], which is the only caller
+/// that reads it. A second output rather than a second walk: the two questions
+/// are answered about the same directories, and nothing else here could make them
+/// stay that way.
+fn collect(dir: &Path, descend: bool, out: &mut Vec<Entry>, unnameable: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
         let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            // **Recorded, not merely skipped** (§15 D809). The extension is
+            // compared as an `OsStr`, since the whole case here is a name that
+            // has no `&str` to compare — and the file type is asked because a
+            // *directory* called `<not unicode>.ondin` is not a document, however
+            // unlikely. Everything else about such an entry is unknowable from
+            // here: it is not read, so it is not known to be a document, only to
+            // be shaped like one.
+            if path.extension() == Some(std::ffi::OsStr::new(DOCUMENT_EXT))
+                && entry.file_type().map(|t| t.is_file()).unwrap_or(false)
+            {
+                unnameable.push(path);
+            }
             continue;
         };
         // The one rule that keeps `.versions` and `.trash` out. See module docs.
@@ -346,7 +434,7 @@ fn collect(dir: &Path, descend: bool, out: &mut Vec<Entry>) {
         };
         if file_type.is_dir() {
             if descend {
-                collect(&path, false, out);
+                collect(&path, false, out, unnameable);
             }
             continue;
         }
@@ -676,5 +764,71 @@ mod tests {
                 assert_eq!(conflict_marker(&with), None, "{with:?}");
             }
         }
+    }
+
+    /// A `.ondin` whose filename is not valid Unicode is **not an entry** and
+    /// **is** reported by `unnameable` (§15 D809).
+    ///
+    /// 🚨 **The first half is the pre-existing behaviour and the second is the
+    /// whole fix.** `roadmap.md` carried this as *"never reproduced"* — it was not
+    /// established that a filename Windows accepts can fail `to_str` — and it can:
+    /// `std::fs::write` on a path holding a lone UTF-16 surrogate succeeds on
+    /// NTFS, and the entry `read_dir` gives back answers `None`. The document
+    /// staying out of the list is a limitation with no better answer; being
+    /// *silently* left behind by `super::relocate` was the loss, and this is what
+    /// `relocate` asks so that it is not.
+    ///
+    /// ⚠️ **Three controls, because a walk that reported everything would pass
+    /// the claim above.** An ordinary document is an entry and is not reported; a
+    /// non-Unicode name that is **not** a `.ondin` is neither; and the second
+    /// level is walked, since `unnameable` and `scan` share one `collect` and the
+    /// two-level rule has to reach both.
+    ///
+    /// **Two flips, both run, and the first landed somewhere other than
+    /// predicted.** Dropping the `path.extension() == …` term from `collect`, so
+    /// every unnameable entry is reported, was predicted to fail at a
+    /// *not-a-document* assertion — there is no such assertion, and the `.txt`
+    /// control is only visible as a **third entry inside the `reported == want`
+    /// equality**, which is where it actually fails. ⚠️ *A control asserted as a
+    /// member of a set bites at the set, and the message that names the set is the
+    /// one the next reader has to understand.* Dropping the whole
+    /// `unnameable.push` fails at that same assertion with an **empty** left side,
+    /// which is the honest tell for the two being different faults.
+    #[test]
+    fn a_document_with_a_non_unicode_filename_is_not_listed_and_is_reported() {
+        let root = temp_root("unnameable");
+        write_doc(&root.join("landing-v4.ondin"), named("Landing v4", None));
+        let project = root.join("kestrel");
+        std::fs::create_dir_all(&project).unwrap();
+
+        let odd = root.join(unnameable_doc_name());
+        let deep = project.join(unnameable_doc_name());
+        // Written as bytes rather than through `write_doc`: what it holds is
+        // irrelevant, and nothing here ever reads it — the whole point is that the
+        // name alone decides.
+        std::fs::write(&odd, b"{}").expect("the OS accepts this name");
+        std::fs::write(&deep, b"{}").unwrap();
+        // The not-a-document control, beside it under the same broken name.
+        let mut other = unnameable_doc_name();
+        other.push(".txt");
+        std::fs::write(root.join(&other), b"x").unwrap();
+
+        let stems: Vec<String> = scan(&root).into_iter().map(|e| e.stem).collect();
+        assert_eq!(
+            stems,
+            vec!["landing-v4".to_string()],
+            "the ordinary document is the only entry"
+        );
+
+        let mut reported = unnameable(&root);
+        reported.sort();
+        let mut want = vec![odd, deep];
+        want.sort();
+        assert_eq!(
+            reported, want,
+            "both are reported, including the one a level down"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

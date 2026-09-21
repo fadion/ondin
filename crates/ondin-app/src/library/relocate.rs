@@ -15,6 +15,17 @@
 //! rather than being idempotent — which is the right way round, since the other
 //! failure silently eats work.
 //!
+//! 🚨 **And there is no rollback, by decision** (§15 D814). *Undo this migration*
+//! was the third of the three asks §15 D620 left with the maintainer — the other
+//! two, the full list of what was stranded and a *Try again*, landed at §15 D810 —
+//! and it is ruled a **non-goal**. The reason is the paragraph above: nothing here
+//! overwrites anything, so an "undo" is not a reverse of a known operation but a
+//! decision about everything that *did* arrive, including a `.trash` file renamed
+//! on the way in by `Collision::Rename` and now indistinguishable from a document
+//! that was always there. A reverse migration can also partly fail, which leaves a
+//! second and worse partial state. **The retry is the recovery**, and it is
+//! reachable now, which is what the ask was really about.
+//!
 //! **Move, with copy-and-delete as the fallback.** `fs::rename` is instant and
 //! atomic within a volume and simply fails across one, which is the common case
 //! here: the whole reason to change the base folder is usually to put it on a
@@ -101,11 +112,12 @@ impl Moved {
     /// A one-line report for the status bar.
     ///
     /// ⚠️ **It names the first one.** A status line cannot hold twenty-three
-    /// paths and the *Library settings* modal is where a full list belongs
-    /// (§15 D620 leaves that to the maintainer), but one name is the difference
-    /// between a number the user can act on and one they cannot: it says which
-    /// folder to go and look in, and whether what was left behind is a document
-    /// or a sidecar.
+    /// paths and the *Library settings* modal is where a full list belongs —
+    /// §15 D620 left that to the maintainer and **§15 D810 built it**, so the
+    /// modal now draws the names and offers the run again. One name here is
+    /// still the difference between a number the user can act on and one they
+    /// cannot: it says which folder to go and look in, and whether what was left
+    /// behind is a document or a sidecar, without opening Settings at all.
     pub fn summary(&self) -> String {
         if let Some(first) = self.failed.first() {
             let name = first
@@ -211,6 +223,42 @@ pub fn relocate(from: &Path, to: &Path) -> Moved {
             true => moved.paths.push((entry.path.clone(), target)),
             false => moved.fail(&entry.path),
         }
+    }
+
+    // **Documents `scan` could not name, carried across verbatim** (§15 D809).
+    // A `.ondin` whose filename is not valid Unicode is not an `Entry` and never
+    // was, so the loop above cannot see it — and until this ran, *Change base
+    // folder* left it alone in a folder the app no longer reads, **uncounted**,
+    // under a status line that said the migration had succeeded. That is exactly
+    // what `Collision::Stranded`'s note calls the bad outcome and what §15 D431
+    // fixed for a `.trash` collision and not for this.
+    //
+    // ⚠️ **By its own `OsStr` name, with no `unique_stem` and no re-derivation.**
+    // The loop above may rename into a collision because it has a stem to work
+    // with; here there is no `&str` at all, so the only honest target is the name
+    // the file already has. A destination already holding that name is therefore a
+    // failure rather than a rename — one of these cannot be told from another by
+    // looking, which is `Collision::Stranded`'s own argument.
+    //
+    // ⚠️ **Moving it does not make it visible**, and this deliberately does not
+    // try: the library still cannot list a name that is not text (see
+    // `scan::unnameable`). What the move buys is that the file is where the user
+    // pointed their library, and that `Moved` says it went.
+    for path in scan::unnameable(from) {
+        let Ok(relative) = path.strip_prefix(from) else {
+            moved.fail(&path);
+            continue;
+        };
+        let target = to.join(relative);
+        let made = target
+            .parent()
+            .map(|d| std::fs::create_dir_all(d).is_ok())
+            .unwrap_or(false);
+        if !made || target.exists() || !move_file(&path, &target) {
+            moved.fail(&path);
+            continue;
+        }
+        moved.paths.push((path, target));
     }
 
     // Version history, the trash and the crash snapshots: whole trees, merged
@@ -906,6 +954,69 @@ mod tests {
             "and the unreadable file is named rather than merely counted"
         );
         assert_eq!(std::fs::read(to.join(PROJECTS_FILE)).unwrap(), broken);
+
+        let _ = std::fs::remove_dir_all(&from);
+        let _ = std::fs::remove_dir_all(&to);
+    }
+
+    /// **A document whose filename is not valid Unicode travels with the rest of
+    /// the library, and it is counted** (§15 D809).
+    ///
+    /// 🚨 **It used to be left behind in silence.** `scan::collect` skips an entry
+    /// whose `file_name().to_str()` is `None`, so such a file is never an `Entry`
+    /// and the document loop cannot see it — it stayed in a folder the app no
+    /// longer reads, absent from `Moved::failed`, under a status line that said
+    /// the migration had succeeded. That is `Collision::Stranded`'s bad outcome
+    /// arriving through a different door from §15 D431's.
+    ///
+    /// ⚠️ **The name is built per platform and means two different things** — see
+    /// `scan::unnameable_doc_name`. What is asserted here is the same on
+    /// both.
+    ///
+    /// ⚠️ **The ordinary document is the control**, and it is what says the new
+    /// loop did not simply move everything twice or stop the old one: a version
+    /// that moved the odd file *instead* of running the scan's loop would satisfy
+    /// every assertion below about the odd one.
+    ///
+    /// **Flip-check, run** — the whole `for path in scan::unnameable(from)` loop
+    /// removed: fails at *"and it arrived"*, the predicted site. ⚠️ The assertion
+    /// **above** it, on `documents()`, was predicted to be the one that bites and
+    /// is not — it reads 1 against 2 under the flip and would have caught it, but
+    /// the arrival is asserted first and the count is the weaker claim of the two.
+    /// Ordering the loss before the tally is what puts the right sentence in the
+    /// failure message.
+    #[test]
+    fn a_document_with_a_non_unicode_filename_is_carried_across_and_counted() {
+        let from = temp("odd-name-from");
+        let to = temp("odd-name-to");
+        store::file_document(&from, None, "Landing v4", &mut blank()).unwrap();
+        let odd = from.join(scan::unnameable_doc_name());
+        std::fs::write(&odd, b"{}").expect("the OS accepts this name");
+
+        let moved = relocate(&from, &to);
+
+        let arrived = to.join(scan::unnameable_doc_name());
+        assert!(
+            arrived.is_file(),
+            "and it arrived — under the name it already had, since there is no \
+             `&str` here to derive one from"
+        );
+        assert!(!odd.exists(), "and it is not in two places");
+        assert_eq!(
+            moved.documents(),
+            2,
+            "both documents are counted: {:?}",
+            moved.paths
+        );
+        assert!(
+            moved.failed.is_empty(),
+            "nothing was stranded: {:?}",
+            moved.failed
+        );
+        assert!(
+            to.join("landing-v4.ondin").is_file(),
+            "control: the ordinary document went too"
+        );
 
         let _ = std::fs::remove_dir_all(&from);
         let _ = std::fs::remove_dir_all(&to);

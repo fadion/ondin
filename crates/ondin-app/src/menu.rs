@@ -2469,6 +2469,17 @@ impl OndinApp {
             // `payload_current` it offers layers the chord would decline as stale;
             // without the text it goes dim on the commonest paste there is, a
             // sentence copied in another application (§15 D218).
+            //
+            // ⚠️ **A copy from another `ondin` window is a fourth payload and
+            // needs no fourth term, which is worth a sentence because the
+            // coincidence is load-bearing** (§15 D823). Such a copy reaches this
+            // window as *text* — `io::clip`'s payload is a string, since text is
+            // the only channel `arboard` has — so `system_text` is already true
+            // and the row is already live. What it is live *for* is layers rather
+            // than a text layer, which is `OndinApp::take_clipboard`'s business
+            // and not this predicate's: the row says *Paste* either way. It is a
+            // coincidence rather than a design, so if a payload ever crosses by
+            // some channel that is not text, this is the line that goes wrong.
             can_paste: open.system_image
                 || (self.clipboard.is_some() || self.guide_clipboard.is_some())
                     && open.payload_current

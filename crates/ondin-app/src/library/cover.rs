@@ -16,10 +16,19 @@
 //!   the key is what makes it correct rather than merely fast: a document edited
 //!   on another machine and synced in has a new mtime, so it gets a new key and
 //!   the stale picture is never shown.
-//! - **In memory**, as egui textures, with a per-pass time budget so opening the
-//!   dashboard on a large library does not stall the frame that first shows it.
-//!   `thumbs::ImageThumbs` and `fonts::FontPreviews` are the same shape and §15
-//!   D160 is where those numbers were argued.
+//! - **In memory**, as egui textures.
+//!
+//! 🚨 **And the rendering happens on a thread of its own** (§15 D820). This said
+//! *"with a per-pass time budget so opening the dashboard on a large library does
+//! not stall the frame that first shows it"*, and the budget did not do that: the
+//! *progress guarantee* under it rendered one document per pass whatever the
+//! budget said — without which a library of documents each slower than 8 ms would
+//! draw no covers ever — so the cost was **one stall per pass** until the covers
+//! were built rather than one long freeze, which is the worse-feeling of the two.
+//! A single picture's decode was measured at 433 ms (§15 D449). `thumbs::ImageThumbs`
+//! and `fonts::FontPreviews` keep their budgets and are *not* the same shape any
+//! more: both do work that really is in the frame, and §15 D160 is where those
+//! numbers were argued.
 //!
 //! **The disk cache is genuinely disposable.** Delete it and the covers redraw;
 //! nothing about a document lives here. That is why it is in the cache directory
@@ -32,7 +41,6 @@ use super::scan::Entry;
 use eframe::egui;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
 
 /// The longest edge of a cover, in pixels.
 ///
@@ -42,15 +50,16 @@ use std::time::{Duration, Instant};
 /// show, on every document in the library.
 const COVER_MAX_PX: f64 = 400.0;
 
-/// How long one pass may spend rendering covers.
-///
-/// **Larger than `ImageThumbs`' 2 ms**, and the difference is the point: that
-/// one decodes an image that is already in memory, while this one runs the whole
-/// document → pixels path. Two milliseconds would render roughly nothing and the
-/// grid would fill in over several seconds of scrolling. Eight is still under a
-/// 120 Hz frame, and the progress guarantee below means a document too slow for
-/// any budget still arrives.
-const FRAME_BUDGET: Duration = Duration::from_millis(8);
+// 🚨 **There was a `FRAME_BUDGET` here and it is gone with what it bounded**
+// (§15 D820). Eight milliseconds — larger than `ImageThumbs`' two, on the
+// argument that this path runs the whole document→pixels walk rather than
+// decoding an image already in memory — and it never bounded the thing anyone
+// felt: the *progress guarantee* rendered one document per pass whatever the
+// budget said, so a library of slow documents cost one stall per pass rather
+// than none. Both were consequences of rendering **inside** the pass. The render
+// is a thread now, so the pass spends nothing and there is nothing left to
+// ration; `ImageThumbs`' own 2 ms budget is untouched and still bounds a decode
+// that really does happen in the frame.
 
 /// What a cover key is: the document's identity plus the state of its file.
 ///
@@ -110,23 +119,108 @@ enum NoCover {
 }
 
 /// The dashboard's cover cache.
+///
+/// 🚨 **The render used to happen inside the egui pass** (§15 D820). `get` →
+/// [`render`] → `io::load` → `png::png` → `ImageStore::prepare` is the whole
+/// document→pixels path, and a picture's decode alone was measured at **433 ms**
+/// for an 8000² image (§15 D449). The 8 ms `FRAME_BUDGET` did not bound it: the
+/// progress guarantee rendered one document per pass *whatever the budget said*,
+/// without which a library of slow documents would draw no covers ever — so the
+/// cost was one stall per pass until the covers were built, which is the
+/// worse-feeling of the two. D449 caps how large a *picture* may become and
+/// deliberately does not fix this, a 50 MP camera file being 240 MB of RGBA and
+/// legitimate.
+///
+/// **It is a thread now, and that is what makes both the budget and the progress
+/// guarantee unnecessary.** Nothing in the pass renders; `get` enqueues and
+/// [`Self::drain`] uploads what came back.
+///
+/// **`Default` is derived since §15 D820.** It was hand-written for one reason —
+/// seeding `budget` from the 8 ms `FRAME_BUDGET` — and with the render off the
+/// pass there is no budget to seed.
+#[derive(Default)]
 pub struct Covers {
     covers: HashMap<String, Cover>,
-    /// The pass [`Self::spent`] was accumulated in, so the budget resets once per
-    /// pass. egui's own counter rather than a flag someone has to clear.
-    pass: u64,
-    spent: Duration,
-    /// [`FRAME_BUDGET`], as a field so a test can take it away.
-    budget: Duration,
+    /// Keys handed to the renderer and not yet answered, so a card drawn every
+    /// frame enqueues its document once rather than sixty times a second.
+    ///
+    /// **Separate from `covers` rather than a `Cover::Pending` variant**, because
+    /// every reader of that map asks a question about a *finished* answer —
+    /// [`Self::unreadable`] most of all — and a fourth variant would put "not yet"
+    /// into three `match`es that have no use for it.
+    queued: std::collections::HashSet<String>,
+    /// The renderer, spawned on the first miss.
+    ///
+    /// Lazily, for `library::writer::Writer::spawn`'s reason: an app that never
+    /// opens the dashboard — or a headless probe that never draws a card — pays
+    /// for no thread.
+    render: Option<Renderer>,
 }
 
-impl Default for Covers {
-    fn default() -> Self {
+/// The cover renderer's thread, and the answers coming back.
+///
+/// **A second worker rather than a job on `library::writer::Writer`'s queue**
+/// (§15 D820), and the reason is that module's own contract: it is *"one
+/// background writer of anything, in **FIFO** order"*, and the FIFO is
+/// load-bearing twice — a `Forget` must not be overtaken by the `Snapshot` it
+/// cancels, and a save must not be overtaken by anything. A cover render is
+/// hundreds of milliseconds of work that nothing is waiting on; putting one in
+/// front of an autosave would make the feature that protects work wait behind the
+/// feature that decorates a card.
+///
+/// ⚠️ **Nothing here writes a record.** `render` may write a PNG into the cover
+/// cache, which `crate::atomic` deliberately **exempts** as derived data — a torn
+/// one is regenerated from the document it came from — so the second writer this
+/// adds is not a second writer of anything that module protects.
+struct Renderer {
+    /// `None` only while [`Drop`] is taking it; dropping the sender ends the
+    /// worker's loop.
+    tx: Option<std::sync::mpsc::Sender<(Entry, String)>>,
+    done: std::sync::mpsc::Receiver<(String, Result<Rgba, NoCover>)>,
+    /// Jobs sent and not yet answered — `Writer::in_flight`'s field, for
+    /// `Covers::settle`'s sake and for the same reason: a `Receiver` cannot say
+    /// how many sends are still in the worker's hands. (Plain backticks: that
+    /// method is `cfg(test)`, so a production doc may not link it — §15 D319, and
+    /// the doc gate exits 101 on one that tries, which is how this was caught.)
+    in_flight: usize,
+    handle: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Renderer {
+    fn spawn(ctx: &egui::Context) -> Self {
+        let (tx, jobs) = std::sync::mpsc::channel::<(Entry, String)>();
+        let (report, done) = std::sync::mpsc::channel::<(String, Result<Rgba, NoCover>)>();
+        let ctx = ctx.clone();
+        let handle = std::thread::spawn(move || {
+            for (entry, key) in jobs {
+                let answer = render(&entry, &key);
+                if report.send((key, answer)).is_err() {
+                    return;
+                }
+                // **`request_repaint`, for `crate::fonts::FontService::new`'s
+                // reason**: eframe here is reactive, so without it a cover
+                // finished while the pointer is still would sit in the channel
+                // until something else woke the app up.
+                ctx.request_repaint();
+            }
+        });
         Self {
-            covers: HashMap::new(),
-            pass: 0,
-            spent: Duration::ZERO,
-            budget: FRAME_BUDGET,
+            tx: Some(tx),
+            done,
+            in_flight: 0,
+            handle: Some(handle),
+        }
+    }
+}
+
+impl Drop for Renderer {
+    /// **Joined rather than detached**, so a `Covers` that goes away — the base
+    /// folder changed — does not leave a thread rendering covers for a library
+    /// nobody is looking at.
+    fn drop(&mut self) {
+        self.tx = None;
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
         }
     }
 }
@@ -140,55 +234,119 @@ impl Covers {
     /// draw the plain plate it drew before covers existed. A `None` that means
     /// "later" also asks for a repaint, so later arrives.
     pub fn get(&mut self, ctx: &egui::Context, entry: &Entry) -> Option<&egui::TextureHandle> {
-        let pass = ctx.cumulative_pass_nr();
-        if pass != self.pass {
-            self.pass = pass;
-            self.spent = Duration::ZERO;
-        }
+        self.drain(ctx);
         let key = key(entry)?;
-        // ⚠️ **The lookup is split from the insert rather than using an entry
-        // API**, because the miss path renders — and holding a mutable borrow of
-        // the map across a hundred milliseconds of rasterizing is how a borrow
-        // checker fight turns into a clone of the whole cache.
         if self.covers.contains_key(&key) {
             return match self.covers.get(&key) {
                 Some(Cover::Ready(t)) => Some(t),
                 _ => None,
             };
         }
-
-        // **One render a pass whatever the budget says**, which is the progress
-        // guarantee: a document big enough to spend the whole budget on its own
-        // would otherwise never be drawn at all.
-        if !self.spent.is_zero() && self.spent >= self.budget {
-            ctx.request_repaint();
-            return None;
-        }
-
-        let started = Instant::now();
-        let cover = match render(entry, &key) {
-            Ok(rgba) => {
-                let image = egui::ColorImage::from_rgba_unmultiplied(
-                    [rgba.width as usize, rgba.height as usize],
-                    &rgba.pixels,
-                );
-                Cover::Ready(ctx.load_texture(
-                    format!("cover-{key}"),
-                    image,
-                    egui::TextureOptions::LINEAR,
-                ))
+        // **Enqueued once.** A card is drawn on every frame it is on screen, and
+        // without `queued` a slow document would be handed to the renderer sixty
+        // times a second — a queue that grows faster than it drains and a thread
+        // that never reaches the second document.
+        if self.queued.insert(key.clone()) {
+            let render = self.render.get_or_insert_with(|| Renderer::spawn(ctx));
+            if let Some(tx) = render.tx.as_ref()
+                && tx.send((entry.clone(), key)).is_ok()
+            {
+                render.in_flight += 1;
             }
-            Err(NoCover::Unreadable) => Cover::Unreadable,
-            Err(NoCover::Blank) => Cover::Blank,
+        }
+        None
+    }
+
+    /// Take what the renderer has finished and turn it into textures.
+    ///
+    /// **Called from [`Self::get`] rather than once per frame by the dashboard**,
+    /// which is the cheaper of the two and the one that cannot be forgotten: the
+    /// only thing that ever wants a cover is a card asking for one, and a pass
+    /// that draws no cards has nothing to upload.
+    ///
+    /// ⚠️ **The texture upload stays on this thread and has to.** `load_texture`
+    /// needs the `Context`, which is not `Send` to a worker in any useful sense —
+    /// and it is the cheap half: what cost 433 ms was the decode, which is now the
+    /// worker's, and what is left is an upload of a picture bounded by
+    /// [`COVER_MAX_PX`].
+    fn drain(&mut self, ctx: &egui::Context) {
+        let Some(render) = self.render.as_mut() else {
+            return;
         };
-        // Timed whether or not it worked: a document that fails after 80 ms of
-        // parsing has spent the pass's budget exactly as one that succeeded.
-        self.spent += started.elapsed();
-        ctx.request_repaint();
-        self.covers.insert(key.clone(), cover);
-        match self.covers.get(&key) {
-            Some(Cover::Ready(t)) => Some(t),
-            _ => None,
+        let mut arrived = Vec::new();
+        while let Ok(answer) = render.done.try_recv() {
+            render.in_flight = render.in_flight.saturating_sub(1);
+            arrived.push(answer);
+        }
+        for (key, answer) in arrived {
+            self.queued.remove(&key);
+            let cover = match answer {
+                Ok(rgba) => {
+                    let image = egui::ColorImage::from_rgba_unmultiplied(
+                        [rgba.width as usize, rgba.height as usize],
+                        &rgba.pixels,
+                    );
+                    Cover::Ready(ctx.load_texture(
+                        format!("cover-{key}"),
+                        image,
+                        egui::TextureOptions::LINEAR,
+                    ))
+                }
+                Err(NoCover::Unreadable) => Cover::Unreadable,
+                Err(NoCover::Blank) => Cover::Blank,
+            };
+            self.covers.insert(key, cover);
+        }
+    }
+
+    /// Wait for every queued cover and take the answers.
+    ///
+    /// ⚠️ **For tests, and it is the reason there is only one production path.**
+    /// `library::writer::Writer::settle` is the precedent and the argument is the
+    /// same: an asynchronous feature whose test drove a *synchronous* variant
+    /// would be testing code the app does not run. So the app is always
+    /// asynchronous and a probe that wants an answer asks for one here.
+    ///
+    /// ⚠️ **`#[cfg(test)]` rather than `pub`**, which is D672's answer and not
+    /// D699's: nothing in production waits for a cover, so a `pub` one is an item
+    /// `dead_code` **does** analyse — `ondin-app` declares only a `[[bin]]` and
+    /// has no lib target — and it warned. No production doc links it, so the
+    /// narrow `#[allow]` D699 is about would be the wrong tool here.
+    ///
+    /// Plain backticks throughout: this item is `cfg(test)`, so `cargo doc`
+    /// cannot see it and a link on it resolves against nothing (§15 D319).
+    #[cfg(test)]
+    pub(crate) fn settle(&mut self, ctx: &egui::Context) {
+        while self.render.as_ref().is_some_and(|r| r.in_flight > 0) {
+            let answer = self.render.as_ref().and_then(|r| r.done.recv().ok());
+            let Some((key, answer)) = answer else {
+                // The worker is gone; nothing else will arrive, and counting on
+                // is a hang rather than a wait.
+                if let Some(r) = self.render.as_mut() {
+                    r.in_flight = 0;
+                }
+                break;
+            };
+            if let Some(r) = self.render.as_mut() {
+                r.in_flight = r.in_flight.saturating_sub(1);
+            }
+            self.queued.remove(&key);
+            let cover = match answer {
+                Ok(rgba) => {
+                    let image = egui::ColorImage::from_rgba_unmultiplied(
+                        [rgba.width as usize, rgba.height as usize],
+                        &rgba.pixels,
+                    );
+                    Cover::Ready(ctx.load_texture(
+                        format!("cover-{key}"),
+                        image,
+                        egui::TextureOptions::LINEAR,
+                    ))
+                }
+                Err(NoCover::Unreadable) => Cover::Unreadable,
+                Err(NoCover::Blank) => Cover::Blank,
+            };
+            self.covers.insert(key, cover);
         }
     }
 
@@ -513,53 +671,72 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// ⚠️ **One render a pass whatever the budget says, and no more.**
+    /// **Nothing renders in the pass, and every queued cover arrives** (§15
+    /// D820).
     ///
-    /// The budget is taken away rather than waited out, so this is about the
-    /// *rule* rather than about how fast this machine rasterizes: with no budget
-    /// at all the first document still gets its cover — the progress guarantee,
-    /// without which a library of documents each slower than the budget would
-    /// draw no covers ever — and the second is deferred to the next pass.
+    /// 🚨 **This test replaces `one_cover_a_pass_arrives_however_spent_the_budget_is`,
+    /// and the rule it pinned is gone rather than changed.** That one asserted
+    /// the progress guarantee — *one render a pass whatever the budget says* —
+    /// which existed because the render happened **in** the pass and a library of
+    /// slow documents would otherwise draw no covers ever. With the render on a
+    /// thread there is nothing in the frame to budget: both documents are queued
+    /// on the first pass and both come back.
     ///
-    /// Flip-check, run: removing the `!self.spent.is_zero()` guard makes the
-    /// first call return `None` too and fails on the first assertion. Removing
-    /// the budget check entirely fails the second. The two arms are independent
-    /// and the test pins both.
+    /// ⚠️ **The first assertion is the one with teeth and it is a negative.**
+    /// `get` returning `None` for a document whose file is sitting right there is
+    /// the whole change; a version that rendered inline would answer `Some`
+    /// immediately and fail here.
+    ///
+    /// ⚠️ **`settle` rather than a sleep or a frame count.** A timing-based wait
+    /// would be a flake on a loaded machine and, worse, a *green* one on a fast
+    /// machine that had reintroduced the stall — see `CLAUDE.md` on the recovery
+    /// test whose red run was correct behaviour for a state the clock had picked.
+    ///
+    /// **Flip-check, run** by making `get` render inline again (`render(entry,
+    /// &key)` in place of the enqueue): fails at *"nothing renders in the pass"*,
+    /// the predicted site.
     #[test]
-    fn one_cover_a_pass_arrives_however_spent_the_budget_is() {
-        let root = temp("budget");
+    fn covers_are_rendered_off_the_pass_and_all_of_them_arrive() {
+        let root = temp("async");
         let first = doc_with_a_rect(&root, "Landing v4");
         let second = doc_with_a_rect(&root, "Pricing table");
         let ctx = egui::Context::default();
-        let mut covers = Covers {
-            budget: Duration::ZERO,
-            ..Default::default()
-        };
-        // A pass has to be in flight for `load_texture` and the pass counter to
-        // mean anything.
+        let mut covers = Covers::default();
+        // A pass has to be in flight for `load_texture` to mean anything.
         let _ = ctx.run_ui(Default::default(), |_| {});
 
         assert!(
-            covers.get(&ctx, &first).is_some(),
-            "the first render of a pass must happen whatever the budget says"
+            covers.get(&ctx, &first).is_none() && covers.get(&ctx, &second).is_none(),
+            "nothing renders in the pass: both are queued and neither is ready"
         );
+        assert_eq!(
+            covers.queued.len(),
+            2,
+            "and both were queued, not just the one the old budget allowed"
+        );
+
+        covers.settle(&ctx);
         assert!(
-            covers.get(&ctx, &second).is_none(),
-            "the second must not, the budget being spent"
+            covers.get(&ctx, &first).is_some(),
+            "the first arrives once the worker has it"
         );
-        // And the next pass starts the budget again.
-        let _ = ctx.run_ui(Default::default(), |_| {});
         assert!(
             covers.get(&ctx, &second).is_some(),
-            "the budget is per pass, not per session"
+            "and so does the second, in the same pass — which is what the \
+             per-pass progress guarantee existed to ration and no longer has to"
         );
         let _ = std::fs::remove_dir_all(&root);
     }
 
     /// A cover that could not be made is remembered as a failure rather than
     /// retried, or an empty document would re-enter the render path on every
-    /// pass for the life of the session — spending the budget that the documents
-    /// which *can* be drawn need.
+    /// pass for the life of the session — queueing work the documents which
+    /// *can* be drawn are waiting behind.
+    ///
+    /// ⚠️ **The tell used to be the budget and is now the queue** (§15 D820).
+    /// With the render inline, a second `get` that re-rendered spent more of
+    /// `Covers::spent`; there is no such field any more, and the question is
+    /// instead whether the key goes back on the renderer's queue.
     #[test]
     fn a_document_with_no_cover_is_not_retried_every_pass() {
         let root = temp("failed");
@@ -570,14 +747,20 @@ mod tests {
         let mut covers = Covers::default();
         let _ = ctx.run_ui(Default::default(), |_| {});
 
-        assert!(covers.get(&ctx, &entry).is_none());
-        // The tell is the budget: a second call that re-rendered would spend
-        // more of it, and one that read the remembered failure spends none.
-        let spent_after_first = covers.spent;
-        assert!(covers.get(&ctx, &entry).is_none());
-        assert_eq!(
-            covers.spent, spent_after_first,
-            "a remembered failure must cost nothing to look up"
+        assert!(covers.get(&ctx, &entry).is_none(), "queued, not ready");
+        covers.settle(&ctx);
+        assert!(
+            covers.queued.is_empty(),
+            "the fixture must reach the state: the answer came back"
+        );
+        assert!(
+            covers.get(&ctx, &entry).is_none(),
+            "an empty document still has no cover"
+        );
+        assert!(
+            covers.queued.is_empty(),
+            "and the remembered failure is not queued again — which is what \
+             stops one blank document occupying the renderer for the session"
         );
         let _ = std::fs::remove_dir_all(&root);
     }

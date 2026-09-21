@@ -111,6 +111,29 @@ pub(crate) struct Clip {
     pub(crate) images: Vec<(ondin_core::ImageId, ondin_core::ImageEntry)>,
 }
 
+/// What the system clipboard turned out to be holding, when a paste asks
+/// (§15 D823).
+///
+/// **Three answers rather than a `bool`, and the third is the reason.** A paste
+/// used to ask one question — *is the in-app payload still what the system
+/// clipboard describes* ([`OndinApp::owns_the_clipboard`]) — and a `no` meant
+/// "try the other arms". With layers now crossing between windows there is a
+/// third state: text that **is** an Ondin copy and that this build cannot read.
+/// Falling through on that would hand the payload to
+/// [`OndinApp::paste_text_as_layer`], so the user asks for their layers back and
+/// gets a text layer holding several megabytes of their own JSON. It is the one
+/// outcome worth a variant.
+enum Clipboard {
+    /// [`OndinApp::clipboard`] is live — either it never left this window, or the
+    /// foreign payload has just been adopted into it. The layer arm can run.
+    Layers,
+    /// Somebody else's: a sentence, some markup, a path, nothing. The caller's
+    /// remaining arms are what it is for.
+    Foreign,
+    /// Ours, and unreadable. Already reported, and the caller must **stop**.
+    Unreadable,
+}
+
 /// The values a gesture holds **while it is running**, in one place so that
 /// "is anything in flight?" is answered by the type instead of by a list somebody
 /// has to remember to extend (§15 D785, `[A2-L7-02]`).
@@ -615,6 +638,52 @@ pub struct OndinApp {
     /// Holds a *draft* while it is up rather than a `bool`, because Save is what
     /// applies it — see [`crate::panels::dashboard::LibrarySettings`].
     pub(crate) library_settings: Option<crate::panels::dashboard::LibrarySettings>,
+    /// What the last library migration left behind, if it left anything
+    /// (§15 D810).
+    ///
+    /// 🚨 **The status line named one file and nothing named the rest.**
+    /// `library::relocate::Moved::failed` has held every stranded path since §15
+    /// D620, and `Moved::summary` puts the *first* of them in a sentence that is
+    /// gone at the next status message — so a migration that stranded twenty-three
+    /// documents was, a minute later, unrecoverable without hunting the old folder
+    /// by hand. `apply_library_settings` re-points the app at the new root whether
+    /// the migration succeeded, partly succeeded or did nothing, which is what
+    /// makes the loss permanent rather than a retry away.
+    ///
+    /// **Both roots, not just the list**, because the re-run needs them: the app
+    /// is already pointing at the new library by the time this is read, so the
+    /// source is not derivable from anything else on `OndinApp`.
+    ///
+    /// **Session state and not a preference.** It is cleared by a clean migration
+    /// and by a successful retry, and it does not survive a relaunch — the files
+    /// do, and the old folder is named in the modal for as long as anything is
+    /// still in it. A stranded list written to `prefs.json` would be a second copy
+    /// of a fact the filesystem already holds, and the copy is the one that rots.
+    pub(crate) stranded: Option<crate::panels::dashboard::Stranded>,
+    /// Whether a chrome widget held the keyboard at the **end of the last
+    /// frame** — the one thing [`Self::escape`] cannot ask egui for (§15 D821).
+    ///
+    /// 🚨 **`Escape` out of a chrome text field was spent twice.** egui clears
+    /// focus in `Memory::begin_pass`, so by the time `input::resolve` runs the
+    /// focus is already gone and the key resolves to `Action::Escape` — which is
+    /// §15 D317's own reading, and is how a *valved* field's cancel reaches
+    /// [`Self::cancel_gesture`] at all. For a plain `TextEdit` there is no preview
+    /// to find, so the ladder fell straight through it: renaming a layer in the
+    /// inspector and pressing `Escape` abandoned the rename **and cleared the
+    /// selection**, which is the ladder's last rung.
+    ///
+    /// **Recorded rather than asked, because egui has no global question for
+    /// it.** `Memory::had_focus_last_frame` takes an `Id` and the ladder has none
+    /// — there is no widget to name, the whole point being that *something*
+    /// had the keyboard. So this is written at the end of each frame, beside the
+    /// `Tab` surrender that is there for the same class of reason.
+    ///
+    /// ⚠️ **"Anything focused", not "a text field".** That is `egui_wants_keyboard_input`'s
+    /// own definition (§15 D123) and it is deliberately not narrowed: a button
+    /// reached by the focus ring also spends `Escape` here, which is the reading
+    /// the key already has everywhere — *drop what has the keyboard* — and
+    /// narrowing it would need a widget kind egui does not report.
+    pub(crate) chrome_focus: bool,
     /// In-progress name edit (node id + buffer), so typing persists across
     /// frames and commits once, on defocus.
     pub(crate) name_edit: Option<(NodeId, String)>,
@@ -1241,6 +1310,29 @@ fn with_clipboard<T>(f: impl FnOnce(&mut arboard::Clipboard) -> T) -> Option<T> 
 /// (Plain backticks: `headless` is `cfg(test)`, so a production doc cannot link
 /// it and the doc gate exits 101 on one that tries — §15 D319. This link was
 /// written as a link and caught by that gate, which is the gate working.)
+///
+/// 🚨 **The gate caught this one because the item is *production*. For a link
+/// inside a `cfg(test)` module nothing catches it, and the re-check that was
+/// supposed to has never been able to** (§15 D827, 2026-09-22). `CLAUDE.md`
+/// carried a ``git diff … | grep -E '^\+ *(///|//!).*\[\`'`` for exactly that
+/// blind spot and credited it with a catch per session for six sessions. **In
+/// GNU grep's ERE a backslash before a backtick matches nothing**, so that
+/// command returns no hits on any input whatever — measured against a one-line
+/// fixture that the same pattern minus the backslash matches. It is the
+/// `grep 'cfg(debug'` shape from §15 D732 again: a check whose output cannot
+/// disagree with the claim it is printed under.
+///
+/// 🚨 **A second of that file's checks had the same defect and the worse
+/// consequence**, which is why D827 is about the class rather than this grep:
+/// `review/`'s census defends against a count reading *high* by taking a second
+/// extraction and comparing, and an inert second reading comes back empty, which
+/// reads as *"nothing to correct for"* and **corroborates** the high count. A
+/// check that goes quiet wastes a reading; a check that answers in the shape of
+/// a corroboration is spent as evidence. ⚠️ **Both were found by *running*
+/// them, neither by reading** — the patterns look right — and **no sweep of the
+/// file's remaining commands has been run**. **The backslash is gone from both
+/// now**; what is unchanged is that this doc convention has no gate behind it
+/// and is kept by reading.
 ///
 /// 🚨 **A headless app read and could write the developer's real clipboard.**
 /// D303 swaps three things so a probe cannot touch the machine it runs on — the
@@ -2061,6 +2153,8 @@ impl OndinApp {
             },
             covers: crate::library::cover::Covers::default(),
             library_settings: None,
+            stranded: None,
+            chrome_focus: false,
         }
     }
 }
@@ -2487,6 +2581,14 @@ impl eframe::App for OndinApp {
         if took_tab && let Some(focused) = ctx.memory(|m| m.focused()) {
             ctx.memory_mut(|m| m.surrender_focus(focused));
         }
+
+        // **After the surrender above, which is the only ordering that is true**
+        // (§15 D821). A frame whose `Tab` was ours ends with nothing focused, so
+        // recording before that line would tell the *next* frame's `Escape` that a
+        // field had the keyboard when the app had just taken it away. See
+        // [`Self::chrome_focus`] for what this answers and why egui cannot be
+        // asked directly.
+        self.chrome_focus = ctx.memory(|m| m.focused()).is_some();
     }
 }
 
@@ -2543,11 +2645,37 @@ impl OndinApp {
 
     pub(crate) fn dispatch(&mut self, ctx: &egui::Context, action: Action) {
         match action {
-            Action::Undo => self.undo(),
-            Action::Redo => self.redo(),
+            // 🚨 **The three arms that act on the document finish a live text
+            // session first** (§15 D815). These chords resolve in
+            // `Mode::TextInsert` now, and a `Document` edited while a session is
+            // open is one the session's buffer has not been written back into —
+            // the two then disagree until the session ends and commits over
+            // whatever happened in between. `Save` was the worst of the three: it
+            // writes *and pins a version* from `session.doc`, which does not hold
+            // the typed text.
+            //
+            // **At the dispatch seam rather than in `input::text_insert_mode`**,
+            // because this is a fact about the *action* and not about the key that
+            // produced it: the top bar's buttons already carry it (§15 D466), and
+            // a guard in the keymap would be a second copy that the next door onto
+            // `Undo` would miss. A no-op outside a session, `finish_text_first`
+            // asking `self.text.is_some()` first.
+            Action::Undo => {
+                self.finish_text_first();
+                self.undo();
+            }
+            Action::Redo => {
+                self.finish_text_first();
+                self.redo();
+            }
             // Pins, which is what `Ctrl+S` means now that autosave writes the
             // file anyway (`input::Action::Save`).
-            Action::Save => self.save_file(true),
+            Action::Save => {
+                self.finish_text_first();
+                self.save_file(true);
+            }
+            // No `finish_text_first` of its own: `go_to_dashboard` has called it
+            // since §15 D466 and is the one spelling of that walk.
             Action::Open => self.go_to_dashboard(),
             // **The same two functions the dashboard's own buttons call.** `Ctrl+N`
             // is the *New file* card and `Ctrl+W` is the walk back that the brand
@@ -3163,6 +3291,27 @@ impl OndinApp {
         } else if self.cancel_gesture(ctx) {
             // Whatever was being dragged goes back to where the document says
             // it is, and history never hears about it.
+        } else if self.chrome_focus {
+            // 🚨 **A chrome field surrendered focus to this very `Escape`, and the
+            // key is spent on it** (§15 D821). egui clears focus in `begin_pass`,
+            // so the press is still in `input` when the keymap runs and resolves
+            // here — which is what makes the rung above work for a *valved* field,
+            // whose preview `cancel_gesture` finds and drops. A plain `TextEdit`
+            // installs no preview, so the ladder used to fall straight past it:
+            // renaming a layer and pressing `Escape` abandoned the rename **and**
+            // took the last rung, clearing the selection under the panel that was
+            // showing it.
+            //
+            // ⚠️ **Below `cancel_gesture` and not above it**, which is the whole of
+            // the placement: a numeric field's cancel has to go on reaching that
+            // function, because it is what sets `gesture_cancelled` and stops the
+            // release committing after all (§15 D317). This rung is only ever
+            // taken when nothing was in flight — which is exactly the text-field
+            // case.
+            //
+            // Nothing is undone here. The field has already abandoned its own edit
+            // (`ui::defocus_commits`, §15 D808); what this adds is that the key
+            // stops there.
         } else if self.pen_bias {
             // **The bias, above the points it was armed over.** It is the more
             // transient of the two — one keystroke on, one keystroke off, with the
@@ -4274,8 +4423,10 @@ impl OndinApp {
         if self.paste_image(None) {
             return;
         }
-        if self.owns_the_clipboard() && self.paste_clipboard() {
-            return;
+        match self.take_clipboard() {
+            Clipboard::Layers if self.paste_clipboard() => return,
+            Clipboard::Unreadable => return,
+            _ => {}
         }
         // **After the app's own payload and before the text layer**, which is the
         // whole routing rule: an in-app copy is layers however it looks on the system
@@ -4309,13 +4460,17 @@ impl OndinApp {
         if self.paste_image(None) {
             return;
         }
-        if self.owns_the_clipboard() {
-            if self.paste_guides(0.0) {
-                return;
+        match self.take_clipboard() {
+            Clipboard::Layers => {
+                if self.paste_guides(0.0) {
+                    return;
+                }
+                if self.paste_clipboard_at(Vec2::ZERO) {
+                    return;
+                }
             }
-            if self.paste_clipboard_at(Vec2::ZERO) {
-                return;
-            }
+            Clipboard::Unreadable => return,
+            Clipboard::Foreign => {}
         }
         // **Markup has no "in place" to restore**, exactly as a picture does not: it
         // arrives from another application with no position of ours behind it, so
@@ -4352,6 +4507,86 @@ impl OndinApp {
         system_clipboard_text().as_deref() == Some(stamp.as_str())
     }
 
+    /// What the clipboard is holding for the layer arm — and, when the answer is
+    /// a copy made in **another `ondin` window**, adopt it on the way past
+    /// (§15 D823).
+    ///
+    /// **Every paste door calls this in place of [`Self::owns_the_clipboard`]**,
+    /// so the crossing is a property of the clipboard rather than of any one
+    /// chord: `Ctrl+V`, *Paste in place*, *Paste here* and the layers panel's
+    /// *Paste* all gain it together. ⚠️ **That rule is §15 D224's and not
+    /// D218's** — D218 *recorded* the opposite as an honest asymmetry, *Paste
+    /// here* having no image arm, and D224 is what closed it by taking the point
+    /// `paste_image` had not. D224 also names the one place the row and the chord
+    /// **deliberately differ**, which is the *aim*: *Paste here* passes `Some(p)`,
+    /// so the fill it replaces must be under the pointer. What must not differ is
+    /// what the clipboard is found to **hold**, and that is what this makes
+    /// uniform.
+    ///
+    /// **The receipt is asked first, and that is a fast path rather than a
+    /// separate rule.** A copy that never left this window is already sitting in
+    /// [`Self::clipboard`] with its images beside it, so re-parsing our own
+    /// payload out of the OS clipboard would be the same subtrees at the cost of
+    /// a megabyte of base64 — while giving, by construction, the same answer.
+    ///
+    /// **Adopting rather than pasting directly** is what keeps the placement
+    /// rules in one place. [`Self::paste_clipboard_at`] puts a subtree back under
+    /// the parent it was copied from *if this document has one*, and a foreign
+    /// copy simply does not: ids are minted against a per-process-random actor
+    /// (`session`), so `Document::contains` answers no and the existing fallback
+    /// — the canvas root, appended — is already the right behaviour with nothing
+    /// written for it. ⚠️ **The exception is the case that looks like a bug and
+    /// is not**: the *same document* open in two windows does resolve, and the
+    /// paste lands back in its own group, which is what someone doing that meant.
+    fn take_clipboard(&mut self) -> Clipboard {
+        if self.owns_the_clipboard() {
+            return Clipboard::Layers;
+        }
+        let Some(text) = system_clipboard_text() else {
+            return Clipboard::Foreign;
+        };
+        self.adopt_clip_text(text)
+    }
+
+    /// [`Self::take_clipboard`]'s decision, with the OS read lifted off it.
+    ///
+    /// **Split for the reason §15 D805 split `pick_from_chain` off `pick_preview`**:
+    /// the read is the half no test on this machine can reach — `OndinApp::headless`
+    /// sets `CLIPBOARD_OFF`, so [`system_clipboard_text`] answers `None` to every
+    /// probe and the whole layer arm is unreachable from a test through the door
+    /// above — while the decision is the half worth pinning. A test hands this
+    /// function the text a real [`Self::copy_selection`] produced, which is the
+    /// crossing itself with one process standing in for two.
+    fn adopt_clip_text(&mut self, text: String) -> Clipboard {
+        let Some(read) = ondin_core::io::clip::read(&text) else {
+            return Clipboard::Foreign;
+        };
+        let payload = match read {
+            Ok(payload) => payload,
+            Err(e) => {
+                self.session.fail(format!(
+                    "That copy came from a build this one cannot read ({e})"
+                ));
+                return Clipboard::Unreadable;
+            }
+        };
+        self.clipboard_from = payload.from;
+        self.clipboard = Some(Clip {
+            subtrees: payload.subtrees,
+            images: payload.images,
+        });
+        // The stamp is written here for the same reason `stamp_clipboard` writes
+        // one at a copy: it is what makes `owns_the_clipboard` answer *yes* from
+        // now on, so a second paste of the same foreign copy takes the fast path
+        // above instead of decoding the payload again.
+        self.clipboard_stamp = Some(text);
+        // One clipboard, two typed fields — see `Self::guide_clipboard`. A
+        // foreign payload carries no guides, so whatever this window was holding
+        // is no longer what the system clipboard describes.
+        self.guide_clipboard = None;
+        Clipboard::Layers
+    }
+
     /// Put `text` on the system clipboard **and** keep it as the receipt
     /// [`Self::owns_the_clipboard`] reads back.
     ///
@@ -4368,9 +4603,15 @@ impl OndinApp {
     /// The stand-in is not decoration. `egui_winit` only emits `Event::Paste`
     /// when the OS clipboard has something in it, and that event is the only
     /// form Ctrl+V reaches us in (see `input::normal_mode`) — so a copy that
-    /// leaves the system clipboard alone is a copy that cannot be pasted. The
-    /// layers' names are the most useful thing we can put there: the real
-    /// payload is the captured subtrees, which have no text form today.
+    /// leaves the system clipboard alone is a copy that cannot be pasted.
+    ///
+    /// 🚨 **The names are no longer the whole of what goes there** (§15 D823).
+    /// The captured subtrees follow them past `ondin_core::io::clip::FENCE`, so
+    /// a second `ondin` window pastes them as *layers*; this paragraph read *"the
+    /// real payload is the captured subtrees, which have no text form today"*
+    /// until that landed. The names stay on the **first line** for the reason
+    /// above and because they are what someone pasting an Ondin copy into a note
+    /// wants to read — the stand-in was extended, not replaced.
     fn copy_selection(&mut self, ctx: &egui::Context) {
         // Guides are the other kind of subject Ctrl+C can be aimed at, and they
         // are never selected alongside layers, so this is an early return rather
@@ -4400,19 +4641,33 @@ impl OndinApp {
             .iter()
             .filter_map(|id| self.session.preview_world_bounds(*id))
             .reduce(|a, b| a.union(b));
-        self.stamp_clipboard(ctx, names.join(", "));
-        self.session
-            .info(format!("Copied {} layer(s)", templates.len()));
         // **The pictures come too, and they are taken here for `clipboard_from`'s
         // reason** — this is the last moment the document that holds them is
         // certainly the one on screen. A copy is nodes plus the table entries those
         // nodes key into (`Clip`), because a node carries the key and the document
         // carries the bytes.
         let flat: Vec<Node> = templates.iter().flatten().cloned().collect();
-        let images = build::image_ids_in(&flat)
+        let images: Vec<_> = build::image_ids_in(&flat)
             .into_iter()
             .filter_map(|id| Some((id.clone(), self.session.doc.image(&id)?.clone())))
             .collect();
+        // **The stand-in carries the payload now** (§15 D823). It is still the
+        // layer names on the first line, for the reason this function's doc gives
+        // and for the reason D17 gave before it — but the real subtrees follow it
+        // past `io::clip::FENCE`, which is what lets a second `ondin` window paste
+        // them as *layers* rather than as the text of their names.
+        //
+        // ⚠️ **The names alone on failure, rather than no copy at all.** Nothing
+        // in a well-formed document can make `write` fail, so this arm is a fact
+        // about the function rather than about today's model — and the honest
+        // fallback is the behaviour this call had until D823, which leaves the
+        // in-app clipboard working and only the crossing lost.
+        let heading = names.join(", ");
+        let text = ondin_core::io::clip::write(&templates, &images, self.clipboard_from, &heading)
+            .unwrap_or(heading);
+        self.stamp_clipboard(ctx, text);
+        self.session
+            .info(format!("Copied {} layer(s)", templates.len()));
         self.clipboard = Some(Clip {
             subtrees: templates,
             images,
@@ -4885,8 +5140,10 @@ impl OndinApp {
         if self.paste_image(None) {
             return;
         }
-        if self.owns_the_clipboard() && self.paste_clipboard_beside(id) {
-            return;
+        match self.take_clipboard() {
+            Clipboard::Layers if self.paste_clipboard_beside(id) => return,
+            Clipboard::Unreadable => return,
+            _ => {}
         }
         self.paste_text_as_layer(None);
     }
@@ -4982,10 +5239,15 @@ impl OndinApp {
         if self.paste_image(Some(world)) {
             return;
         }
-        if self.owns_the_clipboard()
-            && self.paste_clipboard_at(paste_aim(self.clipboard_from, world))
-        {
-            return;
+        match self.take_clipboard() {
+            // **`clipboard_from` is read after the adoption, not before it** —
+            // a foreign copy brings its own source box, so *Paste here* aims a
+            // crossing copy exactly as it aims a local one.
+            Clipboard::Layers if self.paste_clipboard_at(paste_aim(self.clipboard_from, world)) => {
+                return;
+            }
+            Clipboard::Unreadable => return,
+            _ => {}
         }
         // Markup lands where the pointer is, like every other arm of this verb —
         // which is the one placement difference between *Paste here* and the chord,
@@ -7262,13 +7524,6 @@ fn width_to_store(width: f32, room: f32, stored: f32, down: bool) -> Option<f32>
 }
 
 impl OndinApp {
-    /// The top bar: brand mark, breadcrumb, save state, file/edit actions,
-    /// zoom readout and the Settings button.
-    ///
-    /// **There is no *Share*.** It was an accent-outlined button at the right end
-    /// until 2026-08-24, dropped when the design regeneration removed it and the
-    /// maintainer confirmed it: this is a local file editor with no sharing to do,
-    /// so the button was a promise nothing behind it could keep (§15 D330).
     /// End a live text session before acting on the document (§15 D466).
     ///
     /// **The two lines [`Self::choose_tool`] and [`Self::go_to_dashboard`] each
@@ -7311,6 +7566,24 @@ impl OndinApp {
         }
     }
 
+    /// The top bar: brand mark, breadcrumb, save state, file/edit actions,
+    /// zoom readout and the Settings button.
+    ///
+    /// **There is no *Share*.** It was an accent-outlined button at the right end
+    /// until 2026-08-24, dropped when the design regeneration removed it and the
+    /// maintainer confirmed it: this is a local file editor with no sharing to do,
+    /// so the button was a promise nothing behind it could keep (§15 D330).
+    ///
+    /// 🚨 **These two paragraphs were on [`Self::finish_text_first`]** until
+    /// 2026-09-19 (§15 D815), and this function had no doc at all. That helper was
+    /// inserted directly above `top_bar` and anchored on its `fn` line, so it took
+    /// this run as the head of its own — `CLAUDE.md`'s first habit exactly, and
+    /// the shape §15 D805 describes: the victim is left *still documented*, by a
+    /// run that opens by describing something else. Found by reading the run above
+    /// `finish_text_first` and asking whether its first line describes it: *"The
+    /// top bar: brand mark, breadcrumb…"* plainly does not describe *"end a live
+    /// text session"*. **The whole-tree length ranking cannot see this one** — the
+    /// merged run is 44 lines against a floor in the fifties.
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         egui::Panel::top("topbar")
             .exact_size(TOP_BAR_H)
@@ -15301,6 +15574,158 @@ mod library_wiring_tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// **And the *chord* now takes the same path, because it resolves at all**
+    /// (§15 D815).
+    ///
+    /// The test above runs the three verbs as the **button** runs them, and says
+    /// in its own doc that this left *"the button and its chord still
+    /// disagreeing"* — `Ctrl+Z` mid-session did nothing, by omission rather than
+    /// by a decision. The four chords resolve in `Mode::TextInsert` now
+    /// (`input::text_insert_tests::the_four_document_chords_resolve_in_a_session`
+    /// is that half), and the finishing moved to `OndinApp::dispatch` so that one
+    /// seam serves both doors.
+    ///
+    /// ⚠️ **Driven through `dispatch`, not through the keymap**, which is the
+    /// seam this half is about: `resolve` answering `[Undo]` and `dispatch`
+    /// finishing the session first are two independent claims, and a test that
+    /// pressed a key would pass or fail for either reason.
+    ///
+    /// **Flip-check, run** by removing `finish_text_first()` from `dispatch`'s
+    /// `Undo` arm: fails at ***"the chord ended the session"***, the first
+    /// assertion. ⚠️ **The prediction was the sibling test's failure site — a
+    /// panic at *"the fixture's node is a text node, got None"*, the undo having
+    /// deleted the node being typed into — and it never runs**, because this test
+    /// asks about the *session* one line earlier and the sibling does not ask at
+    /// all. Both are the same defect; which assertion reports it is decided by
+    /// what each test happens to check first. *The loss is still the node, and
+    /// only the sibling's message says so.*
+    #[test]
+    fn a_document_chord_in_a_session_finishes_it_first() {
+        let ctx = egui::Context::default();
+        let root = temp_root("text-chord");
+        let mut app = app_at(&ctx, root.clone());
+        let id = app.session.ids.mint();
+        let parent = app.session.doc.root();
+        let parts = crate::fonts::FontService::default_text_parts();
+        app.session
+            .try_commit(ondin_core::Transaction(vec![
+                ondin_core::Operation::CreateNode {
+                    id,
+                    parent,
+                    index: 0,
+                    kind: ondin_core::NodeKind::Text {
+                        content: "hello".into(),
+                        style: Box::new(parts.style),
+                        spans: parts.spans,
+                        para_spans: parts.para_spans,
+                        paragraph: parts.paragraph,
+                        block: parts.block,
+                        sizing: parts.sizing,
+                        on_path: None,
+                        on_path_flip: false,
+                        on_path_offset: 0.0,
+                    },
+                    transform: None,
+                    name: None,
+                },
+            ]))
+            .expect("the fixture's text node");
+        app.save_file(false);
+        app.begin_edit_text(Some(id), None);
+        app.text
+            .as_mut()
+            .expect("the session is live")
+            .editor
+            .insert("TYPED");
+        assert_eq!(
+            app.mode,
+            super::Mode::TextInsert,
+            "the fixture must reach the state: a live session is what this is about"
+        );
+
+        app.dispatch(&ctx, crate::input::Action::Undo);
+
+        assert!(app.text.is_none(), "the chord ended the session");
+        let content = match app.session.doc.get(id).map(|n| n.kind()) {
+            Some(ondin_core::NodeKind::Text { content, .. }) => content.clone(),
+            other => panic!("the fixture's node is a text node, got {other:?}"),
+        };
+        assert_eq!(
+            content, "hello",
+            "and undid the typing rather than the node that carried it"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **`Escape` out of a chrome field is spent on the field, not on the
+    /// selection** (§15 D821).
+    ///
+    /// 🚨 **It was spent twice.** egui clears focus in `Memory::begin_pass`, so
+    /// the press is still in `input` when `input::resolve` runs and the key
+    /// resolves to `Action::Escape` — measured directly: with a `TextEdit`
+    /// focused, `resolve` answers `[Escape]`. That is what makes a *valved*
+    /// numeric field's cancel reach `cancel_gesture`; a plain text field installs
+    /// no preview, so the ladder fell through to its last rung and cleared the
+    /// selection under the panel that was showing it.
+    ///
+    /// ⚠️ **The assertion is on the selection, not on the field**, because the
+    /// field's own half is `ui::defocus_commits` (§15 D808) and is asserted where
+    /// it is decided. What is new here is only that the ladder stops.
+    ///
+    /// ⚠️ **`chrome_focus` is set by hand rather than by focusing a widget.** The
+    /// flag is written at the *end* of `update`, and this test does not run a full
+    /// frame — driving one would make the test about `update`'s ordering, which is
+    /// a second claim with its own failure modes. The ordering has a comment of
+    /// its own at the write site; what this pins is the rung.
+    ///
+    /// **Flip-check, run** by deleting the `else if self.chrome_focus` rung: fails
+    /// at *"the selection survives"*, the predicted site, with an empty selection
+    /// — which is the reported symptom exactly. The control below fails instead if
+    /// the rung is made unconditional, which is the other way it could be wrong.
+    #[test]
+    fn escape_out_of_a_chrome_field_does_not_also_clear_the_selection() {
+        let ctx = egui::Context::default();
+        let root = temp_root("escape-chrome");
+        let mut app = app_at(&ctx, root.clone());
+        let id = app.session.ids.mint();
+        let parent = app.session.doc.root();
+        app.session
+            .try_commit(ondin_core::Transaction(vec![
+                ondin_core::Operation::CreateNode {
+                    id,
+                    parent,
+                    index: 0,
+                    kind: ondin_core::NodeKind::Rect {
+                        size: ondin_core::kurbo::Size::new(80.0, 40.0),
+                        corner_radii: Default::default(),
+                    },
+                    transform: None,
+                    name: None,
+                },
+            ]))
+            .expect("the fixture's rect");
+        app.session.selection.set_one(id);
+
+        // A chrome field had the keyboard when the key arrived.
+        app.chrome_focus = true;
+        app.escape(&ctx);
+        assert_eq!(
+            app.session.selection.ids(),
+            &[id],
+            "the selection survives: the key was spent on the field"
+        );
+
+        // **Control: with nothing focused the ladder runs as it always has.**
+        // Without this the rung could be unconditional and nothing would notice.
+        app.chrome_focus = false;
+        app.escape(&ctx);
+        assert!(
+            app.session.selection.ids().is_empty(),
+            "control: outside a field, Escape still clears the selection"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// Every close request cancels while the work is unsaved, not only the
     /// first.
     ///
@@ -15752,6 +16177,7 @@ mod context_menu_rule_tests {
     use super::OndinApp;
     use super::library_wiring_tests::whole_frame;
     use super::ungroup_tests::app_with_two_groups;
+    use crate::tools::Tool;
     use ondin_core::{Document, NodeId};
 
     /// A secondary press, as two events, so a test can look between them.
@@ -15952,6 +16378,97 @@ mod context_menu_rule_tests {
             before.as_slice(),
             "R3: and it closed only the menu — the selection is the rung \
              underneath and one press does not pay out two"
+        );
+    }
+
+    /// **R3 with the whole ladder underneath it** — the wider fixture
+    /// `context-menus.md` §10's Escape bullet asked for and the clause §15 D795
+    /// left open (§15 D824).
+    ///
+    /// §10 words it exactly: *"Open one with a layer selected inside an entered
+    /// group and the node tool active, press Escape once, and assert the menu is
+    /// gone while the selection, `entered_group` and the tool are all
+    /// untouched."* `escape_over_a_menu_closes_the_menu_and_keeps_the_selection`
+    /// above asserts the first and the last of those; this asserts all three.
+    ///
+    /// 🚨 **It is a second test rather than a widening of that one, and the
+    /// reason is that the wider fixture moves where the teeth are.** `escape`
+    /// pays out **one** rung per press, and its chain reaches `entered_group`
+    /// *before* the tool and before the selection clear that is its final `else`.
+    /// So in the narrow fixture the fall-through's one extra rung is the
+    /// selection — which is why that test's selection assertion bites — and in
+    /// this one it is `entered_group`, leaving the selection and the tool
+    /// untouched under the very flip this test exists for. **Widening the
+    /// original would have taken the teeth out of it and left the suite looking
+    /// one test richer.** Both fixtures are needed because the ladder has two
+    /// different rungs directly under the menu depending on what is set.
+    ///
+    /// ⚠️ **Flipped** the same way its neighbour is — the dispatch loop
+    /// (`for action in input::resolve(&ctx, self.mode, self.prefs.nudge)`) in the
+    /// menu arm right after `self.context_menu = None`, the "closed it and then
+    /// fell through" version the arm's own comment warns about: **red on the
+    /// `entered_group` assertion**, the predicted site, with `None` against the
+    /// entered group — and **green on the selection and the tool**, which is the
+    /// paragraph above happening rather than being argued.
+    ///
+    /// ⚠️ **Two spellings of that mutation were run, and this matters because the
+    /// project's rule is that a mutation named by its text names no line.** The
+    /// first was `self.escape(&ctx)` in that arm — the ladder called directly,
+    /// skipping the routing — and the second is the dispatch loop above, which is
+    /// what the neighbour's doc and §15 D795 have always said. **Both came back
+    /// red at the same assertion with the same value**, which is the expected
+    /// result and not a licence to treat them as one edit: the first reaches the
+    /// ladder whatever `input::resolve` decides about the key, so it could have
+    /// passed while the real routing refused to produce the action at all.
+    ///
+    /// 🚨 **The documented run also discharges §15 D795's closing *Fix*.** That
+    /// entry asked for this flip to be re-run against
+    /// `escape_in_present_mode_closes_the_menu_first_and_the_mode_second` before
+    /// either test is leaned on as the only cover for a fall-through, its
+    /// argument having been *"asserted from a read and never run"*. Run over the
+    /// whole `escape_` filter on 2026-09-22: **three of the twelve go red** —
+    /// that test at *"and left present mode alone"*, the R3 selection test, and
+    /// this one — and the other **nine stay green**. So no one of the three is
+    /// the only cover, which is what the ask was about (§15 D824).
+    #[test]
+    fn escape_over_a_menu_keeps_the_entered_group_and_the_tool_as_well() {
+        let ctx = egui::Context::default();
+        let (mut app, g1, _, _) = app_with_two_groups(&ctx);
+        app.enter_container(g1, None);
+        app.choose_tool(Tool::Node);
+        let selection = app.session.selection.ids().to_vec();
+        assert_eq!(
+            app.entered_group,
+            Some(g1),
+            "the fixture is not in the state this test is about — with no group \
+             entered the assertion below is true of nothing"
+        );
+        assert_eq!(app.tool, Tool::Node, "nor with the tool left on Select");
+        assert!(
+            !selection.is_empty(),
+            "and entering a group selects something inside it"
+        );
+
+        right_click(&ctx, &mut app, egui::pos2(660.0, 410.0));
+        assert!(app.context_menu.is_some(), "a menu to escape from");
+
+        whole_frame(&ctx, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(app.context_menu.is_none(), "R3: the press closed the menu");
+        assert_eq!(
+            app.entered_group,
+            Some(g1),
+            "R3: and it closed only the menu — the group scope is the rung \
+             directly underneath and one press does not pay out two"
+        );
+        assert_eq!(
+            app.tool,
+            Tool::Node,
+            "R3: the tool is a rung below that and is not reached either"
+        );
+        assert_eq!(
+            app.session.selection.ids(),
+            selection.as_slice(),
+            "R3: and the selection, which is the bottom of the ladder"
         );
     }
 
@@ -16347,6 +16864,180 @@ mod clipboard_gate_tests {
         assert!(
             !super::system_clipboard_has_image(),
             "and the picture reader answers no"
+        );
+    }
+}
+
+#[cfg(test)]
+mod clipboard_crossing_tests {
+    //! **A layer copied in one `ondin` window pastes as a layer in another**
+    //! (§15 D823, `roadmap.md`'s *Now · Canvas*).
+    //!
+    //! Until D823 a copy put the layer *names* on the system clipboard and kept
+    //! the real subtrees in `OndinApp::clipboard`, so nothing crossed the process
+    //! boundary: a second window's `Ctrl+V` saw text, and pasted the names as a
+    //! text layer. The payload now follows the names past `io::clip::FENCE`.
+    //!
+    //! 🚨 **One process standing in for two, and that is the honest limit of
+    //! this module.** `OndinApp::headless` sets `CLIPBOARD_OFF` (§15 D798), so
+    //! no test here can put anything on the real OS clipboard or read it back —
+    //! which is why `OndinApp::adopt_clip_text` exists as its own function. What
+    //! is asserted is that the text a real `copy_selection` produced is enough,
+    //! on its own, to rebuild the layers in an app that has never seen the
+    //! document they came from. What is *not* asserted is that the OS carries
+    //! that text between two processes, which is `arboard`'s job and needs two
+    //! windows to see.
+
+    use super::{Clipboard, OndinApp};
+    use ondin_core::NodeId;
+
+    /// Every node reachable from the root, which is what a paste adds to.
+    fn node_ids(app: &OndinApp) -> Vec<NodeId> {
+        fn walk(doc: &ondin_core::Document, id: NodeId, out: &mut Vec<NodeId>) {
+            out.push(id);
+            let Some(node) = doc.get(id) else { return };
+            for c in node.children() {
+                walk(doc, *c, out);
+            }
+        }
+        let mut out = Vec::new();
+        walk(&app.session.doc, app.session.doc.root(), &mut out);
+        out
+    }
+
+    /// **The whole crossing, end to end**: copy two groups in one app, hand the
+    /// clipboard text to a second app that has never seen that document, and the
+    /// six nodes arrive as layers with ids of the *second* app's minting.
+    ///
+    /// **The id assertion is not decoration.** A captured subtree keeps the
+    /// original's ids until `document::remap_subtree` replaces them, and those ids
+    /// are minted against a per-process-random actor (`session::actor_id`) — so a
+    /// payload arriving from another window is a template, and a paste that took
+    /// its ids at face value would put one process's ids into another process's
+    /// document and break invariant 3 the first time the two met.
+    ///
+    /// ⚠️ **Flipped** by restoring the pre-D823 copy — `stamp_clipboard(ctx,
+    /// heading)` in place of the payload write, which is exactly the line this
+    /// entry changed rather than a deletion of the feature: **red on the
+    /// `Clipboard::Layers` assertion**, the predicted site, with `Foreign`,
+    /// because layer names carry no fence. The node assertions below never run
+    /// under it, which is the right order — the crossing is the claim and the
+    /// arithmetic is its consequence.
+    ///
+    /// ⚠️ **That flip takes `an_unreadable_copy_is_reported_rather_than_pasted_as_text`
+    /// down too, and at its *fixture* assertion rather than its claim** — the
+    /// version rewrite finds nothing to rewrite in `"Group 1, Group 2"`, so
+    /// `assert_ne!` fires before the test reaches anything it is about. Worth
+    /// the sentence because it is the fixture rule earning its keep: without
+    /// that line the rewrite would have been a no-op, the unchanged text would
+    /// have read as an ordinary copy, and a test whose whole subject is the
+    /// refusal would have failed claiming the refusal did not happen.
+    #[test]
+    fn a_copy_from_another_window_pastes_as_layers_with_fresh_ids() {
+        let ctx = egui::Context::default();
+        let (mut source, g1, g2, _) = super::ungroup_tests::app_with_two_groups(&ctx);
+        assert_eq!(
+            source.session.selection.ids(),
+            [g1, g2],
+            "the fixture is not in the state this test is about — an empty \
+             selection copies nothing and every assertion below would be vacuous"
+        );
+
+        source.copy_selection(&ctx);
+        let text = source
+            .clipboard_stamp
+            .clone()
+            .expect("a copy stamps the clipboard");
+        let from_source = node_ids(&source);
+
+        // A second window: its own app, its own `IdSource`, its own document,
+        // which has never held any of the nodes about to arrive.
+        let mut target = OndinApp::headless(&ctx);
+        let before = node_ids(&target);
+
+        assert!(
+            matches!(target.adopt_clip_text(text), Clipboard::Layers),
+            "the text a copy leaves behind is enough to recognise it as ours"
+        );
+        assert!(target.paste_clipboard(), "and enough to paste it");
+
+        let after = node_ids(&target);
+        assert_eq!(
+            after.len() - before.len(),
+            6,
+            "two groups of two rects each, and the groups themselves"
+        );
+        let arrived: Vec<NodeId> = after
+            .into_iter()
+            .filter(|id| !before.contains(id))
+            .collect();
+        assert!(
+            arrived.iter().all(|id| !from_source.contains(id)),
+            "and not one of them kept the id it had in the window it came from"
+        );
+    }
+
+    /// **Someone else's clipboard is still someone else's**, which is the arm
+    /// that keeps `Ctrl+V` over a sentence working.
+    ///
+    /// ⚠️ **Flipped** by having `io::clip::read` answer `Some(parse(text))` for
+    /// text with no fence in it — the plausible wrong version, "try the parse and
+    /// see": **red on the `Foreign` assertion**, at `Unreadable`, which is the
+    /// worse of the two failures it could produce. A paste of an ordinary
+    /// sentence would stop with *"that copy came from a build this one cannot
+    /// read"* instead of making the text layer the user asked for.
+    #[test]
+    fn ordinary_text_is_not_mistaken_for_a_copy() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        assert!(
+            matches!(
+                app.adopt_clip_text("a sentence copied in a browser".to_string()),
+                Clipboard::Foreign
+            ),
+            "no fence, so the caller's markup and text arms get it"
+        );
+        assert!(
+            app.clipboard.is_none(),
+            "and nothing was adopted on the way past"
+        );
+    }
+
+    /// **A copy this build cannot read stops the paste rather than becoming
+    /// one**, which is the whole reason `Clipboard` has three variants.
+    ///
+    /// ⚠️ **Flipped** by folding `Unreadable` into `Foreign` at
+    /// `adopt_clip_text`'s error arm — the shape a `bool` return would have
+    /// forced: **red on the `Unreadable` assertion**, and the cost the variant
+    /// buys is what the second assertion names. `paste` would fall through to
+    /// `paste_text_as_layer` and the user would get a text layer holding their
+    /// own payload.
+    #[test]
+    fn an_unreadable_copy_is_reported_rather_than_pasted_as_text() {
+        let ctx = egui::Context::default();
+        let (mut source, _, _, _) = super::ungroup_tests::app_with_two_groups(&ctx);
+        source.copy_selection(&ctx);
+        let text = source.clipboard_stamp.clone().unwrap();
+        let bumped = text.replace(
+            &format!(
+                "\"schema_version\":{}",
+                ondin_core::io::CURRENT_SCHEMA_VERSION
+            ),
+            "\"schema_version\":9999",
+        );
+        assert_ne!(bumped, text, "the fixture really was rewritten");
+
+        let mut target = OndinApp::headless(&ctx);
+        assert!(
+            matches!(target.adopt_clip_text(bumped), Clipboard::Unreadable),
+            "ours, and unreadable — which is not the same answer as not ours"
+        );
+        assert!(
+            matches!(
+                target.session.status().kind,
+                crate::session::StatusKind::Error
+            ),
+            "and the user is told, because nothing else in the paste path will"
         );
     }
 }

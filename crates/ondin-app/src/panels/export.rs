@@ -1342,7 +1342,11 @@ impl OndinApp {
                     NamePart::Prefix => &mut self.export_prefix_text,
                     NamePart::Suffix => &mut self.export_suffix_text,
                 } = None;
-                if text != current {
+                // **`Escape` abandons the name** (§15 D808,
+                // `crate::ui::defocus_commits`), and the buffer above goes either
+                // way — a prefix left half-typed in the buffer would reappear on
+                // the next click into the field.
+                if text != current && crate::ui::defocus_commits(&resp) {
                     out = Some(text.clone());
                 }
             }

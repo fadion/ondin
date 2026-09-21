@@ -2115,9 +2115,18 @@ impl OndinApp {
                 // surfaces for one edit have to agree on what a name is: the app
                 // owns the names it generates and the user owns the ones they type
                 // (§15 D127), and "" is not one of either.
+                // **The buffer goes on every way out and the write only on the
+                // ones that keep it** (§15 D808): `Escape` used to commit the
+                // typed name, this field being one of the four that read
+                // `lost_focus()` alone. ⚠️ **Order matters in this chain** — the
+                // `take` is a side effect and sits *before* the new term
+                // deliberately, so `Escape` still drops the buffer and only
+                // declines to write it. A buffer left behind is an abandoned name
+                // waiting for the next click on the row.
                 if resp.lost_focus()
                     && let Some((nid, val)) = self.name_edit.take()
                     && nid == id
+                    && ui::defocus_commits(&resp)
                 {
                     let name = val.trim().to_string();
                     if !name.is_empty() && name != name0 {
@@ -6622,13 +6631,28 @@ impl OndinApp {
                     .font(egui::FontId::proportional(11.5)),
             )
         });
+        // ⚠️ **Ending is not committing**, which is the half this field's
+        // exemption argument was missing (§15 D808): `Escape` ends the edit too,
+        // and the write below is gated on `ui::defocus_commits` rather than on
+        // the `lost_focus()` here.
+        //
+        // 🚨 **The marker below must stay inside the gate's window, and adding
+        // the paragraph above it is what pushed it out.** `nothing_commits_on_the_expression_d316_removed`
+        // looks fifteen lines back and four forward from the matched
+        // `lost_focus()`; with the marker opening this block it landed one line
+        // past that and the gate went red on a line nothing had changed about.
+        // So the marker goes **last**, next to what it excuses, which is where it
+        // should have been — a comment that grows at the bottom pushes an
+        // exemption away from its condition, and a comment that grows at the top
+        // does not.
+        //
         // valve-gate-not-a-commit: the two terms the gate looks for are in two
         // *different* conditions here, and this is a `TextEdit` rather than a
         // `DragValue`. `changed()` stashes the typed string and writes nothing;
-        // `lost_focus()` alone is what parses it. A text field genuinely does
-        // end on losing focus — it reports no keystroke-by-keystroke value for
-        // a latch to smooth out — which is why D316's rule is about numeric
-        // fields and this line is not an instance of it.
+        // `lost_focus()` alone is what *parses* it. The exemption stands on the
+        // two terms being in two conditions — a fact about where the buffer is
+        // stashed, not about what commits — which is why D316's rule, about
+        // numeric fields, is not what this line is an instance of.
         if resp.gained_focus() || resp.changed() {
             self.stroke_dash_text = Some((index, text.clone()));
         }
@@ -6659,8 +6683,14 @@ impl OndinApp {
             // round-tripped path against a stored one — met from the other side:
             // there the comparison existed and had no canonical form, here there
             // was no comparison at all.
+            //
+            // **`Escape` abandons the list** (§15 D808) — a term in this chain
+            // rather than a guard above it, because the buffer on the line above
+            // has to go either way and an early return would skip the
+            // `on_hover_text` below.
             if let Some(dashes) = parse_dash_list(&text)
                 && text != dash_list_text(&s.dashes)
+                && ui::defocus_commits(&resp)
             {
                 out = Some(Stroke {
                     dashes,
@@ -9058,9 +9088,25 @@ impl OndinApp {
             self.paint_hex = Some((id, slot, text.clone()));
         }
         // Dropping the buffer here is what strips a typed or pasted `#`: the
-        // field falls back to `hex_of`, which never writes one.
+        // field falls back to `hex_of`, which never writes one. **On every way out
+        // of the field, including the one that writes nothing** — `Escape` has to
+        // leave the buffer behind as well as the colour, or the next click into the
+        // row reopens the abandoned text.
         if resp.lost_focus() {
             self.paint_hex = None;
+        }
+        // ⚠️ **`Escape` abandons it, and this field had to be told** (§15 D808).
+        // `ui::defocus_commits` carries the whole of that rule and the measurement
+        // behind it; what belongs here is why the *rest* of `edit_valve` is not the
+        // answer, since routing this field through the valve is what
+        // `[S14.4-L1-04]`'s other half asked for. **A valve previews while the
+        // control is engaged, and a half-typed hex is a colour**: `parse_hex`
+        // accepts three digits, so `6D8CD9` passes through `6D8` — `#66DD88`, a
+        // real green — and a valved field would put that on the canvas on the way
+        // to the blue. The buffer exists precisely so that nothing between the
+        // first keystroke and the last is a value, which leaves the valve with
+        // nothing to preview and one sentence to lend.
+        if ui::defocus_commits(&resp) {
             // **Nothing is written unless the typed colour differs from the one
             // that is there** (§15 D517, `[S14.4-L1-04]`). Two things went wrong
             // without this, and the same comparison closes both.
@@ -13189,8 +13235,19 @@ mod stroke_row_tests {
     /// button_padding.y`, which is 23 at the theme's 4. The compaction to 22 works because
     /// every dropdown's own scope brings that padding to 0 or 2 first; a caller that left
     /// it alone would get a 23pt row and no error, and **this test is that tripwire, not
-    /// `menu_rows`** — a padding line was briefly added there and removed, because six call
+    /// `menu_rows`** — a padding line was briefly added there and removed, because call
     /// sites set the padding *after* the helper runs and would override it.
+    ///
+    /// ⚠️ **Re-measured 2026-09-19 (§15 D811), and this paragraph said *six* twice.**
+    /// `ui::menu_rows` has **seventeen** production call sites — six in this file, six in
+    /// `typography.rs`, four in `export.rs`, one in `dashboard.rs` — of which **eleven**
+    /// set the padding on the line after it. Six do not, and `export.rs`'s
+    /// `export-menu` popover is the one that must not: its rows are `ui::menu_item` and
+    /// `ui::menu_row`, which take the height as an **argument**, so `button_padding`
+    /// cannot reach them and there is nothing for a padding line to correct. **So the
+    /// sentence below this one — *"every call site sets 0 or 2"* — was false of that
+    /// caller and is now scoped to the family this test is about**: a row egui sizes.
+    /// The other family is `ui::MENU_ITEM_H`'s subject, and D811 is where the tell is.
     ///
     /// So the test asks that the painted height **is** `ui::MENU_ROW_H` rather than that it
     /// clears some remembered natural height: the first form fails when a future
@@ -13199,10 +13256,12 @@ mod stroke_row_tests {
     fn a_menu_rows_height_does_not_depend_on_its_state() {
         // **Both ambient paddings a real dropdown arrives with**, because the floor
         // is only the height while it is above the natural one and the natural one
-        // is `15 + 2 * button_padding.y`. Every call site sets 0 (the control's own
-        // scope) or 2 (a line beside `menu_rows`); at the theme's 4 the natural row
-        // is 23 and a 22pt floor would be ignored. One value here would have tested
-        // one of the two, and 0 is the one that hides it.
+        // is `15 + 2 * button_padding.y`. Every call site **whose rows egui sizes**
+        // sets 0 (the control's own scope) or 2 (a line beside `menu_rows`); at the
+        // theme's 4 the natural row is 23 and a 22pt floor would be ignored. One
+        // value here would have tested one of the two, and 0 is the one that hides
+        // it. (The qualifier is §15 D811's: a caller whose rows take their height as
+        // an argument sets neither, and is right not to.)
         for (ppp, pad) in [
             (1.0_f32, 0.0_f32),
             (1.0, 2.0),
@@ -13223,9 +13282,11 @@ mod stroke_row_tests {
                 ui.spacing_mut().button_padding.y = pad;
                 ui.scope(|ui| {
                     ui::menu_rows(ui);
-                    // The six sites that spell this beside `menu_rows` rather than
+                    // The eleven sites that spell this beside `menu_rows` rather than
                     // letting the helper own it — kept in the fixture because it is
-                    // what the code does, not what it ought to do.
+                    // what the code does, not what it ought to do. (Eleven of
+                    // seventeen, measured 2026-09-19; this said *six* and was a
+                    // count of the day it was written — §15 D811.)
                     ui.spacing_mut().button_padding.y = pad;
                     // Selected, and resting: the two that differed with no pointer
                     // anywhere near them, which is why this needs no synthetic hover.
@@ -20978,8 +21039,23 @@ mod paint_hex_field_tests {
 
     use super::*;
 
-    /// Drive the field once, optionally typing `typed` into it, and report what
-    /// the document ended up with.
+    /// `drive_exiting` by the ordinary door, which is `Enter`.
+    ///
+    /// (Plain backticks throughout this module — §15 D319's convention inside a
+    /// `cfg(test)` module.)
+    fn drive(typed: Option<&str>) -> ([f32; 4], usize) {
+        let (colour, depth, _) = drive_exiting(typed, egui::Key::Enter);
+        (colour, depth)
+    }
+
+    /// Drive the field once, optionally typing `typed` into it, leave it by
+    /// pressing `exit`, and report the colour, the undo depth and whether the
+    /// buffer survived.
+    ///
+    /// **`exit` is a parameter because the two keys that leave a field mean
+    /// opposite things** (§15 D808): `Enter` confirms and `Escape` abandons, and
+    /// egui reports the same `lost_focus()` for both — so the only way to tell the
+    /// two tests apart is which key they press.
     ///
     /// ⚠️ **A fresh `egui::Context` per run, which is not tidiness.** The first
     /// spelling shared one across both halves, and the second half's click never
@@ -20987,7 +21063,7 @@ mod paint_hex_field_tests {
     /// under the same widget id, so `Event::Text` landed nowhere and the control
     /// read as a fix that had turned the field off. Measured by printing
     /// `app.paint_hex` after the text frame: `None`.
-    fn drive(typed: Option<&str>) -> ([f32; 4], usize) {
+    fn drive_exiting(typed: Option<&str>, exit: egui::Key) -> ([f32; 4], usize, bool) {
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
         let mut app = crate::app::OndinApp::headless(&ctx);
@@ -21057,14 +21133,14 @@ mod paint_hex_field_tests {
             // it rather than appending.
             frame(&mut app, vec![egui::Event::Text(t.into())]);
         }
-        // **Three** frames of `Enter`, one more than the two `lost_focus()` is
-        // true on, so the settling frame is driven too — which is the half of this
-        // that is about undo.
+        // **Three** frames of the exit key, one more than the two `lost_focus()`
+        // is true on, so the settling frame is driven too — which is the half of
+        // this that is about undo.
         for _ in 0..3 {
             frame(
                 &mut app,
                 vec![egui::Event::Key {
-                    key: egui::Key::Enter,
+                    key: exit,
                     physical_key: None,
                     pressed: true,
                     repeat: false,
@@ -21076,6 +21152,7 @@ mod paint_hex_field_tests {
         (
             paint::stops_of(brush)[0].1.components,
             app.session.history.undo_depth(),
+            app.paint_hex.is_some(),
         )
     }
 
@@ -21135,6 +21212,52 @@ mod paint_hex_field_tests {
             "control: a typed colour is written — got {typed:?}, wanted {want:?}"
         );
         assert_eq!(depth, 1, "control: and once, not twice");
+    }
+
+    /// **`Escape` abandons a typed colour** — it does not commit it and spends no
+    /// undo step (§15 D808).
+    ///
+    /// 🚨 **It committed, and the field was the last of four doing it.** egui does
+    /// not revert a `TextEdit` on `Escape`; it hands back what was typed and
+    /// surrenders focus, so `lost_focus()` alone reads a cancel as a confirm. The
+    /// rule already existed twice in the app — `app::OndinApp::edit_valve` for
+    /// every numeric field (§15 D315, which put the guard there; D317 is the entry
+    /// for reading the latch above it) and `panels::dashboard`'s rename arm — and
+    /// `ui::defocus_commits` is it said once.
+    ///
+    /// ⚠️ **`Enter` is the control and it is not decoration here.** The two keys
+    /// leave the field by the same door, so a fix that read "did the field lose
+    /// focus by a key" would refuse both, and the only thing that would notice is
+    /// an assertion that the ordinary way out still writes. That is
+    /// `a_bare_click_through_the_hex_field_changes_nothing`'s second half, which
+    /// this leans on rather than repeats.
+    ///
+    /// **Flip-check, run** — dropping `&& !…key_pressed(Escape)` from
+    /// `ui::defocus_commits`, which is the live copy of that rule and not the
+    /// valve's: fails on the colour at `[0.20000002, 0.40000004, 0.6, 1.0]`
+    /// against `[0.5, 0.25, 0.125, 1.0]`, the predicted site, and the undo
+    /// assertion under it would have caught it too at 1 against 0.
+    ///
+    /// ⚠️ **What this cannot see is the `Escape` the app spends elsewhere on the
+    /// same frame.** The key reaches `OndinApp::escape` in the frame it clears the
+    /// focus (§15 D317), so the ladder there runs as well — and with nothing else
+    /// in flight its last rung clears the selection. This drives the field alone,
+    /// which is the seam the fix is at; the ladder's own reading of a chrome field
+    /// surrendering focus is a separate question and is in `roadmap.md`.
+    #[test]
+    fn escape_abandons_a_typed_hex_instead_of_committing_it() {
+        let (colour, depth, buffered) = drive_exiting(Some("336699"), egui::Key::Escape);
+        assert_eq!(
+            colour,
+            [0.5, 0.25, 0.125, 1.0],
+            "Escape left the colour alone"
+        );
+        assert_eq!(depth, 0, "and spent no undo step doing it");
+        assert!(
+            !buffered,
+            "and dropped the buffer, so the next click into the row does not \
+             reopen the abandoned text"
+        );
     }
 }
 

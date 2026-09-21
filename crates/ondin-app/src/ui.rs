@@ -1567,6 +1567,20 @@ pub const MENU_ROW_H: f32 = 22.0;
 /// row carries a glyph and a label. The gap was two before this change and is two
 /// after it, because what was asked for was the same amount off everything rather
 /// than a new relationship between the two surfaces.
+///
+/// 🚨 **The two constants are two *families* of row, and [`MENU_ROW_H`]'s warning
+/// does not apply to this one** (§15 D811). That one is a **floor** under a row
+/// egui sizes, so `button_padding` decides the natural height and a caller that
+/// leaves the theme's 4 alone silently gets 23; these rows are
+/// `allocate_exact_size`d by [`menu_row`] and [`menu_item`], which take the height
+/// as an **argument**, so the padding cannot reach them and the number is the
+/// height rather than a minimum. *The tell for which family a row is in is whether
+/// its height is an argument* — which is why a warning about "any new dropdown"
+/// cannot be applied without reading the callee, and why it is written here beside
+/// both constants rather than once over the pair. The Export panel's preset menu
+/// is the case that made this worth saying: it calls [`menu_rows`], never touches
+/// the padding, and is correct — where a warning phrased about dropdowns in
+/// general scores it as the failure case.
 pub const MENU_ITEM_H: f32 = 24.0;
 
 /// Like [`egui::Ui::add_enabled_ui`], but idempotent under a parent that is
@@ -4463,6 +4477,44 @@ pub fn hex_of(c: ondin_core::peniko::Color) -> String {
 /// anyone pastes. The alpha digits are read and discarded (see [`parse_hex`]),
 /// but a field that refuses to hold them refuses the paste outright.
 pub const HEX_CHAR_LIMIT: usize = 9;
+
+/// Whether a text field's edit has ended **and is meant to be kept** — the frame
+/// it lost focus, unless `Escape` is what took the focus away (§15 D808).
+///
+/// 🚨 **`Escape` committed.** Four chrome text fields decided they were finished
+/// from `resp.lost_focus()` alone — the inspector's hex and layer-name fields, the
+/// stroke-dash list and the Export panel's prefix/suffix — and egui does not
+/// revert a `TextEdit` on `Escape`: it hands back what was typed and merely
+/// surrenders focus. So the key that cancels a gesture everywhere else in the app
+/// *applied* the edit, and spent an undo step doing it. Measured on the hex field:
+/// typing `336699` over `[0.5, 0.25, 0.125, 1.0]` and pressing `Escape` leaves
+/// `[0.2, 0.4, 0.6, 1.0]` and `undo_depth` 1.
+///
+/// **The rule already existed twice and was broken at four sites beside it**,
+/// which is why it is a function now rather than a fifth copy of the condition.
+/// `app::OndinApp::edit_valve` carries it for every *numeric* field — it is the
+/// `if !…key_pressed(Escape)` on the falling edge of D316's engagement latch, and
+/// §15 D317 is the entry for getting its ordering right — and
+/// `panels::dashboard`'s rename field carries it as an arm further up. A text
+/// field cannot use the valve itself (see `inspector::paint_hex_field`), so what
+/// it can share is this one sentence of it.
+///
+/// ⚠️ **It reads the key rather than the focus, and that is not the same
+/// question.** `Escape` clears egui's focus in `Memory::begin_pass`, so the frame
+/// a field reports `lost_focus()` is the frame the press is still in `input` —
+/// which is `input::resolve`'s own note (§15 D317) from the other end. Asking
+/// `has_focus()` or the next frame's state answers nothing: by then the key is
+/// gone and the two ways out of a field are indistinguishable.
+///
+/// ⚠️ **One test covers all four callers, because the rule is here and not at
+/// them** — `inspector::paint_hex_field_tests::escape_abandons_a_typed_hex_instead_of_committing_it`,
+/// and dropping the second term above is what it flips against. The three other
+/// sites have no `Escape` assertion of their own and are not meant to grow one;
+/// what they owe is to call this rather than to re-spell it. (Plain backticks:
+/// the test is `cfg(test)` and a production doc may not link one — §15 D319.)
+pub fn defocus_commits(resp: &egui::Response) -> bool {
+    resp.lost_focus() && !resp.ctx.input(|i| i.key_pressed(egui::Key::Escape))
+}
 
 /// Select the whole of a hex field the moment it takes focus, so typing replaces
 /// the colour instead of inserting into it. Call with the field's own response.

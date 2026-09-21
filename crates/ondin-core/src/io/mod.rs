@@ -11,6 +11,7 @@
 //! wrong in two. A number a reader can get from the item eight lines down is a
 //! number this comment has no business carrying.
 
+pub mod clip;
 pub mod migrate;
 pub mod probe;
 pub mod schema;

@@ -230,60 +230,207 @@ fn is_nonzero_fill(r: &FillRule) -> bool {
     *r == FillRule::NonZero
 }
 
+impl NodeDto {
+    /// Project one node to its DTO.
+    ///
+    /// **Lifted out of [`DocumentDto::from_document`]'s map so the clipboard can
+    /// reach it** (`crate::io::clip`, §15 D823). A copied subtree crossing
+    /// between two `ondin` windows is the same bytes as a saved one, and the
+    /// alternative was a second projection beside this one — which would have put
+    /// the `clip` normalization below, and every rule like it, in two places that
+    /// nothing compares. The document schema is the format; the clipboard is a
+    /// second *reader* of it, not a second format.
+    pub(crate) fn from_node(n: &Node) -> Self {
+        Self {
+            id: n.id().to_wire(),
+            parent: n.parent().map(NodeId::to_wire),
+            children: n.children().iter().map(|c| c.to_wire()).collect(),
+            kind: n.kind().clone(),
+            transform: n.transform().as_coeffs(),
+            name: n.name().to_string(),
+            visible: n.visible(),
+            locked: n.locked(),
+            proportions_locked: n.proportions_locked(),
+            opacity: n.opacity(),
+            // ⚠️ **Normalized on the way *out* as well as on the way in**
+            // (§15 D663, `[S1.1-L1-06]`), which is what stops a document's
+            // bytes moving on its first open-and-save with no edit made.
+            // `op_set_clip` deliberately accepts the flag on a kind that
+            // cannot honour it — §15 D282: *"an inert `clip` is a switch
+            // nothing reads"*, so dragging a shape through a frame and back
+            // keeps its setting — and `into_node` zeroes it on load. Both
+            // halves are right on their own and the pair was not: a `.ondin`
+            // holding `"clip": true` on a `Group` loaded as `false` and saved
+            // back one byte **longer**, silently, for every such group —
+            // `clip` carries a named serde default and no
+            // `skip_serializing_if`, so the key is always written and
+            // `"clip":true` (4) becomes `"clip":false` (5). ⚠️ This comment
+            // said *shorter* until `arch-scribe` read the DTO; the direction
+            // is not what makes it a defect and is exactly why it went
+            // unchecked.
+            //
+            // Fixed here rather than at either end. The loader's
+            // normalization **stays** — it is the guard against a hand-edited
+            // or foreign file — and this is the projection saying what the
+            // format's `clip` actually means, which is *"clips its
+            // children"*. The model is untouched, so D282's property is
+            // untouched.
+            clip: n.clip() && n.kind().clips_children(),
+            mask: n.mask(),
+            mask_mode: n.mask_mode(),
+            // **The stored field, not `fill_rule()`** — that accessor answers
+            // the *effective* rule and would write `EvenOdd` into every
+            // `Exclude`, changing the bytes of files that are already correct
+            // (§15 D239, invariant 9).
+            fill_rule: n.fill_rule,
+            paint: n.paint().clone(),
+            pivot: n.pivot(),
+            exports: n.exports().to_vec(),
+            effects: n.effects().to_vec(),
+            grids: n.grids().to_vec(),
+        }
+    }
+
+    /// Rebuild one node from its DTO, normalizing the flags a foreign or
+    /// hand-edited file can state on a kind that cannot honour them.
+    ///
+    /// **Every rule here is a rule about the format rather than about a
+    /// document**, which is why it is reachable from the clipboard: a subtree
+    /// arriving from another window has been through exactly the same wire form
+    /// as one arriving from disk, and has exactly the same claim on being
+    /// repaired rather than trusted.
+    pub(crate) fn into_node(self) -> Result<Node, IoError> {
+        let id = parse_id(&self.id)?;
+        let parent = self.parent.as_deref().map(parse_id).transpose()?;
+        let children = self
+            .children
+            .iter()
+            .map(|c| parse_id(c))
+            .collect::<Result<Vec<_>, _>>()?;
+        // The flag is kept inert on kinds with no frame to clip to, so a
+        // pre-`clip` file (where the default says "yes") does not arrive
+        // with every group and rectangle claiming to clip.
+        let clip = self.clip && self.kind.clips_children();
+        // Kept inert on the kinds that cannot be one, the same way `clip` is
+        // above. Nothing writes a mask onto a frame or the root, so this
+        // guards against a hand-edited or future file rather than against
+        // our own default — but a mask flag on a frame would be a switch the
+        // inspector cannot show and the walk would have to decide about
+        // anyway.
+        let mask = self.mask && self.kind.can_mask();
+        Ok(Node {
+            id,
+            parent,
+            children,
+            kind: normalize_kind(self.kind),
+            transform: Affine::new(self.transform),
+            name: self.name,
+            visible: self.visible,
+            locked: self.locked,
+            proportions_locked: self.proportions_locked,
+            // ⚠️ **Clamped, not refused**, which is §5.11's own asymmetry
+            // rather than a new one: a text span reaching past its content is
+            // clamped in `normalize_kind` for exactly this reason, that a
+            // recoverable file should stay openable. A hand-edited or
+            // third-party `"opacity": 5.0` used to load into a state
+            // `op_set_opacity` and `op_insert_subtree` both refuse with
+            // `BadOpacity` — the two doors disagreeing about one field. The
+            // range is `crate::build::valid_opacity`'s, so there is one
+            // answer rather than two spellings of it.
+            //
+            // `f32::clamp` returns `NaN` for a `NaN` input, so the finite
+            // test is not decoration — though a `NaN` cannot actually arrive
+            // here, since serde would have refused `null` for an `f32` one
+            // step earlier. Written as a fact about the function rather than
+            // as a fact about today's DTO.
+            opacity: if self.opacity.is_finite() {
+                self.opacity.clamp(0.0, 1.0)
+            } else {
+                1.0
+            },
+            clip,
+            mask,
+            // Not gated on `mask`: the mode is remembered while the mask is
+            // off, which is the whole reason it is a field beside the flag.
+            mask_mode: self.mask_mode,
+            fill_rule: self.fill_rule,
+            paint: self.paint,
+            pivot: self.pivot,
+            // ⚠️ **Dropped rather than refused, which is this file's own rule
+            // for a value that is decoration** (§15 D492). `op_set_exports`
+            // rejects a scale or a quality that cannot be one; a file written
+            // by an older build, another tool, or a hand edit can still carry
+            // one, and refusing the whole document over an export preset would
+            // lose the artwork to save the recipe. An unusable spec is not
+            // repaired either — `Width(0)` has no defensible non-zero reading —
+            // so it goes, and the panel shows one row fewer.
+            exports: self
+                .exports
+                .into_iter()
+                .filter(crate::document::export_spec_is_usable)
+                .collect(),
+            effects: self.effects,
+            grids: self.grids,
+        })
+    }
+}
+
+impl ImageDto {
+    /// Project one image table entry to its DTO.
+    pub(crate) fn from_entry(id: &ImageId, entry: &ImageEntry) -> Self {
+        Self {
+            id: id.0.clone(),
+            format: entry.format,
+            width: entry.width,
+            height: entry.height,
+            source: match &entry.source {
+                ImageSource::Embedded(bytes) => ImageSourceDto::Embedded {
+                    data: BASE64.encode(bytes),
+                },
+                ImageSource::Linked(path) => ImageSourceDto::Linked { path: path.clone() },
+            },
+        }
+    }
+
+    /// Rebuild one image table entry, refusing an empty intrinsic size and bad
+    /// base64 — the two states nothing downstream has a reading for.
+    pub(crate) fn into_entry(self) -> Result<(ImageId, ImageEntry), IoError> {
+        let id = ImageId(self.id);
+        if self.width == 0 || self.height == 0 {
+            return Err(IoError::Integrity(format!(
+                "image {id} has an empty intrinsic size ({}×{})",
+                self.width, self.height
+            )));
+        }
+        let source = match self.source {
+            // `.into()` is the `Vec<u8>` → `Arc<[u8]>` move the table's own type
+            // now asks for (§15 D301). It reallocates once, here, at load — the
+            // one place in the app where a copy of the bytes is unavoidable
+            // anyway, since base64 decoding produces the `Vec`.
+            ImageSourceDto::Embedded { data } => ImageSource::Embedded(
+                BASE64
+                    .decode(&data)
+                    .map_err(|e| IoError::Integrity(format!("image {id}: bad base64 ({e})")))?
+                    .into(),
+            ),
+            ImageSourceDto::Linked { path } => ImageSource::Linked(path),
+        };
+        Ok((
+            id,
+            ImageEntry {
+                source,
+                format: self.format,
+                width: self.width,
+                height: self.height,
+            },
+        ))
+    }
+}
+
 impl DocumentDto {
     /// Project a document to its DTO, nodes sorted by id (deterministic bytes).
     pub(crate) fn from_document(doc: &Document) -> Self {
-        let mut nodes: Vec<NodeDto> = doc
-            .nodes_iter()
-            .map(|n| NodeDto {
-                id: n.id().to_wire(),
-                parent: n.parent().map(NodeId::to_wire),
-                children: n.children().iter().map(|c| c.to_wire()).collect(),
-                kind: n.kind().clone(),
-                transform: n.transform().as_coeffs(),
-                name: n.name().to_string(),
-                visible: n.visible(),
-                locked: n.locked(),
-                proportions_locked: n.proportions_locked(),
-                opacity: n.opacity(),
-                // ⚠️ **Normalized on the way *out* as well as on the way in**
-                // (§15 D663, `[S1.1-L1-06]`), which is what stops a document's
-                // bytes moving on its first open-and-save with no edit made.
-                // `op_set_clip` deliberately accepts the flag on a kind that
-                // cannot honour it — §15 D282: *"an inert `clip` is a switch
-                // nothing reads"*, so dragging a shape through a frame and back
-                // keeps its setting — and `into_document` zeroes it on load. Both
-                // halves are right on their own and the pair was not: a `.ondin`
-                // holding `"clip": true` on a `Group` loaded as `false` and saved
-                // back one byte **longer**, silently, for every such group —
-                // `clip` carries a named serde default and no
-                // `skip_serializing_if`, so the key is always written and
-                // `"clip":true` (4) becomes `"clip":false` (5). ⚠️ This comment
-                // said *shorter* until `arch-scribe` read the DTO; the direction
-                // is not what makes it a defect and is exactly why it went
-                // unchecked.
-                //
-                // Fixed here rather than at either end. The loader's
-                // normalization **stays** — it is the guard against a hand-edited
-                // or foreign file — and this is the projection saying what the
-                // format's `clip` actually means, which is *"clips its
-                // children"*. The model is untouched, so D282's property is
-                // untouched.
-                clip: n.clip() && n.kind().clips_children(),
-                mask: n.mask(),
-                mask_mode: n.mask_mode(),
-                // **The stored field, not `fill_rule()`** — that accessor answers
-                // the *effective* rule and would write `EvenOdd` into every
-                // `Exclude`, changing the bytes of files that are already correct
-                // (§15 D239, invariant 9).
-                fill_rule: n.fill_rule,
-                paint: n.paint().clone(),
-                pivot: n.pivot(),
-                exports: n.exports().to_vec(),
-                effects: n.effects().to_vec(),
-                grids: n.grids().to_vec(),
-            })
-            .collect();
+        let mut nodes: Vec<NodeDto> = doc.nodes_iter().map(NodeDto::from_node).collect();
         // Stable order: sort by (actor, seq) via the parsed id.
         nodes.sort_by_key(|n| NodeId::from_wire(&n.id).expect("wire form we just produced"));
         let mut guides: Vec<GuideDto> = doc
@@ -302,18 +449,7 @@ impl DocumentDto {
         guides.sort_by_key(|g| GuideId::from_wire(&g.id).expect("wire form we just produced"));
         let mut images: Vec<ImageDto> = doc
             .images()
-            .map(|(id, entry)| ImageDto {
-                id: id.0.clone(),
-                format: entry.format,
-                width: entry.width,
-                height: entry.height,
-                source: match &entry.source {
-                    ImageSource::Embedded(bytes) => ImageSourceDto::Embedded {
-                        data: BASE64.encode(bytes),
-                    },
-                    ImageSource::Linked(path) => ImageSourceDto::Linked { path: path.clone() },
-                },
-            })
+            .map(|(id, entry)| ImageDto::from_entry(id, entry))
             .collect();
         // A `FxHashMap` has no order at all, so this sort is not tidiness — it is
         // the whole of invariant 9 for the table.
@@ -337,78 +473,8 @@ impl DocumentDto {
 
         let mut nodes: FxHashMap<NodeId, Node> = FxHashMap::default();
         for dto in self.nodes {
-            let id = parse_id(&dto.id)?;
-            let parent = dto.parent.as_deref().map(parse_id).transpose()?;
-            let children = dto
-                .children
-                .iter()
-                .map(|c| parse_id(c))
-                .collect::<Result<Vec<_>, _>>()?;
-            // The flag is kept inert on kinds with no frame to clip to, so a
-            // pre-`clip` file (where the default says "yes") does not arrive
-            // with every group and rectangle claiming to clip.
-            let clip = dto.clip && dto.kind.clips_children();
-            // Kept inert on the kinds that cannot be one, the same way `clip` is
-            // above. Nothing writes a mask onto a frame or the root, so this
-            // guards against a hand-edited or future file rather than against
-            // our own default — but a mask flag on a frame would be a switch the
-            // inspector cannot show and the walk would have to decide about
-            // anyway.
-            let mask = dto.mask && dto.kind.can_mask();
-            let node = Node {
-                id,
-                parent,
-                children,
-                kind: normalize_kind(dto.kind),
-                transform: Affine::new(dto.transform),
-                name: dto.name,
-                visible: dto.visible,
-                locked: dto.locked,
-                proportions_locked: dto.proportions_locked,
-                // ⚠️ **Clamped, not refused**, which is §5.11's own asymmetry
-                // rather than a new one: a text span reaching past its content is
-                // clamped in `normalize_kind` for exactly this reason, that a
-                // recoverable file should stay openable. A hand-edited or
-                // third-party `"opacity": 5.0` used to load into a state
-                // `op_set_opacity` and `op_insert_subtree` both refuse with
-                // `BadOpacity` — the two doors disagreeing about one field. The
-                // range is `crate::build::valid_opacity`'s, so there is one
-                // answer rather than two spellings of it.
-                //
-                // `f32::clamp` returns `NaN` for a `NaN` input, so the finite
-                // test is not decoration — though a `NaN` cannot actually arrive
-                // here, since serde would have refused `null` for an `f32` one
-                // step earlier. Written as a fact about the function rather than
-                // as a fact about today's DTO.
-                opacity: if dto.opacity.is_finite() {
-                    dto.opacity.clamp(0.0, 1.0)
-                } else {
-                    1.0
-                },
-                clip,
-                mask,
-                // Not gated on `mask`: the mode is remembered while the mask is
-                // off, which is the whole reason it is a field beside the flag.
-                mask_mode: dto.mask_mode,
-                fill_rule: dto.fill_rule,
-                paint: dto.paint,
-                pivot: dto.pivot,
-                // ⚠️ **Dropped rather than refused, which is this file's own rule
-                // for a value that is decoration** (§15 D492). `op_set_exports`
-                // rejects a scale or a quality that cannot be one; a file written
-                // by an older build, another tool, or a hand edit can still carry
-                // one, and refusing the whole document over an export preset would
-                // lose the artwork to save the recipe. An unusable spec is not
-                // repaired either — `Width(0)` has no defensible non-zero reading —
-                // so it goes, and the panel shows one row fewer.
-                exports: dto
-                    .exports
-                    .into_iter()
-                    .filter(crate::document::export_spec_is_usable)
-                    .collect(),
-                effects: dto.effects,
-                grids: dto.grids,
-            };
+            let node = dto.into_node()?;
+            let id = node.id();
             if nodes.insert(id, node).is_some() {
                 return Err(IoError::Integrity(format!("duplicate node id {id:?}")));
             }
@@ -468,38 +534,10 @@ impl DocumentDto {
         // document that cannot be opened at all.
         let mut images: FxHashMap<ImageId, ImageEntry> = FxHashMap::default();
         for dto in self.images {
-            let id = ImageId(dto.id);
-            if images.contains_key(&id) {
+            let (id, entry) = dto.into_entry()?;
+            if images.insert(id.clone(), entry).is_some() {
                 return Err(IoError::Integrity(format!("duplicate image id {id}")));
             }
-            if dto.width == 0 || dto.height == 0 {
-                return Err(IoError::Integrity(format!(
-                    "image {id} has an empty intrinsic size ({}×{})",
-                    dto.width, dto.height
-                )));
-            }
-            let source = match dto.source {
-                // `.into()` is the `Vec<u8>` → `Arc<[u8]>` move the table's own type
-                // now asks for (§15 D301). It reallocates once, here, at load — the
-                // one place in the app where a copy of the bytes is unavoidable
-                // anyway, since base64 decoding produces the `Vec`.
-                ImageSourceDto::Embedded { data } => ImageSource::Embedded(
-                    BASE64
-                        .decode(&data)
-                        .map_err(|e| IoError::Integrity(format!("image {id}: bad base64 ({e})")))?
-                        .into(),
-                ),
-                ImageSourceDto::Linked { path } => ImageSource::Linked(path),
-            };
-            images.insert(
-                id,
-                ImageEntry {
-                    source,
-                    format: dto.format,
-                    width: dto.width,
-                    height: dto.height,
-                },
-            );
         }
 
         verify_integrity(&nodes, root)?;

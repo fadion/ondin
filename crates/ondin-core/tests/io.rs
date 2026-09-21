@@ -3235,3 +3235,149 @@ fn a_span_boundary_inside_a_character_is_snapped_on_load() {
     .unwrap();
     let _ = ondin_core::Resolved::rebuild(&live);
 }
+
+// --- the clipboard's wire form (`io::clip`, §15 D823) -----------------------
+
+/// **The clipboard is the document format with a different envelope**, and this
+/// is what says so: every node kind `rich_document` builds goes out through
+/// `io::clip::write` and comes back `PartialEq`-identical to the nodes captured
+/// from the document. A second projection beside `NodeDto` would drift from it
+/// silently — a field added to one and not the other compiles, saves and loads —
+/// so the test that matters is not "a clip round-trips" but "a clip round-trips
+/// *through the same DTO a file does*".
+///
+/// **Two subtrees rather than one, and that is the flip.** Copying a
+/// multi-selection is the case `Clip::subtrees` is a `Vec` for, and the plausible
+/// wrong version is a payload that carries *a* subtree: `write` taking
+/// `subtrees.first()` and wrapping it. ⚠️ **Flipped exactly that way: red on the
+/// subtree-count assertion at 1 against 2**, the predicted site, before any node
+/// comparison runs — which is why the count is asserted before the contents.
+#[test]
+fn a_clipboard_payload_round_trips_every_node_kind() {
+    let (doc, root) = rich_document();
+    let frame = doc.get(root).unwrap().children()[0];
+    let kids = doc.get(frame).unwrap().children().to_vec();
+    assert!(
+        kids.len() >= 2,
+        "the fixture is not in the state this test is about — one child cannot \
+         show a multi-selection crossing"
+    );
+    let captured: Vec<Vec<ondin_core::Node>> = kids
+        .iter()
+        .take(2)
+        .map(|id| doc.capture_subtree(*id).unwrap())
+        .collect();
+
+    let text = io::clip::write(&captured, &[], None, "Two layers").unwrap();
+    let payload = io::clip::read(&text)
+        .expect("the fence is ours")
+        .expect("and the payload reads");
+
+    assert_eq!(
+        payload.subtrees.len(),
+        2,
+        "a copy of two layers crosses as two subtrees"
+    );
+    assert_eq!(
+        payload.subtrees, captured,
+        "and each node comes back exactly as the document held it"
+    );
+}
+
+/// **The pictures cross too**, which is the half a payload of nodes alone gets
+/// wrong in silence: a fill stores an image *key* and the bytes live in a table
+/// on the document, so a picture whose entry stayed behind arrives in the other
+/// window as the missing-picture placeholder with nothing saying why (`Clip`).
+///
+/// ⚠️ **Flipped** by writing `images: Vec::new()` in `ClipDto`, which is the
+/// plausible wrong version — "the nodes are the copy" — and is what the in-app
+/// clipboard looked like before §15 D280 taught it otherwise: **red on the
+/// entry-count assertion**, the predicted site, at 0 against 1. (That citation
+/// read D183 for a day; D183 is the drop and paste *doors*, and the entry about
+/// a picture arriving in another document as the missing-picture placeholder is
+/// D280.)
+#[test]
+fn a_clipboard_payload_carries_the_image_table_entries_it_keys_into() {
+    let (doc, root) = rich_document();
+    let frame = doc.get(root).unwrap().children()[0];
+    let captured = vec![doc.capture_subtree(frame).unwrap()];
+    let id = ImageId("pic".to_string());
+    let entry = ImageEntry {
+        source: ImageSource::Embedded(vec![1, 2, 3, 4].into()),
+        format: ImageFormat::Png,
+        width: 2,
+        height: 2,
+    };
+
+    let text = io::clip::write(&captured, &[(id.clone(), entry.clone())], None, "One").unwrap();
+    let payload = io::clip::read(&text).unwrap().unwrap();
+
+    assert_eq!(
+        payload.images.len(),
+        1,
+        "the table entry the nodes key into crosses with them"
+    );
+    assert_eq!(payload.images[0].0, id);
+    assert_eq!(payload.images[0].1, entry, "bytes and all");
+}
+
+/// **Three answers, and the middle one is the whole reason `read` is not a
+/// `bool`.** Ordinary text is somebody else's and the caller has other arms for
+/// it; text carrying our fence is ours, and an unreadable one has to be said out
+/// loud rather than fallen through on — falling through pastes the payload as a
+/// text layer, which is the one outcome nobody wants.
+///
+/// ⚠️ **Flipped** by deleting `parse`'s `schema_version` comparison, which is the
+/// plausible wrong version: the DTO's *shape* has not changed between versions,
+/// so serde parses a payload from an unknown build perfectly happily. **Red on
+/// the third assertion**, the predicted site, with an `Ok` where the refusal
+/// belongs — and green on the first two, which is what makes the version check a
+/// separate claim rather than a consequence of the fence.
+#[test]
+fn clipboard_text_is_foreign_ours_or_refused() {
+    let (doc, root) = rich_document();
+    let frame = doc.get(root).unwrap().children()[0];
+    let captured = vec![doc.capture_subtree(frame).unwrap()];
+    let text = io::clip::write(&captured, &[], None, "One").unwrap();
+
+    assert!(
+        io::clip::read("a sentence copied in a browser").is_none(),
+        "no fence, so it is not ours and the caller's other arms get it"
+    );
+    assert!(
+        io::clip::read(&text).unwrap().is_ok(),
+        "the fixture is not in the state this test is about"
+    );
+
+    let bumped = text.replace(
+        &format!("\"schema_version\":{}", io::CURRENT_SCHEMA_VERSION),
+        "\"schema_version\":9999",
+    );
+    assert_ne!(bumped, text, "the version really was rewritten");
+    assert!(
+        matches!(
+            io::clip::read(&bumped),
+            Some(Err(IoError::UnsupportedVersion(9999)))
+        ),
+        "a copy from a build we do not know is refused by name, not ignored"
+    );
+}
+
+/// **A layer named like the fence does not break the payload**, which is why
+/// `read` splits on the *last* occurrence rather than the first.
+///
+/// ⚠️ **Flipped** to `split_once`: **red on the `is_ok`**, the predicted site —
+/// the heading's copy of the fence wins, and everything after it (the real fence
+/// and the JSON) is handed to `serde_json` as one string.
+#[test]
+fn a_layer_named_like_the_fence_still_crosses() {
+    let (doc, root) = rich_document();
+    let frame = doc.get(root).unwrap().children()[0];
+    let captured = vec![doc.capture_subtree(frame).unwrap()];
+
+    let text = io::clip::write(&captured, &[], None, io::clip::FENCE).unwrap();
+    assert!(
+        io::clip::read(&text).unwrap().is_ok(),
+        "the heading is not part of the format and cannot make it unreadable"
+    );
+}

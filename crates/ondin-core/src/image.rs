@@ -173,6 +173,22 @@ impl ImageEntry {
     /// explicitly rather than inferring "linked" from absent bytes; that inference
     /// is what cost behaviour last time, and `dead_code` will not warn here because
     /// this is a library.
+    ///
+    /// 🚨 **And it will have no production caller in v1, by decision** (§15 D819).
+    /// The three Asset rows that would need one — *Embed*/*Link*, *Relink…* and a
+    /// document-wide *Embed all* — are a **decided non-goal for v1**, because all
+    /// three wait on the same missing thing: a gesture that **authors** a linked
+    /// source. `ImageSource::Linked` is constructed in one place, `io/schema.rs`'s
+    /// deserializer, and every app path onto a picture funnels through
+    /// `load_image_bytes`, which builds `Embedded` unconditionally — so a
+    /// hand-written or foreign `.ondin` can carry a link and the app will open it,
+    /// and nothing can make one. §15 D191 is the out-of-v1 image list this joins.
+    ///
+    /// **This function stays**, and so does `tools::original_refusal`'s three-state
+    /// reasoning in the comments where that function stood: the subject exists in
+    /// the model, a foreign document can put one in front of the app, and the next
+    /// person to build the authoring gesture should rebuild from those rather than
+    /// re-derive them.
     pub fn is_linked(&self) -> bool {
         matches!(self.source, ImageSource::Linked(_))
     }

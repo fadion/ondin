@@ -8899,6 +8899,23 @@ impl OndinApp {
     ///
     /// Gated on the canvas being hovered: `Context::input` is global, so
     /// without it the canvas would pan under a wheel meant for the inspector.
+    ///
+    /// ⚠️ **A trackpad pinch arrives here as `Ctrl`+wheel, and on Windows that is
+    /// the only way it can arrive** — which is why this function is the whole of
+    /// the app's zoom-gesture surface. `egui::Event::Zoom` would be **dead code**:
+    /// egui only ever *consumes* that event, its sole producer is `egui-winit`'s
+    /// `WindowEvent::PinchGesture` arm, and winit raises `PinchGesture` from its
+    /// **iOS and macOS** backends alone — `platform_impl/windows` has no path to
+    /// it. Multi-touch is the half that is reachable, `WindowEvent::Touch` being
+    /// delivered on Windows, so `multi_touch()` would see a touchscreen pinch.
+    ///
+    /// 🚨 **Both are filed *Later* rather than open work** (§15 D822). Neither can
+    /// be built or tested on the machine this is developed on: one is a macOS
+    /// portability item with nothing on this platform to write it against, the
+    /// other needs a touchscreen. They sat under *Now* in `roadmap.md` reading as
+    /// cheap work, which is the one thing they are not — and the entry records the
+    /// **trigger** rather than a plan: a Mac, or a touch device, is what re-opens
+    /// either.
     fn wheel_input(&mut self, ui: &egui::Ui, resp: &egui::Response, rect: egui::Rect, ppp: f32) {
         /// Zoom per pixel of wheel travel, as egui's own `scroll_zoom_speed`.
         const ZOOM_SPEED: f64 = 1.0 / 200.0;
@@ -9047,6 +9064,46 @@ impl OndinApp {
         })
     }
 
+    /// An **occupied** frame whose border passes within the pick slop of `world`
+    /// — `context-menus.md` §2's C5, *"or on its edge"* (§15 D816).
+    ///
+    /// 🚨 **That clause was answered by one door out of three.**
+    /// [`Self::begin_select_drag`] carried [`Self::selected_frame_at`] and neither
+    /// [`Self::pick_at_pointer`]'s caller had anything, so an occupied frame was
+    /// reachable from the canvas by its **name tag alone** — C5 says *"a frame is
+    /// right-clickable exactly where it is left-clickable"* and names the edge in
+    /// the same sentence. Widening the shared chain with `selected_frame_at`
+    /// instead was declined and is the reason this function exists: that one
+    /// answers a frame's whole box, so it would have made an already-selected
+    /// frame's **interior** a target, which is the half of C5 that has never been
+    /// true and which `pick_leaf` skips on purpose so a marquee can be dragged
+    /// across a frame's contents (§15 D22).
+    ///
+    /// **[`Self::pick_slop`], so the band is the same width as every other pick
+    /// in the app** and the same width on screen at any zoom. A frame narrower
+    /// than twice that has no interior left and is therefore all edge — which is
+    /// the honest answer at that size and not a case worth a branch.
+    ///
+    /// ⚠️ **The box is the *world* box, so a rotated frame's band is its
+    /// axis-aligned bounds rather than its drawn border.** The same limitation
+    /// `selected_frame_at` has had all along, and the same one §15 D36 records for
+    /// a rotated frame's ruler origin: nothing in this file resolves a rotated
+    /// frame's edge, and a click a little off the drawn line still lands in the
+    /// band. Worth knowing before reading this as exact.
+    ///
+    /// `.rev()`, for [`Self::frame_label_at`]'s reason: `artboards` is paint order,
+    /// so the last match of two nested frames is the inner one.
+    fn frame_edge_at(&self, world: Point) -> Option<NodeId> {
+        let slop = self.pick_slop();
+        self.artboards().into_iter().rev().find(|id| {
+            self.is_occupied_frame(*id)
+                && self.session.resolved.world_bounds(*id).is_some_and(|b| {
+                    b.inflate(slop, slop).contains(world)
+                        && !b.inflate(-slop, -slop).contains(world)
+                })
+        })
+    }
+
     /// Whether `id` is actually on screen: it and every ancestor switched on.
     ///
     /// Read through [`crate::session::EditorSession::display_node`], so the eye in
@@ -9098,10 +9155,15 @@ impl OndinApp {
     /// is one function rather than a third copy.
     ///
     /// ⚠️ **[`Self::begin_select_drag`] is a third door and is deliberately not
-    /// folded in.** It carries a further fallback, `selected_frame_at`, which is
-    /// C5's *"or on its edge"* half — a widening neither of these two has, and one
-    /// that wants an explicit decision rather than arriving as a side effect of
-    /// sharing a helper.
+    /// folded in.** It carries a further fallback, [`Self::selected_frame_at`],
+    /// which answers a frame's whole **box** — and that was declined as the way to
+    /// close C5's *"or on its edge"* (§15 D816), because it would make an
+    /// already-selected frame's interior a target, which C5 never claimed and
+    /// which `pick_leaf` skips on purpose. The edge is answered by
+    /// [`Self::frame_edge_at`] instead, and it is the **last** link: a layer
+    /// sitting near its frame's border still wins the pixel, which is what
+    /// *"exactly where it is left-clickable"* has to mean when there is something
+    /// to click.
     fn pick_at_pointer(
         &self,
         ui: &egui::Ui,
@@ -9112,6 +9174,7 @@ impl OndinApp {
     ) -> Option<NodeId> {
         self.frame_label_at(ui, screen, rect, ppp)
             .or_else(|| self.pick_leaf(world))
+            .or_else(|| self.frame_edge_at(world))
     }
 
     /// The frame whose name tag is under `screen`, if any.
@@ -21893,6 +21956,136 @@ mod marquee_selectability_tests {
             !got.contains(&hidden),
             "and a hidden one is refused by `apply_marquee`'s own visibility \
              term, which is the node's flag and stays here"
+        );
+    }
+}
+
+#[cfg(test)]
+mod frame_edge_tests {
+    //! **C5's *"or on its edge"*, which was answered by one door out of three**
+    //! — `context-menus.md` §2, §15 D816.
+    //!
+    //! (Plain backticks per §15 D319 — `cargo doc` builds without the `test`
+    //! cfg.)
+
+    use super::*;
+    use ondin_core::kurbo::Size;
+    use ondin_core::{Document, IdSource, Operation, Transaction};
+
+    /// A 200×200 frame at the world origin with one 10×10 rect in it, so the
+    /// frame is **occupied** — which is the whole population this is about, an
+    /// empty one being clickable anywhere already.
+    fn fixture(ctx: &egui::Context) -> (OndinApp, NodeId, NodeId) {
+        let mut app = OndinApp::headless(ctx);
+        let mut ids = IdSource::new(0xED9E);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let board = ids.mint();
+        let inside = ids.mint();
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: board,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(200.0, 200.0),
+                },
+                transform: Some(Affine::IDENTITY),
+                name: None,
+            },
+            Operation::CreateNode {
+                id: inside,
+                parent: board,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(10.0, 10.0),
+                    corner_radii: Default::default(),
+                },
+                transform: Some(Affine::translate((90.0, 90.0))),
+                name: None,
+            },
+        ]))
+        .expect("a frame with something in it");
+        app.session.adopt_document(doc, None);
+        (app, board, inside)
+    }
+
+    /// **An occupied frame's border answers, its middle does not, and its
+    /// contents still win their own pixels** (§15 D816).
+    ///
+    /// 🚨 **C5 says *"a frame is right-clickable exactly where it is
+    /// left-clickable … on its **name tag**, on its edge, or anywhere on it while
+    /// it is empty"*, and the edge clause had no implementation on the shared
+    /// chain.** `begin_select_drag` carried `selected_frame_at` and neither
+    /// `pick_at_pointer` caller had anything, so an occupied frame was reachable
+    /// from the canvas by its tag alone.
+    ///
+    /// ⚠️ **The middle assertion is the one that rules out the rejected fix.**
+    /// Widening the chain with `selected_frame_at` — a frame's whole box — was the
+    /// obvious repair and would make this test fail, because it makes the
+    /// interior a target and `pick_leaf` skips an occupied frame *on purpose* so
+    /// a marquee can be dragged across its contents (§15 D22). So *"the middle is
+    /// not the frame"* is not a boundary check; it is the decision.
+    ///
+    /// ⚠️ **The band is `PICK_SLOP_PX` at the camera's zoom**, so the fixture
+    /// works in world units at zoom 1 and says which side of the border each
+    /// sample is on.
+    ///
+    /// **Flip-checks, both run.** Dropping the `!…inflate(-slop)` term — so the
+    /// band becomes the whole box, which *is* `selected_frame_at`'s answer —
+    /// fails at *"the middle of a frame is not the frame"*, the predicted site.
+    /// Dropping the `is_occupied_frame` term leaves every assertion here **green**,
+    /// because this fixture's frame is occupied: that term is about the *empty*
+    /// case, which `pick_leaf` already answers, so the flip has nothing to bite on
+    /// and the coverage gap is real and stated rather than papered over.
+    #[test]
+    fn a_frames_edge_is_pickable_and_its_middle_is_not() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (app, board, inside) = fixture(&ctx);
+        assert!(
+            app.is_occupied_frame(board),
+            "the fixture must reach the state: an *empty* frame is a different rule"
+        );
+        let slop = app.pick_slop();
+        assert!(
+            slop > 0.0 && slop < 50.0,
+            "the fixture must reach the state: a usable band at this zoom, got {slop}"
+        );
+
+        // Just inside the top border, and just outside it: both are the edge.
+        for (at, what) in [
+            (Point::new(100.0, slop / 2.0), "just inside the top border"),
+            (Point::new(100.0, -slop / 2.0), "just outside it"),
+            (Point::new(slop / 2.0, 100.0), "the left border"),
+            (Point::new(200.0 - slop / 2.0, 100.0), "the right border"),
+        ] {
+            assert_eq!(
+                app.frame_edge_at(at),
+                Some(board),
+                "{what} is the frame's edge"
+            );
+        }
+
+        assert_eq!(
+            app.frame_edge_at(Point::new(100.0, 100.0)),
+            None,
+            "the middle of a frame is not the frame — which is what `pick_leaf` \
+             skipping an occupied frame exists for, and what widening the chain \
+             with `selected_frame_at` would have broken"
+        );
+        assert_eq!(
+            app.frame_edge_at(Point::new(-50.0, -50.0)),
+            None,
+            "and neither is empty canvas well outside it"
+        );
+
+        // **The contents still win their own pixels**, which is why the edge is
+        // the *last* link of `pick_at_pointer` rather than the first.
+        assert_eq!(
+            app.pick_leaf(Point::new(95.0, 95.0)),
+            Some(inside),
+            "control: the rect inside the frame is picked as itself"
         );
     }
 }

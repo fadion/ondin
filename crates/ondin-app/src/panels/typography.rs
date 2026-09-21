@@ -3402,24 +3402,35 @@ impl OndinApp {
             self.session.clear_gesture_preview();
             resp.ctx
                 .data_mut(|d| d.insert_temp::<Option<CharAttr>>(pending_key, None));
-        } else if resp.changed() && !resp.lost_focus() {
-            // valve-gate-not-a-commit: this arm *is* a commit, and it is the one
-            // exception the rule names — a control with no engagement to latch.
-            // The `!lost_focus()` below is what keeps it off every control that
-            // has one, which is the opposite of the pattern being looked for.
-            //
-            // ⚠️ **`!lost_focus()` is what keeps this arm off a field that has a
-            // latch, and it is not decoration.** A `DragValue` reports
-            // `lost_focus()` on **two** consecutive frames and writes its parsed
-            // edit string back on the *second* of them — so without this the
-            // falling edge would refuse an `Escape` on the first frame and this
-            // arm would commit the abandoned number on the next one. Measured:
-            // the test read 40 where it asked for 20. A raw sensed region never
-            // takes focus, so it never reports losing it, and this arm stays
-            // exactly what it was for.
-            self.commit_edit(tx.clone());
-            self.text_session_restyled_after(&tx);
         }
+        // 🚨 **There was a third arm and it is gone** (§15 D812, ruled by the
+        // maintainer). `else if resp.changed() && !resp.lost_focus()` committed
+        // outright, on the reasoning that this valve — unlike the app's other two —
+        // serves controls with **no engagement to latch**, and that without it a
+        // click on the picker's hue strip would commit nothing, ever.
+        //
+        // **Both halves turned out to be false, eleven days after the arm was
+        // kept and within hours of each other.**
+        // §15 D802 wrote the test D523 asked for: `picker::pointer_slot` answers a
+        // click through `write_slot` before it could reach `valve_slot`, so the raw
+        // sensed regions never enter this valve at all — a drag enters it as the
+        // engaged arm and its release as the falling edge, which are the two arms
+        // every other valve has, and `changed()` is never true on those frames.
+        // §15 D803 then found the one thing that *did* reach it, and it was a
+        // hazard: egui's per-frame clamp of a stored value outside a **ranged**
+        // field marks a control holding no focus as `changed()`, so the arm fired
+        // on a field nobody had touched, committed it and spent an undo step. That
+        // is `[S6.2-L1-01]`.
+        //
+        // ⚠️ **What decided it was the asymmetry, not the count.** All seven call
+        // sites are engagement-bearing — `ui::value_field`, `ui::bare_drag_value`,
+        // the axis field and slider, the length fields — and **both** of this app's
+        // `DragValue` helpers now opt out of egui's clamp (§15 D425, D552), so the
+        // arm had no live user of any kind. If some unmeasured caller did need it,
+        // its symptom is *"this control commits nothing"*, which is loud and gets
+        // reported; the symptom of keeping it is *"a field nobody touched spent an
+        // undo step"*, which is silent. D425's one line is no longer the only thing
+        // standing between that bug and the document.
     }
 
     /// Remember what a **session-scoped** scrub is about to overwrite, on the frame
@@ -3493,7 +3504,43 @@ impl OndinApp {
                     CharAttr::LetterSpacing(l) => l,
                     _ => Length::ZERO,
                 };
-                let next = step_length(current, step, TRACKING_STEP_EM, TRACKING_STEP_PX);
+                // **A held key stops where the field stops** (§15 D817, ruled by
+                // the maintainer). `TextStyle::set` canonicalizes `letter_spacing`
+                // without bounding it, so before this a held `Alt`+`→` walked
+                // tracking past `MAX_TRACKING_PCT` and out of what the field can be
+                // scrubbed to — where the `Size` arm four lines up stops at its
+                // ends and says so.
+                //
+                // ⚠️ **Here and not at `TextStyle::set`, which is where `Size`'s
+                // bound lives**, and the difference is deliberate. These caps are
+                // on the *controls*: any finite value is a legal attribute, a file
+                // may hold one, and the field **shows** an out-of-range stored
+                // value instead of rewriting it — which is **§15 D425**'s
+                // decision, not D475's. (D475 is this panel's *test* of it, and
+                // says in its own body that D425 carries the argument and it
+                // deliberately does not restate it. Citing D475 for the behaviour
+                // is the substitution `CLAUDE.md` records happening at seven
+                // sites, and this comment made it an eighth.) A bound in
+                // the model would make that unreachable for tracking and would be
+                // this panel refusing a document it is able to display. So the two
+                // chords agree about *behaviour* — held keys stop at the field's
+                // ends — and deliberately not about where the bound is written.
+                //
+                // The px face is derived from the `%` face at the current font
+                // size, through the same [`px_range_for`] the field itself uses, so
+                // the chord and the scrub cannot come to disagree about the cap in
+                // the unit the user happens to be in.
+                let next = match step_length(current, step, TRACKING_STEP_EM, TRACKING_STEP_PX) {
+                    Length::Em(v) => {
+                        Length::Em(v.clamp(MIN_TRACKING_PCT / 100.0, MAX_TRACKING_PCT / 100.0))
+                    }
+                    Length::Px(v) => {
+                        let r =
+                            px_range_for(MIN_TRACKING_PCT..=MAX_TRACKING_PCT, subject.font_size());
+                        Length::Px(v.clamp(*r.start(), *r.end()))
+                    }
+                }
+                .canonical();
                 self.apply_char_attrs(&subject, vec![CharAttr::LetterSpacing(next)]);
             }
             TextChord::Leading(step) => {
@@ -10430,6 +10477,272 @@ mod feature_mixed_tests {
             per_run(&app, id, tag("liga")),
             vec![0, 0],
             "control: and the tag that was named really did change in both runs"
+        );
+    }
+}
+
+#[cfg(test)]
+mod valve_arm_tests {
+    //! **`char_valve` has two arms, not three** (§15 D812), and **a held
+    //! tracking chord stops where its field stops** (§15 D817).
+    use super::*;
+    use crate::app::OndinApp;
+    use crate::theme;
+    use ondin_core::{CharSpans, Document, NodeId, Operation, ParaSpans, Transaction};
+
+    const AREA: egui::Rect = egui::Rect {
+        min: egui::pos2(0.0, 0.0),
+        max: egui::pos2(400.0, 600.0),
+    };
+
+    /// A headless app holding one plain text node at 20pt, and its id.
+    fn app_with_text() -> (egui::Context, OndinApp, NodeId) {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = ondin_core::IdSource::new(1);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let id = ids.mint();
+        let style = TextStyle {
+            font_family: "Inter".into(),
+            font_size: 20.0,
+            ..TextStyle::default()
+        };
+        doc.apply(&Transaction(vec![Operation::CreateNode {
+            id,
+            parent: root,
+            index: 0,
+            kind: ondin_core::NodeKind::Text {
+                content: "hello".into(),
+                style: Box::new(style),
+                spans: CharSpans::default(),
+                para_spans: ParaSpans::default(),
+                paragraph: ParagraphStyle::default(),
+                block: BlockStyle::default(),
+                sizing: TextSizing::Auto,
+                on_path: None,
+                on_path_flip: false,
+                on_path_offset: 0.0,
+            },
+            transform: None,
+            name: None,
+        }]))
+        .expect("build the fixture");
+        app.session.adopt_document(doc, None);
+        app.session.selection.set_one(id);
+        (ctx, app, id)
+    }
+
+    /// **A control reporting `changed()` while it holds no focus and is not
+    /// dragged commits nothing** — `char_valve` has two arms, not three
+    /// (§15 D812).
+    ///
+    /// 🚨 **This is `[S6.2-L1-01]` reproduced at the valve.** The deleted arm was
+    /// `else if resp.changed() && !resp.lost_focus()`, kept for *"a control with no
+    /// engagement to latch"*. §15 D802 found the controls it was kept for never
+    /// reach this valve; §15 D803 found the one thing that does, and it is a
+    /// hazard — egui's per-frame clamp of a stored value outside a **ranged**
+    /// field reports an untouched control as changed, so the arm committed an edit
+    /// nobody made and spent an undo step on it.
+    ///
+    /// ⚠️ **The fixture is a ranged `DragValue` *without* the app's opt-out**, and
+    /// that is the whole of what makes this reproducible. `ui::value_field_f64`
+    /// and `ui::bare_drag_value` both pass `clamp_existing_to_range(false)`
+    /// (§15 D425, D552), so no production control can get into this state today —
+    /// which is exactly why the arm's removal is a *second* defence rather than
+    /// tidying, and why the condition has to be built here by hand. A test that
+    /// drove a real field would assert nothing.
+    ///
+    /// ⚠️ **The response is the assertion's subject and the value is not.** What
+    /// is being pinned is that a frame reporting `changed()` with no engagement
+    /// does not reach a commit; whether egui chose to clamp on this particular
+    /// frame is egui's business, so the fixture asserts it reached the state
+    /// (`changed()` true, `has_focus()` false, `dragged()` false) before asserting
+    /// what the valve did about it.
+    ///
+    /// **Flip-check, run** by restoring the third arm: fails at *"no undo step"*
+    /// with **1 against 0**, the predicted site. ⚠️ The size assertion under it
+    /// was predicted to fail as well and never runs, the first `assert_eq!`
+    /// ending the test — *a prediction about a second assertion is a prediction
+    /// about an assertion that may not execute.*
+    #[test]
+    fn a_changed_frame_with_no_engagement_commits_nothing() {
+        let (ctx, mut app, id) = app_with_text();
+        let before = app.session.history.undo_depth();
+
+        // 20 is the fixture's font size; 5000 is outside the field's range, which
+        // is what makes egui rewrite it and call that a change.
+        //
+        // ⚠️ **The first draft used 999 and `MAX_FONT_SIZE` is 1000**, so the value
+        // was *in* range, nothing was rewritten, and the fixture assertion below
+        // failed with `changed=false` on every frame. That assertion is the only
+        // reason this test is not silently about nothing — which is exactly what
+        // it is there for.
+        let mut out_of_range = 5000.0_f64;
+        // ⚠️ **Every frame, not the last one.** The rewrite happens on the frame
+        // egui first meets the stored value; by the frame after it the value is
+        // already in range and reports nothing. Reading only the final frame
+        // measured `changed=false` and the fixture never reached the state it
+        // names — which is the *"assert the fixture is in the state you think"*
+        // rule biting on its own first draft.
+        let mut states = Vec::new();
+        for _ in 0..3 {
+            let subject = TypeSubject::of(&app, id).expect("a subject");
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(AREA),
+                    ..Default::default()
+                },
+                |ui| {
+                    // No `clamp_existing_to_range(false)`: egui's default, which is
+                    // what every field in the app opts out of.
+                    let resp = ui.add(egui::DragValue::new(&mut out_of_range).range(
+                        ondin_core::typography::MIN_FONT_SIZE
+                            ..=ondin_core::typography::MAX_FONT_SIZE,
+                    ));
+                    states.push((resp.changed(), resp.has_focus(), resp.dragged()));
+                    app.char_valve(&resp, &subject, CharAttr::Size(out_of_range));
+                },
+            );
+        }
+
+        assert!(
+            states
+                .iter()
+                .any(|(changed, focused, dragged)| *changed && !focused && !dragged),
+            "the fixture must reach the state the arm fired on, on some frame: {states:?}"
+        );
+        assert_eq!(
+            app.session.history.undo_depth(),
+            before,
+            "a control nobody touched spends no undo step"
+        );
+        let size = match app.session.doc.get(id).expect("the node").kind() {
+            ondin_core::NodeKind::Text { style, .. } => style.font_size,
+            other => panic!("the fixture is a text node, not {other:?}"),
+        };
+        assert_eq!(size, 20.0, "and does not write its rewritten value either");
+    }
+
+    /// **A held `Alt`+`→` stops at `MAX_TRACKING_PCT`, and `Alt`+`←` at the
+    /// min** — the tracking chord stops where its field stops (§15 D817).
+    ///
+    /// `TextStyle::set` canonicalizes `letter_spacing` without bounding it, so
+    /// before this the chord walked past the cap and out of what the field can be
+    /// scrubbed to, where the `Size` arm in the same `match` stops at its ends.
+    /// Nothing was *lost* — the field shows an out-of-range stored value rather
+    /// than rewriting it (§15 **D425**; D475 is this panel's test of that, and
+    /// citing it for the behaviour is the substitution `CLAUDE.md` records at
+    /// seven sites) — so what this fixes is the two chords disagreeing about
+    /// whether a held key has an end.
+    ///
+    /// ⚠️ **The bound is at the arm and not at `TextStyle::set`**, which is where
+    /// `Size`'s is, and that asymmetry is the decision rather than an oversight:
+    /// these caps are on the *controls*, a file may legally hold any finite
+    /// value, and a bound in the model would make D425's behaviour unreachable
+    /// for this attribute.
+    ///
+    /// ⚠️ **200 presses, not 2.** The step is `TRACKING_STEP_EM`, so a test that
+    /// pressed twice would be green against no clamp at all — it has to actually
+    /// reach the cap, which is what the *"the fixture must reach the state"*
+    /// assertion below demands before the interesting one runs.
+    ///
+    /// **Flip-check, run** by removing the `clamp` from the `Em` arm: fails at
+    /// *"the em face stops at the same percentage"* with **`Em(4.0)`** against
+    /// `Em(2.0)` — 400%, twice the field's own maximum. ⚠️ The predicted site was
+    /// the *first* cap assertion, and that one is the **px** arm, which the flip
+    /// does not touch: the two arms are two clamps, and a flip of one cannot be
+    /// caught by an assertion about the other. *The stored default being `Px` is
+    /// why the em face needs a fixture of its own at all.*
+    #[test]
+    fn a_held_tracking_chord_stops_at_the_fields_cap() {
+        let (_ctx, mut app, id) = app_with_text();
+        app.begin_edit_text(Some(id), None);
+        assert!(
+            app.text.as_ref().map(|s| s.id) == Some(id),
+            "the fixture must reach the state: `text_chord` returns early with no \
+             live session, so without this the test would be about nothing"
+        );
+
+        // ⚠️ **Read through `TypeSubject`, not off the node.** With a live session
+        // the write can land in the editor rather than in the document
+        // (`apply_char_attrs`'s `partial` arm), so a probe reading
+        // `style.letter_spacing` measured `Px(0.0)` after four hundred presses and
+        // would have been green against a chord that did nothing. The subject is
+        // what the chord itself reads and what the field shows, which makes it the
+        // honest place to ask.
+        let tracking = |app: &OndinApp| {
+            let subject = TypeSubject::of(app, id).expect("a subject");
+            match subject.shown(CharAttrKind::LetterSpacing) {
+                CharAttr::LetterSpacing(l) => l,
+                other => panic!("the letter-spacing slot answered {other:?}"),
+            }
+        };
+
+        // ⚠️ **The stored default is `Px(0.0)`, not `Em`**, which the first draft
+        // of this test assumed and which is why the px face is asserted first. The
+        // px cap is derived from the `%` one at the current font size through the
+        // same `px_range_for` the field uses — at the fixture's 20pt that is
+        // `-10..=40`.
+        let px_cap = px_range_for(MIN_TRACKING_PCT..=MAX_TRACKING_PCT, 20.0);
+        assert!(
+            matches!(tracking(&app), Length::Px(v) if v == 0.0),
+            "the fixture must reach the state: tracking starts at Px(0), not {:?}",
+            tracking(&app)
+        );
+
+        // Far past the cap, in both directions, and the count is the point: the
+        // step is small, so a test that pressed twice would be green against no
+        // clamp at all.
+        for _ in 0..400 {
+            app.text_chord(TextChord::Tracking(1));
+        }
+        assert_eq!(
+            tracking(&app),
+            Length::Px(*px_cap.end()),
+            "a held key stops at the cap the field stops at"
+        );
+        for _ in 0..800 {
+            app.text_chord(TextChord::Tracking(-1));
+        }
+        assert_eq!(
+            tracking(&app),
+            Length::Px(*px_cap.start()),
+            "and at the other end, which is not the negation of the first"
+        );
+
+        // **The em face, which is the other arm of the clamp.** A unit click puts
+        // the same quantity in `%`, and the cap there is the constant itself
+        // rather than a derived number.
+        let (_ctx, mut app, id) = app_with_text();
+        app.begin_edit_text(Some(id), None);
+        let subject = TypeSubject::of(&app, id).expect("a subject");
+        app.apply_char_attrs(&subject, vec![CharAttr::LetterSpacing(Length::Em(0.0))]);
+        assert!(
+            matches!(tracking(&app), Length::Em(_)),
+            "the fixture must reach the state: tracking is in em now, not {:?}",
+            tracking(&app)
+        );
+        for _ in 0..400 {
+            app.text_chord(TextChord::Tracking(1));
+        }
+        assert_eq!(
+            tracking(&app),
+            Length::Em(MAX_TRACKING_PCT / 100.0),
+            "the em face stops at the same percentage"
+        );
+
+        // Control: one press from zero is an ordinary step and is not clamped to
+        // anything. Without this the test would pass against a chord that did
+        // nothing at all.
+        let (_ctx, mut app, id) = app_with_text();
+        app.begin_edit_text(Some(id), None);
+        app.text_chord(TextChord::Tracking(1));
+        assert_eq!(
+            tracking(&app),
+            Length::Px(TRACKING_STEP_PX).canonical(),
+            "control: an ordinary press still steps by one step"
         );
     }
 }

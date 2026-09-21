@@ -33,17 +33,40 @@ which is this file's own §9.5 lesson: **check the section before believing the 
 
 | Where | Open |
 | --- | --- |
-| *Now · Images* | *Embed*/*Link* and *Relink…*, plus *Embed all* — all three blocked on nothing being able to author a linked source. |
-| *Now · SVG import* | **Built the day it was asked for**, all of it (§15 D394). What is left: ~~a `<filter>` that is more than one `<feGaussianBlur>`,~~ `<foreignObject>`, ~~CSS combinators,~~ the rejoined **paragraph**, ~~and an **elliptical radial gradient**~~ — each skipped or approximated *and reported*, so **nothing here is lost silently**. **Filters left this row on 2026-09-03 by being read whole** (§15 D411): the shadow chain, `<feDropShadow>` and the writer's identity `<feOffset/>`, which is what closes *Copy as SVG* for a shadow — until then every effect this app **exported** came back as nothing, reported and lost. ⚠️ **The same audit found the gradient's reason wrong** — not "the model holds circles" but a missing gradient transform, both backends already having the mechanism — **and it left this row the next day by being built** (§15 D412), the field landing on the brush rather than on `Fill` so a gradient-stroked shape gets it too. **`<textPath>` left this row on 2026-09-01 by being read** (§15 D406), hours after the writer started emitting it. ⚠️ **This row was stale in two directions when D405 read it**: it still listed per-run **font** properties as the one silent loss, which §15 D398 built hours after it was written, and it named the elliptical gradient, which appears nowhere in the section below — the file's own §9.5 lesson, twice in one row. **CSS combinators left this row on 2026-09-19 by being built** (§15 D806): compounds, the child combinator and a backtracking descendant walk, with what is still refused — sibling order, a pseudo-class, an attribute — reported once for the sheet as before, so the *skipped or approximated and reported* claim above is unchanged and covers a narrower set. ⚠️ **That leaves `<foreignObject>` and the paragraph**, and only the second of those is work: the section below has recorded `<foreignObject>` as a decided non-goal nobody has said the words for since 2026-09-03 (§15 D411). |
-| *Now · Canvas* | `Event::Zoom` (a macOS portability item, untestable here) and touchscreen pinch (needs a touchscreen) — **nothing else** *of the gestures*, as of 2026-09-01: the extreme-zoom crash closed with §15 D402 and the last unbounded term with **D403**, hours apart. ⚠️ **Two context-menu items were open under this section as of 2026-09-07** and the *"nothing else"* predates both — a frame's *Background…*, and C5's edge clause (§15 D469), which are decisions rather than work. **The first was ruled on 2026-09-19 and is a decided non-goal** (§15 D800), so C5's edge clause is what is left of the pair. 🚨 **Four context-menu tests plus a ruler-origin test were added here on 2026-09-09** (`[A7-L8-06]`) as the only **work** in this row, and both are **closed 2026-09-19** — §15 D795 and D797 — leaving the one decision above. They had been queued in `context-menus.md` §10, §15 **D214** (this row said D226, which is the panel's *Paste* slot) and §15 D36, and in none of them was this table or the section bullet. *The row said "nothing else of the gestures" and was scoped so narrowly that it stayed technically true through three additions; a qualifier that survives everything is not doing the job.* |
-| *Now · Text* | Justify-all, tab stops, columns, widow/orphan — **four** now, and **not one of them is short of a dependency**; hyphenation was the last to hold that claim, lost it on 2026-09-01 and left this row the same day for §0 as a decided non-goal (§15 D399), and **text-on-path left it hours later by being built** (§15 D405). Plus the paragraph scope's absence from the MCP snapshot, parked with MCP — to which D405 adds `on_path` itself. |
-| *Now · Inspector* | Three items: the hex field commits through no shared valve, which is the routing half §15 D517 left standing when it closed both *measured* halves of `[S14.4-L1-04]` on 2026-09-07 — a **shape** argument, which is why it is one line and not a fix — `char_valve`'s third arm, **which as of 2026-09-19 is a maintainer question and no longer a test** — §15 D802 wrote the test D523 asked for and found the picker's raw sensed regions do not reach the arm at all, and §15 D803 the same day found the one thing that *does* reach it: an egui clamp rewrite `ui::value_field_f64` already opts out of, which makes deleting the arm a second defence against `[S6.2-L1-01]` rather than tidying, so what is open is that ruling — and the menu-row border, which is a layout item rather than a valve one. 🚨 **This row was stale in *two* directions on 2026-09-09 and was corrected by `arch-scribe` reading it against the section.** It named the multi Transform card's **angle** fields, which §15 **D628** closed and struck from the section that same day, and it did not name the menu-row border, which had been the section's third bullet all along — so *"every one is a remainder of a landed fix"* and *"all three are valve remainders"* were both false. **A row that summarises a section is a second copy of it**, and this is §9.5's lesson at the table rather than in a bullet. |
-| *Now · Path editing* | One decision: whole-path geometry patches, revisited with MCP. ⚠️ **The `retain_valid`/`subpath_lengths` pair left this row on 2026-09-19**, ruled to the narrow `#[allow(dead_code)]` with the no-effect call removed (§15 D637, *Resolved*) — it had been here since 2026-09-09. |
-| *Now · Files, library and storage* | Three, all from the codebase review or from closing one of its findings: a dashboard cover rendered synchronously on the UI thread, a `.ondin` whose filename is not valid Unicode being invisible to the whole library, and the per-machine index having no injection point — so the suite writes to the developer's own cache (§15 D619). ⚠️ **This row did not exist until 2026-09-09** and the section had held open work since 2026-09-06; the *"nothing open"* line below was the half that got corrected first, and a missing row is the same failure with nothing to contradict. |
-| *Now · Text alignment* | Side bearings / optical margin alignment, marked *Later*. |
+| *Now · Images* | **Nothing open as of 2026-09-19.** The three Asset rows — *Embed*/*Link*, *Relink…* and *Embed all* — were **decided non-goals for v1** that day (§15 D819) and are in §0: all three waited on one missing thing, a gesture that **authors** a linked source, so they were ruled together. ⚠️ **The model keeps the subject** — `is_linked` and `tools::original_refusal`'s three-state reasoning stay, a foreign `.ondin` being able to put a link in front of the app. The section is the record of the v1 image build. |
+| *Now · SVG import* | **Built the day it was asked for**, all of it (§15 D394). What is left: ~~a `<filter>` that is more than one `<feGaussianBlur>`,~~ `<foreignObject>`, ~~CSS combinators,~~ the rejoined **paragraph**, ~~and an **elliptical radial gradient**~~ — each skipped or approximated *and reported*, so **nothing here is lost silently**. **Filters left this row on 2026-09-03 by being read whole** (§15 D411): the shadow chain, `<feDropShadow>` and the writer's identity `<feOffset/>`, which is what closes *Copy as SVG* for a shadow — until then every effect this app **exported** came back as nothing, reported and lost. ⚠️ **The same audit found the gradient's reason wrong** — not "the model holds circles" but a missing gradient transform, both backends already having the mechanism — **and it left this row the next day by being built** (§15 D412), the field landing on the brush rather than on `Fill` so a gradient-stroked shape gets it too. **`<textPath>` left this row on 2026-09-01 by being read** (§15 D406), hours after the writer started emitting it. ⚠️ **This row was stale in two directions when D405 read it**: it still listed per-run **font** properties as the one silent loss, which §15 D398 built hours after it was written, and it named the elliptical gradient, which appears nowhere in the section below — the file's own §9.5 lesson, twice in one row. **CSS combinators left this row on 2026-09-19 by being built** (§15 D806): compounds, the child combinator and a backtracking descendant walk, with what is still refused — sibling order, a pseudo-class, an attribute — reported once for the sheet as before, so the *skipped or approximated and reported* claim above is unchanged and covers a narrower set. ⚠️ **That leaves `<foreignObject>` and the paragraph**, and only the second of those is work: the section below has recorded `<foreignObject>` as a decided non-goal nobody has said the words for since 2026-09-03 (§15 D411). **The words were said on 2026-09-19 and it is in §0** (§15 D813), so **the rejoined paragraph is the whole of what is open here** — one item, for the first time since this row was written. **And it went on 2026-09-22 as a decided non-goal** (§15 D826), so **this section has nothing open**: the rejoin would have to invent the line height, and the only signal it could read is also exactly what a stack of separate labels in a foreign file looks like. ⚠️ **A file dialog is still not on the list and is still not a non-goal** — the section says so, and it is a sentence to write when someone wants it rather than a gap. |
+| *Now · Canvas* | **Nothing open as of 2026-09-22.** Both of the two that were left closed that day: the layer clipboard **crosses between two `ondin` windows** now (§15 D823), through `ondin_core::io::clip` and the document schema's own `NodeDto`; and the context-menu test's last clause is written (§15 D824) — 🚨 **by a *second* test rather than by the widening `context-menus.md` §10 asked for**, since `escape` pays out one rung per press and in the wider fixture that rung is `entered_group`, so widening the first test would have left it asserting nothing under its own flip. *The text below is the row as it stood before.* **Two, as of 2026-09-19, and neither is a gesture**: the layer clipboard not crossing between two `ondin` windows, and one clause of one context-menu test, kept in `context-menus.md` §10 — that file's Escape bullet asks for `entered_group` and the tool as well as the selection. 🚨 **`Event::Zoom` and touchscreen pinch left this row for *Later* on 2026-09-19** (§15 D822): neither can be built *or tested* on this machine, and the trigger is stated — a Mac, or a touch device. **C5's edge clause closed the same day** (§15 D816), by a new last link on `pick_at_pointer` rather than the widening this file proposed, which would have made a selected frame's interior a target. ⚠️ *The row below is kept because its qualifier is the lesson.* `Event::Zoom` (a macOS portability item, untestable here) and touchscreen pinch (needs a touchscreen) — **nothing else** *of the gestures*, as of 2026-09-01: the extreme-zoom crash closed with §15 D402 and the last unbounded term with **D403**, hours apart. ⚠️ **Two context-menu items were open under this section as of 2026-09-07** and the *"nothing else"* predates both — a frame's *Background…*, and C5's edge clause (§15 D469), which are decisions rather than work. **The first was ruled on 2026-09-19 and is a decided non-goal** (§15 D800), so C5's edge clause is what is left of the pair — **and it was answered hours later** (§15 D816), so neither survives. 🚨 **Four context-menu tests plus a ruler-origin test were added here on 2026-09-09** (`[A7-L8-06]`) as the only **work** in this row, and both are **closed 2026-09-19** — §15 D795 and D797 — leaving the one decision above. They had been queued in `context-menus.md` §10, §15 **D214** (this row said D226, which is the panel's *Paste* slot) and §15 D36, and in none of them was this table or the section bullet. *The row said "nothing else of the gestures" and was scoped so narrowly that it stayed technically true through three additions; a qualifier that survives everything is not doing the job.* |
+| *Now · Text* | **Nothing open as of 2026-09-22**, the four deferred features having been ruled on that day (§15 D825): tab stops, columns and widow/orphan control are **decided non-goals** in §0, and justify-all is in *Later · Parked decisions*, **blocked upstream** — which is the split the entry exists for, since its trigger is a patch to parley and not a ruling here. ⚠️ **What is left is not an item**: the paragraph scope's absence from the MCP snapshot is parked with MCP, and §15 D171's watch-note is a thing to read when a symptom appears. 🚨 **Do not put a count back on this row** — *a count of items is what goes wrong when one of them is a note*, which is this table's own lesson from the *Inspector* row and has now bitten this section's opener twice. *The text below is the row as it stood before.* Justify-all, tab stops, columns, widow/orphan — **four** now, and **not one of them is short of a dependency**; hyphenation was the last to hold that claim, lost it on 2026-09-01 and left this row the same day for §0 as a decided non-goal (§15 D399), and **text-on-path left it hours later by being built** (§15 D405). Plus the paragraph scope's absence from the MCP snapshot, parked with MCP — to which D405 adds `on_path` itself. ⚠️ **And one line to suspect if the canvas ever looks a frame stale during a text session** (§15 D171), which this row had never named. **Whether a chord stops where its field stops was ruled on 2026-09-19** (§15 D817) — it does, and the bound is at the **arm** and deliberately not at `TextStyle::set`, these caps being on the controls rather than on the model. |
+| *Now · Inspector* | **Nothing open as of 2026-09-19**, `char_valve`'s third arm having been ruled on and **deleted** that day (§15 D812) — on a *read* of the five unmeasured call sites rather than a third measurement, all seven being engagement-bearing with both `DragValue` helpers opted out of egui's clamp (§15 D425, D552), so the arm had no live user at all. *The row below is the history of a count that was wrong in three directions.* **One item** as of 2026-09-19, the hex field's routing and the menu-row border having left this row: `[S14.4-L1-04]`'s open half was answered with the **sentence** it asked for rather than with the valve (§15 D808) — `parse_hex` accepts three digits, so a half-typed hex is a real colour and there is nothing a valve could preview. 🚨 **The item's own premise was false while it stood** — it read *"there is nothing measured left to fix"*, and `Escape` was committing a typed colour at that field and at three others beside it, nobody having pressed the other key at any of them. What is left: `char_valve`'s third arm, **which as of 2026-09-19 is a maintainer question and no longer a test** — §15 D802 wrote the test D523 asked for and found the picker's raw sensed regions do not reach the arm at all, and §15 D803 the same day found the one thing that *does* reach it: an egui clamp rewrite `ui::value_field_f64` already opts out of, which makes deleting the arm a second defence against `[S6.2-L1-01]` rather than tidying, so what is open is that ruling. ⚠️ **The menu-row border was never work, and this row counted it as an item for ten days**: this row gained it on 2026-09-09 by being corrected against the section, and the section's bullet had been a standing trap rather than an item since the day it was written — everything in it was in `ui::menu_rows`' and `ui::MENU_ROW_H`'s own docs already, and the one sentence that was not is a paragraph on `ui::MENU_ITEM_H` now (§15 D811). *A count of items is what goes wrong when one of them is a note*, which is this row's own §9.5 lesson from a third direction. 🚨 **This row was stale in *two* directions on 2026-09-09 and was corrected by `arch-scribe` reading it against the section.** It named the multi Transform card's **angle** fields, which §15 **D628** closed and struck from the section that same day, and it did not name the menu-row border, which had been the section's third bullet all along — so *"every one is a remainder of a landed fix"* and *"all three are valve remainders"* were both false. **A row that summarises a section is a second copy of it**, and this is §9.5's lesson at the table rather than in a bullet. |
+| *Now · Path editing* | **Nothing open as of 2026-09-22.** The one item — whole-path geometry patches — **moved to *Later · Parked decisions*** that day: it is non-blocking with a stated trigger (revisited *with* MCP, which is parked), which is what *Later* is for by this file's own table above. ⚠️ **That honours §15 D123's closing note rather than breaking it** — the note asks for it to stay *"in the todo as a decision rather than a gap"*, and it stays in this file; what changes is that it stops sitting under a heading meaning *open work on live code*. ⚠️ **The `retain_valid`/`subpath_lengths` pair left this row on 2026-09-19**, ruled to the narrow `#[allow(dead_code)]` with the no-effect call removed (§15 D637, *Resolved*) — it had been here since 2026-09-09. |
+| *Now · Files, library and storage* | **Nothing open as of 2026-09-19** — the last two closed that day: the cover render moved onto **a worker of its own** rather than onto `Writer`'s FIFO queue, `FRAME_BUDGET` deleted with what it bounded (§15 D820), and **rollback was refused outright** and is a §0 non-goal, the retry being the recovery (§15 D814). 🚨 **The threading then flaked a *dashboard* test 2 runs in 20**, found by running the filter twenty times after six clean runs had said nothing. *The text below is the row as it stood that morning.* **Two**, as of 2026-09-19: a dashboard cover rendered synchronously on the UI thread, which needs a thread, and **rollback** after a partly-failed migration, which needs a ruling. **Three left this row that day.** The non-Unicode filename was **reproduced** — a lone UTF-16 surrogate, which NTFS accepts and `to_str` refuses — and the migration now carries such a file by its `OsStr` name (§15 D809); the per-machine index has an injection point, and it is a `cfg!` rather than any of the four answers the bullet proposed (§15 D807); and the partly-failed migration got its list in the modal and a *Try again* button, leaving only the third of its three asks (§15 D810). ⚠️ **This row said *"Three, all from the codebase review"* while the section held four**, the migration bullet never having been named in it — so it was short by one from the day it was written and the arithmetic in it was never a count of anything. ⚠️ **This row did not exist until 2026-09-09** and the section had held open work since 2026-09-06; the *"nothing open"* line below was the half that got corrected first, and a missing row is the same failure with nothing to contradict. |
+| *Now · Text alignment* | **Nothing open as of 2026-09-22.** Side bearings / optical margin alignment moved to *Later · Parked decisions*, undecided — it had been filed `Later:` inside a `Now` section since the section was written, which is the prefix table broken from the inside. ⚠️ *This row said "Side bearings / optical margin alignment, marked **Later**" and was perfectly accurate for weeks — it described the bullet exactly, including the contradiction, and that is why nobody acted on it.* What is left in the section is one standing rule: don't use ink bounds for alignment. |
 | *Later* | The command palette and cheatsheet; the parked decisions; post-v1 (MCP, Command Mode, multiplayer). |
 
-**Sections with nothing open**: *Doc drift*.
+**Sections with nothing open**: *Doc drift*, *Now · Images*, *Now · Inspector*, *Now · Keyboard*,
+*Now · Files, library and storage*, *Now · Canvas and interaction*, *Now · SVG import*, *Now · Text*,
+*Now · Path editing*, *Now · Text alignment and measurement*. **That is every `Now` section there
+is** — the first time this line has been able to say so, and the reason it is said as a property of
+the set rather than as a count of it.
+🚨 **Four joined on 2026-09-22 and four on 2026-09-19, and the 09-22 four are the two the previous
+batch expected to clear and did not, plus two more.** Canvas by one build and one test (§15 D823,
+D824), SVG import by a **ruling** (D826), Text by a ruling that also **split** an item out to *Later*
+(D825), and Path editing by a **move** — its one remaining bullet was a decision with a stated
+trigger, so it belongs under *Later* rather than under a heading that means open work on live code.
+🚨 **The tenth was found by deriving this line rather than by writing it.** *Now · Text alignment
+and measurement* was the only `Now` section left off, and what it held was one bullet the section
+had itself marked `Later:` — side bearings / optical margin alignment — beside a standing rule about
+ink bounds. **A `Later:` item inside a `Now` section is the prefix table broken from the inside**,
+and it is why that section sat off this line for weeks holding no open work: nobody reading the
+bullet could tell whether it was an item or a note, so nobody moved it. It is in *Later · Parked
+decisions* now, undecided, and the rule stayed where it was. *This is the line's failure mode
+running in the other direction — not a section wrongly called clear, but one wrongly left off.*
+**Re-derived by reading each
+section's own first paragraph**, not from the list of what this batch ruled on — which is this
+line's own failure mode and the reason it has been wrong four times.
+⚠️ **Four joined on 2026-09-19** by four different routes: Images and Keyboard by a ruling
+(§15 D819, D815), Inspector by a **deletion** (D812), and Files by one build and one refusal
+(D820, D814).
 What those sections hold is standing rules and the record of how each item closed; read them for the
 traps. ⚠️ **`Keyboard` came off this list on 2026-09-07 too**, and it had been wrong for the length
 of one session: §15 D466 left an open question there — whether `Undo`, `Redo`, `Save` and `Open`
@@ -233,9 +256,45 @@ blend modes, ~~effects (shadow/blur)~~ **background blur, noise and reordering a
 rich text runs, constraints,
 prototyping, plugins,
 multiplayer, Command Mode, eyedropper/comment tools, modifier badges on the cursor, **vertical
-writing mode**, **a unit system**, **hyphenation**, **a multiple selection in the library**.
+writing mode**, **a unit system**, **hyphenation**, **a multiple selection in the library**,
+**`<foreignObject>` on SVG import**, **linked images** (*Embed*/*Link*, *Relink…* and *Embed all*),
+**a rollback after a partly-failed library migration**, **tab stops**, **columns**, **widow/orphan
+control**, **rejoining a multi-line paragraph on SVG import**.
 
-The last of those was decided 2026-08-28 (§15 D383) — *"we don't have multi-selection and I don't
+**The last four were decided 2026-09-22.** **Tab stops, columns and widow/orphan control** (§15
+D825) came off *Now · Text*'s list of *"four deferred features"*, and what the three share is that
+**not one of them is short of a dependency**: widow/orphan control is a second pass over the lines
+`text::break_lines` yields, tab stops are a layer over `Whitespace::Tab` (which parley classifies and
+does not lay out), and columns change what a paragraph's box *is*. Each is a build of our own that
+nobody has asked for. ⚠️ **Justify-all was the fourth of that list and is *not* here**: it is blocked
+**upstream** and is in *Later · Parked decisions*, its trigger being a patch to parley rather than a
+ruling. Filing the four under one word is exactly how the *"all six dependencies are still genuinely
+absent"* sentence came to be true of none of them (§15 D399).
+**Rejoining a multi-line paragraph on SVG import** (§15 D826) is refused because the only signal a
+rejoin could read — same `x`, a constant `y` step, a matching resolved style — is also exactly what a
+stack of separate labels in a foreign file looks like, so the heuristic welds unrelated layers
+together with no way for the user to say which reading was meant; and the case it would have been
+worth most for is answered by a copy crossing between two `ondin` windows, which carries real nodes
+now (§15 D823). It is reported like every other loss, so `svg_in`'s *"nothing is lost silently"*
+contract covers it, exactly as it covers `<foreignObject>`.
+
+The three before those were decided 2026-09-19. **`<foreignObject>`** (§15 D813) is HTML inside an SVG and
+nothing in this model draws HTML, so there is no version of it to build; it is reported like any
+other unread element, so `svg_in`'s *"nothing is lost silently"* contract already covers it. It had
+sat in *Now · SVG import* for sixteen days with its own text saying it belonged here.
+**Linked images** (§15 D819) are three Asset rows blocked on one missing thing — a gesture that
+**authors** a linked source — where `ImageSource::Linked` is built only by the deserializer and
+every app path funnels through `load_image_bytes`, which builds `Embedded` unconditionally. ⚠️ **The
+model keeps the subject**: `is_linked` and `tools::original_refusal`'s three-state reasoning stay, a
+foreign `.ondin` being able to put a link in front of the app, and D280 is the bug that comes of
+inferring linked from absent bytes. **Rollback** (§15 D814) is refused because `relocate` overwrites
+nothing, so "undo" is a fresh decision about everything that *did* arrive — including a `.trash`
+file renamed on the way in and now indistinguishable from a document that was always there — and a
+reverse migration can itself partly fail. **The retry §15 D810 built is the recovery**, and it is
+reachable from the *Library settings* card.
+
+**A multiple selection in the library** was decided 2026-08-28 (§15 D383) — *"we don't have
+multi-selection and I don't
 think we will"* — and it is here rather than in `shortcuts.md`'s gap list because that is the file's
 own rule: a decided non-goal is never an open item. What it settles is `Ctrl+A` on the dashboard and
 every verb behind it; the four the library has (`Enter`, `Delete`, `F2`, `Ctrl+D`) each take one
@@ -373,37 +432,16 @@ image editing (`Tool::ImageEdit`), drag-and-drop and paste, the seven adjustment
 three writers, thumbnails, the loaded cursor's count badge and the Windows drop position. **`images.md`
 was the scope document and is gone**, so **§5.5a and §15 D176–D191 are the whole record**, plus D225,
 D236, D241, D268, D280 and D305 for what came after it. D191 is the out-of-v1 list nothing else
-carried. **Linked images are the one thing that does not work**, which is the whole of what is open:
+carried.
 
-- **The Asset section is two entries short: *Embed*/*Link* and *Relink…***, and both wait on the same
-  thing — a **linked** source, which nothing in the app can author and nothing can therefore create
-  work for. One dependency holding both, rather than a cheap-versus-expensive split. A third entry,
-  **Embed all** for a document that arrives with dead links, is document-wide rather than per-fill, so
-  it wants a home outside that row — and it is the one no §15 entry names. (The other two of the five
-  are done: *Replace…* in §15 D179, *Export original…* withdrawn as a decided non-goal in D305.
-  Framing keeps the room D190 held in reserve.)
-  - **The dependency holds, re-checked 2026-08-31** — `ImageSource::Linked` is constructed in exactly one
-    place, `io/schema.rs`'s deserializer, and every app path onto a picture funnels through
-    `app::load_image_bytes`, which builds `ImageSource::Embedded` unconditionally. What that sharpens
-    is *which* half is missing: a hand-written or foreign `.ondin` **can** carry a link and the app
-    will open it, so the subject exists and only the *authoring* does not. The two rows are blocked on
-    a gesture, not on the model.
-    - **"Exactly one place" is about the *constructor*, and there is a second path a link travels
-      by** — noticed 2026-08-31 and not a change of verdict. `build::missing_image_ops` copies an
-      entry wholesale out of the document a paste came from, so a `Linked` entry can enter a document
-      the app never deserialized. Still nothing *authors* one, which is the blocker; but a reader
-      taking "one place" as "one way a link can be in front of you" would be wrong, and the two rows
-      would have to cope with a link that arrived this way as much as with one that was opened.
-  - ⚠️ **The one piece of linking that was handled has been un-handled**, and the next reader should
-    know where the spec went. `ImageEntry::bytes` returning `None` had a consumer: *Export original…*
-    dimmed for a linked picture and said why, in three states rather than two — fine, linked, or an
-    id the table does not hold — through `tools::original_refusal` (**§15 D280**, which is also where
-    the cross-document paste defect found on 2026-08-21 was closed). That row went from both doors on
-    2026-08-23 and took the predicate with it, which put `ImageEntry::is_linked` back to **zero
-    callers** for the second time (§15 D305). Nothing regressed, because nothing can author a link
-    yet; what is lost is the worked answer, and it is preserved as comments where the function stood
-    and on `is_linked` itself. **Rebuild from those rather than re-deriving**, and do not infer
-    "linked" from absent bytes — that inference is the bug D280 is about.
+~~**Linked images are the one thing that does not work**, which is the whole of what is open.~~
+**Closed 2026-09-19 — §15 D819: linked images are a decided non-goal for v1**, and the three Asset
+entries that needed them — *Embed*/*Link*, *Relink…* and the document-wide *Embed all* — are on §0's
+list above. All three waited on one missing thing, a gesture that **authors** a linked source, so
+they were decided together. ⚠️ **`is_linked` and `tools::original_refusal`'s three-state reasoning
+stay** — the subject exists in the model and a foreign `.ondin` can put one in front of the app —
+and *"do not infer linked from absent bytes"* is the bug §15 D280 is about. **Nothing is open in
+this section**; it is the record of the v1 image build.
 
 ---
 
@@ -429,9 +467,16 @@ carried. **Linked images are the one thing that does not work**, which is the wh
   `ondin export --scale` hazard with no watchdog to make it fail loudly. *This entry existed for
   about four hours, which is the useful ending: it was written as "a feature rather than a bound" and
   the feature was five hundred lines including its tests.*
-- **Context menus: one row and one clause open, both decisions rather than work — plus one clause of
-  one test** — the four tests were written on 2026-09-19 (§15 D795) and are struck below, all but
-  the Escape bullet's wider fixture. ⚠️ *This headline read "one row and one clause open, and both
+- ~~**Context menus: one clause of one test, and nothing else**~~ — **nothing open as of
+  2026-09-22**, the Escape bullet's wider fixture having been written that day (§15 D824) after both
+  decisions were taken on 2026-09-19: a frame's *Background…* is a decided non-goal (§15 D800) and
+  C5's edge clause is answered (§15 D816). 🚨 **That clause closed by a *second* test rather than by
+  the widening `context-menus.md` §10 asked for** — `escape` pays out one rung per press, and in the
+  wider fixture the rung directly under the menu is `entered_group` rather than the selection, so
+  widening the existing test would have left it asserting nothing under its own flip. ⚠️ *This
+  headline read "one row and one clause open, both decisions rather
+  than work — plus one clause of one test" until both decisions landed.* The four tests were written
+  on 2026-09-19 (§15 D795) and are struck below, all but that fixture. ⚠️ *This headline read "one row and one clause open, and both
   are decisions rather than work" until 2026-09-09, when it was corrected to "one row, one clause and
   four tests open": it had been true of everything the bullet knew about and false of the section,
   the four tests having been queued in `context-menus.md` §10 and **§15 D214** the whole time — this
@@ -454,22 +499,25 @@ carried. **Linked images are the one thing that does not work**, which is the wh
     D400's own reason, the inspector's Fill row already doing this job for a frame exactly as for
     anything else. `context-menus.md` §5.1's row is struck in place with the argument, and §9.1 and
     §9.5 follow it.
-  - **C5's *"or on its edge"* half is answered by one door out of three** (`context-menus.md` §2, §15
-    D469). The select-click arm and the context-menu door now share one chain, `canvas::pick_at_pointer`
-    — the frame's name tag, then `pick_leaf` — and `begin_select_drag` carries a further fallback,
-    `selected_frame_at`, which is the edge clause and which neither of the other two has. Widening the
-    shared chain to match wants a decision rather than arriving as a side effect of sharing a helper:
-    it would make an already-selected frame's *interior* a right-click target, which is the half of C5
-    that has never been true. **The decision, not the work** — the code is one `.or_else` either way.
+  - ~~**C5's *"or on its edge"* half is answered by one door out of three** (`context-menus.md` §2, §15
+    D469). Widening the shared chain to match wants a decision rather than arriving as a side effect
+    of sharing a helper. **The decision, not the work** — the code is one `.or_else` either way.~~
+    **Closed 2026-09-19 — §15 D816**, and 🚨 **the repair this bullet named was the one declined**:
+    widening with `selected_frame_at` would have made an already-selected frame's *interior* a
+    target, the half of C5 that has never been true and which `pick_leaf` skips on purpose so a
+    marquee can cross a frame's contents (§15 D22). `canvas::frame_edge_at` is the **last** link of
+    `pick_at_pointer` instead, so a layer near its frame's border still wins the pixel. *One
+    `.or_else` either way was right about the code and wrong about which one.*
   - ~~🚨 **Four of the rules have no test, and this bullet is where that belongs**
     (`context-menus.md` §10, §15 D226, `[A7-L8-06]`).~~ **Closed 2026-09-19 — §15 D795**:
     `app::context_menu_rule_tests` is the four, every flip run, and they are the first test anywhere
     in the workspace to drive a synthetic **secondary** button through the app —
     `canvas_context_menu`'s door had never had one, every earlier context-menu test calling
-    `open_context_menu` by hand or building a `menu::Context` directly. ⚠️ **One clause is still
-    open and is kept in `context-menus.md` §10 rather than restated here**: that file's Escape
-    bullet asks for `entered_group` and the tool as well as the selection, and the test written
-    asserts the menu and the selection.
+    `open_context_menu` by hand or building a `menu::Context` directly. ⚠️ **One clause stayed open
+    in `context-menus.md` §10 rather than being restated here** — that file's Escape bullet asks for
+    `entered_group` and the tool as well as the selection, and the test written asserts the menu and
+    the selection — **and it closed 2026-09-22 (§15 D824)**, by a second test, §10's own request for
+    a widening having been the repair that would have made the first one vacuous.
     🚨 **The lesson stays because it is about this file rather than about the work**: these four were
     queued in two other documents and in neither of the places a reader looks for open work, which is
     the corollary of *the roadmap holds open work only* that nobody had written down — **it must hold
@@ -492,7 +540,10 @@ carried. **Linked images are the one thing that does not work**, which is the wh
   **Read D114 and D116–D125 before touching any of it**; between them they carry every rule and
   decision this file used to restate. D116 belongs in the read list and said D117 until 2026-08-03 —
   it is the press-swallow trap, which the *Path editing* section names as one of the four that recur.
-  One deferred decision is left, under that section.
+  ⚠️ **The one deferred decision that used to sit under that section — every point edit being a
+  whole-path `GeometryPatch::Path` — moved to *Later · Parked decisions* on 2026-09-22**, being
+  non-blocking with a stated trigger. It is still a decision to read before touching this, and it is
+  no longer filed as open work.
 - **Booleans: nothing open as of 2026-09-19**, and the sub-bullets below are the record of how each
   item closed rather than a queue — §15 D87–D91, D230, D239 (six amendments), D244, D282–D286,
   D298, D299, D453, D457, D794. **Three flo_curves traps are recorded in `boolean.rs`'s module docs
@@ -543,7 +594,12 @@ carried. **Linked images are the one thing that does not work**, which is the wh
     commit that trips it says so — and since §15 D299 the canvas draws §5.5a's placeholder over the
     operands' box, which also gave the node the world bounds it needed to be clickable at all. All of
     that is kept.
-    - **What it cost is the reproduction, and one thing is genuinely open.** Six tests reached the
+    - **What it cost is the reproduction, and what is left is a weaker claim rather than an item.**
+      ⚠️ *This opened "and one thing is genuinely open" until 2026-09-22, which contradicted its own
+      headline two levels up — "Booleans: nothing open as of 2026-09-19" — and the sentence three
+      lines below it, which says the alternative was **declined**. A declined alternative is a
+      decision, not an open item; the file's whole rule is that those are two different things.*
+      Six tests reached the
       abandoned state through a forty-circle ring and none of them can now, so the panic is injected
       (`boolean::poison_next`) and they make a **weaker claim than they used to** — that the guard and
       its consequences work, not that flo_curves can still produce a panic. The alternative, hunting a
@@ -646,7 +702,14 @@ function it named.
   turned out to be about, is that a grid is measured against an **authored** size, which is what
   confines it to a frame while the field itself sits on the node beside `exports`. *An entry short
   enough to read as small can still be the largest thing in its section.*
-- **The *layer* clipboard is app-internal; text and images are not.** Copy puts layer *names* on the
+- ~~**The *layer* clipboard is app-internal; text and images are not.**~~ **Closed 2026-09-22 — §15
+  D823**: `ondin_core::io::clip` puts the captured subtrees on the **system** clipboard behind the
+  layer names, so a copy made in one `ondin` window pastes as layers in another. The section below is
+  kept as the record of how each half of the clipboard works, not as a queue. 🚨 **Both halves of the
+  cost estimate struck below were wrong, in the cheap direction**: the id minting *did not exist as
+  work* — `build::insert_subtrees` already remaps through `document::remap_subtree` — and the
+  serialization that had to be *"not `NodeDto`"* **is** `NodeDto`, the visibility never having been
+  the obstacle once the module sits in `ondin-core::io`. Copy puts layer *names* on the
   system clipboard — and those names are now also the **receipt** that says whether the in-app payload
   is still what the OS clipboard describes, without which a paste of text from another application
   could never be reached (§15 D218). A layer goes **out** as SVG since 2026-08-20 — *Copy as SVG* on
@@ -661,7 +724,7 @@ function it named.
   is in, else the middle of the view, and **no frame is required**: a paste onto empty canvas lands on
   the canvas, where it used to refuse (§15 D218, D221). `Ctrl+V` targets the original parent at a fixed 20×20
   offset, and the context menu's *Paste here* is the pointer-aimed one (`paste_at`, §15 D215).
-  **What is left to build, and what it would cost.** Copy captures subtrees into `OndinApp::clipboard`
+  ~~**What is left to build, and what it would cost.** Copy captures subtrees into `OndinApp::clipboard`
   and puts only a text stand-in of their names on the OS clipboard (§15 D17), so **no layer crosses
   between two `ondin` windows** or into another tool as *layers* — the case the SVG round trip above
   does not cover, since what comes back is an import of markup and not the subtrees that left,
@@ -669,7 +732,9 @@ function it named.
   `Vec<Node>` through the existing schema is most of the work — `InsertSubtree` already carries
   exactly that payload, so the operation the paste would emit needs nothing new; what is missing is a
   serialization of it that is not `NodeDto`, which is `pub(crate)` to `ondin-core`, and the id minting
-  on the way back in. *Moved here on 2026-09-07 from an unheaded, unnumbered bullet list
+  on the way back in.~~ **Built 2026-09-22 — §15 D823**, and the estimate is kept struck rather than
+  deleted because it was wrong in both of the places it named a mechanism. *Moved here on 2026-09-07
+  from an unheaded, unnumbered bullet list
   at the end of `docs/decisions.md`, where it had been sitting with an imperative "Build it." on it —
   open work in the one file that holds none.*
   Paste-in-place (§15 D248), the pasted layer's *slot*, and the decision that `Ctrl+V` keeps its
@@ -677,16 +742,15 @@ function it named.
   SVG in" is closed too, as of 2026-08-31** (§15 D394): markup on the clipboard becomes layers, so
   the *Copy as SVG* round trip closes for everything but text. See the section below for what is left
   of it.
-- **Trackpad pinch arrives as Ctrl+wheel (`wheel_input`), and on Windows that is the only way it can
-  arrive.** This read as one gap and is two things, checked against the vendored sources on 2026-08-19
-  and neither of them built. **`Event::Zoom` would be dead code here**: egui only ever *consumes* that
-  event (`input_state/mod.rs` is its one reader), its sole producer is `egui-winit`'s
-  `WindowEvent::PinchGesture` arm, and winit 0.30.13 raises `PinchGesture` from its **iOS and macOS**
-  backends alone — `platform_impl/windows` has no path to it at all. So it is a macOS portability item
-  rather than a defect, and it cannot be tested on the machine it would be written on. **Multi-touch is
-  the half that is reachable**: winit does deliver `WindowEvent::Touch` on Windows, so egui's
-  `multi_touch()` would see a touchscreen pinch — which needs a touchscreen to develop against. Worth
-  knowing before anyone reads this line as cheap work.
+- ~~**Trackpad pinch arrives as Ctrl+wheel (`wheel_input`), and on Windows that is the only way it can
+  arrive.**~~ **Filed *Later* 2026-09-19 — §15 D822**, with the analysis re-derived and unchanged:
+  `Event::Zoom` **would be dead code here** (egui only consumes it, its sole producer is
+  `egui-winit`'s `WindowEvent::PinchGesture` arm, and winit raises that from its iOS and macOS
+  backends alone), so it is a macOS portability item; multi-touch is the reachable half, `Touch`
+  being delivered on Windows, and needs a touchscreen. **Neither can be built or tested on this
+  machine, so neither is open work** — the trigger is **a Mac, or a touch device**. *This bullet's
+  own last line warned against reading it as cheap work, which is what a Now section makes it look
+  like.*
 - **egui's own keyboard zoom is off** (`theme::install`, `zoom_with_keyboard`). `Ctrl`+`+`/`−` was
   scaling `pixels_per_point` *and* the canvas at once. Anything else the app wants to bind that egui
   also reads needs the same treatment — check `Options` before adding a chord.
@@ -737,10 +801,12 @@ tried on a real Lucide icon and worked. What is left is a list of things nobody 
   silent, but *Copy as SVG* did not close for any shadow, and `svg_roundtrip.rs` had no effect
   coverage to say so. The list tell again: "no answer in the model at all" is a claim about the set
   of `EffectKind`s.
-- **`<foreignObject>`**, which is HTML in an SVG and is not a drawing. ⚠️ **Read as an open item and
+- ~~**`<foreignObject>`**, which is HTML in an SVG and is not a drawing. ⚠️ **Read as an open item and
   is really a decided non-goal nobody has moved** (audited 2026-09-03, §15 D411): nothing in this
   model draws HTML, so there is no version of this to build. It sits here rather than in §0 only
-  because no one has said the words.
+  because no one has said the words.~~ **The words were said 2026-09-19 — §15 D813**, and it is on
+  §0's list. *Sixteen days between an entry saying it should not be here and its leaving is what §0
+  exists to shorten.*
 - ~~**A CSS selector needing a combinator**, which is a cascade engine rather than a lookup. Type,
   class and id are read. Re-read 2026-09-03 and correct as written.~~ **Built 2026-09-19 — §15
   D806**, and the framing was the part that was wrong: the cascade engine an SVG file wants is a
@@ -755,13 +821,20 @@ tried on a real Lucide icon and worked. What is left is a list of things nobody 
   default uses. ⚠️ **The module's "nothing is lost silently" contract holds again**, which is the
   claim this entry existed to withdraw: what a `<tspan>` still loses is a gradient fill and a
   one-sided stroke, and it says so about both.
-- **The paragraph, which is a structural loss rather than a missing feature.** A two-line text layer
+- ~~**The paragraph, which is a structural loss rather than a missing feature.** A two-line text layer
   of ours comes back as two layers in the right places, because nothing in the markup says they were
   one node. Rejoining them means inventing the line height that decides where every line after the
   first sits. ⚠️ **Better covered than this reads** (2026-09-03): a positioned `<tspan x y>` already
   starts a new layer and a bare one joins the text, pinned by
   `a_positioned_tspan_starts_a_new_layer_and_a_bare_one_does_not`, so what is open is the *rejoin*
-  alone and nothing else about the element.
+  alone and nothing else about the element.~~ **Decided against 2026-09-22 — a non-goal for v1, in
+  §0 above, and §15 D826 is the record.** 🚨 **The refusal is about what the signal identifies**:
+  same `x`, a constant `y` step and a matching resolved style is *also* exactly what a stack of
+  separate labels in a foreign file looks like, so the heuristic welds unrelated layers together and
+  the user cannot say which reading was meant. ⚠️ **And the case it would have been worth most for is
+  answered elsewhere** — a copy crossing between two `ondin` windows carries real nodes now,
+  paragraph and all (§15 D823) — so what was left here is the foreign file, which never had the
+  structure to lose.
 - ~~**`<textPath>`**, which the *writer* started emitting on 2026-09-01 (§15 D405) and which this
   reader skips like any other unread element.~~ **Read the same day — §15 D406**, and the estimate
   held: the `href` lookup plus `BezPath::from_svg`, with `Gradients::ids` already holding every
@@ -787,60 +860,21 @@ to write when someone wants it, not a gap.
 
 ## Now · Inspector
 
-- **The hex field commits through no shared valve, and that is the open half of `[S14.4-L1-04]`.**
-  §15 D517 stopped `inspector::paint_hex_field` writing on a bare click: it compares the typed bytes
-  against `hex_of` of the colour already there, which closed both measured symptoms — the 8-bit
-  quantisation of anything the picker's HSV plane produced, and the undo step a click that typed
-  nothing was spending. What it did not do is the finding's other half, routing the write through
-  `app::edit_valve` so the field's commit *timing* is decided at the seam §9.3 exists to decide it at.
-  **A shape argument rather than a defect**: there is nothing measured left to fix, and a text field
-  has no drag to preview, so the valve would be belt-and-braces. It is here because the next person to
-  change how this field commits should know that D316's engagement latch has never reached it and the
-  comparison is what stands in for one. ⚠️ **It is not the only control off the seam** — JPEG quality
-  holds its own in-flight value in `export_quality_scrub` (§9.4, §15 D274) — **but that one carries a
-  stated reason and this one does not**, which is the whole of what is open here: either route it, or
-  write the sentence that says why it is not routed.
+~~**Delete `char_valve`'s third arm, whose only known user is a rewrite the app already opts out
+of?**~~ **Ruled and deleted 2026-09-19 — §15 D812.** 🚨 **What decided it was neither of the two
+measurements but a *read* of the five unmeasured call sites**: all seven are engagement-bearing and
+**both** of the app's `DragValue` helpers opt out of egui's clamp (§15 D425, D552), so the arm had
+no live user at all rather than no *wanted* one — *"seven call sites, two measured"* became seven
+read. The argument is the asymmetry: a caller that needed it fails **loudly** (*"this control
+commits nothing"*), keeping it fails **silently** (*"a field nobody touched spent an undo step"*).
+§15 D802 and D803 are the two findings under it.
 
-- **Delete `char_valve`'s third arm, whose only known user is a rewrite the app already opts out
-  of?** A maintainer question, narrowed twice on 2026-09-19 and no longer about reachability. §15
-  D523 gave the Type panel's valve D316's engagement latch and kept a third arm nothing else in the
-  app has — a `changed()` frame on a control that was **never engaged** — for the picker's **raw
-  sensed regions**, on the reasoning that without it a click on the hue strip would commit nothing,
-  ever. **The test was written and the reasoning was false** (§15 D802): `picker::pointer_slot`
-  answers a click through `write_slot` before it would reach `valve_slot`, so the hue slider and the
-  alpha strip never enter the valve on a click; a drag enters it as the engaged arm and its release
-  as the falling edge, both arms the other two valves have; and on those frames `changed()` is never
-  true. **And the arm does have a user** (§15 D803): removing `ui::value_field_f64`'s
-  `clamp_existing_to_range(false)` and instrumenting the arms again, egui's own per-frame clamp of a
-  stored value outside a *ranged* field marks a control holding no focus as changed, and **the third
-  arm fires** — committing it and spending an undo step. That is `[S6.2-L1-01]`, and D425's one line
-  is the whole of what keeps it from happening. **So the ruling is between two defences against one
-  bug and a route with no wanted user at all**: deleting the arm is a second guard on D425's line
-  rather than tidying, and keeping it keeps a path whose only known user is a hazard. Removing the
-  arm still breaks nothing in the suite. ⚠️ **Seven call sites, two measured** — *only known* is the
-  honest phrase, not *only*. ⚠️ **And the route that *is* taken now has a test** —
-  `picker::text_colour_route_tests` — so nothing here is about coverage any more.
-
-- **Menu rows carry no border, and that is what stops them moving** (`ui::menu_rows`). egui 0.35 puts a
-  `Button`'s `bg_stroke` in the *layout* for a hovered or selected row and leaves it out for a resting
-  one, so the two states want different sizes on **both** axes — at the panels' zero padding, 21 against
-  23 tall and 2pt of width. The `MENU_ROW_H` floor fixes the height only (and only because it clears
-  both); zeroing the stroke makes the states geometrically equal, which is the guarantee that holds
-  whatever the natural size turns out to be. **And a floor only ever *raises***: it is 22 since
-  2026-08-20 (§15 D262), which is below the 23 a row would want at the theme's own padding, so it
-  decides the height only because every dropdown's scope brings that padding to 0 or 2 first. Any new
-  dropdown owes `ui::menu_rows` *and* that padding, and restoring a border to a menu row puts the shift
-  back.
-  - ⚠️ **"Any new dropdown" is too wide, and the debt is only owed by one of the two families of row
-    in the tree** (read 2026-08-31). All of the above is about rows built from an egui widget, where
-    `button_padding` and `interact_size.y` decide the natural height. `ui::menu_row` and
-    `ui::menu_item` are not those: they take an explicit height and `allocate_exact_size` it, so
-    `button_padding` cannot reach them and the floor is not what holds them still. The Export panel's
-    preset menu is the new caller this warning was waiting for, and **it is correct for a reason the
-    warning does not give** — it calls `ui::menu_rows` and never touches the padding, which the
-    sentence above would score as the failure case. *The tell for which family a row is in is whether
-    its height is an argument*, and a warning that cannot be applied without reading the callee is
-    half a warning.
+**The menu-row border left this section on 2026-09-19 and was never work** (§15 D811). Everything in
+it — egui 0.35's per-state frame arithmetic, the 21-against-23, the floor that only ever *raises* —
+was already in `ui::menu_rows`' and `ui::MENU_ROW_H`'s own docs, and the one sentence that was in
+neither is a 🚨 paragraph on `ui::MENU_ITEM_H` now: *"any new dropdown"* was **too wide**, a row whose
+height is an **argument** being in the other family and owing neither the helper nor the padding. A
+standing trap is a doc comment's job; this file holds open work.
 
 ## Now · Keyboard
 
@@ -868,20 +902,30 @@ ever wants it, the order should become a function rather than a third copy.
   palette* below. The cheatsheet **is** `shortcuts.md` rendered from the registry, which is the
   argument for extending `Action` rather than keeping a second list of strings; when it lands,
   that file becomes the registry's test rather than its source.
-- **Should `Undo`, `Redo`, `Save` and `Open` resolve in `Mode::TextInsert` at all?** They are in
-  `normal_mode` and not in `text_insert_mode`, so the four chords are dead during a text session — by
-  omission rather than by a decision, `TextInsert`'s rule being about *bare* keys (§9.3). The top bar's
-  buttons for three of them were live the whole time and now finish the session before acting
-  (§15 D466), so **the damage is closed and the button and its chord still disagree**. What this needs
-  is the decision rather than the work: either `text_insert_mode` grows the four chords, finishing the
-  session the way the buttons do, or the disagreement is recorded as deliberate and the buttons are the
-  only door.
+- ~~**Should `Undo`, `Redo`, `Save` and `Open` resolve in `Mode::TextInsert` at all?**~~ **Ruled and
+  built 2026-09-19 — §15 D815: they do.** `text_insert_mode` grows the four with `normal_mode`'s
+  guards term for term, and 🚨 **the finishing went to `OndinApp::dispatch` rather than into the
+  keymap**, because ending a session first is a fact about the *action* and not about the key — the
+  buttons already spelled it there, and a guard in the keymap would be a second copy the next door
+  onto `Undo` would miss. This section has nothing open.
 
 ## Now · Text
 
-**Four things are open here**: the six deferred features, the paragraph scope's absence from the MCP
-snapshot, one line to suspect if the canvas ever looks a frame stale during a text session,
-and whether a chord stops where its field stops. **Everything above them is closed** — the attribute
+**Nothing here is open work as of 2026-09-22**, the four deferred features having been ruled on that
+day (§15 D825): tab stops, columns and widow/orphan control are decided non-goals in §0, and
+justify-all is in *Later · Parked decisions*, blocked upstream. ⚠️ **Two things are left and neither
+is an item.** The paragraph scope's absence from the MCP snapshot is **parked with MCP**, so it
+unparks when that does and not before; and one line to suspect if the canvas ever looks a frame stale
+during a text session (§15 D171) is a **watch-note** — a thing to read when a symptom appears, not a
+thing to do. 🚨 **Do not restore a count over those two.** This section's own record, below, is that
+*a count of items is what goes wrong when one of them is a note*, and this opener has been wrong
+twice already — once over that same note.
+⚠️ **Whether a chord stops where its field stops was ruled on 2026-09-19 (§15 D817)**
+and is struck below. *(This opener said "three things … the four deferred features" until 2026-09-22,
+and "four things … the six deferred features" before that, while §0 had taken
+hyphenation and D405 had built text-on-path, so the inner count was two adrift before the outer one
+moved.)* **Everything above them is
+closed** — the attribute
 model, the three-tab popup, paragraph layout through lists and nesting, and six review passes — and is
 kept as the record of how, in §15 D77–D82, D103–D109, D145, D148–D174 and `architecture.md`
 §5.4/§5.11/§9.2. *Read it for the traps, not for a queue.*
@@ -984,8 +1028,13 @@ their keep here are the ones aimed at a **seam between two mechanisms**, not at 
 left:
 
 - **Deferred outright**: ~~hyphenation~~ (**a decided non-goal since 2026-09-01** — §0 above, §15
-  D399), justify-all, tab stops, columns, widow/orphan control, ~~text-on-path~~ (**built
-  2026-09-01** — §15 D405).
+  D399), ~~justify-all~~ (**filed *Later · Parked decisions* 2026-09-22, blocked upstream** — §15
+  D825), ~~tab stops, columns, widow/orphan control~~ (**decided non-goals since 2026-09-22** — §0
+  above, §15 D825), ~~text-on-path~~ (**built
+  2026-09-01** — §15 D405). 🚨 **The heading is what D825 undoes.** *Deferred outright* stood over a
+  price, three builds nobody has asked for and an **upstream wall**, and a word like that is how one
+  item inherits another's excuse — which is precisely the failure the ⚠️ below records. Nothing is
+  left under it.
   ⚠️ **"All six dependencies are still genuinely absent" was one sentence covering six
   different situations, and re-deriving them found *none* of the six it describes.** The 2026-08-31
   pass left hyphenation standing as the one item the sentence was true of; re-deriving that one on
@@ -1040,7 +1089,10 @@ left:
     the segment type a `BezPath` already yields. Nothing is behind a feature flag. What is left is
     a *design* — where the path lives relative to the text node, and what the SVG writer emits —
     which is a different and much better problem than a missing crate.
-  - **Justify-all is not a dependency question at all.** parley is present and in use: `TextAlign::Justify`
+  - ~~**Justify-all is not a dependency question at all.**~~ **Moved to *Later · Parked decisions*
+    2026-09-22 — §15 D825**, and the reason it moved there rather than to §0 is the whole of that
+    entry: it is the one of the four that is genuinely **blocked upstream**, so its trigger is a
+    patch and not a ruling. The analysis is unchanged and is kept below. parley is present and in use: `TextAlign::Justify`
     is wired, and `justify_last` already ships three readings of the last line that are ours — the line
     is *translated* rather than re-spaced, which is what made those three affordable and is stated on
     `JustifyLast` itself rather than in §15, no entry naming it. What blocks justify-*all* is upstream and
@@ -1048,10 +1100,15 @@ left:
     `LayoutData` and `ClusterData::advance` are every one of them `pub(crate)`. **That files it beside
     the flo_curves comparator rather than beside hyphenation** — an upstream gap, and one small enough
     upstream to be worth a patch rather than a fork.
-  - **Tab stops** — parley classifies `Whitespace::Tab` and does no tab-stop layout, so this is a
-    feature to build on top of it, not an absent dependency.
-  - **Columns and widow/orphan control** never had a dependency. They are unbuilt features of our own
-    paragraph layout, and pricing them means reading `text.rs`, not the lock file.
+  - ~~**Tab stops** — parley classifies `Whitespace::Tab` and does no tab-stop layout, so this is a
+    feature to build on top of it, not an absent dependency.~~ **A decided non-goal since 2026-09-22
+    — §0 above, §15 D825.** The premise was right and is what decided it: a feature to build, nobody
+    asking for it.
+  - ~~**Columns and widow/orphan control** never had a dependency. They are unbuilt features of our own
+    paragraph layout, and pricing them means reading `text.rs`, not the lock file.~~ **Decided
+    non-goals since 2026-09-22 — §0 above, §15 D825.** Widow/orphan control would be a second pass
+    over the lines `text::break_lines` yields; columns change what a paragraph's box *is*, above that
+    function entirely.
 - **A run colour and a list marker are both invisible to the MCP snapshot**, which emits node-level paint
   and the raw `content` — and a marker is deliberately not in `content` (§15 D169), so an agent reading a
   list sees unmarked paragraphs. The **nesting level** goes with the marker (§15 D172): same emitter, same
@@ -1123,18 +1180,14 @@ left:
   headlessly testable — so if anything on the canvas ever looks a frame stale *while a text session is
   open*, that is the line to suspect. Everything else that could have wanted it has a repaint of its own
   (the chrome-hold timer, the font service, `resp.dragged()`, and input itself).
-- **Should a chord stop where its field stops?** `text_chord`'s `TextChord::Tracking` arm steps
-  `0.01em` per `Alt`+`→` through `apply_char_attrs` with **no range check at all**, and `TextStyle::set`
-  canonicalizes `letter_spacing` without bounding it — so a held key walks tracking past
-  `MAX_TRACKING_PCT` and out of what the field can be scrubbed to. The `Size` arm in the same `match`
-  is the other answer, and says so in a comment: `CharAttr::Size` clamps itself to
-  `MIN_FONT_SIZE..=MAX_FONT_SIZE`, so held keys stop at the ends without a second bound at the chord.
-  **This is a question rather than a defect** — the caps are on the controls and not on the model, a
-  file may legally hold any finite value, and since §15 D475 the field *shows* an out-of-range value
-  instead of rewriting it — so nothing is lost today. What wants deciding is whether the two chords
-  should agree, and if they should, whether the bound belongs at `TextStyle::set` (where `Size`'s is)
-  or at the arm. **The decision, not the work**: it is one `.clamp` either way. Found while writing
-  D475's test; `[S6.2-L1-01]`'s other half is closed, `[S6.3-L1-03]` having gone with D425.
+- ~~**Should a chord stop where its field stops?**~~ **Ruled and built 2026-09-19 — §15 D817: it
+  should, and the bound is at the arm.** 🚨 **Deliberately *not* at `TextStyle::set`, where `Size`'s
+  is**, which is the half worth carrying: these caps are on the **controls**, any finite value is a
+  legal attribute and a file may hold one, so a bound in the model would make §15 D425's
+  show-don't-rewrite behaviour unreachable for this attribute. **The two chords agree about
+  behaviour and deliberately not about where the bound is written.** The px face is derived from the
+  `%` face through the same `px_range_for` the field uses, so chord and scrub cannot disagree about
+  the cap in either unit.
 
 ## Now · Doc drift
 
@@ -1191,22 +1244,25 @@ than this file did. The fillet-versus-arc construction and the inferred point ty
 recorded **twice** — in D119/D114 and again here — which is the duplication this file's own rule
 exists to stop.
 
-One item is left, and it is a decision rather than a gap. (It was two until 2026-09-19, when the
-`retain_valid` / `subpath_lengths` pair was ruled on — the `allow`, and the no-effect call removed;
-§15 D637, now *Resolved*.)
-
-- **Every point edit is a whole-path `GeometryPatch::Path`, deliberately.** Right for undo
-  granularity — one gesture, one step — and coarse only for **MCP**, where "move anchor 3" would
-  rather be an op than a path replacement. MCP is parked until the editor is finished (§8), so this
-  is revisited *with* that work and not before: an op-level patch designed now would be designed
-  against a consumer nobody has written. **D123's closing note explicitly asks for this to stay
-  here** — "it stays in the todo as a decision rather than a gap" — which is why it survived the prune.
-  (It read D125 until 2026-08-03; D125's closing note is about something else, namely `pen_verb`'s
-  routing, which was the last untested decision in the path-editing work and is now pinned — §15 D318.)
+**Nothing is open here as of 2026-09-22.** The last item — every point edit being a whole-path
+`GeometryPatch::Path` — **moved to *Later · Parked decisions*** that day: it is non-blocking with a
+stated trigger (revisited *with* MCP, which is parked), which is what *Later* is for by this file's
+own table. ⚠️ **That honours D123's closing note rather than breaking it.** That note asks for the
+item to stay *"in the todo as a decision rather than a gap"* — it stays in this file, and moving it
+out of a **Now** section is what makes it read as a decision instead of as work somebody could pick
+up. (It was two items until 2026-09-19, when the `retain_valid` / `subpath_lengths` pair was ruled
+on — the `allow`, and the no-effect call removed; §15 D637, now *Resolved*. The bullet read D125
+until 2026-08-03; D125's closing note is about something else, namely `pen_verb`'s routing, which was
+the last untested decision in the path-editing work and is now pinned — §15 D318.)
 
 ## Now · Files, library and storage
 
-**Four things are open here, and all four came out of the codebase review or out of closing one of
+**Nothing is open here as of 2026-09-19**, the last two having closed that day: the synchronous
+cover render was threaded (§15 D820) and rollback was refused outright (§15 D814, now a §0
+non-goal). *What follows is the record of how each item closed — read it for the traps, not as a
+queue.* The paragraph below is kept for what it says about counting.
+
+**Four things were open here, and all four came out of the codebase review or out of closing one of
 its findings** — the last three on 2026-09-09, when §15 D613 struck one item while §15 D619 and §15
 D620 each added one, so the count moved by one in a session that changed three of its members.
 (This paragraph said *"one thing … 2026-09-06"* and was a count behind before the 2026-09-07 item was
@@ -1251,26 +1307,16 @@ would be wrong, and that is the drift this file exists to not have.
 
 **Open**
 
-- **A dashboard cover is rendered synchronously inside the egui pass, and one document can cost
-  hundreds of milliseconds.** `Covers::get` → `cover::rasterize` → `io::load` → `png::png` →
-  `ImageStore::prepare` runs the whole document→pixels path on the UI thread, and a picture's decode
-  alone was **measured at 433 ms** for an 8000² image (§15 D449). The 8 ms `FRAME_BUDGET` does not
-  bound it: the progress guarantee renders one document per pass *whatever the budget says*, without
-  which a library of slow documents would draw no covers ever — so the cost is one stall per pass
-  until the covers are built, rather than one long freeze, which is the worse-feeling of the two.
-  **D449 caps how large a picture may become and deliberately does not fix this**: a 50 MP camera file
-  is 240 MB of RGBA and legitimate, so no bound that admits it can refuse the case that stalls. Moving
-  the render off the UI thread is what would make both the budget and the progress guarantee
-  unnecessary; which thread it goes on is undecided. Same class as the `Document::apply` cost
-  parked under *Per-edit cost*, and a different remedy: that one needs a decision, this one needs a
-  thread.
-- **A `.ondin` whose filename is not valid Unicode is invisible to the whole library, migration
-  included.** `scan::collect` skips any entry whose `file_name().to_str()` is `None`, so such a file is
-  never an entry, never scanned, and — the half that made it a finding — is silently left behind by
-  *Change base folder*, uncounted, exactly as a `.trash` collision used to be (§15 D431 fixed that
-  half and not this one). **Never reproduced**, which is why it is here rather than in §15 with a
-  verdict: it is not established that a filename Windows accepts can fail `to_str`, and the fix
-  differs by whether the answer is "skip but count it" or "carry it by `OsStr`". Reproduce first.
+- ~~**A dashboard cover is rendered synchronously inside the egui pass, and one document can cost
+  hundreds of milliseconds.**~~ **Built 2026-09-19 — §15 D820.** It is a **second worker of its
+  own**, not a job on `library::writer::Writer`'s queue, and the reason is that module's FIFO
+  contract: a cover render is hundreds of milliseconds nothing is waiting on, so putting one there
+  makes the feature that protects work wait behind the feature that decorates a card. **`FRAME_BUDGET`
+  is deleted with what it bounded** — the budget never bounded the felt cost, the progress guarantee
+  under it rendering one document per pass whatever it said. 🚨 **The thread then flaked a *dashboard*
+  test 2 runs in 20**, whose doc had called its two pumped passes *"the cover cache's laziness rather
+  than a flake"* — true while the render was inline, a race once it was not — found by running the
+  filter twenty times after six clean runs said nothing.
 - ~~**`scan::Entry::unread` has no production consumer — give it one or delete it.** `scan::collect`
   writes it, `library/state.rs` hardcodes it `false`, and the only thing that reads it is
   `a_corrupt_document_is_listed_rather_than_hidden`'s assertion; `Entry` derives `PartialEq`, which is
@@ -1282,49 +1328,20 @@ would be wrong, and that is the drift this file exists to not have.
   `MetaProbe::Inconclusive`, so the case that actually reaches a synced library — a document written
   by a **newer build**, well-formed JSON that `io::load` refuses — was reported healthy; the mark
   reads `entry.unread || covers.unreadable(entry)`, the second being `io::load`'s whole-file answer
-  that `cover::rasterize` was already computing for the thumbnail and discarding. **What is still a
-  decision rather than work** is whether *Open* should be disabled or warning-styled on such a card;
-  the mark and the status line already say it, and refusing to open a file the user may want to
-  inspect is not obviously right.
-- **The per-machine index has no injection point, so running the test suite edits the developer's own
-  *Recent searches*.** `LocalIndex::save` writes `dirs::cache_dir()/ondin/library.json` and
-  `Library::open` loads from it; the `app()` fixture redirects the **base folder**, which is a
-  different knob, so anything driving `OndinApp` reaches the real file. Found 2026-09-09 while closing
-  `[S20.1-L6-05]` (§15 D619) — **the first run of that test found its fixture already populated from a
-  previous run**, and the arrows test has been writing there for longer. ⚠️ **The `load_from`/`save_to`
-  pair §15 D370 built is the right answer and nothing routes the app through it**, which is the shape
-  worth noticing: a mitigation can exist, be documented as the rule (§9.5), and be reached by no
-  production path. What is undecided is *where* the path comes from — a field on `Library`, an
-  argument threaded from `OndinApp`, or a process-wide override for tests only — so this is work
-  rather than a ruling. Until it lands, a test that touches this path asserts persistence through
-  `save_to`/`load_from` on a temp path and says why.
-  ⚠️ **The model already exists one module away, so the *where* above has a fourth and cheapest
-  answer** (found 2026-09-09 writing §15 D626): `prefs::Prefs::ephemeral` is a `#[serde(skip)]` flag
-  `OndinApp::headless` sets and `Prefs::save` reads on its **first line**, before anything touches the
-  filesystem, while `save_to` stays available for a temp path — so a headless app's writes never leave
-  the process and no test has to remember to redirect anything. D626's export test drives
-  `write_export`, which calls `prefs.save()`, and touches no `prefs.json` at all, which is the negative
-  this bullet wants. `save`'s own comment gives the reason in the words this entry needed: *"the damage
-  is silent and permanent — the file it writes outlives the test by however long it takes somebody to
-  notice."* **One module has the shape and one does not.**
-  ⚠️ **A second resource was found with no injection point on 2026-09-19 and had one by the end of
-  the day** — the OS clipboard (§15 D796; **the ruling is D798**): `OndinApp::headless` now
-  sets a process-wide `CLIPBOARD_OFF` flag that the two readers and both writers check, so this
-  bullet is about the per-machine index alone. It is kept as the shape, because the clipboard took
-  `Prefs::ephemeral`'s answer — a flag set by `headless` and read before the resource is touched —
-  and that is still the cheapest of the four above.
-- **A partly-failed library migration has no way back, and the full list of what it lost is nowhere on
-  screen.** `Moved::failed` names every file that stayed behind and `summary()` puts the first of them
-  in the status line (§15 D620), which is enough to act on and is not enough to work from: the
-  *Library settings* modal shows none of it, and `apply_library_settings` re-points the app at the new
-  root whether the migration succeeded, partly succeeded or did nothing. ⚠️ **The module's own defence
-  is an argument for a retry the UI does not offer** — *"a migration run twice leaves duplicates rather
-  than being idempotent, which is the right way round"* is true and assumes somebody can run it twice,
-  where today that means a three-step dance back through Settings whose middle step looks like the
-  operation that lost the files. Three separable asks: the full list in the modal, a *re-run the
-  migration* button, and rollback. The first two are work; the third is a **decision**, because
-  `relocate` deliberately overwrites nothing, so "undo" means deciding what to do with everything that
-  did arrive.
+  that `cover::rasterize` was already computing for the thumbnail and discarding. ~~**What is still a
+  decision rather than work** is whether *Open* should be disabled or warning-styled on such a card.~~
+  **Ruled 2026-09-19 — §15 D818: neither.** The mark and the status line already say the file will
+  not load, so a refusal is a third statement of one fact — and 🚨 **the case that actually reaches a
+  synced library is a document written by a *newer build***, well-formed and merely ahead of this
+  one, so refusing to open a file the user may want to inspect is the wrong way round.
+- ~~**A partly-failed library migration has no way back — rollback, the third of the three asks.**~~
+  **Ruled 2026-09-19 — §15 D814: there is no rollback, by decision**, and it is on §0's list above.
+  `relocate` overwrites nothing, so "undo" is a fresh decision about everything that *did* arrive —
+  including a `.trash` file renamed on the way in and now indistinguishable from a document that was
+  always there — and a reverse migration can itself partly fail. **The retry §15 D810 built is the
+  recovery**, and it is reachable from the card that reports the failure. ⚠️ **Do not read the retry
+  as half a rollback**: it moves in the migration's own direction, and nothing in the app moves
+  anything back.
 
 **Both of this section's *original* open items were closed on 2026-08-28 (§15 D384) and are struck
 rather than deleted, because each was wrong in a way worth keeping.**
@@ -1368,14 +1385,19 @@ rather than deleted, because each was wrong in a way worth keeping.**
 
 Box trim is in (§15 D78) and is now **on for new text**, with the line box it gave up drawn dashed
 beside it (§15 D199), and baselines are snap targets with a selected node's own drawn solid beside
-that (§15 D355). What stays here is the part that is not a text attribute:
+that (§15 D355). **Nothing is open here as of 2026-09-22.** What stays is one standing rule — the
+part that is not a text attribute:
 
 - **Don't use ink bounds for alignment.** They depend on the string, so two labels aligned by ink
   jump apart the moment the text is edited. Font-metric-derived trim is stable — which is why trim
   is the mechanism and ink bounds are not.
-- Later: side bearings / optical margin alignment (a left-aligned label still reads as indented,
-  because "H" has almost no left side bearing). "Figure out distances" is closed — the Alt-hover
-  measure and then equal-gap snapping with its labels (§15 D198, D200).
+⚠️ **The one item that was here has moved to *Later · Parked decisions***, on 2026-09-22 and with
+nothing decided about it — side bearings / optical margin alignment, which this section had itself
+marked *Later* since the day it was written and never moved. **A `Later:` item inside a `Now`
+section is the table's prefix rule broken from the inside**, and it is how this section stayed off
+the *nothing open* line while holding no open work: the bullet above is a standing rule, and a rule
+is not an item. ("Figure out distances" is closed — the Alt-hover measure and then equal-gap
+snapping with its labels, §15 D198, D200.)
 
 ## Later · Command palette (`Ctrl+K`, with `Ctrl+/` as an alias — `shortcuts.md` §8)
 
@@ -1473,6 +1495,25 @@ than an oversight. None blocks v1.
 - History cap / snapshot compaction for huge delete inverses.
 - Font embedding in `.ondin` files for non-Google local fonts (document portability) —
   `architecture.md` §5.4a.
+- **Every point edit is a whole-path `GeometryPatch::Path`, deliberately.** Right for undo
+  granularity — one gesture, one step — and coarse only for **MCP**, where "move anchor 3" would
+  rather be an op than a path replacement. **Parked here 2026-09-22**, moved out of *Now · Path
+  editing*, where it had been the last item: MCP is parked until the editor is finished (§8), so this
+  is revisited *with* that work and not before — an op-level patch designed now would be designed
+  against a consumer nobody has written. ⚠️ **§15 D123's closing note asks for it to stay "in the
+  todo as a decision rather than a gap"**, and that is what this move serves: it stays in the file,
+  and it stops sitting under a heading that means *open work on live code*.
+- **Justify-all, which is blocked upstream rather than declined** (§15 D825). **Parked here
+  2026-09-22**, moved out of *Now · Text*, where it had been filed beside three features that are now
+  §0 non-goals — and the distinction is the reason for the move. parley is present and in use:
+  `TextAlign::Justify` is wired and `justify_last` ships three readings of the last line that are
+  ours. What blocks justify-*all* is internal to parley: `align_impl` hard-codes skipping
+  `BreakReason::None | Explicit`, and `align`, `LayoutData` and `ClusterData::advance` are every one
+  of them `pub(crate)`. **The trigger is a patch upstream**, small enough to be worth one rather than
+  a fork — so it sits beside the flo_curves comparator, which is the other thing here that was fixed
+  by somebody else releasing. ⚠️ **This has been mistaken for a price twice** and is not one; §15
+  D399 is what a *priced* text feature looks like, and it says in as many words that nothing about
+  hyphenation was blocked.
 - **A transform origin for a multi-selection: one body, or *n* layers each with their own.** Parked
   2026-08-23, and parked because the question has two legitimate answers rather than because nobody has
   got to it — *"both are useful in different scenarios, so picking one is just assuming"*. Read as a
@@ -1506,6 +1547,12 @@ than an oversight. None blocks v1.
     reading serves is not what will arrive, because four cases have arrived and they split two-two.
     **What would unpark it now is a user asking for the *stored* origin**, not a case discriminating
     the readings.
+- **Side bearings / optical margin alignment.** A left-aligned label still reads as indented,
+  because "H" has almost no left side bearing. Moved here from *Now · Text alignment and
+  measurement* on 2026-09-22, where it had been filed `Later:` inside a `Now` section since that
+  section was written — nothing about it was decided by the move, and the trim mechanism it would
+  sit beside is §15 D78 and D199. Its neighbour there, *don't use ink bounds for alignment*, is a
+  standing rule and stays.
 - UI toolkit revisit (gpui / Xilem) post-v1 — `architecture.md` §9.1.
 - MCP transport hardening (auth, TCP/remote) — local socket + proxy only for now.
 - `vello_hybrid` as a third backend if low-end GPU performance demands it.

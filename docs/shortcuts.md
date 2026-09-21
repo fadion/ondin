@@ -672,9 +672,12 @@ it is the one row here whose semantics differ from every app it is borrowed from
 
 **`Tab` is the one row here that is built, and it is *not* a keymap binding** — which is
 what keeps it clear of `Tab` stepping the point selection (§11, §15 D123). That one is an
-`Action` resolved by `input::resolve`, which returns nothing at all in TextInsert, so the
-two never see the same key; this is an arm of the canvas editor's own loop, beside `Home`
-and `End`. Only paragraphs with a marker move, each by one and clamped separately, so a
+`Action`, and `text_insert_mode` resolves **no bare key**, `Tab` among them, so the two
+never see the same key; this is an arm of the canvas editor's own loop, beside `Home`
+and `End`. ⚠️ **This said `input::resolve` *"returns nothing at all in TextInsert"* and that
+was never quite true** — the styling chords have resolved there since §15 D211 — **and since
+§15 D815 four document chords do too** (`Undo`, `Redo`, `Save`, `Open`). The separation
+`Tab` relies on is the *bare key* rule, not an empty `Vec`. Only paragraphs with a marker move, each by one and clamped separately, so a
 parent and its sublist keep their shape instead of levelling (§15 D173). It is claimed
 **whether or not it moves anything**, because a `Tab` that reached egui would move the focus
 ring and the guard on this loop is `egui_wants_keyboard_input` — the next keystroke of the
@@ -727,8 +730,12 @@ and the cheatsheet can be rendered from one source.
 | `Escape` | unwind one rung | ✅ |
 
 **The Escape ladder is part of the keymap and belongs in the cheatsheet**: session → gesture
-in flight → pen bias armed over an edit → point selection → layer selection → Select tool
-(`OndinApp::escape`, §15 D125). It is the one key whose meaning is a sequence rather than an action,
+in flight → **a chrome field that just lost focus** → pen bias armed over an edit → point
+selection → layer selection → Select tool (`OndinApp::escape`, §15 D125, D821). ⚠️ **That
+rung sits *below* the gesture and not above it** (§15 D821): a valved numeric field's cancel
+has to go on reaching `cancel_gesture`, which is what stops the release committing after all
+(§15 D317), so the new rung is only ever taken when nothing was in flight — the plain
+`TextEdit` case, where renaming a layer and pressing `Escape` used to clear the selection too. It is the one key whose meaning is a sequence rather than an action,
 and `Enter` is deliberately its counterpart rather than its alias — a toggle in and out
 against a ladder that unwinds one press at a time. **The counterpart is not symmetric, and that is
 deliberate** (§15 D228): `Enter` toggles the two *tools* it can enter — the node tool and image

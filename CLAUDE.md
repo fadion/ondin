@@ -6,16 +6,16 @@ documents, and is untracked.
 
 | File | Holds |
 | --- | --- |
-| `docs/architecture.md` | The design and the invariants. **Source of truth.** ~11,800 lines. |
-| `docs/decisions.md` | **§15** — every deviation from that design, **D1–D806** with no gaps, each with a verdict. ~46,100 lines. |
-| `docs/roadmap.md` | Open work, decided non-goals, parked decisions, post-v1. |
+| `docs/architecture.md` | The design and the invariants. **Source of truth.** ~12,000 lines. |
+| `docs/decisions.md` | **§15** — every deviation from that design, **D1–D827** with no gaps, each with a verdict. ~47,300 lines. |
+| `docs/roadmap.md` | Open work, decided non-goals, parked decisions, post-v1. **Every `Now` section is clear as of 2026-09-22** — what is left is *Later* and §0. |
 | `docs/shortcuts.md` | The whole keymap — bound, unbound and agreed. |
 | `docs/context-menus.md` | The context-menu spec and its own deviation ledger. |
 | `docs/vm.md` | The language behind Command Mode. Nothing here is built. |
 | `todo.md` | **The maintainer's private scratchpad. Untracked.** Not a project record — never write a decision, a gap or a trap there and leave it there. |
 
 **Don't page these in by hand — ask `design-oracle`.** `architecture.md` and
-`decisions.md` are ~57,000 lines together, and reading them is what runs a session out
+`decisions.md` are ~59,000 lines together, and reading them is what runs a session out
 of room. Page a section in only when you need to *edit* it.
 
 ## The record
@@ -67,8 +67,21 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 806 index rows, 806 body headings, next free
-D807** — but trust the procedure over any number written down here, including that one.
+anywhere cited either. **The live figures: 827 index rows, 827 body headings, next free
+D828** — but trust the procedure over any number written down here, including that one.
+⚠️ **Session 29 is the reason those are not 826 and D827.** It reserved D823–D830, spent
+D823–D826 on a planned batch, and then spent **D827** on something it found *while running
+its own closing checks* — so the figure it would have written an hour earlier was already
+wrong. **A session's last number is not the one it planned**, which is the same lesson as
+session 28's below, arriving by the opposite route: not a number typed ahead of its entry,
+but an entry the session did not know it owed when it reserved.
+⚠️ **Session 28 proved the warning again from the cheap direction**: it reserved D807–D814,
+spent D807–D810 through a briefed batch, and then typed **D811** into a comment for a
+record-only change the batch had never been told about. `arch-scribe` refused to invent an
+entry for it and said so; what *found* it was running the negative grep over the **unspent
+tail** after writing rather than only before. **Re-grep the tail at the end of a batch, not
+just the block at the start** — that is the one reading that separates "reserved" from
+"spent", and a session that spends a number between batches is the normal case.
 ⚠️ **`decisions.md`'s own header carried that same sentence and it was deleted on 2026-09-19
 rather than corrected**, because a file that names its own next free number is a second copy
 of §15.0's last index line and it is the copy that rots. This table is the third copy; it
@@ -98,12 +111,26 @@ nothing. Put the number on the doc of whatever a reader meets the question at.
 grep -rhoE 'D[0-9]{1,3}\b' crates/ --include=*.rs | sort -u
 ```
 
-700 distinct numbers today, and **every one of them resolves** — the first clean reading
-in twenty-odd sessions, D476 and D477 having been reconstructed from their citation sites
-on 2026-09-19 (§15 D806's neighbours; both entries say in their first line that they are
-reconstructions). ⚠️ **Do not read a clean census as the steady state.** It has been dirty
+722 distinct numbers today, and **every one of them resolves** — the third clean reading
+in twenty-odd sessions, after D476 and D477 were reconstructed from their citation sites on
+2026-09-19 (§15 D806's neighbours; both entries say in their first line that they are
+reconstructions). ⚠️ **The total went *down* by one across a session that spent five
+numbers, and that is the file's own warning about totals happening**: session 29 corrected
+three wrong citations in shipped code (D797→D798, D218→D224, D183→D280), and because every
+number involved was cited elsewhere too, the set-difference against `HEAD` showed **five
+arrivals and no departures** while the count moved the other way. *Only the set-difference
+said anything; the count said the opposite of the truth.*
+⚠️ **Run it from `crates/`, or with `--exclude-dir=target`.** Pointed at `.` from the
+repository root it sweeps `target/`, where `unicode-general-category`'s generated tables put
+**`D00` and `D000`** into the unresolved half — two false positives that read exactly like a
+dangling citation.
+⚠️ **Do not read a clean census as the steady state.** It has been dirty
 far longer than it has been clean, it goes dirty the moment a number is typed into a
 comment ahead of its entry, and check 2 below is the *only* thing that sees that.
+🚨 **It went dirty and clean again inside session 28, which is the shortest instance yet**:
+D811 was typed onto a doc comment between batches, `comm -23` returned it and nothing else,
+and it resolved once the entry was written. *A clean reading is a statement about a moment,
+and the moment it describes is the one the command ran in.*
 
 🚨 **And a number resolving is now the only thing about a citation that can be checked.**
 `.git` was reset on 2026-09-16, so **every commit sha this project's documents cite is
@@ -186,8 +213,15 @@ Its census has traps, all found the hard way:
 - `index.md` has **428 rows for 426 findings** — `[A4-MAP]` and `[S2.1-MATRIX]` are
   reference rows — and the severity column is not spelled uniformly.
 - 🚨 **A finding id mentioned in the *body* of a fix-log row is extracted as closed.** The
-  only trap here that makes the census read too **high**. Extract `^\| \`\[` as a second
-  reading and compare.
+  only trap here that makes the census read too **high**. Extract ``^\| `\[`` as a second
+  reading and compare. 🚨 **That pattern read ``^\| \`\[`` until 2026-09-22 and in `grep -E`
+  it matches nothing** — the second instance of §15 D827's backslash-backtick, found by
+  checking this file's other commands once the first one turned up, and **the worse of the
+  two in consequence**: the inert form returns an empty second reading, which compares
+  against the first as *"no rows have a finding id in their body"* and so **confirms the
+  census it was written to falsify.** Controlled against a one-line fixture, as the other
+  one was. *Two of this file's commands have now been found unable to produce a hit, and
+  both were found by running them rather than by reading them.*
 - 🚨 **And the mirror: naming a finding in a fix-log table is what closes it, whatever the
   prose beside it says.** A half-finished finding has to be kept out of every `^|` row —
   including out of another row's body.
@@ -216,8 +250,15 @@ whole-file mistake — and the files here are the worst size for that:
 find crates -path '*/src/*' -name '*.rs' | xargs wc -l | awk '$1>1000 && $2!="total"' | wc -l
 ```
 
-**40** modules over a thousand lines, `inspector.rs` at 24,801 and `canvas.rs` at 21,673,
-against `decisions.md`'s 46,104 and `architecture.md`'s 11,905.
+**41** modules over a thousand lines, `inspector.rs` at 24,924 and `canvas.rs` at 22,091,
+against `decisions.md`'s 47,293 and `architecture.md`'s 12,015. (`library/relocate.rs`
+crossed the line at 1,023 in session 28 — the reminder that this count only ever rises,
+and that a module joins the list by having a feature finished in it rather than by
+anyone deciding it is large.) ⚠️ **The count held at 41 across session 29 and the ranking
+still moved**, which is why the three names are worth re-measuring rather than the total:
+that session added a whole module (`ondin-core/src/io/clip.rs`) and it is nowhere near the
+line, while `app.rs` grew by several hundred lines without changing its position. **A
+threshold count is the least sensitive thing you can measure about this list.**
 
 ⚠️ **On Windows a scripted rewrite also re-decides the line endings.** A three-line Python
 `read()`/`replace()`/`write()` used for a *flip-check* — the most tempting case, because
@@ -243,16 +284,29 @@ exactly as it found it only holds if the probe comes back out the way it went in
 and its doc comment — and the result compiles, tests, lints, formats and passes
 `cargo doc`, while paragraphs of reasoning now describe the wrong thing.
 
-**There are twenty-four recorded instances.** Twelve were committed by a session that spent
+**There are twenty-five recorded instances.** Twelve were committed by a session that spent
 the day fixing this exact class, one was committed by the session that ran *two*
-whole-tree sweeps for it, between them, and **the last two were committed within an hour of
+whole-tree sweeps for it, between them, and two were committed within an hour of
 each other by a session that had run the neighbour grep correctly on every earlier insertion
-that day** — the twenty-third (§15 D804) by anchoring an `Edit` on the `fn` line, moving a
+that day — the twenty-third (§15 D804) by anchoring an `Edit` on the `fn` line, moving a
 22-line doc block onto the new function; the twenty-fourth (§15 D805) by anchoring *inside*
 the neighbour's doc run and taking only its summary line, which habit 2 **cannot see**.
 **Writing the trap down does not prevent the trap** — only the habits do, and what caught
 the twenty-third was running habit 2 *as a routine at the end* rather than because anything
-felt wrong. The twenty-fourth was caught by `arch-scribe` reading the file:
+felt wrong. The twenty-fourth was caught by `arch-scribe` reading the file.
+
+🚨 **The twenty-fifth (§15 D815) is the oldest one yet found and the cheapest to have
+missed**, and it is worth its own sentence because it says what the *sweep* is for.
+`OndinApp::finish_text_first` had been inserted above `OndinApp::top_bar` and anchored on
+its `fn` line, taking that function's whole doc run as the head of its own — so `top_bar`,
+one of the most-read methods in the app, had **no doc at all**, and the run above
+`finish_text_first` opened *"The top bar: brand mark, breadcrumb, save state…"*. It had
+been there long enough that no one remembers, no gate saw it, and ⚠️ **the whole-tree length
+ranking could not**: the merged run is **44 lines against a floor in the fifties**. It was
+found by habit 3 — reading the run above an item and asking whether its first line describes
+it — run against a function this session only touched for an unrelated reason. *An
+accumulated theft is found by reading, not by sorting; the ranking finds the big ones and
+the floor is where the rest live.*
 
 1. **Anchor on the line above**, and know that "the line above the `fn`" is not the same
    instruction: `#[derive]`, `#[allow]`, `#[test]` and `#[cfg]` all sit between an item
@@ -799,15 +853,43 @@ hand and converted, and none dangled. **This is an invariant, not a figure**: th
 correct value is 0, so it cannot rot the way every other count in this file can, and a
 non-zero reading is unambiguously a regression.
 
+🚨 **It regressed three times in session 28, and the third is the one worth writing down: a
+`#[cfg(test)]` *item*, not a `#[cfg(test)] mod`.** Two were ordinary — links inside a test
+module's prose, caught by the diff grep below. The third was `[`unnameable`]` on the doc of
+a `#[cfg(test)] pub(crate) fn` sitting at **module level**, beside the production function it
+names. `cargo doc` builds without the `test` cfg, so the *item* is absent and its link
+resolves against nothing, by exactly mechanism 1 — but **every hand-rolled check for this
+looks for `mod tests`**, including the one run that day, which found the first two and not
+the third. `arch-scribe` found it by reading the file. **Ask whether the *item* is
+`cfg(test)`, not whether it is inside a test module**, and know that the tempting place to
+put a shared test helper — module level, next to what it is about — is the one place the
+habit does not cover.
+
 **The re-check is your own diff**, not a tree-wide scan:
 
 ```bash
-git diff <base>..HEAD -- crates/ | grep -E '^\+ *(///|//!).*\[\`'
+git diff <base>..HEAD -- crates/ | grep -E '^\+ *(///|//!).*\[`'
 ```
 
+🚨 **That command had a backslash before the backtick until 2026-09-22, and in that form it
+matches nothing on any input whatever** (§15 D827). GNU grep's ERE does not take
+`\`` as an escaped literal; measured with a control, a one-line fixture
+`+/// see [`Foo::bar`] for why` gives **0 matches, exit 1** as it was written and **1 match,
+exit 0** as it is written now. **It is §15 D732's shape for a third time** — the
+`grep 'cfg(debug'` census that could not report any other cfg — and this file's own rule is
+the one that would have caught it: *when a claim comes with a command, read the command
+against the claim, not just its output.* ⚠️ **And the claim was the tell.** The sentence
+below credited this grep with a catch per session for six sessions; a command incapable of a
+hit cannot have caught anything, so either those catches came from somewhere else or the
+command was typed correctly each time and written down wrongly here. **Nobody knows which,
+and it is worth knowing that nobody knows** — that is what a figure attached to a broken
+command costs. ⚠️ **Fixing the command does not give this convention a gate.** `cargo doc`
+still cannot see a `cfg(test)` module, the corrected grep is still a habit somebody has to
+run, and the zero-dangling-links figure below is still kept by reading.
+
 Then ask of each hit whether its item, or the module around it, is `cfg(test)`. Writing
-`[`foo`]` is the reflex; this grep is the correction, and it caught one per session for
-six sessions running. ⚠️ **One such link was on a *production* item and named a test** —
+`[`foo`]` is the reflex; this grep is the correction. ⚠️ **One such link was on a
+*production* item and named a test** —
 `ui::SLIDER_H`'s doc — and the doc gate itself exited 101 on it, because a production doc
 **cannot name a test-only item**. That is the same mechanism from a third direction.
 
@@ -841,9 +923,23 @@ The real census cannot be scoped to its own answer:
 grep -rhoE 'cfg\(([a-z_]+)' crates/ --include=*.rs | sort | uniq -c
 ```
 
-Last run: **329 `test`, 6 `windows`, 3 `panic`, 3 `not`, 3 `debug_assertions`, 2
-`target_os`, 2 `all`, 1 `unix`.** ⚠️ Only `test` has moved across five sessions — **the
-interesting half of this census is the tail, not the total.**
+Last run (2026-09-22): **343 `test`, 7 `windows`, 3 `unix`, 3 `panic`, 3 `not`, 3
+`debug_assertions`, 2 `target_os`, 2 `all`.** ⚠️ **The tail did not move in session 29, over
+a change that added a whole module and two test modules** — which is the reading this census
+is for and the one it usually gives. Only `test` had moved across five sessions before that
+— **the interesting half of this census is the tail, not the total** — and in session 28 the
+**tail moved**:
+`library::scan::unnameable_doc_name` added one `windows` and one `unix`, a `#[cfg(test)]`
+helper that builds a filename which is legal for the OS and not valid Unicode (§15 D809).
+⚠️ **Its `unix` arm joins the class below and is the first *test* member of it**: nothing
+on this machine compiles it, so it is written to be read rather than trusted, and a
+cross-compile is still the only thing that would say. ⚠️ **The previous reading said `1
+unix` and the true figure before that change was 2**, which is the ordinary way a tail
+figure rots — nobody re-runs a census for a number they are not about to use.
+⚠️ **And that is not only about tails.** The citation total above was written into this file as
+**721** and re-measured as **722** twenty minutes later, in the same session, because D827 was
+spent in between — *the number was stale before the session that measured it had ended.* Every
+figure in this file is a reading, and the reading is over the moment it is taken.
 
 ⚠️ **So it is the first of a class, and the rest of the class has no gate at all.**
 `canvas::os_cursor_desktop_px`, `library::clock::local_offset` and `library::store`'s
@@ -933,6 +1029,15 @@ under it:
     times.** ⚠️ And a fix for this class must not be checked at the lowest seam — the test
     that proves the lock works has to keep reaching the real resource, which is why D798's
     refusal sits in the four callers and not inside `with_clipboard`.
+    🚨 ***"A few times" was measured and is wrong*** (§15 D820). Moving the dashboard's
+    cover render onto a thread turned a test that pumped *"the next pass"* into a race, and
+    it failed **2 runs in 20** of its own paired filter — after **six** clean filtered runs
+    and two full `cargo test --workspace` runs, debug and release, all green. **Six clean
+    runs is not evidence**; twenty is a reading. Note the two instances differ in what they
+    share — D796's tests contended for an OS resource, these for *the machine's load* — so
+    the population is wider than "anything the OS owns": **any test whose assertion depends
+    on work finishing is in it.** The fix there is not a longer wait but a *wait*:
+    `Covers::settle`, the shape `library::writer::Writer::settle` already had.
 
 **Three questions to ask of a gate**: does it check the rule, with a predicate wide enough,
 **against the thing that actually ships?** And two of an *absent* one: **when the record says
@@ -944,7 +1049,28 @@ subagent's aside, one from reading a doc link against the type it named, and one
 an unrelated test. The cheap general move that found several: **take a gate, break something
 it claims to cover on purpose, and check it goes red.** It costs a minute.
 
+🚨 **Do the same to the *habits*, not only the gates.** Session 29 found that the doc gate's
+own written re-check — the `git diff … | grep` above — had never been capable of returning a
+hit (§15 D827), and it found it by running the command, getting nothing from a diff it knew
+contained new doc links, and then running the control. That is not a fourteenth entry above,
+because it is not a gate: **it is the *compensating check* for hole 2 being broken**, which
+is strictly worse than the hole, since a hole nobody papered over at least gets read for.
+Every numbered item above is something `cargo` runs; this file is full of commands `cargo`
+does not, and not one of them has ever been controlled. **A command in this file is a claim,
+and a claim with a figure attached to it is the one to check first.**
+
 ⚠️ **The test-shaped version of the same failure is a different list**: an assertion that
 passes because a flip aborts on an earlier case, and an assertion that fails against its own
 fixture rather than against the change. **A gate hole is found by breaking the gate; a
 vacuous assertion is found by disabling the one in front of it.**
+
+🚨 **And there is a third shape: a gate that goes red at a line nothing changed about.**
+`valve_condition_gate` excuses a line by a marker in a comment **within fifteen lines back
+and four forward** of the match. In session 28 a paragraph was added to the top of an
+exempted comment block; the marker moved down one line past the window and the gate failed,
+naming a condition that had been correct and untouched for weeks. It was the gate working —
+the window is deliberate, because `cargo fmt` puts a wrapped condition a long way below its
+comment — but the *edit* that broke it was prose. **An exemption anchored by position is
+broken by anything that moves it**, so a marker goes **last** in its comment block, next to
+what it excuses: a block that grows at the bottom pushes the marker away from its condition,
+and one that grows at the top does not.

@@ -235,9 +235,16 @@ asked `pick_leaf` alone where the select-click arm asked the tag first, so a rig
 opened the *empty-canvas* menu at the pixel a left-click selects the frame — and since the edge and
 the interior resolve through `pick_leaf` too, an occupied frame had **no canvas menu at all**. The
 two doors call one function now, `canvas::pick_at_pointer`, which is C1 made literal rather than
-assumed. **The *"or on its edge"* half is still answered by only one door**: `begin_select_drag` adds
-`selected_frame_at` and neither of the other two has it — open work in `roadmap.md`, and the reason
-this rule is worth checking against the code rather than read as settled.
+assumed. ~~**The *"or on its edge"* half is still answered by only one door**: `begin_select_drag` adds
+`selected_frame_at` and neither of the other two has it — open work in `roadmap.md`.~~ **The edge
+clause is answered as of 2026-09-19** (§15 D816): `canvas::frame_edge_at` is the **last** link of
+`pick_at_pointer`, an occupied frame whose border passes within `pick_slop()`. 🚨 **Widening the
+chain with `selected_frame_at` was the obvious repair and was declined** — that function answers a
+frame's whole **box**, so it would have made an already-selected frame's *interior* a target, which
+is the half of this rule that has never been true and which `pick_leaf` skips on purpose (§15 D22).
+⚠️ **The band is the world AABB**, so a rotated frame's edge is still not resolved anywhere (§15
+D36); and a frame narrower than twice the slop is all edge. **This rule is now true of all three
+doors**, which is the reason it was worth checking against the code rather than read as settled.
 
 **C6 — In the panel, a right-press first commits an open rename.** Already true: "a press anywhere
 else ends the rename" (`layers::layer_rename_field`). The press commits, the release opens the
@@ -1379,9 +1386,12 @@ happened four times.
     Fixed 2026-09-07 by writing the chain once, `canvas::pick_at_pointer`, asked by both doors. It is
     listed here because C5's own closing sentence — *"nothing new is needed for this; it falls out of
     C1"* — is what stopped anyone checking, which is the same failure as item 8's in the other
-    direction: **a rule this file says is free is a rule nothing tests.** What is *not* closed is C5's
+    direction: **a rule this file says is free is a rule nothing tests.** ~~What is *not* closed is C5's
     *"or on its edge"* half, which `begin_select_drag` answers with a third fallback neither of the
-    other doors carries; that is in `roadmap.md` rather than here.
+    other doors carries; that is in `roadmap.md` rather than here.~~ **Closed 2026-09-19 — §15 D816**,
+    with `canvas::frame_edge_at` as `pick_at_pointer`'s last link rather than by widening the chain
+    with `selected_frame_at`, which would have made a selected frame's interior a target. C5 above
+    carries the reasoning; this ledger item has nothing left open.
 13. ⚠️ **§5.9's list of five rows that stay live over a lock was four in the code, and *Rename* was the
     missing one** (§15 D529, `[S15.2-L1-01]`). `layer_menu` dimmed it, so the row was the only one of
     that verb's three doors that refused — `Ctrl+R`, `F2` and the panel's double-click all renamed a
@@ -1481,9 +1491,10 @@ synthetic secondary button through the app**: every earlier context-menu test ca
 `open_context_menu` by hand or built a `menu::Context` directly, so `canvas_context_menu`'s door had
 no test through it at all, which is how thirty-odd green tests in `menu.rs` left all four rules
 open. Each bullet's own flip was run and is recorded on the test it belongs to. ⚠️ **One clause of
-the queue survives**: the Escape bullet asks for `entered_group` and the tool as well as the
-selection, and what was written asserts the menu and the selection — so that half is still verified
-by reading and by hand.
+the queue survived until 2026-09-22** (§15 D824): the Escape bullet asks for `entered_group` and the
+tool as well as the selection, and what was written asserts the menu and the selection. 🚨 **It was
+closed by a *second* test and not by widening the first, which is what this bullet asked for and
+would have been wrong** — see the bullet itself. **The queue is now empty.**
 
 The rule this project applies to a green test is *what would also pass this* — so each of these
 names the plausible wrong implementation it is aimed at.
@@ -1531,9 +1542,18 @@ names the plausible wrong implementation it is aimed at.
   keystroke for the rest of the session. ⚠️ **Written in part** as
   `escape_over_a_menu_closes_the_menu_and_keeps_the_selection` (§15 D795): a **selection**
   underneath rather than an entered group and the node tool, so the menu and the selection are
-  asserted and `entered_group` and the tool are not. The selection is the sharper of the three
+  asserted and `entered_group` and the tool are not. ~~The selection is the sharper of the three
   anyway — it is cleared on the *same* rung, where present mode and an entered group are further
-  down the ladder — but this bullet is not closed.
+  down the ladder — but this bullet is not closed.~~ **Closed 2026-09-22 — §15 D824**, by
+  `escape_over_a_menu_keeps_the_entered_group_and_the_tool_as_well`. 🚨 **That struck
+  sentence was backwards about `escape` and the correction is why the bullet needed a *second* test
+  rather than a widening.** The ladder runs present mode → … → `entered_group` → the tool →
+  a selection clear that is the final `else`, so the selection is the **bottom** and the other two
+  are above it. One press pays out one rung: under the narrow fixture the fall-through's extra rung
+  is the selection, which is what gives that test its teeth, and under the fixture **this bullet
+  asks for** it is `entered_group` — leaving the selection and the tool untouched under the very
+  flip the test exists for. Widening the original would have taken the teeth out of it. Both
+  fixtures stand; the new one is red on `entered_group` under the same flip.
 - **No document action fires while a menu is open.** Open one over a layer, press `Delete`, assert
   the document is byte-identical. Flip: without R3's gate the layer is gone and the menu is left
   pointing at nothing.

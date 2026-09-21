@@ -53,6 +53,11 @@
 //! **[`Import::skipped`]** is *missing*: a `<filter>` holding a primitive this has no
 //! kind for — an arbitrary `feColorMatrix` among them, which is why this app's own
 //! image **adjustments** do not come back (see [`FilterRead`]) — `<foreignObject>`,
+//! which is a **decided non-goal** rather than a gap (§15 D813): it is HTML inside
+//! an SVG, nothing in this model draws HTML, and there is therefore no version of
+//! it to build. It sat on `roadmap.md` as open work for weeks only because nobody
+//! had said the words; the ruling is that it is reported like any other unread
+//! element and that is the whole answer —
 //! an `<image>` whose href points at a file
 //! this paste never had, a reference that resolves to nothing, and a CSS selector
 //! needing **sibling order, a pseudo-class or an attribute** — combinators
@@ -1791,6 +1796,17 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
     /// one number that decides where every line after the first sits. *The round trip
     /// closes for the picture and not for the paragraph* — which is worth knowing
     /// before anyone tries to make it close for both.
+    ///
+    /// 🚨 **Rejoining it is a decided non-goal for v1** (§15 D826, `roadmap.md` §0),
+    /// so the paragraph above is now the end of the argument rather than the start of
+    /// one. The only signal a rejoin could read — same `x`, a constant `y` step, a
+    /// matching resolved style — is exactly what a *stack of separate labels* in a
+    /// foreign file looks like, so the heuristic welds unrelated layers together and
+    /// the user has no way to say which reading was meant. ⚠️ **And the case it would
+    /// have been worth most for is answered elsewhere**: a copy crossing between two
+    /// `ondin` windows carries real nodes now, paragraph and all (§15 D823,
+    /// `crate::io::clip`), so what is left here is the foreign file, which never had
+    /// the structure to lose.
     ///
     /// **A `<tspan>`'s own style is read, as character spans over the bytes it
     /// contributed** — its colour (§15 D396) and its **font scope**: size, weight,

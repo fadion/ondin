@@ -70,17 +70,55 @@
 > three are owed a citation planted by hand, which is D741's fix for D735's shape and the state the
 > paragraph below names.
 > **Session 27 (2026-09-19) then reserved D794–D815**, from a last index line of **D793** and with its
-> own negative grep over that range from the repository root before a citation was typed, and has
-> spent **D794 through D800** — the boolean sliver, `[A7-L8-06]`'s five tests, the clipboard heap
-> corruption those tests found, its headless stub, the letter-spacing zero readout and a decided
-> non-goal. All seven are cited from `crates/`, D800's planted by hand on `menu::head_rows`' frame arm
-> because a record-only entry is invisible to the census until somebody does.
+> own negative grep over that range from the repository root before a citation was typed, and spent
+> **D794 through D806** — the boolean sliver, `[A7-L8-06]`'s five tests, the clipboard heap corruption
+> those tests found, its headless stub, the letter-spacing zero readout, a decided non-goal, the
+> popover `Escape` sweep, `char_valve`'s third arm and the mutation that mis-named its own line,
+> D624's last three, the click-to-select policy and the SVG reader's CSS combinators. All thirteen are
+> cited from `crates/`, D800's planted by hand on `menu::head_rows`' frame arm because a record-only
+> entry is invisible to the census until somebody does. ⚠️ **This paragraph said *"spent D794 through
+> D800"* for the length of six entries**, which is the ordinary way an account of a block goes stale:
+> the reservation is written once and the spending goes on afterwards.
+> **Session 28 (2026-09-19, the same day) took D807–D814** — the remainder of session 27's block, and
+> **re-measured rather than inherited**, from a last index line of **D806** with its own negative grep
+> over D807–D816 run from the repository root before any citation was typed — and has spent
+> **D807 through D810**: the per-machine index's injection point, `Escape` committing at four chrome
+> text fields, the non-Unicode filename reproduced at last, and the partly-failed migration's list and
+> retry. All four are cited from `crates/`.
+> 🚨 **D811 was *owed* for the length of a batch** — `ui::MENU_ITEM_H`'s doc cited it with nothing in
+> this file behind it — and **it is spent now**, on the two *families* of menu row that pair of
+> constants distinguishes. Found
+> by running the negative grep over the unspent tail after the batch rather than only before it —
+> which is the check that catches a number typed into a comment ahead of its entry, and the only one
+> that can.
+> **Session 29 (2026-09-19, the same day) reserved D812–D828**, from a last index line of **D811**
+> and with its own negative grep over that range from the repository root before a citation was
+> typed — the only hits were this file's own reservation prose — and has spent **D812 through
+> D822**: the maintainer's ruling on all eleven decisions put to them. `char_valve`'s third arm
+> deleted, `<foreignObject>` and linked images and the two pinch items decided as non-goals, the
+> migration's rollback refused, the four document chords live in a text session, C5's edge clause
+> answered, the tracking chord bounded, an `UNREADABLE` card keeping its *Open*, dashboard covers
+> moved onto a thread, and `Escape` spent on a chrome field. All eleven are cited from `crates/`;
+> **five are record-only and their citations are planted by hand** — D813, D814, D818, D819 and
+> D822 — which is D741's fix for D735's shape.
+> **On 2026-09-22 the same session spent D823–D827** and extended its reservation to **D830**: the
+> layer clipboard crossing between two `ondin` windows, the Escape context-menu test's wider fixture,
+> three text non-goals with justify-all split out to *Later* as blocked upstream, the SVG rejoin
+> non-goal, and two hand-written checks that could not return a hit. **Three of the five are
+> record-only and their citations are planted by hand** — D825 on `text::break_lines` beside D399's
+> hyphenation note, D826 on `svg_in`'s `text_node`, and D827 on `app::CLIPBOARD_OFF`.
+> ⚠️ **D827 was spent between batches**, which is the case `CLAUDE.md` warns about and the reason the
+> negative grep is re-run over the unspent tail at the close rather than only at the start.
+> **D828–D830 are reserved and unspent**, which is a
+> fact about the reservation and **not** a statement of what the next free number is — read §15.0's
+> last index line for that, as the instruction below says.
 > 🚨 **This paragraph used to end "So the next free number is D794, D794 and D795 being reserved and
 > unspent", which is the self-contradiction this file's own instructions warn about and which went on
 > being true-then-false for four sessions. The sentence is gone rather than updated: a header that
 > names the next free number is a second copy of §15.0's last index line, and it is the copy that
-> rots.** ⚠️ **Read the last index line. As measured on 2026-09-19 it is D800, with 798 index rows and
-> 798 body headings — and trust the procedure over those three figures, including these.**
+> rots.** ⚠️ **Read the last index line. As measured on 2026-09-19 after session 28's batch it is
+> D810, with 810 index rows and 810 body headings — and trust the procedure over those three figures,
+> including these.**
 > ⚠️ **D790 closed session 25's block, and it was spent by no session of this review at all**: a
 > one-fix visit on 2026-09-15 that existed to repair a single misattributed sentence in §5.6. It was
 > reserved from a last index line of D789 with its own negative grep before a citation was typed, and
@@ -1140,6 +1178,27 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D804** — **The last three of D624's six are reached, and two of them were a lift after all.** D624 named `list_section`'s gutter default, `wrap_section`'s `!= WrapMode::NoWrap` gate and `write_axis`'s `clear_at_default` as needing *"a live text session and a laid-out panel to enter"* — **a fixture rather than a lift**, and that was the stated reason they did not travel with the first three. 🚨 **True of one of them.** The gutter default and `clear_at_default` read nothing but their parameters; what needed the panel was their *callers*, so **D269**'s move reaches them and both are lifted — `marker_attrs(next, indent_start, font_size)` out of `list_section` and `axis_coords_after(axis, coords, value, clear_at_default)` out of `write_axis`, each pinned by a test that builds no `Ui`. **The question is what a decision *reads*, not where it is written.** 🚨 **`clear_at_default` was the same eight lines in two places**, `write_axis` and `axis_valve`, and only the valve's copy was covered (**D569**) — the exact shape D624's own ⚠️ warned about two sentences later, *"a grep for the name reads as though the decision were reached"*; **the warning was about the reader being misled and the duplication itself went unremarked**. One copy now, and one assertion over both arms. *(Fixed and tested 2026-09-19; **Resolved** — D624's queue is closed and the fixture-or-lift split it drew was wrong for two of three. ⚠️ **`marker_attrs` takes `font_size` because the zero test is on the *resolved* indent**, `Em(0.0)` and `Px(0.0)` being different values to the model and the same ink (**D537**, **D799**), so a predicate comparing variants passes a test that only tries `Px`. The wrap gate genuinely wanted the fixture and has one: `wrap_gate_tests` drives the real section on a headless app through real pointer events at coordinates found by a 4pt sweep. ⚠️ **The Wrap strip reads off-then-on, so its left cell is `NoWrap`** — `WrapMode::ALL` puts the cell that does nothing first — and the first draft named the constants the other way round, caught by *"the mode switched"*, a click on the cell already current changing nothing. **Three tests, every flip run, no two landing on one assertion.** `a_default_axis_value_is_dropped_except_on_opsz` carries four assertions for three flips: unconditional rule → red only on **`opsz`**; `value == axis.default` dropped → red on the **second**; the `!` inverted → red on the **first**. ⚠️ **The prediction for the second was wrong** — the first assertion is about a *default* value, which a flag-only rule still drops. `a_marker_opens_a_gutter_only_when_there_is_none` is built on the asymmetry, turning a marker **off** never touching the indent, a gutter the user can see being theirs once it exists. 🚨 **In `nowrap_kills_word_break_and_long_words_and_nothing_else` the control is the whole test**: every `NoWrap` assertion is that a click changed nothing, which a section nobody drew also produces, so the same fixture clicks the Wrap strip — the one control the gate must **not** catch — and requires it to work; **dimmed and not reset** is asserted too, a stored `word_break` surviving the trip, which a gate that cleared the fields would satisfy while losing the setting. 🚨 **And a doc-comment theft committed and repaired inside this change**: `marker_attrs` anchored on `agreed_zero`'s `fn` line moved all 22 lines of its doc, green through every gate, caught by running the neighbour grep **once more at the end** — the argument for running it as a routine rather than on suspicion; the tally stays in `CLAUDE.md` and not here (**D697**). §9.4's wrap paragraph names the test, and D624's *"`architecture.md` unchanged: none of the three is stated there"* is corrected — §9.4 states that gate in full; §9.3's D569 bullet says the rule is one function. **The *Now · Text* bullet is struck from `roadmap.md`**; that section's *"Four things are open here"* opener never counted it and is left where it was, short by one)*
 - **D805** — **The click-to-select policy is a free function and a table, and `[A5-L6-06]` closes whole.** `canvas::pick_preview` read its two modifiers out of `ui.input` and decided in the same body, so reaching its five arms meant driving egui five times rather than calling a function — and nobody did: §15 **D503** closed the `group_chain` half of the finding and left **three** of its five mutations measured green, `ctrl && !alt` widened to `ctrl`, the `[_outermost, next, ..]` arm collapsed, and `pick_for_click`'s `entered_group = None` guard. **D269**'s move, taken as `roadmap.md` prescribed it: `pick_from_chain(ctrl, alt, chain, leaf)` is a free function and the method is the input read, the chain build and a call. ⚠️ **One real behaviour change, named rather than glossed** — the chain is built on the `Ctrl`-only path too, where the early return used to skip it, which is one shallow parent walk and a small `Vec` per hover frame. 🚨 **Both flips' predicted sites were wrong**, in opposite ways: widening `ctrl && !alt` is red on the **`Ctrl+Alt`** assertion rather than the `Ctrl`-alone one, because widening that arm makes `Ctrl` alone *more* often right; and deleting the isolation guard is red on the **scope** assertion, which panics before the pick assertion the prediction named is reached. *(Fixed and tested 2026-09-19; **Resolved** — all three mutations are red and `[A5-L6-06]` has no half left open. ⚠️ **`Ctrl` alone is asserted against a *deep* chain, not an empty one**: against `[]` every arm answers the leaf, so the no-group case alone passes against every mutation here — and the leaf's id is distinct from every group's so a wrong arm cannot coincide with the right answer. ⚠️ **The guard stayed in `pick_for_click`**, being a side effect on `self`, so `a_click_outside_the_entered_group_leaves_it` drives a headless app through a real `Ui`; it runs **before** the chain is built, so both halves are asserted, and **the control is the click that stays inside** — without it *"the scope was cleared"* passes against a guard that clears it unconditionally. 🚨 **A doc-comment theft in a shape the neighbour grep cannot answer**: the new function was inserted *inside* `frame_covering`'s doc run and took its summary line, leaving the victim with a doc that opens mid-argument, so *"did the item below lose its comment"* answers **no** — repaired here, and the question that catches it is whether the run above your own new item begins by describing it. §9.4's selection-policy paragraph now names the function that holds the policy; D503's open-half ⚠️ is amended and `query.rs`'s chain-order test doc, which named `pick_preview` as the positional reader, names `pick_from_chain`. **The *Now · Canvas and interaction* bullet is struck from `roadmap.md`**; the *Now · Canvas* table row never named this item and is left alone)*
 - **D806** — **The SVG reader's CSS is a small cascade engine, and the line is drawn at the ancestor walk.** `roadmap.md` carried combinators as *"a cascade engine rather than a lookup"*, and the framing was what was wrong: the narrow engine an SVG file wants is a compound parser plus an ancestor walk. `svg_in::Css` reads **compounds** — an optional element name or `*`, any number of `.class`, at most one `#id` — joined by the **descendant** and **child** combinators in any chain. What is still refused needs something other than an ancestor walk (`+`, `~`, `:pseudo`, `[attr]`) and is still reported **once for the sheet** as `"style (complex selector)"`, so D394's contract is unchanged and narrower. 🚨 **`chain` is stored right-to-left** — `chain[0]` is the compound left of the subject — because that is the order matching walks in and the reason it is cheap, `Css::declaration` testing specificity and the declaration's presence before the tree is touched at all. ⚠️ **`match_chain` is recursive because the descendant combinator backtracks**, which a greedy walk gets wrong on any repeated class in a nested group. 🚨 **A malformed selector is refused rather than repaired** — `.a > > .b` read leniently is a *wider* rule than the one written — which is the module's *"nothing is lost silently"* contract aimed at its own parser. ⚠️ **Specificity is `100·ids + 10·classes + 1·types` summed over the whole selector, and more than nine classes on one side would carry**, named as a known bound. *(Built and tested 2026-09-19; **Resolved.** D394's *"a lookup, not a cascade engine"* sentence and §7's two copies are amended; `skipped` stays the bucket on D493's rule. **The *Now · SVG import* bullet is struck from `roadmap.md`** and the *CSS combinators* clause in that section's table row with it)*
+- **D807** — **The per-machine index had no injection point, so the suite edited the developer's own *Recent searches*.** §15 **D619** recorded this as a side effect rather than fixing it and left the *where* to the maintainer. **Established rather than reasoned**: `%LOCALAPPDATA%\ondin\library.json` on the maintainer's machine held `recent_searches: ["alp", "d", "alpha", "gamma", "beta"]` — the fixture strings of `a_remembered_search_is_deduped_promoted_capped_and_shown` and nothing else — with an mtime from a suite run earlier the same day. `library::cache::index_is_reachable()` answers `!cfg!(test)`; `LocalIndex::load` returns `Self::default()` and `LocalIndex::save` returns, each on its **first line**, when it is false, and `load_from`/`save_to` stay past the guard. 🚨 **`roadmap.md` named four answers and none of them was taken.** It called `prefs::Prefs::ephemeral` *"the cheapest of the four"*, and the reason it does not work here is `library::state::Library::open`: `Prefs` is built **once**, by the one constructor that knows a test's app is different, where the index is rebuilt by `Library::open`, which tests call **directly after building the app** — so a field the constructor set is silently discarded by the very fixture that needs it. A process-wide flag stored by `headless` (D798's `CLIPBOARD_OFF` spelling) fails one step further out, every `Library::open` in `library::state`'s own tests reading the machine's file until some *other* test in the binary happened to build an app first. **A `cfg!` has no door to forget.** *(Fixed and tested 2026-09-19; **Keep** — and the profile-dependent guard is allowed here for a reason the other two resources in this class do not have: `load` and `save` hold no behaviour beyond resolving `path()`, every decision either makes — the three-way read, the `unreadable` write latch, the round trip — living in `load_from`/`save_to`, which take a path and are asserted. Not true of `Prefs`, whose latch test drives `save_to`, and emphatically not of the clipboard, `clipboard_gate_tests` having to open a **real** `arboard` handle to prove D796's lock holds under eight threads, which is why D798's refusal sits in the four callers and not inside `with_clipboard`. **Test** `library::cache::tests::the_machines_own_index_is_unreachable_from_a_test`, which asserts the guard **and then** the one consequence observable without writing; flipped by deleting the `if !index_is_reachable()` from `load` it is red on the second assertion with `["alp", "d", "alpha", "gamma", "beta"]` against `[]`, the reported symptom itself. ⚠️ **The `save` half cannot be caught by any test** — the only thing that would observe it is a write nobody may perform — so it rests on the first assertion and on the `cfg!`. ⚠️ **The second assertion can false-*pass* and never false-fail**, a fresh runner with no file answering `Default` unguarded too, which is the other reason the flag is asserted directly. Two test sites had their reasoning corrected and not their behaviour: `a_remembered_search_is_deduped_promoted_capped_and_shown` **asserts** the empty list where it used to clear it, and `a_missing_library_folder_says_so_instead_of_reading_as_empty` dropped its `LocalIndex::default()` overwrite. §9.5's *"an injection point for the local index is open work"* paragraph and D619's closing hand-off are amended; **the per-machine-index bullet is struck from `roadmap.md`** with the clause in the *Now · Files, library and storage* table row that named it)*
+- **D808** — **`Escape` committed a typed value at four chrome text fields.** Measured on the real `inspector::paint_hex_field` through `RawInput`: click in, type `336699` over a fill of `[0.5, 0.25, 0.125, 1.0]`, press `Escape` — the colour became `[0.2, 0.4, 0.6, 1.0]` and `undo_depth` went to 1. **egui does not revert a `TextEdit` on `Escape`**; it hands back what was typed and merely surrenders focus, so a condition built from `resp.lost_focus()` alone reads a cancel as a confirm. **The rule already existed twice in the app and was broken at four sites beside it**: `app::OndinApp::edit_valve` carries it for every *numeric* field — the `!key_pressed(Escape)` on the falling edge of D316's engagement latch, put there by **D315** and ordered against the cancel by **D317** — and `panels::dashboard`'s rename field carries it as an arm further up, while `inspector::paint_hex_field`, the inspector's layer-name field, `inspector::dash_list_field` and `panels::export`'s prefix and suffix fields did not. `ui::defocus_commits(resp)` is `lost_focus() && !key_pressed(Escape)`, called at all four; the buffer is still dropped on every way out and only the **write** is declined. ⚠️ **It reads the key rather than the focus**, `Escape` clearing egui's focus in `Memory::begin_pass` so that the frame a field reports `lost_focus()` is the frame the press is still in `input` — D317's finding from the other end. *(Fixed and tested 2026-09-19; **Keep — and the valve is still not the answer for the hex field, which is the half `[S14.4-L1-04]` asked for.** A valve *previews while the control is engaged*, and a half-typed hex is a colour: `ui::parse_hex` accepts three digits, so `6D8CD9` passes through `6D8` — `#66DD88`, a real green — and a valved field would put that on the canvas on the way to the blue. The buffer exists precisely so that nothing between the first keystroke and the last is a value, which leaves the valve with nothing to preview and one sentence to lend. 🚨 **The roadmap item's own premise was wrong and it is worth naming which half**: it read *"there is nothing measured left to fix"*, true of D517's two symptoms and false of the field, because nobody had pressed the other key at it. **Test** `inspector::paint_hex_field_tests::escape_abandons_a_typed_hex_instead_of_committing_it`, sharing a driver with `a_bare_click_through_the_hex_field_changes_nothing` — the driver gained an `exit` key parameter, so **`Enter` is the control and is not decoration**: a fix reading *"did a key take the focus"* refuses both, and only the `Enter` half notices. Flipped by dropping the second term from `defocus_commits`: red on the colour at `[0.20000002, 0.40000004, 0.6, 1.0]`, the predicted site, the undo assertion under it good for the same catch at 1 against 0. ⚠️ **One test covers all four callers because the rule is in the function and not at them**; the three other sites have no `Escape` assertion and are **not** meant to grow one. ⚠️ **§9.3's exemption list for `valve_condition_gate` said a text field *"genuinely does end on losing focus"*, which is now half a truth** — it ends, and it does not necessarily commit — amended there, at the dash field's own exemption comment and in §9.4's hex-field and dash-list paragraphs. **The *Now · Inspector* bullet is struck from `roadmap.md`** with the clause in the table row that named it)*
+- **D809** — **A `.ondin` whose filename is not valid Unicode: reproduced, and the migration carries it now.** §15 **D431** closed the `.trash` half of this shape and named the other in its own last paragraph: `scan::collect` skipped any entry whose `file_name().to_str()` is `None`, so such a document was invisible to the library **and to the migration**, left alone in a folder the app no longer reads, uncounted, under a status line saying the move had succeeded. 🚨 **`roadmap.md` carried it as *"never reproduced"*** — *"it is not established that a filename Windows accepts can fail `to_str`"*, with the instruction *"reproduce first"*. **It has been.** A lone UTF-16 high surrogate is a legal code unit and not a scalar value: `std::fs::write` on a path built from `OsString::from_wide(&[0xD800, …])` **succeeds** on NTFS and the entry `read_dir` hands back answers `None` to `file_name().to_str()`, the same for a lone low surrogate and a reversed pair, with an ASCII name and a well-formed astral pair as controls answering `Some`. Nothing in this app can create such a name; a sync client or another tool can. **Neither fix the roadmap offered was taken**: *skip but count it* leaves the file alone in the abandoned folder, which is what `Collision::Stranded`'s own note calls the bad outcome, and *carry it by `OsStr` through `scan::Entry`* makes `stem` an `OsString` when **there is no honest label to draw for a name that is not text**. What shipped is narrower than both — the document still stays out of the library's list, and the **migration** carries it across verbatim. *(Reproduced, fixed and tested 2026-09-19; **Keep.** `scan::collect` gained a second output and records a skipped entry when its extension is `ondin` — compared as an `OsStr`, the whole case being a name with no `&str` in it — and the entry is a **file**, a directory shaped like a document not being one; `scan::unnameable(root)` runs the same `collect`, **one walk and two outputs by construction**, so the two questions cannot come to disagree about the two-level rule or about which dot-directories are skipped. `library::relocate::relocate` moves each by its own `OsStr` name — no `naming::unique_stem` and no re-derivation, there being no `&str` to derive from — and a destination already holding that name is a **failure rather than a rename**, which is `Collision::Stranded`'s argument: one of these cannot be told from another by looking. ⚠️ **Moving it does not make it visible, and that is deliberate**; what the move buys is that the file is where the user pointed their library and that `Moved` says it went. **Tests** `scan::tests::a_document_with_a_non_unicode_filename_is_not_listed_and_is_reported` and `relocate::tests::a_document_with_a_non_unicode_filename_is_carried_across_and_counted`. The platform-specific name is `scan::unnameable_doc_name`, `#[cfg(test)]` **beside** `unnameable` rather than inside either test module, two modules needing it and a platform fact spelled twice being one that can come to disagree with itself; ⚠️ **its `#[cfg(unix)]` arm is compiled by nothing on this machine**, the class `CLAUDE.md` lists four production functions in, so it is written to be read rather than trusted. D431's closing *"Fix, and it is not closed"* paragraph is amended and §9.5's two-level scan paragraph carries the third rule. **The bullet is struck from `roadmap.md`** with the clause in the table row that named it)*
+- **D810** — **A partly-failed migration had no way back and no list.** §15 **D620** gave `Moved::failed` the names of everything that stayed behind, put the **first** of them in the status line and closed by handing the rest to the maintainer: the full list belongs in the *Library settings* modal, and so do a retry and a rollback. **The first two are built; rollback is not and stays open**, because `relocate` deliberately overwrites nothing, so "undo" means deciding what to do with everything that *did* arrive. `OndinApp::stranded: Option<panels::dashboard::Stranded>` holds `{ from, to, failed }` and is assigned in **both** directions, so a clean run clears a previous one's report — **session state and not a preference**, the files being the record and a stranded list in `prefs.json` a second copy of a fact the filesystem holds. The modal draws it under the migrate switch: a warning line with the count, the old folder's path, up to `STRANDED_ROWS` = **6** filenames, an *"…and N more"* and a *Try again* button. ⚠️ **Six is a bound on the modal's height, not a judgement about how many names are useful** — that card has no scroll area and a partly-failed migration can strand every document in the library, so an uncapped list takes *Save changes* off the bottom of the window. *(Fixed and tested 2026-09-19; **Keep.** `OndinApp::retry_migration` re-runs `relocate(from, to)`, and **it is not idempotent and does not need to be**: a successful move deletes its source, so the second walk meets only what was left behind, and what fails again fails for the same reason. This is the run `relocate`'s own defence already assumed was reachable — *"a migration run twice leaves duplicates rather than being idempotent, which is the right way round"* — where until now the only route was a three-step dance back through Settings **whose middle step looks exactly like the operation that lost the files**. The re-point loop inline in `apply_library_settings` is `OndinApp::follow_moved_documents` now, a retry being a second migration that owes everything the first one did, and **D430**'s whole argument moved onto the function with it. ⚠️ **The retry is answered *after* the Save/Cancel match** so it cannot race a base-folder change; Cancel leaves the report standing, the files being stranded whatever the user did with the card. **Test** `panels::dashboard::tests::a_partly_failed_migration_is_listed_and_can_be_run_again`, driving the real modal and reading the list out of `galleys` on **D426**'s rule. 🚨 **Two flips, and the second is the finding**: dropping the `stranded` assignment fails at the report, predicted, while **dropping `retry_migration`'s `library.refresh()` left every assertion green on the first reading** — the retry's effect on the dashboard *behind* the modal was untested — which is what the `library.entries` assertion was added for. §9.5's *"there is no retry and no rollback to offer instead"* sentence and D620's closing hand-off are amended. **The `roadmap.md` bullet is edited down to rollback alone rather than struck**, and the table row with it)*
+- **D811** — **A menu row's height is either an argument or a floor, and the warning that said "any new dropdown" could not be applied without reading the callee.** `roadmap.md`'s *Now · Inspector* carried the menu-row border as a bullet from 2026-08-31 and **none of it was ever work**: every sentence was already in `ui::menu_rows`' own doc (egui 0.35's per-state frame arithmetic, the 21-against-23 at the panels' zero padding, *"so the border goes"*) and in `ui::MENU_ROW_H`'s (the floor that only ever *raises*, the 22-since-2026-08-20 — **D262** — and the 23pt tripwire `a_menu_rows_height_does_not_depend_on_its_state` asserts against). **One sentence was in neither**: *"any new dropdown owes `ui::menu_rows` and that padding"* is **too wide**, there being two *families* of row — a row egui sizes, where `MENU_ROW_H` is a **floor** and `button_padding` decides whether the floor decides anything, and a row `ui::menu_row`/`ui::menu_item` `allocate_exact_size`, which take the height as an **argument** the padding cannot reach. *The tell for which family a row is in is whether its height is an argument.* `panels::export`'s own menu popover is the caller that proves it — it calls `menu_rows`, never touches the padding, and is **correct**, every row in it being a `menu_item` with the height passed in — where a warning phrased about dropdowns in general scores it as the failure case. *(Recorded 2026-09-19; **Resolved — record-only**, filed on `ui::MENU_ITEM_H` because a warning belongs where a reader meets the *exception*, and the citation is planted by hand there. ⚠️ **A warning that cannot be applied without reading the callee is half a warning** — the same failure as a citation resolving to the wrong entry, and invisible to every gate here, a comment's *advice* compiling as readily as its facts. §6's *"Eleven popups call it — five in `inspector.rs`, six in `typography.rs`"* is amended to the measured **seventeen call sites** across four files, its enumeration having omitted this entry's own caller and the file it lives in; the same stale six in the test's own doc is reported and left standing. **The bullet and its ⚠️ sub-bullet are struck from `roadmap.md`** and the *Now · Inspector* table row goes from two items to one)*
+- **D812** — **`char_valve`'s third arm is gone, and the asymmetry of the two failures is what decided it.** `else if resp.changed() && !resp.lost_focus()`, the arm no other valve has, kept by §15 **D523** for *"a control with no engagement to latch"* — the picker's raw sensed regions, on the reasoning that a click on the hue strip would otherwise commit nothing ever. **Both halves were falsified on 2026-09-19**: **D802** found `picker::pointer_slot` answers a click through `write_slot` before it could reach `valve_slot`, so those regions never enter the valve at all, and **D803** found the one thing that did — egui's per-frame clamp of a stored value outside a **ranged** field marks an unfocused control `changed()`, so the arm committed an edit nobody made and spent an undo step, `[S6.2-L1-01]`. **What decided it is new since D803 and is a read rather than a measurement**: all seven call sites are engagement-bearing and **both** `DragValue` helpers opt out of that clamp (**D425**, **D552**), so the arm had no live user at all — D803's *"seven call sites, two measured"* is seven read. 🚨 **The argument is the asymmetry**: an unmeasured caller that needed it fails **loudly** (*"this control commits nothing"*), where keeping it fails **silently** (*"a field nobody touched spent an undo step"*). *(Ruled by the maintainer and taken 2026-09-19; **Resolved** — D802's *Fix* and D803's hand-off are both discharged, and D425's line stops being the only thing between that bug and the document. **Test** `panels::typography::valve_arm_tests::a_changed_frame_with_no_engagement_commits_nothing`, which builds the condition **by hand** with a ranged `DragValue` carrying egui's default — no production control can reach that state now, which is exactly why the fixture must. Flipped by restoring the arm: red at *"no undo step"*, 1 against 0. ⚠️ **The first draft of that test was about nothing** — 999 against a `MAX_FONT_SIZE` of **1000**, so the value was in range, egui rewrote nothing and the fixture never reached the state it named; the *assert the fixture is in the state* rule is the only thing that caught it. D523's third-arm paragraphs and §9.2's and §9.3's copies are amended. **The *Now · Inspector* bullet is struck from `roadmap.md`** and that section has nothing open)*
+- **D813** — **`<foreignObject>` is a decided non-goal, and the words are said at last.** `roadmap.md` carried it as an open SVG-import item that *"sits here rather than in §0 only because no one has said the words"* — audited into that state on 2026-09-03 (§15 **D411**) and left there. It is HTML inside an SVG, nothing in this model draws HTML, and there is no version of it to build. It is reported like any other unread element, so `svg_in`'s *"nothing is lost silently"* contract already covers it and always did. *(Ruled by the maintainer 2026-09-19; **Resolved — a decided non-goal**, no production line changed and none is proposed. **Record-only, so the citation is planted by hand** on `svg_in`'s module head, in the `Import::skipped` list — the one place a reader meets the question *why does this element not come in*. It **moves into `roadmap.md` §0's decided-non-goals list** as well as being struck from *Now · SVG import*, which is what §0 is for: an item that has sat for sixteen days one sentence short of a decision is exactly the thing this ledger stops being re-argued. With it and D806 gone that section has only the rejoined **paragraph** left)*
+- **D814** — **A library migration has no rollback, by decision, and the retry is the recovery.** §15 **D620** handed the maintainer three asks and **D810** built two of them — the stranded list in the *Library settings* modal and *Try again*. The third is refused. `relocate` deliberately **overwrites nothing**, so *"undo"* is not the reverse of a known operation: it is a fresh decision about everything that *did* arrive, including a `.trash` file renamed on the way in by `Collision::Rename` and now indistinguishable from a document that was always there. ⚠️ **And a reverse migration can itself partly fail**, which is a second and worse partial state with nothing to offer after it. **What the ask was really about is reachable now**: the retry moves in the migration's own direction over whatever is still in the old folder, and D810 made it a button rather than a three-step dance back through Settings whose middle step looks exactly like the operation that lost the files. *(Ruled by the maintainer 2026-09-19; **Resolved — a decided non-goal.** Record-only, no production line changed; **the citation is planted by hand** on `library::relocate`'s module head, beside the *"a migration run twice leaves duplicates rather than being idempotent"* note that is the same argument from the forward direction. ⚠️ **Do not read the retry as half a rollback** — nothing in the app moves anything back, and that sentence is kept on the module rather than only here. **The `roadmap.md` bullet is struck whole**, D810 having edited it down to this one ask, and the *Now · Files* table row with it)*
+- **D815** — **`Undo`, `Redo`, `Save` and `Open` resolve in `Mode::TextInsert`, and the finishing is at `dispatch`.** They were dead in a text session **by omission**: §9.3 records only that `TextInsert` is *near* exclusive — *"no **bare** key resolves to an `Action` there"* — which is a rule about bare keys and was never about chords, so nothing had decided it. Meanwhile the top bar's buttons for three of them were live the whole time and have finished the session before acting since §15 **D466**, so the button and its chord disagreed: clicking Undo rewound the document while `Ctrl+Z` 30px away did nothing. `input::text_insert_mode` grows the four with `normal_mode`'s guards **term for term**, every `!m.shift` included. 🚨 **The finishing is at `OndinApp::dispatch` and deliberately not in the keymap**, because it is a fact about the *action* and not about the key: the buttons already spell it there, and a guard in the keymap would be a second copy the next door onto `Undo` would miss. `Open` needs nothing of its own — `go_to_dashboard` has finished the session since D466. *(Ruled by the maintainer, built and tested 2026-09-19; **Resolved**, closing the question D466 left open. **Tests** `input::text_insert_tests::the_four_document_chords_resolve_in_a_session` and `app::library_wiring_tests::a_document_chord_in_a_session_finishes_it_first`, both flip-checked and deliberately **two**, since `resolve` answering and `dispatch` finishing are independent claims a single key-press test would conflate. ⚠️ **`ctrl_shift_is_not_a_second_spelling_of_ctrl` sweeps `normal_mode`'s arms and not these**, which is why the four are written out rather than shared — the two modes' lists are different lengths on purpose. 🚨 **A doc-comment theft was found while reading for this and repaired in the same change**: `OndinApp::finish_text_first` had been inserted above `OndinApp::top_bar` anchored on its `fn` line and had taken its whole doc run, leaving `top_bar` with none — §15 **D805**'s shape, where the victim reads as *still documented* by a run that opens by describing something else, and which the whole-tree length ranking cannot see at 44 lines against a floor in the fifties. What found it was the mirror question: does the run above my new item begin by describing it. §9.3's *near*-exclusive paragraph and its *"the button and its chord still disagree"* ⚠️ are amended, and `shortcuts.md` §10's *"returns nothing at all in TextInsert"* clause with them. **The *Now · Keyboard* bullet is struck from `roadmap.md`** and that section has nothing open)*
+- **D816** — **C5's *"or on its edge"* is answered, and widening the shared chain was the repair that was declined.** `canvas::begin_select_drag` carried `selected_frame_at` and neither `pick_at_pointer` caller had anything, so an occupied frame was reachable from the canvas by its **name tag alone** — where `context-menus.md` §2's **C5** says *"a frame is right-clickable exactly where it is left-clickable … on its name tag, on its edge, or anywhere on it while it is empty"* (§15 **D469**). 🚨 **`roadmap.md` named widening the chain with `selected_frame_at` as the obvious fix and it is wrong**: that function answers a frame's whole **box**, so it would make an already-selected frame's *interior* a target — the half of C5 that has never been true, and one `pick_leaf` skips on purpose so a marquee can be dragged across a frame's contents (§15 **D22**). `canvas::frame_edge_at` answers an occupied frame whose border passes within `pick_slop()` instead — the same band every other pick uses, so the same width on screen at any zoom — added as the **last** link of `pick_at_pointer`, so a layer near its frame's border still wins the pixel. ⚠️ **A frame narrower than twice the slop is all edge**, which is the honest answer at that size rather than a case worth a branch. ⚠️ **And the box is the world *AABB***, so a rotated frame's band is not its drawn border — the limitation `selected_frame_at` has always had, and the one §15 **D36** records for a rotated frame's ruler origin. *(Ruled by the maintainer, built and tested 2026-09-19; **Resolved.** **Test** `canvas::frame_edge_tests::a_frames_edge_is_pickable_and_its_middle_is_not`. ⚠️ **One of its two flips does not bite, and that is recorded in the test rather than tidied away**: dropping the `is_occupied_frame` term leaves every assertion green, because the fixture's frame is occupied — that term is about the *empty* case, which `pick_leaf` already answers, so the flip says where the teeth are not. `context-menus.md` §2's C5 notes the edge clause as answered. **The *Now · Canvas* context-menu bullet is struck from `roadmap.md`** and that row's last decision with it)*
+- **D817** — **A tracking chord stops where its field stops, and the bound is at the arm and not in the model.** `TextChord::Tracking` stepped through `apply_char_attrs` with no range check, and `TextStyle::set` canonicalizes `letter_spacing` without bounding it — so a held `Alt`+`→` walked tracking past `MAX_TRACKING_PCT` and out of what the field can be scrubbed to, where the `Size` arm in the same `match` stops at its ends and says so in a comment. **Nothing was being lost**: since §15 **D425**'s opt-out — tested on this panel by **D475** — the field *shows* an out-of-range stored value instead of rewriting it. What this fixes is the two chords disagreeing about whether a held key has an end. 🚨 **The bound is at the arm and deliberately not at `TextStyle::set`, where `Size`'s is, so the two chords agree about *behaviour* and not about where the bound is written.** These caps are on the **controls**: any finite value is a legal attribute, a file may hold one, and a bound in the model would make D425's own behaviour unreachable for this attribute — the panel refusing a document it is able to display. The px face is derived from the `%` face at the current font size through the same `px_range_for` the field uses, so the chord and the scrub cannot disagree about the cap in whichever unit the user is in. *(Ruled by the maintainer, built and tested 2026-09-19; **Resolved.** **Test** `panels::typography::valve_arm_tests::a_held_tracking_chord_stops_at_the_fields_cap`. ⚠️ **Two things the first draft got wrong and the test now records**: the stored default is **`Px(0.0)` and not `Em`**, so the em face needs a fixture of its own or that half is never exercised; and a probe reading `style.letter_spacing` off the node measured `Px(0.0)` after four hundred presses, because with a live session the write lands in the **editor** rather than on the node — it reads through `TypeSubject` now. **The *Now · Text* bullet is struck from `roadmap.md`** and that section's *"four things are open"* opener goes to three)*
+- **D818** — **An `UNREADABLE` card keeps its *Open*, and the reason is which file actually arrives.** §15 **D613** gave `scan::Entry::unread` a reader and closed by leaving one thing to the maintainer — *"whether *Open* should be disabled or warning-styled on such a card"*. **Neither.** The mark and the status line already say the file will not load, so a refusal is a third statement of one fact. 🚨 **And the case that actually reaches a synced library is a document written by a *newer build*** — well-formed, merely ahead of this one — so refusing to open a file the user may want to inspect, or may be about to update the app for, is the wrong way round. The mark warns; the click stays theirs. *(Ruled by the maintainer 2026-09-19; **Resolved — a decided non-goal**, no production line changed. **Record-only, so the citation is planted by hand** on `panels::dashboard::Mark::Unreadable`, the variant a reader meets the question at. D613's closing hand-off is amended. **The bullet's open half is struck from `roadmap.md`**, leaving that section's cover and rollback items, which D820 and D814 close)*
+- **D819** — **Linked images are a decided non-goal for v1, and `is_linked` stays with no production caller.** The three Asset entries — *Embed*/*Link*, *Relink…* and the document-wide *Embed all* — all wait on the same missing thing: a gesture that **authors** a linked source. `ImageSource::Linked` is constructed in exactly one place, `io/schema.rs`'s deserializer, and every app path onto a picture funnels through `app::load_image_bytes`, which builds `Embedded` unconditionally — **so a foreign `.ondin` can carry a link and the app will open it, and nothing can make one.** §15 **D191** is the out-of-v1 image list this joins, and §15 **D305** already withdrew *Export original…* the same way. 🚨 **`is_linked` and the preserved reasoning stay**, which is the half a future editor would tidy: the subject exists in the model, a foreign document can put one in front of the app, and `tools::original_refusal`'s three-state answer is kept as comments where that function stood — fine, linked, or an id the table does not hold. **Rebuild from those rather than re-deriving**, and *do not infer linked from absent bytes*, which is the bug §15 **D280** is about and which two hand-rolled `bytes().is_some()` doors had already committed once. *(Ruled by the maintainer 2026-09-19; **Resolved — a decided non-goal.** Record-only, no production line changed; **the citation is planted by hand** on `ondin_core::image`'s `is_linked`, which is where the question *why does nothing call this* is met — and `dead_code` cannot ask it there, core being a library where a `pub` item is API. **The three rows move into `roadmap.md` §0** and the *Now · Images* open bullet is struck, leaving that section as the record of the v1 image build with nothing open)*
+- **D820** — **A dashboard cover is rendered on a thread of its own, and the budget is deleted with what it bounded.** `Covers::get` → `render` → `io::load` → `png::png` → `ImageStore::prepare` ran the whole document→pixels path **inside the egui pass**, where a picture's decode alone was measured at **433 ms** for an 8000² image (§15 **D449**). `roadmap.md` said which thread it goes on was undecided. 🚨 **It is a second worker of its own and not a job on `library::writer::Writer`'s queue**, and the reason is that module's own contract — *"one background writer of anything, in **FIFO** order"* — with the FIFO load-bearing twice: a `Forget` must not be overtaken by the `Snapshot` it cancels, and a save must not be overtaken by anything. A cover render is hundreds of milliseconds nothing is waiting on, so putting one in front of an autosave makes the feature that protects work wait behind the feature that decorates a card. ⚠️ **Nothing the renderer does is a record**: it may write a PNG into the cover cache, which `crate::atomic` deliberately **exempts** as derived data, so this is not a second writer of anything that module protects. 🚨 **`FRAME_BUDGET` is deleted rather than retuned, and that is a removal and not a regression**: the 8 ms never bounded the felt cost, because the **progress guarantee** under it rendered one document per pass *whatever the budget said* — so a library of slow documents cost one stall per pass rather than none. Both were consequences of rendering **inside** the pass, and neither has anything to bound now. `thumbs::ImageThumbs` keeps its 2 ms and is no longer the same shape: its decode really does happen in the frame. *(Ruled by the maintainer, built and tested 2026-09-19; **Resolved.** `Covers` gains `queued` — so a card drawn every frame enqueues **once** rather than sixty times a second, which is a queue that outruns its drain and a thread that never reaches the second document — plus `Renderer`, spawned lazily on the first miss for `Writer::spawn`'s reason and **joined** on drop rather than detached, and a `#[cfg(test)] pub(crate) settle`. ⚠️ **`settle` is `cfg(test)` and not `pub`, which is §15 D672's answer rather than D699's**: nothing in production waits for a cover, and `ondin-app` has no lib target, so `dead_code` does analyse a `pub` item there and it warned. **Test** `library::cover::tests::covers_are_rendered_off_the_pass_and_all_of_them_arrive`, **replacing** `one_cover_a_pass_arrives_however_spent_the_budget_is` — the rule that one pinned is **gone rather than changed**, which is why the test goes with it; `a_document_with_no_cover_is_not_retried_every_pass` survives with a new tell, the budget having been how it measured a re-render and the queue being it now. 🚨 **The thread introduced a flake in *another module's* test, and finding it is the most useful thing in this entry.** `panels::dashboard::tests::a_document_this_build_cannot_open_wears_the_mark_and_a_healthy_one_does_not` asserts the red `UNREADABLE` chip, which `mark_of` reads through `Covers::unreadable` — and a cover only learns a document is unloadable when it **renders** it. The test pumped one extra pass and asserted on the next, and **its own doc said those two passes were *"the cover cache's laziness rather than a flake"***. ⚠️ **That sentence was accurate when it was written and this change made it exactly wrong**: the laziness is still there and the *timing* it promised is gone, because "the next pass" was a fact while the render was inline and is a **race** once it is on a thread. It is struck in place in the test's doc rather than deleted, the stale half being the point. **The fix is one line** — `app.covers.settle(&ctx)` before the assertion, which is what that method exists for — and 25 paired runs afterwards failed none. 🚨 **What found it was running the filter twenty times.** The whole suite was green throughout, both full `--workspace` runs were green in debug *and* release, and a verification run of the same two filters **three times each** was green: **2 of 20** paired runs failed, and only under a filtered run, which packs the related tests onto every core at once. *Six clean runs is not evidence.* That is `CLAUDE.md`'s thirteenth gate hole and §15 **D796**'s lesson arriving from a second direction — there a shared OS resource, here a shared worker — and neither is visible to any gate. ⚠️ **It is also what earns `settle` its `pub(crate)`**: the argument for the method was that the app stays asynchronous and a probe asks for an answer, and this is a *second* module's test needing it, which is the case that says it must not be private to `cover.rs`. 🚨 **The doc gate caught two dangling links this change created** — `[`FRAME_BUDGET`]` after the constant was deleted, and `[`Covers::settle`]` after that method became `cfg(test)`, the second being D319's mechanism from the direction where a production doc may not name a test-only item. *That gate is the one that reads doc comments, and this is it working.* §5.11a's cover-cache paragraph and §9.5's `Covers::unreadable` sentence are amended, and §5.3a's `MAX_SHADOW_BLOCK` paragraph, whose *"a hang at launch"* is now a stuck cover thread and a library that renders nothing past the first bad file. **The bullet is struck from `roadmap.md`** with the clause in the table row that named it)*
+- **D821** — **`Escape` is spent on a chrome field that has just lost focus, and the rung goes *below* `cancel_gesture`.** Measured with D808's probe: with a `TextEdit` focused, `input::resolve` answers `[Escape]`, because egui clears focus in `Memory::begin_pass` and the press is still in `input` when the keymap runs — §15 **D317**'s own reading, and what makes a *valved* field's cancel reach `cancel_gesture` at all. **A plain `TextEdit` installs no preview, so the ladder fell straight through**: renaming a layer in the inspector and pressing `Escape` abandoned the rename **and** cleared the selection, the ladder's last rung, under the panel that was showing it. A new rung in `OndinApp::escape` answers it. 🚨 **Below `cancel_gesture` and not above it, which is the whole of the placement**: a numeric field's cancel has to go on reaching that function, because it is what sets `gesture_cancelled` and stops the release committing after all (D317). The new rung is only ever taken when nothing was in flight — exactly the text-field case. It reads a new field, `OndinApp::chrome_focus`, written at the **end** of each frame after the `Tab` surrender. ⚠️ **Recorded rather than asked, because egui has no global question for it**: `Memory::had_focus_last_frame` takes an `Id` and the ladder has none. ⚠️ **"Anything focused", not "a text field"** — `egui_wants_keyboard_input`'s own definition (§15 **D123**), deliberately not narrowed. *(Found and fixed 2026-09-19; **Keep.** This closes nothing on `roadmap.md`: it is a defect D808's probe turned up and the maintainer ruled on in the same round. Nothing is undone at the rung — the field has already abandoned its own edit through `ui::defocus_commits` (§15 **D808**); what this adds is that the key stops there. **Test** `app::library_wiring_tests::escape_out_of_a_chrome_field_does_not_also_clear_the_selection`, flip-checked. `shortcuts.md` §11's ladder enumeration gains the rung)*
+- **D822** — **`Event::Zoom` and touchscreen pinch are *Later* with a stated trigger, not open work.** `Event::Zoom` **would be dead code here**: egui only ever consumes that event, its sole producer is `egui-winit`'s `WindowEvent::PinchGesture` arm, and winit raises `PinchGesture` from its **iOS and macOS** backends alone — `platform_impl/windows` has no path to it. So it is a macOS portability item rather than a defect. **Multi-touch is the reachable half** — winit does deliver `WindowEvent::Touch` on Windows, so egui's `multi_touch()` would see a touchscreen pinch — and it needs a touchscreen to develop against. **Neither can be built or tested on the machine this is developed on**, which is what makes them *Later* rather than *Now*: an item nobody can write or check is not open work, and leaving it in a *Now* section reads as cheap. *(Ruled by the maintainer 2026-09-19; **Resolved — filed *Later* with the trigger stated**, and the trigger is the useful half: **a Mac, or a touch device.** Record-only, no production line changed; **the citation is planted by hand** on `canvas::wheel_input`, the function that carries the `Ctrl`+wheel path these two would join. Re-derived rather than inherited — the analysis was last checked against the vendored sources on 2026-08-19 and the conclusion is unchanged. **The two items move to *Later*** and the *Now · Canvas* row's last two entries go with them, leaving that section with nothing open)*
+- **D823** — **A layer copied in one `ondin` window pastes as a layer in another, and the wire form is the document schema.** §15 **D17** closed by prescribing the fix — *"give core a serializable subtree; that would also buy paste between two Ondin windows"* — and until now a copy put only the layer **names** on the OS clipboard, so a second window's `Ctrl+V` saw text and pasted the names as a text layer. `ondin_core::io::clip` is that subtree: the names, then `FENCE`, then JSON, found with `rsplit_once` so a layer *named* like the fence cannot truncate the heading. **Not a second format** — `NodeDto::from_node`/`into_node` and `ImageDto` were lifted out of `DocumentDto` so the clipboard reaches the same projection a file does, which is what keeps D663's out-bound `clip` normalization and every rule like it in one place. 🚨 **The version is compared for equality, not migrated**, the one deliberate divergence from `io::load`. 🚨 **`read` answers `Option<Result<…>>` and the third state is the point**: ours-and-unreadable must be *said*, or the payload falls through to `paste_text_as_layer` and the user gets a text layer holding megabytes of their own JSON. *(Built and tested 2026-09-22; **Resolved.** All four paste doors call `OndinApp::take_clipboard` where they called `owns_the_clipboard`, and `adopt_clip_text` is its decision with the OS read lifted off it, **D805**'s split for **D798**'s reason. 🚨 **`roadmap.md`'s cost estimate was wrong twice, both times in the cheap direction**: the id minting *did not exist as work* — `build::insert_subtrees` already remaps through `document::remap_subtree` — and the serialization it said must **not** be `NodeDto` **is** `NodeDto`. Placement needed nothing either, **D221**'s root fallback already being right for a foreign parent. The pictures cross through `ImageDto`, which is **D280**'s lesson. **Seven tests, every one flip-checked.** D17's closing *Fix* is struck, §5.11 gains the second reader and §9.4 the crossing. **The `roadmap.md` bullet is struck**)*
+- **D824** — **The Escape context-menu rule gets its wider fixture, and it had to be a *second* test.** §15 **D795** closed on one clause of `context-menus.md` §10 it could not write: that file's Escape bullet asks for the menu opened with a layer selected **inside an entered group and the node tool active**, and for `entered_group` and the tool to be untouched as well as the selection. 🚨 **§10 asked for the existing test to be widened and that would have been wrong.** `OndinApp::escape` pays out **one** rung per press and reaches `entered_group` *before* the tool and before the selection clear that is its final `else` — so under the narrow fixture the fall-through's extra rung is the **selection**, which is why that test bites, and under the wide one it is `entered_group`, leaving the selection and the tool untouched **under the very flip the test exists for**. Widening would have taken the teeth out of it and left the suite looking one test richer. *(Tested 2026-09-22; **Resolved** as to §10's queue. **Test** `app::context_menu_rule_tests::escape_over_a_menu_keeps_the_entered_group_and_the_tool_as_well`, flipped the same way its neighbour is — `input::resolve` in the menu-holds-the-keyboard arm right after `self.context_menu = None` — **red on the `entered_group` assertion** and green on the selection and the tool, both at the predicted sites. ⚠️ **D795's own closing *Fix* is untouched by this**: re-running that flip against `escape_in_present_mode_…` is still owed. §10's bullet is corrected, its *"present mode and an entered group are further down the ladder"* being backwards about `escape`. **The `roadmap.md` clause is struck**, and with D823 that section has nothing open)*
+- **D825** — **Tab stops, columns and widow/orphan control are decided non-goals for v1; justify-all is *not* one.** *Now · Text* carried the three beside justify-all as *"the four deferred features"*, and what the three share is the opposite of a wall: **not one of them is short of a dependency.** Widow/orphan control is a second pass over the lines `text::break_lines` yields; tab stops are a layer over `Whitespace::Tab`, which parley classifies and does not lay out; columns change what a paragraph's box *is*, above that function entirely. Each is a build of our own that nobody has asked for — the same shape as **D399**'s hyphenation, priced rather than blocked. ⚠️ **Justify-all is the exception and goes to *Later · Parked*, not to §0**: it is blocked **upstream**, parley's `align_impl` hard-coding a skip of `BreakReason::None | Explicit` with `align`, `LayoutData` and `ClusterData::advance` all `pub(crate)`, so its trigger is a patch upstream and not a decision here. *(Ruled by the maintainer 2026-09-22; **Resolved — three decided non-goals and one parked item.** Record-only, no production line changed; **the citation is planted by hand** on `text::break_lines`, beside D399's hyphenation note, which is where a reader meets the question. 🚨 **Filing the four under one word is what this entry undoes** — *"deferred"* stood over a price, a build nobody wants and an upstream wall, and this file's own history is that such a sentence gets re-derived as a blocker, which is exactly what **D399** had to correct. **The three move into `roadmap.md` §0**, justify-all to *Later*)*
+- **D826** — **Rejoining a multi-line paragraph on SVG import is a decided non-goal for v1.** A multi-line text layer of ours exports as one `<text>` per line and comes back as one layer per line, because nothing in the markup says they were one node — and the rejoin would have to **invent the line height** that decides where every line after the first sits. 🚨 **The refusal is about what the only available signal identifies**: same `x`, a constant `y` step and a matching resolved style is *also* exactly what a stack of separate labels in a foreign file looks like, so the heuristic welds unrelated layers together and the user has no way to say which reading was meant. ⚠️ **And the case it would have been worth most for is answered elsewhere** — a copy crossing between two `ondin` windows carries real nodes now, paragraph and all (§15 **D823**) — so what is left here is the foreign file, which never had the structure to lose. *(Ruled by the maintainer 2026-09-22; **Resolved — a decided non-goal**, no production line changed. **Record-only, so the citation is planted by hand** on `svg_in`'s `text_node`, in the run that already argued the loss was real — that paragraph is now the end of the argument rather than the start of one. `a_positioned_tspan_starts_a_new_layer_and_a_bare_one_does_not` already pins what *is* read, so nothing about the element is left open. **It moves into `roadmap.md` §0** and is struck from *Now · SVG import*, where it was the last item — §15 **D813** having left that section with this alone)*
+- **D827** — **Two of the hand-written checks standing in for gates could not return a hit, and one of them *confirmed* the thing it was written to falsify.** In GNU grep's ERE a backslash before a backtick matches nothing, and two of `CLAUDE.md`'s commands escape it. **Instance 1**, the re-check standing in for §15 **D319**'s blind spot — `git diff <base>..HEAD -- crates/ | grep -E '^\+ *(///|//!).*\[\`'`, credited with **a catch per session for six sessions running** — returns **0 matches / exit 1** against a fixture the unescaped pattern matches. 🚨 **Instance 2 is worse and is why this is one entry**: `review/`'s census defends against a count reading *high* by extracting `^\| \`\[` as a **second reading and comparing**, and an inert second reading does not merely fail to falsify the census — it comes back empty, reads as *"no fix-log row names a finding in its body"*, and **corroborates** the high count. *A check that goes quiet wastes a reading; a check that answers in the shape of a corroboration is worth less than no check, because it is spent as evidence.* 🚨 **Both were found by *running* them, neither by reading**, which is §15 **D732**'s advice failing on its own terms: `'.*\[\`'` reads as a careful author escaping everything, so the defect is invisible to the attention that catches a wrong anchor. **The advice needs its second half — a command you cannot falsify by reading, control.** ⚠️ **The correct spelling was already in the tree, inside D319 itself**, whose `find … grep -nE '^ *//[/!].*\[`'` uses a bare backtick: one check written twice, once correctly and once incapably, with the incapable copy in the file everybody reads. *(Both commands fixed 2026-09-22; **Keep** — resolved as to the two commands, **open as to the class**. 🚨 ***Fix:* no sweep has been run.** What was checked is the commands this session had reason to touch plus the `review/` one; `CLAUDE.md`'s other greps, `awk` programs and `comm` pipelines are **uncontrolled**, and every clean reading ever taken from one is worth what that command was capable of. Run each against a fixture that must match and one that must not. ⚠️ **The six-session record is a tell nobody read**: either those catches came from elsewhere or the command was typed differently each time, and **which is not recoverable** — a run record is evidence about the command only if the command is what was run. ⚠️ **A third command misreads its output the opposite way**: the citation census run wide from the repository root reports `D00` and `D000` out of `target/`'s generated `unicode-general-category` tables, false positives that read exactly like a dangling citation — run it from `crates/` or with `--exclude-dir=target`. **All three outputs were plausible and none is falsifiable by looking at what it printed.** Fixing the commands buys no gate: `cargo doc` still cannot see a `#[cfg(test)]` module, and the corrected doc grep still asks only half its question, a `#[cfg(test)]` **item** at module level sitting outside every check that looks for a `mod tests`. Record-only, no production line changed; **the citation is planted by hand** on `app::CLIPBOARD_OFF`, the one doc that narrates a doc-gate catch and the neighbour of D798's note on the D319 convention)*
 
 ---
 
@@ -2156,7 +2215,11 @@ linear part, so a zero-length handle stays at zero rather than at a rounding err
 *One item is deliberately not built: every point edit is still a whole-path `GeometryPatch::Path`. That
 is right for undo granularity and coarse only for MCP, where "move anchor 3" would rather be an op —
 and MCP is parked until the editor is finished (§8). It stays in the roadmap as a decision rather than a
-gap.*
+gap.* ⚠️ **It moved within that file on 2026-09-22**, from *Now · Path editing* — which it was the last
+item in — to *Later · Parked decisions*. **That is this sentence being honoured rather than overridden**:
+it is still in the roadmap, and a **Now** heading means *open work on live code*, which is the one
+reading this note exists to refuse. The trigger is unchanged and is stated there — revisited *with*
+MCP, not before.
 
 **D126 — Three stroke features are declined, and one stored field is deliberately not offered.
 *Intentional.*** Carried in the todo as settled and moved here so the answer stops being re-argued from
@@ -3825,9 +3888,13 @@ rather than keys is also why D207's Alt guard, swept across the keymap's `on(…
 
 One consequence: `egui_winit` only emits `Event::Paste` when the **system** clipboard is non-empty, so a
 copy that touches only the in-app clipboard cannot be pasted. `copy_selection` therefore also puts the
-copied layers' names on the system clipboard. The real payload is still the captured subtrees in
+copied layers' names on the system clipboard. ~~The real payload is still the captured subtrees in
 `OndinApp::clipboard`. *Fix properly by giving core a serializable subtree — that would also buy paste
-between two Ondin windows.*
+between two Ondin windows.*~~ **Done 2026-09-22 — D823**, and exactly as prescribed:
+`ondin_core::io::clip` is that subtree, the payload follows the names past a fence, and a copy made in
+one `ondin` window pastes as layers in another. **The names stay on the first line**, for this
+paragraph's reason and because they are what someone pasting an Ondin copy into a note wants to read —
+so the stand-in was extended rather than replaced.
 
 **D18 — The canvas ground is editable. *Superseded in part by D28 — it is saved now.*** Clicking
 empty canvas opens an Appearance panel holding one colour field for the ground behind and around
@@ -4023,6 +4090,36 @@ factor is `exp(px / 200)` — egui's `scroll_zoom_speed` — clamped to 0.2..5.0
 trackpad can deliver a whole gesture's travel in a single frame. The whole thing is gated on the canvas
 being hovered: `Context::input` is global, so without the gate a wheel meant for the inspector pans the
 artwork behind it.
+
+**D822 — `Event::Zoom` and touchscreen pinch are *Later* with a stated trigger, not open work.
+*Ruled by the maintainer 2026-09-19; Resolved — filed *Later*, and no production line changed.***
+
+`roadmap.md`'s *Now · Canvas* carried these as the section's last two items. Both are real and
+neither is work anybody here can do, which is the distinction that moves them.
+
+**`Event::Zoom` would be dead code in this app.** egui only ever *consumes* that event —
+`input_state/mod.rs` is its one reader — its sole producer is `egui-winit`'s
+`WindowEvent::PinchGesture` arm, and winit raises `PinchGesture` from its **iOS and macOS** backends
+alone; `platform_impl/windows` has no path to it at all. So handling it is a **macOS portability
+item** rather than a defect, and on this machine the handler could be written and never entered.
+
+**Multi-touch is the reachable half**: winit does deliver `WindowEvent::Touch` on Windows, so egui's
+`multi_touch()` would see a touchscreen pinch. It needs a touchscreen to develop against, which is a
+different kind of blocker and a smaller one.
+
+🚨 **Neither can be built *or tested* on the machine this is developed on, and that is the whole
+ruling.** An item nobody can write or check is not open work; leaving it in a *Now* section reads as
+cheap work somebody keeps not doing, which is the misreading `roadmap.md`'s own bullet warned about
+in its last line. **The trigger is stated rather than implied: a Mac, or a touch device.** Until one
+of those exists there is nothing to attempt and nothing to re-derive.
+
+⚠️ **Re-derived rather than inherited.** The analysis was last checked against the vendored sources
+on 2026-08-19 — one consumer, one producer, iOS and macOS only, `Touch` present on Windows — and
+re-reading it for this ruling changed nothing. This is the class of item that closes with *no change
+to this repository at all*, so the date it was last asked is the useful record.
+
+**Record-only, so the citation is planted by hand** on `canvas::wheel_input`, the function carrying
+the `Ctrl`+wheel path these two would join and the place the question is met.
 
 **D27 — A node holding a ghost was culled. *Resolved.*** `scene.rs` skips a node whose cached world
 bounds miss the viewport, and skips its whole subtree when those bounds cover it (§6.3) — which they are
@@ -9029,9 +9126,15 @@ arm and the selection clear is its **last**, the fall-through `else` under every
 on to claim the present-mode test does *not* bite on this flip — **asserted from a read and never
 run**, with that test's own flip note recording the neighbouring mutation failing at *"and left
 present mode alone"*. The verdict was right and the argument was not: what this test adds is the
-door and the state at the bottom of the ladder. ⚠️ ***Fix:* re-run this flip against
+door and the state at the bottom of the ladder. ⚠️ ~~***Fix:* re-run this flip against
 `escape_in_present_mode_…` before relying on either test as the only cover for a fall-through**;
-the comment now says so rather than answering it.
+the comment now says so rather than answering it.~~ **Discharged 2026-09-22 — D824**, by running it
+over the whole `escape_` filter rather than against that one neighbour: **three of twelve go red** —
+`escape_in_present_mode_…` at *"and left present mode alone"*, this entry's R3 test on the selection,
+and D824's on `entered_group` — and the other **nine stay green**. So no one of the three is the only
+cover, which is what the ask was about; and the nine greens are the other half of the answer, saying
+where the cover is *not*. **The read this entry distrusted was right and it was still right to
+distrust it** — what makes the claim usable is that it is a measurement now.
 
 **And `a_keystroke_does_not_reach_the_document_while_a_menu_is_open`**, which is §10's own wording —
 open a menu over a layer, press `Delete`, assert the document is unchanged. ⚠️ **"Byte-identical" is
@@ -9049,13 +9152,76 @@ union and carries no such rule; both numbers resolve, so nothing in this project
 opened with a layer selected inside an entered group and the node tool active, and for
 `entered_group` and the tool to be untouched as well as the selection; what is asserted is the menu
 and the selection. **That clause is what survives of the queue**, and §10 says so rather than
-reading as closed.
+reading as closed. *Closed 2026-09-22 by **D824**, and not by widening this test — which turned out
+to be the one repair that would have made it assert nothing.*
 
 **Two helpers were widened to `pub(super)` rather than copied** — `library_wiring_tests::whole_frame`
 and `ungroup_tests::app_with_two_groups`. A second copy of `whole_frame` would be a second statement
 of the egui warm-up-frame rule its doc comment carries, and that rule is the part worth having once:
 egui resolves a press against the widget rects it knew *last* frame, so a press on the frame a widget
 first appears is assigned to nothing and the whole test passes while asserting nothing.
+
+**D824 — The Escape context-menu rule gets its wider fixture, and the finding is that it had to be a
+second test. *Tested 2026-09-22; Resolved — §10's queue is empty, and D795's own *Fix* is not this
+one.***
+
+D795 above closed on the one clause of `context-menus.md` §10 it could not write. That file's Escape
+bullet words it exactly: *"Open one with a layer selected inside an entered group and the node tool
+active, press Escape once, and assert the menu is gone while the selection, `entered_group` and the
+tool are all untouched."* `escape_over_a_menu_closes_the_menu_and_keeps_the_selection` asserts the
+first and the last of those.
+`app::context_menu_rule_tests::escape_over_a_menu_keeps_the_entered_group_and_the_tool_as_well` is
+the rest.
+
+🚨 **It is a second test rather than a widening of that one, and §10 asked for the widening.**
+`OndinApp::escape` pays out **one** rung per press, and its chain reaches `entered_group` *before*
+the tool and before the selection clear that is its final `else`. So in the narrow fixture the
+fall-through's one extra rung is the **selection** — which is exactly why that test's selection
+assertion bites — and in the wide one it is `entered_group`, leaving the selection *and* the tool
+untouched **under the very flip the test exists for**. **Widening the original would have taken the
+teeth out of it and left the suite looking one test richer.** Both fixtures are needed, because the
+ladder has two different rungs directly under the menu depending on what is set.
+
+**Flipped the same way its neighbour is** — the *"closed it and then fell through"* mutation in the
+menu-holds-the-keyboard arm, the dispatch loop
+(`for action in input::resolve(&ctx, self.mode, self.prefs.nudge)`) run right after
+`self.context_menu = None`, which is what that arm's own comment warns about and is D795's flip for
+the test above. The new test is **red on the `entered_group` assertion**, the predicted site, with
+`None` against the entered group, and **green on the selection and the tool**; the old one is red on
+the selection with `[]` against its two group ids. Both at the sites predicted, which is the
+paragraph above happening rather than being argued.
+
+🚨 **That flip was first run in a spelling that is not this one, and the two are not one edit.** The
+first run called `self.escape(&ctx)` directly in that arm — the ladder invoked, skipping the routing
+— which comes back red at the same assertion with the same value and **proves less**, because it
+reaches the ladder whatever `input::resolve` decides about the key. The documented mutation puts the
+*dispatch* back, so a version in which the keymap refuses to produce the action at all would show.
+Both spellings were run and both are recorded on the test. **The rule this is an instance of is the
+one this project already has** — *name the mutation by its function, not by a description two edits
+fit* (D803) — and here the looser description was the *safer*-sounding one, which is the direction
+that does not announce itself: a flip that reaches further than the production path does cannot
+distinguish a live route from a dead one.
+
+**D795's closing *Fix* is discharged, and the measurement is what discharges it.** That entry asked
+for the R3 flip to be re-run against `escape_in_present_mode_closes_the_menu_first_and_the_mode_second`
+before either test was relied on as the only cover for a fall-through, its own argument for existing
+having been *"asserted from a read and never run"*. Run over the whole `escape_` filter on
+2026-09-22, **three of twelve go red** — `escape_in_present_mode_…` at *"and left present mode
+alone"*, `escape_over_a_menu_closes_the_menu_and_keeps_the_selection` on the selection, and this test
+on `entered_group` — and the other **nine stay green**. So **no one of the three is the only cover**,
+which is exactly what the ask was about, and the nine greens are the other half of the answer: they
+say where the cover is *not*, the fall-through being invisible to every `escape_` test whose fixture
+leaves the rungs above the menu empty. D795's *Fix* is struck there.
+
+*(The fixture enters the group through `enter_container` and chooses `Tool::Node`, and asserts all
+three of those states **before** the right-click — a fixture that never reached the state is a test
+about nothing. 🚨 **§10's bullet carried the same error D795 corrected at the test site, and it is
+amended here too**: it read *"the selection is the sharper of the three anyway — it is cleared on the
+same rung, where present mode and an entered group are further **down** the ladder"*, which is
+backwards about `escape`. `self.present` is that function's **first** arm, `entered_group` its
+second-to-last, and the selection clear the fall-through `else` under everything — so the selection
+is the **bottom** of the ladder and the other two are above it, which is the whole reason this test
+exists. **The `roadmap.md` clause is struck**, and with D823 that section has nothing open.)*
 
 **D796 — Two threads opening the OS clipboard corrupt the heap, and the whole suite had been passing
 on scheduler luck. *Fixed and tested 2026-09-19; Keep — and two consequences were deliberately not
@@ -9172,6 +9338,112 @@ too, so this one builds its own and asserts from there rather than pretending it
 `OndinApp::headless` as an intra-doc link; `headless` is `#[cfg(test)]`, so `cargo doc` exited 101 —
 **D319**'s mechanism arriving from the production side, where a *production* doc cannot name a
 test-only item. Plain backticks now, with a sentence saying why, which is D319's own convention.
+
+**D823 — A layer copied in one `ondin` window pastes as a layer in another, and the wire form is the
+document schema. *Built and tested 2026-09-22; Resolved — D17's closing *Fix* is spent.***
+
+D17 closed by saying what to do: *"Fix properly by giving core a serializable subtree — that would
+also buy paste between two Ondin windows."* Until now a copy captured subtrees into
+`OndinApp::clipboard` and put only the layer **names** on the OS clipboard, so a second window's
+`Ctrl+V` saw text and pasted the names as a text layer. `ondin_core::io::clip` is that subtree.
+
+**Text, because text is the only channel there is.** `arboard` offers the system clipboard as text or
+as an image and nothing else, so a payload that is to survive leaving this process has to be a
+string. It is the layer names, then `io::clip::FENCE` (`--- ondin clipboard ---`), then the JSON. The
+names stay on the first line for both of D17's reasons — `egui_winit` emits `Event::Paste` only for a
+non-empty clipboard, and someone pasting an Ondin copy into a note wants to read what they copied —
+so the payload *follows* the stand-in rather than replacing it. ⚠️ **The fence is found with
+`rsplit_once` and not `split_once`**, so a layer actually named `--- ondin clipboard ---` does not
+truncate the heading and take the payload with it; a pathological name is not a reason for a paste to
+fail, and `a_layer_named_like_the_fence_still_crosses` pins it.
+
+**The payload is the document schema, and that is the decision this entry is really about.**
+`NodeDto::from_node`/`into_node` and `ImageDto::from_entry`/`into_entry` were lifted out of
+`DocumentDto::from_document`/`into_document`, which now call them; nothing about the file changed and
+`save_load_roundtrips` and `save_is_byte_deterministic_through_load` say so. A second projection
+beside `NodeDto` would have put D663's out-bound `clip` normalization, the opacity clamp, the
+stored-versus-effective `fill_rule` and the unusable-export-spec drop in **two places that nothing
+compares** — a field added to one and not the other compiles, saves and loads. So
+`a_clipboard_payload_round_trips_every_node_kind` is not *"a clip round-trips"* but *"a clip
+round-trips through the same DTO a file does"*, which is the claim worth having.
+
+**The version is checked for equality, not migrated**, which is the one place this deliberately
+differs from `io::load`. A file is an archive and has to open in a build written years later; a
+clipboard is a handoff between two processes running right now, and the honest answer to *"this came
+from a schema I do not know"* is to say so rather than to guess. The migration ladder stays where the
+archives are.
+
+🚨 **`io::clip::read` answers `Option<Result<Payload, IoError>>`, and the third answer is why it is
+not a `bool`.** `None` is *no fence, somebody else's*, and the caller's other arms get it.
+`Some(Err)` is *ours and unreadable*, which has to be **said** rather than fallen through on: falling
+through hands the payload to `paste_text_as_layer`, so the user asks for their layers back and gets a
+text layer holding several megabytes of their own JSON. `parse` also refuses an empty subtree, a
+subtree with other than exactly one root, and a duplicate image id. ⚠️ **The root check is
+deliberately here rather than left to `remap_subtree`**, which answers `None` for a malformed
+template and whose caller then *skips* it — so a payload with one bad subtree in five would paste
+four layers and report four, with nothing anywhere naming the one that vanished. A non-finite `from`
+box is dropped rather than carried, since it would sit in every comparison `paste_aim` makes and
+match none of them; the copy still pastes, at the fallback a copy with no box at all gets.
+
+**App side**: `enum Clipboard { Layers, Foreign, Unreadable }`, `OndinApp::take_clipboard` — the
+receipt asked first as a fast path, then the OS read, then adoption — and `OndinApp::adopt_clip_text`,
+which is that decision with the OS read lifted off it. **Split for the reason D805 split
+`pick_from_chain` off `pick_preview`**: `OndinApp::headless` sets `CLIPBOARD_OFF` (**D798**), so
+`system_clipboard_text` answers `None` to every probe and the layer arm is unreachable from a test
+through the outer door, while the decision is the half worth pinning. All four paste doors — `paste`,
+`paste_in_place`, `paste_at` and `paste_beside` — call `take_clipboard` where they called
+`owns_the_clipboard`, so the crossing is a property of the clipboard rather than of any one chord.
+⚠️ **The rule that makes that worth stating is D224's and not D218's**, which `take_clipboard`'s doc
+said until this entry was written: D218 *recorded* the opposite as an honest asymmetry — *Paste here*
+having no image arm — and **D224** is what closed it. D224 also records the one place the row and the
+chord **deliberately differ**, which is the *aim*: *Paste here* passes `Some(p)`, so the fill it
+replaces must be under the pointer. What must not differ is what the clipboard is found to **hold**,
+and that is what this change makes uniform.
+
+🚨 **Two things `roadmap.md`'s cost estimate got wrong, both in the cheap direction.** It read:
+*"what is missing is a serialization of it that is not `NodeDto`, which is `pub(crate)` to
+`ondin-core`, **and the id minting on the way back in**."* The id minting **did not exist as work at
+all** — `build::insert_subtrees` already remaps every captured subtree through
+`document::remap_subtree`, which mints fresh ids, refuses a template with more than one root and
+refuses one whose child is not in the set. And the serialization is **`NodeDto` itself**: the
+visibility was never the obstacle once the module lives in `ondin-core::io`, so the sentence
+prescribed the one shape the fix must not take. *A cost estimate that names a mechanism is a claim
+about the code, and this one had never been read against it* — which is that file's own standing
+warning arriving from the pleasant direction twice over.
+
+**Placement across windows needed nothing written for it either.** `paste_clipboard_at` puts a
+subtree back under the parent it was copied from *if this document has one*; ids are minted against a
+per-process-random actor (`session.rs`), so `Document::contains` answers no for a foreign parent and
+**D221**'s fallback — the canvas root, appended — is already the right behaviour. ⚠️ **The exception
+looks like a bug and is not**: the *same document* open in two windows does resolve, and the paste
+lands back in its own group, which is what someone doing that meant.
+
+**The pictures cross too.** `Payload::images` carries the table entries the subtrees key into, base64
+through `ImageDto`, because a node carries the key and the document carries the bytes — which is
+**D280**'s lesson, where a picture copied into another *document* arrived as the missing-picture
+placeholder and *Export original…* then blamed a link the app cannot author.
+
+⚠️ **`menu.rs`'s `can_paste` needed no fourth term, and that is a coincidence rather than a design.**
+A foreign copy arrives as *text*, so the `system_text` term already makes the *Paste* row live; what
+it is live **for** is layers, which is `take_clipboard`'s business and not that predicate's — the row
+says *Paste* either way. Said at the site as well as here, because if a payload ever crosses by a
+channel that is not text, that is the line that goes wrong.
+
+*(**Tests**: four in `ondin-core/tests/io.rs` —
+`a_clipboard_payload_round_trips_every_node_kind`,
+`a_clipboard_payload_carries_the_image_table_entries_it_keys_into`,
+`clipboard_text_is_foreign_ours_or_refused` and `a_layer_named_like_the_fence_still_crosses` — and
+three in `app::clipboard_crossing_tests`. Every one flip-checked, each test's doc naming its mutation
+and the site it came back red at, and all seven predicted sites were correct. ⚠️ **That app module
+states its own limit in as many words**: one process standing in for two, because no test here can
+put anything on the real OS clipboard or read it back; what is *not* asserted is that the OS carries
+the text between two processes, which is `arboard`'s job. ⚠️ **On a `write` failure `copy_selection`
+falls back to the names alone**, which is the pre-D823 behaviour — the crossing is lost and the
+in-app clipboard still works — and that arm is a fact about the function rather than about today's
+model, nothing in a well-formed document being able to make `write` fail. **D17's closing *Fix* is
+struck**; §5.11 gains the second reader and §9.4's clipboard paragraph the crossing. **The
+`roadmap.md` bullet is struck**, which with D824 leaves *Now · Canvas and interaction* with nothing
+open.)*
 
 **D227 — The missing-font warning gets its UI half, and the third state it needed first.
 *Built 2026-08-19.*** §5.4a carried this as a **gap rather than a decision** for as long as it was one,
@@ -11068,6 +11340,49 @@ a geometry write, `crop_resize_tx` going through `tools::resize_layer` (D320).
 deriving — but the axis above is the question to ask it. **Revisit if linking is ever authored**: the
 refusal that was deleted has to come back somewhere, and the two comments named above are its spec.*
 
+🚨 **Linking will not be authored in v1, decided 2026-09-19 (D819)**, so that *Revisit* has a date on
+it now rather than an open question behind it.
+
+**D819 — Linked images are a decided non-goal for v1, and `is_linked` stays with no production
+caller. *Ruled by the maintainer 2026-09-19; Resolved — a decided non-goal, and no production line
+changed.***
+
+The three Asset entries `roadmap.md` carried — *Embed*/*Link*, *Relink…*, and the document-wide
+*Embed all* for a file that arrives with dead links — all wait on **the same missing thing**: a
+gesture that **authors** a linked source. That is one dependency holding three rows, not a
+cheap-versus-expensive split, which is why they are decided together.
+
+**The dependency is exact.** `ImageSource::Linked` is constructed in exactly one place,
+`io/schema.rs`'s deserializer, and every app path onto a picture funnels through
+`app::load_image_bytes`, which builds `Embedded` unconditionally. So a hand-written or foreign
+`.ondin` **can** carry a link and the app will open it — the subject exists in the model and can be
+put in front of the user — and **nothing can make one**. ⚠️ **"One place" is about the *constructor*
+and not about the ways a link can reach you**: `build::missing_image_ops` copies an entry wholesale
+out of the document a paste came from, so a `Linked` entry can enter a document this app never
+deserialized. That does not change the verdict and it does change what the three rows would have to
+cope with.
+
+**D191** is the out-of-v1 image list this joins, and **D305** already withdrew *Export original…*
+the same way — so this is the second time a linked-image verb has been decided out rather than built,
+and the first one is where the reasoning is kept.
+
+🚨 **`is_linked` and the preserved reasoning stay, which is the half a future editor would tidy
+away.** `dead_code` cannot object — `ondin-core` is a library, so a `pub` item is API however many
+callers it has lost — and that silence is exactly why this entry has to say the keeping is
+deliberate. Three grounds: the subject exists in the model; a foreign document can put one in front
+of the app; and `tools::original_refusal`'s **three-state** answer — fine, linked, or an id the table
+does not hold — is kept as comments where that function stood. **Rebuild from those rather than
+re-deriving them**, and in particular *do not infer "linked" from absent bytes*: that inference is the
+bug **D280** is about, committed once already by two hand-rolled `bytes().is_some()` doors that told
+a user who had merely lost a picture that they were using linking.
+
+**Record-only, so the citation is planted by hand** on `ondin_core::image`'s `is_linked` — the place
+a reader meets the question *why does nothing call this*, and the one question no gate in this
+workspace can ask there.
+
+**The three rows move into `roadmap.md` §0** and the *Now · Images* open bullet is struck, leaving
+that section as the record of the v1 image build with nothing open.
+
 **D240 — `Node::from_parts` is deleted rather than given a parts struct, because two of its callers were
 already the parts struct. *Resolved.*** D41 recorded the constructor at eleven positional arguments and
 asked for a parts struct "before adding another bool, not after"; D60 re-recorded it at **thirteen**, three
@@ -11647,6 +11962,13 @@ not name (§15 D517, 2026-09-07). It is guarded by a **comparison** rather than 
 written unless the typed bytes differ from `hex_of` of the colour that is already there, which also
 closes the quantisation D517 is mostly about and which the valve alone would not have. So "one edit,
 one commit" holds at that field by a second mechanism, and D517 records the routing as still owed.
+⚠️ **One clause of this valve did reach it in the end, and it took a defect to find out which**
+(§15 D808, 2026-09-19): the field committed a typed colour on `Escape`, because `lost_focus()` alone
+cannot tell a cancel from a confirm, and so did three other chrome text fields. The `Escape` refusal is
+`ui::defocus_commits` now and all four call it. **The engagement latch still does not reach any of
+them, and is not meant to** — a text field has no per-keystroke value to smooth out, and a half-typed
+hex is a real colour, so the routing D517 left owing is answered with that sentence rather than with
+the valve.
 
 *Keep.* **Revisit if** a control ever genuinely wants a commit per keystroke; the answer is that it
 wants a **preview** per keystroke, which is what it now gets.
@@ -11905,6 +12227,106 @@ D302's: a gate written down in two places is two gates, and **a gate described m
 is a gate people stop checking behind**. `CLAUDE.md`'s doc-gate paragraph claimed `cargo doc` "resolves
 every `[`link`]` in every doc comment"; it now reads "every doc comment it can *see*" and carries the
 measurement.
+
+**D827 — Two of the hand-written checks standing in for gates could not return a hit, and one of them
+*confirmed* the thing it was written to falsify. *Both commands fixed 2026-09-22; Keep — resolved as
+to the two commands, open as to the class, and no sweep has been run.***
+
+This project keeps several checks that no gate performs, written down as shell commands in
+`CLAUDE.md`. **Two were found incapable of reporting a hit on any input whatever**, by the same
+mechanism, on the same day — and **both were found by *running* them, neither by reading them**,
+which is the part that decides what this entry is about.
+
+**The mechanism is one character.** In GNU grep's ERE a backslash before a backtick matches nothing:
+a backtick is not a metacharacter, so escaping it produces a pattern that can never match. Both
+commands escape it. Measured with controls rather than reasoned, GNU grep 3.0 in both cases.
+
+**Instance 1 — the doc gate's re-check, which goes quiet.** D319 above ends on a practice rather than
+a `Fix`, no flag closing the hole, and `CLAUDE.md` gave that practice a command: the diff-scoped grep
+a session runs over its own changes, looking for a new intra-doc link written inside a `#[cfg(test)]`
+module.
+
+```
+git diff <base>..HEAD -- crates/ | grep -E '^\+ *(///|//!).*\[\`'
+```
+
+Against the one-line fixture `+/// see [`Foo::bar`] for why`, **0 matches, exit 1** as written and
+**1 match, exit 0** with the backslash removed. Found by running it during a session's own re-check,
+getting nothing back from a diff known to contain new doc links, and then putting the two spellings
+side by side. **The consequence is a false negative that looks like a clean result**: the reader
+concludes *no new links to check*, which is what a healthy diff also produces.
+
+🚨 **Instance 2 — `review/`'s second reading, which agrees with the count it was written to
+contradict, and this is the one that costs.** That census has a trap that makes the closed-findings
+count read too **high**: a finding id mentioned in the *body* of a fix-log row is extracted as closed.
+The defence is a second extraction compared against the first — *"extract `^\| \`\[` as a second
+reading and compare"*. Against the fixture ``| `[S8.2-L1-01]` | High | fixed |``, **0 matches, exit 1**
+as written and **1 match, exit 0** unescaped.
+
+**Set the two consequences side by side, because they are different failures.** The first returns
+nothing and is *indistinguishable from* a tree with no defects. The second returns an empty **second
+reading**, which is then compared against the first and reads as *"no fix-log row names a finding in
+its body"* — so the inert command does not merely fail to falsify the census, it **confirms** it. A
+check written specifically to catch a count reading high, silently agreeing with the high count. *A
+broken check that goes quiet wastes a reading; a broken check that answers in the shape of a
+corroboration is worth less than no check at all, because it is spent as evidence.*
+
+**This is D732's shape twice**, and the advice that came out of that entry is the advice these two
+were there to be caught by: *when a claim comes with a command, read the command against the claim,
+not just its output.* 🚨 **Reading is exactly what failed here, twice — the patterns look right.**
+`'^\+ *(///|//!).*\[\`'` reads as a careful author escaping everything that might be special, and
+that is the reason it survived: the defect is invisible to the sort of attention that catches a wrong
+anchor or a missing `-r`. **What found both was running them against a fixture that should match.**
+So the advice needs its second half: *a command you cannot falsify by reading, control.* One line
+each, and both took under a minute.
+
+🚨 **One tell was on the page the whole time and was never read as one.** The doc-gate grep was
+credited with **a catch per session for six sessions running**. Either those catches came from
+somewhere else, or the command was typed differently each time it was run. **Which of the two is not
+recoverable**, and this entry says so rather than guessing: the sessions are not at a resolvable sha
+(the reset of 2026-09-16), and a grep leaves no trace of the spelling it was invoked with. What *is*
+certain is that the **written** command has never been capable of the catches attributed to it — so
+the claim and the command were two different things, and only the claim was ever checked. *A run
+record is evidence about the command only if the command is what was run.*
+
+⚠️ **The correct spelling was already in the tree, in D319 above.** That entry's own count of the
+integration tests' links is `find crates -path "*/tests/*" -name "*.rs" | xargs grep -nE '^ *//[/!].*\[`'`
+— `\[` and then a **bare** backtick, which works. So one check existed twice, once correctly and once
+incapably, and the incapable copy was the one in the file everybody reads. *A gate written down in two
+places is two gates*, which is D302's sentence and D319's closing one, arriving from the direction
+where the two copies **disagree about whether the check runs at all**.
+
+⚠️ **Fixing the commands buys no gate, which is why this is *Keep*.** `cargo doc` still cannot see a
+`#[cfg(test)]` module (D319); `review/`'s census is still hand-run; both corrected greps are still
+habits somebody has to remember; and D319's zero-dangling-links figure is an invariant kept by
+reading. The corrected doc grep also asks only half its question: a `#[cfg(test)]` **item** at module
+level — not inside a `mod tests` — is absent from rustdoc's crate by exactly D319's mechanism while
+sitting outside every hand-rolled check that looks for the module. *Ask whether the item is
+`cfg(test)`, not whether it is inside a test module.*
+
+🚨 ***Fix:* no sweep has been run, and the honest state is two found out of an unknown population.**
+What was checked is the commands this session had reason to touch, plus the `review/` one. `CLAUDE.md`
+carries many more — greps, `awk` programs, `comm` pipelines, the citation census, the `///`-run length
+ranking — and **not one of the rest has been controlled.** Every count and every clean reading this
+project has ever taken from an uncontrolled command is worth exactly as much as the command was
+capable of. **Run each of them against a fixture that must match, and against one that must not.**
+Two of two checked came back dead; that is not a base rate, but it is not a reason to assume the rest
+are alive either.
+
+⚠️ **A third command was found misreading its output the same day, and it fails the opposite way** —
+worth recording beside these because it completes the picture. The citation census run in its wide
+form from the repository root over `.` picks up `target/debug/build/…/category.rs`, generated
+`unicode-general-category` tables, and reports **`D00` and `D000`** in the unresolved half: two false
+positives that read exactly like a citation with no entry behind it. Run it from `crates/`, or with
+`--exclude-dir=target`. **So one command could not report a hit, one reported an absence as a
+corroboration, and one reported hits that were not citations — and all three outputs were plausible.**
+None of the three is falsifiable by looking at what it printed.
+
+*(Record-only, no production line changed. **The citation is planted by hand** on
+`app::CLIPBOARD_OFF`, the one doc in the tree that narrates a doc-gate catch and the neighbour of
+D798's note on the D319 convention — which is where a reader meets the question *what catches the
+other kind*. The answer, at that site and here, is **nothing does**, and until the sweep above is run
+nobody knows how much of what stands in for it works.)*
 
 **D320 — A crop is a resize, so the lock reaches it: image editing refuses on a locked layer, and the
 row dims *because* the mode refuses. *Decided, built and tested both ways. Keep — read the ordering
@@ -18946,7 +19368,65 @@ change and a fourth was found here —
 `Css::declaration`'s doc closed *"every selector here has exactly one"*, a claim about components
 that this entry makes false. **The *Now · SVG import* bullet is struck from `roadmap.md`** and the
 *CSS combinators* clause in that section's table row with it; `<foreignObject>` and the rejoined
-paragraph are what the row has left)*
+paragraph are what the row has left — **and `<foreignObject>` left it the same day as a decided
+non-goal, D813**, so the rejoined paragraph is the whole of what remains)*
+
+**D813 — `<foreignObject>` is a decided non-goal, and the words are said at last. *Ruled by the
+maintainer 2026-09-19; Resolved — a decided non-goal, and no production line changed.***
+
+`roadmap.md` carried this as an open SVG-import item whose own text said it should not be one: it
+*"sits here rather than in §0 only because no one has said the words"*, a state it was audited into
+on 2026-09-03 (**D411**) and then left in for sixteen days.
+
+**The words are said.** `<foreignObject>` is HTML inside an SVG, nothing in this model draws HTML,
+and there is no version of it to build — not a smaller one, not a partial one. It is not a feature
+held up by a dependency, which is the state most of that section's remaining items are in.
+
+It is **reported like any other unread element**, so `svg_in`'s *"nothing is lost silently"* contract
+already covers it and always did. That is worth stating, because the contract is the reason this can
+be a non-goal rather than a gap: a file carrying one is not quietly mangled, it is told about.
+
+**Record-only, so the citation is planted by hand** on `svg_in`'s module head, in the
+`Import::skipped` list — the one place a reader meets the question *why does this element not come
+in*. ⚠️ **It moves into `roadmap.md` §0 as well as being struck from *Now · SVG import***, which is
+what §0 is for: an item that sat for sixteen days one sentence short of a decision is exactly the
+thing that ledger exists to stop being re-argued. With this and D806 gone, that section has the
+rejoined paragraph and nothing else. *That went three days later — **D826**, below — and the section
+is empty.*
+
+**D826 — Rejoining a multi-line paragraph on SVG import is a decided non-goal for v1. *Ruled by the
+maintainer 2026-09-22; Resolved — a decided non-goal, and the last item in its section.***
+
+A multi-line text layer of ours exports as one `<text>` per line (D81) and comes back as one layer
+per line, because nothing in the markup says they were one node. `svg_in`'s `text_node` has argued
+for as long as it has existed that this is **a real loss rather than an oversight** — the writer put
+each line at a baseline the canvas computed, and rejoining them means **inventing the line height**
+that decides where every line after the first sits.
+
+🚨 **The refusal is about what the only available signal actually identifies.** Same `x`, a constant
+`y` step and a matching resolved style is not evidence of a paragraph: it is *also* exactly what a
+stack of separate labels in a foreign file looks like — a legend, a table column, a set of axis
+ticks. So the heuristic welds unrelated layers into one text node, and the user has no way to say
+which reading was meant. *An importer that guesses wrong here destroys structure the file did have,
+to recover structure it never recorded*, which is the wrong side of `svg_in`'s standing bargain.
+
+⚠️ **And the case it would have been worth most for is answered elsewhere.** The paragraph a user
+most wants back whole is one of *their own*, and since **D823** a copy crossing between two `ondin`
+windows carries real nodes — paragraph and all — through `io::clip` rather than through markup. What
+is left here is the foreign file, which never had the structure to lose. *The round trip closes for
+the picture and not for the paragraph, and that sentence is now the end of an argument rather than
+the start of one.*
+
+Nothing else about the element is open: a positioned `<tspan x y>` already starts a new layer and a
+bare one joins the text, pinned by `a_positioned_tspan_starts_a_new_layer_and_a_bare_one_does_not`,
+and a `<tspan>`'s own style is read as character spans (D396, D398). The loss is reported like every
+other, so `svg_in`'s *"nothing is lost silently"* contract covers this as it covers `<foreignObject>`
+above — which is the reason both can be non-goals rather than gaps.
+
+*(Record-only, no production line changed; **the citation is planted by hand** on `svg_in`'s
+`text_node`, in the run that already argued the loss was real, because that paragraph is where a
+reader meets the question. **It moves into `roadmap.md` §0** and is struck from *Now · SVG import* —
+which D813 had already reduced to this one item, so **that section now has nothing open**.)*
 
 **D395 — A blur is rasterized coarser the further in you zoom, because its cost is otherwise
 unbounded. *Fixed and tested 2026-09-01; Keep, with a second timeout recorded and not fixed.***
@@ -19326,6 +19806,41 @@ on.
 since it wants the same table — because what is left after that is a dictionary and a retry loop, and
 the decision is then worth re-taking rather than inheriting. `roadmap.md` §0 carries the decision and
 `text::break_lines` carries a pointer here, on the loop the retry would go in.
+
+**D825 — Tab stops, columns and widow/orphan control are decided non-goals for v1, and justify-all is
+emphatically not one. *Ruled by the maintainer 2026-09-22; Resolved — three non-goals and one parked
+item, out of what had been one word over four different situations.***
+
+`roadmap.md`'s *Now · Text* carried these as *"the four deferred features"*, which is exactly the
+shape D399 above had to spend a day correcting one item at a time. **What the three share is the
+opposite of a wall: not one of them is short of a dependency.** Widow/orphan control is a second pass
+over the lines `text::break_lines` yields. Tab stops are a layer over `Whitespace::Tab`, which parley
+classifies and does not lay out. Columns are a change to what a paragraph's box *is*, above that
+function entirely. Each is a build of our own that nobody has asked for, and each was being carried
+as though something outside the project were holding it up.
+
+⚠️ **Justify-all is the exception and is not on the list.** It is blocked **upstream**: parley's
+`align_impl` hard-codes skipping `BreakReason::None | Explicit`, and `align`, `LayoutData` and
+`ClusterData::advance` are every one of them `pub(crate)` — the measurement D399 made from the other
+side while pricing the hyphen's retry, and the reason that entry could say *"line breaking has to
+change a line's measure, for which it does"* while justify-all cannot. Its trigger is therefore a
+**patch upstream**, not a decision here, and it goes to *Later · Parked decisions* rather than to §0.
+`roadmap.md` already files it *"beside the flo_curves comparator rather than beside hyphenation"*,
+and this entry is what stops the distinction being lost the next time the four are summarised
+together.
+
+🚨 **That is the whole point of splitting them, and the file's own history says so.** One word —
+*deferred* — stood over a price, a build nobody wants, and an upstream wall, and a sentence like that
+gets re-derived as a blocker: *"all six dependencies are still genuinely absent"* covered six
+different situations and was true of **none** of them, which is what D399 found and what took a day.
+A decided non-goal and a parked upstream gap have different triggers and belong in different lists;
+filing them together is what lets one inherit the other's excuse.
+
+*(Record-only, no production line changed; **the citation is planted by hand** on
+`text::break_lines`, beside D399's hyphenation note, which is where a reader meets the question of
+what this loop is not being asked to do. **The three move into `roadmap.md` §0** and justify-all to
+*Later · Parked decisions*, leaving that section with the MCP snapshot's paragraph scope — parked
+with MCP — and D171's watch-note, which is a note rather than work.)*
 
 **D400 — A frame's fill is its fill list, exactly like every other painted layer's. *Built and tested
 2026-09-01; Keep.***
@@ -30034,10 +30549,98 @@ settings* modal, and so do rollback and a *re-run the migration* button. The mod
 round"* — is an argument for a retry the UI does not offer, and the retry that exists today is a
 three-step dance back through Settings whose middle step looks like the operation that lost the
 files. That is a `roadmap.md` bullet under *Now · Files, library and storage* rather than a verdict
-here.
+here. ⚠️ **Two of those three were built on 2026-09-19 and this hand-off now names one thing** — the
+list and the retry are D810's; **rollback alone is still the maintainer's**, and it is a decision
+rather than work.
 
 §9.5 amended, where the migration paragraph described the map the session is re-pointed through and
 said nothing about what happens to a file that does not go.
+
+**D810 — A partly-failed migration had no way back and no list. *Fixed and tested 2026-09-19; Keep —
+two of the three asks, and the third is still a decision.***
+
+D620 gave `Moved::failed` the names of everything that stayed behind and put the **first** of them in
+the status line, then handed the rest to the maintainer as three separable asks: the full list in the
+*Library settings* modal, a *re-run the migration* button, and rollback. **The first two are built.
+Rollback is not and stays open**, because `relocate` deliberately overwrites nothing, so "undo" means
+deciding what to do with everything that *did* arrive — which is a decision rather than a fix, and is
+what is left in `roadmap.md`.
+
+`OndinApp::stranded: Option<panels::dashboard::Stranded>` holds `{ from, to, failed }` after a migration
+that left anything behind, and is assigned in **both** directions so that a clean run *clears* a
+previous one's report and the modal cannot go on offering to retry a move that has already finished.
+**Session state and not a preference**: the files are the record, and a stranded list in `prefs.json`
+would be a second copy of a fact the filesystem holds. It is deliberately not a `Moved` — that type is
+the whole of what a migration did, including the path map a caller re-points an open document through,
+and what has to survive the operation is the part nobody can reconstruct afterwards.
+
+The modal draws it under the migrate switch: a warning line with the count, the old folder's path, up
+to `STRANDED_ROWS` = **6** filenames, an *"…and N more"*, and a *Try again* button. It sits below the
+switch rather than beside it because the switch is a question about the *next* move and this is the
+report on the last one. ⚠️ **Six is a bound on the modal's height and not a judgement about how many
+names are useful.** That card has no scroll area and a partly-failed migration can strand every document
+in the library, so an uncapped list takes *Save changes* off the bottom of the window. The folder above
+is what the user opens; the names are what to look for in it.
+
+`OndinApp::retry_migration` re-runs `relocate(from, to)`. **It is not idempotent and does not need to
+be**: a successful move deletes its source, so the second walk meets only what was left behind, and what
+fails again fails for the same reason — a name already taken at the destination is `Collision::Stranded`'s
+case and stays stranded however many times it is asked. This is the run the module's own defence already
+assumed was reachable — *"a migration run twice leaves duplicates rather than being idempotent, which is
+the right way round"* — where until now the only route was a three-step dance back through Settings
+**whose middle step looks exactly like the operation that lost the files**.
+
+The re-point loop that was inline in `apply_library_settings` is `OndinApp::follow_moved_documents` now,
+because a retry is a second migration and owes everything the first one did; D430's whole argument — the
+forked open document, the map rather than a prefix swap, `prefs.last_document` — moved onto the function
+with it. ⚠️ **The retry is answered *after* the Save/Cancel match**, so it cannot race a base-folder
+change: both touch the library and `apply_library_settings` is the one that may **re-point** it, so
+running the retry first would move files into a root the next line is about to change. Cancel takes the
+draft away and leaves the report standing, which is right — the files are still stranded whatever the
+user did with the card.
+
+**Test `panels::dashboard::tests::a_partly_failed_migration_is_listed_and_can_be_run_again`**, driving
+the real modal and reading the list out of `galleys`. Asserting it on a `String` instead would be D426's
+own bug: 22 status messages went into a slot nothing drew for two months while every test that read the
+slot passed. 🚨 **Two flips, and the second is the finding.** Dropping the `stranded` assignment fails at
+the report, predicted. **Dropping `retry_migration`'s `library.refresh()` left every assertion green on
+the first reading** — the retry's effect on the dashboard *behind* the modal was untested — which is what
+the `library.entries` assertion was added for. *A flip that does not bite is where the coverage gap is,
+not a failed experiment.*
+
+§9.5's *"there is no retry and no rollback to offer instead"* sentence is amended.
+
+🚨 **Rollback was refused the same day (D814), so this entry's *"stays open"* is discharged** and the
+three asks are closed as two built and one decided.
+
+**D814 — A library migration has no rollback, by decision, and the retry is the recovery. *Ruled by
+the maintainer 2026-09-19; Resolved — a decided non-goal, and no production line changed.***
+
+D620 handed over three asks and D810 built two. The third is refused, and the reason is that it is
+not the operation it sounds like.
+
+**`relocate` deliberately overwrites nothing, so "undo" is not the reverse of a known operation.** It
+is a fresh decision about everything that *did* arrive — a document already sitting at the
+destination, a `.versions` tree merged into another library's, and worst of all a `.trash` file
+renamed on the way in by `Collision::Rename`, which no longer carries the name it left under and is
+therefore indistinguishable from a document that was always there. A rollback would have to guess,
+per file, and a wrong guess deletes work.
+
+⚠️ **And a reverse migration can itself partly fail**, which leaves a second and worse partial state
+with nothing to offer after it. The thing being asked for is a recovery, and a recovery that can
+strand files is not one.
+
+**What the ask was really about is reachable now.** The retry moves in the **migration's own
+direction** over whatever is still in the old folder, and D810 made it a button on the card that
+reports the failure — where until then the only route was a three-step dance back through Settings
+whose middle step looks exactly like the operation that lost the files. ⚠️ **Do not read the retry
+as half a rollback**: nothing in the app moves anything back, and that sentence is kept on
+`relocate`'s module head rather than only here.
+
+**Record-only, so the citation is planted by hand** on `library::relocate`'s module head, beside the
+*"a migration run twice leaves duplicates rather than being idempotent, which is the right way
+round"* note — which is this same argument seen from the forward direction, and the place a reader
+meets the question.
 
 ---
 
@@ -30085,6 +30688,65 @@ filed under** — worth expecting, because the prediction reads the *claim* and 
 list.
 
 §9.5 amended, where the paragraph on `load_from`/`save_to` implied that pair was the whole mitigation.
+⚠️ **The hand-off above was answered on 2026-09-19 and this paragraph is the one it corrects** — see
+D807, which is the injection point, and note that it is none of the four shapes this entry and
+`roadmap.md` between them proposed.
+
+**D807 — The per-machine index had no injection point, so the suite edited the developer's own
+*Recent searches*. *Fixed and tested 2026-09-19; Keep — a `cfg!`, because there is no constructor here
+that can be trusted to set a flag.***
+
+D619 recorded this as a side effect rather than fixing it and left the *where* to the maintainer.
+**It was established rather than reasoned.** `%LOCALAPPDATA%\ondin\library.json` on the maintainer's
+machine held `recent_searches: ["alp", "d", "alpha", "gamma", "beta"]` — the fixture strings of
+`panels::dashboard`'s `a_remembered_search_is_deduped_promoted_capped_and_shown`, and nothing else —
+with an mtime from a suite run earlier the same day. The `app()` fixture redirects the **base folder**,
+which is a different knob, so anything driving an `OndinApp` reached the real file.
+
+`library::cache::index_is_reachable()` answers `!cfg!(test)`; `LocalIndex::load` returns
+`Self::default()` and `LocalIndex::save` returns, each on its **first line**, when it is false.
+`load_from`/`save_to` are untouched and stay past the guard.
+
+🚨 **`roadmap.md` named four possible answers and none of them was taken, which is the half worth
+recording.** It called `prefs::Prefs::ephemeral` — a `#[serde(skip)]` flag `OndinApp::headless` sets and
+`Prefs::save` reads before anything touches the filesystem — *"the cheapest of the four"*. It does not
+work here, and the reason is `library::state::Library::open`: `Prefs` is built **once**, by the one
+constructor that knows a test's app is different, whereas the index is rebuilt by `Library::open`, which
+tests call **directly, after building the app** — `app.library = Library::open(root)` at two sites, in
+`app.rs` and in `panels/dashboard.rs` — so a field the constructor set would be silently discarded by
+the very fixture that needs it. A process-wide flag stored by `headless` (D798's `CLIPBOARD_OFF`
+spelling) fails one step further out: every `Library::open` in `library::state`'s own tests would go on
+reading the machine's file until some *other* test in the binary happened to build an app first.
+**A `cfg!` has no door to forget.**
+
+🚨 **Why a profile-dependent guard is allowed here and was refused for the other two resources in the
+class.** `load` and `save` hold no behaviour beyond resolving `path()` — the three-way read, the
+`unreadable` write latch and the round trip are all in `load_from`/`save_to`, which take a path and are
+asserted. That is not true of `Prefs`, whose latch test drives `save_to`, and it is emphatically not
+true of the clipboard: `clipboard_gate_tests` has to open a **real** `arboard` handle to prove D796's
+lock holds under eight threads, which is exactly why D798's refusal sits in the four callers and not
+inside `with_clipboard`. *The question to ask of a `cfg!` is what it costs in coverage, and here the
+answer is nothing.*
+
+**Test `library::cache::tests::the_machines_own_index_is_unreachable_from_a_test`**, which asserts the
+guard **and then** the one consequence observable without writing — `a_headless_app_cannot_reach_the_clipboard`'s
+order, and it matters for the same reason. Flip-checked by deleting the `if !index_is_reachable()` from
+`load`: red on the second assertion with `["alp", "d", "alpha", "gamma", "beta"]` against `[]`, which is
+the reported symptom itself rather than a stand-in for it. ⚠️ **The `save` half cannot be caught by any
+test** — the only thing that would observe it is a write nobody may perform — so deleting *that* guard
+leaves the test green by construction, and that half rests on the first assertion and on the `cfg!`.
+⚠️ **The second assertion can false-*pass* and never false-fail**: on a fresh runner with no file an
+unguarded `load` answers `Default` too, which is the other reason the flag is asserted directly.
+
+Two test sites had their reasoning corrected rather than their behaviour.
+`a_remembered_search_is_deduped_promoted_capped_and_shown` **asserts** the empty list where it used to
+clear it, and `a_missing_library_folder_says_so_instead_of_reading_as_empty` dropped its
+`LocalIndex::default()` overwrite; its `mark_opened` is still the fixture. *An assertion is what a
+cleared list should always have been — clearing it says the suite expects contamination and works
+around it.*
+
+§9.5's *"an injection point for the local index is open work"* paragraph is amended, and the bullet is
+struck from `roadmap.md` with the clause in that section's table row.
 
 **D618 — Two of the library's destructive modals, on screen for the first time.
 *Fixed and tested 2026-09-09; Fix — the sentence and the switch, asserted where the eye reads them.***
@@ -30404,15 +31066,18 @@ it splits into `Cover::Unreadable` / `Cover::Blank` behind a private `NoCover`, 
 `Covers::unreadable(entry)` is a map lookup on the key `get` already built, with no parsing of its
 own — everything that reads it is drawing. `mark_of` asks `entry.unread || covers.unreadable(entry)`
 and **neither alone is sufficient**: the flag carries the early passes, because the cover cache is
-lazy and per-pass budgeted, so a document whose cover has not been attempted yet answers `false`.
-`get` requests a repaint, so late arrives.
+lazy — and per-pass budgeted until **D820** moved the render onto a thread — so a document whose
+cover has not come back yet answers `false`. `get` requests a repaint, so late arrives.
 
 Two tests, and neither is the other.
 `cover::a_document_the_loader_refuses_is_unreadable_where_an_empty_one_is_merely_blank` asserts the
 *fact*, on a **version bump** rather than a cut, since a cut is the case that was already caught;
 `dashboard::a_document_this_build_cannot_open_wears_the_mark_and_a_healthy_one_does_not` asserts the
 *drawing*, in both views, with a healthy document in the same library as the control and two passes
-pumped for the cover cache's laziness. `an_empty_document_has_no_cover` was strengthened from
+pumped for the cover cache's laziness. 🚨 **Those two passes became a *race* on 2026-09-19 and this
+test flaked 2 runs in 20** — with the render on a thread, "the next pass" stopped being a fact — so
+it calls `Covers::settle` before asserting now; **D820** has the mechanism and why six clean runs
+were not evidence. `an_empty_document_has_no_cover` was strengthened from
 `is_none()` to `Some(NoCover::Blank)` — **it could not have told the two failures apart**, which is
 exactly why an empty document used to get the same answer as a corrupt one. All flips run and bite
 at their predicted sites; dropping `covers.unreadable` from `mark_of` fails at 0 marks against 1,
@@ -30421,7 +31086,29 @@ which is the half the scan flag cannot see.
 ⚠️ **Left undone deliberately**: the finding also asks for a disabled or warning-styled *Open* row.
 That is a behaviour decision rather than a drawing one, the mark plus the existing status line
 already say it, and refusing to open a file the user may want to inspect or repair is not obviously
-right. **The maintainer's call.**
+right. **The maintainer's call**, and it was taken on 2026-09-19 — **neither**, D818.
+
+**D818 — An `UNREADABLE` card keeps its *Open*, and the reason is which file actually arrives.
+*Ruled by the maintainer 2026-09-19; Resolved — a decided non-goal, and no production line
+changed.***
+
+D613 built the mark and closed by handing this over: whether *Open* should be **disabled** or
+**warning-styled** on such a card. The answer is neither, on two grounds.
+
+**The mark and the status line already say the file will not load**, so a refusal at the click is a
+third statement of one fact — and the one statement that also takes something away. D613's own
+colour argument is the same shape from the other end: red was chosen there *because* the thing being
+warned about is the click, which only works if the click remains the user's to make.
+
+🚨 **And the case that actually reaches a synced library is a document written by a *newer build*** —
+D613 established that as the gap the scan flag could not see: one number changed, structurally
+perfect, refused by `migrate`'s version guard. Such a file is not corrupt; it is **ahead of this
+build**. Refusing to open a document the user may want to inspect, or may be about to update the app
+for, is the wrong way round. The mark warns, and the click stays theirs.
+
+**Record-only, so the citation is planted by hand** on `panels::dashboard::Mark::Unreadable` — the
+variant a reader meets the question at, and the one place the decision would otherwise be invisible
+to the census. *Nothing in the code changed, which is the whole of the ruling.*
 
 §9.5 amended; `roadmap.md`'s *"`scan::Entry::unread` has no production consumer"* entry is struck,
 its two answers having been "a mark on the card" and "remove the field" and the first one having
@@ -35674,10 +36361,20 @@ it at all"* was never the alternative. A drag enters the valve as the engaged ar
 the falling edge — arms the other two valves already have — and on the frames this route does enter
 it, `changed()` is **false**, a raw sensed region being written through `write_stop_colour` and marked
 changed by nothing. **This entry's own verdict stands**: the commit condition is fixed and tested, and
-that is what the entry is titled for. What does not stand is the reason the third arm was kept, and
-D802 is where the arm's fate is open.
+that is what the entry is titled for. What does not stand is the reason the third arm was kept.
 
-⚠️ **That arm needs `&& !resp.lost_focus()`, and the test measured why.** A `DragValue` reports
+🚨 **And the arm itself is gone as of 2026-09-19 (D812).** D803 found its one real user — egui's own
+clamp of a stored value outside a *ranged* field, committing an edit nobody made — and the read that
+settled it is that all seven call sites are engagement-bearing while both `DragValue` helpers opt out
+of that clamp (D425, D552), so it had no live user at all. **The two paragraphs above are kept as the
+record of what was believed and why**, which is the whole shape of this entry: an arm kept for a
+route that did not exist, deleted eleven days later once somebody wrote the test.
+
+⚠️ **The `&& !resp.lost_focus()` argument below went with the arm and is kept for one reason** — it
+is the clearest statement in this file of how a `DragValue` reports `lost_focus()` on **two**
+consecutive frames, which the surviving two arms still depend on.
+
+⚠️ **That arm needed `&& !resp.lost_focus()`, and the test measured why.** A `DragValue` reports
 `lost_focus()` on **two** consecutive frames and writes its parsed edit string back on the *second*
 of them. Without the guard the falling edge refuses an `Escape` on the first frame and the third arm
 commits the abandoned number on the next one — `escape_abandons_a_typed_font_size` read **40** where
@@ -35785,6 +36482,13 @@ already closes — and *keep it* is keeping a route whose only known user someth
 shut. ⚠️ Two of the seven call sites are measured now, so *only known user* is still the honest
 phrase. **Still the maintainer's ruling, and still nothing changed to pre-empt it.**
 
+🚨 **Ruled 2026-09-19: the arm is deleted (D812).** What decided it was neither of the two
+measurements but a **read** of the remaining five call sites — all seven are engagement-bearing, and
+both `DragValue` helpers opt out of egui's clamp (D425, **D552**), so the arm had no live user of any
+kind. *"Seven call sites, two measured"* is seven read, and the *only known user* hedge above is
+discharged. The argument that settled it is the asymmetry: a caller that needed the arm fails loudly,
+keeping it fails silently.
+
 ⚠️ **Two fixture facts, both found the hard way, and the first is why this took a sweep.** A text node
 selected is not enough: `PaintSlot::TextColor` **orphans the picker** unless `type_menu` is on the
 Character tab, because the slot is only *shown* there and `picker_ui`'s orphan match is doing exactly
@@ -35800,9 +36504,10 @@ What landed is `picker::text_colour_route_tests::a_click_on_the_picker_writes_a_
 an end-to-end test of the route that *is* taken and had no test either: a click at the measured
 coordinate on a real picker writes the text layer's colour, and it is **one** undo step rather than a
 preview left on the floor. D523's third-arm paragraphs and its index row are amended rather than left
-standing, and §9.3's copy of them with it. `roadmap.md`'s bullet is **re-scoped rather than struck** —
-the test it asked for is written; the question under it is open — and the *Now · Inspector* table row
-that called this *"the one the picker's raw sensed regions need"* is corrected with it.
+standing, and §9.3's copy of them with it. `roadmap.md`'s bullet was **re-scoped rather than struck**
+— the test it asked for is written; the question under it was open — and the *Now · Inspector* table
+row that called this *"the one the picker's raw sensed regions need"* is corrected with it. **Both
+are struck outright on 2026-09-19 by D812**, which takes the ruling.
 
 **D522 — One drop of N image files was N undo steps. *Fixed and tested 2026-09-07; Fix — a
 transaction-returning half of `create_image_at`, and a document advanced as the batch is built.***
@@ -36209,6 +36914,107 @@ arriving through the harness rather than through the data.
 `[0.5019608, 0.2509804, 0.1254902, 1.0]` against `[0.5, 0.25, 0.125, 1.0]` — the predicted site. With
 that assertion disabled and the flip re-run, it fails on the undo step at 1 against 0, so both halves
 have teeth.
+
+🚨 **The *"nothing measured left to fix"* above was wrong, and D808 is what was left.** Nobody had
+pressed `Escape` at this field. The routing question is answered there — with a sentence, which is the
+half of `[S14.4-L1-04]` this entry left owing — and the defect found on the way is not the hex field's
+alone.
+
+**D808 — `Escape` committed a typed value at four chrome text fields. *Fixed and tested 2026-09-19;
+Keep — the rule is one function now, and the valve is still not the answer for the hex field.***
+
+Measured on the real `inspector::paint_hex_field` with a `RawInput`-driven probe: click in, type
+`336699` over a fill of `[0.5, 0.25, 0.125, 1.0]`, press `Escape` — the colour became
+`[0.2, 0.4, 0.6, 1.0]` and `undo_depth` went to 1. **egui does not revert a `TextEdit` on `Escape`**; it
+hands back what was typed and merely surrenders focus, so a condition built from `resp.lost_focus()`
+alone reads a cancel as a confirm. The key that cancels a gesture everywhere else in the app *applied*
+the edit, and spent an undo step doing it.
+
+**The rule already existed twice in the app and was broken at four sites beside it.**
+`app::OndinApp::edit_valve` carries it for every *numeric* field — the `!key_pressed(Escape)` on the
+falling edge of D316's engagement latch, put there by **D315** and ordered against the cancel by
+**D317** — and `panels::dashboard`'s rename field carries it as an arm further up. The four that did
+not: `inspector::paint_hex_field`, the inspector's layer-name field, `inspector::dash_list_field` and
+`panels::export`'s prefix and suffix fields. `ui::defocus_commits(resp)` is
+`resp.lost_focus() && !resp.ctx.input(|i| i.key_pressed(egui::Key::Escape))`, called at all four. The
+buffer is still dropped on every way out; only the **write** is declined, or a half-typed name would
+reappear on the next click into the field.
+
+⚠️ **It reads the key rather than the focus, and those are not the same question.** `Escape` clears
+egui's focus in `Memory::begin_pass`, so the frame a field reports `lost_focus()` is the frame the press
+is still in `input` — which is D317's finding arriving from the other end. Asking `has_focus()`, or
+looking at the next frame, answers nothing: by then the key is gone and the two ways out of a field are
+indistinguishable.
+
+**Why the valve is still not the answer for the hex field, which is the half `[S14.4-L1-04]` actually
+asked for.** That finding wanted `paint_hex_field` routed through `edit_valve` *or* a sentence saying
+why not, and the sentence is this: **a valve previews while the control is engaged, and a half-typed hex
+is a colour.** `ui::parse_hex` accepts three digits, so `6D8CD9` passes through `6D8` — `#66DD88`, a
+real green — and a valved field would put that on the canvas on the way to the blue. The buffer exists
+precisely so that nothing between the first keystroke and the last is a value, which leaves the valve
+with nothing to preview and exactly one sentence to lend. That sentence is `defocus_commits`, and it is
+now shared rather than owed.
+
+**Test `inspector::paint_hex_field_tests::escape_abandons_a_typed_hex_instead_of_committing_it`**,
+sharing a driver with `a_bare_click_through_the_hex_field_changes_nothing`; the driver gained an `exit`
+key parameter. ⚠️ **`Enter` is the control and it is not decoration.** The two keys leave the field by
+the same door, so a fix reading *"did a key take the focus away"* would refuse both, and the only thing
+that notices is an assertion that the ordinary way out still writes. Flip-checked by dropping the second
+term from `defocus_commits`: red on the colour at `[0.20000002, 0.40000004, 0.6, 1.0]` against
+`[0.5, 0.25, 0.125, 1.0]`, the predicted site, with the undo assertion under it good for the same catch
+at 1 against 0. ⚠️ **One test covers all four callers because the rule is in the function and not at
+them.** The three other sites have no `Escape` assertion and are **not** meant to grow one; what they
+owe is to call this rather than to re-spell it.
+
+⚠️ **§9.3's list of the five lines exempted from `valve_condition_gate` said a text field *"genuinely
+does end on losing focus"*, and that is now half a truth**: it ends, and it does not necessarily
+commit. Amended there, at the dash field's own exemption comment, and in §9.4's hex-field and
+dash-list paragraphs. The gate itself is untouched and still right — the two terms it looks for sit in
+two different conditions at each of these fields, which is a fact about where the buffer is stashed and
+not about what commits.
+
+🚨 **The probe written for this entry then turned up a second defect at the same seam (D821)**: the
+key that no longer commits was still paying out a rung of the `Escape` ladder underneath the field.
+Read the two together — this one stops the write, that one stops the press.
+
+**D821 — `Escape` is spent on a chrome field that has just lost focus, and the rung goes *below*
+`cancel_gesture`. *Found and fixed 2026-09-19; Keep.***
+
+Measured with D808's probe: with a `TextEdit` focused, `input::resolve` answers `[Escape]`. egui
+clears focus in `Memory::begin_pass`, so the press is still in `input` when the keymap runs — **D317**'s
+own reading, and the thing that makes a *valved* field's cancel reach `cancel_gesture` at all.
+
+**A plain `TextEdit` installs no preview, so the ladder fell straight through it.** Renaming a layer
+in the inspector and pressing `Escape` abandoned the rename **and cleared the selection** — the
+ladder's last rung — under the panel that was showing it. One press, two things, and the second was
+not asked for. This is **D527**'s rule (*a press that dismisses a floating thing is spent on it*)
+reaching the one family of control nobody had counted as floating.
+
+A new rung in `OndinApp::escape` answers it, on `OndinApp::chrome_focus`.
+
+🚨 **Below `cancel_gesture` and not above it, which is the whole of the placement.** A numeric
+field's cancel has to go on reaching that function, because `cancel_gesture` is what sets
+`gesture_cancelled` and stops the release committing after all (D317). Put the new rung above it and
+every valved field silently starts committing what `Escape` was meant to abandon — the defect D315
+and D317 exist to prevent, reintroduced by a fix for its neighbour. Because it sits below, the rung is
+only ever taken when **nothing was in flight**, which is exactly the plain-text-field case.
+
+**Nothing is undone at the rung.** The field has already abandoned its own edit through
+`ui::defocus_commits` (**D808**); all this adds is that the key stops there.
+
+⚠️ **`chrome_focus` is recorded rather than asked, because egui has no global question for it.**
+`Memory::had_focus_last_frame` takes an `Id` and the ladder has none to give it, so the flag is
+written at the **end** of each frame, after the `Tab` surrender — which matters, since a frame whose
+`Tab` was ours ends with nothing focused (D123, D698).
+
+⚠️ **"Anything focused", not "a text field", and that is deliberate.** It is
+`egui_wants_keyboard_input`'s own definition — `focused().is_some()`, *anything*, a button reached by
+`Tab` included (**D123**) — and narrowing it to text would make the rung disagree with the predicate
+the rest of the keymap stands down for. Two spellings of "the chrome owns the keyboard" is the
+duplication this app keeps finding in other places.
+
+**Test** `app::library_wiring_tests::escape_out_of_a_chrome_field_does_not_also_clear_the_selection`,
+flip-checked. `shortcuts.md` §11's ladder enumeration gains the rung.
 
 **D516 — *Export all* really means every layer. *Fixed and tested 2026-09-07; Fix — the ordering
 without the outermost filter.***
@@ -38465,7 +39271,10 @@ tree. ⚠️ **Its only *known* user, not its only one**: `char_valve` has seven
 measured now. What this changes for D802's ruling is its shape rather than its answer — *delete the
 arm* is now a specific proposal with a reason, a **second** defence against the bug D425's line
 already closes, and *keep it* means keeping a route whose only known user is a hazard something else
-has to hold shut. **The ruling is the maintainer's and is not taken here.**
+has to hold shut. **The ruling is the maintainer's and is not taken here.** 🚨 **It was taken the same
+day and the arm is deleted (D812)** — on a read of the five unmeasured call sites rather than on a
+third measurement, all seven being engagement-bearing with both `DragValue` helpers opted out
+(D425, D552), so *"its only known user"* became *"no live user at all"*.
 
 ⚠️ **This entry was first written the other way round** — as a flip in doubt, on the premise that the
 green run was real — and that premise was the wrong line. It is rewritten rather than left standing,
@@ -38474,6 +39283,91 @@ would have reached §9.2's one-line-for-82-fields argument next. **Nothing in th
 pre-empt anything**: the opt-out stays on D425's argument, `badge_field`'s stays on D475's, and the
 only edit is the test's own doc, which now names the function the mutation belongs to and what the
 instrumented run found.
+
+**D812 — `char_valve`'s third arm is gone, and the asymmetry of the two failures is what decided it.
+*Ruled by the maintainer, fixed and tested 2026-09-19; Resolved — D802's *Fix* and D803's hand-off
+are both discharged.***
+
+The arm was `else if resp.changed() && !resp.lost_focus()`, the one no other valve in this app has.
+**D523** kept it for *"a control with no engagement to latch"* — specifically the picker's raw
+sensed regions — on the reasoning that such a control has no focus to hold and, on a click that
+never becomes a drag, nothing to latch, so a falling-edge-only valve *"would never commit it at
+all"*.
+
+**Both halves of that were falsified on 2026-09-19, hours apart.** D802 wrote the test D523 had
+asked for and found the route does not exist: `picker::pointer_slot` answers a click through
+`write_slot` and returns before it could reach `valve_slot`, so the hue slider and the alpha strip
+never enter this valve on a click; a *drag* enters it as the engaged arm and its release as the
+falling edge, which are the two arms every other valve has; and on the frames that route does enter
+it, `changed()` is false. D803 then found the one thing that **did** reach it, and it is a hazard
+rather than a feature: egui's per-frame clamp of a stored value outside a **ranged** field marks a
+control holding no focus as `changed()`, so the arm walked past `engaged` and `was_engaged` into
+`commit_edit`, committing an edit nobody made and spending an undo step. That is `[S6.2-L1-01]`,
+and D425's one line was the whole of what kept it from happening in the shipped tree.
+
+🚨 **What decided it is new since D803, and it is a read of the call sites rather than a third
+measurement.** All seven are engagement-bearing — `ui::value_field`, `ui::bare_drag_value`, the axis
+field and slider, the length fields — and **both** of the app's `DragValue` helpers opt out of
+egui's clamp, `ui::value_field_f64` per **D425** and `ui::bare_drag_value` per **D552**. So the arm
+had no live user at all, not merely no *wanted* one. D803's *"seven call sites, two measured"* is
+seven **read**, which is the figure the ruling turns on.
+
+**The argument is the asymmetry of the two failure modes, and it is what a future editor restoring
+the arm has to answer.** An unmeasured caller that genuinely needed it fails **loudly** — *"this
+control commits nothing"* is a bug report somebody files — where keeping it fails **silently**, as
+*"a field nobody touched spent an undo step"*, which is a defect that reaches the document and the
+autosave before anyone notices. Deleting it is therefore a second defence against the bug D425
+already closes rather than tidying, and D425's line stops being the only thing standing between
+that bug and the document.
+
+**Test** `panels::typography::valve_arm_tests::a_changed_frame_with_no_engagement_commits_nothing`,
+which builds the condition **by hand** with a ranged `DragValue` carrying egui's default. No
+production control can reach that state now, which is exactly why the fixture has to: the test is
+about the arm's predicate and not about any caller. Flipped by restoring the arm, it is red at *"no
+undo step"* with 1 against 0.
+
+⚠️ **The first draft of that test was about nothing, and only one habit caught it.** It used 999
+against a `MAX_FONT_SIZE` of **1000**, so the value was in range, egui rewrote nothing, and the
+fixture never reached the state it named — a green test asserting that an arm which had just been
+deleted did not fire on a frame where nothing would have fired anyway. Asserting the fixture is in
+the state the test is about is what found it, and nothing else here could have.
+
+**D817 — A tracking chord stops where its field stops, and the bound is at the arm and deliberately
+not in the model. *Ruled by the maintainer, fixed and tested 2026-09-19; Resolved.***
+
+`TextChord::Tracking` stepped `0.01em` per `Alt`+`→` through `apply_char_attrs` with **no range
+check at all**, and `TextStyle::set` canonicalizes `letter_spacing` without bounding it — so a held
+key walked tracking past `MAX_TRACKING_PCT` and out of what the field can be scrubbed to. The
+`Size` arm four lines up is the other answer and says so in its own comment: `CharAttr::Size` clamps
+itself to `MIN_FONT_SIZE..=MAX_FONT_SIZE`, so held keys stop at the ends without a second bound at
+the chord.
+
+**Nothing was being lost, which is why this was a question rather than a defect.** Since **D425**'s
+opt-out — tested on this very panel by **D475** — the field *shows* an out-of-range stored value
+instead of rewriting it, so a document holding 300% tracking keeps it and displays it. What the
+absence of a bound cost is the two chords disagreeing about whether a held key has an end, which is
+a thing the hand learns and then finds untrue one field over.
+
+🚨 **The bound is at the arm and not at `TextStyle::set`, where `Size`'s is, so the two chords agree
+about *behaviour* and deliberately not about where the bound is written.** These caps are on the
+**controls**: any finite value is a legal `letter_spacing`, a file may hold one, and
+`MIN_LINE_HEIGHT_PCT`'s own doc run says as much for the whole family. A bound in the model would
+make D425's behaviour unreachable for this attribute — the panel refusing a document it is perfectly
+able to display — and would be the one place in this app where a control's cap had leaked into the
+format. *A reader tempted to "finish the job" by moving it down to `set` should read D475 first.*
+
+**The px face is derived from the `%` face at the current font size**, through the same
+`px_range_for` the field itself uses, so the chord and the scrub cannot come to disagree about the
+cap in whichever unit the user happens to be in — which is the failure this would otherwise have
+invited, the two faces being separate numbers with one meaning.
+
+**Test** `panels::typography::valve_arm_tests::a_held_tracking_chord_stops_at_the_fields_cap`.
+⚠️ **Two things the first draft got wrong, and the test records both because each would silently
+halve it.** The stored default is **`Px(0.0)` and not `Em`**, so the em face needs a fixture of its
+own or that half of the `match` is never exercised at all. And a probe reading `style.letter_spacing`
+off the node measured `Px(0.0)` after four hundred presses: with a live session the write lands in
+the **editor** rather than on the node, so the assertion reads through `TypeSubject` now — a test
+that looks at the wrong side of a live session measures a value nobody is writing.
 
 **D474 — The guide commit table gets its first test caller. *Tested 2026-09-07; Keep — the code is
 unchanged.***
@@ -38812,6 +39706,49 @@ that was wrong. `canvas::frame_menu_door_tests`.
 numbers, seventeen of them reserved for this round's own entries and the eighteenth D22 — an old entry
 arriving in a comment when the code it is about is finally written down.
 
+🚨 **The edge clause is answered as of 2026-09-19 (D816), and not by the widening this entry's last
+paragraph and `roadmap.md` both pointed at.** Read D816 beside the paragraph above: folding
+`selected_frame_at` into the shared chain would have made an already-selected frame's *interior* a
+target, which is the half of C5 that has never been true.
+
+**D816 — C5's *"or on its edge"* is answered, and widening the shared chain was the repair that was
+declined. *Ruled by the maintainer, built and tested 2026-09-19; Resolved.***
+
+`canvas::begin_select_drag` carried `selected_frame_at` and neither `pick_at_pointer` caller had
+anything, so an occupied frame was reachable from the canvas by its **name tag alone** — where
+`context-menus.md` §2's **C5** reads *"a frame is right-clickable exactly where it is left-clickable
+… on its name tag, on its edge, or anywhere on it while it is empty"*. D469 closed the tag half and
+left this in its own last paragraph.
+
+🚨 **`roadmap.md` named the obvious repair — widen the shared chain with `selected_frame_at` — and it
+is wrong, which is the most useful sentence here.** That function answers a frame's whole **box**, so
+it would have made an already-selected frame's **interior** a right-click target. That is the half of
+C5 that has never been true, and it is a half `pick_leaf` skips *on purpose*, so that a marquee can
+be dragged across a frame's contents (**D22**). A one-`.or_else` fix would have bought the edge and
+sold the marquee.
+
+`canvas::frame_edge_at` answers an **occupied** frame whose border passes within `pick_slop()`
+instead. **The same band every other pick in the app uses**, so it is the same width on screen at any
+zoom and needs no constant of its own; and it is the **last** link of `pick_at_pointer`, after
+`frame_label_at` and `pick_leaf`, so a layer sitting near its frame's border still wins the pixel —
+which is what *"exactly where it is left-clickable"* has to mean when there is something to click.
+
+⚠️ **A frame narrower than twice the slop is all edge**, having no interior left. That is the honest
+answer at that size rather than a case worth a branch, and it is stated so nobody reads the function
+as exact.
+
+⚠️ **The box is the world *AABB*, so a rotated frame's band is its axis-aligned bounds and not its
+drawn border.** This is the limitation `selected_frame_at` has had all along and the one **D36**
+records for a rotated frame's ruler origin: nothing in `canvas.rs` resolves a rotated frame's edge,
+and a click a little off the drawn line still lands in the band. Worth knowing before anybody builds
+on it.
+
+**Test** `canvas::frame_edge_tests::a_frames_edge_is_pickable_and_its_middle_is_not`. ⚠️ **One of its
+two flips does not bite, and that is recorded in the test rather than tidied away**: dropping the
+`is_occupied_frame` term leaves every assertion green, because the fixture's frame is occupied. That
+term is about the **empty** case, which `pick_leaf` already answers on its own — so the flip is a
+statement about where the teeth are not, which is the half of a flip-check worth writing down.
+
 **D468 — Everything being transformed is excluded from the baselines, not just the node named. *Fixed
 and tested 2026-09-07; Fix — the two sources agree and the exclusion is still asked once per source.***
 
@@ -38940,6 +39877,51 @@ call them. `top_bar` is 200 lines of layout and a click into it is a coordinate 
 `inspector::mixed_opacity_tests` had just shown to be its own hazard, its first aim landing on a
 destructive neighbour (D465). The three call sites are one line each and were read.
 `app::library_wiring_tests::the_top_bars_undo_and_save_commit_what_was_typed_first`.
+
+**D815 — `Undo`, `Redo`, `Save` and `Open` resolve in `Mode::TextInsert`, and the finishing is at
+`dispatch`. *Ruled by the maintainer, built and tested 2026-09-19; Resolved — the question D466 left
+open.***
+
+The four chords were dead in a text session **by omission rather than by a decision**. §9.3 records
+only that `TextInsert` is *near* exclusive — *"no **bare** key resolves to an `Action` there, because
+a bare key in a session is a character"* — which is a rule about bare keys and was never about
+chords at all, so the four simply fell out of `text_insert_mode` with nothing anywhere having
+weighed them.
+
+**Meanwhile the top bar's buttons for three of them were live the whole time**, and have finished
+the session before acting since **D466**. So the button and its chord disagreed about the same verb
+thirty pixels apart: clicking *Undo* rewound the document, `Ctrl+Z` did nothing. D466 closed the
+damage — the button no longer deletes the node being typed into — and left this half open in its own
+words.
+
+`input::text_insert_mode` grows the four, with `normal_mode`'s guards **term for term**, every
+`!m.shift` included. ⚠️ **They are written out rather than shared with `normal_mode`, and the two
+modes' lists are different lengths on purpose**, so a future editor factoring them together would be
+asserting an equality nobody has decided. `ctrl_shift_is_not_a_second_spelling_of_ctrl` sweeps
+`normal_mode`'s arms and **not** these, so the new ones are swept separately.
+
+🚨 **The finishing is at `OndinApp::dispatch` and deliberately not in the keymap, because it is a
+fact about the *action* rather than about the key.** The buttons already spell it there; a guard in
+`text_insert_mode` would be a second copy of one rule, and the next door onto `Undo` — a context-menu
+row, a palette entry — would miss it exactly as the chord did. So `dispatch` calls
+`finish_text_first` on the three arms that act on the document, and one seam serves every door.
+`Open` needs nothing of its own: `go_to_dashboard` has finished the session since D466.
+
+**Two tests, and they are two on purpose.** `input::text_insert_tests::the_four_document_chords_resolve_in_a_session`
+covers the keymap; `app::library_wiring_tests::a_document_chord_in_a_session_finishes_it_first`
+drives `dispatch` directly. `resolve` answering and `dispatch` finishing are independent claims, and
+a single test that pressed a key would pass or fail for either reason. Both flip-checked.
+
+🚨 **A doc-comment theft was found while reading for this and repaired in the same change.**
+`OndinApp::finish_text_first` had been inserted directly above `OndinApp::top_bar` and anchored on
+its `fn` line, so it took `top_bar`'s whole doc run as the head of its own — *"The top bar: brand
+mark, breadcrumb, save state…"* followed by *"End a live text session before acting on the
+document"* — and **`top_bar` had no doc at all**. That is **D805**'s shape exactly: the victim is
+left *still documented*, by a run that opens by describing something else, so *"did the item below
+lose its comment"* answers no. ⚠️ **The whole-tree length ranking cannot see it either** — the merged
+run is 44 lines against a floor in the fifties. What found it was reading the run *above*
+`finish_text_first` and asking whether its first line describes it, which is the only question that
+catches this shape. The run is split and both items head-describe themselves.
 
 **D465 — A *Mixed* opacity field the user has not moved writes nothing. *Fixed and tested 2026-09-07;
 Fix — the one field that called the valve unconditionally is guarded, and the guard compares a
@@ -40105,9 +41087,11 @@ measured is 256,000,000 bytes and passes the shipped cap**, which is the honest 
 and is worth knowing before anyone reads this entry as closing the 433 ms. What closes is the unbounded
 tail — the 1.6 GB and 2 GB cases — and the abort. The 433 ms synchronous decode inside the dashboard's
 egui pass (`library::cover::rasterize` → `export::png::png` → `prepare`, one document per pass, since
-`Covers::get`'s 8 ms budget explicitly does not apply to the first render of a pass — its progress
+`Covers::get`'s 8 ms budget explicitly did not apply to the first render of a pass — its progress
 guarantee, without which a library of slow documents would draw no covers ever) is a **threading**
-problem. It is open in `roadmap.md`.
+problem. 🚨 **It was threaded on 2026-09-19 (D820), and the budget and the progress guarantee went
+with it** — both were consequences of rendering *inside* the pass, and neither had anything left to
+bound once it was not. The 433 ms is still 433 ms; it is simply no longer in a frame.
 
 ⚠️ **The test's control is the load-bearing half.** `a_pictures_rgba_expansion_is_bounded_in_rgba_bytes`
 refuses a 9000² grayscale PNG of about 100 KB and then asserts the 9504×6336 camera file is
@@ -40116,6 +41100,92 @@ is a number somebody will want to lower, and the control is what says why it can
 where it is. Flipped against the plausible wrong version rather than against nothing: a cap on the
 **file** bytes, which is the obvious reading of "refuse huge images", leaves the test green at 105 KB.
 That is what says the *denomination* is the finding.
+
+**D820 — A dashboard cover is rendered on a thread of its own, and the budget is deleted with what
+it bounded. *Ruled by the maintainer, built and tested 2026-09-19; Resolved — D449's threading
+problem, closed.***
+
+`Covers::get` → `render` → `io::load` → `png::png` → `ImageStore::prepare` ran the whole
+document→pixels path **inside the egui pass**, where D449 measured a picture's decode alone at
+**433 ms** for an 8000² image. `roadmap.md` carried it with the remedy named and the *where*
+undecided — *"which thread it goes on is undecided"*.
+
+🚨 **It is a second worker of its own and deliberately not a job on `library::writer::Writer`'s
+queue, and the reason is that module's own contract**: *"one background writer of anything, in
+**FIFO** order"*, with the FIFO load-bearing twice — a `Forget` must not be overtaken by the
+`Snapshot` it cancels, and a save must not be overtaken by anything. A cover render is hundreds of
+milliseconds that **nothing is waiting on**. Putting one on that queue makes the feature which
+protects the user's work wait behind the feature which decorates a card, and it does so precisely
+when the library is large, which is when both matter most.
+
+⚠️ **Nothing the renderer does is a record, which is what makes a second writer legitimate here.**
+It may write a PNG into the cover cache, and `crate::atomic` **exempts** that cache as derived data —
+a lost or half-written cover is regenerated from the document it came from. So this is not a second
+writer of anything `writer.rs` protects.
+
+🚨 **`FRAME_BUDGET` is deleted rather than retuned, and the entry should be read as a removal and not
+a regression.** The 8 ms never bounded the felt cost, because the **progress guarantee** underneath
+it rendered one document per pass *whatever the budget said* — without which a library of slow
+documents would draw no covers ever. So the budget bought one stall per pass rather than none, and
+the guarantee is what made that certain. Both were consequences of rendering **inside** the pass and
+neither has anything left to bound. ⚠️ **`thumbs::ImageThumbs` keeps its 2 ms and is no longer the
+same shape**: that decode really does happen in the frame, so its budget is still a budget. *A reader
+generalising from one to the other would be reasoning from a similarity that has just stopped being
+true.*
+
+`Covers` gains three things. **`queued`**, so a card drawn on every frame it is on screen enqueues
+**once** rather than sixty times a second — without it the queue grows faster than it drains and the
+worker never reaches the second document. **`Renderer`**, spawned lazily on the first miss for
+`Writer::spawn`'s reason (an app that never opens the dashboard, or a headless probe that never draws
+a card, pays for no thread) and **joined** on drop rather than detached, so a `Covers` that goes away
+with the base folder does not leave a thread rendering for a library nobody is looking at. And a
+`#[cfg(test)] pub(crate) settle`.
+
+⚠️ **`settle` is `cfg(test)` and not `pub`, which is D672's answer rather than D699's.** Nothing in
+production waits for a cover, and `ondin-app` has no lib target, so `dead_code` *does* analyse a
+`pub` item there — and it warned. The narrow `#[allow]` D699 argues for is the wrong tool here
+because the precondition that forced it there is absent: no production doc names this method.
+
+**Test** `library::cover::tests::covers_are_rendered_off_the_pass_and_all_of_them_arrive`, which
+**replaces** `one_cover_a_pass_arrives_however_spent_the_budget_is`. The rule that one pinned is
+**gone rather than changed**, which is why the test goes with it rather than being adjusted.
+`a_document_with_no_cover_is_not_retried_every_pass` survives with a new tell: the budget was how it
+measured a re-render, and the queue is now.
+
+🚨 **The doc gate caught two dangling links this change created** — `` [`FRAME_BUDGET`] `` after the
+constant was deleted, and `` [`Covers::settle`] `` after that method became `cfg(test)`. The second
+is **D319**'s mechanism from the direction where a *production* doc may not name a test-only item, so
+it is plain backticks and a sentence saying why. That gate is the one that reads doc comments, and
+this is it working.
+
+🚨 **The thread introduced a flake in another module's test, and finding it is the most useful thing
+in this entry.** `panels::dashboard::tests::a_document_this_build_cannot_open_wears_the_mark_and_a_healthy_one_does_not`
+asserts the red `UNREADABLE` chip, which `mark_of` reads through `Covers::unreadable` — and a cover
+only learns a document is unloadable when it **renders** it. That test pumped one extra pass and
+asserted on the next, and its own doc said those two passes were *"the cover cache's laziness rather
+than a flake"*.
+
+⚠️ **That sentence was accurate when it was written and this change made it exactly wrong.** The
+laziness is still there; the **timing** it promised is gone. "The next pass" was a *fact* while the
+render was inline and is a **race** once it is on a thread, decided by how loaded the machine is. It
+is struck in place in the test's doc rather than deleted, because the stale half is the point — *a
+comment can be made false by a change that never touches its file*. The fix is one line,
+`app.covers.settle(&ctx)` before the assertion, which is what that method exists for; 25 paired runs
+afterwards failed none.
+
+🚨 **What found it was running the filter twenty times, and nothing else would have.** The whole
+suite was green throughout, both full `--workspace` runs were green in debug *and* release, and a
+verification run of the same two filters **three times each** came back clean. **2 of 20** paired
+runs failed — `cargo test -p ondin-app library::cover` followed by `cargo test -p ondin-app
+dashboard` — and only under a *filtered* run, which packs the related tests onto every core at once.
+*Six clean runs is not evidence.* This is `CLAUDE.md`'s thirteenth gate hole and **D796**'s lesson
+arriving from a second direction: there a shared OS resource, here a shared worker, and neither
+visible to any gate in this project.
+
+⚠️ **It is also what earns `settle` its `pub(crate)`.** The argument for the method was that the app
+stays asynchronous and a probe asks for an answer, which `cover.rs`'s own tests already showed. This
+is a **second module's** test needing it — the case that says it must not be private to `cover.rs`,
+and the one a reader narrowing the visibility later has to answer.
 
 **D448 — A gradient stop whose offset is `nan` cost the document, and the fix was one step too broad
 the first time. *Fixed and tested 2026-09-07; Keep, with the operation-side check recorded as open.***
@@ -40792,7 +41862,61 @@ green. The bodies are read as text so that a failure *names* what went missing.
 **Fix, and it is not closed.** `scan::collect` skips any entry whose `file_name().to_str()` is `None`,
 so a `.ondin` whose Windows filename is not valid Unicode is invisible to the migration too — the same
 loss by a different door. That half of the finding was never reproduced, is not fixed, and is on the
-roadmap rather than here.
+roadmap rather than here. ⚠️ **It was reproduced on 2026-09-19 and it is fixed — see D809**, which
+carries such a file across by its `OsStr` name and counts it when it cannot. This paragraph is the
+statement of the defect and stands; its *"never reproduced"* and *"is not fixed"* clauses are spent.
+
+**D809 — A `.ondin` whose filename is not valid Unicode: reproduced, and the migration carries it now.
+*Reproduced, fixed and tested 2026-09-19; Keep — narrower than either fix the roadmap offered.***
+
+D431 closed the `.trash` half of this shape and named the other in its own last paragraph.
+`scan::collect` skipped any entry whose `file_name().to_str()` is `None`, so such a document was
+invisible to the library **and to the migration**: *Change base folder* left it alone in a folder the app
+no longer reads, **uncounted**, under a status line saying the move had succeeded. 🚨 **`roadmap.md`
+carried it as *"never reproduced"*** — *"it is not established that a filename Windows accepts can fail
+`to_str`"*, with the instruction *"reproduce first"*. **It has been.**
+
+**The reproduction, on this machine, with a standalone probe.** A lone UTF-16 high surrogate is a legal
+code unit and not a scalar value: `std::fs::write` on a path built from `OsString::from_wide(&[0xD800,
+…])` **succeeds** on NTFS, and the entry `read_dir` hands back answers `None` to
+`file_name().to_str()`. The same for a lone low surrogate and for a reversed pair. The controls — an
+ASCII name and a well-formed astral pair — both answer `Some`. Nothing in this app can *create* such a
+name; a sync client or another tool can.
+
+**Neither of the two fixes the roadmap offered was taken, and the reason is the same in both
+directions.** *Skip but count it* leaves the file alone in the folder the app has abandoned, which is
+what `relocate::Collision::Stranded`'s own note calls the bad outcome. *Carry it by `OsStr` through
+`scan::Entry`* would make `stem` an `OsString`, and **there is no honest label to draw for a name that
+is not text**. What shipped is narrower than both: the document still stays out of the library's list,
+and the **migration** carries it across verbatim.
+
+`scan::collect` gained a second output and records a skipped entry when its extension is `ondin` —
+compared as an `OsStr`, since the whole case here is a name with no `&str` to compare — and the entry is
+a **file**, a directory called `<not unicode>.ondin` not being a document however unlikely. Everything
+else about such an entry is unknowable from there: it is not read, so it is not known to *be* a
+document, only to be shaped like one. `scan::unnameable(root)` runs the same `collect` and returns them
+— **one walk and two outputs, by construction rather than by agreement** — so the two questions cannot
+come to disagree about the two-level rule or about which dot-directories are skipped.
+
+`library::relocate::relocate` moves each by its own `OsStr` name: no `naming::unique_stem` and no
+re-derivation, there being no `&str` to derive from. ⚠️ **So a destination already holding that name is
+a failure rather than a rename**, which is `Collision::Stranded`'s argument reached from a second
+direction — one of these files cannot be told from another by looking, so the arrival is left where it
+is and counted. ⚠️ **Moving it does not make it visible and deliberately does not try.** What the move
+buys is that the file is where the user pointed their library, and that `Moved` says it went.
+
+**Tests** `scan::tests::a_document_with_a_non_unicode_filename_is_not_listed_and_is_reported` and
+`relocate::tests::a_document_with_a_non_unicode_filename_is_carried_across_and_counted`. The
+platform-specific name is `scan::unnameable_doc_name`, `#[cfg(test)]` **beside** `unnameable` rather
+than inside either test module, because two modules' tests need it and a platform fact spelled twice is
+one that can come to disagree with itself. ⚠️ **The two arms are two different facts, not one fact
+spelled twice**: on Windows a name is UTF-16 and the gap is an unpaired surrogate, on Unix it is bytes
+and the gap is any byte that is not valid UTF-8. ⚠️ **The `#[cfg(unix)]` arm is compiled by nothing on
+this machine** — the class `CLAUDE.md` lists four production functions in, with no gate for any of them
+— so it is written to be read rather than trusted, and the measurement above is the Windows arm's.
+
+§9.5's two-level scan paragraph carries the third rule now, and the bullet is struck from `roadmap.md`
+with the clause in that section's table row.
 
 **D430 — *Move my library* re-points the session through the path map, not a prefix swap. *Fixed and
 tested 2026-09-06; Keep.*** **The last of the codebase review's seven Criticals.**
@@ -42730,6 +43854,71 @@ here rather than left to be rediscovered: *if the menus still read long on scree
 air around the rules before taking another point off the rows*, which are already inside the export's
 26. **Asked for and done the same day — §15 D263**, which also says how that 63pt over-sells the case:
 seven separators losing 2pt each is 14, against the 42 the rows had already given up.
+
+**D811 — A menu row's height is either an argument or a floor, and the warning that said "any new
+dropdown" could not be applied without reading the callee. *Record-only; recorded 2026-09-19;
+Resolved — nothing was defective and nothing was repaired, and what moved is where a rule is written
+down.***
+
+`roadmap.md`'s *Now · Inspector* carried the menu-row border as a bullet from 2026-08-31 — egui 0.35's
+per-state frame arithmetic, the 21-against-23 at the panels' zero padding, the two points on the other
+axis, the floor that only ever *raises* — and none of it was ever work. **Every sentence of it was
+already in the code twice over.** `ui::menu_rows`' own doc carries the arithmetic, the measurement and
+*"so the border goes"*, with the argument that zeroing `bg_stroke` on all four states is a stronger
+guarantee than clearing a floor because it does not depend on where the natural height happens to
+fall; `ui::MENU_ROW_H`'s carries the floor rule, the 22-since-2026-08-20 (**D262**) and the tripwire —
+*a new caller that leaves the theme's padding alone gets a 23pt row and no error*, which
+`a_menu_rows_height_does_not_depend_on_its_state` asserts against at both of the paddings in use. A
+standing trap is a doc comment's job, and `roadmap.md` holds open work only.
+
+**One sentence of the bullet was in neither, and it is the one that makes the warning usable.** The
+sub-bullet's finding was that *"any new dropdown owes `ui::menu_rows` and that padding"* is **too
+wide**: there are two *families* of menu row, and the warning is true of one of them. A row built from
+an egui widget is sized by `button_padding` and `interact_size.y`, so `MENU_ROW_H` is a **floor**
+under it and the ambient padding decides whether the floor decides anything at all. `ui::menu_row` and
+`ui::menu_item` take the height as an **argument** and `allocate_exact_size` it, so `button_padding`
+cannot reach them and the floor is not what holds them still. *The tell for which family a row is in
+is whether its height is an argument.*
+
+**The Export panel's own menu is the caller that proves it.** `panels::export`'s `export-menu`
+popover calls `ui::menu_rows`, sets no padding after it, and is **correct**: every row in it is a
+`ui::menu_item` or a `ui::menu_row` with the height passed in — `inspector::menu_action`'s dimmable
+rows included, that helper being `menu_item` under a `scope` — so there is nothing for a padding to
+reach. A warning phrased about dropdowns in general scores that menu as the failure case. 🚨 **And it
+passes `MENU_ROW_H`**, the *dropdown* constant, to functions of the other family, so the constant a
+row names does not say which family it is in either; only whether the height is an argument does.
+
+**It is filed on `ui::MENU_ITEM_H` rather than on `MENU_ROW_H` because a warning belongs where a
+reader meets the exception.** Somebody adding a menu reaches for a height constant first, and the one
+they reach for is the one that has to tell them which rule they are under. Beside `MENU_ROW_H` the
+paragraph is a caveat on a rule the reader has already decided applies to them; beside `MENU_ITEM_H`
+it is the answer to the question that constant's reader is actually asking, and it links
+`MENU_ROW_H`, `menu_row`, `menu_item` and `menu_rows` so that either door reaches the other.
+
+⚠️ **The shape worth keeping is that a warning which cannot be applied without reading the callee is
+half a warning**, and this one had been half a warning since the day it was written: a reader
+following it would have "fixed" a correct caller by adding a padding line to a menu whose rows cannot
+see one. That is the same failure as a citation resolving to the wrong entry — it names the right
+neighbourhood and is wrong about the rule — and nothing here can gate it, a comment's *advice*
+compiling as readily as its facts.
+
+*(Recorded 2026-09-19; **Resolved — record-only.** No production line changed and none is proposed.
+**The citation is planted by hand** on `MENU_ITEM_H`, a record-only entry being invisible to the
+citation census until somebody does (D741's fix for D735's shape) and that constant being the one
+place a reader meets the question *which rule is my row under*. The *Now · Inspector* menu-row bullet
+and its ⚠️ sub-bullet are **struck from `roadmap.md`** with a clause saying where they went, and that
+section's table row goes from *"Two items"* to one — `char_valve`'s third arm, the ruling **D802** and
+**D803** left — since a count of items is exactly what goes wrong when one of them is a note.
+⚠️ **§6's `menu_rows` paragraph named the wrong callers while this stood**: *"Eleven popups call it —
+five in `inspector.rs`, six in `typography.rs`"*, where the measurement on 2026-09-19 is **seventeen
+call sites — six in `inspector.rs`, six in `typography.rs`, four in `export.rs` and one in
+`dashboard.rs`** — so its enumeration omitted the very caller this entry turns on, and the file that
+caller lives in. Amended there, with *"six of the eleven"* setting the padding themselves becoming
+eleven of the seventeen and the export popover named as the one call site none of the arithmetic
+reaches. 🚨 **The same stale six is in `a_menu_rows_height_does_not_depend_on_its_state`'s own doc
+twice and is left standing**, along with that test's *"Every call site sets 0 (the control's own
+scope) or 2"*, which the export popover does not and does not need to; reported to the maintainer
+rather than corrected here, `inspector.rs` being under edit while this was written.)*
 
 **D263 — Three points of air, and a border the height never counted. *Built and tested; not yet
 reviewed on screen.*** The second half of D262's compaction, from the same report on the same day: the

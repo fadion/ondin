@@ -3404,6 +3404,17 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
 
 - Native format = JSON, currently **v4** (`io::CURRENT_SCHEMA_VERSION`). `schema.rs` defines a
   versioned DTO decoupled from in-memory types.
+- ⚠️ **The schema has a *second reader*, and it is not the on-disk format's alone** (§15 D823).
+  `io::clip` writes a copied subtree for the system clipboard using the same `NodeDto` and `ImageDto`
+  a file goes through — `from_node`/`into_node` and `from_entry`/`into_entry` are lifted out of
+  `DocumentDto` for exactly that — so every normalization this section describes applies to a pasted
+  layer too, with nothing to keep in step. A second projection beside `NodeDto` is the thing to
+  refuse: a field added to one and not the other compiles, saves and loads. 🚨 **What the clipboard
+  deliberately does *not* share is the migration ladder.** `io::clip::read` compares
+  `schema_version` for **equality** and refuses anything else. A file is an archive and has to open
+  in a build written years later; a clipboard is a handoff between two processes running now, and
+  the honest answer to a schema this build does not know is to say so. *Do not "fix" that asymmetry
+  by routing `clip` through `migrate.rs`* — it is the decision, not an omission.
 - **The library block is the first key after `schema_version`** (§5.11a). Its position is a decision
   about *reading* rather than about diffs: the dashboard lists a folder by reading each document's
   name, project and date, and `io::probe` reaches them from a 4 KB prefix without parsing the
@@ -4438,7 +4449,11 @@ no value moves**, and the divisor stays `k²` — the transparent-off-edge rule,
 downstream of it can survive** (`effect::MAX_SHADOW_BLOCK` = 4096, `effect::MAX_KERNEL_RADIUS` = 512,
 §15 D454). `<feDropShadow stdDeviation="1e30">` imports with nothing reported, saves, and reloads —
 and the dashboard rasterizes every document in the base folder, so one such file is a hang at launch
-rather than a bad drawing somebody asked for. The two caps bound different things and neither covers
+rather than a bad drawing somebody asked for. ⚠️ **Since §15 D820 that hang is on the cover thread
+rather than in the egui pass, which changes its shape and not the case for the caps**: the window
+comes up, and the one worker is stuck on that document for ever, so every cover queued behind it in
+FIFO order never arrives either. A library that renders no covers past the first bad file is a
+quieter symptom than a frozen launch and no less a fault. The two caps bound different things and neither covers
 the other: `coarsen` was Θ(k) whatever the surface it walked, and behind it the kernel is `2⌈3σ⌉+1`
 taps with nothing else to stop it. ⚠️ **D743 bounded that walk, so `MAX_SHADOW_BLOCK` is now a
 correctness cap rather than a cost one** — `coarsen` costs `w·h` however large `k` is, and what the
@@ -5830,10 +5845,12 @@ normalises and the other does not. **The Type panel is
 where the rule is tested twice**, because it reaches the widget by three routes and has no second
 guard the rewrite would trip. ⚠️ **`char_valve` carries `edit_valve`'s engagement latch since §15
 D523 and this sentence is amended rather than deleted**: the latch commits on the falling edge of a
-*gesture*, but the valve's third arm commits a `changed()` frame on a control that was never engaged
-— which is exactly the shape of an egui-initiated rewrite, **measured rather than reasoned since §15
-D803**, the opt-out removed and all three arms instrumented with the third the one that fires — so
-the opt-out is still the whole of what stops the library writing to the document there
+*gesture*, and the valve's third arm used to commit a `changed()` frame on a control that was never
+engaged — which is exactly the shape of an egui-initiated rewrite, **measured rather than reasoned
+since §15 D803**, the opt-out removed and all three arms instrumented with the third the one that
+fires. 🚨 **That arm is deleted since §15 D812**, so the rewrite has two defences here rather than
+one; the opt-out is still the load-bearing half, because it is what stops the library writing at all
+rather than what stops the write being committed
 (`typography::…::a_stored_tracking_outside_the_fields_range_is_not_rewritten_on_an_idle_frame`).
 ⚠️ **The Layout grid panel is the third place it is tested, and the two image-card fields are a
 fourth door nothing drives** (§15 D539). Three of the four grid fields carry a range the model does
@@ -6006,12 +6023,17 @@ measurements. **A floor only ever *raises*, so `MENU_ROW_H` is the row's height 
 the natural one** — `15 + 2 × button_padding.y`, which is 23 at the theme's padding of 4. It is the height
 because every dropdown's own scope brings that padding to 0 or 2 first; a caller that leaves the theme's
 value alone gets a 23pt row and no error, and lowering the constant alone would move nothing at all
-(§15 D262). **Eleven popups call it — five in `inspector.rs`, six in `typography.rs`** (it read "all
-eight, four and four" until 2026-08-20, and had been wrong for long enough that nobody could say when;
-a count in prose is a premise the compiler never checks). The font family list is among them but takes
-only the `interact_size` from it: it paints its *rows* by hand, which is why it was the one dropdown
-that never had the fault (§15 D84). Six of the eleven set `button_padding.y` themselves on the line
-after the call, which is why the helper must not — it runs first and would be overridden.
+(§15 D262). **Seventeen sites call it — six in `inspector.rs`, six in `typography.rs`, four in
+`export.rs` and one in `dashboard.rs`** (re-measured 2026-09-19; it read "eleven popups… five and six"
+until then, naming neither of the last two files, and "all eight, four and four" until 2026-08-20, and
+had been wrong on each occasion for long enough that nobody could say when; a count in prose is a
+premise the compiler never checks). ⚠️ **One of the seventeen is not a dropdown at all** —
+`panels::export`'s own menu popover — and its rows take their height as an **argument**, so none of
+the arithmetic above reaches them and it owes the padding line nothing (§15 D811). The font family
+list is among them but takes only the `interact_size` from it: it paints its *rows* by hand, which is
+why it was the one dropdown that never had the fault (§15 D84). Eleven of the seventeen set
+`button_padding.y` themselves on the line after the call, which is why the helper must not — it runs
+first and would be overridden.
 *Restoring a border to a menu row puts the shift back.*
 
 **A control that does not apply is shown and disabled, never removed.** The inspector's rows divide their
@@ -6427,17 +6449,19 @@ input event (winit/egui)
   number does**: a `DragValue` reports `lost_focus()` with its old value still in place and writes
   the parsed edit string back on the frame after, when the field is already disengaged, so a valve
   committing from the falling edge has to be handed the typed value by the field rather than read it
-  off the response. ⚠️ **And `char_valve` has a third arm neither of the others needs**: a
-  `changed()` frame on a control that was **never engaged** commits at once, the case a
-  falling-edge-only valve has no transition to spend. That arm is guarded with `!lost_focus()` —
-  otherwise a field *with* a latch falls through it and commits on the second of the two
-  `lost_focus` frames the number an `Escape` had just abandoned (§15 D523). 🚨 **This sentence used
-  to name the arm's users — *"the picker's hue slider and alpha strip reach it as raw sensed
-  regions"* — and that half is false** (§15 D802). `picker::pointer_slot` answers a click through
+  off the response. ⚠️ **`char_valve` had a third arm neither of the others needs, and since §15
+  D812 all three valves have the same two**: a `changed()` frame on a control that was **never
+  engaged** committed at once, the case a falling-edge-only valve has no transition to spend, and it
+  was kept for the picker's raw sensed regions (§15 D523). 🚨 **Both halves of that reasoning were
+  falsified on 2026-09-19 and the arm is deleted.** `picker::pointer_slot` answers a click through
   `write_slot` before it would reach `valve_slot`, so those controls never enter the valve on a
-  click; a drag enters it as the engaged arm and its release as the falling edge, and on those
-  frames `changed()` is never true. **Whether anything reaches the arm is open**, and deleting it
-  breaks no test.
+  click at all; a drag enters it as the engaged arm and its release as the falling edge, and on
+  those frames `changed()` is never true (§15 D802). The one thing that *did* reach it was egui's
+  own per-frame clamp of a stored value outside a **ranged** field, which marks an unfocused control
+  as changed — so the arm committed an edit nobody made and spent an undo step, `[S6.2-L1-01]` (§15
+  D803). **What settled it is that all seven call sites are engagement-bearing and both `DragValue`
+  helpers opt out of that clamp** (§15 D425, D552), so the arm had no live user of any kind, and the
+  two failure modes are asymmetric: a caller that needed it fails loudly, keeping it fails silently.
 - ⚠️ **The durable defence against a fifth is a test, and it is written now** (§15 D524). One
   superseded expression survived in three hand-rolled valves *and* in a fourth line predicting what one
   of them would do, and was found four times by four unrelated accidents — a photographed undo history
@@ -6459,6 +6483,17 @@ input event (winit/egui)
   in `canvas.rs`, the Type panel's opacity gate, `CharWrite::Valve`'s gate, and a `TextEdit` whose two
   terms sit in two *different* conditions — a text field genuinely does end when it loses focus, D316's
   rule being about numeric ones. That is the gate's whole cost and it is paid once.
+  🚨 **"Ends when it loses focus" is half a truth and it cost four fields** (§15 D808). A text field
+  does end there; it does not necessarily **commit** there, because egui hands a `TextEdit`'s typed
+  content back on `Escape` rather than reverting it, so `lost_focus()` alone reads a cancel as a
+  confirm. `ui::defocus_commits(resp)` — `lost_focus() && !key_pressed(Escape)` — is the one spelling,
+  called by the hex field, the inspector's layer-name field, the stroke-dash list and the Export
+  panel's prefix and suffix, each of which had been writing a typed value that `Escape` had just
+  abandoned. **It is the valve's `Escape` refusal (§15 D315) and none of the rest of the valve**: a
+  text field has no per-keystroke value for an engagement latch to smooth out, which is the sentence
+  above, and it has no half-typed state worth previewing, which is §9.4's reason for the buffer.
+  The gate is untouched and still right — the two terms stay in two different conditions, which is a
+  fact about where the buffer is stashed and not about what commits.
 - ⚠️ **"Every character-attribute field routes through `char_valve`" was false for one of them until
   2026-09-08** (§15 D569). The Type panel's variable-**axis** number field discarded the `Response`
   `value_field` hands back, so there was nothing for a valve to key on at all, and wrote through the
@@ -6595,7 +6630,10 @@ input event (winit/egui)
   Alt for `AltGr`, and Shift because `Ctrl+Shift+C` is this keymap's centre-align and `is_copy_command`
   no more examines Shift than it examines Alt. **`TextInsert` is *near* exclusive rather than exclusive**: no **bare** key resolves
   to an `Action` there, because a bare key in a session is a character, but a *modified* chord does —
-  `Action::TextStyle`, the styling set `shortcuts.md` §10 asks for (§15 D211). `Tab` is the one of them
+  `Action::TextStyle`, the styling set `shortcuts.md` §10 asks for (§15 D211). 🚨 **And since §15 D815
+  four chords that are not styling resolve there too**: `Undo`, `Redo`, `Save` and `Open`, which were
+  dead in a session **by omission** — this rule is about *bare* keys and was never about chords, so
+  nothing had decided they should be. `Tab` is the one of them
   the keymap *also* names (`Action::StepPoint`) and it stays in the editor's loop; the modes are
   the whole of what keeps the two apart (§15 D173). It owes the focus half of the guard even so, and
   shipped without it, typing a panel's digits into the document as well as into the field (§15 D167).
@@ -6605,9 +6643,13 @@ input event (winit/egui)
   yet committed it deleted the node being typed into, while *Save* wrote and **pinned a version** of a
   document without the typed text. Each of the three calls `OndinApp::finish_text_first` before acting
   now, as `choose_tool` and `go_to_dashboard` already did (§15 D466). ⚠️ **The button and its chord
-  still disagree**, which is a gap rather than a decision: whether `Ctrl+Z` should be dead mid-session
-  at all is unanswered here, and dimming the button would agree with the chord at the cost of a control
-  that visibly does nothing.
+  disagreed for as long as the chord was dead** — clicking Undo rewound the document while `Ctrl+Z`
+  30px away did nothing — **and since §15 D815 they are one behaviour**: the four chords resolve in
+  `text_insert_mode`, and the finishing moved to `OndinApp::dispatch`, which is where the buttons
+  already spelled it. **The seam is `dispatch` and deliberately not the keymap**, because finishing a
+  session first is a fact about the *action* rather than about the key; a guard in the keymap would be
+  a second copy that the next door onto `Undo` would miss. `Open` needs none of its own —
+  `go_to_dashboard` has finished the session since D466.
   **Two `Action`s are resolved from the two signals one paste produces**: `Event::Paste` gives
   `Action::Paste`, and the `Ctrl`-without-Alt `V` **release** gives `Action::PasteRelease`, because
   `egui-winit` swallows the press and emits the event only for non-empty text, so a clipboard holding a
@@ -7956,6 +7998,14 @@ straight to `commit_edit` rather than through `edit_valve` (§9.3), so D316's la
 It compares the **bytes** now, `parse_hex(&text)` against `parse_hex(&hex_of(current))`, which is the
 hazy rule's own shape arrived at from the other side; the mixed case still writes unconditionally,
 there being no one colour to compare against over a set that disagrees.
+⚠️ **And `Escape` committed at this field until 2026-09-19** (§15 D808), egui handing a `TextEdit`'s
+typed content back rather than reverting it. It asks `ui::defocus_commits` now, as the three other
+chrome text fields with the same defect do (§9.3). 🚨 **That is the whole of what this field takes from
+the valve and the routing question is answered with it**: a valve previews while the control is
+engaged, and a half-typed hex is a colour — `parse_hex` accepts three digits, so `6D8CD9` passes
+through `6D8`, `#66DD88`, a real green — so a valved field would put that on the canvas on the way to
+the blue. **The buffer exists precisely so that nothing between the first keystroke and the last is a
+value**, which leaves the valve with nothing to preview.
 ⚠️ **The rule is not about the word *Mixed*, and the third instance is a field that never prints
 it** (§15 D534). The **single-layer** Appearance panel's corner-radius field shows
 `largest(corners)` when the four disagree — a plain number, so that a drag starts from the shape's
@@ -8187,7 +8237,10 @@ lossy — `dash_list_text` drops a fractional part within `1e-9` of zero, so an 
 of `5.0000000001` was silently rewritten to `5` by opening the popover and closing it. Comparing the
 *parsed* lists cannot catch that, since they genuinely differ; comparing the strings asks the only
 question that means anything, and the *undo-step* half of the same complaint is
-`Transaction::changes_nothing`'s (§15 D428), which absorbs a retyping that differs only in spacing. The mitre angle appears only
+`Transaction::changes_nothing`'s (§15 D428), which absorbs a retyping that differs only in spacing.
+⚠️ **"On defocus" is `ui::defocus_commits` and not `lost_focus()`** (§15 D808): this field committed a
+typed list on `Escape` the same way the hex field committed a colour, the buffer going either way and
+only the write being declined. The mitre angle appears only
 under Miter, where it is the only join with a spike to limit — **and only where a join means anything at
 all**, because it means something only under both. `Miter` is the *default* join, so an ellipse whose
 stroke had never been touched satisfied the value test and showed the field: dimmed with the row above
@@ -10195,6 +10248,19 @@ D447). Nothing wrong was ever drawn from it, a `NodeId`'s random per-session act
 dangle rather than collide, which is exactly why nobody found it by looking at the screen;
 before the entries travelled it arrived as the missing-image placeholder (§15 D280). Duplicate passes
 no entries at all, being unable to leave the document it reads from.
+
+**And a copy crosses between two `ondin` windows** (§15 D823). `copy_selection` writes the captured
+subtrees *and* those image entries onto the **system** clipboard as text — the layer names, then
+`io::clip::FENCE`, then the payload as JSON — because `arboard` offers text or an image and nothing
+else. The names are still the first line, for D17's reason and because they are what someone pasting
+into a note wants to read. Every paste door asks `OndinApp::take_clipboard` rather than
+`owns_the_clipboard`, so the crossing is a property of the clipboard and not of one chord: it answers
+`Layers` (ours, or a foreign payload just adopted into `OndinApp::clipboard`), `Foreign`, or
+`Unreadable` — and the third exists because falling through on an Ondin copy this build cannot read
+would paste the user's own JSON as a text layer. **The placement rules needed nothing**: ids are
+minted against a per-process-random actor, so a foreign parent fails `Document::contains` and the
+paste lands at the root, which is §15 D221's fallback; the *same* document open twice does resolve,
+and the subtree goes back into its own group.
 ⚠️ **`go_to_dashboard`'s clear list is the second one of the same class and it had the same kind of
 hole** (§15 D526): it clears `picker`, `context_menu`, `open_menu` and `rename_entry` and did not clear
 `confirming_close`, so walking to the library under the *Unsaved changes* card left the flag stuck
@@ -10983,7 +11049,8 @@ where to open, or what a file is called on disk:
   — of a document in `library.entries`, which is also what removes the superseded covers of documents
   that are still here. Nothing in the path and nothing in the key namespaces per library, **so
   changing the base folder throws away the old library's covers and switching back re-renders all of
-  them** at one document per pass. That is affordable because covers are disposable, and it is stated
+  them** — on the cover thread since §15 D820, where it used to be one document per egui pass. That
+  is affordable because covers are disposable, and it is stated
   here because it was stated nowhere: a doc comment on `Covers::clear` was claiming the opposite, and
   a rule about the whole cache written on one function is invisible to anyone changing either.
 
@@ -11016,9 +11083,22 @@ was, `move_file` being copy-then-delete with the delete last — written through
 `Moved::fail(&Path)` spelling so that none of the twelve failure sites can record a loss without saying
 what was lost, and `summary()` puts the first of them in the status line. The user has to go and find
 what stayed behind: `apply_library_settings` re-points the app at the new root whether the migration
-succeeded, partly succeeded or did nothing, and running it again leaves duplicates rather than being
-idempotent, so there is no retry and no rollback to offer instead. A number cannot be acted on; a name
-says which folder to open and whether what is still there is a document or a sidecar.
+succeeded, partly succeeded or did nothing. A number cannot be acted on; a name says which folder to
+open and whether what is still there is a document or a sidecar.
+
+⚠️ **A status line is a sentence and this is a list, so the modal keeps the list and offers the run
+again** (§15 D810). `OndinApp::stranded` holds `{ from, to, failed }` after a migration that left
+anything behind and is assigned in **both** directions, so a clean run clears a previous one's report;
+it is session state and not a preference, the files being the record. The *Library settings* card draws
+the count, the old folder's path, up to `STRANDED_ROWS` = 6 filenames, an *"…and N more"*, and a *Try
+again* button — **six being a bound on the modal's height**, that card having no scroll area and a
+partly-failed migration being able to strand every document in the library.
+`OndinApp::retry_migration` re-runs `relocate(from, to)`, and **not being idempotent is what makes it
+safe**: a successful move deletes its source, so the second walk meets only what was left behind. It is
+answered *after* the Save/Cancel match, so it cannot race a base-folder change. The re-point loop is
+`OndinApp::follow_moved_documents` now, a retry being a second migration that owes everything the first
+one did. ⚠️ **Rollback is still not offered and is a decision rather than a gap**: `relocate`
+deliberately overwrites nothing, so "undo" means deciding what to do with everything that *did* arrive.
 
 ⚠️ **"Into a collision" is now the whole of when it renames, and it was a partial truth until
 2026-09-07** (§15 D509). Every stem was re-derived from `Entry::display_name()`, which is a silent
@@ -11044,6 +11124,17 @@ project folder, so that is the whole tree; `.versions`, `.trash` and `.recovery`
 files that are *not* library entries, and the leading dot is the only thing distinguishing them.
 ⚠️ The two rules overlap: `.versions` is three levels deep and excluded by the depth limit as well, so neither can be
 changed while assuming the other still covers it.
+⚠️ **There is a third rule and it is a *skip* rather than a filter: a filename that is not valid
+Unicode cannot be an `Entry`** (§15 D809). `file_name().to_str()` answers `None` for it — reproduced on
+this machine, a lone UTF-16 surrogate being a legal code unit that is not a scalar value, which
+`std::fs::write` accepts on NTFS — and there is no honest label to draw for a name that is not text, so
+the document stays out of the list. **What it must not do is stay behind.** `scan::unnameable(root)`
+reports those paths, running the **same `collect`** as the scan so the two cannot come to disagree
+about either rule above, and `library::relocate` carries each across by its own `OsStr` name: no
+re-derivation, there being no `&str` to derive from, and so a name already taken at the destination is
+a **failure** rather than a rename, on `Collision::Stranded`'s argument. Until that landed, *Change
+base folder* left such a file alone in a folder the app no longer reads, uncounted, under a status line
+reporting success — the shape the bullet above fixed for a `.trash` collision and not for this.
 
 ⚠️ **A scan that could not read the folder is not evidence that the folder is empty (§15 D384).** The
 unit that goes missing is never one document — a document cannot live outside the base folder — it is
@@ -11096,14 +11187,26 @@ A `fail` and not a modal: all three states are survivable and the app runs. Each
 `dirs::cache_dir()` with no injection point and a probe driving them would read — and overwrite — the
 developer's own files (§15 D370).
 
-⚠️ **That pair is available and it is not what the app calls, so the suite still writes to the real
-cache directory** (§15 D619). `remember_search` ends in `LocalIndex::save` and `Library::open` begins
-in `LocalIndex::load`, both the global spellings, so a test driving anything at the `OndinApp` level
-goes through them however carefully its fixture redirects the base folder — which is a *different*
-knob. It surfaced as a test finding its own *Recent searches* already populated from the previous
-run. The rule above is right and is only half-enforced: **an injection point for the local index is
-open work**, and until it exists a probe that reaches this path has to assert persistence through
-`save_to`/`load_from` on a temp path and say so.
+⚠️ **That pair was available and was not what the app called, so the suite wrote to the real cache
+directory** (§15 D619). `remember_search` ends in `LocalIndex::save` and `Library::open` begins in
+`LocalIndex::load`, both the global spellings, so a test driving anything at the `OndinApp` level goes
+through them however carefully its fixture redirects the base folder — which is a *different* knob. It
+surfaced as a test finding its own *Recent searches* already populated from the previous run, and was
+established on the machine: the real `library.json` held that test's own fixture strings.
+
+**The injection point is a `cfg!`** (§15 D807). `library::cache::index_is_reachable()` answers
+`!cfg!(test)`, and `LocalIndex::load` and `LocalIndex::save` each ask it on their **first line**, before
+anything resolves a path; `load_from`/`save_to` stay past the guard and are still where every decision
+either of them makes is asserted. 🚨 **`Prefs::ephemeral`'s shape does not work here, and the reason is
+`Library::open`.** `Prefs` is built once, by the one constructor that knows a test's app is different,
+where the index is rebuilt by `Library::open` — which tests call **directly, after building the app** —
+so a field the constructor set would be silently discarded by the very fixture that needs it, and a
+process-wide flag stored by `headless` (the clipboard's spelling, §15 D798) would leave
+`library::state`'s own tests reading the machine's file until some other test in the binary happened to
+build an app first. ⚠️ **A guard that differs by profile is allowed here and is refused for the other
+two resources in this class**, and the test is what it costs in coverage: `load` and `save` hold no
+behaviour beyond resolving the path, where `Prefs`' latch test drives `save_to` and
+`clipboard_gate_tests` has to open a real `arboard` handle to prove its lock holds.
 
 **Every write is metadata first, path second.** A rename writes the name into the document and *then*
 renames the file; a move writes the project id and *then* moves the file. The failure that leaves is a
@@ -11560,9 +11663,10 @@ and is set only through `MetaProbe::Inconclusive`, so a document whose first 4 K
 reported healthy without the rest of it being looked at — a file written by a **newer build** is
 well-formed JSON that `io::load` refuses, and a synced folder is exactly where one arrives.
 `Covers::unreadable` is `io::load`'s answer over the whole file, which `cover::rasterize` was
-already computing for the thumbnail and throwing away; the cache is lazy and per-pass budgeted, so
-a document whose cover has not been attempted yet answers *not known to be broken* and the flag is
-what carries the early passes. Until 2026-09-09 `unread` had no reader outside `library/` at all
+already computing for the thumbnail and throwing away; the cache is lazy and **answered off the egui
+pass** (§15 D820, where it used to be lazy and per-pass budgeted), so a document whose cover has not
+come back yet answers *not known to be broken* and the flag is what carries the early passes — a
+window that is now as long as the render takes rather than one pass per document. Until 2026-09-09 `unread` had no reader outside `library/` at all
 and the card was pixel-identical to a healthy one.
 
 **A `.ondin` dropped on the library is filed in it (§15 D373).** `OndinApp::take_dropped_documents` runs
@@ -11786,8 +11890,14 @@ live on the canvas, participate in shared undo, and survive save/load.
   assert nothing. **Every `arboard` handle in the process opens under one `Mutex`
   (`app::with_clipboard`)**, because two threads opening the global clipboard at once corrupt the
   heap and take the whole test binary down; that is a fix for the suite, the app having one UI
-  thread. ⚠️ **The per-machine index is still the resource with no injection point** and is in
-  `roadmap.md`; this one no longer is.
+  thread. ⚠️ **The per-machine index was the last resource with no injection point and has one**
+  (§15 D807): `library::cache::index_is_reachable()` is `!cfg!(test)`, read on the first line of
+  `LocalIndex::load` and of `LocalIndex::save`. **A `cfg!` and not `headless`'s flag**, because
+  `Library::open` rebuilds the index and tests call it directly after building the app, so anything a
+  constructor set would be discarded by the fixture that needs it — see §9.5. **So the rule above now
+  holds by construction on all four resources**, and the last of the four was breached for as long as
+  it was because the fixture redirected the base folder, which is a different knob from the cache
+  directory.
 
 ---
 

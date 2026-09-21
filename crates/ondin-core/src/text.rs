@@ -2923,6 +2923,24 @@ fn line_geometry(
 /// half is free; what was priced and declined is the offset map D80 specifies and a
 /// second layout pass. **Do not re-derive this as a wall** — `roadmap.md` §0 carries
 /// the decision and D399 carries the numbers.
+///
+/// 🚨 **Hyphenation is no longer alone there. Tab stops, columns and widow/orphan
+/// control joined it on 2026-09-22** (§15 D825, `roadmap.md` §0), and they are on the
+/// list for the same kind of reason: not one of them is short of a dependency, so
+/// each is a feature of *this* loop and its neighbours rather than a wall, and each
+/// is a build nobody has asked for. **Widow/orphan control is the one that would
+/// live here**, as a second pass over the lines this loop yields; tab stops are a
+/// layer over `Whitespace::Tab`, which parley classifies and does not lay out; and
+/// columns are a change to what a paragraph's box *is*, which is above this function
+/// entirely.
+///
+/// ⚠️ **Justify-all is the exception and is *not* a non-goal — it is blocked
+/// upstream**, which is a different state with a different trigger and has been
+/// mistaken for a price twice. `TextAlign::Justify` is wired and `JustifyLast` ships
+/// three readings of the last line that are ours; what is missing is parley's
+/// `align_impl` hard-coding a skip of `BreakReason::None | Explicit`, with `align`,
+/// `LayoutData` and `ClusterData::advance` all `pub(crate)`. The trigger is a patch
+/// upstream, not a decision here (§15 D825, `roadmap.md` *Later · Parked*).
 fn break_lines(
     layout: &mut Layout<RunIndex>,
     paras: &Paragraphs<'_>,

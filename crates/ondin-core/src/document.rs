@@ -9,7 +9,7 @@ use crate::export::ExportSpec;
 use crate::guide::{Guide, GuideId};
 use crate::id::{IdSource, NodeId};
 use crate::image::{ImageEntry, ImageId};
-use crate::io::CURRENT_SCHEMA_VERSION;
+use crate::io::{CURRENT_SCHEMA_VERSION, MAX_TREE_DEPTH};
 use crate::meta::DocumentMeta;
 use crate::node::{
     BlockStyle, CharSpans, Fill, FillRule, MaskMode, Node, NodeKind, Paint, ParaSpans,
@@ -687,10 +687,25 @@ impl Document {
             // above says which traffic that is. A guard at one of two doors
             // leaves the enforcement test's *"at every door that writes one"*
             // false, which is the defect rather than a tidiness.
+            // ⚠️ **Paint was the fourth coordinate a node carries and it was not
+            // in this list either** (§15 D831). The loop checked geometry, the
+            // transform, the pivot and the effects, and never asked
+            // `brush_is_finite` — which `op_set_fills` and `op_set_strokes` both
+            // ask one door over, for invariant 8's paint half (§15 D451). The
+            // comment above says which traffic this door carries, and since
+            // `io::clip` that traffic is *OS-clipboard text*: a pasted gradient
+            // stop with a `NaN` offset reached the document, and the next
+            // autosave wrote a `.ondin` that never opened again.
             if !n.kind.geometry_is_finite()
                 || !affine_is_finite(n.transform)
                 || n.pivot.is_some_and(|p| !p.is_finite())
                 || !n.effects.iter().all(effect_is_finite)
+                || !n.paint.fills.iter().all(|f| brush_is_finite(&f.brush))
+                || !n.paint.strokes.iter().all(|s| {
+                    brush_is_finite(&s.brush)
+                        && s.width.is_finite()
+                        && s.dashes.iter().all(|d| d.is_finite())
+                })
             {
                 return Err(OpError::NonFinite);
             }
@@ -726,10 +741,60 @@ impl Document {
         //
         // The loader has enforced this since it was written — check (5), the
         // reachability walk — so the two doors into the tree were held to
-        // different standards, which §5.11 says they must not be. Every
-        // production caller already satisfies it: both feed `remap_subtree`
-        // output from a single fresh capture.
-        if claimed.len() + 1 != nodes.len() {
+        // different standards, which §5.11 says they must not be. ⚠️ **D423's
+        // own closing sentence read *"Every production caller already satisfies
+        // it: both feed `remap_subtree` output from a single fresh capture"*,
+        // and `io::clip` made it false** — there are three `InsertSubtree` sites
+        // now, and the third is OS-clipboard text, which is not a capture and
+        // not this process's (§15 D832).
+        //
+        // 🚨 **And a count is not a reachability check: a cycle balances it**
+        // (§15 D832). With `nodes = [R, A, B]`, `A.parent = B`, `B.parent = A`,
+        // `A.children = [B]` and `B.children = [A]`, `R` is the single root, the
+        // loop above claims `A` and `B` exactly once each, and `2 + 1 == 3`
+        // balances — so an `A`/`B` component reachable from nothing was inserted,
+        // committed and saved, and the file then failed `io::load` with *"2
+        // node(s) are not reachable from the root"*. The arithmetic was standing
+        // in for the walk, and the two agree on every input except the one that
+        // matters.
+        //
+        // **So walk it, which is what the loader's check (5) does** — and the
+        // depth rides along, which is check (6) and `[R1-L2-02]`: until
+        // `io::clip` there was no way to nest without a user click per level, so
+        // §15 D416's own conditional (*"fix if a builder, an importer or the MCP
+        // write surface ever nests without one"*) had not fired. A 300-deep
+        // payload now arrives in one paste.
+        //
+        // ⚠️ **The bound is absolute, so the parent's own depth is part of it.**
+        // A 200-deep subtree pasted into a 200-deep parent reloads no better
+        // than a 400-deep one pasted at the root, and a subtree-relative check
+        // would have passed it. The upward walk is bounded too: a cycle among
+        // the *existing* nodes is an invariant violation rather than an input,
+        // but hanging on one would be a worse answer than refusing it.
+        let mut parent_depth = 0usize;
+        let mut up = self.nodes[&parent].parent;
+        while let Some(id) = up {
+            parent_depth += 1;
+            if parent_depth > MAX_TREE_DEPTH {
+                return Err(OpError::TooDeep);
+            }
+            up = self.nodes[&id].parent;
+        }
+
+        let mut visited: FxHashSet<NodeId> = FxHashSet::default();
+        visited.insert(root_id);
+        let mut stack = vec![(root_id, parent_depth + 1)];
+        while let Some((id, depth)) = stack.pop() {
+            if depth > MAX_TREE_DEPTH {
+                return Err(OpError::TooDeep);
+            }
+            for c in &by_id[&id].children {
+                if visited.insert(*c) {
+                    stack.push((*c, depth + 1));
+                }
+            }
+        }
+        if visited.len() != nodes.len() {
             return Err(OpError::MalformedSubtree);
         }
 
@@ -1986,9 +2051,15 @@ mod tests {
     /// reason the arm is here rather than in `tests/io.rs` is the module doc
     /// above: outside the crate a `Vec<Node>` can only come from
     /// `capture_subtree`, i.e. from a document the operation guards have already
-    /// vetted, so **no external route reaches this check** — it is the same
-    /// register as `io::MAX_TREE_DEPTH`'s doc, a guard kept for the traffic the
-    /// model cannot vouch for rather than for a measured route.
+    /// vetted.
+    ///
+    /// 🚨 **This doc used to end *"so no external route reaches this check"*, and
+    /// §15 D639 carried the same sentence. `io::clip` is that route** (§15 D832)
+    /// — a paste is OS-clipboard text, which no operation guard has seen and
+    /// which any web page's *Copy* button can write. The guard is no longer
+    /// *"kept for the traffic the model cannot vouch for"*; it is load-bearing on
+    /// a route that exists, and the three arms beside it (paint, reachability,
+    /// depth) are there because the same premise had excused their absence.
     ///
     /// Both variants, because they are different types: `Normalized` holds a
     /// `Vec2` and `Local` a `Point`, and a guard written against one compiles
@@ -2044,6 +2115,230 @@ mod tests {
             Err(OpError::NonFinite)
         ));
         assert!(!doc.contains(g));
+    }
+
+    /// The pivot arm's twin for **paint**, the fourth family (§15 D831).
+    ///
+    /// `op_set_fills` and `op_set_strokes` have asked `build::brush_is_finite`
+    /// since §15 D451; this door never did, so the one field family the loader
+    /// writes as `null` could still arrive through it. Until `io::clip` that was
+    /// a guard against traffic nobody could produce; a paste is OS-clipboard
+    /// text, and any web page's *Copy* button can write it.
+    ///
+    /// **Four values, because they are four different clauses**, and a guard
+    /// written by reading the word "colour" covers only the first: a fill's
+    /// solid colour, a stroke's brush, a stroke's `width`, and a dash length.
+    /// The stroke trio is why this arm restates `op_set_strokes`' predicate
+    /// rather than calling `brush_is_finite` alone — a stroke carries numbers a
+    /// fill has no equivalent of.
+    ///
+    /// Flips, all four run against the clause that catches them. Removing the
+    /// fills clause fails at *"fill was inserted"* and leaves the other three
+    /// green; removing the strokes clause fails at the remaining three. ⚠️ The
+    /// interesting one is `width`: deleting `s.width.is_finite()` alone leaves
+    /// *both* brush assertions green, which is what says the three stroke
+    /// sub-clauses are carrying their own weight rather than restating each
+    /// other.
+    #[test]
+    fn insert_subtree_refuses_non_finite_paint() {
+        let bad = peniko::Color::new([f32::NAN, 0.0, 0.0, 1.0]);
+        let cases: Vec<(&str, Paint)> = vec![
+            (
+                "fill",
+                Paint {
+                    fills: vec![Fill {
+                        brush: crate::Brush::Solid(bad),
+                        visible: true,
+                    }],
+                    ..Paint::default()
+                },
+            ),
+            (
+                "stroke brush",
+                Paint {
+                    strokes: vec![Stroke {
+                        brush: crate::Brush::Solid(bad),
+                        ..Stroke::default()
+                    }],
+                    ..Paint::default()
+                },
+            ),
+            (
+                "stroke width",
+                Paint {
+                    strokes: vec![Stroke {
+                        width: f64::INFINITY,
+                        ..Stroke::default()
+                    }],
+                    ..Paint::default()
+                },
+            ),
+            (
+                "dash length",
+                Paint {
+                    strokes: vec![Stroke {
+                        dashes: vec![4.0, f64::NAN],
+                        ..Stroke::default()
+                    }],
+                    ..Paint::default()
+                },
+            ),
+            (
+                // 🚨 **The only one of the five a clipboard payload can actually
+                // carry**, and the reason it is here rather than left to the
+                // four above. `io::schema`'s own note says no JSON input can
+                // produce a non-finite `f64` — `serde_json` writes `NaN` as
+                // `null`, refuses `null` where an `f64` is wanted and refuses
+                // `1e999` outright — so every `NaN` case above dies at
+                // `from_str` one function before this door. A gradient's
+                // `opacity` is checked with `valid_opacity` and not
+                // `is_finite` (§15 D767), which makes `1e30` finite, writable,
+                // readable, and refused only here.
+                //
+                // ⚠️ **`1e30` and not the `1e39` the finding's headline used**:
+                // the field is an `f32`, whose maximum is ~`3.4e38`, so `1e39`
+                // is a compile error here and would arrive from JSON as `inf` —
+                // caught, but by the finiteness half rather than by the range
+                // half, which is the clause this case exists to pin.
+                "gradient opacity",
+                Paint {
+                    fills: vec![Fill {
+                        brush: crate::Brush::Gradient({
+                            let mut g =
+                                crate::image::GradientBrush::from(peniko::Gradient::default());
+                            g.opacity = 1e30;
+                            g
+                        }),
+                        visible: true,
+                    }],
+                    ..Paint::default()
+                },
+            ),
+        ];
+        for (name, paint) in cases {
+            let (mut doc, _root, ab) = base();
+            let mut ids = IdSource::new(0xFA);
+            let g = ids.mint();
+            let mut n = node(
+                g,
+                None,
+                vec![],
+                NodeKind::Rect {
+                    size: Size::new(5.0, 5.0),
+                    corner_radii: RoundedRectRadii::default(),
+                },
+            );
+            n.paint = paint;
+            assert!(
+                matches!(insert(&mut doc, vec![n], ab), Err(OpError::NonFinite)),
+                "{name} was inserted"
+            );
+            assert!(!doc.contains(g), "{name} left the node behind");
+        }
+    }
+
+    /// A cycle balances the count this door used to make (§15 D832).
+    ///
+    /// `[R, A, B]` with `A.parent = B`, `B.parent = A`, `A.children = [B]` and
+    /// `B.children = [A]`: `R` is the single root, the child loop claims `A` and
+    /// `B` exactly once each, and `claimed.len() + 1 == nodes.len()` — `2 + 1 ==
+    /// 3` — balanced. So the `A`/`B` component went in reachable from nothing,
+    /// committed, and saved a file that `io::load` refused with *"2 node(s) are
+    /// not reachable from the root"*. The arithmetic agreed with the walk on
+    /// every input except this one.
+    ///
+    /// ⚠️ **The fixture is built to pass every other check in the function**,
+    /// which is the point: single root, unique ids, every child listed once,
+    /// every parent back-pointer consistent, every kind legal. Weaken any of
+    /// those and the test passes for the wrong reason — it would be measuring
+    /// `MalformedSubtree` arriving from a different arm.
+    ///
+    /// Flip: the walk replaced by the old `claimed.len() + 1 != nodes.len()`.
+    /// Red here at the predicted site, and — measured with `--no-fail-fast`
+    /// rather than assumed — **green across every other target in
+    /// `ondin-core`**: 459 lib tests, `build`, `bulk`, `io`, `ops`, `resolve`
+    /// and `spine` all pass while a cycle goes into the document. That is what
+    /// says nothing else was covering this, and it is the reason the arm is
+    /// here rather than left to the loader, which catches it one save too late.
+    #[test]
+    fn insert_subtree_refuses_a_cycle_that_balances_the_count() {
+        let (mut doc, _root, ab) = base();
+        let mut ids = IdSource::new(0xC1);
+        let (r, a, b) = (ids.mint(), ids.mint(), ids.mint());
+        let nodes = vec![
+            group(r, None, vec![]),
+            group(a, Some(b), vec![b]),
+            group(b, Some(a), vec![a]),
+        ];
+        assert!(
+            matches!(insert(&mut doc, nodes, ab), Err(OpError::MalformedSubtree)),
+            "a cycle was inserted"
+        );
+        for id in [r, a, b] {
+            assert!(!doc.contains(id), "{id:?} was left behind");
+        }
+    }
+
+    /// The depth bound §15 D416's own conditional asked for (§15 D832).
+    ///
+    /// D416 left this door unbounded on the argument that *"nothing nests
+    /// without a user click per level"*, and named the condition that would end
+    /// it: *"fix if a builder, an importer or the MCP write surface ever nests
+    /// without one"*. `io::clip` is that importer — a 300-deep chain arrives in
+    /// one paste — and the saved document then failed the loader's check (6)
+    /// forever, which is the shape where the user's in-memory session is the
+    /// only copy of their work.
+    ///
+    /// 🚨 **The second case is the one a subtree-relative check gets wrong**, and
+    /// it is why the bound reads the parent's depth. Two chains, each
+    /// comfortably inside `MAX_TREE_DEPTH` on its own, compose to a document
+    /// that is not: the first goes in and the second is refused *because of
+    /// where it lands*. A guard measuring only the incoming subtree passes both
+    /// and writes the same unreloadable file.
+    ///
+    /// Flip: `parent_depth` pinned to `0`. The first two assertions stay green
+    /// and the third fails — the predicted site, and the reason the third case
+    /// is here at all.
+    #[test]
+    fn insert_subtree_refuses_a_subtree_that_would_nest_too_deep() {
+        // A flat chain of `len` groups: the first is the subtree root.
+        fn chain(ids: &mut IdSource, len: usize) -> Vec<Node> {
+            let minted: Vec<NodeId> = (0..len).map(|_| ids.mint()).collect();
+            minted
+                .iter()
+                .enumerate()
+                .map(|(i, id)| {
+                    group(
+                        *id,
+                        i.checked_sub(1).map(|p| minted[p]),
+                        minted.get(i + 1).copied().into_iter().collect(),
+                    )
+                })
+                .collect()
+        }
+
+        let (mut doc, _root, ab) = base();
+        let mut ids = IdSource::new(0xD0);
+        assert!(
+            matches!(
+                insert(&mut doc, chain(&mut ids, MAX_TREE_DEPTH + 8), ab),
+                Err(OpError::TooDeep)
+            ),
+            "a chain past the bound was inserted"
+        );
+
+        // Half the bound fits under an artboard at depth 1, twice over it does not.
+        let half = MAX_TREE_DEPTH / 2;
+        let first = chain(&mut ids, half);
+        let tail = first.last().expect("half is non-empty").id;
+        insert(&mut doc, first, ab).expect("half the bound fits");
+        assert!(
+            matches!(
+                insert(&mut doc, chain(&mut ids, half), tail),
+                Err(OpError::TooDeep)
+            ),
+            "two halves composed past the bound"
+        );
     }
 
     #[test]

@@ -956,6 +956,22 @@ pub enum OpError {
     ArtboardPlacement,
     #[error("malformed subtree")]
     MalformedSubtree,
+    /// The subtree would sit deeper than [`crate::io::MAX_TREE_DEPTH`] once it
+    /// is attached (§15 D832).
+    ///
+    /// **Measured against the *parent's* depth, not the subtree's own**, because
+    /// the bound the loader enforces is absolute: a 200-deep subtree pasted into
+    /// a 200-deep parent reloads no better than a 400-deep one pasted at the
+    /// root. Distinct from [`Self::MalformedSubtree`] because the subtree is
+    /// perfectly well formed — it is the destination that makes it unusable, and
+    /// a user who is told *"malformed"* about their own valid layers has been
+    /// told the wrong thing.
+    #[error(
+        "the subtree would nest deeper than {} once attached, and a document \
+         that deep cannot be reloaded",
+        crate::io::MAX_TREE_DEPTH
+    )]
+    TooDeep,
     /// The operation had nothing to make a shape out of — a boolean whose operands
     /// cancel out entirely, asked to flatten. Distinct from [`Self::WrongKindForOp`]
     /// because the kind was right and the *geometry* was empty, which is a thing the

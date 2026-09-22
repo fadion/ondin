@@ -8,7 +8,7 @@ use ondin_core::peniko::Color;
 use ondin_core::{
     Document, DocumentMeta, Effect, EffectKind, Fill, Filters, GradientBrush, Guide, GuideAxis,
     GuideId, History, IdSource, ImageEntry, ImageFormat, ImageId, ImageSource, NodeId, NodeKind,
-    Operation, Pivot, Shadow, Stroke, StrokeAlign, Transaction, image_brush,
+    OpError, Operation, Pivot, Shadow, Stroke, StrokeAlign, Transaction, image_brush,
 };
 
 /// Build a document exercising every node kind and several fields.
@@ -3381,4 +3381,184 @@ fn a_layer_named_like_the_fence_still_crosses() {
         io::clip::read(&text).unwrap().is_ok(),
         "the heading is not part of the format and cannot make it unreadable"
     );
+}
+
+/// 🚨 **The clipboard is an external route into `op_insert_subtree`, and this is
+/// the end-to-end proof that the door holds** (§15 D831, D832).
+///
+/// Until `io::clip` a `Vec<Node>` could only come from `capture_subtree` — from
+/// a document the operation guards had already vetted — and three separate
+/// arguments rested on that: §15 D639's *"no external route"*, D416's *"nothing
+/// nests without a user click per level"* and D423's *"every production caller
+/// feeds a single fresh capture"*. Each was true of the capture and **false of a
+/// paste**, which is OS-clipboard text that any web page's *Copy* button can
+/// write.
+///
+/// **The assertion is the round trip, not the refusal**, and that is the whole
+/// point of putting this test here rather than beside the guards in
+/// `document.rs`. The damage these payloads did was never at paste time: the
+/// node went in, the canvas drew, and the *next autosave* wrote a `.ondin` that
+/// `io::load` refused for the rest of time — with the user's in-memory session
+/// the only surviving copy. So each case asserts three things in order: the
+/// payload really does get through `clip::read` (or the test is about a fence,
+/// not a door), the operation refuses it, and the document **still saves and
+/// reloads** afterwards.
+///
+/// ⚠️ **Each payload is built to pass every check before the one it is aimed
+/// at.** The cycle carries exactly one root, unique ids, consistent
+/// back-pointers and one listing per child — weaken any of those and it is
+/// refused by a different arm and the test measures nothing.
+///
+/// Flips, all three run, each red at its own case with the cases before it
+/// green: `op_insert_subtree`'s **reachability clause** disabled (cycle), its
+/// **depth clause** disabled (chain), and the **fills clause** deleted from the
+/// field loop (gradient). Each one reproduces the live bug rather than merely
+/// failing — the cycle's three nodes, 264 chain nodes and the gradient node all
+/// appear in the returned `DirtySet`, which is what says these payloads reached
+/// the document and not an error path.
+///
+/// 🚨 **The cycle mutation is the reachability *clause*, not the whole walk, and
+/// the difference is the test's meaning.** Replacing the walk with the old count
+/// also removes the depth bound, so the loop aborts at case one and cases two
+/// and three are never reached — a flip that looks decisive while making two of
+/// the three assertions unobservable. Disabling one clause at a time is what
+/// shows they are three guards rather than one: under the cycle flip the depth
+/// test stays green, and under the depth flip the cycle test does.
+#[test]
+fn a_hostile_clipboard_payload_is_refused_and_leaves_the_document_openable() {
+    fn group_json(id: &str, parent: Option<&str>, children: &[&str]) -> String {
+        let parent = parent.map_or_else(|| "null".to_string(), |p| format!("\"{p}\""));
+        let kids = children
+            .iter()
+            .map(|c| format!("\"{c}\""))
+            .collect::<Vec<_>>()
+            .join(",");
+        format!(
+            "{{\"id\":\"{id}\",\"parent\":{parent},\"children\":[{kids}],\"kind\":\"Group\",\
+             \"transform\":[1.0,0.0,0.0,1.0,0.0,0.0],\"name\":\"n\",\"visible\":true,\
+             \"locked\":false,\"proportions_locked\":false,\"opacity\":1.0,\"clip\":false,\
+             \"paint\":{{\"fills\":[],\"strokes\":[]}}}}"
+        )
+    }
+    fn wrap(nodes: &[String]) -> String {
+        format!(
+            "two layers\n{}\n{{\"schema_version\":{},\"subtrees\":[[{}]]}}",
+            io::clip::FENCE,
+            io::CURRENT_SCHEMA_VERSION,
+            nodes.join(",")
+        )
+    }
+
+    // `[X2-L1-01]` — `[R, A, B]` with `A` and `B` pointing at each other. One
+    // root, every child listed once, every back-pointer consistent: the count
+    // this door used to make balances at `2 + 1 == 3`.
+    let cycle = wrap(&[
+        group_json("c0ffee:1", None, &[]),
+        group_json("c0ffee:2", Some("c0ffee:3"), &["c0ffee:3"]),
+        group_json("c0ffee:3", Some("c0ffee:2"), &["c0ffee:2"]),
+    ]);
+
+    // `[R1-L2-02]` — a chain past the loader's own bound, arriving in one paste.
+    let n = io::MAX_TREE_DEPTH + 8;
+    let chain_ids: Vec<String> = (0..n).map(|i| format!("dee9:{i}")).collect();
+    let chain = wrap(
+        &(0..n)
+            .map(|i| {
+                let kids: Vec<&str> = chain_ids
+                    .get(i + 1)
+                    .map(String::as_str)
+                    .into_iter()
+                    .collect();
+                group_json(
+                    &chain_ids[i],
+                    i.checked_sub(1).map(|p| chain_ids[p].as_str()),
+                    &kids,
+                )
+            })
+            .collect::<Vec<_>>(),
+    );
+
+    // `[R1-L2-01]` — a gradient whose ramp opacity is finite and far out of
+    // range. Built by copying a real one and moving the number, because that is
+    // the only value in this family JSON can carry at all: `serde_json` writes a
+    // `NaN` as `null` and refuses it on the way back, so the finite
+    // out-of-range case is the whole of the reachable attack (§15 D767).
+    let gradient = {
+        let (mut doc, root) = rich_document();
+        let frame = doc.get(root).unwrap().children()[0];
+        // A *paintable* descendant, not the frame's first child — that is a
+        // group, and `op_set_fills` refuses one. The subtree captured from here
+        // is the group's Rect.
+        let group = doc.get(frame).unwrap().children()[0];
+        let kid = doc.get(group).unwrap().children()[0];
+        let mut brush = GradientBrush::from(ondin_core::peniko::Gradient::default());
+        brush.opacity = 0.375;
+        doc.apply(&Transaction(vec![Operation::SetFills {
+            id: kid,
+            fills: vec![Fill {
+                brush: Brush::Gradient(brush),
+                visible: true,
+            }],
+        }]))
+        .expect("a gradient with an in-range opacity is accepted");
+        let captured = vec![doc.capture_subtree(kid).unwrap()];
+        let text = io::clip::write(&captured, &[], None, "one layer").unwrap();
+        assert_eq!(
+            text.matches("\"opacity\":0.375").count(),
+            1,
+            "the fixture is not in the state this test is about — the ramp \
+             opacity must be the one distinctive number in the payload, or the \
+             substitution below lands on a node's own opacity and the refusal \
+             comes back BadOpacity for the wrong reason"
+        );
+        // ⚠️ **And re-key it, or the refusal is `DuplicateId` from one arm
+        // earlier.** This payload is captured from the same fixture it is
+        // pasted back into, so every id in it is already in the target
+        // document — which is a true refusal and the wrong one to be
+        // measuring. A real cross-window paste comes from another process,
+        // where the ids are the other document's. The prefix is read out of
+        // the payload rather than written down, so a change of fixture seed
+        // does not quietly turn this back into a `DuplicateId` test.
+        let prefix = text
+            .split("\"id\":\"")
+            .nth(1)
+            .and_then(|s| s.split(':').next())
+            .expect("the payload names at least one node");
+        text.replace(&format!("{prefix}:"), "9ade:")
+            .replace("\"opacity\":0.375", "\"opacity\":1e30")
+    };
+
+    for (name, text, expected) in [
+        ("a cycle", cycle, OpError::MalformedSubtree),
+        ("a chain past the depth bound", chain, OpError::TooDeep),
+        (
+            "a gradient ramp opacity of 1e30",
+            gradient,
+            OpError::NonFinite,
+        ),
+    ] {
+        let (mut doc, root) = rich_document();
+        let frame = doc.get(root).unwrap().children()[0];
+        let before = io::save(&doc).unwrap();
+
+        let payload = io::clip::read(&text)
+            .expect("the fence is ours")
+            .unwrap_or_else(|e| panic!("{name} did not even reach the door: {e}"));
+        let index = doc.get(frame).unwrap().children().len();
+        let outcome = doc.apply(&Transaction(vec![Operation::InsertSubtree {
+            nodes: payload.subtrees[0].clone(),
+            parent: frame,
+            index,
+        }]));
+        assert_eq!(
+            std::mem::discriminant(&outcome.unwrap_err()),
+            std::mem::discriminant(&expected),
+            "{name} was refused for the wrong reason"
+        );
+
+        // The claim that matters: the work is still there and still openable.
+        assert_eq!(io::save(&doc).unwrap(), before, "{name} left a mark");
+        io::load(&io::save(&doc).unwrap())
+            .unwrap_or_else(|e| panic!("after {name} the document no longer opens: {e}"));
+    }
 }

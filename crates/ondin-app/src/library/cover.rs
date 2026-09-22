@@ -361,10 +361,16 @@ impl Covers {
     /// existed one call away.
     ///
     /// ⚠️ **`false` is "not known to be broken", not "fine".** The cover cache is
-    /// lazy and per-pass budgeted, so a document whose cover has not been
+    /// lazy and rendered on a worker, so a document whose cover has not been
     /// attempted yet answers `false` — which is why the dashboard asks
     /// `entry.unread || this`, and why the mark can arrive a pass late on a large
     /// library. `get` requests a repaint, so late arrives.
+    ///
+    /// ⚠️ **This said *"per-pass budgeted"* until §15 D844.** That was the
+    /// mechanism before §15 D820 deleted `FRAME_BUDGET` and moved the render off
+    /// the UI thread; the *conclusion* — that `false` is not a health claim — is
+    /// unchanged, which is exactly why the stale premise was easy to leave
+    /// standing under a sentence that still reads correctly.
     ///
     /// **Cheap on purpose**: a map lookup on the key `get` already built, and no
     /// parsing of its own. Everything that reads this is drawing.
@@ -391,10 +397,25 @@ impl Covers {
     /// happens.
     ///
     /// ⚠️ **The cost is bounded and the sentence was not.** Covers are
-    /// deliberately disposable (§15 D366), the render budget is 8 ms a pass with
-    /// a one-render progress guarantee, so the damage is a slowly filling grid
-    /// rather than a wrong picture — which is why this is a corrected sentence
-    /// and not a rewritten cache.
+    /// deliberately disposable (§15 D366) and the render costs the **pass**
+    /// nothing at all, being a worker thread's work since §15 D820 — so the
+    /// damage is a slowly filling grid rather than a wrong picture, which is
+    /// why this is a corrected sentence and not a rewritten cache.
+    ///
+    /// 🚨 **That clause read *"the render budget is 8 ms a pass with a
+    /// one-render progress guarantee"* until §15 D844, and it is the
+    /// load-bearing half of this paragraph** — it is the entire cost argument
+    /// for why §15 D708 was answered by correcting a sentence rather than by
+    /// namespacing the cache. D820 deleted `FRAME_BUDGET`, `Covers::spent` and
+    /// `Covers::budget` **in the same range that amended `architecture.md` to
+    /// say so**, and left this copy standing. So the verdict survives and its
+    /// stated evidence had expired: the next person weighing D708's two named
+    /// repairs below would have read a cost model measured against rationing
+    /// that no longer exists, found the damage still bounded, and left the cache
+    /// alone on the strength of it. **The conclusion is *more* true now — a pass
+    /// that spends nothing is a better bound than a pass that spends eight
+    /// milliseconds** — which is exactly what makes a stale premise under a
+    /// surviving verdict so easy to walk past.
     ///
     /// **Two ways to make the old claim true, neither taken here.** Namespace
     /// the directory by a hash of the library root, which would also stop two

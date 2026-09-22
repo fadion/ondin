@@ -67,18 +67,21 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 841 index rows, 841 body headings, next free
-D842** — but trust the procedure over any number written down here, including that one.
-⚠️ **D831–D841 are spent.** Session 30 reserved **D831–D840**, and **D842–D850 is reserved
-and unspent** — so for once there *is* a tail to read, and it is the exception rather than
-the rule. Confirm it with the negative grep anyway; a reservation recorded here is a claim
-about the moment it was written, which is the whole subject of this section.
+anywhere cited either. **The live figures: 844 index rows, 844 body headings, next free
+D845** — but trust the procedure over any number written down here, including that one.
+⚠️ **D831–D844 are spent** and **D845–D850 is reserved and unspent** — so for once there *is*
+a tail to read, and it is the exception rather than the rule. Confirm it with the negative grep
+anyway; a reservation recorded here is a claim about the moment it was written, which is the
+whole subject of this section.
 🚨 **And session 30 is the strongest instance yet of the warning below.** It reserved ten
-numbers for **six** planned entries, spent all ten, then needed a **second block** for an
-eleventh — D841, typed into a comment *before* that block was reserved and caught only by
-running the negative grep a minute later. **Eleven numbers for a session that planned six**,
-and the overrun came from the same place it always does: two entries were owed to defects
-found while checking the fix for an earlier one, and one to a correction a subagent returned.
+numbers for **six** planned entries, spent all ten, needed a **second block**, and finished on
+**fourteen** — D831–D844. Two of those were typed into comments *before* the block covering
+them was reserved (D841, D844), each caught by the negative grep within a minute; **D844 was
+caught by the closing re-grep over the unspent tail and not by the reservation check at the
+start**, which is the reading that separates "reserved" from "spent" and is session 28's D811
+lesson arriving again. **Fourteen numbers for a session that planned six**, and the overrun came
+from where it always does: entries owed to defects found while checking the fix for an earlier
+one, and to corrections a subagent returned.
 🚨 **Session 29 is the reason those are not 826 and D827, and it is the strongest instance
 this warning has.** It reserved D823–D830 and planned four. It spent **D827** on something it
 found while running its own closing checks, **D828** on something it found while fixing what
@@ -125,7 +128,7 @@ nothing. Put the number on the doc of whatever a reader meets the question at.
 grep -rhoE 'D[0-9]{1,3}\b' crates/ --include=*.rs | sort -u
 ```
 
-741 distinct numbers today, and **every one of them resolves** — the fourth clean reading
+744 distinct numbers today, and **every one of them resolves** — the fourth clean reading
 in twenty-odd sessions, after D476 and D477 were reconstructed from their citation sites on
 2026-09-19 (§15 D806's neighbours; both entries say in their first line that they are
 reconstructions).
@@ -338,7 +341,22 @@ exactly as it found it only holds if the probe comes back out the way it went in
 and its doc comment — and the result compiles, tests, lints, formats and passes
 `cargo doc`, while paragraphs of reasoning now describe the wrong thing.
 
-**There are twenty-seven recorded instances.** 🚨 **The twenty-sixth and twenty-seventh were
+**There are twenty-eight recorded instances.** 🚨 **The twenty-eighth is the one that says the
+habits are not optional, because it was committed by a session that ran them correctly on every
+other insertion it made that day** (§15 D843). Inserting a test above
+`a_thin_intersect_keeps_its_area`, it anchored the `Edit` on the `#[test]` / `fn` pair — the
+**unique** string, which is exactly the line this section says is not the **correct** one — so
+the new test landed between that function and its 25-line doc, and the two `///` runs
+**merged**. The victim was left with nothing, and D794's bow-tie account, its four-cell flip
+matrix and the sentence *"a thin `Intersect` keeps its area all the way down to 10⁻⁴ world
+units"* sat on a test about magnitude bounds. **All seven gates green**, `cargo fmt` clean, the
+suite green. ⚠️ **Neither sweep would have found it**: the merged run is ~50 lines against a
+floor of 58, and the *length* ranking is the only whole-tree check there is. It was caught by
+`arch-scribe` **reading the file** — the second instance in this tally caught that way and not
+by any command. **The lesson is the narrow one: habit 2 is cheap and has to be run on *every*
+insertion, because the one you skip is the one that was mechanical enough to feel safe.**
+
+🚨 **The twenty-sixth and twenty-seventh were
 committed in a single edit sequence on 2026-09-22** (§15 D830), by a session that had read
 this paragraph twice that day and had already *corrected* an instance of the neighbouring
 D790 class an hour earlier. One anchored an `Edit` on the tail of a test's doc run, putting a

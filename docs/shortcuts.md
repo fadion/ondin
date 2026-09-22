@@ -729,13 +729,32 @@ and the cheatsheet can be rendered from one source.
 | `Enter` | step **into** the selection, or back out | ✅ all five kinds, 2026-08-19 (§15 D228) — text, picture, path, group, boolean, in `double_click_pick`'s order so the key and the double-click cannot disagree. On text with no pointer to place a caret from it **selects the whole string**; a group is a *depth* rather than a mode, so `Escape` is the way back out of that one |
 | `Escape` | unwind one rung | ✅ |
 
-**The Escape ladder is part of the keymap and belongs in the cheatsheet**: session → gesture
-in flight → **a chrome field that just lost focus** → pen bias armed over an edit → point
-selection → layer selection → Select tool (`OndinApp::escape`, §15 D125, D821). ⚠️ **That
-rung sits *below* the gesture and not above it** (§15 D821): a valved numeric field's cancel
-has to go on reaching `cancel_gesture`, which is what stops the release committing after all
-(§15 D317), so the new rung is only ever taken when nothing was in flight — the plain
-`TextEdit` case, where renaming a layer and pressing `Escape` used to clear the selection too. It is the one key whose meaning is a sequence rather than an action,
+**The Escape ladder is part of the keymap and belongs in the cheatsheet.** Read off
+`OndinApp::escape` on 2026-09-22, it is **twelve** rungs (§15 D125, D821, D828):
+
+present mode → the detached colour picker → a text session → the pen → **a gesture in flight**
+(`cancel_gesture`) → **a chrome field that just lost focus** → pen bias armed over an edit →
+the point selection → the pivot handle → the entered group → a tool that is not Select →
+**the layer selection**, which is the fall-through `else` under everything.
+
+🚨 **This list read "session → gesture in flight → a chrome field that just lost focus → pen
+bias armed over an edit → point selection → layer selection → Select tool" until 2026-09-22,
+and it was wrong in both ways a list can be.** It omitted five rungs — present mode, which is
+the **first** arm, the picker, the pen, the pivot handle and the entered group — and it put
+**the layer selection above the tool when the code puts it below**. The order is the whole
+content of a ladder, so an inverted pair is not a smaller error than a missing rung: a reader
+pricing "what does one more press cost here" got the opposite answer. ⚠️ **The same inversion
+was live in `context-menus.md` §10 at the same time**, where it read that the selection is
+cleared on the same rung as the menu *"where present mode and an entered group are further
+down the ladder"* — both of those are further **up**. Two files, one wrong belief, and
+`cargo doc` cannot see either: **a prose ordering is the least checkable thing this project
+writes down.** Re-derive it from the `else if` chain rather than editing the sentence.
+
+⚠️ **The chrome-field rung sits *below* the gesture and not above it** (§15 D821): a valved
+numeric field's cancel has to go on reaching `cancel_gesture`, which is what stops the release
+committing after all (§15 D317), so it is only ever taken when nothing was in flight — the
+plain `TextEdit` case, where renaming a layer and pressing `Escape` used to clear the
+selection too. It is the one key whose meaning is a sequence rather than an action,
 and `Enter` is deliberately its counterpart rather than its alias — a toggle in and out
 against a ladder that unwinds one press at a time. **The counterpart is not symmetric, and that is
 deliberate** (§15 D228): `Enter` toggles the two *tools* it can enter — the node tool and image

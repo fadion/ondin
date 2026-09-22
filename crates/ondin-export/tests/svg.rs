@@ -3781,28 +3781,86 @@ fn collecting_defs_does_not_grow_with_the_square_of_their_count() {
     // which was the thing to check rather than assume.
     //
     // ⚠️ **It does not make the test immune, and pretending otherwise is how a
-    // flake comes back as a mystery.** Three stalls in a row still fail it. The
-    // failure message prints both times so the next reader can tell a stall
-    // (both times inflated, ratio near 4) from the square coming back (the
-    // large one alone inflated).
-    let best_of = |doc: &_, res: &_| {
-        (0..3)
-            .map(|_| {
-                let at = std::time::Instant::now();
-                let _ = svg(doc, res, None);
-                at.elapsed().as_secs_f64()
-            })
-            .fold(f64::INFINITY, f64::min)
+    // flake comes back as a mystery.** Stalls in every repetition still fail it.
+    //
+    // 🚨 **Best-of-three in two phases was not enough, and the reason is the
+    // phases** (§15 D829). This gate went red once in a `cargo test --workspace
+    // --release` on 2026-09-22 and did not recur in 31 further runs; it was then
+    // reproduced deliberately under 64 spinners on 24 cores, at **4 failures in
+    // 10 runs**, always here. Measuring `0..3` of the small and *then* `0..3` of
+    // the large gives the large phase its own window — and the large phase is
+    // about four times longer in wall-clock, so it has four times the exposure
+    // to a burst, and a burst inside it is missed by all three of its
+    // repetitions while none of the small's are touched. **The minimum is the
+    // right statistic and it was being taken over the wrong sample.**
+    //
+    // **Interleaved, so a burst lands on both measurements or on neither**,
+    // which is what makes the minimum mean what D705 says it means.
+    //
+    // ⚠️ **Interleaving alone bought almost nothing, and the first version of
+    // this comment claimed otherwise before it was measured.** At five
+    // interleaved rounds the same 64 spinners still gave **3 failures in 10**
+    // against the baseline's 4. What works is the round count: at **fifteen**
+    // it is **0 in 20**. Both numbers are on the same load and the same
+    // machine, and the honest reading is that the sampling fix is the *count*
+    // and interleaving is the thing that makes the count pay — under
+    // oversubscription every individual sample is hit, so what is needed is
+    // enough of them that one round escapes both measurements together.
+    //
+    // ⚠️ **Fifteen rounds moves the absolute times and not the ratio**, so the
+    // figures in D705's note above are stale for this sampling and are kept
+    // only as the record of what it measured. A deeper minimum converges nearer
+    // the true cost: **0.0034 s / 0.0140 s** here against D705's 0.0082 /
+    // 0.0327, while the ratio is **4.12×** against its 3.97×. The broken
+    // version measures **0.0048 s / 0.0416 s** and **8.70×**. So the bound at
+    // 6.0 keeps 46% headroom above the fixed version and 31% below the broken
+    // one — the discrimination this test exists for is untouched, which is the
+    // thing to check when raising a repetition count rather than assume.
+    let time_once = |doc: &_, res: &_| {
+        let at = std::time::Instant::now();
+        let _ = svg(doc, res, None);
+        at.elapsed().as_secs_f64()
     };
-    let small_ms = best_of(&small_doc, &small_res);
-    let large_ms = best_of(&large_doc, &large_res);
+    let (mut small_ms, mut large_ms) = (f64::INFINITY, f64::INFINITY);
+    for _ in 0..15 {
+        small_ms = small_ms.min(time_once(&small_doc, &small_res));
+        large_ms = large_ms.min(time_once(&large_doc, &large_res));
+    }
 
     let ratio = large_ms / small_ms.max(f64::EPSILON);
+    // 🚨 **The message still tells the reader which of the two it is, but on a
+    // different quantity, because the rule it used to give was backwards**
+    // (§15 D829). It read: *"a stall (both times inflated, ratio near 4)"*
+    // versus *"the square coming back (the large one alone inflated)"* — and
+    // **the large one alone inflated is the signature of a stall**, for the
+    // exposure reason above. The reproduction printed
+    // `0.0071s vs 0.0618s`: the small measurement *below* its own baseline and
+    // the large at 1.9× its own, which the old rule reads as a quadratic
+    // regression and which was a loaded machine.
+    //
+    // **What actually discriminates is the small measurement against its own
+    // baseline**, because the scan is quadratic in *both* documents: at fifteen
+    // rounds the fixed version measures 0.0034 s small and the broken one
+    // 0.0048 s, so a real regression drags the small one up by ~1.4× as well. A
+    // small measurement down at the fixed baseline, with a ratio over the bound,
+    // is a stalled machine whatever the large one did.
+    //
+    // ⚠️ **Those two numbers have to be re-measured whenever the round count
+    // changes, and this message shipped once with figures that did not match its
+    // own sampling.** The first draft carried D705's best-of-three baselines into
+    // a best-of-fifteen test, which put the threshold at 0.0082 s — above *both*
+    // of the real values — so the flip against a genuine quadratic regression
+    // printed a small time of 0.0048 s and the message told the reader it was a
+    // stall. **A diagnostic rule is a measurement, and it expires with the
+    // measurement it was taken from.**
     assert!(
         ratio < 6.0,
-        "a 4x document cost {ratio:.2}x — measured 4.06x with the set and 8.3x \
-         with the scan, so this is the square coming back ({small_ms:.4}s vs \
-         {large_ms:.4}s)"
+        "a 4x document cost {ratio:.2}x ({small_ms:.4}s vs {large_ms:.4}s), over \
+         the 6.0 bound. At fifteen rounds the set measures 4.12x (0.0034s / \
+         0.0140s) and the linear scan 8.70x (0.0048s / 0.0416s). **Check the \
+         small time first**: near 0.0034s this is a stalled machine, near 0.0048s \
+         it is the square coming back — the scan is quadratic in both documents, \
+         so a real regression drags the small one up too and a stall need not"
     );
 }
 

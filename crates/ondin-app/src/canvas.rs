@@ -1030,10 +1030,13 @@ impl OndinApp {
         // three pick chains, and the menu had the shortest, which is D293/D167's
         // shape exactly.
         //
-        // ⚠️ **C5's *"or on its edge"* half is not done here.** `begin_select_drag`
-        // has a third fallback, `selected_frame_at`, that neither of the other two
-        // carries; widening this to match is a separate decision rather than a
-        // silent one.
+        // ⚠️ **C5's *"or on its edge"* half is done here now**, and this comment
+        // said otherwise for as long as it was not (§15 D839). `8ae40bf` added
+        // `frame_edge_at` as a last link on `pick_at_pointer` — which is the
+        // call below — so the menu reaches a frame's border by the same chain a
+        // click does. The sentence survived because `pick_at_pointer`'s own doc
+        // was amended and this copy of the claim was not, and a reader repairing
+        // the code to match it would have deleted the link.
         let Some(leaf) = self.pick_at_pointer(ui, screen, world, rect, ppp) else {
             // **C3 — empty canvas does not clear the selection.** A left-click
             // there deselects; a right-click must not, because the canvas menu's
@@ -2169,10 +2172,23 @@ impl OndinApp {
             return;
         }
 
+        // ⚠️ **Four links, and the last one is what makes a press agree with a
+        // click** (§15 D839). `selected_frame_at` answers an *already selected*
+        // frame's whole box, which is how a selected frame is dragged from its
+        // interior; it says nothing about an unselected one. So after `8ae40bf`
+        // added the edge link to `pick_at_pointer` alone, the same pixel on an
+        // unselected frame's border **selected** it on a click and started a
+        // **marquee** on a press — clearing `entered_group` on the way, which is
+        // the part the user would not attribute to the border at all.
+        //
+        // Appended rather than inserted: on a frame that *is* selected the two
+        // agree (its box contains its edge), so the order only decides which
+        // answers first and never what the answer is.
         let grabbed = self
             .frame_label_at(ui, grab, rect, ppp)
             .or_else(|| self.pick_leaf(grab_world))
-            .or_else(|| self.selected_frame_at(grab_world));
+            .or_else(|| self.selected_frame_at(grab_world))
+            .or_else(|| self.frame_edge_at(grab_world));
         match grabbed {
             Some(leaf) => {
                 // Same policy as a click, so dragging a grouped layer moves what
@@ -7970,11 +7986,21 @@ impl OndinApp {
         // The name above a frame is the frame, so hovering it outlines the
         // frame — otherwise the one place a frame *can* be clicked is the one
         // place that gives no sign of it.
+        // ⚠️ **The same three links as [`Self::pick_at_pointer`], in the same
+        // order** (§15 D839). This function's own contract is that the ring
+        // shows what a click would take, and `8ae40bf` added the edge link to
+        // the click chain and not to this one — so a frame's border was
+        // selectable with no hover ring and no measure overlay, the two
+        // functions disagreeing about a band four pixels wide. A chain that has
+        // to match another chain is the thing to check when either gains a link.
         let target = match self.frame_label_at(ui, p, rect, ppp) {
             Some(frame) => frame,
             None => {
-                let leaf = self.pick_leaf(self.to_world(p, rect, ppp))?;
-                self.pick_preview(leaf, ui)
+                let world = self.to_world(p, rect, ppp);
+                match self.pick_leaf(world) {
+                    Some(leaf) => self.pick_preview(leaf, ui),
+                    None => self.frame_edge_at(world)?,
+                }
             }
         };
         (!self.session.selection.contains(target)).then_some(target)
@@ -9096,7 +9122,19 @@ impl OndinApp {
     fn frame_edge_at(&self, world: Point) -> Option<NodeId> {
         let slop = self.pick_slop();
         self.artboards().into_iter().rev().find(|id| {
+            // 🚨 **The two predicates every other pick door carries, and this
+            // one shipped without either** (§15 D839). `pick_leaf` filters
+            // through `query::hit_test`'s `is_effectively_interactable` and
+            // `frame_label_at` through `shown_visible`; this link was added on
+            // its own and consulted neither, so a **locked** frame and a
+            // **hidden** frame were both selectable by their border —
+            // `architecture.md` §9.4 being *"the canvas never selects a locked
+            // layer, by any gesture"*. `Selection::set_one` filters nothing,
+            // which is why each door has to carry its own and why a new door is
+            // exactly where this goes wrong.
             self.is_occupied_frame(*id)
+                && self.shown_visible(*id)
+                && !ondin_core::is_effectively_locked(&self.session.doc, *id)
                 && self.session.resolved.world_bounds(*id).is_some_and(|b| {
                     b.inflate(slop, slop).contains(world)
                         && !b.inflate(-slop, -slop).contains(world)
@@ -22086,6 +22124,163 @@ mod frame_edge_tests {
             app.pick_leaf(Point::new(95.0, 95.0)),
             Some(inside),
             "control: the rect inside the frame is picked as itself"
+        );
+    }
+
+    /// 🚨 **Through the shipped chain, which nothing went through** (§15 D839).
+    ///
+    /// Every assertion above is on `frame_edge_at` directly. Deleting
+    /// `.or_else(|| self.frame_edge_at(world))` from `pick_at_pointer` — the
+    /// link `8ae40bf` exists to add — left the whole app suite green, so the
+    /// **feature** had no test even though its helper had four. A helper test
+    /// and a chain test are different claims, and it is the chain the user
+    /// clicks.
+    ///
+    /// ⚠️ **The camera has to be where the fixture thinks it is.** These points
+    /// are world units and `pick_at_pointer` wants both a screen position and a
+    /// world one, so the screen half is derived with `to_screen` rather than
+    /// assumed — passing a stray screen point would let `frame_label_at` answer
+    /// first and the test would pass without the link it is about.
+    ///
+    /// Flip: that `or_else` deleted. Red at *"the border is reached through the
+    /// chain"*, the predicted site, with the control green.
+    #[test]
+    fn a_frames_edge_is_reached_through_the_shipped_chain() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (app, board, inside) = fixture(&ctx);
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+        let slop = app.pick_slop();
+
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            let edge = Point::new(100.0, slop / 2.0);
+            assert_eq!(
+                app.pick_at_pointer(ui, app.to_screen(edge, rect, 1.0), edge, rect, 1.0),
+                Some(board),
+                "the border is reached through the chain, not just through the \
+                 helper"
+            );
+            let middle = Point::new(150.0, 150.0);
+            assert_eq!(
+                app.pick_at_pointer(ui, app.to_screen(middle, rect, 1.0), middle, rect, 1.0),
+                None,
+                "control: the interior is still not the frame, so the link did \
+                 not widen into `selected_frame_at`'s answer"
+            );
+            let over = Point::new(95.0, 95.0);
+            assert_eq!(
+                app.pick_at_pointer(ui, app.to_screen(over, rect, 1.0), over, rect, 1.0),
+                Some(inside),
+                "control: contents still win their own pixels"
+            );
+        });
+    }
+
+    /// **A locked frame and a hidden one are not selectable by their border**
+    /// (§15 D839).
+    ///
+    /// 🚨 This link shipped consulting **neither** predicate, where both sibling
+    /// links carry one: `pick_leaf` filters through `query::hit_test`'s
+    /// `is_effectively_interactable` and `frame_label_at` through
+    /// `shown_visible`. `architecture.md` §9.4 is *"the canvas never selects a
+    /// locked layer, by any gesture"*, and `Selection::set_one` filters nothing,
+    /// so a door that does not filter is a door that selects.
+    ///
+    /// ⚠️ **Both, and separately, because they are two predicates.** A fix that
+    /// added only `shown_visible` — the nearer one to hand, since
+    /// `frame_label_at` uses it — passes a hidden-only test and leaves §9.4's
+    /// own sentence false.
+    ///
+    /// ⚠️ **The control runs first.** Each case asserts the border answers
+    /// *before* the flag is set, so a fixture that never reached the band would
+    /// fail loudly rather than pass by answering `None` for the wrong reason —
+    /// which is this whole test's failure mode, every assertion being `None`.
+    ///
+    /// Flip, run: the lock term deleted and `shown_visible` left in place — the
+    /// half-fix the doc above predicts, and the one somebody reaching for
+    /// `frame_label_at`'s predicate would write. **Red on the locked case,
+    /// green on the hidden one**, which is what says the two terms are two
+    /// claims rather than one spelled twice.
+    #[test]
+    fn a_locked_or_hidden_frames_edge_is_not_pickable() {
+        for (what, op) in [
+            ("locked", |id| Operation::SetLocked { id, locked: true }),
+            ("hidden", |id| Operation::SetVisible { id, visible: false }),
+        ] as [(&str, fn(NodeId) -> Operation); 2]
+        {
+            let ctx = egui::Context::default();
+            crate::theme::install(&ctx);
+            let (mut app, board, _inside) = fixture(&ctx);
+            let slop = app.pick_slop();
+            let edge = Point::new(100.0, slop / 2.0);
+            assert_eq!(
+                app.frame_edge_at(edge),
+                Some(board),
+                "control ({what}): the fixture must reach the band before the \
+                 flag is set, or this test passes for the wrong reason"
+            );
+            app.session
+                .commit(Transaction(vec![op(board)]))
+                .then_some(())
+                .expect("the flag is settable");
+            assert_eq!(
+                app.frame_edge_at(edge),
+                None,
+                "a {what} frame is not selectable by its border"
+            );
+        }
+    }
+
+    /// **A press on the border does what a click on it does** (§15 D839).
+    ///
+    /// The same pixel **selected** the frame on a click and started a
+    /// **marquee** on a press, because `begin_select_drag`'s third link is
+    /// `selected_frame_at` — an *already selected* frame's whole box — which
+    /// says nothing about an unselected one. ⚠️ **And the marquee cleared
+    /// `entered_group` on the way**, which is the part a user would never
+    /// attribute to the border.
+    ///
+    /// ⚠️ **The fixture must start with the frame unselected**, asserted,
+    /// because a selected frame makes `selected_frame_at` answer and the whole
+    /// disagreement disappears — that is exactly the state in which the old code
+    /// was right.
+    ///
+    /// Flip, run: the fourth link deleted from `begin_select_drag`. Red on the
+    /// drag arm, the predicted site, before the selection and `entered_group`
+    /// assertions are reached — which is why the drag arm is asserted first of
+    /// the three.
+    #[test]
+    fn a_press_on_a_frames_edge_grabs_it_rather_than_starting_a_marquee() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, board, _inside) = fixture(&ctx);
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+        let slop = app.pick_slop();
+        let edge = Point::new(100.0, slop / 2.0);
+        assert!(
+            !app.session.selection.contains(board),
+            "the fixture must reach the state: with the frame already selected, \
+             `selected_frame_at` answers and there is nothing to show"
+        );
+        app.entered_group = Some(board);
+
+        let screen = app.to_screen(edge, rect, 1.0);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            app.begin_select_drag(ui, screen, rect, 1.0, &None, false);
+        });
+
+        assert!(
+            matches!(app.drag, Drag::Move { .. }),
+            "a press on the border grabs the frame rather than starting a marquee"
+        );
+        assert!(
+            app.session.selection.contains(board),
+            "and selects it, like the click does"
+        );
+        assert_eq!(
+            app.entered_group,
+            Some(board),
+            "and does not clear the entered group, which only the marquee arm does"
         );
     }
 }

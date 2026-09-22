@@ -168,13 +168,20 @@ use kurbo::{BezPath, PathEl, Point};
 /// but read it as being about which quantities may vary, not about this number
 /// reaching the boolean, because it no longer does.
 ///
-/// ⚠️ **And the rule runs both ways, which this doc broke while stating it**
-/// (§15 D841). The line above named `FLO_ACCURACY` as an intra-doc link, and a
-/// link *out of* a `cfg(test)` item is as unchecked as a link *into* one:
-/// `cargo doc` builds without the `test` cfg, so this item is absent and
-/// nothing ever resolves what it points at. Plain backticks here too — the
-/// documented correct population of such links is **zero**, which makes it an
-/// invariant rather than a figure.
+/// ⚠️ **And this doc broke that rule two paragraphs above the line stating it**
+/// (§15 D841). It named `FLO_ACCURACY` as an intra-doc link, which is exactly
+/// what §15 D319's convention forbids *here* — a link in a test's prose is
+/// decoration, because `cargo doc` builds without the `test` cfg and this item
+/// is absent from the crate rustdoc walks. Plain backticks, then; the correct
+/// population of such links is **zero**, an invariant rather than a figure.
+///
+/// 🚨 **The check is what is new, not the rule.** This is the second instance of
+/// the hole §15 D827's own *Fix* named — a `#[cfg(test)]` **item** at module
+/// level, rather than one inside a `mod tests`, sits outside every hand-rolled
+/// sweep that looks for the module while being absent from rustdoc all the
+/// same. D827 wrote that down and the next instance was already in the tree,
+/// three lines from here. *A rule stated in a doc comment does not bind the doc
+/// comment stating it.*
 ///
 /// ⚠️ **`cfg(test)` rather than `allow(dead_code)`**, so that "no production line
 /// reads this" is enforced by the compiler instead of asserted by the sentence

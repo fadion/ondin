@@ -1841,9 +1841,21 @@ impl OndinApp {
                     }
                     // Dropping the buffer here is what strips a typed or pasted
                     // `#`: the field falls back to `hex_of`, which never writes one.
+                    // 🚨 **`Escape` drops the buffer and writes nothing** (§15
+                    // D841). This read `if let Some(…) = parse_hex(&text)` with
+                    // no `Escape` clause, so the key that cancels everywhere
+                    // else committed the typed colour — `[X6-L1-02]`'s second
+                    // site, and the same input §15 D808 records as the bug.
+                    //
+                    // ⚠️ **The clear is outside the guard and the write inside
+                    // it.** Both have to happen on `Escape` except the write: a
+                    // cancelled edit that kept its buffer would leave the
+                    // abandoned text in the field.
                     if resp.lost_focus() {
                         self.char_hex = None;
-                        if let Some([r, g, b]) = ui::parse_hex(&text) {
+                        if let Some([r, g, b]) =
+                            ui::parse_hex(&text).filter(|_| ui::defocus_commits(&resp))
+                        {
                             now = Some(Some(
                                 Color::from_rgba8(r, g, b, 255).with_alpha(shown.components[3]),
                             ));

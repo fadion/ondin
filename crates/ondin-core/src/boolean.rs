@@ -162,11 +162,19 @@ use kurbo::{BezPath, PathEl, Point};
 /// A hundredth of a world unit — the tolerance this module's tests read, and
 /// until 2026-09-19 the one handed to every boolean.
 ///
-/// 🚨 **It is no longer what flo_curves is given**; [`FLO_ACCURACY`] is, and it is
+/// 🚨 **It is no longer what flo_curves is given**; `FLO_ACCURACY` is, and it is
 /// three orders finer (§15 D794). The paragraph below is still the reason the
 /// figure is a *constant* rather than a parameter, and that reason is untouched —
 /// but read it as being about which quantities may vary, not about this number
 /// reaching the boolean, because it no longer does.
+///
+/// ⚠️ **And the rule runs both ways, which this doc broke while stating it**
+/// (§15 D841). The line above named `FLO_ACCURACY` as an intra-doc link, and a
+/// link *out of* a `cfg(test)` item is as unchecked as a link *into* one:
+/// `cargo doc` builds without the `test` cfg, so this item is absent and
+/// nothing ever resolves what it points at. Plain backticks here too — the
+/// documented correct population of such links is **zero**, which makes it an
+/// invariant rather than a figure.
 ///
 /// ⚠️ **`cfg(test)` rather than `allow(dead_code)`**, so that "no production line
 /// reads this" is enforced by the compiler instead of asserted by the sentence

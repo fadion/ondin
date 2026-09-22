@@ -888,6 +888,28 @@ impl OndinApp {
             // commits, and "6D" would land as a real colour on the way. Clearing
             // the buffer is also what strips a typed or pasted `#` — the field
             // falls back to `hex_of`, which never writes one.
+            //
+            // 🚨 **[`ui::defocus_commits`] and not a bare `lost_focus()`** (§15
+            // D841). `Escape` surrenders focus like every other way out, so a
+            // bare check commits the value the user was cancelling — **the same
+            // input and the same two numbers §15 D808 records as the bug**, at a
+            // site D808 did not enumerate. Its own entry names the four fields
+            // it audited and never claims four is the population, so this is a
+            // gap rather than a live entry re-argued.
+            //
+            // ⚠️ **No gate sees this.** `nothing_commits_on_the_expression_d316_removed`
+            // fires only where `lost_focus()` sits within 160 characters of
+            // `changed()`; here they are ~700 apart, in two separate conditions,
+            // and that gate is about D316's compound expression rather than
+            // about `Escape`. What finds this shape is
+            // `grep -rn "lost_focus()"` and reading each hit.
+            //
+            // ⚠️ **The condition stays `lost_focus()` and the *write* is what
+            // `Escape` suppresses**, which is not interchangeable: the buffer
+            // clear at the end of this block has to run on every defocus, or a
+            // cancelled edit leaves its typed text sitting in the field for the
+            // next person to look at. Gating the whole block was the first shape
+            // of this fix and it did exactly that.
             if resp.lost_focus() {
                 // 🚨 **Nothing is written unless the typed colour differs from
                 // the one that is there** (§15 D730, `[S23.1-L1-05]`) —
@@ -912,7 +934,8 @@ impl OndinApp {
                 // edit whenever the stand-in happened to match what was typed.
                 let mixed = matches!(slot, PaintSlot::SelectionAll(_));
                 let unchanged = !mixed && parse_hex(&text) == parse_hex(&hex_of(current));
-                if let Some([r, g, b]) = parse_hex(&text).filter(|_| !unchanged) {
+                let abandoned = !ui::defocus_commits(&resp);
+                if let Some([r, g, b]) = parse_hex(&text).filter(|_| !unchanged && !abandoned) {
                     let rgb = Color::from_rgba8(r, g, b, 255);
                     // ⚠️ **Over a selection, each paint keeps its own opacity**
                     // (§15 D540) — `inspector::paint_hex_field`'s branch, which

@@ -2190,7 +2190,15 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
     // Eight, and D240's transposition hazard does not apply: every parameter is a
     // distinct type, so a swapped pair does not compile. Two call sites, both in
     // [`Builder::text`].
-    #[allow(clippy::too_many_arguments)]
+    //
+    // 🚨 This attribute was written **twice**, on consecutive lines, from the first
+    // commit of the current `.git` until 2026-09-22 — with every gate green the whole
+    // time (§15 D828). Clippy has `duplicated_attributes` for exactly this and it is
+    // warn-by-default, so the interesting half is why it never fired: **the lint is
+    // silent on any item inside an `impl` block**, inherent or trait, and fires on a
+    // free function — measured both ways in an isolated crate. This workspace is
+    // mostly `impl` blocks, so that is a blind spot over nearly every item in it, and
+    // the sweep that found this one was three hand-written greps rather than a gate.
     #[allow(clippy::too_many_arguments)]
     fn text_node(
         &mut self,

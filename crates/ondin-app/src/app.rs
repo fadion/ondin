@@ -16907,7 +16907,8 @@ mod clipboard_crossing_tests {
     //! windows to see.
 
     use super::{Clipboard, OndinApp};
-    use ondin_core::NodeId;
+    use ondin_core::kurbo::Size;
+    use ondin_core::{Fill, IdSource, NodeId, NodeKind, Operation, Transaction, image_brush};
 
     /// Every node reachable from the root, which is what a paste adds to.
     fn node_ids(app: &OndinApp) -> Vec<NodeId> {
@@ -16992,6 +16993,108 @@ mod clipboard_crossing_tests {
         assert!(
             arrived.iter().all(|id| !from_source.contains(id)),
             "and not one of them kept the id it had in the window it came from"
+        );
+    }
+
+    /// 🚨 **The picture crosses too, which is the one part of a layer that is
+    /// not in the subtree** (§15 D842).
+    ///
+    /// A fill stores an image *key* and the bytes live in a table on the
+    /// document, so a cross-window paste is the **only** route where the target
+    /// is guaranteed not to hold the entry already — within one process the
+    /// in-app `Clip` and the document share the table, and `insert_all`'s own
+    /// doc says the duplicate path passes no images at all. If the bytes do not
+    /// make the crossing the layer arrives as the missing-picture placeholder,
+    /// or on a stroke as nothing whatever (§15 D179), with the node count and
+    /// every id assertion above still green.
+    ///
+    /// ⚠️ **The module's other three tests pass with `images: Vec::new()`
+    /// substituted into `adopt_clip_text`**, because their fixture is two groups
+    /// of plain rects with no fill referencing an `ImageId` anywhere — so this
+    /// module's own header claim, that the text *"is enough, on its own, to
+    /// rebuild the layers"*, was asserted against the one kind of layer that has
+    /// nothing to rebuild. **The fixture never reached the state it named.**
+    ///
+    /// ⚠️ **Pasted twice on purpose.** `build::missing_image_ops` filters on
+    /// `!doc.has_image(id)` and nothing else, so "the entry arrives" and "the
+    /// entry arrives once" are two claims, and the second is the one a filter
+    /// written as `always add` would fail while the first stayed green.
+    ///
+    /// Flip: `images: Vec::new()` in `adopt_clip_text`'s `Clip`. Red on the
+    /// `image(&id)` assertion, the predicted site, with the layers all present
+    /// and one of them drawing a placeholder — which is exactly the failure the
+    /// node-count assertions cannot see.
+    #[test]
+    fn a_copy_from_another_window_brings_its_pictures() {
+        let ctx = egui::Context::default();
+        let mut source = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0xB17E);
+        let root = ids.mint();
+        let mut doc = ondin_core::Document::new(root);
+        let rect = ids.mint();
+        let id = ondin_core::ImageId("a-photo".into());
+        let entry = ondin_core::ImageEntry {
+            source: ondin_core::ImageSource::Embedded(vec![9, 8, 7, 6].into()),
+            format: ondin_core::ImageFormat::Png,
+            width: 2,
+            height: 2,
+        };
+        doc.apply(&Transaction(vec![
+            Operation::AddImage {
+                id: id.clone(),
+                entry: entry.clone(),
+            },
+            Operation::CreateNode {
+                id: rect,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(10.0, 10.0),
+                    corner_radii: Default::default(),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetFills {
+                id: rect,
+                fills: vec![Fill {
+                    brush: image_brush(id.clone()),
+                    visible: true,
+                }],
+            },
+        ]))
+        .expect("a rect painted with a picture");
+        source.session.adopt_document(doc, None);
+        source.session.selection.set_one(rect);
+
+        source.copy_selection(&ctx);
+        let text = source
+            .clipboard_stamp
+            .clone()
+            .expect("a copy stamps the clipboard");
+
+        let mut target = OndinApp::headless(&ctx);
+        assert!(
+            target.session.doc.image(&id).is_none(),
+            "the fixture must reach the state: a target that already held the \
+             entry would pass this test without anything crossing"
+        );
+        assert!(matches!(target.adopt_clip_text(text), Clipboard::Layers));
+        assert!(target.paste_clipboard(), "the layer pastes");
+
+        assert_eq!(
+            target.session.doc.image(&id),
+            Some(&entry),
+            "the bytes crossed with the layer that keys into them — a node \
+             carries the key and the document carries the picture"
+        );
+
+        assert!(target.paste_clipboard(), "and it pastes a second time");
+        assert_eq!(
+            target.session.doc.image(&id),
+            Some(&entry),
+            "with the table entry added once, not twice — `missing_image_ops` \
+             filters on `!doc.has_image(id)` and this is what says so"
         );
     }
 

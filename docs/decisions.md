@@ -1212,6 +1212,11 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D834** — **An image entry no node keys into is dropped, the inbound side having had no rule where the outbound side always had one.** `[X2-L5-01]`. `copy_selection` computes the carried set as `build::image_ids_in` over the copied nodes; `parse` imposed no such rule, and everything downstream is permissive in the same direction — `missing_image_ops` adds **every** carried entry the document lacks, `io::save` writes `doc.images()` whole, and the table is never collected. 🚨 **So a crafted payload could plant arbitrary bytes in the victim's document at rest, invisibly**, nothing in the UI listing an image no layer shows. **Dropped rather than refused**, which is **D492**'s bargain and faces the same way as **D179** — so the door is permissive about an image mismatch in *both* directions, and no legitimate copy changes. ⚠️ **This closes the *invisible* route and not `[R3-L5-01]`**: a node carrying an image fill keyed to an attacker-chosen `Linked` entry still brings it through, as it must, or a real picture would stop crossing. *(Fixed and tested 2026-09-22; **Keep.** ⚠️ **The filter exposed a test asserting something its fixture did not do** — `a_clipboard_payload_carries_the_image_table_entries_it_keys_into` handed `write` an entry **nothing referenced** while asserting *"the table entry the nodes key into"*, and passed because `parse` carried whatever it was given. The fixture paints a descendant before capturing now)*
 - **D835** — **`ClipDto::subtrees` stated a rule in the format's own voice and nothing checked it.** `[X2-L2-02]`, Low, and what keeps it from being lower is *which two readers disagree*. The field's doc says the first entry is that subtree's root; `paste_clipboard_at` takes both the destination **parent** and the *just above what it came from* z-slot from `template.first()`, while `remap_subtree` and `insert_subtrees` locate the **real** root by predicate. So a reordered payload had its placement computed from one node and applied to another — landing a paste inside a group the user did not choose, in the same-document-in-two-windows case where a foreign parent id does resolve (§10). **Refused rather than reordered**: the rule is the format's, and silently reordering would leave `capture_subtree`'s guarantee untested on both sides. ⚠️ **A position and a predicate are two ways of answering one question, and a wire format is where they are first allowed to disagree.** *(Fixed and tested 2026-09-22; **Keep.** Covered as a row of `every_refusal_the_clipboard_door_makes_has_a_test`, which asserts the message and not only the error)*
 - **D836** — **Five of `parse`'s six decisions had no test, and the sixth cannot be reached from the wire — which is worth asserting rather than leaving to look untested.** `[R2-L6-01]`, High. Only the `schema_version` mismatch was exercised, so the check whose own comment argues it prevents **silent partial loss on paste** was itself unasserted and deleting it left the workspace green. ⚠️ **Each fixture is written out as JSON rather than produced by `write`**, four of them being states `write` cannot reach — which is the point, they model a payload from somewhere else. 🚨 **And they assert the *message*, not `is_err()`**: with the empty-subtree refusal gone the payload is still refused, as *"0 roots"*, so a test asking only whether it errored stays green while the user is told the wrong thing. **`Payload::from` crossed in every payload and was `None` in every `write` call in the workspace** while driving *Paste here*'s aim. 🚨 **The non-finite `from` filter cannot be reached through `read` at all**: `serde_json` refuses every spelling of a non-finite `f64`, `1e999` coming back `Serde("number out of range")` one function *before* the filter — **D421**'s argument for why the loader carries no finiteness check, arriving at the clipboard door. **It is kept, and not for D639's reason**: that was a fact about who calls a function today and `io::clip` falsified it inside a fortnight, where this is a property of the **format**, which does not acquire a new caller quietly. *(Tested and measured 2026-09-22; **Keep.** **Tests** `every_refusal_the_clipboard_door_makes_has_a_test` and `the_paste_here_box_makes_the_round_trip_and_a_broken_one_cannot_arrive`, which asserts the **serde refusal** as the only observable form of the claim. ⚠️ **The mutations are named by function rather than by text** (§15 **D803**) — five on `parse`'s clauses, each red only at its own row, the single-root one weakened to `roots.first()` rather than deleted; three on `op_insert_subtree`'s, **one clause at a time**, because replacing the whole walk also removes the depth bound and the table-driven test then aborts at case one. 🚨 **That mutation looks decisive and measures a third of what it claims to** — D803's slip with the sign reversed)*
+- **D837** — **A kilobyte of SVG hung the import inside the selector matcher, and the cap the review asked for was not a bound.** `[R1-L2-03]` (**High**), `[X7-L6-01]`, `[X7-L6-02]`. §15 **D806** built `match_chain` recursive with no memo: each descendant arm looped over every ancestor and recursed on each match, so `nope g g g g g g g g g g text` against sixty nested `<g>` searched every increasing choice of ten ancestors — `C(nesting, chain)` — before failing on the `nope` that never matches, and it is called **once per element per property** the cascade asks about. **334 bytes / 30 levels / 12.6 s**, with a 534-byte fixture not finishing in **120 s**. 🚨 **None of this module's three bounds is even approached**, which is the point: §5.11's series runs *a depth bound is not a size bound* (**D446**) to *a size bound is not a payload bound* (**D459**), and this is a file that is tiny and shallow by **every quantity anyone had thought to count** — what explodes is the work *per element*. 🚨 **The review's sketch was `MAX_SELECTOR_COMPOUNDS` and it was declined, which is the sentence the next reader needs, because the finding is what they meet first.** An element's ancestors are a **path** — `parent_element` walks one line, not a tree — so *"does `chain` match some increasing subsequence of the ancestors"* is ordinary subsequence matching and was never exponential **in nature**; the recursion was re-deriving its own sub-answers. A table over `(chain index, ancestor index)` is the same predicate in `O(chain × depth)`, so **no selector that used to be honoured stops being honoured**, where a cap would have sold expressiveness for a bound it does not give: at 8 compounds over 64 levels `C(64, 8) ≈ 4.4 × 10⁹`. *A cap that looks like a fix and leaves the hang reachable is worse than none, because it closes the finding.* *(Fixed and tested 2026-09-22; **Resolved.** **Test** `a_long_selector_over_deep_nesting_returns` over a 60-level fixture, asserting only that it **returns** — ⚠️ **no wall-clock, deliberately** (§15 **D829**): a timing assertion measures the machine, an exponential matcher does not come back at all, so the harness's own timeout is the sharper instrument and the fixture is sized to be hopeless rather than merely slow. The flip is the recursive version and it was run: **it does not finish in 120 s**. 🚨 **D806's justification for the recursion could not be used to write the backtracking test and is amended** — `.a .b .c` is a shape where greedy and backtracking **necessarily agree**. `svg_in.rs`'s copy of it is corrected too)*
+- **D838** — **A stylesheet is bounded by its own length, and it is the fourth quantity this importer bounds.** `[X7-L1-02]`. §5.11's series had three members and none of them looks at the `<style>` element: `MAX_SVG_NESTING` bounds depth (**D416**), `MAX_SVG_NODES` the emitted count (**D446**), `MAX_GRADIENT_STOPS` what one node carries (**D459**). `Css::declaration` walks **every rule for every element for every property**, so 50,000 rules over 1,000 shapes froze a paste for **24.5 s** from a file shallow and small by every other measure — linear in each of three things is cubic in the file. 🚨 **The cap is the fix and a reorder is not, and that was measured rather than assumed**: re-flipping D806's ordering (the cheap tests before the tree walk) ran the same fixture at **44.0 s** against the shipped 24.5, so the shipped order is already the faster one. ⚠️ **`MAX_CSS_RULES = 2_048` is chosen with headroom over real exports and was *not* measured against a corpus** — said plainly so nobody cites it as a measurement; Illustrator's `.st0….stN` convention runs to the low hundreds on a detailed drawing and Inkscape emits fewer. **Reported rather than refused**, through the `"style (complex selector)"` line the import already surfaces, and the rules read before the cap still paint. *(Fixed and tested 2026-09-22; **Keep.** **Test** `a_stylesheet_past_the_rule_cap_is_reported_and_what_it_read_still_paints`, **both halves**, *"capped"* and *"still works"* being two claims. 🚨 **The obvious flip is vacuous, and it was written down as the flip before it was run**: the fixture is `MAX_CSS_RULES + 10` rules, so raising the constant raises the fixture with it and the test still passed at **100,000**, having quietly built a hundred thousand rules and spent 1.63 s doing it. **A fixture defined in terms of the constant under test cannot falsify that constant**, and the passing run looks exactly like a working one — worth more than the cap is, the shape being available to every threshold test in the module. §5.11 amended)*
+- **D839** — **The frame-edge pick reached one door of three and carried neither predicate, so a rule §9.4 states in as many words was false across a band four pixels wide.** `[X5-L2-01]` (**High**), `[X5-L1-01]`, `[X5-L1-02]`, `[X5-L6-01]`. §15 **D816** added `frame_edge_at` as the last link of `pick_at_pointer` and stopped there. **`begin_select_drag` builds its own chain**, whose third link is `selected_frame_at` — an *already selected* frame's whole box, silent about an unselected one — so the same pixel **selected** the frame on a click and started a **marquee** on a press, clearing `entered_group` on the way, which is the part no user would attribute to the border. **`hover_target` is the chain whose job is to agree with another chain**, and a border was selectable with no hover ring and no measure overlay. 🚨 **And the new door consulted neither predicate where both its siblings carry one** — `pick_leaf` filters through `query::hit_test`'s `is_effectively_interactable`, `frame_label_at` through `shown_visible` — so a **locked** and a **hidden** frame were each selectable by their border, against §9.4's *"the canvas never selects a locked layer, by any gesture"*. `Selection::set_one` filters nothing, which is why every door carries its own and why **a new door is exactly where this goes wrong**. ⚠️ **Both predicates, separately**: adding `shown_visible` alone is the one nearest to hand, being `frame_label_at`'s, and it passes a hidden-only test while leaving §9.4's own sentence false — measured, as the flip. *(Fixed and tested 2026-09-22; **Resolved for the edge door — and *Fix*, because the name tag is the same defect and was not in the brief.** Three tests in `canvas::frame_edge_tests`, each flip run: the shipped chain, both flags with the control asserted *first*, and the press-versus-click disagreement. 🚨 **`frame_label_at` reads `shown_visible` and no lock at all**, so a locked frame is still selectable by its **name tag** and §9.4's *"by any gesture"* is still false there; `shown_visible`'s own doc argues the lock out for *drawing* the tag, which is a different question from picking it. 🚨 **The two repairs are not symmetric and the obvious one has the cost**: a lock term on `frame_label_at` takes away the canvas's only route to *Unlock*, that tag's own menu carrying it, so the alternative — writing the tag into §9.4 as a second deliberate exception beside the layers panel's — is the one to weigh it against rather than to skip. §9.4 amended in two places, the door list and the lock rule)*
+- **D840** — **The typography chords bound without rewriting, and three of this panel's own sentences had outlived the code they describe.** `[X4-L1-01]`–`[X4-L1-03]`, `[X4-L6-01]`, `[X4-L6-02]`, `[X4-L3-01]`, `[R2-L8-04]`, `[R2-L6-03]`. **(a)** The `Leading` arm ended in `step_length` with **no range expression at all** — §15 **D817**'s identical defect three arms up in the same `match`, never read beside it — so a held `Alt`+`↓` walked line height **negative**, out of `0..=1000%` and into `parley_line_height`, `Length::canonical` normalising `-0.0` without bounding. **(b)** D817's own clamp was **unconditional**, which honoured D817 and broke §15 **D425**: with a stored `Em(5.0)` — 500%, legal, and a file may hold one — `Alt`+`→` stepped and then clamped to `MAX_TRACKING_PCT`, so **the increase key decreased tracking by 300 percentage points**. `stepped_into` widens the range by `from`, which is exactly `clamp` inside the range and pins the *away* direction outside it. **(c)** `agreed_zero` hands back the first value that **cannot** be the default; **(d)** the third arm D812 deleted was still described in the present tense at three sites. *(Fixed and tested 2026-09-22; **Resolved — extends D817 and amends D425's citation, D799, D812 and D475.** 🚨 **A flip that does not bite because two defences must fail together is a different animal from one that does not bite because nothing is tested, and the two are indistinguishable without running the pair** — §15 D803's trap one level up)*
+- **D841** — **`Escape` still committed a typed colour at two hex fields §15 D808 never reached, and the gate whose *name* reads like it covers the class cannot see it.** `[X6-L1-02]` and `[R1-L2-05]`. **(a)** `picker::hex_row` and `typography::char_hex` both decided they were finished on a bare `lost_focus()`, so the key that cancels everywhere else **applied** the edit — **the same input and the same two numbers D808 records as the bug**, at two sites that entry did not enumerate; it named the four it audited and never claimed four was the population, so this is a gap and not a live entry re-argued. ⚠️ **The *write* is what `Escape` suppresses and not the block**, which is the trap: both sites clear their text buffer inside the same `lost_focus()` arm, and gating the whole arm — the first shape this fix took — leaves a cancelled edit's typed text sitting in the field for the next person to find. **No test would have caught that.** 🚨 **And no gate sees the class.** `app::valve_condition_gate::nothing_commits_on_the_expression_d316_removed` reports a `lost_focus()` only where `changed()` falls within **160 characters** with no exemption marker; at the picker the two are ~700 apart in two separate conditions. **The window is right and is not the defect** — `cargo fmt` wraps a long condition a long way below its comment, and a line-matched version would have found none of D808's four — and the gate's own doc says it *"looks for the expression, not for the shape"*. **The mistake is reading a gate's name as its coverage**, which is `CLAUDE.md`'s *gates that look like they cover the code and do not* arriving from a new direction: not a predicate too narrow for its rule, but a predicate exactly right for a *different* rule with a confusable name. An `Escape` gate costs about eight exemption markers across six files, which is a decision about where those go; recorded and not started. **(b)** `boolean::ACCURACY` is `#[cfg(test)]` at **module level** and its doc named `FLO_ACCURACY` as an intra-doc link — unresolvable, the item being absent from the crate `cargo doc` builds. 🚨 **This is not a new direction of D319's convention; it is the direction that convention already states** — *"every intra-doc link in a test's prose is decoration"* — **and it is the second instance of the item-versus-module hole §15 D827 named in its own *Fix***: every hand-rolled check for this looks for a `mod tests`. Plain backticks now. ⚠️ **The same doc run states the rule two paragraphs below the line that broke it.** *(Fixed 2026-09-22; **(a) Keep, (b) Resolved** — the correct population of such links is **zero**, an invariant rather than a figure. §9.3's four-caller sentence and §9.4's *"the three other chrome text fields"* amended; D808 and D827 amended)*
 
 ---
 
@@ -12811,6 +12816,10 @@ reading. The corrected doc grep also asks only half its question: a `#[cfg(test)
 level — not inside a `mod tests` — is absent from rustdoc's crate by exactly D319's mechanism while
 sitting outside every hand-rolled check that looks for the module. *Ask whether the item is
 `cfg(test)`, not whether it is inside a test module.*
+🚨 **The second instance was already in the tree when that was written** (§15 **D841**):
+`boolean::ACCURACY`, `#[cfg(test)]` at module level, whose doc named `FLO_ACCURACY` as an intra-doc
+link — and it was found by the release review **reading the file**, not by any of the checks above.
+*Naming a hole is not closing it*, and this one was named and re-met inside the same week.
 
 🚨 ***Fix:* the sweep is partly run — ten controlled, three dead — and it is not finished.** **The
 seven that check out**, so this can say what was covered rather than implying the whole file: the
@@ -19837,11 +19846,16 @@ and the declaration's *presence* before it calls `matches` at all, so the tree i
 rule that could win. **Storing `chain` left-to-right is the obvious simplification and it costs the whole
 ordering.**
 
-⚠️ **`match_chain` is recursive because the descendant combinator backtracks.** `.a .b .c` against a
-tree where the nearest `.b` above a `.c` has no `.a` above *it* has to keep looking further up; a
-greedy walk that takes the first matching ancestor and commits answers `false`. The case is not
-exotic — it is any repeated class in a nested group, which is exactly what a hand-written sheet
-produces.
+⚠️ **`match_chain` is recursive because the descendant combinator backtracks.** 🚨 **It is a table
+since §15 D837, and the example this paragraph gave cannot demonstrate what it was written for.**
+`.a .b .c` against a tree where the nearest `.b` above a `.c` has no `.a` above *it* is a shape where
+greedy and backtracking **necessarily agree**: a descendant chain's ancestor sets are nested, so if
+the nearest `.b` has no `.a` above it, no `.b` further up has one either. The case that separates the
+two needs a `>` to the **left** of a descendant — `.a > .b .c`, where committing to the nearest `.b`
+fails on its plain `<g>` parent while a `.b` further up does have `.a` for a direct parent. The
+backtracking is real and this was the wrong witness for it; D837's
+`a_descendant_chain_reconsiders_an_ancestor_that_fails_further_left` is the right one, and the
+recursion the paragraph defended is what hung the import on a kilobyte of SVG.
 
 🚨 **A malformed selector is refused, not repaired**, which is this module's *"nothing is lost
 silently"* contract pointed at its own parser. `.a > > .b` read leniently becomes `.a > .b`, a
@@ -19890,6 +19904,103 @@ that this entry makes false. **The *Now · SVG import* bullet is struck from `ro
 *CSS combinators* clause in that section's table row with it; `<foreignObject>` and the rejoined
 paragraph are what the row has left — **and `<foreignObject>` left it the same day as a decided
 non-goal, D813**, so the rejoined paragraph is the whole of what remains)*
+
+**D837 — A kilobyte of SVG hung the import inside the selector matcher, and the cap the review asked
+for was not a bound. *Fixed and tested 2026-09-22; Resolved — `[R1-L2-03]` (High), `[X7-L6-01]` and
+`[X7-L6-02]`.***
+
+**D806** built `match_chain` recursive and gave it no memo. Each descendant arm looped over every
+ancestor and recursed on each match, so `nope g g g g g g g g g g text` against sixty nested `<g>`
+searched every increasing choice of ten ancestors — `C(nesting, chain)` — before failing on the
+`nope` that never matches; and it is called **once per element per property the cascade is asked
+about**. Measured at **334 bytes / 30 levels / 12.6 s**, with a 534-byte fixture not finishing in
+**120 s**.
+
+🚨 **Not one of this module's three bounds is consulted here, and not one is even approached.** That
+is the whole shape of it: §5.11 runs the series *a depth bound is not a size bound* (**D446**) and
+*a size bound is not a payload bound* (**D459**), and this file is tiny and shallow by **every
+quantity anyone had thought to count**. What explodes is the *work per element*, which is not a
+quantity a file declares at all — so the family that has grown one bound per member each time meets
+a member it cannot be extended to. **D838**, written the same day, is the fourth bound; this is the
+case that says a fourth bound would not have helped.
+
+🚨 **The review's sketch was `MAX_SELECTOR_COMPOUNDS` and it was declined — which is the sentence
+the next reader needs, because the finding is what they meet first.** An element's ancestors are a
+**path**: `parent_element` walks one line, not a tree. So *"does `chain` match some increasing
+subsequence of the ancestors"* is ordinary subsequence matching, and the search was never
+exponential **in nature** — the recursion was re-deriving its own sub-answers. Written as a table
+over `(chain index, ancestor index)` it is exactly the same predicate in `O(chain × depth)`, so **no
+selector that used to be honoured stops being honoured**, where a cap sells expressiveness for a
+bound it does not give: at 8 compounds over 64 levels, `C(64, 8) ≈ 4.4 × 10⁹`. *A cap that looks
+like a fix and leaves the hang reachable is worse than no cap at all, because it closes the
+finding.*
+
+⚠️ **`g(i, j)` is *"can `chain[i..]` be satisfied using ancestors from the `j`-th upwards"*, and the
+answer is `g(0, 0)`.** The load-bearing line is the descendant arm's `acc`, accumulated from the top
+down: that is what turns the old inner loop into one pass, and it is what a simplification would
+spell back out as a second loop over `j`.
+
+*(Fixed and tested 2026-09-22; **Resolved.** **Test** `a_long_selector_over_deep_nesting_returns`,
+on a 60-level fixture. ⚠️ **It asserts only that the import *returns*, and carries no wall-clock
+deliberately** (§15 **D829**): a timing assertion measures the machine, while an exponential matcher
+does not come back at all, so the harness's own timeout is both the sharper instrument and the
+honest one — which is why the fixture is sized to be hopeless rather than merely slow, a fixture
+tuned to *"slow"* being a wall-clock assertion wearing a disguise. The flip is the recursive version
+and it was run: **it does not finish in 120 s**, against 0.27 s for the whole `svg_in` suite.
+⚠️ **And the fixture has to reach the matcher**: `declaration` tests the property's presence and the
+specificity *first*, so the leading compound is `nope` rather than something absent from the sheet,
+and the assertion that the shape came out **black** is what says the rule was evaluated and lost
+rather than skipped. 🚨 **D806's own justification for the recursion could not be used to write the
+backtracking test, and is amended in place**: `.a .b .c` is a shape where greedy and backtracking
+**necessarily agree**, a descendant chain's ancestor sets being nested — having found the nearest
+`.b`, any `.a` above a further `.b` is above that one too. The case that separates them needs a `>`
+to the **left** of a descendant, which is
+`a_descendant_chain_reconsiders_an_ancestor_that_fails_further_left`, flipped against a greedy walk
+and red. `match_chain`'s own doc carried the same false example and is corrected with it.
+`a_universal_compound_matches_any_element` is the third test and closes `[X7-L6-02]`: making the
+universal compound a literal tag name — matching only an element *called* `*` — passed the whole
+suite. §5.11 carries the case that is none of the bounds, beside the three that are)*
+
+**D838 — A stylesheet is bounded by its own length, and it is the fourth quantity this importer
+bounds. *Fixed and tested 2026-09-22; Keep — the number has headroom behind it rather than a
+corpus.***
+
+`[X7-L1-02]`. §5.11's series had three members and none of them looks at the `<style>` element:
+`MAX_SVG_NESTING` bounds how deep the walk goes (**D416**), `MAX_SVG_NODES` how many nodes it emits
+(**D446**), `MAX_GRADIENT_STOPS` what one node carries (**D459**). `Css::declaration` walks every
+rule for every element for every property it is asked about, so a sheet of **50,000 rules over 1,000
+shapes froze a paste for 24.5 s** — from a file that is shallow and small by every other measure.
+Linear in each of three things is cubic in the file.
+
+🚨 **The cap is the fix and a reorder is not, and that was measured rather than argued.** D806 puts
+the cheap tests — the specificity and the declaration's own presence — before the tree walk, which
+is what keeps the constant small and is **not** a bound; re-flipping that ordering ran the same
+fixture at **44.0 s** against the shipped **24.5 s**, so the shipped order is already the faster one
+and there is nothing left to buy by rearranging it.
+
+⚠️ **`MAX_CSS_RULES = 2_048` is chosen with headroom over real exports and was not measured against
+a corpus.** Said plainly, because a threshold stated without its provenance gets cited as a
+measurement by the next reader: Illustrator's `.st0….stN` convention emits one rule per distinct
+style and runs to the low hundreds on a detailed drawing, and Inkscape emits fewer. *Revisit with an
+actual corpus if a real export is ever refused.*
+
+**Reported rather than refused, and the rules already read still apply.** The overflow goes through
+`Css::complex`, so the import surfaces it as the existing *"style (complex selector)"* line rather
+than inventing a channel — a sheet past this is a generated one, and the shapes in such a file carry
+presentation attributes as well, so they still import and simply take those instead.
+
+*(Fixed and tested 2026-09-22; **Keep.** **Test**
+`a_stylesheet_past_the_rule_cap_is_reported_and_what_it_read_still_paints`, **both halves**, because
+*"capped"* and *"still works"* are two claims and a cap that dropped the whole sheet would pass an
+assertion about the report alone while losing every style in the file. Flip: the cap's branch
+disabled — red on the report at `[]`, the predicted site, and green on the fill, the pair working as
+intended since the first rule applies either way. 🚨 **The obvious flip is vacuous, and it was
+written down as the flip before it was run.** The fixture is `MAX_CSS_RULES + 10` rules, so raising
+the constant raises the fixture with it and the cap trips either way: at **100,000** the test still
+passed, having quietly built a hundred thousand rules and spent 1.63 s doing it. **A fixture defined
+in terms of the constant under test cannot falsify that constant** — which is worth more than this
+cap is, because the same shape is available to every threshold test in the module and the passing
+run looks exactly like a working one. §5.11 amended)*
 
 **D813 — `<foreignObject>` is a decided non-goal, and the words are said at last. *Ruled by the
 maintainer 2026-09-19; Resolved — a decided non-goal, and no production line changed.***
@@ -32430,7 +32541,12 @@ arrive as an oversight.**
 
 ⚠️ **`agreed_zero` hands back the *first* value, not the default**, because the unit chip reads its
 suffix off whatever comes back: returning `Px(0.0)` for a document the user had set to `%` would flip
-the chip under them, which is D537's own symptom arriving by a new road.
+the chip under them, which is D537's own symptom arriving by a new road. 🚨 **That sentence was a
+coincidence and not a guarantee, and it is a rule since §15 D840**: `values_in` answers in
+**document** order, so for any selection whose explicit run is not at the head the first value **is**
+the default, and the panel shipped D537's symptom by that road anyway. It hands back the first value
+that *cannot* be the default now, and both of the flips below were run against the one ordering
+document order gets right.
 
 **Two tests, and three flips run between them.**
 
@@ -37602,6 +37718,87 @@ not about what commits.
 key that no longer commits was still paying out a rung of the `Escape` ladder underneath the field.
 Read the two together — this one stops the write, that one stops the press.
 
+🚨 **And four was what this entry audited, not what there was** (§15 **D841**): `picker::hex_row` and
+`typography::char_hex` had the same defect and the same numbers, and were found by the release review
+rather than by anything here. **This entry never claimed a sweep and D841 is the sweep** — worth
+saying, because an enumeration reads like a population when nothing beside it says otherwise.
+
+**D841 — `Escape` still committed a typed colour at two hex fields, and a link out of a `cfg(test)`
+item. *Fixed 2026-09-22; (a) Keep — the class has no gate and the reason is recorded; (b) Resolved.***
+
+Two subjects, both small, and the useful half of each is what it says about a check.
+
+**(a) `picker::hex_row` and `typography::char_hex`.** `[X6-L1-02]`. Both decided they were finished on
+a bare `resp.lost_focus()`, and egui does not revert a `TextEdit` on `Escape` — it hands back what was
+typed and merely surrenders focus. So the key that cancels a gesture everywhere else in this app
+**applied** the edit: **D808**'s finding exactly, the same input and the same two numbers, at two
+sites that entry did not reach. D808 named the four fields it audited and never claimed four was the
+population, so this is a gap rather than a live entry re-argued — but *an enumeration reads like a
+population when nothing beside it says otherwise*, and that is the half worth carrying.
+
+⚠️ **The *write* is what `Escape` suppresses, and not the block — which is not interchangeable.** Both
+sites clear their text buffer inside the same `lost_focus()` arm, and that clear is what strips a
+typed or pasted `#`, the field falling back to `hex_of`. Gating the whole arm was the first shape this
+fix took, and it leaves a cancelled edit's typed text sitting in the field for whoever opens the
+popover next. **No assertion anywhere would have caught it**: the colour is correct either way, and
+what survives is a buffer nothing reads back. So `picker` computes an `abandoned` flag into its
+existing `filter`, and `typography` puts `defocus_commits` inside the `parse_hex` filter with the
+buffer cleared above it.
+
+**The population is closed, and it was read rather than assumed.** Every live `lost_focus()` in
+`crates/` now routes through `ui::defocus_commits`, reads `Key::Escape` itself, or is a **gate** —
+a test of whether anything is happening to a control at all, which decides whether to *build* a
+transaction rather than whether to commit one. ⚠️ **The sweep's figure is thirteen live sites and a
+plain `grep -rn "lost_focus()" crates/` returns far more**, because it counts the prose about the
+rule, the test drivers and `defocus_commits`' own definition. *A count of this kind is a reading with
+a filter behind it, and the filter is the part worth stating.*
+
+🚨 **No gate sees this class, and the reason is the most useful sentence here.**
+`app::valve_condition_gate::nothing_commits_on_the_expression_d316_removed` sweeps every `.rs` under
+`crates/`, blanks `//` comments, and reports a `lost_focus()` only where `changed()` falls within
+**160 characters** of it with no exemption marker. At the picker the two terms are about 700 apart, in
+two separate conditions — so a field committing on a bare `lost_focus()`, which is *precisely* a
+control deciding it is finished, is invisible to it. ⚠️ **The window is not the bug and must not be
+widened for this**: `cargo fmt` puts a wrapped condition a long way below its comment, a line-matched
+version would have found **none** of D316's four, and the gate's own doc says in as many words that it
+*"looks for the expression, not for the shape"*. **The mistake is reading a gate's name as its
+coverage** — and that is a new member of `CLAUDE.md`'s *gates that look like they cover the code and
+do not*, arriving from a direction none of the others come from: not a predicate too narrow for its
+own rule, nor one pointed at the wrong artefact, but a predicate **exactly right for a different rule
+whose name is confusable with this one**. D808 had already written the mechanism down — *"the two
+terms it looks for sit in two different conditions at each of these fields"* — as a note that the gate
+was still **right**, which it is; nobody asked the next question, which is what else has that shape.
+
+**An enforcement test for the `Escape` question is a decision and not work.** It costs about eight
+exemption markers across six files, and a marker is anchored by position — §15 **D827**'s neighbour,
+where a paragraph added to the top of an exempted comment block pushed its marker out of the window
+and failed a condition nobody had touched. So where those markers go is the decision, and it is
+recorded here rather than started.
+
+**(b) An intra-doc link *out of* a `#[cfg(test)]` item.** `[R1-L2-05]`. `boolean::ACCURACY` is
+`#[cfg(test)]` at **module level**, and its doc named `FLO_ACCURACY` as `[`FLO_ACCURACY`]`. `cargo
+doc` builds without the `test` cfg, so the item is absent from the crate rustdoc walks and nothing
+ever resolves what it points at. 🚨 **This is not a second direction of D319's convention — it is the
+direction that convention already states**, *"every intra-doc link in a test's prose is decoration"*,
+with plain backticks and a sentence saying why. What is genuinely new is nothing about the rule and
+everything about the **check**: it is the second instance of the item-versus-module hole **D827**
+named in its own *Fix* — *"a `#[cfg(test)]` **item** at module level, not inside a `mod tests`, is
+absent from rustdoc's crate by exactly D319's mechanism while sitting outside every hand-rolled check
+that looks for the module"*. Written down, and the next instance was already in the tree.
+⚠️ **And the same doc run states the rule two paragraphs below the line that broke it** — *"no
+production doc may link it (§15 D319, D699): two constants below explain themselves by contrast with
+this one and name it in plain backticks"*. *A rule stated in a doc comment does not bind the doc
+comment stating it.*
+
+*(Fixed 2026-09-22; **(a) Keep, (b) Resolved.** ⚠️ **(a) is *Keep* rather than *Resolved* because the
+class is closed by reading and nothing keeps it closed**: the two sites are fixed and the sweep is
+clean, and the next `TextEdit` somebody adds is outside every gate in the workspace. *Fix by writing
+the enforcement test once the marker placement is decided.* (b) is *Resolved* and its figure cannot
+rot: the correct population of unresolvable links is **zero**, so it is an invariant rather than a
+count, and any non-zero reading is unambiguously a regression. §9.3's four-caller sentence and §9.4's
+*"the three other chrome text fields"* are amended, both having stated the population D808 knew;
+D808 and D827 carry a line each)*
+
 **D821 — `Escape` is spent on a chrome field that has just lost focus, and the rung goes *below*
 `cancel_gesture`. *Found and fixed 2026-09-19; Keep.***
 
@@ -39786,7 +39983,16 @@ no engagement latch. The passing control one function away, `paragraph_length`, 
 `Length` fields through `edit_valve`, whose latch (`let engaged = resp.dragged() || resp.has_focus();`)
 means a clamp on an untouched field commits nothing. So **the widget's opt-out is the whole of what
 stops a library default writing to the document here**, which is exactly why this panel wants a test
-of its own rather than inheriting `ui.rs`'s.
+of its own rather than inheriting `ui.rs`'s. 🚨 **Both halves of that are amended by §15 D812 and
+D840, and the concern this entry is named for has since happened.** `char_valve` has carried
+`edit_valve`'s engagement latch since **D523**, and **D812** deleted the third arm — the one an
+idle egui-initiated rewrite actually went through — so the panel has two independent defences where
+it had one, and the opt-out is no longer *"the whole of what stops"* it. The consequence is that the
+test below **no longer bites**: removing `value_field_f64`'s opt-out leaves it green while `ui.rs`'s
+and the inspector's go red, so D425's line is still guarded and guarded from `ui.rs`, which is
+precisely the inheritance this entry exists to prevent. *The verdict stands and the argument is
+spent* — the test is kept for the behaviour it states and can no longer stand in for a
+single-mutation guard.
 
 `a_stored_tracking_outside_the_fields_range_is_not_rewritten_on_an_idle_frame` runs **two** idle
 frames per case, because a widget's state is last frame's, and **the in-range control is what keeps it
@@ -39951,6 +40157,16 @@ production control can reach that state now, which is exactly why the fixture ha
 about the arm's predicate and not about any caller. Flipped by restoring the arm, it is red at *"no
 undo step"* with 1 against 0.
 
+🚨 **This entry's prose outlived it at three sites in the code, corrected under §15 D840.** The
+commit rewrote the comment **inside** `char_valve` and left the doc **above** it describing the arm
+in the present tense — *"a `changed()` frame on a control that was never engaged commits at once"*,
+*"whether anything reaches this arm is open"*, *"deleting the arm breaks no test today"* — plus
+`char_valve_tests`' closing comment, saying the arm *"has no test here"* and that what was owed was
+*"not a test but a question"*. Every one of those was true when written and false from the moment the
+arm went; deleting or restoring it now breaks two tests. **The body and the doc of one function
+drifted apart in a single edit**, and the doc is the half a reader meets first — one repairing the
+code to match it would have restored the arm.
+
 ⚠️ **The first draft of that test was about nothing, and only one habit caught it.** It used 999
 against a `MAX_FONT_SIZE` of **1000**, so the value was in range, egui rewrote nothing, and the
 fixture never reached the state it named — a green test asserting that an arm which had just been
@@ -39980,6 +40196,13 @@ about *behaviour* and deliberately not about where the bound is written.** These
 make D425's behaviour unreachable for this attribute — the panel refusing a document it is perfectly
 able to display — and would be the one place in this app where a control's cap had leaked into the
 format. *A reader tempted to "finish the job" by moving it down to `set` should read D475 first.*
+🚨 **And the clamp written here was unconditional, which honoured this ruling and broke the very
+entry this paragraph rests on** (§15 **D840**): with a stored `Em(5.0)`, `Alt`+`→` stepped and then
+clamped to the cap, so the increase key took 300 percentage points off a value D425 says this panel
+shows rather than rewrites. `stepped_into` widens the range by the value it started from, which is
+exactly `clamp` inside the range — **this ruling's stated goal is preserved exactly and only the
+out-of-range case changes.** The `Leading` arm, three arms further down the same `match`, had no
+range expression at all and was fixed with it — this entry was never read beside it.
 
 **The px face is derived from the `%` face at the current font size**, through the same
 `px_range_for` the field itself uses, so the chord and the scrub cannot come to disagree about the
@@ -39993,6 +40216,96 @@ own or that half of the `match` is never exercised at all. And a probe reading `
 off the node measured `Px(0.0)` after four hundred presses: with a live session the write lands in
 the **editor** rather than on the node, so the assertion reads through `TypeSubject` now — a test
 that looks at the wrong side of a live session measures a value nobody is writing.
+
+**D840 — The typography chords bound without rewriting, and three of this panel's own sentences had
+outlived the code they describe. *Fixed and tested 2026-09-22; Resolved — extends D817, and amends
+D799, D812 and D475.***
+
+`[X4-L1-01]`, `[X4-L1-02]`, `[X4-L1-03]`, `[X4-L6-01]`, `[X4-L6-02]`, `[X4-L3-01]`, `[R2-L8-04]`,
+`[R2-L6-03]`. Four subjects in one entry because they are one `match` and one panel, and three of the
+four are a decision that was made correctly and then described wrongly.
+
+**(a) The `Leading` arm had no bound at all.** It ended in `step_length` with no range expression
+anywhere in it, and `Length::canonical` rounds and normalises `-0.0` without bounding — so a held
+`Alt`+`↓` walked line height **negative**, out of the field's `0..=1000%` and into
+`parley_line_height`. This is **D817**'s defect, three arms up in the same `match`, and it survived
+because that entry is about the tracking arm and this one was never read beside it. The floor is the
+interesting end: 1000% takes a great many presses to reach, while zero is one press from the seeded
+value and is what a hand holding the key actually hits.
+
+**(b) D817's clamp was unconditional, which honoured D817 and broke D425.** D817's *own* argument is
+that the caps sit on the chord and not in `TextStyle::set` precisely so that **D425**'s
+show-don't-rewrite behaviour stays reachable for this attribute — so the prose was right and the code
+was narrower than the prose. With a stored `Em(5.0)` — 500%, legal, and a file may hold one —
+`Alt`+`→` stepped to `5.0 + step` and clamped to `MAX_TRACKING_PCT`, so **the increase key decreased
+tracking by 300 percentage points in one press** and the value the user had was gone.
+`stepped_into(from, next, range)` is `next.clamp(range.start().min(from), range.end().max(from))`:
+inside the range that is exactly `clamp`, so a held key still stops where the field stops; outside
+it the step may move **toward** the range freely and is pinned at `from` going away from it. ⚠️ **Not
+the same as "skip the clamp when the value starts out of range"**, which is the other obvious repair
+and lets `Alt`+`→` on a stored 500% walk to 600% and beyond — a control with no cap at all for
+exactly the documents that most need one. **D817's ruling is preserved exactly**: only the
+out-of-range case changes, and the two arms now share one predicate rather than each carrying its own
+bound, which is the argument for `stepped_into` existing.
+
+⚠️ **This is also the record of which entry carries that rule.** The behaviour is **D425**'s; D475 is
+this panel's *test* of it and says in its own body that D425 carries the argument and it deliberately
+does not restate it. The comment fixed here cited D475 for the behaviour, which is the substitution
+`CLAUDE.md` records at seven sites and this made an eighth.
+
+**(c) `agreed_zero` hands back the first value that *cannot* be the default.** **D799** built it
+returning the first, and its own prose — carried into `architecture.md` §5.4 — said *"it hands back
+the **first** value, not the default"*, which was **a coincidence rather than a guarantee**.
+`Spans::values_in` answers in **document** order, so the first value is the one at the start of the
+selection, and for any selection whose explicit run is not at the head that first value **is** the
+node default: a layer with `%` typed over characters 4..8 and the default over 0..4 read back `px`
+for the whole word, while the same document with the run at the head read `%`. The unit chip flipped
+under the user on the strength of where they happened to start selecting — **D537**'s own symptom by
+a third road. `Length::ZERO` is `Px(0.0)` and is what every one of these attributes defaults to, so a
+`Px(0.0)` in the set *may* be nobody's choice while an `Em(0.0)` is always somebody's, which is what
+makes this a rule rather than a preference between two units. Where both are explicit the two are
+equally defensible and this is a tie-break; the review's alternative, the value at the caret, is the
+better answer to *that* case and needs a caret this function is not given.
+
+**(d) The arm D812 deleted was still described in the present tense at three sites.** That commit
+rewrote the comment **inside** `char_valve` and left the doc **above** it saying *"a `changed()`
+frame on a control that was never engaged commits at once"*, *"whether anything reaches this arm is
+open"* and *"deleting the arm breaks no test today"* — all three false at `HEAD`, the question having
+been ruled on and both directions now breaking a test. The third site is `char_valve_tests`' closing
+comment, which said the arm *"has no test here"* and that what was owed was *"not a test but a
+question"*. 🚨 **The body and the doc of one function drifted apart in a single edit**, and the doc is
+the half a reader meets first: a reader repairing the code to match it would have restored the arm.
+*D812's account is right and only its neighbourhood was left standing* — which is the cheapest kind
+of drift to introduce, since every gate is green either way.
+
+*(Fixed and tested 2026-09-22; **Resolved.** Two new tests and two amended, each flip run, plus one
+re-measured. `a_held_leading_chord_stops_at_the_fields_ends` flips `stepped_into` back to the bare `step_length`
+the arm used to end in — red at the floor, the predicted site, with a negative line height.
+`a_chord_does_not_rewrite_a_stored_out_of_range_tracking` seeds through `apply_char_attrs` rather
+than through the chord, because seeding with the chord would clamp on the way in and the fixture
+would never reach the state; ⚠️ **both of its flips land on the second assertion and the doc
+predicted neither** — the shipped unconditional clamp gives `Em(2.0)` against `Em(5.0)`, and
+skipping-when-out-of-range gives `Em(5.01)`, so *"nothing moves"* catches both at values 3.0 apart
+and the third assertion is **not** the discriminator it was written as. D817's own test gained the em
+**floor**, which nothing had asserted: two arms with two ends each is four clamps, this one pinned
+one of them twice and another once, and deleting half of D817's em clamp left the suite green — the
+floor is `MIN_TRACKING_PCT`, −50 against a maximum of 200, so an assertion assuming symmetry would
+pass against the wrong number. `a_zero_letter_spacing_in_two_units_is_not_mixed` runs **both
+orderings** now; D799's two flips were run against the one ordering document order gets right, and
+restoring `values.into_iter().next()` is red on the `4..8` case and **green on the `0..4` case** —
+one character of the fixture separated a passing test from the defect it was written to catch.
+🚨 **And `a_stored_tracking_outside_the_fields_range_is_not_rewritten_on_an_idle_frame` no longer
+bites, which is a finding rather than a failed experiment.** Removing `value_field_f64`'s opt-out
+used to fail it at `Em(2.0)` where `Em(3.0)` was; re-run after **D812** deleted the third arm, it
+stays **green** while `ui.rs`'s and the inspector's grid-panel tests go red — so D425's line is still
+guarded, but from `ui.rs`, which is precisely the inheritance **D475** exists to prevent. With the
+opt-out gone *and* the third arm restored it fails at `Em(2.0)` against `Em(3.0)` exactly as before.
+**A flip that does not bite because two defences must fail together is a different animal from one
+that does not bite because nothing is tested, and the two are indistinguishable without running the
+pair** — §15 **D803**'s trap one level up, where naming the mutation by its function is not enough
+and the *pair* has to be named. The test is kept for the behaviour it states; what it can no longer
+do is stand in for a single-mutation guard. §5.4's `agreed_zero` sentence and §9.2's parenthetical
+naming that test are amended)*
 
 **D474 — The guide commit table gets its first test caller. *Tested 2026-09-07; Keep — the code is
 unchanged.***
@@ -40373,6 +40686,82 @@ two flips does not bite, and that is recorded in the test rather than tidied awa
 `is_occupied_frame` term leaves every assertion green, because the fixture's frame is occupied. That
 term is about the **empty** case, which `pick_leaf` already answers on its own — so the flip is a
 statement about where the teeth are not, which is the half of a flip-check worth writing down.
+
+**D839 — The frame-edge pick reached one door of three and carried neither predicate, so a rule §9.4
+states in as many words was false across a band four pixels wide. *Fixed and tested 2026-09-22;
+Resolved for the edge door — and Fix, because the name tag is the same defect and was not in the
+brief.***
+
+**D816** added `canvas::frame_edge_at` as the last link of `pick_at_pointer` and stopped there. Three
+things were then true at once, and each is a finding of its own: `[X5-L2-01]` (**High**),
+`[X5-L1-01]`, `[X5-L1-02]` and `[X5-L6-01]`.
+
+**The chain a press runs is not the chain that was widened.** `begin_select_drag` builds its own, and
+its third link is `selected_frame_at` — an *already selected* frame's whole box, which is how such a
+frame is dragged from its interior and which says nothing at all about an unselected one. So the same
+pixel on an unselected frame's border **selected** it on a click and started a **marquee** on a
+press, clearing `entered_group` on the way, which is the part a user would never attribute to the
+border. The edge link is **appended** rather than inserted: on a frame that *is* selected the two
+agree, its box containing its edge, so the order decides only which answers first and never what the
+answer is.
+
+**And `hover_target` is the chain whose whole job is to agree with another chain.** Its contract is
+that the ring shows what a click would take, so with the edge link on the click chain and not on this
+one, a frame's border was selectable with **no hover ring and no measure overlay** — two functions
+disagreeing about a band one `pick_slop` wide. *A chain that has to match another chain is the thing
+to check whenever either of them gains a link.*
+
+🚨 **The new door consulted neither predicate, where both its siblings carry one.** `pick_leaf`
+filters through `query::hit_test`'s `is_effectively_interactable`, and `frame_label_at` through
+`shown_visible` (by way of `frame_label`, which answers `None` for a hidden frame); this link was
+added on its own and asked for neither, so a **locked** frame and a **hidden** frame were each
+selectable by their border — against §9.4's *"the canvas never selects a locked layer, by any
+gesture"*. `Selection::set_one` filters nothing, which is why each door has to carry its own and why
+**a new door is exactly where this goes wrong**.
+
+⚠️ **Both predicates, and separately, because they are two claims.** The half-fix is not
+hypothetical: `shown_visible` is the one nearest to hand, being `frame_label_at`'s, and adding it
+alone passes a hidden-only test while leaving §9.4's own sentence false. Measured, as the flip.
+
+🚨 **`frame_label_at` still reads no lock, and §9.4's *"by any gesture"* is still false at the name
+tag.** That door predates all of this and was not in the brief, so it is recorded rather than
+changed: `shown_visible`'s own doc argues the lock out deliberately — *"a locked frame is one you can
+see and cannot move, and its name is how you find it in the layer tree to unlock it"* — but that is
+an argument for **drawing** the tag, and `frame_label_at` is what **picks** it, with nothing
+downstream filtering (`pick_for_click` and `Selection::set_one` both read the lock not at all).
+**Reproduced headlessly over this entry's own fixture with the frame locked**: `frame_label_at`
+answers `Some(board)` at the tag's centre, and so does `pick_at_pointer`.
+
+🚨 **The two repairs are not symmetric, which is what makes this a product call rather than a
+one-line fix, and the asymmetry is the thing to meet before choosing.** *Either* a **lock term on
+`frame_label_at`**, beside this entry's — which costs an **affordance**: the layer menu that tag
+opens carries *Unlock* (`menu.rs`), so the name tag is the canvas's **only** route to unlocking a
+frame, and filtering it strands the user with a frame they can see, a menu they cannot reach, and no
+way back except the layers panel. That is §15 **D801**'s hazard in another place, in that entry's own
+words — gating the key *"would strand the user in the mode with the key that exits it swallowed"* —
+and it is the cost nobody meets if they take the option that looks obvious. *Or* the tag is written into §9.4
+as a **second deliberate exception** beside the layers panel's, on that ruling's own reasoning — a
+lock guards against accidents on the canvas, and reading a name and clicking it is not the gesture a
+stray drag makes, where a four-pixel band around a border is. **Choose one and write it down**; do
+not add the lock term without pricing the unlock route first.
+
+*(Fixed and tested 2026-09-22; **Resolved for the edge door.** Three tests in
+`canvas::frame_edge_tests`, each flip run. `a_frames_edge_is_reached_through_the_shipped_chain` is
+the one that says the **feature** had no test: every earlier assertion was on `frame_edge_at`
+directly, and deleting the `or_else` from `pick_at_pointer` — the link D816 exists to add — left the
+whole app suite green. ⚠️ Its screen half is derived with `to_screen` rather than assumed, or
+`frame_label_at` answers first and the test passes without the link it is about.
+`a_locked_or_hidden_frames_edge_is_not_pickable` asserts the border answers **before** each flag is
+set, because every assertion in it is `None` and a fixture that never reached the band would
+otherwise pass for the wrong reason; its flip is the half-fix above — **red on the locked case, green
+on the hidden one**, which is what says the two terms are two claims rather than one spelled twice.
+`a_press_on_a_frames_edge_grabs_it_rather_than_starting_a_marquee` must start with the frame
+**unselected**, asserted, since a selected frame makes `selected_frame_at` answer and the whole
+disagreement disappears — that being exactly the state the old code was right in. §9.4 amended in
+two places — the door list and the lock rule — and `canvas.rs`'s copy of C5's *"or on its edge"*
+clause with them: that comment said the
+clause was unanswered for as long as it was, and a reader repairing the code to match it would have
+deleted the link)*
 
 **D468 — Everything being transformed is excluded from the baselines, not just the node named. *Fixed
 and tested 2026-09-07; Fix — the two sources agree and the exclusion is still asked once per source.***

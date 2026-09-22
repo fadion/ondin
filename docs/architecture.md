@@ -1173,10 +1173,16 @@ pub enum TextSizing {
   D799). Keeping the two distinct is what made `Spans::shared_in` — which compares structurally, and
   must — report *Mixed* over text whose spacing is zero throughout, so the Type panel's `shared` and
   `para_shared` fall through to `agreed_zero` for all seven lengths: every value a zero length means
-  one value, whatever units they are in, and it hands back the **first** one so the unit chip keeps
-  the suffix the user chose. **It stops at zero on purpose** — that is the only amount at which the
-  unit says nothing about the ink, and a general resolved comparison would flip a field between a
-  number and a dash as the text was resized.
+  one value, whatever units they are in, and it hands back the first one that **cannot be the
+  default** so the unit chip keeps the suffix the user chose. ⚠️ **It said the *first* one until
+  2026-09-22, and that was a coincidence rather than a guarantee** (§15 D840): `Spans::values_in`
+  answers in **document** order, so for any selection whose explicit run is not at the head the first
+  value *is* the default, and the chip flipped to `px` on the strength of where the user happened to
+  start selecting — D537's own symptom by a third road. `Length::ZERO` is `Px(0.0)`, so a `Px(0.0)`
+  in the agreeing set may be nobody's choice while an `Em(0.0)` is always somebody's, which is what
+  makes this a rule rather than a preference between units. **It stops at zero on purpose** — that
+  is the only amount at which the unit says nothing about the ink, and a general resolved comparison
+  would flip a field between a number and a dash as the text was resized.
 - **The boundary rule, stated once**: typing at the edge of a span inherits from the character to the
   left, unless the caret was explicitly restyled while empty (`TextEdit::pending`). Every rich-text
   bug in every editor lives in this question; `Spans::edited` is the single implementation, for the
@@ -3507,6 +3513,23 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   emitted one. `svg_in::MAX_GRADIENT_STOPS` (256) is its only bound, and the list is **resampled** to
   it rather than truncated or refused, since truncating compresses the ramp into the front of its
   range; a file that reaches the cap is a generated one, and it is reported once as `approximated`.
+  ⚠️ **And none of those three looks at the `<style>` element, which is a fourth quantity** (§15
+  D838). `svg_in::Css::declaration` walks every rule for every element for every property it is asked
+  about, so a sheet of 50,000 rules over 1,000 shapes froze a paste for **24.5 s** from a file that
+  is shallow and small by all three bounds above — linear in each of three things is cubic in the
+  file. `MAX_CSS_RULES` (2,048) is **chosen with headroom over real exports rather than measured
+  against a corpus**, and the overflow is *reported* through the existing `"style (complex selector)"`
+  line rather than refused, the rules read before the cap still applying. Re-ordering the cascade's
+  cheap tests instead was measured and is slower (44.0 s against 24.5), so the cap is the fix.
+  🚨 **The fifth case is none of these, and it is why the family cannot simply be extended** (§15
+  D837). `svg_in::match_chain` backtracked by recursing with no memo, so a 534-byte file — sixty
+  nested `<g>` and one ten-compound selector — did not finish in **120 s** while sitting far inside
+  every bound this list names. What explodes is the *work per element*, which is not a quantity a
+  file declares, and the repair is a table over `(chain index, ancestor index)` rather than a sixth
+  constant: an element's ancestors are a **path**, so the predicate is ordinary subsequence matching
+  in `O(chain × depth)` and no selector that used to be honoured stops being. A cap on selector
+  compounds was the review's proposal and is the trap worth naming — `C(64, 8) ≈ 4.4 × 10⁹` is not a
+  bound, so it would have closed the finding and left the hang reachable.
 - ⚠️ **The op door owes the same standard, and on one check it did not pay it** (§15 D423). The claim
   that "a document produced by `apply` cannot contain a cycle" rests on `op_insert_subtree` validating
   the set it is handed; it walked from each node to its listed children and never asked the converse —
@@ -5906,8 +5929,14 @@ engaged — which is exactly the shape of an egui-initiated rewrite, **measured 
 since §15 D803**, the opt-out removed and all three arms instrumented with the third the one that
 fires. 🚨 **That arm is deleted since §15 D812**, so the rewrite has two defences here rather than
 one; the opt-out is still the load-bearing half, because it is what stops the library writing at all
-rather than what stops the write being committed
-(`typography::…::a_stored_tracking_outside_the_fields_range_is_not_rewritten_on_an_idle_frame`).
+rather than what stops the write being committed. ⚠️ **And the test that used to pin this panel's
+half no longer can** (§15 D840):
+`typography::…::a_stored_tracking_outside_the_fields_range_is_not_rewritten_on_an_idle_frame` stays
+**green** with the opt-out removed, because the deleted arm is the second defence — what goes red is
+`ui.rs`'s and the inspector's, which is the inheritance §15 D475 exists to prevent. Removing both
+together fails it at `Em(2.0)` against `Em(3.0)` as before. **A flip that does not bite because two
+defences must fail together is a different thing from one that does not bite because nothing is
+tested, and only running the pair separates them.**
 ⚠️ **The Layout grid panel is the third place it is tested, and the two image-card fields are a
 fourth door nothing drives** (§15 D539). Three of the four grid fields carry a range the model does
 not — `count` is `1..=1000` where the field's own doc says *"Zero draws nothing rather than being
@@ -6545,7 +6574,20 @@ input event (winit/egui)
   confirm. `ui::defocus_commits(resp)` — `lost_focus() && !key_pressed(Escape)` — is the one spelling,
   called by the hex field, the inspector's layer-name field, the stroke-dash list and the Export
   panel's prefix and suffix, each of which had been writing a typed value that `Escape` had just
-  abandoned. **It is the valve's `Escape` refusal (§15 D315) and none of the rest of the valve**: a
+  abandoned. ⚠️ **Six callers, not four, and D808's four were what it audited rather than what there
+  was** (§15 D841): `picker::hex_row` and `typography::char_hex` had the same defect and the same
+  numbers. Every live `lost_focus()` in `crates/` has since been read, and each now calls this, reads
+  the key itself, or is one of the gates below. 🚨 **The *write* is what is declined and never the
+  block** — the buffer clear has to run on every way out, or a cancelled edit leaves its typed text in
+  the field, which nothing asserts and no gate sees.
+  🚨 **And the gate above does not cover that class, which is a fact about its *name* rather than a
+  defect in it** (§15 D841). It reports a `lost_focus()` only where `changed()` is within 160
+  characters; at the picker's hex field the two are ~700 apart in two separate conditions, so a
+  control committing on a bare `lost_focus()` — precisely a control deciding it is finished — is
+  invisible to it. The window is deliberate and must not be widened for this. **A predicate exactly
+  right for one rule, under a name that reads as covering a neighbouring one**, is a shape none of
+  the other known gate holes has. An `Escape` gate costs about eight exemption markers across six
+  files and is a decision about where those go, recorded and not started. **It is the valve's `Escape` refusal (§15 D315) and none of the rest of the valve**: a
   text field has no per-keystroke value for an engagement latch to smooth out, which is the sentence
   above, and it has no half-typed state worth previewing, which is §9.4's reason for the buffer.
   The gate is untouched and still right — the two terms stay in two different conditions, which is a
@@ -8055,8 +8097,9 @@ It compares the **bytes** now, `parse_hex(&text)` against `parse_hex(&hex_of(cur
 hazy rule's own shape arrived at from the other side; the mixed case still writes unconditionally,
 there being no one colour to compare against over a set that disagrees.
 ⚠️ **And `Escape` committed at this field until 2026-09-19** (§15 D808), egui handing a `TextEdit`'s
-typed content back rather than reverting it. It asks `ui::defocus_commits` now, as the three other
-chrome text fields with the same defect do (§9.3). 🚨 **That is the whole of what this field takes from
+typed content back rather than reverting it. It asks `ui::defocus_commits` now, as the **five** other
+chrome text fields with the same defect do (§9.3) — three named with it in D808, and the colour
+picker's and Type panel's own hex fields found afterwards (§15 D841). 🚨 **That is the whole of what this field takes from
 the valve and the routing question is answered with it**: a valve previews while the control is
 engaged, and a half-typed hex is a colour — `parse_hex` accepts three digits, so `6D8CD9` passes
 through `6D8`, `#66DD88`, a real green — so a valved field would put that on the canvas on the way to
@@ -10242,11 +10285,18 @@ it (`selected_frame_at`), so picking one by its name and then reaching for the m
 rubber-band the selection away.
 
 **So the tag is a pick, and every door that resolves a pointer to a layer owes it** —
-`canvas::pick_at_pointer`, the tag then `pick_leaf`, which the select-click arm and the context-menu
-door both call. The menu door asked `pick_leaf` alone until 2026-09-07 and therefore had **no way at
-all** of reaching an occupied frame, a right-click on the tag opening the empty-canvas menu instead
-(§15 D469). `begin_select_drag` is the third door and still adds `selected_frame_at` on top, which is
-the sentence above and is a widening the other two do not have.
+`canvas::pick_at_pointer`, the tag then `pick_leaf` then the **edge**, which the select-click arm and
+the context-menu door both call. The menu door asked `pick_leaf` alone until 2026-09-07 and therefore
+had **no way at all** of reaching an occupied frame, a right-click on the tag opening the
+empty-canvas menu instead (§15 D469). `begin_select_drag` is the third door and still adds
+`selected_frame_at` on top, which is the sentence above and is a widening the other two do not have.
+⚠️ **A frame's *edge* is the last link of that chain since §15 D816, and reaching only one of the
+three doors with it was a defect in its own right** (§15 D839): `begin_select_drag` builds its own
+chain, so the same pixel selected the frame on a click and started a **marquee** on a press —
+clearing `entered_group` with it — and `canvas::hover_target`, whose contract is that the ring shows
+what a click would take, left the border selectable with no hover ring and no measure overlay. All
+four now carry it. *A chain whose job is to agree with another chain is the thing to check whenever
+either gains a link.*
 
 ⚠️ **And where two tags coincide, the one a click picks is the one the user can read** (§15 D554).
 `OndinApp::artboards` is depth-first in child order — paint order — so every reader of it takes the
@@ -10402,6 +10452,24 @@ the predicate sat in `apply_marquee` rather than in the shared helper until 2026
 the node's flag, deliberately: a layer inside a hidden group can be marquee-selected where a click on
 it cannot. What was decided is the lock, and a hidden-but-unlocked layer is fully editable anyway
 (`context-menus.md` §5.9), so widening this would be a second decision.
+🚨 **Every door carries its own copy of that, because `Selection::set_one` filters nothing — so a
+*new* door is exactly where this sentence goes false** (§15 D839). `canvas::frame_edge_at`, added for
+`context-menus.md` §2's C5, consulted neither predicate where both its siblings carry one, and a
+locked frame and a hidden one were each selectable by their border until 2026-09-22. ⚠️ **It wants
+both terms and separately**: `shown_visible` is the one nearest to hand, being `frame_label_at`'s,
+and adding it alone passes a hidden-only test while leaving this sentence false.
+🚨 ***Fix:* `canvas::frame_label_at` still reads no lock, so a locked frame is selectable by its
+**name tag** and *"by any gesture"* is not true yet.** `shown_visible` argues the lock out
+deliberately — a locked frame's name is how you find it in the tree to unlock it — but that is an
+argument for *drawing* the tag, not for picking it, and nothing downstream filters — `pick_for_click`
+resolves through `pick_from_chain`, which reads no lock either. Reproduced headlessly with the frame
+locked: the tag's centre answers through `pick_at_pointer`. 🚨 **The two repairs are not symmetric.**
+A lock term on `frame_label_at` costs an **affordance** — the layer menu that tag opens carries
+*Unlock*, so the tag is the canvas's only route to unlocking a frame, and filtering it leaves the
+user with a frame they can see and a menu they cannot reach. The alternative is to write the tag in
+here as a **second deliberate exception** beside the layers panel's below, on that ruling's own
+reasoning: a lock guards against accidents, and reading a name and clicking it is not what a stray
+drag does. **Undecided, and the lock term is the option that looks obvious and has the cost.**
 ⚠️ **The layers panel is the exception and it is the ruling's own** (§15 D746, D71, D323): clicking a
 row selects a locked layer, `layers::select_from_row` reading no lock at all, and once it is selected
 the inspector's rules apply unchanged — a lock stops a layer being dragged about, not recoloured.

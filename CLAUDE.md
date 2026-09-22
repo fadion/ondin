@@ -67,10 +67,18 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 830 index rows, 830 body headings, next free
-D831** — but trust the procedure over any number written down here, including that one.
-⚠️ **The D823–D830 block is fully spent**, so the next session reserves a fresh one rather
-than reading a remaining tail.
+anywhere cited either. **The live figures: 841 index rows, 841 body headings, next free
+D842** — but trust the procedure over any number written down here, including that one.
+⚠️ **D831–D841 are spent.** Session 30 reserved **D831–D840**, and **D842–D850 is reserved
+and unspent** — so for once there *is* a tail to read, and it is the exception rather than
+the rule. Confirm it with the negative grep anyway; a reservation recorded here is a claim
+about the moment it was written, which is the whole subject of this section.
+🚨 **And session 30 is the strongest instance yet of the warning below.** It reserved ten
+numbers for **six** planned entries, spent all ten, then needed a **second block** for an
+eleventh — D841, typed into a comment *before* that block was reserved and caught only by
+running the negative grep a minute later. **Eleven numbers for a session that planned six**,
+and the overrun came from the same place it always does: two entries were owed to defects
+found while checking the fix for an earlier one, and one to a correction a subagent returned.
 🚨 **Session 29 is the reason those are not 826 and D827, and it is the strongest instance
 this warning has.** It reserved D823–D830 and planned four. It spent **D827** on something it
 found while running its own closing checks, **D828** on something it found while fixing what
@@ -117,10 +125,17 @@ nothing. Put the number on the doc of whatever a reader meets the question at.
 grep -rhoE 'D[0-9]{1,3}\b' crates/ --include=*.rs | sort -u
 ```
 
-725 distinct numbers today, and **every one of them resolves** — the third clean reading
+741 distinct numbers today, and **every one of them resolves** — the fourth clean reading
 in twenty-odd sessions, after D476 and D477 were reconstructed from their citation sites on
 2026-09-19 (§15 D806's neighbours; both entries say in their first line that they are
-reconstructions). ⚠️ **The total went *down* by one across a session that spent five
+reconstructions).
+🚨 **A hex seed is a false positive of this sieve and one was manufactured in our own source**
+(§15 D832's test). `IdSource::new(0xD0)` matches `D[0-9]{1,3}\b` exactly, so it read as a
+dangling `D0` — the same shape as `target/`'s `D00`/`D000` below, in a file the census is
+*meant* to sweep, and it survived the run that introduced it. Seeds are letter pairs now
+(`0xDA`); the `…C`-suffixed ones already in the tree (`0xD0C`) never matched, the boundary
+saving them. ⚠️ **And the comment warning about it reintroduced it twice** before being
+written without the literal: the census greps source, and a comment is source. ⚠️ **The total went *down* by one across a session that spent five
 numbers, and that is the file's own warning about totals happening**: session 29 corrected
 three wrong citations in shipped code (D797→D798, D218→D224, D183→D280), and because every
 number involved was cited elsewhere too, the set-difference against `HEAD` showed **five
@@ -285,7 +300,7 @@ whole-file mistake — and the files here are the worst size for that:
 find crates -path '*/src/*' -name '*.rs' | xargs wc -l | awk '$1>1000 && $2!="total"' | wc -l
 ```
 
-**41** modules over a thousand lines, `inspector.rs` at 24,924 and `canvas.rs` at 22,091,
+**41** modules over a thousand lines, `inspector.rs` at 24,924 and `canvas.rs` at 22,286,
 against `decisions.md`'s 47,673 and `architecture.md`'s 12,037. (`library/relocate.rs`
 crossed the line at 1,023 in session 28 — the reminder that this count only ever rises,
 and that a module joins the list by having a feature finished in it rather than by
@@ -294,6 +309,10 @@ still moved**, which is why the three names are worth re-measuring rather than t
 that session added a whole module (`ondin-core/src/io/clip.rs`) and it is nowhere near the
 line, while `app.rs` grew by several hundred lines without changing its position. **A
 threshold count is the least sensitive thing you can measure about this list.**
+⚠️ **It held at 41 through session 30 as well, over seven commits touching six of these
+modules** — `canvas.rs` moved 22,091 → 22,286 and nothing crossed the line in either
+direction. *Three sessions running, the total has said nothing and the ranking has moved
+every time.*
 
 ⚠️ **On Windows a scripted rewrite also re-decides the line endings.** A three-line Python
 `read()`/`replace()`/`write()` used for a *flip-check* — the most tempting case, because
@@ -453,6 +472,13 @@ at line 1" caveat is gone** — that rule existed because the prose version swep
 and this command's head runs 107 down to a floor of 58 over twenty entries. *Two spellings of
 one check are two checks with two baselines*, which is the same trap as `--workspace` against
 `-p`.
+⚠️ **Re-run at the close of session 30: head 107, floor still 58 over twenty, and one new
+entry at #2** — `typography.rs`'s `a_stored_tracking_outside_the_fields_range_is_not_rewritten_on_an_idle_frame`
+at **87**, up from 63, because §15 D840 added three corrections to its doc (a flip that stopped
+biting, the two-defence measurement, and the past-tensing of an argument that had landed). Read
+line by line against the item beneath it before being excused, per the first rule below: its
+first line describes the test and the run ends at the `#[test]`. **The floor did not move while
+the head gained an entry**, which is exactly what that third rule says to expect.
 
 ⚠️ **Read the head, do not just rank it** — the ranking's first run under this command turned
 up nineteen entries describing their items and one opening ***"And it holds…"***, which is
@@ -1038,8 +1064,16 @@ The real census cannot be scoped to its own answer:
 grep -rhoE 'cfg\(([a-z_]+)' crates/ --include=*.rs | sort | uniq -c
 ```
 
-Last run (2026-09-22): **343 `test`, 7 `windows`, 3 `unix`, 3 `panic`, 3 `not`, 3
-`debug_assertions`, 2 `target_os`, 2 `all`.** ⚠️ **The tail did not move in session 29, over
+Last run (2026-09-23): **347 `test`, 7 `windows`, 3 `unix`, 3 `panic`, 3 `not`, 3
+`debug_assertions`, 2 `target_os`, 2 `all`, 1 `debug`.**
+🚨 **The `1 debug` row is not new and was never written down** — it is
+`cfg(debug_assertions)` matched a second time by the `[a-z_]+` sieve at a line the census
+itself prints, and every recorded reading of this command has silently dropped it (the release
+review's `[R2-L8-05]`). **A census transcribed by hand is a census with a hand in it**, which is
+this file's own subject arriving in the paragraph that states the method. The figure `343` was
+likewise a reading of no commit in the range; it is `347` at `b7c2063`, the four being test
+modules this session added.
+⚠️ **The tail did not move in session 29, over
 a change that added a whole module and two test modules** — which is the reading this census
 is for and the one it usually gives. Only `test` had moved across five sessions before that
 — **the interesting half of this census is the tail, not the total** — and in session 28 the
@@ -1048,9 +1082,12 @@ is for and the one it usually gives. Only `test` had moved across five sessions 
 helper that builds a filename which is legal for the OS and not valid Unicode (§15 D809).
 ⚠️ **Its `unix` arm joins the class below and is the first *test* member of it**: nothing
 on this machine compiles it, so it is written to be read rather than trusted, and a
-cross-compile is still the only thing that would say. ⚠️ **The previous reading said `1
-unix` and the true figure before that change was 2**, which is the ordinary way a tail
-figure rots — nobody re-runs a census for a number they are not about to use.
+cross-compile is still the only thing that would say. 🚨 **This paragraph used to end *"the previous reading said `1 unix` and the true figure
+before that change was 2"*, and it was the correction that was wrong.** Measured with
+`git grep -hoE 'cfg\(unix' <ref> -- 'crates/**/*.rs'`: **1** at `v0.1.0` and **1** at
+`f34b09e^`, so the reading of `1` was right and the figure `2` was never true of any commit.
+**A correction is a reading too**, and this one was written without running the command at a
+ref — which is the same failure as the stale figure it was correcting, one level up.
 ⚠️ **And that is not only about tails.** The citation total above was written into this file as
 **721**, re-measured as **722** twenty minutes later, and closed the same session at **725** —
 D827, D828, D829 and D830 each spent after a figure had been written down. *The number was
@@ -1180,18 +1217,43 @@ under it:
     thirteenth by a flake; this one was found by *running the control CLAUDE.md prescribes***
     — break what the gate claims to cover and check it goes red — **on a defect that was
     already sitting in the tree.**
+15. 🚨 **A hand-written gate whose *window* is narrower than its subject, so the defect it
+    exists for walks past it.** `app::valve_condition_gate::nothing_commits_on_the_expression_d316_removed`
+    greps every `.rs` file for `lost_focus()` and reports any site that also has `changed()`
+    **within 160 characters** and no exemption marker. Its subject is a control deciding it
+    is finished — but a field that commits on a bare `lost_focus()`, with no `changed()`
+    anywhere near, is exactly that and is invisible to it: at `picker::hex_row` the two terms
+    sit ~700 characters apart in two separate conditions, and `Escape` committed a typed
+    colour there from the day D808 closed the four fields it happened to grep (§15 D841).
+    ⚠️ **The window is not a bug** — it is deliberate, because `cargo fmt` puts a wrapped
+    condition a long way below its comment — **the mistake is reading the gate's *name* as its
+    coverage.** It is right about D316's compound expression and silent about the other half
+    of the same class. ⚠️ **And the exemption cost is why this one is recorded rather than
+    closed**: a gate for the `Escape` question needs about eight markers across six files,
+    which is a decision about where they go. **Found by reading a gate's predicate against a
+    defect it did not catch** — the cheapest of the routes on this list, and the first time
+    one was found by asking *"why was this quiet?"* of a bug rather than of a gate.
 
 **Three questions to ask of a gate**: does it check the rule, with a predicate wide enough,
 **against the thing that actually ships?** And two of an *absent* one: **when the record says
 a check is impossible, check** (D445), and **when the record says a check is unnecessary,
 check** (D622).
 
-⚠️ **Suspect a fifteenth.** None of the first thirteen was found by looking for it — two came
+⚠️ **Suspect a sixteenth.** None of the first thirteen was found by looking for it — two came
 from a subagent's aside, one from reading a doc link against the type it named, and one from
 writing an unrelated test. **The fourteenth was found by looking**, which is the one change
 worth making to this paragraph: the move below was run deliberately, against a lint nobody
 suspected, and it took a minute. The cheap general move: **take a gate, break something it
 claims to cover on purpose, and check it goes red.**
+
+🚨 **The fifteenth came by a third route and it is the cheapest of the three: start from the
+*defect*, not from the gate.** A live bug was already in hand (`Escape` committing at two hex
+fields), and a gate existed whose name covered it; the whole of the work was reading that gate's
+predicate — a 160-character window — and noticing the bug's two terms were 700 apart. **No
+control run, nothing broken on purpose, one minute.** ⚠️ **The lesson is narrow and worth
+stating exactly**: whenever you fix a defect that some gate's *name* suggests it should have
+caught, go and read that gate's predicate before closing the finding. A gate that was quiet
+about a bug you are holding is the one case where the hole is free to find.
 
 🚨 **And run the control on the *reverse* reading too.** The fourteenth started as a defect with
 no warning against it, so the question was "why is this gate quiet" rather than "does this gate

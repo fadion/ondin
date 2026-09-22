@@ -936,10 +936,16 @@ impl Sel<'_> {
 
 /// Whether `el`'s ancestors satisfy `chain`, which runs right to left.
 ///
-/// **A descendant combinator backtracks.** `.a .b .c` against a tree where the
-/// nearest `.b` above a `.c` has no `.a` above *it* must keep looking further up
-/// rather than failing — a greedy walk gets that wrong, and the case is not
-/// exotic: it is any repeated class in a nested group.
+/// **A descendant combinator backtracks**, and the shape that proves it needs a
+/// `>` to the **left** of a descendant. 🚨 **`.a .b .c` does not**, which is the
+/// example this doc and §15 D806 both gave: a descendant chain's ancestor sets
+/// are nested, so if the nearest `.b` has no `.a` above it then no `.b` further
+/// up has one either, and greedy and backtracking **necessarily agree**. In
+/// `.a > .b .c` they do not — committing to the nearest `.b` fails on its plain
+/// `<g>` parent while a `.b` further up has `.a` for a direct parent, which is
+/// what `a_descendant_chain_reconsiders_an_ancestor_that_fails_further_left` is
+/// built on — plain backticks, the test being `cfg(test)` and so invisible to
+/// `cargo doc` (§15 D319).
 ///
 /// 🚨 **It used to backtrack by recursing, and that made a kilobyte of SVG hang
 /// the import** (§15 D837). Each descendant arm looped over every ancestor and
@@ -950,8 +956,11 @@ impl Sel<'_> {
 /// about. Measured at **334 bytes / 30 levels / 12.6 s**, with a 534-byte
 /// fixture not finishing in 120 s. Neither [`MAX_SVG_NESTING`] nor
 /// [`MAX_SVG_NODES`] is consulted here and neither is even approached: the file
-/// is tiny and shallow by both measures. §15 D446's *"a depth bound is not a
-/// size bound"* has a third member, and this one is neither.
+/// is tiny and shallow by both measures. `architecture.md` §5.11's series — *a
+/// depth bound is not a size bound* (§15 D446), *a size bound is not a payload
+/// bound* (§15 D459) — gains a **fourth** quantity in [`MAX_CSS_RULES`] (§15
+/// D838), and this is the case that is none of them: what explodes is the work
+/// *per element*, which is not a quantity a file declares.
 ///
 /// **The fix is not a cap, because the search was never exponential in
 /// nature.** An element's ancestors are a **path** — `parent_element` walks one
@@ -6736,7 +6745,7 @@ mod tests {
     /// come back at all, so the suite's own timeout is both the sharper
     /// instrument and the honest one. **The flip is running this test against
     /// the recursive version, and it was run: it does not finish in 120 s**,
-    /// against 0.27 s for the whole `svg_in` suite — 94 tests — with the table.
+    /// against 0.27 s for the whole `svg_in` suite — 95 tests — with the table.
     /// That is the whole check, and it is why the fixture is sized to be
     /// hopeless rather than merely slow: a fixture tuned to "slow" would be a
     /// wall-clock assertion wearing a disguise.
@@ -6831,7 +6840,8 @@ mod tests {
     /// greedy walk gives a different answer** (§15 D837).
     ///
     /// 🚨 **`match_chain`'s own doc could not be used to write this test**, and
-    /// §15 D806 carries the same sentence: it justifies the recursion with
+    /// §15 D806 carried the same sentence — both are corrected now, and both
+    /// justified the recursion with
     /// `.a .b .c`, where greedy and backtracking **necessarily agree**, because
     /// a descendant chain's ancestor sets are nested — having found the nearest
     /// `.b`, any `.a` above a further `.b` is also above that one. The case that

@@ -10949,8 +10949,10 @@ mod valve_arm_tests {
     /// press away from the seeded value and is what a user holding the key
     /// actually hits.
     ///
-    /// Flip: [`stepped_into`] replaced by the bare `step_length` this arm used to
+    /// Flip: `stepped_into` replaced by the bare `step_length` this arm used to
     /// end in. Red at the floor, the predicted site, with a negative line height.
+    /// (Plain backticks — this is a `cfg(test)` module and `cargo doc` cannot
+    /// see it, so a link here is checked by nothing, §15 D319.)
     #[test]
     fn a_held_leading_chord_stops_at_the_fields_ends() {
         let (_ctx, mut app, id) = app_with_text();

@@ -1322,17 +1322,19 @@ fn with_clipboard<T>(f: impl FnOnce(&mut arboard::Clipboard) -> T) -> Option<T> 
 /// `grep 'cfg(debug'` shape from §15 D732 again: a check whose output cannot
 /// disagree with the claim it is printed under.
 ///
-/// 🚨 **A second of that file's checks had the same defect and the worse
-/// consequence**, which is why D827 is about the class rather than this grep:
-/// `review/`'s census defends against a count reading *high* by taking a second
-/// extraction and comparing, and an inert second reading comes back empty, which
-/// reads as *"nothing to correct for"* and **corroborates** the high count. A
-/// check that goes quiet wastes a reading; a check that answers in the shape of
-/// a corroboration is spent as evidence. ⚠️ **Both were found by *running*
-/// them, neither by reading** — the patterns look right — and **no sweep of the
-/// file's remaining commands has been run**. **The backslash is gone from both
-/// now**; what is unchanged is that this doc convention has no gate behind it
-/// and is kept by reading.
+/// 🚨 **Two more of that file's checks were broken too**, which is why D827 is
+/// about the class rather than this grep. `review/`'s census defends against a
+/// count reading *high* by taking a second extraction and comparing; the
+/// documented pattern returns **0** where the corrected one returns **394**, so
+/// it asserted *"nothing to correct for"* and **corroborated** the high count.
+/// And §15.0's order-check piped `- **D110**` through `sort -n`, which parses no
+/// number and falls back to a whole-line comparison — **194 differing lines on
+/// an index in perfect order**, which is how a check gets abandoned. ⚠️ **All
+/// three were found by *running* them, none by reading** — the patterns look
+/// right. **Ten of that file's commands are controlled now and the sweep is
+/// unfinished.** The backslash is gone from both greps and the order-check has
+/// its `sed`; what is unchanged is that this doc convention has no gate behind
+/// it and is kept by reading.
 ///
 /// 🚨 **A headless app read and could write the developer's real clipboard.**
 /// D303 swaps three things so a probe cannot touch the machine it runs on — the

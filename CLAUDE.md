@@ -7,7 +7,7 @@ documents, and is untracked.
 | File | Holds |
 | --- | --- |
 | `docs/architecture.md` | The design and the invariants. **Source of truth.** ~12,000 lines. |
-| `docs/decisions.md` | **§15** — every deviation from that design, **D1–D827** with no gaps, each with a verdict. ~47,300 lines. |
+| `docs/decisions.md` | **§15** — every deviation from that design, **D1–D829** with no gaps, each with a verdict. ~47,500 lines. |
 | `docs/roadmap.md` | Open work, decided non-goals, parked decisions, post-v1. **Every `Now` section is clear as of 2026-09-22** — what is left is *Later* and §0. |
 | `docs/shortcuts.md` | The whole keymap — bound, unbound and agreed. |
 | `docs/context-menus.md` | The context-menu spec and its own deviation ledger. |
@@ -67,14 +67,18 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 827 index rows, 827 body headings, next free
-D828** — but trust the procedure over any number written down here, including that one.
-⚠️ **Session 29 is the reason those are not 826 and D827.** It reserved D823–D830, spent
-D823–D826 on a planned batch, and then spent **D827** on something it found *while running
-its own closing checks* — so the figure it would have written an hour earlier was already
-wrong. **A session's last number is not the one it planned**, which is the same lesson as
-session 28's below, arriving by the opposite route: not a number typed ahead of its entry,
-but an entry the session did not know it owed when it reserved.
+anywhere cited either. **The live figures: 829 index rows, 829 body headings, next free
+D830** — but trust the procedure over any number written down here, including that one.
+🚨 **Session 29 is the reason those are not 826 and D827, and it is the strongest instance
+this warning has.** It reserved D823–D830 and planned four. It spent **D827** on something it
+found while running its own closing checks, **D828** on something it found while fixing what
+D827 turned up, and **D829** on something it found while reproducing a flake it had reported
+as unexplained an hour earlier. **Three of its seven numbers were owed to work that did not
+exist when the block was reserved**, each one discovered by the check for the one before it.
+⚠️ **This paragraph was itself written three times, at 827 and 828 and 829**, which is the
+warning happening to the sentence that carries it. **A session's last number is not the one it
+planned**, and the closing re-grep over the unspent tail is the only thing that notices —
+session 28's case below is the same lesson arriving by the cheaper route.
 ⚠️ **Session 28 proved the warning again from the cheap direction**: it reserved D807–D814,
 spent D807–D810 through a briefed batch, and then typed **D811** into a comment for a
 record-only change the batch had never been told about. `arch-scribe` refused to invent an
@@ -111,7 +115,7 @@ nothing. Put the number on the doc of whatever a reader meets the question at.
 grep -rhoE 'D[0-9]{1,3}\b' crates/ --include=*.rs | sort -u
 ```
 
-722 distinct numbers today, and **every one of them resolves** — the third clean reading
+724 distinct numbers today, and **every one of them resolves** — the third clean reading
 in twenty-odd sessions, after D476 and D477 were reconstructed from their citation sites on
 2026-09-19 (§15 D806's neighbours; both entries say in their first line that they are
 reconstructions). ⚠️ **The total went *down* by one across a session that spent five
@@ -186,10 +190,29 @@ what the cited entry says, not whether the number exists.**
   reports five hundred defects in a file with none**, and the next reader to "repair" it
   would renumber a clustering nobody has seen a reason to abandon. Where a new entry goes
   is the subject's business, not the number's.
-- **Order-check §15.0 only**: `grep -oE '^- \*\*D[0-9]+\*\*'` piped through `sort -n` and
-  diffed against itself. That found an inversion once, and in fixing it a **missing
-  newline** that had joined two index rows into one physical line — invisible to every
-  count in this file.
+- **Order-check §15.0 only**, and **strip to the digits before sorting**:
+
+  ```bash
+  grep -oE '^- \*\*D[0-9]+\*\*' docs/decisions.md | sed 's/[^0-9]//g' > /tmp/a
+  sort -n /tmp/a | diff - /tmp/a
+  ```
+
+  That found an inversion once, and in fixing it a **missing newline** that had joined two
+  index rows into one physical line — invisible to every count in this file.
+  🚨 **The `sed` is the whole of it, and this check ran without one until 2026-09-22**
+  (§15 D827). `sort -n` on `- **D110**` finds no number to parse, scores every line 0, and
+  falls back to GNU sort's last-resort **whole-line** comparison — which is lexicographic,
+  so it puts `D110` before `D9`. **Run against today's perfectly-ordered index the written
+  form reports 194 differing lines.** It is the **third** distinct way a command in this
+  file has been found not to do what its sentence says, and the one with the opposite sign:
+  the other two could not report a hit, and this one cannot stop reporting them. ⚠️ **Which
+  makes the anecdote above the tell.** A check that cries wolf 194 times is read once,
+  disbelieved, and never run again — so *"that found an inversion once"* is the sound of a
+  check being abandoned, not of one working. **A false-positive generator is not the safe
+  direction for a broken check to fail in; it is the direction that gets the check
+  discarded.** And the bullet above already names this exact failure for a numeric test
+  pointed at the *body* — the file warned about the mechanism two bullets up and shipped it
+  two bullets down.
 - **Compare the index and the body as *sets*, with `comm`, both ways.** Never as counts.
 - **The body-heading regex is `^\*\*D[0-9]+ —`** — with the em dash. A looser
   `^\*\*D[0-9]+ ` also matches prose lines opening `**D344 amended**`, and this file twice
@@ -219,9 +242,19 @@ Its census has traps, all found the hard way:
   checking this file's other commands once the first one turned up, and **the worse of the
   two in consequence**: the inert form returns an empty second reading, which compares
   against the first as *"no rows have a finding id in their body"* and so **confirms the
-  census it was written to falsify.** Controlled against a one-line fixture, as the other
-  one was. *Two of this file's commands have now been found unable to produce a hit, and
-  both were found by running them rather than by reading them.*
+  census it was written to falsify.** 🚨 **Measured against the real ledger, not a fixture:
+  the corrected pattern matches 394 rows of `review/findings.md` and the form this file
+  carried matches 0.** So the documented second reading did not merely fail — it handed back
+  an emphatic *"no fix-log row names a finding in its body"* about a file with 394 of them.
+  *Two of this file's commands have now been found unable to produce a hit, and both were
+  found by running them rather than by reading them.*
+  ⚠️ **The corrected command has still not been used for a census, and the open question is
+  what it changes.** It yields **391 distinct ids over 394 rows** — so the reading exists now,
+  and whether the closed count has been running high all along is *unmeasured*, because that
+  comparison has to be made against `review/index.md`'s own documented method rather than
+  against a grep of the whole file. **Do not read "the command is fixed" as "the census is
+  sound"**: the check that was supposed to falsify the count has never once falsified
+  anything, and nobody has yet asked it to.
 - 🚨 **And the mirror: naming a finding in a fix-log table is what closes it, whatever the
   prose beside it says.** A half-finished finding has to be kept out of every `^|` row —
   including out of another row's body.
@@ -251,7 +284,7 @@ find crates -path '*/src/*' -name '*.rs' | xargs wc -l | awk '$1>1000 && $2!="to
 ```
 
 **41** modules over a thousand lines, `inspector.rs` at 24,924 and `canvas.rs` at 22,091,
-against `decisions.md`'s 47,293 and `architecture.md`'s 12,015. (`library/relocate.rs`
+against `decisions.md`'s 47,529 and `architecture.md`'s 12,015. (`library/relocate.rs`
 crossed the line at 1,023 in session 28 — the reminder that this count only ever rises,
 and that a module joins the list by having a feature finished in it rather than by
 anyone deciding it is large.) ⚠️ **The count held at 41 across session 29 and the ranking
@@ -749,8 +782,34 @@ cargo doc --workspace --no-deps --document-private-items   # the gate that reads
 **At the close of a session, once — not in the edit loop** (§15 D771, D597):
 
 ```bash
-cargo test --workspace --release
+cargo test --workspace --release 2>&1 | tee /tmp/release-run.log
 ```
+
+🚨 **The `tee` is not tidiness, and it is there because a failure was lost.** On 2026-09-22
+this gate went red once — `68 passed; 1 failed` in `ondin-export --test svg` — and the run
+had been piped through a `grep` for the *summary* line, so **the name of the failing test was
+never captured**. It did not recur in **31** further runs. ⚠️ **Keep the whole output and grep
+the file**, never the stream: this gate runs *once a session*, which makes every red run a
+sample you cannot ask for again.
+
+🚨 **It was `collecting_defs_does_not_grow_with_the_square_of_their_count`, and it is fixed**
+(§15 D829) — but note *how* that was settled, because waiting for it to recur would not have
+worked. Thirty-one clean runs said nothing; what named it was **reproducing the condition on
+purpose**, with 64 spin loops on 24 cores, where it failed **4 times in 10**. The test asserts
+a *ratio* of two timed exports precisely so it is not a measurement of the machine, and took
+the best of three — but of three *small* and then three *large*, and the large phase is four
+times longer in wall-clock, so a burst inside it is missed by all three of its repetitions
+while none of the small's are touched. Interleaved and raised to fifteen rounds it is **0 in
+20** under the same load, with the bound and the discrimination untouched.
+⚠️ **Interleaving alone was worth almost nothing — 3 in 10 — and was written up as the fix
+before it was measured.** The count is what pays.
+🚨 **And the failure message had been telling the reader the wrong thing.** It offered *"a
+stall (both times inflated)"* versus *"the square coming back (the large one alone inflated)"*
+— and **the large one alone inflated is the signature of a stall**, by that same exposure
+argument. A one-in-thirty red run was therefore going to arrive already labelled as a
+performance regression in code that was correct. **When a flake's own diagnostic is part of
+the record, fix it with the flake**: a rare failure is read once, by someone who will believe
+what it says.
 
 **It is the only thing that *runs* anything under the release cfg**, and `check --release`
 is scoped `-p ondin-app`, so it does not compile the other four crates' test targets at
@@ -937,9 +996,10 @@ cross-compile is still the only thing that would say. ⚠️ **The previous read
 unix` and the true figure before that change was 2**, which is the ordinary way a tail
 figure rots — nobody re-runs a census for a number they are not about to use.
 ⚠️ **And that is not only about tails.** The citation total above was written into this file as
-**721** and re-measured as **722** twenty minutes later, in the same session, because D827 was
-spent in between — *the number was stale before the session that measured it had ended.* Every
-figure in this file is a reading, and the reading is over the moment it is taken.
+**721**, re-measured as **722** twenty minutes later, and closed the same session at **724** —
+D827, D828 and D829 each spent after a figure had been written down. *The number was stale
+three times before the session that measured it had ended.* Every figure in this file is a
+reading, and the reading is over the moment it is taken.
 
 ⚠️ **So it is the first of a class, and the rest of the class has no gate at all.**
 `canvas::os_cursor_desktop_px`, `library::clock::local_offset` and `library::store`'s
@@ -982,7 +1042,7 @@ D699 bracket the same attribute from opposite sides).
 
 ### Gates that look like they cover the code and do not
 
-**Thirteen, by thirteen unrelated mechanisms.** The list matters less than the standing advice
+**Fourteen, by fourteen unrelated mechanisms.** The list matters less than the standing advice
 under it:
 
 1. Clippy without `--all-targets` never lints a test (D302).
@@ -1038,16 +1098,54 @@ under it:
     the population is wider than "anything the OS owns": **any test whose assertion depends
     on work finishing is in it.** The fix there is not a longer wait but a *wait*:
     `Covers::settle`, the shape `library::writer::Writer::settle` already had.
+    🚨 ***"Twenty runs is a reading" answers whether, not which*** (§15 D829). The release
+    gate went red once on 2026-09-22 and then came back clean **31 times** — 20 of them as a
+    paced reading, exactly the instrument above — and every one of those clean runs was
+    consistent with the flake being real. What identified it was **recreating the condition
+    on purpose**: 64 spin loops on 24 cores, where it failed 4 in 10 and named itself. *A
+    flake that will not recur is not a flake with no cause; it is a condition nobody has
+    recreated.* Use the paced reading to decide whether something is real, and a reproduction
+    to find out what it is — and note that this instance shares neither an OS resource nor a
+    settling deadline but **the machine's scheduler**, with nothing to wait on, because the
+    work was finished and merely slow.
+14. 🚨 **A lint that is on by default, names the defect exactly, and does not see most of
+    this codebase.** `clippy::duplicated_attributes` is warn-by-default and fires on a
+    duplicated `#[allow(..)]`; `svg_in::Builder::text_node` carried one **twice on
+    consecutive lines** from the first commit of the current `.git` until 2026-09-22, with
+    all seven gates green (§15 D828). **The lint is silent on any item inside an `impl`
+    block** — inherent or trait — and fires on a free function, including one inside a
+    `mod`. Measured both ways in an isolated crate, after a control confirmed the lint name
+    is real in this toolchain (an unknown name warns `E0602`; this one does not). ⚠️ **The
+    population is not "attributes"** — `ondin-app` is very largely `impl OndinApp`, so this
+    is a hole over nearly every item in the workspace, and what stands in for it is three
+    hand-written greps: adjacent identical attribute lines, a repeat anywhere in one item's
+    attribute run, and a repeated lint *inside* one `#[allow(..)]`. All three are clean as
+    of 2026-09-22. ⚠️ **The first twelve of this list were found by accident and the
+    thirteenth by a flake; this one was found by *running the control CLAUDE.md prescribes***
+    — break what the gate claims to cover and check it goes red — **on a defect that was
+    already sitting in the tree.**
 
 **Three questions to ask of a gate**: does it check the rule, with a predicate wide enough,
 **against the thing that actually ships?** And two of an *absent* one: **when the record says
 a check is impossible, check** (D445), and **when the record says a check is unnecessary,
 check** (D622).
 
-⚠️ **Suspect a fourteenth.** None of the thirteen was found by looking for it — two came from a
-subagent's aside, one from reading a doc link against the type it named, and one from writing
-an unrelated test. The cheap general move that found several: **take a gate, break something
-it claims to cover on purpose, and check it goes red.** It costs a minute.
+⚠️ **Suspect a fifteenth.** None of the first thirteen was found by looking for it — two came
+from a subagent's aside, one from reading a doc link against the type it named, and one from
+writing an unrelated test. **The fourteenth was found by looking**, which is the one change
+worth making to this paragraph: the move below was run deliberately, against a lint nobody
+suspected, and it took a minute. The cheap general move: **take a gate, break something it
+claims to cover on purpose, and check it goes red.**
+
+🚨 **And run the control on the *reverse* reading too.** The fourteenth started as a defect with
+no warning against it, so the question was "why is this gate quiet" rather than "does this gate
+work" — and answering it needed *two* controls, not one: that the lint name is real in this
+toolchain (an unknown name warns `E0602`; it did not), and that the lint fires at all (an
+isolated crate, where it did). **Without the first control the finding is "the lint does not
+exist here"; without the second it is "the lint is broken".** Both are wrong, and the true
+answer — it fires on free functions and not on `impl` members — is reachable only by varying
+the item's *position* until the warning appears. *A silent gate has more than one explanation,
+and the cheap ones are the wrong ones.*
 
 🚨 **Do the same to the *habits*, not only the gates.** Session 29 found that the doc gate's
 own written re-check — the `git diff … | grep` above — had never been capable of returning a

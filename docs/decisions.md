@@ -101,15 +101,19 @@
 > moved onto a thread, and `Escape` spent on a chrome field. All eleven are cited from `crates/`;
 > **five are record-only and their citations are planted by hand** — D813, D814, D818, D819 and
 > D822 — which is D741's fix for D735's shape.
-> **On 2026-09-22 the same session spent D823–D827** and extended its reservation to **D830**: the
+> **On 2026-09-22 the same session spent D823–D829** and extended its reservation to **D830**: the
 > layer clipboard crossing between two `ondin` windows, the Escape context-menu test's wider fixture,
 > three text non-goals with justify-all split out to *Later* as blocked upstream, the SVG rejoin
-> non-goal, and two hand-written checks that could not return a hit. **Three of the five are
-> record-only and their citations are planted by hand** — D825 on `text::break_lines` beside D399's
-> hyphenation note, D826 on `svg_in`'s `text_node`, and D827 on `app::CLIPBOARD_OFF`.
-> ⚠️ **D827 was spent between batches**, which is the case `CLAUDE.md` warns about and the reason the
-> negative grep is re-run over the unspent tail at the close rather than only at the start.
-> **D828–D830 are reserved and unspent**, which is a
+> non-goal, three hand-written checks that were broken in three directions, a warn-by-default clippy
+> lint blind to every item inside an `impl` block, and the release gate's flake named and its failure
+> message corrected. **Four of the seven are record-only and their citations are planted by hand** —
+> D825 on `text::break_lines` beside D399's hyphenation note, D826 on `svg_in`'s `text_node`, D827 on
+> `app::CLIPBOARD_OFF`, and D828 on `svg_in::Builder::text_node`; **D829's two are planted by hand as
+> well**, on the sampling loop and the assertion in `ondin-export/tests/svg.rs`, that entry changing
+> no production line either.
+> ⚠️ **D827, D828 and D829 were each spent between batches**, three times in one session, which is the
+> case `CLAUDE.md` warns about and the reason the negative grep is re-run over the unspent tail at the
+> close rather than only at the start. **D830 is reserved and unspent**, which is a
 > fact about the reservation and **not** a statement of what the next free number is — read §15.0's
 > last index line for that, as the instruction below says.
 > 🚨 **This paragraph used to end "So the next free number is D794, D794 and D795 being reserved and
@@ -1198,7 +1202,9 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D824** — **The Escape context-menu rule gets its wider fixture, and it had to be a *second* test.** §15 **D795** closed on one clause of `context-menus.md` §10 it could not write: that file's Escape bullet asks for the menu opened with a layer selected **inside an entered group and the node tool active**, and for `entered_group` and the tool to be untouched as well as the selection. 🚨 **§10 asked for the existing test to be widened and that would have been wrong.** `OndinApp::escape` pays out **one** rung per press and reaches `entered_group` *before* the tool and before the selection clear that is its final `else` — so under the narrow fixture the fall-through's extra rung is the **selection**, which is why that test bites, and under the wide one it is `entered_group`, leaving the selection and the tool untouched **under the very flip the test exists for**. Widening would have taken the teeth out of it and left the suite looking one test richer. *(Tested 2026-09-22; **Resolved** as to §10's queue. **Test** `app::context_menu_rule_tests::escape_over_a_menu_keeps_the_entered_group_and_the_tool_as_well`, flipped the same way its neighbour is — `input::resolve` in the menu-holds-the-keyboard arm right after `self.context_menu = None` — **red on the `entered_group` assertion** and green on the selection and the tool, both at the predicted sites. ⚠️ **D795's own closing *Fix* is untouched by this**: re-running that flip against `escape_in_present_mode_…` is still owed. §10's bullet is corrected, its *"present mode and an entered group are further down the ladder"* being backwards about `escape`. **The `roadmap.md` clause is struck**, and with D823 that section has nothing open)*
 - **D825** — **Tab stops, columns and widow/orphan control are decided non-goals for v1; justify-all is *not* one.** *Now · Text* carried the three beside justify-all as *"the four deferred features"*, and what the three share is the opposite of a wall: **not one of them is short of a dependency.** Widow/orphan control is a second pass over the lines `text::break_lines` yields; tab stops are a layer over `Whitespace::Tab`, which parley classifies and does not lay out; columns change what a paragraph's box *is*, above that function entirely. Each is a build of our own that nobody has asked for — the same shape as **D399**'s hyphenation, priced rather than blocked. ⚠️ **Justify-all is the exception and goes to *Later · Parked*, not to §0**: it is blocked **upstream**, parley's `align_impl` hard-coding a skip of `BreakReason::None | Explicit` with `align`, `LayoutData` and `ClusterData::advance` all `pub(crate)`, so its trigger is a patch upstream and not a decision here. *(Ruled by the maintainer 2026-09-22; **Resolved — three decided non-goals and one parked item.** Record-only, no production line changed; **the citation is planted by hand** on `text::break_lines`, beside D399's hyphenation note, which is where a reader meets the question. 🚨 **Filing the four under one word is what this entry undoes** — *"deferred"* stood over a price, a build nobody wants and an upstream wall, and this file's own history is that such a sentence gets re-derived as a blocker, which is exactly what **D399** had to correct. **The three move into `roadmap.md` §0**, justify-all to *Later*)*
 - **D826** — **Rejoining a multi-line paragraph on SVG import is a decided non-goal for v1.** A multi-line text layer of ours exports as one `<text>` per line and comes back as one layer per line, because nothing in the markup says they were one node — and the rejoin would have to **invent the line height** that decides where every line after the first sits. 🚨 **The refusal is about what the only available signal identifies**: same `x`, a constant `y` step and a matching resolved style is *also* exactly what a stack of separate labels in a foreign file looks like, so the heuristic welds unrelated layers together and the user has no way to say which reading was meant. ⚠️ **And the case it would have been worth most for is answered elsewhere** — a copy crossing between two `ondin` windows carries real nodes now, paragraph and all (§15 **D823**) — so what is left here is the foreign file, which never had the structure to lose. *(Ruled by the maintainer 2026-09-22; **Resolved — a decided non-goal**, no production line changed. **Record-only, so the citation is planted by hand** on `svg_in`'s `text_node`, in the run that already argued the loss was real — that paragraph is now the end of the argument rather than the start of one. `a_positioned_tspan_starts_a_new_layer_and_a_bare_one_does_not` already pins what *is* read, so nothing about the element is left open. **It moves into `roadmap.md` §0** and is struck from *Now · SVG import*, where it was the last item — §15 **D813** having left that section with this alone)*
-- **D827** — **Two of the hand-written checks standing in for gates could not return a hit, and one of them *confirmed* the thing it was written to falsify.** In GNU grep's ERE a backslash before a backtick matches nothing, and two of `CLAUDE.md`'s commands escape it. **Instance 1**, the re-check standing in for §15 **D319**'s blind spot — `git diff <base>..HEAD -- crates/ | grep -E '^\+ *(///|//!).*\[\`'`, credited with **a catch per session for six sessions running** — returns **0 matches / exit 1** against a fixture the unescaped pattern matches. 🚨 **Instance 2 is worse and is why this is one entry**: `review/`'s census defends against a count reading *high* by extracting `^\| \`\[` as a **second reading and comparing**, and an inert second reading does not merely fail to falsify the census — it comes back empty, reads as *"no fix-log row names a finding in its body"*, and **corroborates** the high count. *A check that goes quiet wastes a reading; a check that answers in the shape of a corroboration is worth less than no check, because it is spent as evidence.* 🚨 **Both were found by *running* them, neither by reading**, which is §15 **D732**'s advice failing on its own terms: `'.*\[\`'` reads as a careful author escaping everything, so the defect is invisible to the attention that catches a wrong anchor. **The advice needs its second half — a command you cannot falsify by reading, control.** ⚠️ **The correct spelling was already in the tree, inside D319 itself**, whose `find … grep -nE '^ *//[/!].*\[`'` uses a bare backtick: one check written twice, once correctly and once incapably, with the incapable copy in the file everybody reads. *(Both commands fixed 2026-09-22; **Keep** — resolved as to the two commands, **open as to the class**. 🚨 ***Fix:* no sweep has been run.** What was checked is the commands this session had reason to touch plus the `review/` one; `CLAUDE.md`'s other greps, `awk` programs and `comm` pipelines are **uncontrolled**, and every clean reading ever taken from one is worth what that command was capable of. Run each against a fixture that must match and one that must not. ⚠️ **The six-session record is a tell nobody read**: either those catches came from elsewhere or the command was typed differently each time, and **which is not recoverable** — a run record is evidence about the command only if the command is what was run. ⚠️ **A third command misreads its output the opposite way**: the citation census run wide from the repository root reports `D00` and `D000` out of `target/`'s generated `unicode-general-category` tables, false positives that read exactly like a dangling citation — run it from `crates/` or with `--exclude-dir=target`. **All three outputs were plausible and none is falsifiable by looking at what it printed.** Fixing the commands buys no gate: `cargo doc` still cannot see a `#[cfg(test)]` module, and the corrected doc grep still asks only half its question, a `#[cfg(test)]` **item** at module level sitting outside every check that looks for a `mod tests`. Record-only, no production line changed; **the citation is planted by hand** on `app::CLIPBOARD_OFF`, the one doc that narrates a doc-gate catch and the neighbour of D798's note on the D319 convention)*
+- **D827** — **Three of the hand-written checks standing in for gates were broken, and their failure modes have three different signs.** Ten of `CLAUDE.md`'s commands were controlled on 2026-09-22 and three were dead; **every one was found by *running* it, none by reading**. **Instance 1**, the re-check standing in for §15 **D319**'s blind spot — `git diff <base>..HEAD -- crates/ | grep -E '^\+ *(///|//!).*\[\`'` — returns **0 matches / exit 1** on any input, a backslash before a backtick matching nothing in GNU grep's ERE. It reads as *a clean tree*. 🚨 **Instance 2 has the same defect and the worse consequence**: `review/`'s census defends against a count reading *high* by extracting `^\| \`\[` as a **second reading and comparing** — and against the real ledger the corrected pattern returns **394** where the documented one returns **0**, so it did not merely go quiet, it asserted *"no fix-log row names a finding in its body"* about a file holding 394 of them, and that was then read as **corroboration**. ⚠️ `findings.md` is 23.7k lines and **gitignored**, so the census is the only statement of that ledger's state and this reading was the only check on it; both rested on a command returning 0. 🚨 **Instance 3 has the opposite sign**: the §15.0 order-check piped `- **D110**` through `sort -n`, which parses no number, scores every line 0 and falls back to a **whole-line lexicographic** comparison — **194 differing lines against an index in perfect numeric order**. ⚠️ **That direction is not the safe one**: a check that cries wolf is run once, disbelieved and abandoned, after which everything is missed anyway. ⚠️ **And the file had already written that mechanism down two bullets above** — a numeric-order test on the *body* being *"a false-finding generator"* — and shipped it against the index. 🚨 **Two of the three came with a usage anecdote and in both cases the anecdote was the evidence**: *"a catch per session for six sessions"* over a command incapable of a catch, and *"found an inversion once"*, which is the sound of a check being **discarded**. *A figure attached to a check is a claim about the check, and it is the first thing to test.* *(Three commands fixed 2026-09-22; **Keep** — **open as to the class**, and §15 **D732**'s *read the command against the claim* is what failed here, the patterns looking right. **The advice needs its second half — a command you cannot falsify by reading, control.** ⚠️ **The correct spelling was already in the tree, inside D319 itself**, whose `find … grep -nE '^ *//[/!].*\[`'` uses a bare backtick. 🚨 ***Fix:* the sweep is partly run and unfinished.** Seven check out — the citation census, the body-heading regex, the neighbour grep, the module-size ranking, the cfg census, the per-number `grep -rl`, and `comm -23` under `LC_ALL=C`. **Still uncontrolled**: the `///`-run length ranking, which is given as *prose rather than as a command* and so has no spelling to control, and everything in `review/` beyond the one reading above. ⚠️ **A fourth command misreads its *scope* rather than its pattern**: the citation census run wide from the repository root reports `D00` and `D000` out of `target/`'s generated `unicode-general-category` tables. **Four commands, four ways of being wrong, four plausible outputs, and none falsifiable by looking at what it printed.** Fixing them buys no gate: `cargo doc` still cannot see a `#[cfg(test)]` module, and the corrected doc grep still asks half its question, a `#[cfg(test)]` **item** at module level sitting outside every check that looks for a `mod tests`. Record-only; **the citation is planted by hand** on `app::CLIPBOARD_OFF`)*
+- **D828** — **A warn-by-default clippy lint is silent on every item inside an `impl` block, which is most of this codebase.** `#[allow(clippy::too_many_arguments)]` was written **twice, on consecutive lines**, on `svg_in::Builder::text_node`, from the first commit of the current `.git` until 2026-09-22, with all seven gates green. The duplicate is deleted and **is not the subject** — a second `allow` of one lint allows one lint. **The subject is that `clippy::duplicated_attributes` exists, is warn-by-default, names this exactly, and never fired.** Measured in order, both cheap explanations being wrong: **(1)** the lint name is real here — `-W clippy::this_lint_does_not_exist_at_all` warns `E0602: unknown lint` and the real name does not, so it exists in clippy 0.1.97; **(2)** it does fire — in an isolated crate, `#[allow(dead_code)]` twice on a free `fn` fires with `note: #[warn(clippy::duplicated_attributes)] on by default`, and `#[allow(dead_code, dead_code)]` fires too; **(3)** position is the variable — a duplicate on a free fn **inside a `mod`** fires, on an **inherent `impl` method** it does not, on a **trait `impl` method** it does not, isolated to be certain (a file with only the two `impl` cases yields **0**, one with only the free-fn case yields **1**). 🚨 **So it is not a blind spot over "attributes" as a category but over nearly every item in this workspace**: `ondin-app` is very largely one `impl OndinApp` and `ondin-core`'s builders are `impl` blocks. **It is the fourteenth entry on `CLAUDE.md`'s *gates that look like they cover the code and do not* list**, and earns it the same way as the others — it names the right rule, it is on, and it is pointed at a shape it cannot see. *(Measured 2026-09-22; **Keep** — the blind spot is upstream and not closable from here. ⚠️ **What stands in for it is three greps over `crates/`, clean today, and all three are worth naming because the first is the tempting one and the weakest**: adjacent identical attribute lines; a repeat anywhere in one item's **contiguous attribute run**, which is the real shape; and a lint repeated **inside** one `#[allow(..)]`, which measurement 2 proved the lint also catches and neither other grep sees. 🚨 ***Fix:* control those three before trusting the clean reading** — they are hand-written commands standing in for a gate, which is §15 **D827**'s population, and three of the ten controlled there could not report a hit. **How this was found differs from the thirteen before it**: not sideways, but by running the control `CLAUDE.md` already prescribes — *break what a gate claims to cover and check it goes red* — against a defect already in the tree. The advice worked the first time it was pointed at this lint; nobody had pointed it there. Record-only as to the lint, one line deleted; **the citation is planted by hand** on `svg_in::Builder::text_node`, above the surviving attribute. ⚠️ **Do not read the deletion as the fix**)*
+- **D829** — **The release gate's flake is named, and its own failure message had been accusing the wrong thing.** §15 **D705**'s test again — `collecting_defs_does_not_grow_with_the_square_of_their_count`, §15 **D593**'s regression test — red once in a `cargo test --workspace --release`. 🚨 **Thirty-one clean runs said nothing**: 11 warm workspace release runs, 20 more paced, 3 with the sources touched, 11 of the target alone. **What named it was reproducing the condition on purpose** — 64 spin loops on 24 cores, **4 failures in 10**. *A flake that will not recur is not a flake with no cause; it is a condition nobody has recreated*, and §15 **D820**'s twenty-run reading is the instrument for *is this real* and not for *what is it*. **The mechanism is the phases**: `0..3` of the small and *then* `0..3` of the large, where the large phase is ~4× longer in wall-clock, so it carries 4× the exposure to a burst and a burst inside it is missed by all three of its repetitions while none of the small's are touched. **The minimum was the right statistic taken over the wrong sample.** Fixed by **interleaved rounds, fifteen of them**: baseline **4 in 10**, interleaved-five **3 in 10**, interleaved-fifteen **0 in 20**, all on one load. 🚨 **Interleaving alone bought almost nothing and was written up as the fix before being measured** — *the count is what pays and interleaving is what makes the count worth paying for*, since under oversubscription every sample is hit and what is needed is enough rounds that one escapes **both** measurements together. 🚨 **The failure message was wrong in the dangerous direction**: D705 told the next reader that *"the large one alone inflated"* meant the square coming back, and **that is the signature of a stall** — the reproduction printed `0.0071s vs 0.0618s` on a loaded machine, which the old rule reads as a regression. So a once-in-thirty red run would have arrived **already labelled a performance regression in correct code**, to a reader with no way to reproduce it. *(Fixed and measured 2026-09-22; **Resolved.** Discrimination flip-checked rather than assumed: the linear scan restored measures **8.70×** against the 6.0 bound and the fixed version **4.12×**, so 46% headroom above and 31% below. ⚠️ **A deeper minimum moves the absolute times and not the ratio** — 0.0034/0.0140 here against D705's 0.0082/0.0327 — so that entry's figures are stale *for this sampling*. ⚠️ **The repair committed the same fault one order down**: the rewritten message carried D705's best-of-three baselines into a best-of-fifteen test, so the flip against a genuine regression printed 0.0048 s and the message called it a stall — **caught only by running the flip**. *A diagnostic rule is a measurement and it expires with the measurement it was taken from.* **On D820's population question: a third member, not a restatement** — D796 contends for an **OS resource** and waits on a lock, D820 for the machine's **load** with an assertion depending on work finishing and waits on `settle`, and this for the **scheduler** with the work already done, so there is **nothing to wait for** and the repair must be statistical. The honest superset is *any test whose assertion depends on anything the scheduler decides*. Test-only; **the citation is planted by hand at two sites**, the sampling loop and the assertion's message. ⚠️ **Do not collapse fifteen rounds back toward three**, and **do not widen the 6.0 bound**)*
 
 ---
 
@@ -10887,6 +10893,72 @@ it was written, and `CLAUDE.md`'s *Build / test* block had not — so which gate
 the work was delegated, and this session's was not. **A gate written down in two places is two gates**,
 and the weaker one is the one that gets run by whoever is in a hurry. Both say the same thing now.
 
+**D828 — A warn-by-default clippy lint is silent on every item inside an `impl` block, which is most
+of this codebase. *Measured 2026-09-22 and the duplicate deleted; Keep — the blind spot is not
+closable from here, and what stands in for it is three hand-written greps.***
+
+`#[allow(clippy::too_many_arguments)]` was written **twice, on consecutive lines**, on
+`svg_in::Builder::text_node`, from the first commit of the current `.git` until 2026-09-22, with all
+seven gates green the whole time. The duplicate is deleted. **It was harmless and it is not the
+subject of this entry**: a second `allow` of the same lint allows the same lint.
+
+**The subject is that `clippy::duplicated_attributes` exists, is warn-by-default, names this defect
+exactly, and never fired.** Measured in this order, because the two cheap explanations are both wrong
+and each would have closed the question:
+
+1. **Control — is the lint name real in this toolchain?**
+   `cargo clippy -p ondin-core -- -W clippy::this_lint_does_not_exist_at_all` warns `E0602: unknown
+   lint`. The real name produces no such warning. So the lint exists in clippy 0.1.97 and *"it was
+   added after our toolchain"* is out.
+2. **Control — does it fire at all?** In an isolated crate outside the workspace, `#[allow(dead_code)]`
+   twice on a free `fn` **fires**, carrying `note: #[warn(clippy::duplicated_attributes)] on by
+   default`; `#[allow(dead_code, dead_code)]` on a second free fn **fires** too. So *"it is off, or
+   allowed somewhere"* is out as well.
+3. **Vary the item's position, which is what was left.** Same isolated crate: a duplicate on a free fn
+   **inside a `mod`** fires; on an **inherent `impl` method** it does **not**; on a **trait `impl`
+   method** it does **not**. Isolated to be certain rather than inferred from one file — a file
+   containing only the two `impl` cases yields **0** warnings, and a file containing only the free-fn
+   case yields **1**.
+
+🚨 **So the lint is silent on any item inside an `impl` block, and that is not a blind spot over
+"attributes" as a category — it is a blind spot over nearly every item in this workspace.**
+`ondin-app` is very largely one `impl OndinApp`, and `ondin-core`'s builders are `impl` blocks too.
+The population the lint *can* see here is free functions and module-level items; the population it
+cannot is almost everything anyone writes an attribute on. **It is the fourteenth entry on
+`CLAUDE.md`'s *gates that look like they cover the code and do not* list**, and it earns the place by
+the same test the other thirteen do: it names the right rule, it is switched on, and it is pointed at
+a shape it cannot see.
+
+⚠️ **What stands in for it is three greps over `crates/`, all clean today, and naming all three
+matters because the first is the tempting one and the weakest.** (a) Adjacent identical attribute
+lines — which catches exactly the instance above and nothing else. (b) A repeat anywhere in one
+item's **contiguous attribute run**, which is the real shape, an item's attributes not being obliged
+to sit next to each other. (c) A lint repeated **inside** one `#[allow(..)]`, which is the form
+measurement 2 proved the lint also catches and which neither of the other two greps sees at all.
+
+🚨 ***Fix:* control those three before trusting the clean reading.** They are hand-written commands
+standing in for a gate, which is precisely D827's population, and three of the ten checks controlled
+there came back incapable of reporting a hit. **A clean reading from an uncontrolled command is worth
+what the command was capable of**, and the thing these three are standing in for is a lint that was
+itself silent for the life of the repository. Run each against a fixture that must match and one that
+must not.
+
+**And how this was found is worth the paragraph, because it differs from the thirteen before it.**
+Those arrived sideways — a subagent's aside, a doc link read against the type it named, an unrelated
+test, a flake. This one came from **running the control `CLAUDE.md` already prescribes**: *take a
+gate, break something it claims to cover on purpose, and check it goes red* — except that here the
+thing it claimed to cover was already broken and sitting in the tree. **The standing advice worked
+the first time it was pointed at this lint; nobody had pointed it there.** *The cost of that advice
+is a minute and the reason it goes unrun is that it feels like checking something that cannot be
+wrong* — which is the same sentence D827 ends up at from the other direction, and the two entries are
+worth reading together.
+
+*(Record-only as to the lint; one line deleted. **The citation is planted by hand** on
+`svg_in::Builder::text_node`, in the comment block above the surviving attribute — the one place a
+reader meets the question *why did nothing catch the copy*. ⚠️ **Do not read the deletion as the
+fix**; the duplicate was the symptom that made the blind spot visible, and the blind spot is upstream
+and unchanged.)*
+
 **D303 — `OndinApp` can be built headlessly, and could have been all along. *Built; three tests against
 a real app, the multi-selection one flip-checked.*** Raised as debt with no obvious actionable: the line
 chrome, `pen_verb` routing, the cursor decisions, autopan and `resize_tx` are all verified by reading,
@@ -12228,18 +12300,19 @@ is a gate people stop checking behind**. `CLAUDE.md`'s doc-gate paragraph claime
 every `[`link`]` in every doc comment"; it now reads "every doc comment it can *see*" and carries the
 measurement.
 
-**D827 — Two of the hand-written checks standing in for gates could not return a hit, and one of them
-*confirmed* the thing it was written to falsify. *Both commands fixed 2026-09-22; Keep — resolved as
-to the two commands, open as to the class, and no sweep has been run.***
+**D827 — Three of the hand-written checks standing in for gates were broken, and their failure modes
+have three different signs. *Three commands fixed 2026-09-22; Keep — ten of the file's checks are
+controlled now and three of those ten were dead, so the class is open and the sweep is unfinished.***
 
 This project keeps several checks that no gate performs, written down as shell commands in
-`CLAUDE.md`. **Two were found incapable of reporting a hit on any input whatever**, by the same
-mechanism, on the same day — and **both were found by *running* them, neither by reading them**,
-which is the part that decides what this entry is about.
+`CLAUDE.md`. **Ten were controlled on 2026-09-22 and three of the ten were broken** — and **every one
+of the three was found by *running* it, none by reading it**, which is the part that decides what this
+entry is about.
 
-**The mechanism is one character.** In GNU grep's ERE a backslash before a backtick matches nothing:
-a backtick is not a metacharacter, so escaping it produces a pattern that can never match. Both
-commands escape it. Measured with controls rather than reasoned, GNU grep 3.0 in both cases.
+**Two share one mechanism, and it is one character.** In GNU grep's ERE a backslash before a backtick
+matches nothing: a backtick is not a metacharacter, so escaping it produces a pattern that can never
+match. Both commands escape it. Measured with controls rather than reasoned, GNU grep 3.0 in both
+cases. **The third fails the opposite way** and is below.
 
 **Instance 1 — the doc gate's re-check, which goes quiet.** D319 above ends on a practice rather than
 a `Fix`, no flag closing the hole, and `CLAUDE.md` gave that practice a command: the diff-scoped grep
@@ -12263,6 +12336,21 @@ The defence is a second extraction compared against the first — *"extract `^\|
 reading and compare"*. Against the fixture ``| `[S8.2-L1-01]` | High | fixed |``, **0 matches, exit 1**
 as written and **1 match, exit 0** unescaped.
 
+🚨 **Then controlled against the real ledger, which is the number this entry turns on: 394 against
+0.** ``grep -cE '^\| `\[' review/findings.md`` — the corrected pattern — returns **394**. The form
+`CLAUDE.md` carried, ``grep -cE '^\| \`\[' review/findings.md``, returns **0**. So the documented
+command did not merely fail to find anything; it returned an emphatic *"no fix-log row names a
+finding in its body"* **about a file containing 394 such rows**, and that answer was then compared
+against the first reading as corroboration. *That is the difference between a check that was quiet
+and a check that asserted the opposite of the truth about the ledger it was pointed at*, and it is
+why a fixture alone would have understated this instance.
+
+⚠️ **This is the instance where `review/` being gitignored is load-bearing.** `findings.md` is 23.7k
+lines with **no `git checkout` behind it**, so the census over it is the only thing that says what
+state that ledger is in — and the second reading is the only thing that says the census is not
+reading high. **Both halves were resting on a command returning 0.** A ledger with no version control
+under it is the worst possible place for a check whose failure mode is agreement.
+
 **Set the two consequences side by side, because they are different failures.** The first returns
 nothing and is *indistinguishable from* a tree with no defects. The second returns an empty **second
 reading**, which is then compared against the first and reads as *"no fix-log row names a finding in
@@ -12270,6 +12358,28 @@ its body"* — so the inert command does not merely fail to falsify the census, 
 check written specifically to catch a count reading high, silently agreeing with the high count. *A
 broken check that goes quiet wastes a reading; a broken check that answers in the shape of a
 corroboration is worth less than no check at all, because it is spent as evidence.*
+
+🚨 **Instance 3 — the §15.0 order-check, which cannot stop reporting hits, and whose sign is the
+opposite of the other two.** It read: *"`grep -oE '^- \*\*D[0-9]+\*\*'` piped through `sort -n` and
+diffed against itself."* `sort -n` finds no number to parse at the head of `- **D110**`, scores every
+line **0**, and falls back to GNU sort's last-resort **whole-line** comparison — which is
+lexicographic, so `D110` sorts before `D9`. **Run against today's index, which is in perfect numeric
+order, the written form reports 194 differing lines.** Strip the digits out first
+(`sed 's/[^0-9]//g'`) and it reports none.
+
+⚠️ **The false-positive direction is not the safe one, and it is tempting to file it as the benign
+failure.** Nothing is silently missed — which is true of the *first* run and of no run after it. A
+check that cries wolf 194 times on a clean file is run once, disbelieved, and abandoned, and after
+that everything is silently missed anyway. **The benign-looking failure mode is how a check stops
+being run at all**, which is a worse end state than the quiet one, because a check nobody runs leaves
+no trace of having been given up on.
+
+🚨 **The file had already written this exact mechanism down, two bullets above, and then shipped it.**
+That bullet warns that a numeric-order test pointed at the **body** is *"a false-finding generator
+that reports five hundred defects in a file with none"* — and the command two bullets later does the
+same thing to the **index**, for a different reason, at 194. *Describing a failure mode is not the
+same as being able to recognise it in your own next sentence*, which is the general form of what this
+whole entry is about.
 
 **This is D732's shape twice**, and the advice that came out of that entry is the advice these two
 were there to be caught by: *when a claim comes with a command, read the command against the claim,
@@ -12280,14 +12390,24 @@ anchor or a missing `-r`. **What found both was running them against a fixture t
 So the advice needs its second half: *a command you cannot falsify by reading, control.* One line
 each, and both took under a minute.
 
-🚨 **One tell was on the page the whole time and was never read as one.** The doc-gate grep was
-credited with **a catch per session for six sessions running**. Either those catches came from
-somewhere else, or the command was typed differently each time it was run. **Which of the two is not
-recoverable**, and this entry says so rather than guessing: the sessions are not at a resolvable sha
-(the reset of 2026-09-16), and a grep leaves no trace of the spelling it was invoked with. What *is*
-certain is that the **written** command has never been capable of the catches attributed to it — so
-the claim and the command were two different things, and only the claim was ever checked. *A run
-record is evidence about the command only if the command is what was run.*
+🚨 **Two of the three came with a usage anecdote, and in both cases the anecdote was the evidence.**
+The doc-gate grep was credited with **a catch per session for six sessions running**. The order-check
+was credited with having *"found an inversion once"*. Read against what the commands can do, both
+sentences say the opposite of what they were written to say.
+
+Take them in turn. For the doc-gate grep: either those catches came from somewhere else, or the
+command was typed differently each time it was run. **Which of the two is not recoverable**, and this
+entry says so rather than guessing — the sessions are not at a resolvable sha (the reset of
+2026-09-16), and a grep leaves no trace of the spelling it was invoked with. What *is* certain is that
+the **written** command has never been capable of the catches attributed to it, so the claim and the
+command were two different things and only the claim was ever checked. For the order-check, *"found
+an inversion once"* is **the sound of a check being discarded, not of one working**: a command that
+reports 194 defects in a clean file is run, disbelieved, and not run again, and "once" is exactly the
+count that produces.
+
+*A figure attached to a check is a claim about the check, and it is the first thing to test.* **A run
+record is evidence about the command only if the command is what was run** — and a *low* run count is
+evidence about the command too, in the direction nobody reads it.
 
 ⚠️ **The correct spelling was already in the tree, in D319 above.** That entry's own count of the
 integration tests' links is `find crates -path "*/tests/*" -name "*.rs" | xargs grep -nE '^ *//[/!].*\[`'`
@@ -12304,29 +12424,41 @@ level — not inside a `mod tests` — is absent from rustdoc's crate by exactly
 sitting outside every hand-rolled check that looks for the module. *Ask whether the item is
 `cfg(test)`, not whether it is inside a test module.*
 
-🚨 ***Fix:* no sweep has been run, and the honest state is two found out of an unknown population.**
-What was checked is the commands this session had reason to touch, plus the `review/` one. `CLAUDE.md`
-carries many more — greps, `awk` programs, `comm` pipelines, the citation census, the `///`-run length
-ranking — and **not one of the rest has been controlled.** Every count and every clean reading this
-project has ever taken from an uncontrolled command is worth exactly as much as the command was
-capable of. **Run each of them against a fixture that must match, and against one that must not.**
-Two of two checked came back dead; that is not a base rate, but it is not a reason to assume the rest
-are alive either.
+🚨 ***Fix:* the sweep is partly run — ten controlled, three dead — and it is not finished.** **The
+seven that check out**, so this can say what was covered rather than implying the whole file: the
+citation census; the body-heading regex `^\*\*D[0-9]+ —`; the neighbour grep (BRE, where `\(pub \)\?`
+does work); the module-size ranking; the cfg census; the per-number `grep -rl`; and `comm -23` under
+`LC_ALL=C`. **Still uncontrolled**: the `///`-run length ranking, which is given as *prose rather than
+as a command* and so cannot be controlled until somebody writes it down as one — a check with no
+literal form is a check whose spelling is re-decided on every run, which is the doc-gate grep's
+unrecoverable ambiguity arriving by design rather than by accident — and everything in the `review/`
+section beyond the one reading above. **Run each remaining one against a fixture that must match and
+one that must not.** Three of ten came back dead; that is not a base rate, but it is not a reason to
+assume the rest are alive either, and every count this project has taken from an uncontrolled command
+is worth exactly what that command was capable of. ⚠️ **And the population is larger than
+`CLAUDE.md`.** **D828** was found the same day and replaces a dead *lint* with three hand-written
+greps — so those three join this list the moment they are written down, and their *"clean over
+`crates/`"* reading is worth what they are capable of until somebody controls them.
 
-⚠️ **A third command was found misreading its output the same day, and it fails the opposite way** —
-worth recording beside these because it completes the picture. The citation census run in its wide
-form from the repository root over `.` picks up `target/debug/build/…/category.rs`, generated
-`unicode-general-category` tables, and reports **`D00` and `D000`** in the unresolved half: two false
-positives that read exactly like a citation with no entry behind it. Run it from `crates/`, or with
-`--exclude-dir=target`. **So one command could not report a hit, one reported an absence as a
-corroboration, and one reported hits that were not citations — and all three outputs were plausible.**
-None of the three is falsifiable by looking at what it printed.
+⚠️ **A fourth command misreads its *scope* rather than its pattern, and it completes the picture.**
+The citation census run in its wide form from the repository root over `.` picks up
+`target/debug/build/…/category.rs`, generated `unicode-general-category` tables, and reports **`D00`
+and `D000`** in the unresolved half: two false positives that read exactly like a citation with no
+entry behind it. Run it from `crates/`, or with `--exclude-dir=target`.
+
+**So four commands, four ways of being wrong, and every one of the four outputs was plausible.** One
+could not report a hit, and read as a clean tree. One could not report a hit, was compared against a
+first reading, and read as **corroboration** — 394 rows answered as 0. One could not stop reporting
+hits, and read as 194 defects in a file with none, which is how a check gets abandoned. One reported
+hits that were not citations at all. **None of the four is falsifiable by looking at what it
+printed**, which is the whole of why controlling them is not optional: *the output of a broken check
+and the output of a working one are the same shape.*
 
 *(Record-only, no production line changed. **The citation is planted by hand** on
 `app::CLIPBOARD_OFF`, the one doc in the tree that narrates a doc-gate catch and the neighbour of
 D798's note on the D319 convention — which is where a reader meets the question *what catches the
-other kind*. The answer, at that site and here, is **nothing does**, and until the sweep above is run
-nobody knows how much of what stands in for it works.)*
+other kind*. The answer, at that site and here, is **nothing does**, and until the sweep above is
+finished nobody knows how much of what stands in for it works.)*
 
 **D320 — A crop is a resize, so the lock reaches it: image editing refuses on a locked layer, and the
 row dims *because* the mode refuses. *Decided, built and tested both ways. Keep — read the ordering
@@ -25678,6 +25810,100 @@ this session a subagent turned up something no finding names.
 
 *(D593's measurement paragraph gains a pointer here. Nothing amended in `architecture.md` — §7 and
 §11 record D593's fix rather than its sampling; nothing struck from `roadmap.md`.)*
+
+**D829 — The release gate's flake is named, and its own failure message had been accusing the wrong
+thing. *Fixed and measured 2026-09-22; Resolved — 0 in 20 under the load that gave 4 in 10, with the
+flip still red at 8.70×.***
+
+It is D705's test again — `collecting_defs_does_not_grow_with_the_square_of_their_count`, D593's
+regression test — going red once in a `cargo test --workspace --release` at the close of a session.
+
+🚨 **Thirty-one clean runs said nothing, and the way it was identified is half this entry.** After the
+single red run it did not recur in **11** warm workspace release runs, **20** more as a paced reading,
+**3** with the sources touched to force a recompile, or **11** runs of that target alone. What named
+it was **reproducing the condition on purpose**: 64 spin loops on 24 cores, where it failed **4 times
+in 10**, always here. *A flake that will not recur is not a flake with no cause; it is a condition
+nobody has recreated.* ⚠️ **D820's twenty-run reading is the right instrument for *is this real* and
+the wrong one for *what is it*** — twenty clean runs is precisely what this gave. That entry is
+amended to say so.
+
+**The mechanism is the *phases*, and D705's two decisions were both correct.** The test takes a
+**ratio** of two timed exports deliberately, so that it is not a measurement of the machine, and D705
+made it best-of-three because the minimum is the right statistic for contention. But it measured
+`0..3` of the **small** document and *then* `0..3` of the **large** — two separate windows — and the
+large phase is about four times longer in wall-clock. So it carries four times the exposure to a
+scheduler burst, and a burst inside it is missed by all three of its repetitions while none of the
+small's are touched. **The minimum was the right statistic taken over the wrong sample.**
+
+**The fix is interleaved rounds, and fifteen rather than three** — measured on the same load and the
+same machine:
+
+| sampling | failures |
+| --- | --- |
+| baseline, best-of-three in phases | **4 in 10** |
+| interleaved, five rounds | **3 in 10** |
+| interleaved, fifteen rounds | **0 in 20** |
+
+🚨 **Interleaving alone bought almost nothing, and it was written up as the fix before it was
+measured.** A comment claiming *"0 failures in 10"* sat in the file for several minutes on the
+strength of an argument that reads perfectly: *make a burst land on both measurements or on neither*.
+The argument is sound and it is not the lever. **The count is what pays, and interleaving is what
+makes the count worth paying for** — under oversubscription every individual sample is hit, so what
+is needed is enough rounds that one of them escapes **both** measurements together. *This is the
+project's own rule about flips arriving in the measurement of a fix: the plausible mechanism and the
+effective one were the same edit, and only the second number distinguishes them.*
+
+**Discrimination is untouched and was flip-checked rather than assumed.** `Defs::add` put back to
+`self.entries.iter().any(…)`, fifteen rounds, quiet machine: **8.70×** against the 6.0 bound. The
+fixed version over three consecutive runs: **4.12×**, stable to two decimals. So the bound keeps 46%
+headroom above the fixed version and 31% below the broken one. ⚠️ **A deeper minimum moves the
+absolute times and not the ratio** — 0.0034 s / 0.0140 s here against D705's 0.0082 / 0.0327 — so
+that entry's figures are stale *for this sampling* and are kept in the comment only as the record of
+what best-of-three measured. **That is what a repetition count has to be checked against**: it must
+buy stability without costing separation, and only measuring both sides says whether it did.
+
+🚨 **The failure message was wrong, and it was wrong in the dangerous direction.** D705's note
+instructed the next reader, *in the message itself*, to tell *"a stall (both times inflated, ratio
+near 4)"* from *"the square coming back (the large one alone inflated)"*. **The large one alone
+inflated is the signature of a stall**, by exactly the exposure argument above. The reproduction
+printed `0.0071s vs 0.0618s` — the small measurement *below* its own baseline and the large at 1.9×
+its own — which the old rule reads as a quadratic regression, and which was a loaded machine. So a
+once-in-thirty red run was going to arrive **already labelled as a performance regression in code
+that is correct**, at the close of a session, to a reader with no way to reproduce it. *That is worse
+than an unexplained flake: it is a flake with a confident wrong explanation attached, and the
+explanation is the part that gets acted on.*
+
+**What actually discriminates is the small measurement against its own baseline**, because the scan
+is quadratic in **both** documents: a real regression drags the small time up by ~1.4× as well, where
+a stall need not. A small time down at the fixed baseline with a ratio over the bound is a stalled
+machine whatever the large one did.
+
+⚠️ **And the repair committed the same fault one order down, which is why it belongs in this entry
+rather than only in the comment.** The rewritten message carried D705's **best-of-three** baselines
+into a best-of-**fifteen** test, putting the threshold at 0.0082 s — above *both* real values — so
+the flip against a genuine quadratic regression printed a small time of 0.0048 s and the new message
+called it a stall. **Caught only by running the flip.** *A diagnostic rule is a measurement, and it
+expires with the measurement it was taken from.* The message now carries the fifteen-round figures
+and says they must be re-measured whenever the round count changes.
+
+**On the population question D820 left open: this is a third member and not a restatement, and what
+distinguishes it is that there is nothing to wait for.** D796's tests contended for an **OS
+resource** and the fix is a lock; D820's for the **machine's load** with an assertion that depended
+on work *finishing*, and the fix is a `settle`. This one contends for the **scheduler** with the work
+already done — nothing is pending, it was merely slow — so no seam exists to synchronise on and the
+repair has to be **statistical**: sample enough, and sample so that contention cannot land on one
+side of a ratio alone. So D820's *"any test whose assertion depends on work finishing"* is still too
+narrow. **The honest superset is any test whose assertion depends on anything the scheduler decides**,
+and the three members differ in what they can do about it — wait for a resource, wait for a result,
+or wait for nothing and measure better.
+
+*(**Test-only**, no behaviour changed. **The citation is planted by hand at two sites** in
+`ondin-export/tests/svg.rs` — on the sampling loop and on the assertion's message — because the entry
+has two findings and a reader meets them at different lines. ⚠️ **Do not collapse the fifteen rounds
+back toward three as a speed-up**: 0 in 20 and 3 in 10 are the two numbers that decision has to be
+made against, and they are on the same load. ⚠️ **And do not widen the 6.0 bound**, which is D705's
+refusal and unchanged — widening toward 8.70× gives up the discrimination the test exists for.
+Nothing amended in `architecture.md`; nothing struck from `roadmap.md`.)*
 
 **D704 — The Language combo showed a raw BCP-47 tag when closed and a friendly name when open.
 *Fixed and tested 2026-09-09; Keep.***
@@ -41181,6 +41407,16 @@ dashboard` — and only under a *filtered* run, which packs the related tests on
 *Six clean runs is not evidence.* This is `CLAUDE.md`'s thirteenth gate hole and **D796**'s lesson
 arriving from a second direction: there a shared OS resource, here a shared worker, and neither
 visible to any gate in this project.
+
+🚨 **"Twenty runs is a reading" is a test for *existence*, not for *identity*, and D829 is what says
+so.** That entry's flake went red once and then came back clean through **31** further runs — eleven
+warm workspace release runs, twenty more paced, three with the sources touched to force a recompile,
+and eleven of the target alone. Twenty clean runs is exactly what it gave, and the instrument above
+was the wrong one for the question being asked: it answers *is this real*, and it cannot answer *what
+is it*. **What named it was reproducing the condition on purpose** — 64 spin loops on 24 cores, where
+it failed 4 times in 10. *A flake that will not recur is not a flake with no cause; it is a condition
+nobody has recreated.* Read the two instructions as a pair: twenty runs to decide whether to spend
+the afternoon, a deliberate reproduction to spend it on.
 
 ⚠️ **It is also what earns `settle` its `pub(crate)`.** The argument for the method was that the app
 stays asynchronous and a probe asks for an answer, which `cover.rs`'s own tests already showed. This

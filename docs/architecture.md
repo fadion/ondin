@@ -1078,7 +1078,8 @@ NodeKind::Text {
     style: Box<TextStyle>,     // character defaults — boxed, see D77
     spans: CharSpans,          // per-attribute character overrides; empty on uniform text
     para_spans: ParaSpans,     // per-paragraph overrides, byte-keyed like `spans` — D163
-    paragraph: ParagraphStyle, // paragraph defaults: align, indents, wrapping, direction, spacing
+    paragraph: ParagraphStyle, // paragraph defaults: align, indents, wrapping, direction, spacing,
+                               //   optical margins — D830
     block: BlockStyle,         // node-wide: vertical align, box trim, overflow, max lines
     sizing: TextSizing,
 }
@@ -1304,6 +1305,19 @@ pub enum TextSizing {
   geometry measuring in a frame that omits the line's start edge (§15 D165).
   `Layout::set_text_indent` is deliberately never called: it is
   a second mechanism on the same edge and using both double-counts (§15 D163).
+- **Optical margins ride the same two values, and that is the whole of the feature** (§15 D830).
+  `ParagraphStyle::optical_margins` places a line by its **ink** at both edges rather than by its first
+  and last glyphs' advance origins, which differ from the ink by a side bearing of 1–10% of the font
+  size depending on the letter. `text::break_lines` starts the line a left bearing earlier and widens
+  its measure by *both* bearings — `x -= lsb`, `measure += lsb + rsb` — so **no arm of it reads
+  `align`**: start, end, centre and justify all fall out of those two numbers, and parley does the
+  re-justification. Shifting the line instead, the obvious version, cannot work under `Justify` at all,
+  whose two ends are pinned. **The bearings cost a second break pass** — `text::optical_offsets` reads
+  them off the once-broken layout and `shape` breaks again, gated on `Paragraphs::any_optical_margins()`
+  — and the second pass may break somewhere the first did not, which is **accepted rather than iterated
+  to a fixed point**. ⚠️ **The node's box does not move when it is switched on**, only the ink, which is
+  what lets two labels placed at the same x line up by their letters; and it is **off by default**,
+  deliberately not the shape D199 gave box trim.
 - Layout is computed by `parley` in `text.rs` and cached in `Resolved` (derived state, never
   serialized). Shaping is the most expensive thing in the pipeline and *three* consumers need it —
   bounds, hit-testing, and the scene walk — so nothing outside `Resolved` may call `text::layout` in a
@@ -3601,7 +3615,9 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   `a_uniform_text_node_writes_no_spans_paragraph_or_block`. (`para_spans` arrived after v3 had shipped
   and needed no bump of its own, being additive in exactly this sense; §15 D163. So did
   `ParagraphStyle::marker` and `ParagraphStyle::level`, both `skip_serializing_if`, so a document with no
-  list is byte-identical to what it was before either field existed; §15 D169, D172.)
+  list is byte-identical to what it was before either field existed; §15 D169, D172. So did
+  `ParagraphStyle::optical_margins`, for the same reason and with the same absence meaning what every
+  existing file already meant; §15 D830.)
   Two fields changed *shape*, which is what the bump is for:
   - `line_height` was a bare multiplier and is now `Option<Length>`. The step reads a v2 number as
     `Em(m)`, which is exactly what it meant; left to serde the key would have been dropped and the
@@ -8685,6 +8701,12 @@ still break under `NoWrap` and the paragraph spacing and indent controls must go
 Wrap strip itself still answering a click, which is the control without which the other assertions
 pass against a section nobody drew (§15 D804). A whole
 row of dimmed cells reads as "this does not apply" where a dimmed dropdown just reads as broken.
+⚠️ **"Margins" sits under the Wrap section and is deliberately outside that gate** (§15 D830): one
+switch, *Optical margins*, and the reason it is not dimmed under `NoWrap` is that a single-line label
+which never wraps is exactly the node it earns its keep on — a gate copied from the neighbour would have
+dimmed the control precisely where it is most useful. It carries no preview text either, the effect
+being 1–10% of the font size and so invisible in a 264px popup; the canvas is where it shows, and the
+tooltip says what to look at.
 
 **`ui::slider` is hand-painted, like `segmented` and `switch`.** The design specifies a 3pt rail, an 11pt
 knob, the filled half in `ACCENT_600` and the knob in `ACCENT_100` with a soft shadow under it, and

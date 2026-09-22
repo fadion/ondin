@@ -1205,6 +1205,7 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D827** — **Three of the hand-written checks standing in for gates were broken, and their failure modes have three different signs.** Ten of `CLAUDE.md`'s commands were controlled on 2026-09-22 and three were dead; **every one was found by *running* it, none by reading**. **Instance 1**, the re-check standing in for §15 **D319**'s blind spot — `git diff <base>..HEAD -- crates/ | grep -E '^\+ *(///|//!).*\[\`'` — returns **0 matches / exit 1** on any input, a backslash before a backtick matching nothing in GNU grep's ERE. It reads as *a clean tree*. 🚨 **Instance 2 has the same defect and the worse consequence**: `review/`'s census defends against a count reading *high* by extracting `^\| \`\[` as a **second reading and comparing** — and against the real ledger the corrected pattern returns **394** where the documented one returns **0**, so it did not merely go quiet, it asserted *"no fix-log row names a finding in its body"* about a file holding 394 of them, and that was then read as **corroboration**. ⚠️ `findings.md` is 23.7k lines and **gitignored**, so the census is the only statement of that ledger's state and this reading was the only check on it; both rested on a command returning 0. 🚨 **Instance 3 has the opposite sign**: the §15.0 order-check piped `- **D110**` through `sort -n`, which parses no number, scores every line 0 and falls back to a **whole-line lexicographic** comparison — **194 differing lines against an index in perfect numeric order**. ⚠️ **That direction is not the safe one**: a check that cries wolf is run once, disbelieved and abandoned, after which everything is missed anyway. ⚠️ **And the file had already written that mechanism down two bullets above** — a numeric-order test on the *body* being *"a false-finding generator"* — and shipped it against the index. 🚨 **Two of the three came with a usage anecdote and in both cases the anecdote was the evidence**: *"a catch per session for six sessions"* over a command incapable of a catch, and *"found an inversion once"*, which is the sound of a check being **discarded**. *A figure attached to a check is a claim about the check, and it is the first thing to test.* *(Three commands fixed 2026-09-22; **Keep** — **open as to the class**, and §15 **D732**'s *read the command against the claim* is what failed here, the patterns looking right. **The advice needs its second half — a command you cannot falsify by reading, control.** ⚠️ **The correct spelling was already in the tree, inside D319 itself**, whose `find … grep -nE '^ *//[/!].*\[`'` uses a bare backtick. 🚨 ***Fix:* the sweep is partly run and unfinished.** Seven check out — the citation census, the body-heading regex, the neighbour grep, the module-size ranking, the cfg census, the per-number `grep -rl`, and `comm -23` under `LC_ALL=C`. **Still uncontrolled**: the `///`-run length ranking, which is given as *prose rather than as a command* and so has no spelling to control, and everything in `review/` beyond the one reading above. ⚠️ **A fourth command misreads its *scope* rather than its pattern**: the citation census run wide from the repository root reports `D00` and `D000` out of `target/`'s generated `unicode-general-category` tables. **Four commands, four ways of being wrong, four plausible outputs, and none falsifiable by looking at what it printed.** Fixing them buys no gate: `cargo doc` still cannot see a `#[cfg(test)]` module, and the corrected doc grep still asks half its question, a `#[cfg(test)]` **item** at module level sitting outside every check that looks for a `mod tests`. Record-only; **the citation is planted by hand** on `app::CLIPBOARD_OFF`)*
 - **D828** — **A warn-by-default clippy lint is silent on every item inside an `impl` block, which is most of this codebase.** `#[allow(clippy::too_many_arguments)]` was written **twice, on consecutive lines**, on `svg_in::Builder::text_node`, from the first commit of the current `.git` until 2026-09-22, with all seven gates green. The duplicate is deleted and **is not the subject** — a second `allow` of one lint allows one lint. **The subject is that `clippy::duplicated_attributes` exists, is warn-by-default, names this exactly, and never fired.** Measured in order, both cheap explanations being wrong: **(1)** the lint name is real here — `-W clippy::this_lint_does_not_exist_at_all` warns `E0602: unknown lint` and the real name does not, so it exists in clippy 0.1.97; **(2)** it does fire — in an isolated crate, `#[allow(dead_code)]` twice on a free `fn` fires with `note: #[warn(clippy::duplicated_attributes)] on by default`, and `#[allow(dead_code, dead_code)]` fires too; **(3)** position is the variable — a duplicate on a free fn **inside a `mod`** fires, on an **inherent `impl` method** it does not, on a **trait `impl` method** it does not, isolated to be certain (a file with only the two `impl` cases yields **0**, one with only the free-fn case yields **1**). 🚨 **So it is not a blind spot over "attributes" as a category but over nearly every item in this workspace**: `ondin-app` is very largely one `impl OndinApp` and `ondin-core`'s builders are `impl` blocks. **It is the fourteenth entry on `CLAUDE.md`'s *gates that look like they cover the code and do not* list**, and earns it the same way as the others — it names the right rule, it is on, and it is pointed at a shape it cannot see. *(Measured 2026-09-22; **Keep** — the blind spot is upstream and not closable from here. ⚠️ **What stands in for it is three greps over `crates/`, clean today, and all three are worth naming because the first is the tempting one and the weakest**: adjacent identical attribute lines; a repeat anywhere in one item's **contiguous attribute run**, which is the real shape; and a lint repeated **inside** one `#[allow(..)]`, which measurement 2 proved the lint also catches and neither other grep sees. 🚨 ***Fix:* control those three before trusting the clean reading** — they are hand-written commands standing in for a gate, which is §15 **D827**'s population, and three of the ten controlled there could not report a hit. **How this was found differs from the thirteen before it**: not sideways, but by running the control `CLAUDE.md` already prescribes — *break what a gate claims to cover and check it goes red* — against a defect already in the tree. The advice worked the first time it was pointed at this lint; nobody had pointed it there. Record-only as to the lint, one line deleted; **the citation is planted by hand** on `svg_in::Builder::text_node`, above the surviving attribute. ⚠️ **Do not read the deletion as the fix**)*
 - **D829** — **The release gate's flake is named, and its own failure message had been accusing the wrong thing.** §15 **D705**'s test again — `collecting_defs_does_not_grow_with_the_square_of_their_count`, §15 **D593**'s regression test — red once in a `cargo test --workspace --release`. 🚨 **Thirty-one clean runs said nothing**: 11 warm workspace release runs, 20 more paced, 3 with the sources touched, 11 of the target alone. **What named it was reproducing the condition on purpose** — 64 spin loops on 24 cores, **4 failures in 10**. *A flake that will not recur is not a flake with no cause; it is a condition nobody has recreated*, and §15 **D820**'s twenty-run reading is the instrument for *is this real* and not for *what is it*. **The mechanism is the phases**: `0..3` of the small and *then* `0..3` of the large, where the large phase is ~4× longer in wall-clock, so it carries 4× the exposure to a burst and a burst inside it is missed by all three of its repetitions while none of the small's are touched. **The minimum was the right statistic taken over the wrong sample.** Fixed by **interleaved rounds, fifteen of them**: baseline **4 in 10**, interleaved-five **3 in 10**, interleaved-fifteen **0 in 20**, all on one load. 🚨 **Interleaving alone bought almost nothing and was written up as the fix before being measured** — *the count is what pays and interleaving is what makes the count worth paying for*, since under oversubscription every sample is hit and what is needed is enough rounds that one escapes **both** measurements together. 🚨 **The failure message was wrong in the dangerous direction**: D705 told the next reader that *"the large one alone inflated"* meant the square coming back, and **that is the signature of a stall** — the reproduction printed `0.0071s vs 0.0618s` on a loaded machine, which the old rule reads as a regression. So a once-in-thirty red run would have arrived **already labelled a performance regression in correct code**, to a reader with no way to reproduce it. *(Fixed and measured 2026-09-22; **Resolved.** Discrimination flip-checked rather than assumed: the linear scan restored measures **8.70×** against the 6.0 bound and the fixed version **4.12×**, so 46% headroom above and 31% below. ⚠️ **A deeper minimum moves the absolute times and not the ratio** — 0.0034/0.0140 here against D705's 0.0082/0.0327 — so that entry's figures are stale *for this sampling*. ⚠️ **The repair committed the same fault one order down**: the rewritten message carried D705's best-of-three baselines into a best-of-fifteen test, so the flip against a genuine regression printed 0.0048 s and the message called it a stall — **caught only by running the flip**. *A diagnostic rule is a measurement and it expires with the measurement it was taken from.* **On D820's population question: a third member, not a restatement** — D796 contends for an **OS resource** and waits on a lock, D820 for the machine's **load** with an assertion depending on work finishing and waits on `settle`, and this for the **scheduler** with the work already done, so there is **nothing to wait for** and the repair must be statistical. The honest superset is *any test whose assertion depends on anything the scheduler decides*. Test-only; **the citation is planted by hand at two sites**, the sampling loop and the assertion's message. ⚠️ **Do not collapse fifteen rounds back toward three**, and **do not widen the 6.0 bound**)*
+- **D830** — **Optical margin alignment: a line is placed by its ink at both edges, and one adjustment serves every alignment.** A glyph's advance carries its side bearings, so a line placed by its first glyph's advance origin starts a bearing's width *inside* the measure. Measured on the default face at 16 px: the left bearing runs from **0.98%** of the font size (`f`) to **10.06%** (`'`), capitals alone spanning 2.34% (`W`, `A`, `V`, `Y`) to 8.59% (`H`, `I`, `L`), so two stacked left-aligned labels can sit about 9% of the font size out of alignment. ⚠️ **`roadmap.md`'s statement of the item had the example backwards** — it blamed `H` for having *almost no* left bearing, and `H` has the **largest** of the capitals measured. `ParagraphStyle::optical_margins: bool` — **paragraph scope, not spannable, off by default everywhere and deliberately not §15 D199's shape**, since trim moves the *box* around ink that does not move while this moves the *ink* out past the box it was authored in. 🚨 **The mechanism is one adjustment to the line's geometry before parley breaks it** — `x -= lsb`, `measure += lsb + rsb` — and **no arm of it reads `align`**, so start, end, centre and justify all fall out of the same two numbers and parley does the re-justification; shifting each line by its first bearing, the obvious version, cannot work for justified text at all, whose two ends are pinned. **The cost is a second break pass**, plus an accepted approximation: a line whose widened measure gains a word keeps the old last glyph's correction. *(Built and measured 2026-09-22; **Resolved — the scope and the default are the maintainer's rulings.** Five tests in `text::optical_margin_tests`, three flips failing at three different numbers, which is what pins the correction to *both* bearings rather than to some bearing. The SVG writer needed no change and D81 is why; the MCP snapshot still reaches `align` alone, which is *Now · Text*'s parked item and not a new gap. ⚠️ **It does not break the roadmap's *don't use ink bounds for alignment* rule** — that rule forbids deriving the **datum** from the ink, and this leaves the datum where it was and moves the ink to meet it. §5.4, §5.11 and §9.2 amended. **The `roadmap.md` bullet is struck**, hours after it moved to *Later · Parked decisions*)*
 
 ---
 
@@ -6389,6 +6390,149 @@ on `block_min_coord` is still wrong — but *"not a re-keying, in either directi
 many: the resolution moved out of the map rather than into a different key.
 `a_click_in_a_paragraph_gap_lands_on_a_line_that_bounds_it` asserts the whole band with the measured
 numbers in its failure messages, and no existing click test disagreed with the change.
+
+**D830 — Optical margin alignment: a line is placed by its ink at both edges, and one adjustment serves
+every alignment. *Resolved — built 2026-09-22 on the measurements, and off by default.***
+
+A glyph's advance carries its side bearings, so a line placed by its first glyph's advance origin starts
+a bearing's width *inside* the measure — and the width differs per glyph. Measured with a throwaway probe
+before any of this was built, laying out single characters in the default face at 16 px and reading each
+first glyph's ink against its pen origin: the left bearing runs from **0.98%** of the font size (`f`) to
+**10.06%** (`'`), the capitals alone spanning 2.34% (`W`, `A`, `V`, `Y`) to 8.59% (`H`, `I`, `L`). Two
+stacked left-aligned labels can therefore sit about 9% of the font size out of alignment — 1.5 px at
+16 px, 9 px at 100 px, which is the size at which it stops reading as a font and starts reading as one
+label somebody indented by hand.
+
+⚠️ **`roadmap.md`'s statement of the item had the example backwards, and had since it was written**:
+*"a left-aligned label still reads as indented, because `H` has almost no left side bearing."* `H` has
+the **largest** left bearing of the capitals measured. The complaint was real and the illustration
+inverted it, and that sentence is what anyone scoping the work would have read first — *an unmeasured
+example is still a claim, and this one would have sent a reader looking for the effect at the wrong end
+of the alphabet.*
+
+**Both edges, not the start edge alone**, and **off by default everywhere with a toggle** — deliberately
+*not* D199's shape. D199 turns box trim on for new text while the format default stays `None`: *"the app
+authors a trim; the format assumes none."* What makes this differ is what the two settings move. **Trim
+moves the box around ink that does not move** (D78); this moves the **ink** out past the box it was
+authored in, so a document changes appearance the moment it is switched on. A default that makes every
+new text node differ from what the same document shows in any other tool is a bigger claim than trim's —
+and it can be made later without a format change, which is not true in the other direction.
+
+`ParagraphStyle::optical_margins: bool`, appended at the end of the struct with `#[serde(default,
+skip_serializing_if = "is_default")]`: purely additive in §5.11's sense, so no schema bump, and a missing
+key means what every existing file already meant. **Paragraph scope and not spannable**, on D77's own
+test — that entry declines to span three node-level survivors on the ground that *nobody sets those per
+paragraph*, and nobody sets optical alignment on one paragraph of a layer and not the next. ⚠️ **That is
+D77's weaker reason and not its stronger one, and the two are worth keeping apart**: `align` and the base
+direction cannot be spanned **at all**, being one value per `Layout`, while `wrap` merely has no user.
+`optical_margins` is in the second class, so nothing but the absence of demand stops it being spanned
+later, and the standing instruction D77 leaves — that `ParaSpans` may not carry a value the renderer must
+ignore — would not be violated by spanning it. It is deliberately not `BlockStyle`'s either: that scope
+is the box — vertical alignment, trim, overflow, max lines — and this is how a line sits against its
+measure, which is flow.
+
+🚨 **The mechanism is the part worth the entry, and the obvious version does not survive justification.**
+Shifting each line left by its first glyph's bearing works for start-aligned text and cannot work for
+justified text at all: a justified line's two ends are pinned, so shifting it slides the whole block and
+leaves the right margin ragged. What `text::break_lines` does instead is **one adjustment to the line's
+geometry before parley breaks it** — start the line a left bearing earlier and widen its measure by
+*both* bearings, `x -= lsb` and `measure += lsb + rsb`. **No arm of it reads `align`**, and that is the
+property to preserve: every alignment falls out of the same two numbers. Start-aligned, the line begins
+at `x − lsb` and its ink lands on the nominal edge; end-aligned, parley pushes the advance end to
+`nominal_end + rsb`, putting the ink there instead; centred, the two corrections apply symmetrically and
+the *ink* is what gets centred; justified, the line stretches to the widened measure, so its ink spans
+exactly the nominal one — **parley does the re-justification, which is why nothing here reimplements it.**
+Measured on a 200-wide box over three strings chosen for their differing bearings: centred, all three
+land at an optical centre of exactly **100.000** against 99.582–100.199 before; justified and wrapped,
+the block spans **0.000 → 200.000** against −0.234 → 199.523.
+
+**The cost is a second break pass**, because the correction depends on a line's first and last glyph and
+which glyphs those are is what breaking decides. `text::optical_offsets` reads them off the once-broken
+layout and `shape` then breaks again with the offsets, gated on `Paragraphs::any_optical_margins()` so a
+node that has not asked for it pays one scan. ⚠️ **Breaking is not re-shaping** — it is a walk over
+clusters that are already shaped — so this is the cheaper half of laying out twice.
+
+⚠️ **The second pass can break somewhere the first did not, and that is accepted rather than iterated to
+a fixed point.** Every line's measure only ever *grows*, by its own two bearings and so by under a fifth
+of an em on the faces measured, so a line can gain a word it did not have — in which case its correction
+is the old last glyph's rather than the new one's and the hang is a bearing out. The text is right either
+way; only the optical nicety is approximate. **Re-breaking until the offsets settle is what this
+declines**, and the reason is that it could not be bounded without a loop nobody can prove terminates.
+
+⚠️ **A glyph with no ink contributes nothing rather than its own bearing**, which is load-bearing and
+reads as an optimisation somebody could drop. A line ending in a space has a last glyph whose outline is
+empty, and its "right bearing" measured from the advance would be the **whole advance** — hanging the
+line a space past the measure. `optical_offsets` skips any glyph whose outline bounding box is degenerate
+on either axis, which is also what makes the first *inked* glyph rather than the first glyph the one the
+left bearing comes from.
+
+**Two properties make the feature usable, and the first is the one a simplification would break.** *The
+node's box does not move*: measured, with the setting on the ink moves 1.375 → 0.000 while the box's
+start edge stays at 0.000. Had switching it on moved the box too, two labels placed at the same x would
+be misaligned again by their origins and nothing would have been gained.
+`optical_margins_leave_the_box_where_it_was` pins that start edge for three strings and exists for that
+reason rather than as a flip target — there is no plausible wrong version that moves the box, the
+correction being applied to parley's line geometry with the box derived from the layout afterwards, and
+it is asserted because the property is load-bearing and invisible. And *ink outside the box is already an
+ordinary state here*, which is what made this cheap: D199's `CapToBaseline` leaves descenders outside
+`bounds()` and `untrimmed_bounds()` is the reader for drawing them, so nothing structural had to change
+to let a glyph hang.
+
+**On the standing rule it looks like it breaks.** `roadmap.md` carries *"Don't use ink bounds for
+alignment. They depend on the string, so two labels aligned by ink jump apart the moment the text is
+edited. Font-metric-derived trim is stable"*, and D405 leans on it for the type-on-a-path box. No §15
+entry owns it — it is a design principle rather than a verdict — and **this does not contradict it, for a
+reason sharper than "the box does not move".** The rule forbids deriving the *datum* from the ink; this
+leaves the datum exactly where it was — `text::line_geometry`'s `x` and measure, which are the authored
+box and the paragraph's own indents — and moves the **ink** to meet it. The instability the rule names
+runs the other way here: the quantity that now stays put as the string is edited is the ink edge, and
+what moves is the line's advance origin, which nothing draws, snaps to or measures with. *The next reader
+will feel the tension; this paragraph is the answer, and if the rule is ever restated it should be
+restated as being about the datum.*
+
+**The SVG writer needed no change, and that is by construction rather than luck.** `text::export_lines`
+and the canvas's `layout` both go through `shape`, and the correction is applied inside it, so the
+writer's own computed line `x` already carries it — which is what D81 requires of every other alignment
+and indent: *"the writer no longer asks a viewer to re-align text it re-shaped itself."* Pinned on
+`ExportLine::x` rather than on emitted markup, because that is the seam and a test over the string would
+be testing the formatter.
+
+⚠️ **The MCP snapshot does not reach it, and no rule is broken by that.** `align` is still the only one
+of `ParagraphStyle`'s fields `snapshot.rs` emits; this makes it **fourteen fields and thirteen missing.**
+That is *Now · Text*'s existing parked item — the paragraph scope's absence is parked with MCP and
+unparks when that does — and it is named here only so the figure is not silently stale.
+
+**Five tests in `text::optical_margin_tests`**, each carrying its mutation and the site it failed at.
+The three flips that were run — dropping the shift, widening by `lsb` alone, and shifting without
+widening — **fail at three different numbers**: an overshoot to 200.375, an undershoot to 198.789, and
+199.023. *That is what pins the correction to **both** bearings rather than to some bearing*, and it is
+why the assertions read as three views of one number and are not. ⚠️ **One predicted number was wrong and
+is corrected on the test rather than left standing**: the justify flip was written as failing at 198.789
+and fails at 199.023, because a justified line slid left leaves a gap of `lsb` and not of `rsb` — a
+different bearing, from a different glyph, at the other end of the line.
+
+🚨 **Two doc-comment thefts were committed while building this, in one edit sequence.** A test was added
+by anchoring an `Edit` on the tail of the previous test's doc run, which put the new item between that
+run and `a_justified_block_spans_its_measure_by_ink`; and `optical_offsets` was added by anchoring on
+`fn break_lines(`'s **signature**, which put it between `break_lines` and its doc — and because both runs
+are `///` with nothing between them they **merged**, leaving `break_lines` with no doc at all and forty
+lines of prose about hyphenation and justify-all sitting on a function about side bearings. **Both were
+caught by habit 2**, the neighbour grep, run as a routine over every inserted item rather than because
+anything felt wrong, and both were repaired by moving the new item rather than by retyping the prose.
+🚨 **The `///`-run length ranking could not have seen the second**: the merged run came to about 38 lines
+against a floor of 58, which is `CLAUDE.md`'s *"a clean reading says nothing about the edit you just
+made"* with a live instance behind it rather than only a recorded one.
+
+*(Built and measured 2026-09-22; **Resolved — the scope and the default are the maintainer's rulings.**
+Model in `typography.rs`, layout and tests in `text.rs`, control in `panels/typography.rs`'s
+`optical_margin_section` — in the **Box** tab under *Margins*, after *Wrap* and deliberately **not**
+inside `wrap_section`'s `NoWrap` gate, since a single-line label that never wraps is exactly the node
+this earns its keep on and a gate copied from the neighbour would have dimmed it there. §5.4 gains the
+field and the second pass, §5.11's additive parenthesis gains the key, §9.2 gains the section. **The
+`roadmap.md` bullet is struck** from *Later · Parked decisions*, hours after it arrived there.
+⚠️ ***Revisit if* someone asks for it on by default** — that change is still free, and it is free only in
+that direction: once documents are authored with the key set, turning the default back off leaves every
+one of them as it was, and only a migration would not.)*
 
 **D78 — Box trim tightens the box and never moves the ink; `Fixed` keeps meaning the typed box.
 *Resolved — the plan's two open decisions, decided.***

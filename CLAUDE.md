@@ -7,7 +7,7 @@ documents, and is untracked.
 | File | Holds |
 | --- | --- |
 | `docs/architecture.md` | The design and the invariants. **Source of truth.** ~12,000 lines. |
-| `docs/decisions.md` | **§15** — every deviation from that design, **D1–D829** with no gaps, each with a verdict. ~47,500 lines. |
+| `docs/decisions.md` | **§15** — every deviation from that design, **D1–D830** with no gaps, each with a verdict. ~47,700 lines. |
 | `docs/roadmap.md` | Open work, decided non-goals, parked decisions, post-v1. **Every `Now` section is clear as of 2026-09-22** — what is left is *Later* and §0. |
 | `docs/shortcuts.md` | The whole keymap — bound, unbound and agreed. |
 | `docs/context-menus.md` | The context-menu spec and its own deviation ledger. |
@@ -67,8 +67,10 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 829 index rows, 829 body headings, next free
-D830** — but trust the procedure over any number written down here, including that one.
+anywhere cited either. **The live figures: 830 index rows, 830 body headings, next free
+D831** — but trust the procedure over any number written down here, including that one.
+⚠️ **The D823–D830 block is fully spent**, so the next session reserves a fresh one rather
+than reading a remaining tail.
 🚨 **Session 29 is the reason those are not 826 and D827, and it is the strongest instance
 this warning has.** It reserved D823–D830 and planned four. It spent **D827** on something it
 found while running its own closing checks, **D828** on something it found while fixing what
@@ -115,7 +117,7 @@ nothing. Put the number on the doc of whatever a reader meets the question at.
 grep -rhoE 'D[0-9]{1,3}\b' crates/ --include=*.rs | sort -u
 ```
 
-724 distinct numbers today, and **every one of them resolves** — the third clean reading
+725 distinct numbers today, and **every one of them resolves** — the third clean reading
 in twenty-odd sessions, after D476 and D477 were reconstructed from their citation sites on
 2026-09-19 (§15 D806's neighbours; both entries say in their first line that they are
 reconstructions). ⚠️ **The total went *down* by one across a session that spent five
@@ -284,7 +286,7 @@ find crates -path '*/src/*' -name '*.rs' | xargs wc -l | awk '$1>1000 && $2!="to
 ```
 
 **41** modules over a thousand lines, `inspector.rs` at 24,924 and `canvas.rs` at 22,091,
-against `decisions.md`'s 47,529 and `architecture.md`'s 12,015. (`library/relocate.rs`
+against `decisions.md`'s 47,673 and `architecture.md`'s 12,037. (`library/relocate.rs`
 crossed the line at 1,023 in session 28 — the reminder that this count only ever rises,
 and that a module joins the list by having a feature finished in it rather than by
 anyone deciding it is large.) ⚠️ **The count held at 41 across session 29 and the ranking
@@ -317,8 +319,21 @@ exactly as it found it only holds if the probe comes back out the way it went in
 and its doc comment — and the result compiles, tests, lints, formats and passes
 `cargo doc`, while paragraphs of reasoning now describe the wrong thing.
 
-**There are twenty-five recorded instances.** Twelve were committed by a session that spent
-the day fixing this exact class, one was committed by the session that ran *two*
+**There are twenty-seven recorded instances.** 🚨 **The twenty-sixth and twenty-seventh were
+committed in a single edit sequence on 2026-09-22** (§15 D830), by a session that had read
+this paragraph twice that day and had already *corrected* an instance of the neighbouring
+D790 class an hour earlier. One anchored an `Edit` on the tail of a test's doc run, putting a
+new test between that run and its item; the other anchored on `fn break_lines(`'s **signature**
+— and because the new item's own doc is a `///` run with nothing between the two, they
+**merged**, leaving `break_lines` with no doc at all and forty lines about hyphenation and
+justify-all sitting on a function about side bearings. **Both were caught by habit 2 run as a
+routine over every inserted item**, not by suspicion. ⚠️ **The length ranking could not have
+seen the second**: the merged run was about 38 lines against a floor of 58 — the case the
+sweep section below states, now with a live instance behind it rather than only a recalled
+one.
+
+The earlier tally, which is what the habits below were each written from: twelve were
+committed by a session that spent the day fixing this exact class, one was committed by the session that ran *two*
 whole-tree sweeps for it, between them, and two were committed within an hour of
 each other by a session that had run the neighbour grep correctly on every earlier insertion
 that day — the twenty-third (§15 D804) by anchoring an `Edit` on the `fn` line, moving a
@@ -1037,9 +1052,9 @@ cross-compile is still the only thing that would say. ⚠️ **The previous read
 unix` and the true figure before that change was 2**, which is the ordinary way a tail
 figure rots — nobody re-runs a census for a number they are not about to use.
 ⚠️ **And that is not only about tails.** The citation total above was written into this file as
-**721**, re-measured as **722** twenty minutes later, and closed the same session at **724** —
-D827, D828 and D829 each spent after a figure had been written down. *The number was stale
-three times before the session that measured it had ended.* Every figure in this file is a
+**721**, re-measured as **722** twenty minutes later, and closed the same session at **725** —
+D827, D828, D829 and D830 each spent after a figure had been written down. *The number was
+stale four times before the session that measured it had ended.* Every figure in this file is a
 reading, and the reading is over the moment it is taken.
 
 ⚠️ **So it is the first of a class, and the rest of the class has no gate at all.**

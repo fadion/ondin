@@ -40,7 +40,7 @@ which is this file's own §9.5 lesson: **check the section before believing the 
 | *Now · Inspector* | **Nothing open as of 2026-09-19**, `char_valve`'s third arm having been ruled on and **deleted** that day (§15 D812) — on a *read* of the five unmeasured call sites rather than a third measurement, all seven being engagement-bearing with both `DragValue` helpers opted out of egui's clamp (§15 D425, D552), so the arm had no live user at all. *The row below is the history of a count that was wrong in three directions.* **One item** as of 2026-09-19, the hex field's routing and the menu-row border having left this row: `[S14.4-L1-04]`'s open half was answered with the **sentence** it asked for rather than with the valve (§15 D808) — `parse_hex` accepts three digits, so a half-typed hex is a real colour and there is nothing a valve could preview. 🚨 **The item's own premise was false while it stood** — it read *"there is nothing measured left to fix"*, and `Escape` was committing a typed colour at that field and at three others beside it, nobody having pressed the other key at any of them. What is left: `char_valve`'s third arm, **which as of 2026-09-19 is a maintainer question and no longer a test** — §15 D802 wrote the test D523 asked for and found the picker's raw sensed regions do not reach the arm at all, and §15 D803 the same day found the one thing that *does* reach it: an egui clamp rewrite `ui::value_field_f64` already opts out of, which makes deleting the arm a second defence against `[S6.2-L1-01]` rather than tidying, so what is open is that ruling. ⚠️ **The menu-row border was never work, and this row counted it as an item for ten days**: this row gained it on 2026-09-09 by being corrected against the section, and the section's bullet had been a standing trap rather than an item since the day it was written — everything in it was in `ui::menu_rows`' and `ui::MENU_ROW_H`'s own docs already, and the one sentence that was not is a paragraph on `ui::MENU_ITEM_H` now (§15 D811). *A count of items is what goes wrong when one of them is a note*, which is this row's own §9.5 lesson from a third direction. 🚨 **This row was stale in *two* directions on 2026-09-09 and was corrected by `arch-scribe` reading it against the section.** It named the multi Transform card's **angle** fields, which §15 **D628** closed and struck from the section that same day, and it did not name the menu-row border, which had been the section's third bullet all along — so *"every one is a remainder of a landed fix"* and *"all three are valve remainders"* were both false. **A row that summarises a section is a second copy of it**, and this is §9.5's lesson at the table rather than in a bullet. |
 | *Now · Path editing* | **Nothing open as of 2026-09-22.** The one item — whole-path geometry patches — **moved to *Later · Parked decisions*** that day: it is non-blocking with a stated trigger (revisited *with* MCP, which is parked), which is what *Later* is for by this file's own table above. ⚠️ **That honours §15 D123's closing note rather than breaking it** — the note asks for it to stay *"in the todo as a decision rather than a gap"*, and it stays in this file; what changes is that it stops sitting under a heading meaning *open work on live code*. ⚠️ **The `retain_valid`/`subpath_lengths` pair left this row on 2026-09-19**, ruled to the narrow `#[allow(dead_code)]` with the no-effect call removed (§15 D637, *Resolved*) — it had been here since 2026-09-09. |
 | *Now · Files, library and storage* | **Nothing open as of 2026-09-19** — the last two closed that day: the cover render moved onto **a worker of its own** rather than onto `Writer`'s FIFO queue, `FRAME_BUDGET` deleted with what it bounded (§15 D820), and **rollback was refused outright** and is a §0 non-goal, the retry being the recovery (§15 D814). 🚨 **The threading then flaked a *dashboard* test 2 runs in 20**, found by running the filter twenty times after six clean runs had said nothing. *The text below is the row as it stood that morning.* **Two**, as of 2026-09-19: a dashboard cover rendered synchronously on the UI thread, which needs a thread, and **rollback** after a partly-failed migration, which needs a ruling. **Three left this row that day.** The non-Unicode filename was **reproduced** — a lone UTF-16 surrogate, which NTFS accepts and `to_str` refuses — and the migration now carries such a file by its `OsStr` name (§15 D809); the per-machine index has an injection point, and it is a `cfg!` rather than any of the four answers the bullet proposed (§15 D807); and the partly-failed migration got its list in the modal and a *Try again* button, leaving only the third of its three asks (§15 D810). ⚠️ **This row said *"Three, all from the codebase review"* while the section held four**, the migration bullet never having been named in it — so it was short by one from the day it was written and the arithmetic in it was never a count of anything. ⚠️ **This row did not exist until 2026-09-09** and the section had held open work since 2026-09-06; the *"nothing open"* line below was the half that got corrected first, and a missing row is the same failure with nothing to contradict. |
-| *Now · Text alignment* | **Nothing open as of 2026-09-22.** Side bearings / optical margin alignment moved to *Later · Parked decisions*, undecided — it had been filed `Later:` inside a `Now` section since the section was written, which is the prefix table broken from the inside. ⚠️ *This row said "Side bearings / optical margin alignment, marked **Later**" and was perfectly accurate for weeks — it described the bullet exactly, including the contradiction, and that is why nobody acted on it.* What is left in the section is one standing rule: don't use ink bounds for alignment. |
+| *Now · Text alignment* | **Nothing open as of 2026-09-22.** Side bearings / optical margin alignment moved to *Later · Parked decisions*, undecided — it had been filed `Later:` inside a `Now` section since the section was written, which is the prefix table broken from the inside — **and was built hours later the same day** (§15 D830): both edges, `ParagraphStyle::optical_margins`, off by default, one adjustment to the line's geometry that no arm of reads `align`. ⚠️ **The bullet's own example was backwards the whole time it stood** — it blamed `H` for having *almost no* left bearing, and `H` has the largest of the capitals measured. ⚠️ *This row said "Side bearings / optical margin alignment, marked **Later**" and was perfectly accurate for weeks — it described the bullet exactly, including the contradiction, and that is why nobody acted on it.* What is left in the section is one standing rule: don't use ink bounds for alignment — **which D830 does not break, and which now says it is about the *datum***. |
 | *Later* | The command palette and cheatsheet; the parked decisions; post-v1 (MCP, Command Mode, multiplayer). |
 
 **Sections with nothing open**: *Doc drift*, *Now · Images*, *Now · Inspector*, *Now · Keyboard*,
@@ -58,9 +58,11 @@ and measurement* was the only `Now` section left off, and what it held was one b
 had itself marked `Later:` — side bearings / optical margin alignment — beside a standing rule about
 ink bounds. **A `Later:` item inside a `Now` section is the prefix table broken from the inside**,
 and it is why that section sat off this line for weeks holding no open work: nobody reading the
-bullet could tell whether it was an item or a note, so nobody moved it. It is in *Later · Parked
-decisions* now, undecided, and the rule stayed where it was. *This is the line's failure mode
-running in the other direction — not a section wrongly called clear, but one wrongly left off.*
+bullet could tell whether it was an item or a note, so nobody moved it. It went to *Later · Parked
+decisions* undecided and was **built hours later** (§15 D830), so it is struck there; the rule stayed
+where it was. *This is the line's failure mode running in the other direction — not a section wrongly
+called clear, but one wrongly left off — and the item's fate is the sharper half: a bullet nobody
+could classify for weeks was a day's work once it was moved somewhere it had to be.*
 **Re-derived by reading each
 section's own first paragraph**, not from the list of what this batch ruled on — which is this
 line's own failure mode and the reason it has been wrong four times.
@@ -1391,9 +1393,16 @@ part that is not a text attribute:
 - **Don't use ink bounds for alignment.** They depend on the string, so two labels aligned by ink
   jump apart the moment the text is edited. Font-metric-derived trim is stable — which is why trim
   is the mechanism and ink bounds are not.
-⚠️ **The one item that was here has moved to *Later · Parked decisions***, on 2026-09-22 and with
-nothing decided about it — side bearings / optical margin alignment, which this section had itself
-marked *Later* since the day it was written and never moved. **A `Later:` item inside a `Now`
+  ⚠️ **The rule is about the *datum*, and §15 D830 is what made that distinction have to be said.**
+  Optical margins read a per-glyph ink bearing and are not an exception to this: the datum stays
+  where it was — the authored box and the paragraph's own indents — and the **ink** is moved to meet
+  it, so the quantity that stays put as the string is edited is the ink edge and what moves is the
+  line's advance origin, which nothing draws, snaps to or measures with. **A reader who restates this
+  rule should restate it as being about the datum.**
+⚠️ **The one item that was here moved to *Later · Parked decisions* on 2026-09-22 and was built the
+same day** — side bearings / optical margin alignment, §15 D830; the move decided nothing and the
+build decided both questions, both edges and off by default. It had been marked *Later* inside this
+`Now` section since the day the section was written and never moved. **A `Later:` item inside a `Now`
 section is the table's prefix rule broken from the inside**, and it is how this section stayed off
 the *nothing open* line while holding no open work: the bullet above is a standing rule, and a rule
 is not an item. ("Figure out distances" is closed — the Alt-hover measure and then equal-gap
@@ -1547,12 +1556,13 @@ than an oversight. None blocks v1.
     reading serves is not what will arrive, because four cases have arrived and they split two-two.
     **What would unpark it now is a user asking for the *stored* origin**, not a case discriminating
     the readings.
-- **Side bearings / optical margin alignment.** A left-aligned label still reads as indented,
-  because "H" has almost no left side bearing. Moved here from *Now · Text alignment and
-  measurement* on 2026-09-22, where it had been filed `Later:` inside a `Now` section since that
-  section was written — nothing about it was decided by the move, and the trim mechanism it would
-  sit beside is §15 D78 and D199. Its neighbour there, *don't use ink bounds for alignment*, is a
-  standing rule and stays.
+- ~~**Side bearings / optical margin alignment.** A left-aligned label still reads as indented,
+  because "H" has almost no left side bearing.~~ **Built the same day it arrived here, 2026-09-22 —
+  §15 D830**, both edges, `ParagraphStyle::optical_margins`, off by default. ⚠️ **The example above
+  was backwards for as long as this bullet stood**: `H` has the **largest** left bearing of the
+  capitals measured (8.59% of the font size against `W`'s 2.34%), so it is the letter that reads as
+  *indented* rather than the one that does not. The complaint was real and the illustration inverted
+  it — *an unmeasured example is still a claim*, and D830 keeps it for that reason.
 - UI toolkit revisit (gpui / Xilem) post-v1 — `architecture.md` §9.1.
 - MCP transport hardening (auth, TCP/remote) — local socket + proxy only for now.
 - `vello_hybrid` as a third backend if low-end GPU performance demands it.

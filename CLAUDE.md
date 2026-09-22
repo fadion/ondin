@@ -402,8 +402,49 @@ misses the integration tests where some of the longest prose lives — sort desc
 the item each run precedes, and read the first twenty. **A run whose first line does not
 describe the item under it is the bug.**
 
-⚠️ **Ignore every run starting at line 1**: those are module docs and precede nothing.
-`boolean.rs` tops the raw ranking at 116 lines and is correct.
+🚨 **This was prose and not a command until 2026-09-22, which is why it was the one check
+§15 D827 could not control** (that entry's *Fix*). A check with no literal form has its
+spelling re-decided on every run — the doc-gate grep's unrecoverable ambiguity arriving by
+design rather than by accident. Here it is, as `docrun.awk`:
+
+```awk
+FNR==1 { run=0; start=0 }
+/^[[:space:]]*\/\/\// { if (run==0) start=FNR; run++; next }
+run==0 { next }
+/^[[:space:]]*#\[/ { next }
+/^[[:space:]]*\/\// { next }
+{
+  item=$0
+  sub(/^[[:space:]]+/,"",item)
+  if (item != "") printf "%d\t%s:%d\t%s\n", run, FILENAME, start, substr(item,1,58)
+  run=0
+}
+```
+
+```bash
+find crates -name '*.rs' -print0 | xargs -0 awk -f docrun.awk | sort -rn | head -20
+```
+
+`FNR==1` is the per-file reset this file already warns about; the `#[` and `//` lines are
+skipped rather than ending the run, because an attribute or a plain comment sits *between* a
+doc and its item and the item is still below. **Controlled both ways** on synthetic files: two
+30- and 25-line runs with an item between them rank as 30 and 25, and with that item deleted
+they rank as a single **55** attached to the wrong function, its first line still describing
+the other one.
+
+⚠️ **It matches `///` only, so module docs never enter and the old "ignore every run starting
+at line 1" caveat is gone** — that rule existed because the prose version swept `//!` too.
+**Do not carry the old figures across**: `boolean.rs`'s 116-line top entry was a `//!` run,
+and this command's head runs 107 down to a floor of 58 over twenty entries. *Two spellings of
+one check are two checks with two baselines*, which is the same trap as `--workspace` against
+`-p`.
+
+⚠️ **Read the head, do not just rank it** — the ranking's first run under this command turned
+up nineteen entries describing their items and one opening ***"And it holds…"***, which is
+what a *stolen* doc also looks like. It was not one: the antecedent sat in the sibling test's
+doc one item up. **That is §15 D790's shape rather than a theft** — a sentence whose subject
+lives in the previous item's prose is orphaned by anything inserted between them — and it was
+repaired by naming the subject, which is the only fix that survives an insertion.
 
 Four rules this heuristic earned the hard way:
 

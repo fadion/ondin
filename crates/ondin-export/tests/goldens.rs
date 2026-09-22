@@ -624,8 +624,15 @@ fn the_fixture_holds_one_node_of_every_kind() {
     );
 }
 
-/// And it holds one of every **effect** kind, which is the second enum with the
-/// same sweep hazard — §15 D658, `[S8.3-L6-07]`.
+/// And the fixture holds one of every **effect** kind, which is the second enum
+/// with the same sweep hazard — §15 D658, `[S8.3-L6-07]`.
+///
+/// (*The fixture* rather than *it*: the antecedent was in
+/// `the_fixture_holds_one_node_of_every_kind`'s doc, one item up, so anything
+/// inserted between the two would have orphaned this sentence — §15 D790, which
+/// is that failure happening to `architecture.md` §5.6. Found by reading the
+/// `///`-run ranking's head, where a first line opening *"And it…"* is what a
+/// stolen doc also looks like.)
 ///
 /// 🚨 **Both goldens were silent about a whole schema branch.** `effects` and
 /// every field of `EffectSummary` appeared in none of `every-kind.json`'s keys,

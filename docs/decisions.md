@@ -1198,7 +1198,7 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D820** — **A dashboard cover is rendered on a thread of its own, and the budget is deleted with what it bounded.** `Covers::get` → `render` → `io::load` → `png::png` → `ImageStore::prepare` ran the whole document→pixels path **inside the egui pass**, where a picture's decode alone was measured at **433 ms** for an 8000² image (§15 **D449**). `roadmap.md` said which thread it goes on was undecided. 🚨 **It is a second worker of its own and not a job on `library::writer::Writer`'s queue**, and the reason is that module's own contract — *"one background writer of anything, in **FIFO** order"* — with the FIFO load-bearing twice: a `Forget` must not be overtaken by the `Snapshot` it cancels, and a save must not be overtaken by anything. A cover render is hundreds of milliseconds nothing is waiting on, so putting one in front of an autosave makes the feature that protects work wait behind the feature that decorates a card. ⚠️ **Nothing the renderer does is a record**: it may write a PNG into the cover cache, which `crate::atomic` deliberately **exempts** as derived data, so this is not a second writer of anything that module protects. 🚨 **`FRAME_BUDGET` is deleted rather than retuned, and that is a removal and not a regression**: the 8 ms never bounded the felt cost, because the **progress guarantee** under it rendered one document per pass *whatever the budget said* — so a library of slow documents cost one stall per pass rather than none. Both were consequences of rendering **inside** the pass, and neither has anything to bound now. `thumbs::ImageThumbs` keeps its 2 ms and is no longer the same shape: its decode really does happen in the frame. *(Ruled by the maintainer, built and tested 2026-09-19; **Resolved.** `Covers` gains `queued` — so a card drawn every frame enqueues **once** rather than sixty times a second, which is a queue that outruns its drain and a thread that never reaches the second document — plus `Renderer`, spawned lazily on the first miss for `Writer::spawn`'s reason and **joined** on drop rather than detached, and a `#[cfg(test)] pub(crate) settle`. ⚠️ **`settle` is `cfg(test)` and not `pub`, which is §15 D672's answer rather than D699's**: nothing in production waits for a cover, and `ondin-app` has no lib target, so `dead_code` does analyse a `pub` item there and it warned. **Test** `library::cover::tests::covers_are_rendered_off_the_pass_and_all_of_them_arrive`, **replacing** `one_cover_a_pass_arrives_however_spent_the_budget_is` — the rule that one pinned is **gone rather than changed**, which is why the test goes with it; `a_document_with_no_cover_is_not_retried_every_pass` survives with a new tell, the budget having been how it measured a re-render and the queue being it now. 🚨 **The thread introduced a flake in *another module's* test, and finding it is the most useful thing in this entry.** `panels::dashboard::tests::a_document_this_build_cannot_open_wears_the_mark_and_a_healthy_one_does_not` asserts the red `UNREADABLE` chip, which `mark_of` reads through `Covers::unreadable` — and a cover only learns a document is unloadable when it **renders** it. The test pumped one extra pass and asserted on the next, and **its own doc said those two passes were *"the cover cache's laziness rather than a flake"***. ⚠️ **That sentence was accurate when it was written and this change made it exactly wrong**: the laziness is still there and the *timing* it promised is gone, because "the next pass" was a fact while the render was inline and is a **race** once it is on a thread. It is struck in place in the test's doc rather than deleted, the stale half being the point. **The fix is one line** — `app.covers.settle(&ctx)` before the assertion, which is what that method exists for — and 25 paired runs afterwards failed none. 🚨 **What found it was running the filter twenty times.** The whole suite was green throughout, both full `--workspace` runs were green in debug *and* release, and a verification run of the same two filters **three times each** was green: **2 of 20** paired runs failed, and only under a filtered run, which packs the related tests onto every core at once. *Six clean runs is not evidence.* That is `CLAUDE.md`'s thirteenth gate hole and §15 **D796**'s lesson arriving from a second direction — there a shared OS resource, here a shared worker — and neither is visible to any gate. ⚠️ **It is also what earns `settle` its `pub(crate)`**: the argument for the method was that the app stays asynchronous and a probe asks for an answer, and this is a *second* module's test needing it, which is the case that says it must not be private to `cover.rs`. 🚨 **The doc gate caught two dangling links this change created** — `[`FRAME_BUDGET`]` after the constant was deleted, and `[`Covers::settle`]` after that method became `cfg(test)`, the second being D319's mechanism from the direction where a production doc may not name a test-only item. *That gate is the one that reads doc comments, and this is it working.* §5.11a's cover-cache paragraph and §9.5's `Covers::unreadable` sentence are amended, and §5.3a's `MAX_SHADOW_BLOCK` paragraph, whose *"a hang at launch"* is now a stuck cover thread and a library that renders nothing past the first bad file. **The bullet is struck from `roadmap.md`** with the clause in the table row that named it)*
 - **D821** — **`Escape` is spent on a chrome field that has just lost focus, and the rung goes *below* `cancel_gesture`.** Measured with D808's probe: with a `TextEdit` focused, `input::resolve` answers `[Escape]`, because egui clears focus in `Memory::begin_pass` and the press is still in `input` when the keymap runs — §15 **D317**'s own reading, and what makes a *valved* field's cancel reach `cancel_gesture` at all. **A plain `TextEdit` installs no preview, so the ladder fell straight through**: renaming a layer in the inspector and pressing `Escape` abandoned the rename **and** cleared the selection, the ladder's last rung, under the panel that was showing it. A new rung in `OndinApp::escape` answers it. 🚨 **Below `cancel_gesture` and not above it, which is the whole of the placement**: a numeric field's cancel has to go on reaching that function, because it is what sets `gesture_cancelled` and stops the release committing after all (D317). The new rung is only ever taken when nothing was in flight — exactly the text-field case. It reads a new field, `OndinApp::chrome_focus`, written at the **end** of each frame after the `Tab` surrender. ⚠️ **Recorded rather than asked, because egui has no global question for it**: `Memory::had_focus_last_frame` takes an `Id` and the ladder has none. ⚠️ **"Anything focused", not "a text field"** — `egui_wants_keyboard_input`'s own definition (§15 **D123**), deliberately not narrowed. *(Found and fixed 2026-09-19; **Keep.** This closes nothing on `roadmap.md`: it is a defect D808's probe turned up and the maintainer ruled on in the same round. Nothing is undone at the rung — the field has already abandoned its own edit through `ui::defocus_commits` (§15 **D808**); what this adds is that the key stops there. **Test** `app::library_wiring_tests::escape_out_of_a_chrome_field_does_not_also_clear_the_selection`, flip-checked. `shortcuts.md` §11's ladder enumeration gains the rung)*
 - **D822** — **`Event::Zoom` and touchscreen pinch are *Later* with a stated trigger, not open work.** `Event::Zoom` **would be dead code here**: egui only ever consumes that event, its sole producer is `egui-winit`'s `WindowEvent::PinchGesture` arm, and winit raises `PinchGesture` from its **iOS and macOS** backends alone — `platform_impl/windows` has no path to it. So it is a macOS portability item rather than a defect. **Multi-touch is the reachable half** — winit does deliver `WindowEvent::Touch` on Windows, so egui's `multi_touch()` would see a touchscreen pinch — and it needs a touchscreen to develop against. **Neither can be built or tested on the machine this is developed on**, which is what makes them *Later* rather than *Now*: an item nobody can write or check is not open work, and leaving it in a *Now* section reads as cheap. *(Ruled by the maintainer 2026-09-19; **Resolved — filed *Later* with the trigger stated**, and the trigger is the useful half: **a Mac, or a touch device.** Record-only, no production line changed; **the citation is planted by hand** on `canvas::wheel_input`, the function that carries the `Ctrl`+wheel path these two would join. Re-derived rather than inherited — the analysis was last checked against the vendored sources on 2026-08-19 and the conclusion is unchanged. **The two items move to *Later*** and the *Now · Canvas* row's last two entries go with them, leaving that section with nothing open)*
-- **D823** — **A layer copied in one `ondin` window pastes as a layer in another, and the wire form is the document schema.** §15 **D17** closed by prescribing the fix — *"give core a serializable subtree; that would also buy paste between two Ondin windows"* — and until now a copy put only the layer **names** on the OS clipboard, so a second window's `Ctrl+V` saw text and pasted the names as a text layer. `ondin_core::io::clip` is that subtree: the names, then `FENCE`, then JSON, found with `rsplit_once` so a layer *named* like the fence cannot truncate the heading. **Not a second format** — `NodeDto::from_node`/`into_node` and `ImageDto` were lifted out of `DocumentDto` so the clipboard reaches the same projection a file does, which is what keeps D663's out-bound `clip` normalization and every rule like it in one place. 🚨 **The version is compared for equality, not migrated**, the one deliberate divergence from `io::load`. 🚨 **`read` answers `Option<Result<…>>` and the third state is the point**: ours-and-unreadable must be *said*, or the payload falls through to `paste_text_as_layer` and the user gets a text layer holding megabytes of their own JSON. *(Built and tested 2026-09-22; **Resolved.** All four paste doors call `OndinApp::take_clipboard` where they called `owns_the_clipboard`, and `adopt_clip_text` is its decision with the OS read lifted off it, **D805**'s split for **D798**'s reason. 🚨 **`roadmap.md`'s cost estimate was wrong twice, both times in the cheap direction**: the id minting *did not exist as work* — `build::insert_subtrees` already remaps through `document::remap_subtree` — and the serialization it said must **not** be `NodeDto` **is** `NodeDto`. Placement needed nothing either, **D221**'s root fallback already being right for a foreign parent. The pictures cross through `ImageDto`, which is **D280**'s lesson. **Seven tests, every one flip-checked.** D17's closing *Fix* is struck, §5.11 gains the second reader and §9.4 the crossing. **The `roadmap.md` bullet is struck**)*
+- **D823** — **A layer copied in one `ondin` window pastes as a layer in another, and the wire form is the document schema.** §15 **D17** closed by prescribing the fix — *"give core a serializable subtree; that would also buy paste between two Ondin windows"* — and until now a copy put only the layer **names** on the OS clipboard, so a second window's `Ctrl+V` saw text and pasted the names as a text layer. `ondin_core::io::clip` is that subtree: the names, then `FENCE`, then JSON. ~~Found with `rsplit_once` so a layer *named* like the fence cannot truncate the heading.~~ 🚨 **That was backwards and `rsplit_once` was the cause rather than the guard — see §15 D833**; the fence is a marker now and the payload is the last line. **Not a second format** — `NodeDto::from_node`/`into_node` and `ImageDto` were lifted out of `DocumentDto` so the clipboard reaches the same projection a file does, which is what keeps D663's out-bound `clip` normalization and every rule like it in one place. 🚨 **The version is compared for equality, not migrated**, the one deliberate divergence from `io::load`. 🚨 **`read` answers `Option<Result<…>>` and the third state is the point**: ours-and-unreadable must be *said*, or the payload falls through to `paste_text_as_layer` and the user gets a text layer holding megabytes of their own JSON. *(Built and tested 2026-09-22; **Resolved.** All four paste doors call `OndinApp::take_clipboard` where they called `owns_the_clipboard`, and `adopt_clip_text` is its decision with the OS read lifted off it, **D805**'s split for **D798**'s reason. 🚨 **`roadmap.md`'s cost estimate was wrong twice, both times in the cheap direction**: the id minting *did not exist as work* — `build::insert_subtrees` already remaps through `document::remap_subtree` — and the serialization it said must **not** be `NodeDto` **is** `NodeDto`. Placement needed nothing either, **D221**'s root fallback already being right for a foreign parent. The pictures cross through `ImageDto`, which is **D280**'s lesson. **Seven tests, every one flip-checked.** D17's closing *Fix* is struck, §5.11 gains the second reader and §9.4 the crossing. **The `roadmap.md` bullet is struck**)*
 - **D824** — **The Escape context-menu rule gets its wider fixture, and it had to be a *second* test.** §15 **D795** closed on one clause of `context-menus.md` §10 it could not write: that file's Escape bullet asks for the menu opened with a layer selected **inside an entered group and the node tool active**, and for `entered_group` and the tool to be untouched as well as the selection. 🚨 **§10 asked for the existing test to be widened and that would have been wrong.** `OndinApp::escape` pays out **one** rung per press and reaches `entered_group` *before* the tool and before the selection clear that is its final `else` — so under the narrow fixture the fall-through's extra rung is the **selection**, which is why that test bites, and under the wide one it is `entered_group`, leaving the selection and the tool untouched **under the very flip the test exists for**. Widening would have taken the teeth out of it and left the suite looking one test richer. *(Tested 2026-09-22; **Resolved** as to §10's queue. **Test** `app::context_menu_rule_tests::escape_over_a_menu_keeps_the_entered_group_and_the_tool_as_well`, flipped the same way its neighbour is — `input::resolve` in the menu-holds-the-keyboard arm right after `self.context_menu = None` — **red on the `entered_group` assertion** and green on the selection and the tool, both at the predicted sites. ⚠️ **D795's own closing *Fix* is untouched by this**: re-running that flip against `escape_in_present_mode_…` is still owed. §10's bullet is corrected, its *"present mode and an entered group are further down the ladder"* being backwards about `escape`. **The `roadmap.md` clause is struck**, and with D823 that section has nothing open)*
 - **D825** — **Tab stops, columns and widow/orphan control are decided non-goals for v1; justify-all is *not* one.** *Now · Text* carried the three beside justify-all as *"the four deferred features"*, and what the three share is the opposite of a wall: **not one of them is short of a dependency.** Widow/orphan control is a second pass over the lines `text::break_lines` yields; tab stops are a layer over `Whitespace::Tab`, which parley classifies and does not lay out; columns change what a paragraph's box *is*, above that function entirely. Each is a build of our own that nobody has asked for — the same shape as **D399**'s hyphenation, priced rather than blocked. ⚠️ **Justify-all is the exception and goes to *Later · Parked*, not to §0**: it is blocked **upstream**, parley's `align_impl` hard-coding a skip of `BreakReason::None | Explicit` with `align`, `LayoutData` and `ClusterData::advance` all `pub(crate)`, so its trigger is a patch upstream and not a decision here. *(Ruled by the maintainer 2026-09-22; **Resolved — three decided non-goals and one parked item.** Record-only, no production line changed; **the citation is planted by hand** on `text::break_lines`, beside D399's hyphenation note, which is where a reader meets the question. 🚨 **Filing the four under one word is what this entry undoes** — *"deferred"* stood over a price, a build nobody wants and an upstream wall, and this file's own history is that such a sentence gets re-derived as a blocker, which is exactly what **D399** had to correct. **The three move into `roadmap.md` §0**, justify-all to *Later*)*
 - **D826** — **Rejoining a multi-line paragraph on SVG import is a decided non-goal for v1.** A multi-line text layer of ours exports as one `<text>` per line and comes back as one layer per line, because nothing in the markup says they were one node — and the rejoin would have to **invent the line height** that decides where every line after the first sits. 🚨 **The refusal is about what the only available signal identifies**: same `x`, a constant `y` step and a matching resolved style is *also* exactly what a stack of separate labels in a foreign file looks like, so the heuristic welds unrelated layers together and the user has no way to say which reading was meant. ⚠️ **And the case it would have been worth most for is answered elsewhere** — a copy crossing between two `ondin` windows carries real nodes now, paragraph and all (§15 **D823**) — so what is left here is the foreign file, which never had the structure to lose. *(Ruled by the maintainer 2026-09-22; **Resolved — a decided non-goal**, no production line changed. **Record-only, so the citation is planted by hand** on `svg_in`'s `text_node`, in the run that already argued the loss was real — that paragraph is now the end of the argument rather than the start of one. `a_positioned_tspan_starts_a_new_layer_and_a_bare_one_does_not` already pins what *is* read, so nothing about the element is left open. **It moves into `roadmap.md` §0** and is struck from *Now · SVG import*, where it was the last item — §15 **D813** having left that section with this alone)*
@@ -1206,6 +1206,12 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D828** — **A warn-by-default clippy lint is silent on every item inside an `impl` block, which is most of this codebase.** `#[allow(clippy::too_many_arguments)]` was written **twice, on consecutive lines**, on `svg_in::Builder::text_node`, from the first commit of the current `.git` until 2026-09-22, with all seven gates green. The duplicate is deleted and **is not the subject** — a second `allow` of one lint allows one lint. **The subject is that `clippy::duplicated_attributes` exists, is warn-by-default, names this exactly, and never fired.** Measured in order, both cheap explanations being wrong: **(1)** the lint name is real here — `-W clippy::this_lint_does_not_exist_at_all` warns `E0602: unknown lint` and the real name does not, so it exists in clippy 0.1.97; **(2)** it does fire — in an isolated crate, `#[allow(dead_code)]` twice on a free `fn` fires with `note: #[warn(clippy::duplicated_attributes)] on by default`, and `#[allow(dead_code, dead_code)]` fires too; **(3)** position is the variable — a duplicate on a free fn **inside a `mod`** fires, on an **inherent `impl` method** it does not, on a **trait `impl` method** it does not, isolated to be certain (a file with only the two `impl` cases yields **0**, one with only the free-fn case yields **1**). 🚨 **So it is not a blind spot over "attributes" as a category but over nearly every item in this workspace**: `ondin-app` is very largely one `impl OndinApp` and `ondin-core`'s builders are `impl` blocks. **It is the fourteenth entry on `CLAUDE.md`'s *gates that look like they cover the code and do not* list**, and earns it the same way as the others — it names the right rule, it is on, and it is pointed at a shape it cannot see. *(Measured 2026-09-22; **Keep** — the blind spot is upstream and not closable from here. ⚠️ **What stands in for it is three greps over `crates/`, clean today, and all three are worth naming because the first is the tempting one and the weakest**: adjacent identical attribute lines; a repeat anywhere in one item's **contiguous attribute run**, which is the real shape; and a lint repeated **inside** one `#[allow(..)]`, which measurement 2 proved the lint also catches and neither other grep sees. 🚨 ***Fix:* control those three before trusting the clean reading** — they are hand-written commands standing in for a gate, which is §15 **D827**'s population, and three of the ten controlled there could not report a hit. **How this was found differs from the thirteen before it**: not sideways, but by running the control `CLAUDE.md` already prescribes — *break what a gate claims to cover and check it goes red* — against a defect already in the tree. The advice worked the first time it was pointed at this lint; nobody had pointed it there. Record-only as to the lint, one line deleted; **the citation is planted by hand** on `svg_in::Builder::text_node`, above the surviving attribute. ⚠️ **Do not read the deletion as the fix**)*
 - **D829** — **The release gate's flake is named, and its own failure message had been accusing the wrong thing.** §15 **D705**'s test again — `collecting_defs_does_not_grow_with_the_square_of_their_count`, §15 **D593**'s regression test — red once in a `cargo test --workspace --release`. 🚨 **Thirty-one clean runs said nothing**: 11 warm workspace release runs, 20 more paced, 3 with the sources touched, 11 of the target alone. **What named it was reproducing the condition on purpose** — 64 spin loops on 24 cores, **4 failures in 10**. *A flake that will not recur is not a flake with no cause; it is a condition nobody has recreated*, and §15 **D820**'s twenty-run reading is the instrument for *is this real* and not for *what is it*. **The mechanism is the phases**: `0..3` of the small and *then* `0..3` of the large, where the large phase is ~4× longer in wall-clock, so it carries 4× the exposure to a burst and a burst inside it is missed by all three of its repetitions while none of the small's are touched. **The minimum was the right statistic taken over the wrong sample.** Fixed by **interleaved rounds, fifteen of them**: baseline **4 in 10**, interleaved-five **3 in 10**, interleaved-fifteen **0 in 20**, all on one load. 🚨 **Interleaving alone bought almost nothing and was written up as the fix before being measured** — *the count is what pays and interleaving is what makes the count worth paying for*, since under oversubscription every sample is hit and what is needed is enough rounds that one escapes **both** measurements together. 🚨 **The failure message was wrong in the dangerous direction**: D705 told the next reader that *"the large one alone inflated"* meant the square coming back, and **that is the signature of a stall** — the reproduction printed `0.0071s vs 0.0618s` on a loaded machine, which the old rule reads as a regression. So a once-in-thirty red run would have arrived **already labelled a performance regression in correct code**, to a reader with no way to reproduce it. *(Fixed and measured 2026-09-22; **Resolved.** Discrimination flip-checked rather than assumed: the linear scan restored measures **8.70×** against the 6.0 bound and the fixed version **4.12×**, so 46% headroom above and 31% below. ⚠️ **A deeper minimum moves the absolute times and not the ratio** — 0.0034/0.0140 here against D705's 0.0082/0.0327 — so that entry's figures are stale *for this sampling*. ⚠️ **The repair committed the same fault one order down**: the rewritten message carried D705's best-of-three baselines into a best-of-fifteen test, so the flip against a genuine regression printed 0.0048 s and the message called it a stall — **caught only by running the flip**. *A diagnostic rule is a measurement and it expires with the measurement it was taken from.* **On D820's population question: a third member, not a restatement** — D796 contends for an **OS resource** and waits on a lock, D820 for the machine's **load** with an assertion depending on work finishing and waits on `settle`, and this for the **scheduler** with the work already done, so there is **nothing to wait for** and the repair must be statistical. The honest superset is *any test whose assertion depends on anything the scheduler decides*. Test-only; **the citation is planted by hand at two sites**, the sampling loop and the assertion's message. ⚠️ **Do not collapse fifteen rounds back toward three**, and **do not widen the 6.0 bound**)*
 - **D830** — **Optical margin alignment: a line is placed by its ink at both edges, and one adjustment serves every alignment.** A glyph's advance carries its side bearings, so a line placed by its first glyph's advance origin starts a bearing's width *inside* the measure. Measured on the default face at 16 px: the left bearing runs from **0.98%** of the font size (`f`) to **10.06%** (`'`), capitals alone spanning 2.34% (`W`, `A`, `V`, `Y`) to 8.59% (`H`, `I`, `L`), so two stacked left-aligned labels can sit about 9% of the font size out of alignment. ⚠️ **`roadmap.md`'s statement of the item had the example backwards** — it blamed `H` for having *almost no* left bearing, and `H` has the **largest** of the capitals measured. `ParagraphStyle::optical_margins: bool` — **paragraph scope, not spannable, off by default everywhere and deliberately not §15 D199's shape**, since trim moves the *box* around ink that does not move while this moves the *ink* out past the box it was authored in. 🚨 **The mechanism is one adjustment to the line's geometry before parley breaks it** — `x -= lsb`, `measure += lsb + rsb` — and **no arm of it reads `align`**, so start, end, centre and justify all fall out of the same two numbers and parley does the re-justification; shifting each line by its first bearing, the obvious version, cannot work for justified text at all, whose two ends are pinned. **The cost is a second break pass**, plus an accepted approximation: a line whose widened measure gains a word keeps the old last glyph's correction. *(Built and measured 2026-09-22; **Resolved — the scope and the default are the maintainer's rulings.** Five tests in `text::optical_margin_tests`, three flips failing at three different numbers, which is what pins the correction to *both* bearings rather than to some bearing. The SVG writer needed no change and D81 is why; the MCP snapshot still reaches `align` alone, which is *Now · Text*'s parked item and not a new gap. ⚠️ **It does not break the roadmap's *don't use ink bounds for alignment* rule** — that rule forbids deriving the **datum** from the ink, and this leaves the datum where it was and moves the ink to meet it. §5.4, §5.11 and §9.2 amended. **The `roadmap.md` bullet is struck**, hours after it moved to *Later · Parked decisions*)*
+- **D831** — **The insert door never asked about paint, and §15 D823 made that the one arm a stranger could reach.** `[R1-L2-01]`, **Critical**. `op_insert_subtree`'s per-node field loop had grown one family at a time — `Root`, opacity, `geometry_is_finite`, `affine_is_finite`, the pivot (**D639**), the effects (**D641**) — and never paint, which `op_set_fills` and `op_set_strokes` have both asked `build::brush_is_finite` since **D451**. 🚨 **The reachable attack is exactly one value wide.** Every `NaN` this arm refuses dies at `serde_json::from_str` one function earlier — **D421**'s recorded argument for why the loader carries no finiteness check, arriving at the clipboard door — so what survives is a **finite out-of-range** number, and a brush carries exactly one: `GradientBrush::opacity`, weighed with `valid_opacity` and not `is_finite` for **D767**'s reason. A pasted ramp at `1e30` saturated every stop opaque, drew, and was written by the next autosave into a `.ondin` `io::load` refuses for ever. ⚠️ **`1e30`, not the `1e39` the finding's headline used** — the field is an `f32` (max ≈`3.4e38`), so `1e39` is a compile error and arrives from JSON as `inf`, caught by the finiteness clause rather than the range clause the case exists to pin. *(Fixed and tested 2026-09-22; **Keep.** The arm restates `op_set_strokes`' predicate rather than calling `brush_is_finite` alone, a stroke carrying a `width` and `dashes` a fill has no equivalent of. **Test** `document::insert_subtree_refuses_non_finite_paint`, five cases; the flip worth keeping is `width`, whose deletion leaves *both* brush assertions green. §2 invariant 8's paint bullet and §5.7 amended)*
+- **D832** — **A count is not a reachability check, a cycle balances it, and the same door had no depth bound.** `[X2-L1-01]` (**Critical**), `[R1-L2-02]` and `[R2-L8-01]` (both High). §15 **D423**'s `claimed.len() + 1 != nodes.len()` asks whether as many nodes were claimed as there are non-roots and never asks *from where*: `[R, A, B]` with `A` and `B` naming each other passes every other check in the function and balances at `2 + 1 == 3`, so a component reachable from nothing went in, committed and saved a file `io::load` refused with *"2 node(s) are not reachable from the root"*. **So walk it, which is what the loader's check (5) does** — and the depth bound rides on the walk, which is **D416**'s own argument for check (6) one door over. 🚨 **D416's closing conditional had fired**: `io::clip` is the importer that *"nests without a user click per level"*, 300 levels in one paste. `OpError::TooDeep` is its own variant because the subtree is well formed and the **destination** is what makes it unusable. ⚠️ **The bound is absolute, so the parent's depth is part of it** — two chains each inside `MAX_TREE_DEPTH` compose past it, and a subtree-relative check passes exactly that case. 🚨 **Three guards' arguments rested on one premise and this falsified all of them**: D639's *"no external route"*, D416's *"a user click per level"*, D423's *"a single fresh capture"*, each true of a `capture_subtree` and false of a paste. ⚠️ **D423's is false in the word *capture*, not *both*** — the finding read it as *"both `InsertSubtree` sites is now three"* and there are still exactly two, `build::insert_subtrees` and `canvas::clone_tx`; what changed is the **template** the first is handed. *A premise about a caller is falsified by a new feeder as readily as by a new call site, and only one of those is countable.* *(Fixed and tested 2026-09-22; **Keep.** **Tests** `document::insert_subtree_refuses_a_cycle_that_balances_the_count` and `…_a_subtree_that_would_nest_too_deep`, plus `io::a_hostile_clipboard_payload_is_refused_and_leaves_the_document_openable` end to end. D639, D416 and D423 amended; §5.7 needed none of that kind, having always described this op as the funnel paste, import and MCP writes go through. §5.7 and §5.11 amended)*
+- **D833** — **The fence was a landmark and had to become a marker, and the test named for the case never reached it.** `[X2-L1-02]`. `read` located the payload with `rsplit_once(FENCE)` and §15 **D823** recorded that as the careful choice. 🚨 **Backwards: `rsplit_once` was the cause of the failure rather than the guard against it.** The fence is written *before* the JSON, so every copy of it inside the payload — a layer's `name`, a text layer's `content`, a linked image's `path`, all user-authored — comes **after** the real one, and splitting on the last handed `serde_json` a fragment of a string literal. **Neither split direction survives a fence inside the payload**, the payload being where the user's own text lives, so the fence answers only *is this ours* (`contains`, which keeps `read`'s middle answer reachable) and the payload is the **last line**. 🚨 **That makes `write`'s `to_string` load-bearing rather than a size choice**: JSON escapes a raw newline, so the whole DTO is one line — *pretty-printing it would break every paste*. 🚨 **`a_layer_named_like_the_fence_still_crosses` asserted this and did not test it**, passing `FENCE` as the *heading*, the one position that was never in doubt. *(Fixed and tested 2026-09-22; **Resolved.** **Test** `a_fence_inside_the_payload_still_crosses`, four arms, the heading kept as a real property; the flip is the shipped code, **red on the name arm with the heading arm green** — the asymmetry that let the old fixture pass. **And one sentence was being told about three failures**: `adopt_clip_text` gave *"came from a build this one cannot read"* for every `IoError`, including a damaged same-build payload, which was `[X2-L1-02]`'s whole user-visible symptom; it matches on the variant now. D823's ⚠️ and its index row are struck in place)*
+- **D834** — **An image entry no node keys into is dropped, the inbound side having had no rule where the outbound side always had one.** `[X2-L5-01]`. `copy_selection` computes the carried set as `build::image_ids_in` over the copied nodes; `parse` imposed no such rule, and everything downstream is permissive in the same direction — `missing_image_ops` adds **every** carried entry the document lacks, `io::save` writes `doc.images()` whole, and the table is never collected. 🚨 **So a crafted payload could plant arbitrary bytes in the victim's document at rest, invisibly**, nothing in the UI listing an image no layer shows. **Dropped rather than refused**, which is **D492**'s bargain and faces the same way as **D179** — so the door is permissive about an image mismatch in *both* directions, and no legitimate copy changes. ⚠️ **This closes the *invisible* route and not `[R3-L5-01]`**: a node carrying an image fill keyed to an attacker-chosen `Linked` entry still brings it through, as it must, or a real picture would stop crossing. *(Fixed and tested 2026-09-22; **Keep.** ⚠️ **The filter exposed a test asserting something its fixture did not do** — `a_clipboard_payload_carries_the_image_table_entries_it_keys_into` handed `write` an entry **nothing referenced** while asserting *"the table entry the nodes key into"*, and passed because `parse` carried whatever it was given. The fixture paints a descendant before capturing now)*
+- **D835** — **`ClipDto::subtrees` stated a rule in the format's own voice and nothing checked it.** `[X2-L2-02]`, Low, and what keeps it from being lower is *which two readers disagree*. The field's doc says the first entry is that subtree's root; `paste_clipboard_at` takes both the destination **parent** and the *just above what it came from* z-slot from `template.first()`, while `remap_subtree` and `insert_subtrees` locate the **real** root by predicate. So a reordered payload had its placement computed from one node and applied to another — landing a paste inside a group the user did not choose, in the same-document-in-two-windows case where a foreign parent id does resolve (§10). **Refused rather than reordered**: the rule is the format's, and silently reordering would leave `capture_subtree`'s guarantee untested on both sides. ⚠️ **A position and a predicate are two ways of answering one question, and a wire format is where they are first allowed to disagree.** *(Fixed and tested 2026-09-22; **Keep.** Covered as a row of `every_refusal_the_clipboard_door_makes_has_a_test`, which asserts the message and not only the error)*
+- **D836** — **Five of `parse`'s six decisions had no test, and the sixth cannot be reached from the wire — which is worth asserting rather than leaving to look untested.** `[R2-L6-01]`, High. Only the `schema_version` mismatch was exercised, so the check whose own comment argues it prevents **silent partial loss on paste** was itself unasserted and deleting it left the workspace green. ⚠️ **Each fixture is written out as JSON rather than produced by `write`**, four of them being states `write` cannot reach — which is the point, they model a payload from somewhere else. 🚨 **And they assert the *message*, not `is_err()`**: with the empty-subtree refusal gone the payload is still refused, as *"0 roots"*, so a test asking only whether it errored stays green while the user is told the wrong thing. **`Payload::from` crossed in every payload and was `None` in every `write` call in the workspace** while driving *Paste here*'s aim. 🚨 **The non-finite `from` filter cannot be reached through `read` at all**: `serde_json` refuses every spelling of a non-finite `f64`, `1e999` coming back `Serde("number out of range")` one function *before* the filter — **D421**'s argument for why the loader carries no finiteness check, arriving at the clipboard door. **It is kept, and not for D639's reason**: that was a fact about who calls a function today and `io::clip` falsified it inside a fortnight, where this is a property of the **format**, which does not acquire a new caller quietly. *(Tested and measured 2026-09-22; **Keep.** **Tests** `every_refusal_the_clipboard_door_makes_has_a_test` and `the_paste_here_box_makes_the_round_trip_and_a_broken_one_cannot_arrive`, which asserts the **serde refusal** as the only observable form of the claim. ⚠️ **The mutations are named by function rather than by text** (§15 **D803**) — five on `parse`'s clauses, each red only at its own row, the single-root one weakened to `roots.first()` rather than deleted; three on `op_insert_subtree`'s, **one clause at a time**, because replacing the whole walk also removes the depth bound and the table-driven test then aborts at case one. 🚨 **That mutation looks decisive and measures a third of what it claims to** — D803's slip with the sign reversed)*
 
 ---
 
@@ -9502,10 +9508,14 @@ as an image and nothing else, so a payload that is to survive leaving this proce
 string. It is the layer names, then `io::clip::FENCE` (`--- ondin clipboard ---`), then the JSON. The
 names stay on the first line for both of D17's reasons — `egui_winit` emits `Event::Paste` only for a
 non-empty clipboard, and someone pasting an Ondin copy into a note wants to read what they copied —
-so the payload *follows* the stand-in rather than replacing it. ⚠️ **The fence is found with
+so the payload *follows* the stand-in rather than replacing it. ⚠️ ~~**The fence is found with
 `rsplit_once` and not `split_once`**, so a layer actually named `--- ondin clipboard ---` does not
 truncate the heading and take the payload with it; a pathological name is not a reason for a paste to
-fail, and `a_layer_named_like_the_fence_still_crosses` pins it.
+fail, and `a_layer_named_like_the_fence_still_crosses` pins it.~~ 🚨 **`rsplit_once` was the *cause*
+of that failure rather than the guard against it, and the test named for the case never reached it**
+(§15 D833): the fence is written *before* the JSON, so every copy of it inside the payload comes
+after the real one. The fence answers only *is this ours* now, and `read` locates the payload by
+line.
 
 **The payload is the document schema, and that is the decision this entry is really about.**
 `NodeDto::from_node`/`into_node` and `ImageDto::from_entry`/`into_entry` were lifted out of
@@ -9528,7 +9538,9 @@ not a `bool`.** `None` is *no fence, somebody else's*, and the caller's other ar
 `Some(Err)` is *ours and unreadable*, which has to be **said** rather than fallen through on: falling
 through hands the payload to `paste_text_as_layer`, so the user asks for their layers back and gets a
 text layer holding several megabytes of their own JSON. `parse` also refuses an empty subtree, a
-subtree with other than exactly one root, and a duplicate image id. ⚠️ **The root check is
+subtree with other than exactly one root, and a duplicate image id — and, since **D835** and
+**D834**, a subtree whose root is not its first entry, while an image entry no node keys into is
+*dropped* rather than refused. ⚠️ **The root check is
 deliberately here rather than left to `remap_subtree`**, which answers `None` for a malformed
 template and whose caller then *skips* it — so a payload with one bad subtree in five would paste
 four layers and report four, with nothing anywhere naming the one that vanished. A non-finite `from`
@@ -9579,12 +9591,25 @@ it is live **for** is layers, which is `take_clipboard`'s business and not that 
 says *Paste* either way. Said at the site as well as here, because if a payload ever crosses by a
 channel that is not text, that is the line that goes wrong.
 
+🚨 **What this entry did not ask is what the door on the *far* side of `parse` believed about its
+traffic, and three live entries had excused a missing guard on the premise this change falsified.**
+D639's *"no external route reaches the `InsertSubtree` guard"*, D416's *"nothing in the app nests
+without a user click per level"* and D423's *"both feed `remap_subtree` output from a single fresh
+capture"* were each true of a `capture_subtree` and false of a paste. All three are amended, and the
+guards they excused are **D831** (paint), **D832** (reachability and depth). The whole of the gap was
+here, in a module that reads as a serialization change: *a format that widens who may speak to a
+function is a change to that function, and nothing in this project can see it.*
+
 *(**Tests**: four in `ondin-core/tests/io.rs` —
 `a_clipboard_payload_round_trips_every_node_kind`,
 `a_clipboard_payload_carries_the_image_table_entries_it_keys_into`,
 `clipboard_text_is_foreign_ours_or_refused` and `a_layer_named_like_the_fence_still_crosses` — and
 three in `app::clipboard_crossing_tests`. Every one flip-checked, each test's doc naming its mutation
-and the site it came back red at, and all seven predicted sites were correct. ⚠️ **That app module
+and the site it came back red at, and all seven predicted sites were correct. ⚠️ **The fourth is
+`a_fence_inside_the_payload_still_crosses` now** (§15 D833) — the old name is kept here because the
+rename *is* that entry's finding, the test having been named for a case it never reached — and the
+`io.rs` four are seven: D836 added the refusal table and the *Paste here* box, D831 and D832 the
+end-to-end `a_hostile_clipboard_payload_is_refused_and_leaves_the_document_openable`. ⚠️ **That app module
 states its own limit in as many words**: one process standing in for two, because no test here can
 put anything on the real OS clipboard or read it back; what is *not* asserted is that the OS carries
 the text between two processes, which is `arboard`'s job. ⚠️ **On a `write` failure `copy_selection`
@@ -9594,6 +9619,225 @@ model, nothing in a well-formed document being able to make `write` fail. **D17'
 struck**; §5.11 gains the second reader and §9.4's clipboard paragraph the crossing. **The
 `roadmap.md` bullet is struck**, which with D824 leaves *Now · Canvas and interaction* with nothing
 open.)*
+
+**D831 — The insert door never asked about paint, and D823 made that the one arm a stranger could
+reach. *Fixed and tested 2026-09-22; Keep.***
+
+`[R1-L2-01]`, Critical. `op_insert_subtree`'s per-node field loop had grown one family at a time —
+`NodeKind::Root`, the opacity range, `kind.geometry_is_finite()`, `affine_is_finite(transform)`, the
+pivot (D639) and the effects (D641) — and never paint, which `op_set_fills` and `op_set_strokes` have
+both asked `build::brush_is_finite` since **D451**. Invariant 8's paint half was true of two doors
+out of three, and the third is the one D823 had just handed to OS-clipboard text.
+
+**The reachable attack is exactly one value wide, and that is the whole interest of it.** Every `NaN`
+this arm refuses dies at `serde_json::from_str` one function earlier — `io::schema`'s own recorded
+argument for why the loader carries no finiteness check (D421), arriving at the clipboard door:
+serde writes a non-finite `f64` as `null`, refuses `null` where an `f64` is wanted, and refuses
+`1e999` with *"number out of range"*. What survives that is a **finite out-of-range** number, and a
+brush carries exactly one — `GradientBrush::opacity`, which `brush_is_finite` weighs with
+`valid_opacity` rather than `is_finite` for D767's reason. A pasted ramp at `1e30` saturated every
+stop opaque, reached the document, drew, and was written by the next autosave into a `.ondin` that
+`io::load` refuses for the rest of time.
+
+⚠️ **`1e30`, and not the `1e39` the finding's headline used.** The field is an `f32`, whose maximum
+is ≈`3.4e38`, so `1e39` is a compile error as a literal and arrives from JSON as `inf` — refused, but
+by the finiteness clause rather than by the range clause, which is the arm the case exists to pin.
+*A headline value is a claim about a type, and this one had been read off the wrong one.*
+
+**The arm restates `op_set_strokes`' predicate rather than calling `brush_is_finite` alone**, because
+a stroke carries numbers a fill has no equivalent of: its own `width` and every `dashes` entry.
+`insert_subtree_refuses_non_finite_paint` is table-driven over five cases — a fill's solid colour, a
+stroke's brush, a stroke's `width`, a dash length and the gradient opacity — and the flip worth
+keeping is `width`: deleting `s.width.is_finite()` alone leaves *both* brush assertions green, which
+is what says the three stroke sub-clauses carry their own weight rather than restating each other.
+
+**D832 — A count is not a reachability check, a cycle balances it, and the same door had no depth
+bound. *Fixed and tested 2026-09-22; Keep — three holes behind one premise.***
+
+`[X2-L1-01]` (Critical), `[R1-L2-02]` and `[R2-L8-01]` (both High).
+
+**D423's fix was arithmetic standing in for the walk it was copying, and the two agree on every input
+but the one that matters.** `claimed.len() + 1 != nodes.len()` asks whether as many nodes were
+claimed as there are non-roots; it never asks *from where*. With `nodes = [R, A, B]`, `A.parent = B`,
+`B.parent = A`, `A.children = [B]` and `B.children = [A]`, `R` is the single root by the test at the
+top, the child loop claims `A` and `B` exactly once each, every back-pointer is consistent, every
+kind is legal — and `2 + 1 == 3` balances. The `A`/`B` component went in reachable from nothing,
+committed, drew, and saved a file `io::load` then refused with *"2 node(s) are not reachable from the
+root"*. **So walk it, which is what the loader's check (5) does**: §5.11's rule that the two doors
+into the tree are held to the same standard is answered with the same algorithm now rather than with
+a proxy for it.
+
+**The depth bound rides on that walk, which is why it costs nothing** — D416's own argument for check
+(6), one door over. D416 left the operation layer unbounded and named the condition that would end
+it: *"fix if a builder, an importer or the MCP write surface ever nests without one"*. `io::clip` is
+that importer. 300 levels arrive in one paste with no click at any of them, and the document saves
+cleanly and then fails check (6) for ever, which is the shape where the user's in-memory session is
+the only surviving copy of their work. `OpError::TooDeep` is a variant of its own rather than another
+`MalformedSubtree`, because the subtree is perfectly well formed — it is the *destination* that makes
+it unusable, and a user told *"malformed"* about their own valid layers has been told the wrong
+thing.
+
+🚨 **The bound is absolute, so the parent's own depth is part of it**, and a subtree-relative check is
+the plausible wrong version that passes the case that matters: two chains each comfortably inside
+`MAX_TREE_DEPTH` compose into a document that is not, and the second is refused *because of where it
+lands*. The upward walk is bounded too — a cycle among the **existing** nodes is an invariant
+violation rather than an input, but hanging on one would be a worse answer than refusing it.
+
+⚠️ **Three guards' arguments rested on one premise and this change falsified all of them at once.**
+D639's *"no external route reaches the `InsertSubtree` guard"*, D416's *"nothing in the app nests
+without a user click per level"* and D423's *"both feed `remap_subtree` output from a single fresh
+capture"* were each true of a `capture_subtree` and false of a paste. All three are amended. 🚨 **And
+D423's is false in the word *capture*, not in the word *both*** — the finding read it as *"both
+`InsertSubtree` sites is now three"*, and there are still exactly two, `build::insert_subtrees` and
+`canvas::clone_tx` (plus `op_delete_node`'s own inverse). What changed is the **template** the first
+of them is handed. *A premise about a caller is falsified by a new feeder as readily as by a new call
+site, and only one of those is countable.* §5.7 needed no amendment of that kind: it has always
+described this op as the funnel paste, undo-of-delete, import and MCP writes go through, and said
+that anything it lets past becomes a corrupt document the tree walks then have to survive.
+
+**D833 — The fence was a landmark and had to become a marker, and the test named for the case never
+reached it. *Fixed and tested 2026-09-22; Resolved.***
+
+`[X2-L1-02]`. `read` located the payload with `rsplit_once(FENCE)`, and D823 recorded that as the
+careful choice: *"a layer actually named `--- ondin clipboard ---` does not truncate the heading and
+take the payload with it"*. 🚨 **That is backwards — `rsplit_once` was the cause of the failure
+rather than the guard against it.** The fence is written *before* the JSON, so every copy of it
+inside the payload comes **after** the real one: a layer's `name`, a text layer's `content`, a linked
+image's `path`, all user-authored and all serialized behind the fence. Splitting on the last
+occurrence handed `serde_json` a fragment of a string literal, and the other window answered *"That
+copy came from a build this one cannot read"* about a copy this build had made a second earlier.
+
+**Neither split direction survives a fence inside the payload**, because the payload is where the
+user's own text lives, so the repair is not the other function. The fence answers only *is this
+ours* — `text.contains(FENCE)`, which is what keeps `read`'s middle answer reachable, a truncated
+copy still being ours and unreadable rather than foreign — and the payload is located as the **last
+line**. 🚨 **That makes `write`'s `to_string` load-bearing rather than a size choice.** It was chosen
+because nothing diffs a clipboard; what it buys now is that JSON escapes a raw newline, so the whole
+DTO, a multi-line text layer included, is exactly one line and is the last one. *Pretty-printing the
+payload would break every paste*, and both the constant's doc and the writer say so at the site.
+
+🚨 **`a_layer_named_like_the_fence_still_crosses` asserted this and did not test it.** It passed
+`FENCE` as the **heading** argument and never named a layer — the one position that was never in
+doubt, the heading being written before the real fence, where no split direction can be confused. It
+is `a_fence_inside_the_payload_still_crosses` now, with the three positions that matter; the heading
+case is kept as a fourth arm rather than replaced, because it is a real property and costs one line.
+⚠️ **The flip is the shipped code**: restoring `rsplit_once` goes red on the *name* arm with the
+heading arm green, which is exactly the asymmetry that let the old fixture pass. *A test named for a
+case is not a test of it, and the name is what stops anybody looking.*
+
+**And one sentence was being told to the user about three different failures.**
+`OndinApp::adopt_clip_text` formatted every `IoError` as *"That copy came from a build this one
+cannot read"*, which is the version refusal's diagnosis and was also what a damaged payload and a
+structurally bad one got — so the user was sent looking for a version mismatch that was not there. It
+matches on the variant now: `UnsupportedVersion` keeps that sentence and carries the number,
+`Integrity` says the copy is not one this build can use and names what is wrong, `Serde` says it is
+damaged. `[X2-L1-02]`'s whole user-visible symptom was the wrong sentence, so the diagnosis is part
+of the fix rather than a tidy-up beside it.
+
+**D834 — An image entry no node keys into is dropped, the inbound side having had no rule where the
+outbound side always had one. *Fixed and tested 2026-09-22; Keep — `[R3-L5-01]` is not closed by
+it.***
+
+`[X2-L5-01]`. `copy_selection` computes the entries to carry as `build::image_ids_in` over the copied
+nodes, so a well-formed payload has never held one too many. `parse` imposed no such rule, and
+everything downstream is deliberately permissive in the same direction: `missing_image_ops` adds
+**every** carried entry the document lacks — its filter is `!doc.has_image(id)` and nothing else —
+`io::save` writes `doc.images()` whole, and the table is never collected, an entry being *"added and
+removed by explicit operations only"*. 🚨 **So a crafted payload could plant arbitrary bytes in the
+victim's document at rest, invisibly**, because nothing in the UI lists an image no layer shows.
+`parse` keeps only the referenced entries now.
+
+**Dropped rather than refused**, which is D492's bargain — refusing the whole thing over an ancillary
+value loses the artwork to save the recipe — and it faces the same way as D179, where a reference the
+table cannot satisfy draws a placeholder rather than failing the load. Between them the clipboard
+door is permissive about an image mismatch in **both** directions, which is the property worth
+stating: a payload that over-carries still pastes, and no legitimate copy changes at all,
+`copy_selection` already producing exactly the set this keeps.
+
+⚠️ **This closes the *invisible* route and not `[R3-L5-01]`.** That finding is an attacker-chosen
+`ImageSource::Linked` URL reaching the live document and being written verbatim into every SVG export
+as an `href`, and a payload whose node carries an image fill keyed to the entry passes this filter
+untouched — as it must, or a real picture would stop crossing. What is narrowed is the entry the
+payload does **not** draw; the finding stands.
+
+⚠️ **The filter exposed a test that had been asserting something its own fixture did not do.**
+`a_clipboard_payload_carries_the_image_table_entries_it_keys_into` handed `write` an entry **nothing
+referenced** while asserting *"the table entry the nodes key into crosses with them"* — the claim and
+the fixture disagreed, and it passed because `parse` carried whatever it was given. The fixture
+paints a descendant with the image before capturing now. *A test that over-specifies in its name and
+under-specifies in its fixture stays green until something makes the difference matter*, and what
+made it matter here was a guard written for an unrelated reason.
+
+**D835 — `ClipDto::subtrees` stated a rule in the format's own voice and nothing checked it. *Fixed
+and tested 2026-09-22; Keep.***
+
+`[X2-L2-02]`, Low, and what keeps it from being lower is *which two readers disagree*. The field's
+doc says the first entry is that subtree's root, and the paste path reads it that way:
+`paste_clipboard_at` takes both the destination **parent** and the *just above what it came from*
+z-slot from `template.first()`. `document::remap_subtree` and `build::insert_subtrees` locate the
+**real** root by predicate — `parent.is_none_or(|p| !set.contains(&p))`. So a reordered payload had
+its placement computed from one node and applied to another, landing a paste inside a group the user
+did not choose, in the same-document-in-two-windows case where a foreign parent id does resolve
+(§10).
+
+**Refused rather than reordered.** The rule is the format's, so a payload breaking it is malformed
+rather than merely inconvenient; and silently reordering would leave `capture_subtree`'s guarantee
+untested on both sides, which is the state that produced this. ⚠️ **A position and a predicate are
+two ways of answering one question, and a wire format is where they are first allowed to disagree** —
+both readers are correct about every payload this process writes, and neither is a defect until
+something else may write one.
+
+**D836 — Five of `parse`'s six decisions had no test, and the sixth cannot be reached from the wire —
+which is worth asserting rather than leaving to look untested. *Tested and measured 2026-09-22;
+Keep.***
+
+`[R2-L6-01]`, High. `parse` decides six things about text off the OS clipboard and only the
+`schema_version` mismatch was exercised — so the check whose own comment argues it prevents **silent
+partial loss on paste** (*"a payload with one bad subtree in five would paste four layers and say it
+pasted four, with nothing anywhere naming the one that vanished"*) was itself unasserted, and
+deleting it left the workspace green. `every_refusal_the_clipboard_door_makes_has_a_test` covers the
+rest, with D834's drop beside them for the contrast.
+
+⚠️ **Each fixture is written out as JSON rather than produced by `write`**, because four of them are
+states `write` cannot reach. That is the point: they model a payload from somewhere else, which is
+the only kind that can be hostile. 🚨 **And they assert the *message*, not `is_err()`.** With the
+empty-subtree refusal gone the payload is still refused — the root scan finds nothing and reports *"a
+clipboard subtree has 0 roots"* — so a test asking only whether it errored stays green while the user
+is told the wrong thing about their own clipboard. The refusal and the diagnosis are two claims and
+only one of them survives that mutation.
+
+**`Payload::from` crossed in every payload and was `None` in every `write` call in the workspace.**
+It is what `paste_aim` points *Paste here* with, so an `Option<[f64; 4]>` → `Rect` path that dropped
+or mangled the box would land a paste in the wrong place with nothing able to fail on it; the first
+half of `the_paste_here_box_makes_the_round_trip_and_a_broken_one_cannot_arrive` asserts that a real
+box survives.
+
+🚨 **The second half is a measurement, and it changes what the guard beside it means.** `parse`
+filters a non-finite `from`, and **that filter cannot be reached through `read` at all**: the only
+door is JSON, and `serde_json` refuses every spelling of a non-finite `f64` — it writes `NaN` as
+`null` and then rejects `null` where an `f64` is wanted, and rejects an overflowing literal outright,
+`1e999` coming back as `Serde("number out of range")` from `from_str`, one function *before* the
+filter. That is `io::schema`'s own recorded argument for why the loader carries no finiteness check
+(D421), arriving at the clipboard door. The test therefore asserts the **serde refusal**, which is
+the only observable form the claim has.
+
+**The filter is kept, and the reason it is kept is not D639's.** It costs one expression, and `parse`
+is one `pub` away from a caller that is not JSON. But D639's *"no external route"* was a fact about
+who happens to call a function today, and `io::clip` falsified it inside a fortnight; this is a
+property of the **format**, and a format does not acquire a new caller quietly. *An unreachable guard
+is recorded by saying what makes it unreachable, because the two kinds of unreachability expire at
+very different rates.*
+
+⚠️ **The mutations are named by function rather than by text** (§15 D803). Five on `parse`'s clauses,
+each red only at its own row, and the single-root one is the plausible wrong version rather than a
+deletion — `roots.first()`, which still refuses zero and now accepts two. Three on
+`op_insert_subtree`'s, **one clause at a time**: replacing the whole walk with the old count also
+removes the depth bound, so the table-driven test aborts at case one and two of its three assertions
+are never observed. 🚨 **That mutation looks decisive and measures a third of what it claims to** —
+D803's slip with the sign reversed, where naming the edit by what it removes overstates the result
+instead of manufacturing a false negative. Disabling one clause at a time is what shows these are
+three guards and not one: under the cycle flip the depth case stays green, and under the depth flip
+the cycle case does.
 
 **D227 — The missing-font warning gets its UI half, and the third state it needed first.
 *Built 2026-08-19.*** §5.4a carried this as a **gap rather than a decision** for as long as it was one,
@@ -29555,13 +29799,24 @@ guard written against one compiles happily while missing the other. Two doors as
 and `op_insert_subtree`'s per-node field loop, which was already asking `kind.geometry_is_finite()`
 and `affine_is_finite(transform)` and not the third coordinate a node carries.
 
-⚠️ **No external route reaches the `InsertSubtree` guard, and this entry says so rather than claiming
-a closed hole.** Every field of `Node` is `pub(crate)`, so outside the crate a `Vec<Node>` can only
-come from `capture_subtree` — from a document the operation guards have already vetted. It is kept
-for the same reason and in the same register as `io::MAX_TREE_DEPTH`'s doc, *the traffic the model
-cannot vouch for*, and that is why its test lives in `document.rs`'s own `mod tests`
+⚠️ ~~**No external route reaches the `InsertSubtree` guard, and this entry says so rather than
+claiming a closed hole.** Every field of `Node` is `pub(crate)`, so outside the crate a `Vec<Node>`
+can only come from `capture_subtree` — from a document the operation guards have already vetted. It
+is kept for the same reason and in the same register as `io::MAX_TREE_DEPTH`'s doc, *the traffic the
+model cannot vouch for*, and that is why its test lives in `document.rs`'s own `mod tests`
 (`insert_subtree_refuses_a_non_finite_pivot`) rather than in `tests/io.rs` beside the operations a
-caller outside the crate can actually reach.
+caller outside the crate can actually reach.~~ 🚨 **`io::clip` is that route, as of 2026-09-22**
+(§15 D823, D832). A paste is OS-clipboard text, which no operation guard has seen and which any web
+page's *Copy* button can write, so this guard is load-bearing on a route that exists and the pivot
+arm is the only one of four that was already there. **The hedge was the useful half of the
+paragraph**: the claim was framed as *"this entry says so rather than claiming a closed hole"*, and
+what makes the sentence dangerous is not that it was wrong but that three other guards were left
+unwritten on the strength of it — see D831 for paint and D832 for reachability and depth. ⚠️ **The
+test stays in `document.rs`'s `mod tests` and that placement is now argued differently**: it is there
+because it builds a `Vec<Node>` by hand, not because nothing outside could. The end-to-end proof that
+the *reachable* payload is refused lives in `tests/io.rs`
+(`a_hostile_clipboard_payload_is_refused_and_leaves_the_document_openable`), which is where a route
+that exists belongs.
 
 ⚠️ **This is not invariant 8 gaining a family.** A pivot *is* a coordinate — the rule has said
 geometry, transform and guide position since it was written, and the enforcement test's own name has
@@ -42634,8 +42889,16 @@ fails with *"node(s) are not reachable from the root"*. **The loader has enforce
 written** — check (5), the reachability walk — so the two doors into the tree were held to different
 standards, which §5.11 says they must not be.
 
-The fix is one comparison, `claimed.len() + 1 != nodes.len()`, and every production caller already
-satisfies it: both `InsertSubtree` sites feed `remap_subtree` output from a single fresh capture. ⚠️
+~~The fix is one comparison, `claimed.len() + 1 != nodes.len()`, and every production caller already
+satisfies it: both `InsertSubtree` sites feed `remap_subtree` output from a single fresh capture.~~
+🚨 **Both halves of that sentence are false now, and each in its own way** (§15 D832). The comparison
+was **arithmetic standing in for the walk it was copying**, and a cycle balances it: `[R, A, B]` with
+`A` and `B` naming each other passes every other check in the function and makes `2 + 1 == 3`, so a
+component reachable from nothing went in, committed and saved. It is a reachability walk now, which
+is what the loader's check (5) always was. And the caller sentence is false in the word **capture**
+rather than in the word *both* — there are still exactly two `InsertSubtree` sites,
+`build::insert_subtrees` and `canvas::clone_tx`; what changed is that the first is now handed
+OS-clipboard text (§15 D823). ⚠️
 **That is also why the module's own premise was false rather than merely narrow** — its test doc calls
 these "malformed subtrees the public API can never produce". What reaches this is anything that
 *composes* captures: the MCP write surface, an importer, a multi-step builder, which is precisely the
@@ -42900,10 +43163,18 @@ the harness with it. Both suites assert the accepted half too (250 deep loads *a
 import with their shape and no report at all), which is what would catch a fix that simply refused deep
 files.
 
-⚠️ **The operation layer does not enforce it**, and that is recorded rather than closed: a document
+⚠️ ~~**The operation layer does not enforce it**, and that is recorded rather than closed: a document
 built by repeated `CreateNode` can still exceed what the loader will read back. Unlike the two doors
 above, no measured route reaches it — nothing in the app nests without a user click per level. *Fix if
-a builder, an importer or the MCP write surface ever nests without one.*
+a builder, an importer or the MCP write surface ever nests without one.*~~ 🚨 **That conditional fired
+on 2026-09-22, and `io::clip` is the importer** (§15 D832, `[R1-L2-02]`): 300 levels arrive in one
+paste with no click at any of them, and the document that results saves cleanly and then fails check
+(6) for the rest of time. `op_insert_subtree` carries the bound now, riding on the reachability walk
+D832 put there for its own reason — check (6)'s argument one door over — and measured against the
+**parent's** depth so it is absolute. ⚠️ **The conditional is only half spent.** `CreateNode` is still
+unbounded and a document built one node at a time can still outrun what the loader will read back; no
+measured route reaches that one either. *Fix the same way if anything ever drives `CreateNode` in a
+loop without a click per level.*
 
 **D415 — Leaving the editor commits what was typed, and the window ✕ re-arms its own cancel. *Fixed and
 tested 2026-09-06; Keep.***

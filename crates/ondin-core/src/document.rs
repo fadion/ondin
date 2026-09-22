@@ -744,9 +744,12 @@ impl Document {
         // different standards, which §5.11 says they must not be. ⚠️ **D423's
         // own closing sentence read *"Every production caller already satisfies
         // it: both feed `remap_subtree` output from a single fresh capture"*,
-        // and `io::clip` made it false** — there are three `InsertSubtree` sites
-        // now, and the third is OS-clipboard text, which is not a capture and
-        // not this process's (§15 D832).
+        // and `io::clip` made it false** — but not by adding a site, which is
+        // the easy way to misread it: there are still exactly two,
+        // `build::insert_subtrees` and `canvas::clone_tx`. What changed is the
+        // **template** the first of them is handed, which is now OS-clipboard
+        // text rather than a capture out of this process's own vetted document.
+        // The false word in that sentence is *capture*, not *both* (§15 D832).
         //
         // 🚨 **And a count is not a reachability check: a cycle balances it**
         // (§15 D832). With `nodes = [R, A, B]`, `A.parent = B`, `B.parent = A`,
@@ -2318,7 +2321,13 @@ mod tests {
         }
 
         let (mut doc, _root, ab) = base();
-        let mut ids = IdSource::new(0xD0);
+        // ⚠️ A hex seed of `D` followed by digits alone is read by the D-number
+        // census as a dangling citation — its sieve is `D[0-9]{1,3}` with a word
+        // boundary, which a bare one satisfies and which the `…C`-suffixed seeds
+        // elsewhere in the tree do not. This one is a letter pair for that
+        // reason. (Naming the offending literal here would reintroduce it: the
+        // census greps source, and a comment is source.)
+        let mut ids = IdSource::new(0xDA);
         assert!(
             matches!(
                 insert(&mut doc, chain(&mut ids, MAX_TREE_DEPTH + 8), ab),

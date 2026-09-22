@@ -316,6 +316,14 @@ permission.
    weighs the `ImageRef` hanging off the brush — its crop rectangle, its tile scale and its seven
    adjustment sliders — which are this crate's numbers rather than peniko's, and which a check written
    by reading `peniko::Brush` stops short of.
+   ⚠️ **A *third* door asks it, and it took until 2026-09-22 to be added** (§15 D831):
+   `op_insert_subtree`'s field loop, which had grown the pivot and the effects arms and not this one.
+   That is the door `io::clip` opened to OS-clipboard text (§15 D823), and it is where this rule is
+   sharpest — every `NaN` the predicate refuses dies at `serde_json::from_str` one function earlier
+   (§15 D421), so what the paste can actually deliver is the single **finite out-of-range** number a
+   brush carries, `GradientBrush::opacity`, checked below by `valid_opacity` rather than by
+   `is_finite`. **The family with no reachable value and the family with one are guarded identically
+   here on purpose**: which is which is a property of today's wire format, not of the model.
    ⚠️ **The pivot was inside this rule and outside the code, which is the harder direction to see**
    (§15 D639). `op_set_pivot` validated nothing, so a `Normalized(NaN, 0)` reached the model, saved as
    `null` and made the file unopenable — the same ending as a non-finite transform, reached by a value
@@ -2709,9 +2717,19 @@ pub enum OpError {
   malformed subtrees, opacity out of range, ops applied to an unsupporting `NodeKind`.
 - `InsertSubtree` validates the *whole* subtree, not just its root: every internal parent/child
   pair goes through the same kind rules as `CreateNode`, no node may be a second `Root`, no node
-  may be listed as a child twice, and opacities must be in range. It is the op paste, undo-of-
+  may be listed as a child twice, **every node must be reachable from the subtree's root**, the
+  result must not nest past `io::MAX_TREE_DEPTH` once attached (`OpError::TooDeep`), and opacities
+  must be in range. It is the op paste, undo-of-
   delete, import and (later) MCP write tools all funnel through, so anything it lets past becomes
   a corrupt document that the tree walks then have to survive.
+  ⚠️ **That last sentence was always true and the code caught up with it on 2026-09-22** (§15 D831,
+  D832). Until `io::clip` (§15 D823) a `Vec<Node>` could only come from `capture_subtree`, and three
+  separate guards were left unwritten on the strength of it. **Reachability is a walk and not a
+  count** — the arithmetic it replaced balances on a cycle — **the depth bound is measured against
+  the destination parent's depth** so it is absolute rather than subtree-relative, and the per-node
+  field loop asks `build::brush_is_finite` alongside the geometry, the transform, the pivot and the
+  effects (§2 invariant 8). The payload now arrives as OS-clipboard text, which no operation guard
+  has seen.
 
 ### 5.7a Composite builders & the world-space facade (`build.rs`)
 
@@ -3429,6 +3447,16 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   in a build written years later; a clipboard is a handoff between two processes running now, and
   the honest answer to a schema this build does not know is to say so. *Do not "fix" that asymmetry
   by routing `clip` through `migrate.rs`* — it is the decision, not an omission.
+  ⚠️ **`io::clip::read` carries the envelope's own integrity checks, which are not the tree's**
+  (§15 D833, D834, D835, D836). The **fence is a marker and not a landmark** — it answers *is this
+  ours* and the payload is located as the final line, which makes `write`'s single-line
+  `serde_json::to_string` load-bearing rather than a size choice. Beyond the version, `parse` refuses
+  an empty subtree, a subtree with other than exactly one root, a subtree whose root is not its first
+  entry (the field's own stated rule, which two paste decisions read by *position* while
+  `remap_subtree` reads it by *predicate*) and a duplicate image id; it **drops** an image entry no
+  node keys into, §5.11's own asymmetry for a value that is ancillary, and drops a non-finite
+  *Paste here* box. 🚨 **None of that validates the tree**, which is `op_insert_subtree`'s business
+  (§5.7) and was short of it in three places on the day this door opened.
 - **The library block is the first key after `schema_version`** (§5.11a). Its position is a decision
   about *reading* rather than about diffs: the dashboard lists a folder by reading each document's
   name, project and date, and `io::probe` reaches them from a 4 KB prefix without parsing the
@@ -3462,7 +3490,11 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   `Resolved::rebuild` — **an abort rather than a panic**, which nothing catches and which takes the
   session's unsaved work with it. It rides on the reachability walk, which was already visiting every
   node once. `svg_in` enforces a far tighter 64 at its own recursion, so an import can never build a
-  document the loader would refuse. ⚠️ **A depth bound is not a size bound, and for a fortnight nothing
+  document the loader would refuse. ⚠️ **`op_insert_subtree` enforces it as well, since 2026-09-22**
+  (§15 D832): D416 had left the operation layer unbounded on the argument that nothing in the app
+  nests without a user click per level, and `io::clip` is the importer that does — 300 levels in one
+  paste, saving cleanly and then failing this check for ever. `CreateNode` in a loop is still
+  unbounded and still has no measured route. ⚠️ **A depth bound is not a size bound, and for a fortnight nothing
   was** (§15 D446): `<use>` instancing branches, so 843 bytes of markup expanded to 16,384 shapes and
   the cap on `<use>` nesting admits 65,536 — three instantiations per level rather than two is an
   allocation failure, which is an abort. `MAX_SVG_NODES` (50,000) is asked at the top of
@@ -3480,9 +3512,17 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   the set it is handed; it walked from each node to its listed children and never asked the converse —
   whether every non-root node **is** somebody's child — so a set composed from two `capture_subtree`
   snapshots taken at different moments inserted an orphan, which then panicked `DeleteNode`, `Reparent`
-  and `Reorder` and saved a file the loader's own check (5) rejects. One comparison
-  (`claimed.len() + 1 != nodes.len()`) closes it. *Two doors into the tree held to different standards
-  is exactly what this section says must not happen.*
+  and `Reorder` and saved a file the loader's own check (5) rejects. ~~One comparison
+  (`claimed.len() + 1 != nodes.len()`) closes it.~~ 🚨 **One comparison did not close it, and the
+  arithmetic was standing in for the walk it was copying** (§15 D832): a two-node cycle balances the
+  count exactly — `2 + 1 == 3` — while being reachable from nothing, so that set inserted, committed
+  and saved a file `io::load` refused with *"2 node(s) are not reachable from the root"*. It is a
+  reachability walk now, the same algorithm as check (5). ⚠️ **The depth bound rides on it there too**,
+  for the reason the bullet above gives, and it is measured against the *destination parent's* depth,
+  since the loader's bound is absolute and a subtree-relative check passes two chains that compose
+  past it. *Two doors into the tree held to different standards
+  is exactly what this section says must not happen* — and a check that is *shaped* like the one over
+  the way is not the same standard as the one over the way.
 - ⚠️ **There is deliberately no finiteness check here, and that is a measurement rather than an
   omission** (§15 D421). One was written and removed as unreachable: `serde_json` writes a non-finite
   `f64` as `null`, refuses `null` where an `f64` is wanted, and refuses an overflowing literal like

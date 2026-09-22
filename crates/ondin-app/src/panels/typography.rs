@@ -3324,26 +3324,20 @@ impl OndinApp {
     /// engagement latch is D316's, spelled here for the same reason it is
     /// spelled in `multi_valve`.
     ///
-    /// ⚠️ **And a third arm, which the other two valves do not need.** A
-    /// `changed()` frame on a control that was **never engaged** commits at
-    /// once, which is exactly what this did before — the case a
-    /// falling-edge-only valve has no transition to spend. A typed `DragValue`
-    /// never takes that arm, because its keystroke frames hold focus.
+    /// 🚨 **There were three arms and there are two** (§15 D812, ruled by the
+    /// maintainer; the body carries the full account at the site of the
+    /// deletion). This paragraph described the third in the present tense for
+    /// as long as it did not exist — *"a `changed()` frame on a control that was
+    /// never engaged commits at once"*, *"whether anything reaches this arm is
+    /// open"*, *"deleting the arm breaks no test today"* — and all three
+    /// sentences were false at `HEAD`: there is no third arm, the question was
+    /// ruled on, and deleting or restoring it now breaks two tests (§15 D840).
     ///
-    /// 🚨 **The arm was kept for the picker's raw sensed regions and they do
-    /// not reach it** (§15 D802). This paragraph used to name them — the hue
-    /// slider and the alpha strip, arriving through `CharWrite::Valve` — and to
-    /// argue that without the arm *"a falling-edge-only valve would never commit
-    /// it at all"*. Measured with all three arms instrumented,
-    /// `picker::pointer_slot` answers
-    /// `if resp.clicked() { self.write_slot(…); return; }` **before** it would
-    /// reach `valve_slot`, so such a click never enters this function at all. A
-    /// *drag* enters it as the engaged arm and its release as the falling edge,
-    /// and on those frames `changed()` is never true — a raw sensed region is
-    /// written through `write_stop_colour` and is marked changed by nothing.
-    /// **Whether anything reaches this arm is open**, and is a maintainer
-    /// question rather than a missing test: there are seven call sites and D802
-    /// measured one. Deleting the arm breaks no test today.
+    /// ⚠️ **The commit that removed the arm rewrote the comment *inside* the
+    /// function and not the doc above it**, which is the shape worth naming:
+    /// the body and the doc of one function drifted apart in one edit, and the
+    /// doc is the half a reader meets first. A reader repairing the code to
+    /// match this would have restored the arm.
     fn char_valve(&mut self, resp: &egui::Response, subject: &TypeSubject, attr: CharAttr) {
         if subject.partial {
             self.arm_session_scrub(resp, subject.id);
@@ -3565,15 +3559,29 @@ impl OndinApp {
                 // size, through the same [`px_range_for`] the field itself uses, so
                 // the chord and the scrub cannot come to disagree about the cap in
                 // the unit the user happens to be in.
-                let next = match step_length(current, step, TRACKING_STEP_EM, TRACKING_STEP_PX) {
-                    Length::Em(v) => {
-                        Length::Em(v.clamp(MIN_TRACKING_PCT / 100.0, MAX_TRACKING_PCT / 100.0))
-                    }
-                    Length::Px(v) => {
+                // ⚠️ **[`stepped_into`] and not `clamp`**, which is the whole of
+                // §15 D840: a bare clamp here honoured D817 and broke D425, by
+                // rewriting a stored out-of-range value the paragraph above says
+                // this panel deliberately shows rather than rewrites.
+                let next = match (
+                    current,
+                    step_length(current, step, TRACKING_STEP_EM, TRACKING_STEP_PX),
+                ) {
+                    (Length::Em(c), Length::Em(v)) => Length::Em(stepped_into(
+                        c,
+                        v,
+                        MIN_TRACKING_PCT / 100.0..=MAX_TRACKING_PCT / 100.0,
+                    )),
+                    (Length::Px(c), Length::Px(v)) => {
                         let r =
                             px_range_for(MIN_TRACKING_PCT..=MAX_TRACKING_PCT, subject.font_size());
-                        Length::Px(v.clamp(*r.start(), *r.end()))
+                        Length::Px(stepped_into(c, v, r))
                     }
+                    // `step_length` returns the unit it was handed, so a mixed
+                    // pair cannot arise; taking the step unbounded is the honest
+                    // answer if it ever does, since the bound would be in the
+                    // wrong unit.
+                    (_, stepped) => stepped,
                 }
                 .canonical();
                 self.apply_char_attrs(&subject, vec![CharAttr::LetterSpacing(next)]);
@@ -3590,7 +3598,35 @@ impl OndinApp {
                 let from = current
                     .or_else(|| subject.line_height.map(Length::Px))
                     .unwrap_or(Length::Em(1.0));
-                let next = step_length(from, step, LEADING_STEP_EM, LEADING_STEP_PX);
+                // 🚨 **The identical defect §15 D817 fixed three arms up, left
+                // standing here** (§15 D840). This arm ended in `step_length`
+                // with no range expression at all, and `Length::canonical`
+                // rounds and normalises `-0.0` without bounding — so a held
+                // `Alt`+`↓` walked line height **negative**, straight out of the
+                // field's `0..=1000%` and into `parley_line_height`. D817's own
+                // entry is about the tracking arm and this one was never read
+                // beside it; the fix that closes both is one predicate, which is
+                // the argument for [`stepped_into`] existing rather than each
+                // arm carrying its own bound.
+                let next = match (
+                    from,
+                    step_length(from, step, LEADING_STEP_EM, LEADING_STEP_PX),
+                ) {
+                    (Length::Em(c), Length::Em(v)) => Length::Em(stepped_into(
+                        c,
+                        v,
+                        MIN_LINE_HEIGHT_PCT / 100.0..=MAX_LINE_HEIGHT_PCT / 100.0,
+                    )),
+                    (Length::Px(c), Length::Px(v)) => {
+                        let r = px_range_for(
+                            MIN_LINE_HEIGHT_PCT..=MAX_LINE_HEIGHT_PCT,
+                            subject.font_size(),
+                        );
+                        Length::Px(stepped_into(c, v, r))
+                    }
+                    (_, stepped) => stepped,
+                }
+                .canonical();
                 self.apply_char_attrs(&subject, vec![CharAttr::LineHeight(Some(next))]);
             }
             // Node-level, so this is a paragraph-style commit rather than a span
@@ -4219,10 +4255,16 @@ fn axis_coords_after(
 /// only amount that read wrong. **Widening this is a decision, not an
 /// oversight.**
 ///
-/// ⚠️ **It hands back the *first* value, not the default.** The unit chip reads
-/// its suffix off whatever comes back, so returning `Px(0.0)` for a document the
-/// user had set to `%` would flip the chip back to `px` under them — which is
+/// ⚠️ **It hands back the first value that cannot be the default.** The unit chip
+/// reads its suffix off whatever comes back, so returning `Px(0.0)` for a
+/// document the user had set to `%` flips the chip back to `px` under them —
 /// D537's own symptom arriving by a new road.
+///
+/// 🚨 **This paragraph used to say *"the first value, not the default"*, and
+/// that was a coincidence rather than a guarantee** (§15 D840). `values_in`
+/// answers in document order, and for every selection whose explicit run is not
+/// at the head the first value **is** the default — so the sentence described
+/// the one case it was not protecting. It is a rule now, and the body says how.
 ///
 /// ⚠️ **This doc was stolen and put back on 2026-09-19** (§15 D804). Inserting
 /// `marker_attrs` above it, anchored on this `fn` line rather than on the line
@@ -4233,11 +4275,34 @@ fn axis_coords_after(
 /// what caught this one was the neighbour grep run once more at the end, which is
 /// the argument for running it as a routine rather than on suspicion.
 fn agreed_zero<A>(values: Vec<A>, length_of: impl Fn(&A) -> Option<Length>) -> Option<A> {
-    values
+    if !values
         .iter()
         .all(|v| length_of(v).is_some_and(|l| l.is_zero()))
-        .then(|| values.into_iter().next())
-        .flatten()
+    {
+        return None;
+    }
+    // 🚨 **The first value that *cannot* be the default, and only then the
+    // first** (§15 D840). `Spans::values_in` answers in **document** order, so
+    // "the first value" is the one at the start of the selection — and for any
+    // selection whose explicit run is not at the head, that is the node default.
+    // A layer with `%` typed over characters 4..8 and the default over 0..4 read
+    // back `px` for the whole word, and the same document with the run at the
+    // head read `%`: the unit chip flipped under the user on the strength of
+    // where they happened to start selecting.
+    //
+    // **`Length::ZERO` is `Px(0.0)` and is what every one of these six
+    // attributes defaults to**, so a `Px(0.0)` in this set *may* be nobody's
+    // choice while an `Em(0.0)` is always somebody's. That is what makes this a
+    // rule rather than a preference between two units. Where both are explicit —
+    // px typed on one run, `%` on another, both zero — the two are equally
+    // defensible and this is a tie-break; the alternative the review raised, the
+    // value at the caret, is the better answer to *that* case and needs a caret
+    // this function is not given.
+    let pick = values
+        .iter()
+        .position(|v| length_of(v) != Some(Length::ZERO))
+        .unwrap_or(0);
+    values.into_iter().nth(pick)
 }
 
 fn length_attr(kind: CharAttrKind, l: Length) -> CharAttr {
@@ -5678,6 +5743,33 @@ fn step_length(current: Length, step: i8, em: f64, px: f64) -> Length {
         Length::Px(v) => Length::Px(v + d * px),
     }
     .canonical()
+}
+
+/// A chord's stepped value, bounded by `range` **widened to admit `from`**.
+///
+/// 🚨 **Two decisions have to hold at once here and a bare `clamp` breaks one of
+/// them** (§15 D840). §15 D817 says a held key stops where the field stops;
+/// §15 D425 says a control **shows** a stored out-of-range value rather than
+/// rewriting it, which is why these caps sit on the chord and not in
+/// `TextStyle::set`. An unconditional `clamp` honours the first and violates the
+/// second: with a stored `Em(5.0)` — 500%, legal, and a file may hold one —
+/// `Alt`+`→` stepped to `5.0 + step` and then clamped to `MAX_TRACKING_PCT`,
+/// so **the increase key decreased tracking by 300 percentage points** in one
+/// press, and the value the user had was gone.
+///
+/// Widening the range by `from` gives both: inside the range this is exactly
+/// `clamp`, so a held key still stops at the field's ends; outside it, the step
+/// may move **toward** the range freely and is pinned at `from` going away from
+/// it. So the out-of-range value is never rewritten by a key that was asked to
+/// nudge it, and a user who holds the key in the sensible direction walks it
+/// back into range and then stops there.
+///
+/// ⚠️ **Not the same as "skip the clamp when out of range"**, which is the
+/// other obvious repair and is wrong in the away direction: it lets `Alt`+`→`
+/// on a stored 500% walk to 600% and further, which is a control with no cap at
+/// all for exactly the documents that most need one.
+fn stepped_into(from: f64, next: f64, range: std::ops::RangeInclusive<f64>) -> f64 {
+    next.clamp(range.start().min(from), range.end().max(from))
 }
 
 /// Field bounds. Caps on the *controls*, not on the model — any finite value is a
@@ -7893,18 +7985,21 @@ mod tests {
     ///
     /// ⚠️ **And flipped a second way, which is why there are two assertions and
     /// not one.** Returning a different one of the agreeing values — `.last()`
-    /// in place of `.next()` — leaves the `mixed` assertion **green** and fails
-    /// the second at `Px(0.0)` against `Em(0.0)`. Nothing about the dash-or-digits
-    /// question can see that, and what it breaks is the unit chip: it reads its
-    /// suffix off this value, so a `%` document would flip to `px` under the
-    /// user. **A test that only asked "is it mixed" would have shipped D537's
-    /// own symptom by a new road.**
+    /// in place of the non-default pick — leaves the `mixed` assertion **green**
+    /// and fails the second at `Px(0.0)` against `Em(0.0)`. Nothing about the
+    /// dash-or-digits question can see that, and what it breaks is the unit
+    /// chip: it reads its suffix off this value, so a `%` document would flip to
+    /// `px` under the user. **A test that only asked "is it mixed" would have
+    /// shipped D537's own symptom by a new road.**
+    ///
+    /// 🚨 **And it shipped it anyway, because the fixture only ever put the
+    /// explicit run at the head** (§15 D840). Both flips above were run against
+    /// the one ordering document order answers correctly. Restoring
+    /// `values.into_iter().next()` is now red on the `4..8` case and **green on
+    /// the `0..4` case** — the two arms of one loop disagreeing, which is what
+    /// says the ordering is the subject rather than the units.
     #[test]
     fn a_zero_letter_spacing_in_two_units_is_not_mixed() {
-        let style = TextStyle::default();
-        let mut spans = CharSpans::default();
-        spans.set(0..4, CharAttr::LetterSpacing(Length::Em(0.0)), &style);
-
         assert_ne!(
             Length::Em(0.0),
             Length::Px(0.0),
@@ -7912,23 +8007,36 @@ mod tests {
              compare equal this test proves nothing"
         );
 
-        let mut across = subject_of(style, spans);
-        across.partial = true;
-        across.range = 0..8;
+        // 🚨 **Both orderings** (§15 D840). The explicit run at the head was the
+        // only one covered, and it is the one case document order gets right:
+        // with the run at 4..8 the first value is the *default*, and this test
+        // reported `Px(0.0)` in its own words while claiming to prevent exactly
+        // that. One character of the fixture separated a passing test from the
+        // defect it was written to catch.
+        for at in [0..4, 4..8] {
+            let style = TextStyle::default();
+            let mut spans = CharSpans::default();
+            spans.set(at.clone(), CharAttr::LetterSpacing(Length::Em(0.0)), &style);
 
-        assert!(
-            !across.mixed(CharAttrKind::LetterSpacing),
-            "zero over here and zero over there is zero: the ink is identical \
-             and the field must show a number, not a dash"
-        );
-        assert_eq!(
-            across.shared(CharAttrKind::LetterSpacing),
-            Some(CharAttr::LetterSpacing(Length::Em(0.0))),
-            "and it comes back in the unit the user chose, because the chip \
-             reads its suffix off this — handing back the Px default would flip \
-             a percent document to px under them, which is D537's symptom by a \
-             new road"
-        );
+            let mut across = subject_of(style, spans);
+            across.partial = true;
+            across.range = 0..8;
+
+            assert!(
+                !across.mixed(CharAttrKind::LetterSpacing),
+                "zero over here and zero over there is zero: the ink is \
+                 identical and the field must show a number, not a dash \
+                 (explicit run at {at:?})"
+            );
+            assert_eq!(
+                across.shared(CharAttrKind::LetterSpacing),
+                Some(CharAttr::LetterSpacing(Length::Em(0.0))),
+                "and it comes back in the unit the user chose, because the chip \
+                 reads its suffix off this — handing back the Px default would \
+                 flip a percent document to px under them, which is D537's \
+                 symptom by a new road (explicit run at {at:?})"
+            );
+        }
     }
 
     /// **A real disagreement still reads *Mixed*** — the control for the test
@@ -8921,27 +9029,23 @@ mod char_valve_tests {
         );
     }
 
-    // 🚨 **The third arm — a `changed()` frame on a control that was never
-    // engaged — has no test here, and as of 2026-09-19 that is because its
-    // documented users cannot reach it** (§15 D802). This comment used to say
-    // *"writable now and unwritten"*; it was written, and what the writing found
-    // is that the route does not exist.
+    // 🚨 **The third arm is gone and the question was answered** (§15 D812,
+    // ruled by the maintainer). This comment stood through the deletion saying
+    // *"the third arm … has no test here"* and *"what is owed is not a test but
+    // a question"* — both true when written, both false from the moment the arm
+    // was removed later in the same range (§15 D840).
     //
-    // §15 D523 kept the arm for the picker's raw sensed regions arriving through
-    // `CharWrite::Valve` — the hue slider and the alpha strip — on the reasoning
-    // that *"without it a click on the hue strip would commit nothing, ever"*.
-    // Measured by driving that click on a real picker over a text layer, with
-    // all three arms instrumented: `picker::pointer_slot` answers
-    // `if resp.clicked() { self.write_slot(…); return; }` **before** it would
-    // reach `valve_slot`, so a click never enters `char_valve` at all; a *drag*
-    // enters it as the engaged arm and its release as the falling edge; and on
-    // every frame it is entered here, `changed` is **false**, because a raw
-    // sensed region is written through `write_stop_colour` and is never marked
-    // changed by anything. The arm is carried on a reason that does not hold.
+    // The history, because it is the useful half: §15 D523 kept the arm for the
+    // picker's raw sensed regions arriving through `CharWrite::Valve`, on the
+    // reasoning that *"without it a click on the hue strip would commit nothing,
+    // ever"*. §15 D802 measured that and found `picker::pointer_slot` answers
+    // through `write_slot` before it could reach `valve_slot`, so a click never
+    // entered `char_valve` at all. §15 D803 then found the one thing that did
+    // reach it and it was a hazard rather than a user. D812 deleted it.
     //
-    // ⚠️ **What is owed is not a test but a question**: does anything reach this
-    // arm? `char_valve` has seven call sites and this measured one of them.
-    // `picker::text_colour_route_tests` is the route that *is* covered now.
+    // **The test is `valve_arm_tests::a_changed_frame_with_no_engagement_commits_nothing`**,
+    // about 1,600 lines below this in the same file — which is why a reader here
+    // would conclude there is none.
 }
 
 #[cfg(test)]
@@ -9051,18 +9155,40 @@ mod skip_ink_tests {
     /// latch", and it has been false since §15 D523** gave the valve the latch;
     /// the verdict survives the correction because the latch is not what would
     /// absorb this. An idle egui-initiated rewrite is a `changed()` frame on a
-    /// control holding no focus, which is the valve's **third** arm — it
-    /// commits at once, having no engagement to wait on — so the opt-out is
-    /// still the only thing in the way (§9.2 says the same).
+    /// control holding no focus, which was the valve's **third** arm — it
+    /// committed at once, having no engagement to wait on — so the opt-out was
+    /// then the only thing in the way (§9.2 said the same).
+    ///
+    /// 🚨 **That arm was deleted later in this same range (§15 D812), and it is
+    /// what this test now rests on** (§15 D840). With no third arm an idle
+    /// `changed()` frame commits nothing, so the panel has **two** independent
+    /// defences where it had one, and the opt-out is no longer *"the only thing
+    /// in the way"* — the sentence above is kept in the past tense because the
+    /// argument it carries is what the deletion replaced.
     ///
     /// ⚠️ **The in-range control is what keeps it honest**: without it, a field
     /// that had stopped reporting *any* change would pass.
     ///
-    /// ⚠️ **Flip-check, run**: removing `.clamp_existing_to_range(false)` from
-    /// `value_field_f64` fails on the first assertion with `Em(2.0)` where
-    /// `Em(3.0)` was — the finding's own numbers — while the in-range control
-    /// stays green. **Re-run and re-measured 2026-09-19** (§15 D803): still
-    /// exactly that, and the numbers are this test's as well as the finding's.
+    /// 🚨 **Flip-check: it no longer bites, and that is the finding rather than
+    /// a failed experiment** (§15 D840). Removing
+    /// `.clamp_existing_to_range(false)` from `value_field_f64` used to fail the
+    /// first assertion with `Em(2.0)` where `Em(3.0)` was — the finding's own
+    /// numbers, re-measured 2026-09-19 under §15 D803. Re-run after D812
+    /// deleted the third arm, **this test stays green** while
+    /// `ui::tests::a_stored_value_outside_a_fields_range_is_shown_rather_than_rewritten`
+    /// and the inspector's grid-panel test go red. D425's line is still
+    /// guarded — but from `ui.rs` and the inspector, which is precisely the
+    /// inheritance §15 D475 exists to prevent.
+    ///
+    /// **Measured, both defences removed together**: with the opt-out gone *and*
+    /// the third arm restored, it fails at `Em(2.0)` against `Em(3.0)` exactly
+    /// as before. So neither single mutation can redden it, and the reason is
+    /// defence in depth rather than a vacuous assertion — **a flip that does not
+    /// bite because two things must fail at once is a different animal from one
+    /// that does not bite because nothing is being tested**, and the two are
+    /// indistinguishable without running the pair. This test is kept for the
+    /// behaviour it states, and what it can no longer do is stand in for a
+    /// single-mutation guard.
     ///
     /// 🚨 **`ui.rs` makes that call at four production sites and they are not
     /// interchangeable — a re-run spent on the wrong one came back green and was
@@ -9077,15 +9203,17 @@ mod skip_ink_tests {
     /// `.clamp_existing_to_range(false)`"* does not identify it; naming the
     /// **function** does (§15 D803).
     ///
-    /// 🚨 **And the flip says which arm of `char_valve` does the damage.**
-    /// Instrumented on the failing run: **the third arm fires** — the
-    /// `changed() && !lost_focus()` one that D802 found the picker cannot reach.
-    /// So that arm is not dead; its only **known** user is this egui-initiated
-    /// rewrite — seven call sites, two of them measured — and
-    /// `clamp_existing_to_range(false)` is the only thing keeping that user from
-    /// existing. **The arm is the mechanism by which `[S6.2-L1-01]`'s clamp
-    /// became a committed document change and an undo step**, which makes
-    /// deleting it a second defence against the same bug rather than tidying.
+    /// 🚨 **And the flip said which arm of `char_valve` did the damage, which is
+    /// how that arm came to be deleted.** Instrumented on the failing run, the
+    /// third arm fired — the `changed() && !lost_focus()` one D802 found the
+    /// picker cannot reach. So its only **known** user was this egui-initiated
+    /// rewrite, and it was the mechanism by which `[S6.2-L1-01]`'s clamp became
+    /// a committed document change and an undo step. This paragraph argued that
+    /// deleting it would be *"a second defence against the same bug rather than
+    /// tidying"*; §15 D812 deleted it, so the second defence is built and the
+    /// argument is spent. Written in the past tense for that reason — a case
+    /// made for a change that has since landed is history, not a proposal
+    /// (§15 D840).
     #[test]
     fn a_stored_tracking_outside_the_fields_range_is_not_rewritten_on_an_idle_frame() {
         fn tracking(app: &OndinApp, id: NodeId) -> Length {
@@ -10767,6 +10895,20 @@ mod valve_arm_tests {
             Length::Em(MAX_TRACKING_PCT / 100.0),
             "the em face stops at the same percentage"
         );
+        // ⚠️ **The em *floor*, which nothing asserted** (§15 D840). Two arms with
+        // two ends each is four clamps and this test pinned one of them twice
+        // and another once; deleting half of D817's em clamp left the suite
+        // green. The floor is not the negation of the cap — `MIN_TRACKING_PCT`
+        // is −50 against a maximum of 200 — so an assertion that assumed
+        // symmetry would pass against the wrong number.
+        for _ in 0..800 {
+            app.text_chord(TextChord::Tracking(-1));
+        }
+        assert_eq!(
+            tracking(&app),
+            Length::Em(MIN_TRACKING_PCT / 100.0),
+            "and at the em floor, which is not the negation of the em cap"
+        );
 
         // Control: one press from zero is an ordinary step and is not clamped to
         // anything. Without this the test would pass against a chord that did
@@ -10778,6 +10920,137 @@ mod valve_arm_tests {
             tracking(&app),
             Length::Px(TRACKING_STEP_PX).canonical(),
             "control: an ordinary press still steps by one step"
+        );
+    }
+
+    /// **A held leading chord stops where the field stops** (§15 D840).
+    ///
+    /// 🚨 **The identical defect §15 D817 fixed for tracking, three arms up in
+    /// the same `match`, and it went unread beside it.** The `Leading` arm ended
+    /// in `step_length` with no range expression at all, so a held `Alt`+`↓`
+    /// walked line height **negative** — out of the field's `0..=1000%` and into
+    /// `parley_line_height` — and `Length::canonical` normalises `-0.0` without
+    /// bounding anything.
+    ///
+    /// ⚠️ **The floor is the interesting end.** The cap is 1000%, which takes a
+    /// great many presses to reach and is not where the damage was; zero is one
+    /// press away from the seeded value and is what a user holding the key
+    /// actually hits.
+    ///
+    /// Flip: [`stepped_into`] replaced by the bare `step_length` this arm used to
+    /// end in. Red at the floor, the predicted site, with a negative line height.
+    #[test]
+    fn a_held_leading_chord_stops_at_the_fields_ends() {
+        let (_ctx, mut app, id) = app_with_text();
+        app.begin_edit_text(Some(id), None);
+        let leading = |app: &OndinApp| {
+            let subject = TypeSubject::of(app, id).expect("a subject");
+            match subject.shown(CharAttrKind::LineHeight) {
+                CharAttr::LineHeight(v) => v,
+                other => panic!("the line-height slot answered {other:?}"),
+            }
+        };
+
+        for _ in 0..600 {
+            app.text_chord(TextChord::Leading(-1));
+        }
+        let at_floor = leading(&app).expect("the chord writes a line height");
+        let px_floor = px_range_for(MIN_LINE_HEIGHT_PCT..=MAX_LINE_HEIGHT_PCT, 20.0);
+        assert!(
+            match at_floor {
+                Length::Px(v) => v >= *px_floor.start(),
+                Length::Em(v) => v >= MIN_LINE_HEIGHT_PCT / 100.0,
+            },
+            "a held key must not walk line height below the field's floor, got \
+             {at_floor:?}"
+        );
+
+        // Control: one press up from there is an ordinary step, so the floor is
+        // a clamp rather than the chord having stopped working.
+        let before = leading(&app);
+        app.text_chord(TextChord::Leading(1));
+        assert_ne!(
+            leading(&app),
+            before,
+            "control: the chord still moves away from the floor"
+        );
+    }
+
+    /// 🚨 **The increase key decreased tracking by 300 percentage points**
+    /// (§15 D840).
+    ///
+    /// §15 D817's clamp was unconditional, and §15 D425 says a control **shows**
+    /// a stored out-of-range value rather than rewriting it — which is the whole
+    /// reason these caps sit on the chord and not in `TextStyle::set`. So with a
+    /// stored `Em(5.0)` (500%, legal, and a file may hold one) a single
+    /// `Alt`+`→` stepped to `5.0 + step` and clamped to `MAX_TRACKING_PCT`: the
+    /// user asked for *more* and lost 300 percentage points in one press, with
+    /// no way back to the value they had.
+    ///
+    /// **Two flips, both run, and both land on the *second* assertion** — which
+    /// is not where this doc predicted either of them. The shipped
+    /// unconditional clamp gives `Em(2.0)` against `Em(5.0)`, the 300-point loss
+    /// itself; the obvious repair, skipping the clamp whenever the value starts
+    /// out of range, gives `Em(5.01)` — it lets the *away* direction run free,
+    /// so `Alt`+`→` on a stored 500% walks to 600% and beyond, a control with no
+    /// cap at all for exactly the documents that most need one. ⚠️ **The
+    /// prediction here was that the second repair would survive to the third
+    /// assertion**, and it does not: *"nothing moves"* is strict enough to catch
+    /// both wrong versions, at values 3.0 apart. The third assertion is
+    /// therefore not the discriminator it was written as — it covers the
+    /// return-to-range behaviour, which neither flip reaches.
+    ///
+    /// ⚠️ **The fixture writes through `apply_char_attrs`, not the chord**,
+    /// because the chord is the thing under test: seeding with it would clamp on
+    /// the way in and the fixture would never reach the state this is about.
+    /// Asserted, for that reason.
+    #[test]
+    fn a_chord_does_not_rewrite_a_stored_out_of_range_tracking() {
+        let (_ctx, mut app, id) = app_with_text();
+        app.begin_edit_text(Some(id), None);
+        let tracking = |app: &OndinApp| {
+            let subject = TypeSubject::of(app, id).expect("a subject");
+            match subject.shown(CharAttrKind::LetterSpacing) {
+                CharAttr::LetterSpacing(l) => l,
+                other => panic!("the letter-spacing slot answered {other:?}"),
+            }
+        };
+
+        let stored = Length::Em(5.0);
+        let subject = TypeSubject::of(&app, id).expect("a subject");
+        app.apply_char_attrs(&subject, vec![CharAttr::LetterSpacing(stored)]);
+        assert_eq!(
+            tracking(&app),
+            stored,
+            "the fixture must reach the state: a value well outside the field's \
+             range, which D425 says the panel shows rather than rewrites"
+        );
+
+        app.text_chord(TextChord::Tracking(1));
+        assert_eq!(
+            tracking(&app),
+            stored,
+            "the increase key must not drag a stored 500% down to the cap — it \
+             asked for more and there is no more, so nothing moves"
+        );
+
+        app.text_chord(TextChord::Tracking(-1));
+        assert!(
+            matches!(tracking(&app), Length::Em(v) if v < 5.0),
+            "and the decrease key walks it back toward the range, which is the \
+             direction that has somewhere to go"
+        );
+
+        // The third behaviour: once inside, the ordinary cap applies again.
+        for _ in 0..1200 {
+            app.text_chord(TextChord::Tracking(-1));
+        }
+        assert_eq!(
+            tracking(&app),
+            Length::Em(MIN_TRACKING_PCT / 100.0),
+            "and having come back into range it stops at the field's floor like \
+             any other value — the widening is only ever by the value it started \
+             with"
         );
     }
 }

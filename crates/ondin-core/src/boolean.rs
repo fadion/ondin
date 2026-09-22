@@ -124,6 +124,9 @@
 //! exists; it segments the array instead of living inside the comparison. Re-run
 //! on 0.8.1, all eight of the counts above return a real path, and so do NaN,
 //! infinite and 1e300 operands, which is unsurprising once the sort is `total_cmp`.
+//! ⚠️ **That survey's claim is *"nothing unwinds"*, and its 1e300 case no longer
+//! describes this module** (§15 D843): [`MAX_BOOL_COORD`] is 1e150, so such
+//! operands are refused by [`evaluate`] and never reach flo_curves at all.
 //!
 //! **What is done about it: [`evaluate`] catches the unwind and answers `None`.**
 //! Of the three options — a patched fork of flo_curves, catching here, or living
@@ -376,9 +379,19 @@ pub fn evaluate(op: BoolOp, operands: &[BezPath]) -> Option<BezPath> {
 /// the hang.** Measured over `Rect::new(m, m, 2m, 2m)` against
 /// `Rect::new(1.5m, 1.5m, 2.5m, 2.5m)`: the last magnitude to answer `Some` is
 /// **10¹⁰⁰**, `10²⁰⁰` and `10³⁰⁴` already answer `None`, and the hang begins
-/// between `10³⁰⁴` and `5·10³⁰⁴`. So this refuses only geometry that was
-/// answering `None` anyway — **the bound changes no output that anyone has
-/// measured**, and what it changes is how long `None` takes to arrive.
+/// between `10³⁰⁴` and `5·10³⁰⁴`. So **on that fixture** this refuses only
+/// geometry that was answering `None` anyway, and what it changes is how long
+/// `None` takes to arrive.
+///
+/// 🚨 **Do not widen that into *"it changes no output anyone has measured"***,
+/// which is what this doc said until §15 D843 was written and is false: §15
+/// D239's 2026-08-31 survey fed *"NaN, infinite and **1e300** coordinates
+/// across three operations"*, and 1e300 is past this bound — those operands are
+/// refused at the door now and never reach flo_curves. That survey was a
+/// one-off probe rather than a committed test, so nothing broke; its precise
+/// claim, *"found nothing that unwinds"*, is untouched. **A measurement over
+/// one fixture is not a statement about every fixture**, and the scope is the
+/// whole difference between the two sentences.
 const MAX_BOOL_COORD: f64 = 1e150;
 
 /// Whether every coordinate of `path` is inside [`MAX_BOOL_COORD`].
@@ -1479,7 +1492,10 @@ mod tests {
     /// 60, 63) now returns a real path. So does every degenerate operand tried in
     /// its place — NaN, infinite and 1e300 coordinates across three operations —
     /// which is unsurprising once the sort is `total_cmp`, since that is a total
-    /// order on NaN too.
+    /// order on NaN too. ⚠️ **The claim there is *"nothing unwinds"*, and the
+    /// 1e300 case has stopped describing `evaluate`** (§15 D843): `MAX_BOOL_COORD`
+    /// refuses that magnitude before the fold, so re-running that half of the
+    /// sweep now measures the bound rather than flo_curves.
     ///
     /// **What this test now claims, and what it no longer claims.** It says the
     /// guard turns an unwind into `None` and lets a healthy boolean past; it says
@@ -1958,31 +1974,6 @@ mod tests {
         );
     }
 
-    /// A thin `Intersect` keeps its area all the way down to 10⁻⁴ world units.
-    ///
-    /// **The defect this pins was a bow-tie, not a rounding error** (§15 D794).
-    /// flo_curves' `GraphPath` merges two points closer than its own compiled-in
-    /// `CLOSE_DISTANCE` (0.01) into one, so the two *short* ends of a thin result
-    /// — each exactly the result's thickness — were collapsed to single points.
-    /// A rectangle pinched at both ends is two triangles, which is **exactly
-    /// half** the area, and that is what the sweep measured: 2.0 where 4.0 was
-    /// owed, 1.0 where 2.0 was, and at 0.001 — under `SMALL_DISTANCE` — `None`,
-    /// nothing drawn at all. [`FLO_SCALE`] is the fix.
-    ///
-    /// ⚠️ **Flipped both ways, and each flip alone reproduces the defect** —
-    /// which is why [`FLO_SCALE`] carries a four-cell matrix rather than a
-    /// sentence. `FLO_SCALE` to 1.0 fails here; `FLO_ACCURACY` to
-    /// `ACCURACY * FLO_SCALE` — the spelling that looks obviously right, since it
-    /// keeps the tolerance meaning a hundredth of a *world* unit — fails here
-    /// too, at the same thickness and with the same area. **The fix was written
-    /// that way first and this test is what caught it**, so the flip is not
-    /// hypothetical: it is the version that shipped for one `cargo test`.
-    ///
-    /// ⚠️ **The predicted site was right and the prediction under it was wrong.**
-    /// `t = 0.01` is where it fails, but only because the sweep runs coarse-first:
-    /// every thickness below it fails as well, and 0.0001 fails as `None` — the
-    /// `unwrap_or_else` rather than the area assertion. A sweep that stopped at
-    /// 0.005 would have reported a halving where the answer is an erasure.
     /// 🚨 **A boolean over enormous operands returns instead of hanging**
     /// (§15 D843).
     ///
@@ -2040,6 +2031,31 @@ mod tests {
         );
     }
 
+    /// A thin `Intersect` keeps its area all the way down to 10⁻⁴ world units.
+    ///
+    /// **The defect this pins was a bow-tie, not a rounding error** (§15 D794).
+    /// flo_curves' `GraphPath` merges two points closer than its own compiled-in
+    /// `CLOSE_DISTANCE` (0.01) into one, so the two *short* ends of a thin result
+    /// — each exactly the result's thickness — were collapsed to single points.
+    /// A rectangle pinched at both ends is two triangles, which is **exactly
+    /// half** the area, and that is what the sweep measured: 2.0 where 4.0 was
+    /// owed, 1.0 where 2.0 was, and at 0.001 — under `SMALL_DISTANCE` — `None`,
+    /// nothing drawn at all. [`FLO_SCALE`] is the fix.
+    ///
+    /// ⚠️ **Flipped both ways, and each flip alone reproduces the defect** —
+    /// which is why [`FLO_SCALE`] carries a four-cell matrix rather than a
+    /// sentence. `FLO_SCALE` to 1.0 fails here; `FLO_ACCURACY` to
+    /// `ACCURACY * FLO_SCALE` — the spelling that looks obviously right, since it
+    /// keeps the tolerance meaning a hundredth of a *world* unit — fails here
+    /// too, at the same thickness and with the same area. **The fix was written
+    /// that way first and this test is what caught it**, so the flip is not
+    /// hypothetical: it is the version that shipped for one `cargo test`.
+    ///
+    /// ⚠️ **The predicted site was right and the prediction under it was wrong.**
+    /// `t = 0.01` is where it fails, but only because the sweep runs coarse-first:
+    /// every thickness below it fails as well, and 0.0001 fails as `None` — the
+    /// `unwrap_or_else` rather than the area assertion. A sweep that stopped at
+    /// 0.005 would have reported a halving where the answer is an erasure.
     #[test]
     fn a_thin_intersect_keeps_its_area() {
         use kurbo::Shape;

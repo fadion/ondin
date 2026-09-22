@@ -9060,6 +9060,13 @@ to flo_curves is read in that scaled space. **Both figures are constants, not pa
 that varied with the zoom or with the size of the shape would make the geometry a boolean *produces*
 depend on the camera, and the same two shapes would combine to two different paths, each written into
 the document and kept. `Exclude` is composed, since flo_curves has no XOR.
+⚠️ **The scale moves every limit the library has, not only the one it was introduced for** (§15 D843):
+over operands of ~10³⁰⁴ world units flo_curves does not return, where unscaled that wall sits near
+10³⁰⁸ — three decades, exactly the factor. The band existed above and out of an `f64` coordinate's
+reach; scaling brought its lower edge into the range a document can hold. `boolean::MAX_BOOL_COORD`
+(10¹⁵⁰) closes both edges at `evaluate`, and **its size is an argument about the arithmetic rather
+than about the observed hang** — the square of 10¹⁵⁰ is 10³⁰⁰ and still finite, and areas,
+determinants and cross products are what a curve intersection computes.
 
 **Two conventions have to be reconciled, and both bit.** flo_curves works **even-odd** and Ondin fills
 **non-zero**: a hole comes back as a second subpath wound the *same* way as the outline around it, which
@@ -9457,7 +9464,15 @@ shape rather than the ring's. `Exclude` is the outlier (19.9 ms at twenty,
 1.1 s at sixty-four), and worse, some operand sets make flo_curves **panic** out of
 `GraphPath::exterior_paths` on an intransitive comparator. **No operation is exempt from that**, which is why
 the unwind is caught at the one seam they all pass through: `boolean::evaluate` answers `None` and the
-boolean draws nothing, so a wrong shape is not a lost document. The upstream defect is untouched, and the
+boolean draws nothing, so a wrong shape is not a lost document. 🚨 **That guard is blind to a *hang*,
+and the same seam bounds magnitude for it** (§15 D843): a spin is not an unwind, and over operands of
+~10³⁰⁴ world units flo_curves does not return at all — past 590 s in debug, with no panic and no
+`failures()` bump. `evaluate` runs on the **UI thread** (`Resolved::update` on open, `RenderOverrides`
+per pointer move while an operand is dragged), so that is the editor frozen with the document open,
+which is the very outcome the guard exists to prevent. `MAX_BOOL_COORD` refuses such operands before
+the fold. ⚠️ **Nothing upstream bounds magnitude** — `geometry_is_finite` tests `is_finite()` and
+nothing else, so the loader, `op_insert_subtree` and the clipboard door all pass it — which is why
+the check is at this door and not at theirs. The upstream defect is untouched, and the
 guard is inert under `panic = "abort"` — which nothing sets, and the root `Cargo.toml` says beside its
 profiles why not. **That absence is enforced rather than asked for** (§15 D445): a
 `#[cfg(panic = "abort")] compile_error!` sits beside the guard, so the setting fails the build with the

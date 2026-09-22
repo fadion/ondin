@@ -1217,6 +1217,8 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D839** — **The frame-edge pick reached one door of three and carried neither predicate, so a rule §9.4 states in as many words was false across a band four pixels wide.** `[X5-L2-01]` (**High**), `[X5-L1-01]`, `[X5-L1-02]`, `[X5-L6-01]`. §15 **D816** added `frame_edge_at` as the last link of `pick_at_pointer` and stopped there. **`begin_select_drag` builds its own chain**, whose third link is `selected_frame_at` — an *already selected* frame's whole box, silent about an unselected one — so the same pixel **selected** the frame on a click and started a **marquee** on a press, clearing `entered_group` on the way, which is the part no user would attribute to the border. **`hover_target` is the chain whose job is to agree with another chain**, and a border was selectable with no hover ring and no measure overlay. 🚨 **And the new door consulted neither predicate where both its siblings carry one** — `pick_leaf` filters through `query::hit_test`'s `is_effectively_interactable`, `frame_label_at` through `shown_visible` — so a **locked** and a **hidden** frame were each selectable by their border, against §9.4's *"the canvas never selects a locked layer, by any gesture"*. `Selection::set_one` filters nothing, which is why every door carries its own and why **a new door is exactly where this goes wrong**. ⚠️ **Both predicates, separately**: adding `shown_visible` alone is the one nearest to hand, being `frame_label_at`'s, and it passes a hidden-only test while leaving §9.4's own sentence false — measured, as the flip. *(Fixed and tested 2026-09-22; **Resolved for the edge door — and *Fix*, because the name tag is the same defect and was not in the brief.** Three tests in `canvas::frame_edge_tests`, each flip run: the shipped chain, both flags with the control asserted *first*, and the press-versus-click disagreement. 🚨 **`frame_label_at` reads `shown_visible` and no lock at all**, so a locked frame is still selectable by its **name tag** and §9.4's *"by any gesture"* is still false there; `shown_visible`'s own doc argues the lock out for *drawing* the tag, which is a different question from picking it. 🚨 **The two repairs are not symmetric and the obvious one has the cost**: a lock term on `frame_label_at` takes away the canvas's only route to *Unlock*, that tag's own menu carrying it, so the alternative — writing the tag into §9.4 as a second deliberate exception beside the layers panel's — is the one to weigh it against rather than to skip. §9.4 amended in two places, the door list and the lock rule)*
 - **D840** — **The typography chords bound without rewriting, and three of this panel's own sentences had outlived the code they describe.** `[X4-L1-01]`–`[X4-L1-03]`, `[X4-L6-01]`, `[X4-L6-02]`, `[X4-L3-01]`, `[R2-L8-04]`, `[R2-L6-03]`. **(a)** The `Leading` arm ended in `step_length` with **no range expression at all** — §15 **D817**'s identical defect three arms up in the same `match`, never read beside it — so a held `Alt`+`↓` walked line height **negative**, out of `0..=1000%` and into `parley_line_height`, `Length::canonical` normalising `-0.0` without bounding. **(b)** D817's own clamp was **unconditional**, which honoured D817 and broke §15 **D425**: with a stored `Em(5.0)` — 500%, legal, and a file may hold one — `Alt`+`→` stepped and then clamped to `MAX_TRACKING_PCT`, so **the increase key decreased tracking by 300 percentage points**. `stepped_into` widens the range by `from`, which is exactly `clamp` inside the range and pins the *away* direction outside it. **(c)** `agreed_zero` hands back the first value that **cannot** be the default; **(d)** the third arm D812 deleted was still described in the present tense at three sites. *(Fixed and tested 2026-09-22; **Resolved — extends D817 and amends D425's citation, D799, D812 and D475.** 🚨 **A flip that does not bite because two defences must fail together is a different animal from one that does not bite because nothing is tested, and the two are indistinguishable without running the pair** — §15 D803's trap one level up)*
 - **D841** — **`Escape` still committed a typed colour at two hex fields §15 D808 never reached, and the gate whose *name* reads like it covers the class cannot see it.** `[X6-L1-02]` and `[R1-L2-05]`. **(a)** `picker::hex_row` and `typography::char_hex` both decided they were finished on a bare `lost_focus()`, so the key that cancels everywhere else **applied** the edit — **the same input and the same two numbers D808 records as the bug**, at two sites that entry did not enumerate; it named the four it audited and never claimed four was the population, so this is a gap and not a live entry re-argued. ⚠️ **The *write* is what `Escape` suppresses and not the block**, which is the trap: both sites clear their text buffer inside the same `lost_focus()` arm, and gating the whole arm — the first shape this fix took — leaves a cancelled edit's typed text sitting in the field for the next person to find. **No test would have caught that.** 🚨 **And no gate sees the class.** `app::valve_condition_gate::nothing_commits_on_the_expression_d316_removed` reports a `lost_focus()` only where `changed()` falls within **160 characters** with no exemption marker; at the picker the two are ~700 apart in two separate conditions. **The window is right and is not the defect** — `cargo fmt` wraps a long condition a long way below its comment, and a line-matched version would have found none of D808's four — and the gate's own doc says it *"looks for the expression, not for the shape"*. **The mistake is reading a gate's name as its coverage**, which is `CLAUDE.md`'s *gates that look like they cover the code and do not* arriving from a new direction: not a predicate too narrow for its rule, but a predicate exactly right for a *different* rule with a confusable name. An `Escape` gate costs about eight exemption markers across six files, which is a decision about where those go; recorded and not started. **(b)** `boolean::ACCURACY` is `#[cfg(test)]` at **module level** and its doc named `FLO_ACCURACY` as an intra-doc link — unresolvable, the item being absent from the crate `cargo doc` builds. 🚨 **This is not a new direction of D319's convention; it is the direction that convention already states** — *"every intra-doc link in a test's prose is decoration"* — **and it is the second instance of the item-versus-module hole §15 D827 named in its own *Fix***: every hand-rolled check for this looks for a `mod tests`. Plain backticks now. ⚠️ **The same doc run states the rule two paragraphs below the line that broke it.** *(Fixed 2026-09-22; **(a) Keep, (b) Resolved** — the correct population of such links is **zero**, an invariant rather than a figure. §9.3's four-caller sentence and §9.4's *"the three other chrome text fields"* amended; D808 and D827 amended)*
+- **D842** — **The crossing tests asserted that a copy's text rebuilds the layers, against the one kind of layer that has nothing to rebuild.** `[X1.2-L6-02]`. A fill stores an image **key** and the bytes live in a table on the `Document`, so a cross-window paste is the **only** route where the target is guaranteed not to hold the entry already — inside one process the in-app `Clip` and the document share the table, and `insert_all`'s own doc says the duplicate path passes no images at all. 🚨 **Measured, not argued: the module's other three tests all pass with `images: Vec::new()` substituted into `adopt_clip_text`**, their fixture being `ungroup_tests::app_with_two_groups` — two groups of plain rects, no fill referencing an `ImageId` anywhere. **The fixture never reached the state the module header named**, and the failure it could not see is a pasted photograph drawn as the missing-picture placeholder, or on a stroke as nothing at all (§15 **D179**), with every node-count and id assertion still green. ⚠️ **Pasted twice on purpose**: `build::missing_image_ops` filters on `!doc.has_image(id)` and nothing else, so *"the entry arrives"* and *"the entry arrives once"* are two claims and only the second would catch a filter written as *always add*. *(Tested 2026-09-22; **Resolved.** **Test** `clipboard_crossing_tests::a_copy_from_another_window_brings_its_pictures`, which asserts its target does **not** already hold the entry before anything crosses — the one fixture state that would let it pass for nothing. Flip run, `images: Vec::new()` at the adoption: red on the `image(&id)` assertion at `None`, the predicted site, **with the module's other three green** — the finding's own claim confirmed rather than carried. No production line changed)*
+- **D843** — **A magnitude bound on boolean operands, because `catch_unwind` cannot see a hang.** `[X8-L1-01]`. 🚨 **§15 D239's guard is structurally blind to this: a spin is not an unwind.** Over operands of ~10³⁰⁴ world units `flo_curves` does not return — measured past **590 s** in debug and past **20 s** in release, with no panic, no `failures()` bump and no return — and `evaluate` runs on the **UI thread**, `Resolved::update` calling it when a document opens and `RenderOverrides` re-evaluating per pointer move while an operand is dragged. So the outcome is the editor frozen with the document open, which is precisely what D239 exists to prevent. ⚠️ **`FLO_SCALE` moved the threshold and did not create the band**: at scale 1.0 the hang begins near 10³⁰⁸, at the shipped 1000 between 10³⁰⁴ and 5·10³⁰⁴ — three decades, exactly the multiplier — so this closes the band **D794** introduced and the pre-existing one above it in one edit, which is the argument for where it sits. **`MAX_BOOL_COORD = 1e150` because its square is 1e300, which is still finite**: areas, determinants and cross products are the natural intermediates of a curve intersection, so a coordinate whose square overflows is one whose arithmetic has already stopped meaning anything — ⚠️ **that is the quantity it bounds, rather than a number picked to sit below the observed hang**, and the distinction is the whole reason the constant is defensible. Placed at `evaluate` and not at `c()`, which is D794's seam for this kind of argument but returns `Coord2` and has no error channel; checked on the **bounding box**, a Bézier's hull containing its controls, which also refuses a non-finite coordinate by the same comparison. ⚠️ **Nothing on the way in bounds magnitude** — `NodeKind::geometry_is_finite` tests `is_finite()` and nothing else, so such a value passes the loader, `op_insert_subtree`'s per-node check (§15 D831, D832) and the clipboard door alike. *(Fixed and tested 2026-09-22; **Keep.** **Test** `an_enormous_operand_is_refused_rather_than_spun_on`, with no wall-clock assertion for §15 **D829**'s reason; flip run, the bound disabled: **it does not return in 150 s**, against 1.28 s for the whole `boolean` suite. ⚠️ **On the fixture measured — nested rects at magnitude *m* — the bound refuses only geometry that already answered `None`**, the last magnitude to return `Some` being 10¹⁰⁰ against `None` at 10²⁰⁰ and 10³⁰⁴, so what changes is how long `None` takes to arrive. 🚨 **Do not widen that to "no output anyone has measured"**: D239's 2026-08-31 amendment records a survey of *"NaN, infinite and 1e300 coordinates across three operations"*, and 1e300 is now refused at the door and never reaches flo_curves at all. That survey's precise claim was *"found nothing that unwinds"* and is untouched; the looser copies of it in `boolean.rs`'s module docs read as describing what `evaluate` does, and no longer do. §9.4 amended in two places; D239 and D794 carry a line each. 🚨 **The commit anchored this test's doc *inside* the neighbouring test's run and the two merged** — `a_thin_intersect_keeps_its_area` was left with no doc at all while D794's bow-tie account and flip matrix sat on a test about magnitude. Repaired here)*
 
 ---
 
@@ -9773,6 +9775,44 @@ paints a descendant with the image before capturing now. *A test that over-speci
 under-specifies in its fixture stays green until something makes the difference matter*, and what
 made it matter here was a guard written for an unrelated reason.
 
+**D842 — The crossing tests asserted that a copy's text rebuilds the layers, against the one kind of
+layer that has nothing to rebuild. *Tested 2026-09-22; Resolved — `[X1.2-L6-02]`, and no production
+line changed.***
+
+`clipboard_crossing_tests`' header claims the text a real `copy_selection` produced is *"enough, on
+its own, to rebuild the layers in an app that has never seen the document they came from"*. **A fill
+does not carry its picture**: it stores an `ImageId` and the bytes live in a table on the `Document`,
+so that claim is exactly one thing wider than the subtree, and the part outside the subtree was the
+part nothing asserted.
+
+🚨 **This is the only route where it can be asserted at all.** Inside one process the in-app `Clip`
+and the document share the table, and `insert_all`'s own doc says the duplicate path passes no images
+— so a **cross-window** paste is the only case where the target is *guaranteed* not to hold the entry
+already. The property is not merely untested elsewhere; there is nowhere else it could be tested.
+
+🚨 **Measured rather than argued: the module's other three tests all pass with `images: Vec::new()`
+substituted into `adopt_clip_text`.** Their fixture is `ungroup_tests::app_with_two_groups` — two
+groups of plain rects, with no fill referencing an `ImageId` anywhere — so **the fixture never
+reached the state the header named**. What that blind spot hides is not subtle: a pasted photograph
+arrives as the missing-picture placeholder, or on a stroke as nothing whatever (**D179**), while every
+node-count and every id assertion stays green. *A test that counts nodes cannot see what a node is
+painted with.*
+
+⚠️ **Pasted twice, on purpose.** `build::missing_image_ops` filters on `!doc.has_image(id)` and
+nothing else, so *"the entry arrives"* and *"the entry arrives once"* are two claims — and a filter
+written as *always add* satisfies the first while doubling the table on every paste, which only the
+second notices.
+
+*(Tested 2026-09-22; **Resolved.** **Test**
+`clipboard_crossing_tests::a_copy_from_another_window_brings_its_pictures`. ⚠️ **It asserts the target
+does not already hold the entry before anything crosses**, which is the one fixture state that would
+let the whole test pass for nothing — the same habit that caught D812's 999-against-1000 draft. Flip
+run, `images: Vec::new()` in `adopt_clip_text`'s `Clip`: red on the `image(&id)` assertion at `None`,
+the predicted site, **with the module's other three green** — which is the finding's own claim
+measured here rather than carried from it. No production line changed, and the honest limit of the
+module is unchanged: `OndinApp::headless` sets `CLIPBOARD_OFF` (**D798**), so what is asserted is that
+the *text* suffices, not that the OS carries it between two processes)*
+
 **D835 — `ClipDto::subtrees` stated a rule in the format's own voice and nothing checked it. *Fixed
 and tested 2026-09-22; Keep.***
 
@@ -10686,10 +10726,23 @@ worth stating rather than discovering: the group drops out of the boolean above 
 whole thing — the same silent contributes-nothing a text operand already makes, and a wrong-looking shape
 rather than none.
 
-**It depends on unwinding.** Under `panic = "abort"` the guard is inert: `catch_unwind` never returns, the
-process dies as before, and nothing in the code can detect the setting. The root `Cargo.toml` carries a note
-beside its profiles saying not to set it without reading this entry, because **no test can fail if somebody
-does** — that is the whole reason the note exists.
+**It depends on unwinding.** Under `panic = "abort"` the guard is inert: `catch_unwind` never returns and
+the process dies as before. The root `Cargo.toml` carries a note beside its profiles saying not to set it
+without reading this entry. 🚨 **That note, and this paragraph with it, closed by arguing the gate was
+impossible — *"nothing in the code can detect the setting"* and *"no test can fail if somebody does"* —
+and both are false** (§15 **D445**). `#[cfg(panic = "abort")]` is a stable rustc cfg, and `guarded`'s own
+synthetic panic aborts its test binary under the setting, which cargo reports as a hard failure of the
+whole target. A `compile_error!` sits beside the guard now. **This was the third copy of the claim and the
+last one still standing**; `boolean.rs`'s copy was corrected on 2026-09-06 and this one was not. *A record
+that says a check cannot be built is worse than no record, because it stops the next reader trying.*
+
+🚨 **And the guard is blind to a *hang*, which is covered elsewhere and not here** (§15 **D843**). A spin
+is not an unwind: over operands of ~10³⁰⁴ world units flo_curves does not return at all — past 590 s in
+debug, past 20 s in release, with no panic, no `failures()` bump and nothing for `catch_unwind` to catch —
+and `evaluate` runs on the UI thread, so that is the editor frozen with the document open, which is this
+entry's own stated failure arriving by the one route its fix cannot see. `boolean::MAX_BOOL_COORD` refuses
+such operands at the door. **The guard is unchanged and is not what was wrong**; what this entry should be
+read as covering is the unwind alone.
 
 `boolean::tests::exclude_panics_on_forty_overlapping_circles` is gone and its `#[ignore]` with it;
 `a_boolean_that_panics_comes_back_empty_rather_than_taking_the_process` asserts a panicking boolean comes
@@ -10713,7 +10766,12 @@ the pass had recorded as unanswerable offline.
 
 **Measured, not assumed.** On 0.8.1 every one of the eight counts this entry names — `Exclude` at 40, 42,
 44, 47, 49, 59, 60 and 63 — returns a real path. So do NaN, infinite and 1e300 coordinates across three
-operations, which is unsurprising once the sort is `total_cmp`, that being a total order over NaN too. The
+operations, which is unsurprising once the sort is `total_cmp`, that being a total order over NaN too.
+⚠️ **The 1e300 half of that reading is no longer reachable through `evaluate`** (§15 **D843**):
+`MAX_BOOL_COORD` is 1e150, so such operands are refused at the door and never reach flo_curves. **The
+measurement stands as a fact about flo_curves 0.8.1 and has stopped describing what the app does** — and
+its precise form, *"found nothing that unwinds"*, is the one to re-read, the looser copies in `boolean.rs`
+reading as though `evaluate` still passes those operands through. The
 bump was `cargo update -p flo_curves` alone: the requirement was already caret `"0.8.0"`, so only the lock
 had pinned it.
 
@@ -41594,6 +41652,80 @@ absolute-scale defect that appears only below a hundredth of a unit — was in t
 its answer written in as correct. **A control is only as good as the number it expects**,
 and nothing anywhere — not a gate, not a test, not a second reader — compares a finding's expected
 value against arithmetic.
+
+⚠️ **`FLO_SCALE` pulled a pre-existing hang down three decades into reachable range, and that is
+recorded against this entry rather than left to be discovered** (§15 **D843**). Multiplying every
+coordinate by 1000 moves every threshold above as well as below: over operands of ~10³⁰⁴ world units
+flo_curves does not return at all, where at scale 1.0 the same wall sits near 10³⁰⁸. **The band was
+not created here** — it existed above, out of reach of an `f64` coordinate — and what this fix did was
+bring its lower edge within the range a document can hold. D843's `MAX_BOOL_COORD` closes both edges
+in one bound, which is why it sits at `evaluate` and not beside these two constants. *A scale factor
+is a change to every limit the library has, not only to the one it was introduced for.*
+
+**D843 — A magnitude bound on boolean operands, because `catch_unwind` cannot see a hang. *Fixed and
+tested 2026-09-22; Keep — `[X8-L1-01]`, and the bound is on the arithmetic rather than on the
+observed symptom.***
+
+🚨 **D239's guard is structurally blind to this, and the blind spot is the entry.** That guard catches
+an *unwind* and answers `None`; **a spin is not an unwind**. Over operands of ~10³⁰⁴ world units
+`flo_curves` does not come back — measured past **590 s** in debug and past **20 s** in release, with
+no panic, no `failures()` bump and no return at all. `evaluate` runs on the **UI thread**:
+`Resolved::update` calls it when a document opens, and `RenderOverrides` re-evaluates per pointer move
+while an operand is dragged. So the outcome is **the editor frozen with the document open in it**,
+which is word for word the outcome D239 exists to prevent, arriving by the one mechanism that guard
+cannot see. *A guard that converts a failure into a value can do nothing about a call that never
+fails and never returns.*
+
+⚠️ **`FLO_SCALE` moved the threshold and did not create the band.** At scale 1.0 the hang begins near
+10³⁰⁸; at the shipped 1000, between 10³⁰⁴ and 5·10³⁰⁴ — three decades, exactly the multiplier. So the
+bound closes the band **D794** introduced *and* the pre-existing one above it in one edit, and that is
+the argument for where it sits: a fix aimed at the introduced band alone would have gone next to
+`FLO_SCALE` and left the other half.
+
+**`MAX_BOOL_COORD = 1e150` because its square is 1e300, which is still finite.** Areas, determinants
+and cross products are the natural intermediates of a curve intersection, so a coordinate whose square
+overflows is one whose arithmetic has already stopped meaning anything. 🚨 **That is the quantity it
+bounds, and not a number chosen to sit below the observed hang** — which is the whole reason the
+constant is defensible and the sentence to keep if this is ever re-derived. A bound picked from the
+symptom would have to move the day flo_curves, `FLO_SCALE` or the machine changes; this one is a
+statement about `f64`.
+
+**Placed at `evaluate`, not at `c()`.** `c()` is the seam D794 established for exactly this kind of
+argument — every coordinate handed to flo_curves passes it — but it returns `Coord2` and has no error
+channel, where `evaluate` already returns `Option` and already owns the *"answer `None` rather than
+take the process"* contract. It is checked on the **bounding box**, which is one pass, is what
+`bounding_box` already computes for other callers, and implies every control point, a Bézier's hull
+containing its controls. ⚠️ A non-finite coordinate makes the box non-finite and fails the same
+comparison, so this also refuses what `geometry_is_finite` was supposed to have caught, without
+resting on it.
+
+⚠️ **Nothing on the way in bounds magnitude, which is why the door has to.** `NodeKind::geometry_is_finite`
+tests `is_finite()` and nothing else, so a coordinate of 10³⁰⁴ passes the loader, `op_insert_subtree`'s
+per-node check (**D831**, **D832**) and the clipboard door alike. A hand-written, foreign or pasted
+`.ondin` carries it, and every one of those doors was audited for *finiteness* rather than for size.
+
+*(Fixed and tested 2026-09-22; **Keep.** **Test** `an_enormous_operand_is_refused_rather_than_spun_on`.
+⚠️ **No wall-clock assertion, deliberately** (§15 **D829**, and the argument D837's selector bomb makes
+in the other crate): a timing assertion measures the machine, while a spin does not return at all, so
+the harness's own timeout is the sharper instrument and the fixture is sized to be hopeless rather than
+merely slow. **Flip run: with the bound disabled it does not return in 150 s**, against 1.28 s for the
+whole `boolean` suite with it — that is the check and there is nothing else to assert. ⚠️ **Two
+controls, because a bound that refused everything would pass the first assertion**: an ordinary boolean
+still answers `Some`, and so does 10¹⁰⁰, the largest magnitude measured to produce a result — which is
+what says the bound sits *above* the working range rather than through it. ⚠️ **On that fixture — nested
+rects at magnitude *m* — this refuses only geometry that already answered `None`**, 10²⁰⁰ and 10³⁰⁴
+answering `None` today, so what changes is how long `None` takes to arrive. 🚨 **Do not widen that into
+"it changes no output anyone has measured."** D239's 2026-08-31 amendment records a survey of *"NaN,
+infinite and 1e300 coordinates across three operations"*, and 1e300 is past this bound: such operands are
+now refused at the door and never reach flo_curves. That survey's own precise claim was *"found nothing
+that unwinds"* and is untouched — but the looser copies of it, in `boolean.rs`'s module docs and in
+`guarded`'s, read as statements about what `evaluate` does, and they no longer are. §9.4 amended in two
+places, at the scaling seam and at the robustness paragraph; D239 and D794 carry a line each.
+🚨 **The commit anchored this test's doc *inside* the neighbouring test's `///` run**, with no blank line
+and no `#[test]` between, so the two merged: `a_thin_intersect_keeps_its_area` was left with **no doc at
+all** while D794's bow-tie account and its four-cell flip matrix sat on a test about magnitude bounds.
+`CLAUDE.md`'s insertion-anchor trap, in the variant where the victim loses everything — repaired here by
+the inverse edit, with each run put back above its own item)*
 
 **D456 — A mask is not a rail, and neither is ink it has clipped away. *Fixed and tested 2026-09-07;
 Fix — three roles have reached this builder as ordinary kinds and there are three guards between

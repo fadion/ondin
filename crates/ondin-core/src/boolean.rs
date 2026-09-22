@@ -331,11 +331,69 @@ const FLO_ACCURACY: f64 = 0.01;
 /// failing the whole thing — the same silent contribution-of-nothing that a text
 /// operand already makes, and a wrong-looking shape rather than none.
 pub fn evaluate(op: BoolOp, operands: &[BezPath]) -> Option<BezPath> {
+    // 🚨 **A magnitude bound, because the guard below cannot see a *hang***
+    // (§15 D843). §15 D239's `catch_unwind` answers `None` for the input class
+    // this module knows it cannot survive — but a spin is not an unwind, and
+    // over operands of ~10³⁰⁴ world units `flo_curves` does not come back at
+    // all: measured past **590 s** in debug and past **20 s** in release, with
+    // no panic, no `failures()` bump and no return. `evaluate` runs on the UI
+    // thread — `Resolved::update` calls it when the document opens, and
+    // `RenderOverrides` re-evaluates per pointer move while an operand is
+    // dragged — so the outcome is the editor frozen with the document open,
+    // which is exactly what D239 exists to prevent and is the one shape it is
+    // structurally blind to.
+    //
+    // ⚠️ **`FLO_SCALE` moved the threshold down by its own factor and did not
+    // create the band.** At scale 1.0 the hang begins near 10³⁰⁸; at the
+    // shipped 1000 it begins between 10³⁰⁴ and 5·10³⁰⁴ — three decades, exactly
+    // the multiplier. So this closes the introduced band **and** the
+    // pre-existing one above it, which is why the bound is here rather than in
+    // `FLO_SCALE`'s neighbourhood.
+    //
+    // ⚠️ **Nothing on the way in bounds magnitude**: `NodeKind::geometry_is_finite`
+    // tests `is_finite()` and nothing else, so such a value passes the loader,
+    // `op_insert_subtree`'s per-node check and the clipboard door alike. A
+    // hand-written, foreign or pasted `.ondin` can carry it.
+    if operands.iter().any(|p| !within_bool_range(p)) {
+        return None;
+    }
     // `AssertUnwindSafe` because nothing observable crosses the boundary: the
     // arguments are borrowed read-only, and every scrap of state flo_curves builds
     // is local to the call and dropped by the unwind. There is no shared mutable
     // state here for a half-finished operation to leave torn.
     guarded(op, operands, fold_operands)
+}
+
+/// The largest coordinate magnitude a boolean operand may carry (§15 D843).
+///
+/// **10¹⁵⁰ because its square is 10³⁰⁰, which is still finite.** Areas,
+/// determinants and cross products are the natural intermediates of a curve
+/// intersection, so a coordinate whose square overflows is one whose arithmetic
+/// has already stopped meaning anything — that is the quantity this bounds,
+/// rather than a number picked to sit below the observed hang.
+///
+/// ⚠️ **It is far above anything that currently produces a result and far below
+/// the hang.** Measured over `Rect::new(m, m, 2m, 2m)` against
+/// `Rect::new(1.5m, 1.5m, 2.5m, 2.5m)`: the last magnitude to answer `Some` is
+/// **10¹⁰⁰**, `10²⁰⁰` and `10³⁰⁴` already answer `None`, and the hang begins
+/// between `10³⁰⁴` and `5·10³⁰⁴`. So this refuses only geometry that was
+/// answering `None` anyway — **the bound changes no output that anyone has
+/// measured**, and what it changes is how long `None` takes to arrive.
+const MAX_BOOL_COORD: f64 = 1e150;
+
+/// Whether every coordinate of `path` is inside [`MAX_BOOL_COORD`].
+///
+/// The **bounding box**, not the segments: it is one pass, it is what
+/// `bounding_box` already computes for other callers, and a box inside the
+/// bound implies every control point is — a Bézier's hull contains its
+/// controls. ⚠️ A non-finite coordinate makes the box non-finite and fails the
+/// comparison, so this also refuses what `geometry_is_finite` is supposed to
+/// have caught, without relying on it.
+fn within_bool_range(path: &BezPath) -> bool {
+    let b = <BezPath as kurbo::Shape>::bounding_box(path);
+    [b.x0, b.y0, b.x1, b.y1]
+        .iter()
+        .all(|v| v.is_finite() && v.abs() <= MAX_BOOL_COORD)
 }
 
 // **The guard below is inert under `panic = "abort"`, so the setting is a build
@@ -1925,6 +1983,63 @@ mod tests {
     /// every thickness below it fails as well, and 0.0001 fails as `None` — the
     /// `unwrap_or_else` rather than the area assertion. A sweep that stopped at
     /// 0.005 would have reported a halving where the answer is an erasure.
+    /// 🚨 **A boolean over enormous operands returns instead of hanging**
+    /// (§15 D843).
+    ///
+    /// §15 D239's `catch_unwind` answers `None` for the input class this module
+    /// cannot survive, and **a spin is not an unwind**: at ~10³⁰⁴ world units
+    /// `flo_curves` did not come back — past 590 s in debug, past 20 s in
+    /// release — with no panic, no `failures()` bump and no return. `evaluate`
+    /// runs on the UI thread, so that is the editor frozen with the document
+    /// open. `FLO_SCALE` moved the threshold down three decades and did not
+    /// create the band; the bound closes both.
+    ///
+    /// ⚠️ **No wall-clock assertion, deliberately** (§15 D829, and the same
+    /// argument `svg_in`'s selector bomb makes): a timing assertion measures the
+    /// machine, while a spin does not return at all, so the harness's own
+    /// timeout is the sharper instrument. The fixture is sized to be hopeless
+    /// rather than merely slow. **Flip run: with the bound disabled this test
+    /// does not return in 150 s**, where the whole `boolean` suite takes 1.28 s
+    /// with it — that is the check, and there is nothing else to assert.
+    ///
+    /// ⚠️ **The control is the point of the second half.** A bound that refused
+    /// everything would pass the first assertion, so an ordinary boolean is
+    /// asserted to still answer `Some` in the same test — and `1e100`, the
+    /// largest magnitude measured to produce a result, is asserted to still
+    /// produce one, which is what says the bound was placed above the working
+    /// range rather than through it.
+    #[test]
+    fn an_enormous_operand_is_refused_rather_than_spun_on() {
+        let pair = |m: f64| {
+            (
+                Rect::new(m, m, 2.0 * m, 2.0 * m).to_path(0.01),
+                Rect::new(1.5 * m, 1.5 * m, 2.5 * m, 2.5 * m).to_path(0.01),
+            )
+        };
+
+        let (a, b) = pair(1e305);
+        assert_eq!(
+            evaluate(BoolOp::Union, &[a.clone(), b.clone()]),
+            None,
+            "an operand past the bound is refused — and the assertion that \
+             matters is that this line is reached at all"
+        );
+        assert_eq!(evaluate(BoolOp::Intersect, &[a, b]), None);
+
+        // Control: the bound is above everything that ever answered.
+        let (a, b) = pair(1e100);
+        assert!(
+            evaluate(BoolOp::Union, &[a, b]).is_some(),
+            "the largest magnitude measured to produce a result still produces \
+             one, so the bound sits above the working range and not through it"
+        );
+        let (a, b) = pair(1.0);
+        assert!(
+            evaluate(BoolOp::Union, &[a, b]).is_some(),
+            "control: an ordinary boolean is untouched"
+        );
+    }
+
     #[test]
     fn a_thin_intersect_keeps_its_area() {
         use kurbo::Shape;

@@ -3078,6 +3078,7 @@ impl OndinApp {
         });
 
         self.wrap_section(ui, subject);
+        self.optical_margin_section(ui, subject);
     }
 
     /// The three wrapping controls, stacked, each with its own label.
@@ -3179,6 +3180,40 @@ impl OndinApp {
                 )
                 .on_hover_text("Nothing to break: the lines do not wrap");
             }
+        });
+    }
+
+    /// **Optical margins: place each line by its ink rather than by its advance**
+    /// (§15 D830).
+    ///
+    /// **Not inside `wrap_section`'s gate, and that is the point.** Everything in
+    /// that scope is dimmed under `NoWrap` because it states a rule about breaks
+    /// that cannot happen; this one is most useful on exactly the node that never
+    /// wraps — a single-line label, which is the case `roadmap.md` raised it for.
+    /// A gate copied from the neighbour would have dimmed the control precisely
+    /// where it earns its keep.
+    ///
+    /// **One switch and no preview text.** The effect is a fraction of the font
+    /// size — measured 0.98% to 10.06% of it on the default face — so a sample
+    /// string in a 264px popup would show nothing a reader could trust. The
+    /// canvas is where it is visible, and the tooltip says what to look at.
+    fn optical_margin_section(&mut self, ui: &mut egui::Ui, subject: &TypeSubject) {
+        let p = subject.paragraph.clone();
+        section(ui, "Margins", |ui| {
+            let resp = ui::switch_row(ui, "Optical margins", p.optical_margins, SEG_H);
+            if resp.clicked() {
+                self.commit_paragraph(
+                    subject.id,
+                    ParagraphStyle {
+                        optical_margins: !p.optical_margins,
+                        ..p.clone()
+                    },
+                );
+            }
+            resp.on_hover_text(
+                "Hang the first and last glyph of every line out to the edges, so \
+                 the text lines up by its ink instead of by its spacing",
+            );
         });
     }
 

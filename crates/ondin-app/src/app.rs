@@ -4566,9 +4566,25 @@ impl OndinApp {
         let payload = match read {
             Ok(payload) => payload,
             Err(e) => {
-                self.session.fail(format!(
-                    "That copy came from a build this one cannot read ({e})"
-                ));
+                // ⚠️ **One sentence was being told about three different
+                // failures, and it was only true of one** (§15 D833). *"Came
+                // from a build this one cannot read"* is the version refusal's
+                // diagnosis; it was also what a damaged payload and a
+                // structurally bad one got, so the user was sent looking for a
+                // version mismatch that was not there. `[X2-L1-02]`'s whole
+                // user-visible symptom was this sentence, shown for a copy this
+                // build had made a second earlier.
+                self.session.fail(match &e {
+                    ondin_core::io::IoError::UnsupportedVersion(v) => {
+                        format!("That copy came from a build this one cannot read (schema {v})")
+                    }
+                    ondin_core::io::IoError::Integrity(what) => {
+                        format!("That copy is not one this build can use ({what})")
+                    }
+                    ondin_core::io::IoError::Serde(_) => {
+                        format!("That copy is damaged and could not be read ({e})")
+                    }
+                });
                 return Clipboard::Unreadable;
             }
         };

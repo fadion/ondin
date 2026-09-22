@@ -34,9 +34,23 @@ use serde::{Deserialize, Serialize};
 
 /// The line that separates the human heading from the payload.
 ///
-/// **Found with `rsplit_once` rather than `split_once`**, so a layer actually
-/// named this does not truncate the heading and take the payload with it. A
-/// pathological name is not a reason for a paste to fail.
+/// 🚨 **A marker, and no longer a landmark** (§15 D833). This doc used to read
+/// *"found with `rsplit_once` rather than `split_once`, so a layer actually
+/// named this does not truncate the heading and take the payload with it"* —
+/// and `rsplit_once` was what **caused** that failure rather than preventing
+/// it. The fence is written before the JSON, so a layer named this, a text
+/// layer containing it, or a linked image path carrying it all put a second
+/// copy *after* the real one; splitting on the last occurrence then handed
+/// `serde_json` a fragment of a string literal and the copy would not cross.
+/// Neither split direction survives a fence inside the payload, because the
+/// payload is where the user's own text lives.
+///
+/// **So the fence answers only *is this ours*, and [`read`] locates the payload
+/// by line instead** — which works because the JSON is written with
+/// `to_string` rather than a pretty printer and JSON escapes a raw newline, so
+/// the payload is exactly one line and is the last one. That is a property of
+/// [`write()`] and it is load-bearing: pretty-printing the payload would break
+/// the reader.
 pub const FENCE: &str = "--- ondin clipboard ---";
 
 /// What a clipboard copy holds once it is off the wire.
@@ -80,9 +94,9 @@ struct ClipDto {
 /// Write a copy as clipboard text: `heading`, [`FENCE`], then the payload.
 ///
 /// `heading` is whatever the caller wants a foreign application to see — the app
-/// passes the layer names. It is **not** read back: [`read`] takes everything
-/// after the last fence and nothing before it, so the heading can say anything
-/// without becoming part of the format.
+/// passes the layer names. It is **not** read back: [`read`] takes the last
+/// line and nothing before it, so the heading can say anything — including a
+/// newline, or the fence itself — without becoming part of the format.
 pub fn write(
     subtrees: &[Vec<Node>],
     images: &[(ImageId, ImageEntry)],
@@ -104,6 +118,12 @@ pub fn write(
     // **Not pretty-printed, unlike `io::save`.** That printer is there for
     // git diffs; nothing diffs a clipboard, and the whitespace is pure size on
     // a payload that has to fit through the OS.
+    //
+    // 🚨 **And it is now load-bearing rather than a size choice** (§15 D833).
+    // `read` locates the payload as the final line, which is well defined only
+    // because this is `to_string` and because JSON escapes a raw newline as
+    // `\n` — so the whole DTO, including a text layer's multi-line content, is
+    // one line. Switching to `to_string_pretty` here would break every paste.
     let json = serde_json::to_string(&dto)?;
     Ok(format!("{heading}\n{FENCE}\n{json}"))
 }
@@ -117,7 +137,15 @@ pub fn write(
 /// than to fall through on: falling through would paste the payload itself as a
 /// text layer, which is the one outcome nobody wants.
 pub fn read(text: &str) -> Option<Result<Payload, IoError>> {
-    let (_heading, json) = text.rsplit_once(FENCE)?;
+    // **The fence decides the first answer and the last line carries the
+    // payload** (§15 D833). Asking `contains` rather than splitting is what
+    // keeps the middle answer reachable: a truncated copy that still shows the
+    // fence is ours and unreadable, which the user is told about, rather than
+    // foreign text that falls through and gets pasted as a layer.
+    if !text.contains(FENCE) {
+        return None;
+    }
+    let json = text.rsplit_once('\n').map_or("", |(_, last)| last);
     Some(parse(json.trim()))
 }
 
@@ -140,16 +168,40 @@ fn parse(json: &str) -> Result<Payload, IoError> {
         // `None` for a malformed template and whose caller then skips it — so a
         // payload with one bad subtree in five would paste four layers and say
         // it pasted four, with nothing anywhere naming the one that vanished.
-        let roots = nodes
+        let roots: Vec<usize> = nodes
             .iter()
-            .filter(|n| {
+            .enumerate()
+            .filter(|(_, n)| {
                 n.parent()
                     .is_none_or(|p| !nodes.iter().any(|m| m.id() == p))
             })
-            .count();
-        if roots != 1 {
+            .map(|(i, _)| i)
+            .collect();
+        let [root_at] = roots.as_slice() else {
             return Err(IoError::Integrity(format!(
-                "a clipboard subtree has {roots} roots, and a subtree has exactly one"
+                "a clipboard subtree has {} roots, and a subtree has exactly one",
+                roots.len()
+            )));
+        };
+        // **The field doc's own rule, which nothing checked** (§15 D835).
+        // `ClipDto::subtrees` says in the format's voice that the first entry
+        // is that subtree's root, and two paste decisions read it that way:
+        // `paste_clipboard_at` takes both the destination parent and the
+        // "just above what it came from" z-slot from `template.first()`, while
+        // `remap_subtree` and `insert_subtrees` locate the **real** root by
+        // predicate. So a reordered payload had the placement computed from one
+        // node and applied to another — landing a paste inside a group the user
+        // did not choose, in the same-document-in-two-windows case where
+        // foreign ids do resolve (§10).
+        //
+        // Refused rather than reordered: the rule is the format's, so a payload
+        // breaking it is malformed rather than merely inconvenient, and
+        // silently reordering would leave `capture_subtree`'s guarantee
+        // untested on both sides.
+        if *root_at != 0 {
+            return Err(IoError::Integrity(format!(
+                "a clipboard subtree lists its root at {root_at} and a subtree \
+                 begins with its root"
             )));
         }
         subtrees.push(nodes);
@@ -164,6 +216,27 @@ fn parse(json: &str) -> Result<Payload, IoError> {
         seen.push(id.clone());
         images.push((id, entry));
     }
+    // 🚨 **Only the entries a node actually keys into** (§15 D834). The
+    // outbound side has always been precise — `copy_selection` computes the set
+    // as `build::image_ids_in` over the copied nodes — and the inbound side
+    // imposed no such rule, which made this the asymmetry. `missing_image_ops`
+    // adds **every** carried entry the document lacks (its filter is
+    // `!doc.has_image(id)` and nothing else), `io::save` writes `doc.images()`
+    // whole, and the table is never collected: *"an entry is added and removed
+    // by explicit operations only"*. So a payload could plant arbitrary bytes,
+    // or an attacker-chosen `Linked` URL, in the victim's document at rest —
+    // invisible, because nothing in the UI lists an image no layer shows.
+    //
+    // **Dropped rather than refused**, which is D492's rule for a value that is
+    // decoration and matches D179's *"a dangling reference draws a placeholder
+    // rather than failing the load"*: a legitimate payload that over-carries
+    // should still paste. No legitimate copy changes, because `copy_selection`
+    // already produces exactly the set this keeps.
+    let referenced: Vec<ImageId> = subtrees
+        .iter()
+        .flat_map(|nodes| crate::build::image_ids_in(nodes))
+        .collect();
+    images.retain(|(id, _)| referenced.contains(id));
     Ok(Payload {
         subtrees,
         images,

@@ -3239,6 +3239,46 @@ fn a_span_boundary_inside_a_character_is_snapped_on_load() {
 
 // --- the clipboard's wire form (`io::clip`, §15 D823) -----------------------
 
+/// One group node as the wire writes it, for the tests that model a **foreign**
+/// payload.
+///
+/// **Written out rather than produced by `write`**, which is the point of it:
+/// most of what `parse` refuses are states `write` cannot reach, so a fixture
+/// built from our own writer can only ever test the happy path. These are the
+/// payloads another process — or a crafted clipboard — can present.
+fn clip_group_json(id: &str, parent: Option<&str>, children: &[&str]) -> String {
+    let parent = parent.map_or_else(|| "null".to_string(), |p| format!("\"{p}\""));
+    let kids = children
+        .iter()
+        .map(|c| format!("\"{c}\""))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"id\":\"{id}\",\"parent\":{parent},\"children\":[{kids}],\"kind\":\"Group\",\
+         \"transform\":[1.0,0.0,0.0,1.0,0.0,0.0],\"name\":\"n\",\"visible\":true,\
+         \"locked\":false,\"proportions_locked\":false,\"opacity\":1.0,\"clip\":false,\
+         \"paint\":{{\"fills\":[],\"strokes\":[]}}}}"
+    )
+}
+
+/// `clip_group_json`'s envelope: heading, fence, then one line of JSON.
+///
+/// Plain backticks, not an intra-doc link: this file is its own crate root and
+/// `cargo doc` never builds it, so a link here is checked by nothing and would
+/// rot silently (§15 D319).
+fn clip_wrap(subtrees: &[Vec<String>], tail: &str) -> String {
+    let lists = subtrees
+        .iter()
+        .map(|nodes| format!("[{}]", nodes.join(",")))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "two layers\n{}\n{{\"schema_version\":{},\"subtrees\":[{lists}]{tail}}}",
+        io::clip::FENCE,
+        io::CURRENT_SCHEMA_VERSION,
+    )
+}
+
 /// **The clipboard is the document format with a different envelope**, and this
 /// is what says so: every node kind `rich_document` builds goes out through
 /// `io::clip::write` and comes back `PartialEq`-identical to the nodes captured
@@ -3299,10 +3339,29 @@ fn a_clipboard_payload_round_trips_every_node_kind() {
 /// D280.)
 #[test]
 fn a_clipboard_payload_carries_the_image_table_entries_it_keys_into() {
-    let (doc, root) = rich_document();
+    let (mut doc, root) = rich_document();
     let frame = doc.get(root).unwrap().children()[0];
-    let captured = vec![doc.capture_subtree(frame).unwrap()];
     let id = ImageId("pic".to_string());
+    // ⚠️ **A node has to actually key into it** (§15 D834). This fixture used
+    // to hand `write` an entry nothing referenced, while asserting that *"the
+    // table entry **the nodes key into** crosses with them"* — the claim and
+    // the fixture disagreed, and the test passed because `parse` carried
+    // whatever it was given. Now that the inbound side keeps only the
+    // referenced entries, the fixture has to reach the state its own sentence
+    // describes, which is what it should always have done.
+    let painted = {
+        let group = doc.get(frame).unwrap().children()[0];
+        doc.get(group).unwrap().children()[0]
+    };
+    doc.apply(&Transaction(vec![Operation::SetFills {
+        id: painted,
+        fills: vec![Fill {
+            brush: image_brush(id.clone()),
+            visible: true,
+        }],
+    }]))
+    .expect("an image fill is accepted");
+    let captured = vec![doc.capture_subtree(frame).unwrap()];
     let entry = ImageEntry {
         source: ImageSource::Embedded(vec![1, 2, 3, 4].into()),
         format: ImageFormat::Png,
@@ -3364,23 +3423,229 @@ fn clipboard_text_is_foreign_ours_or_refused() {
     );
 }
 
-/// **A layer named like the fence does not break the payload**, which is why
-/// `read` splits on the *last* occurrence rather than the first.
+/// **A fence inside the payload does not break the payload** (§15 D833).
 ///
-/// ⚠️ **Flipped** to `split_once`: **red on the `is_ok`**, the predicted site —
-/// the heading's copy of the fence wins, and everything after it (the real fence
-/// and the JSON) is handed to `serde_json` as one string.
+/// 🚨 **This test asserted that and did not test it.** It passed `FENCE` as the
+/// *heading* argument and never named a layer — so it exercised the one
+/// position that was never in doubt, since the heading is written *before* the
+/// real fence and no split direction can be confused by it. The three positions
+/// that matter are all *after* it, in the JSON: a layer's `name`, a text
+/// layer's `content`, and a linked image's `path`. Under `rsplit_once(FENCE)`
+/// every one of them won, and `serde_json` was handed a fragment of a string
+/// literal — *"That copy came from a build this one cannot read"* for a copy
+/// this build made a second earlier.
+///
+/// The heading case is kept as the fourth arm rather than replaced, because it
+/// is a real property (the heading may say anything) and it costs one line.
+///
+/// ⚠️ **Flipped** to the shipped `text.rsplit_once(FENCE)`, which is what this
+/// test was written against: **red on the name arm**, the first of the three
+/// that matter, with the heading arm green — which is exactly the asymmetry
+/// that let the old fixture pass.
 #[test]
-fn a_layer_named_like_the_fence_still_crosses() {
+fn a_fence_inside_the_payload_still_crosses() {
+    let fence = io::clip::FENCE;
+    for (name, heading, rename, content) in [
+        ("the heading", fence, None, None),
+        ("a layer's name", "One", Some(fence), None),
+        ("a text layer's content", "One", None, Some(fence)),
+    ] {
+        let (mut doc, root) = rich_document();
+        let frame = doc.get(root).unwrap().children()[0];
+        if let Some(rename) = rename {
+            doc.apply(&Transaction(vec![Operation::SetName {
+                id: frame,
+                name: rename.to_string(),
+            }]))
+            .expect("a layer may be named anything");
+        }
+        if let Some(content) = content {
+            let text_id = find_text_node(&doc, frame).expect(
+                "the fixture is not in the state this test is about — it needs \
+                 a text layer to put the fence inside",
+            );
+            doc.apply(&Transaction(vec![Operation::SetText {
+                id: text_id,
+                content: content.to_string(),
+                spans: Default::default(),
+                para_spans: Default::default(),
+            }]))
+            .expect("a text layer may contain anything");
+        }
+        let captured = vec![doc.capture_subtree(frame).unwrap()];
+        let text = io::clip::write(&captured, &[], None, heading).unwrap();
+        assert!(
+            io::clip::read(&text)
+                .expect("the fence is ours")
+                .is_ok_and(|p| !p.subtrees.is_empty()),
+            "{name} carrying the fence must not make the copy unreadable"
+        );
+    }
+}
+
+/// **Every refusal `parse` makes, and only one of them had a test** (§15 D836).
+///
+/// `parse` decides six things about text that arrived off the OS clipboard.
+/// Until this test the `schema_version` mismatch was the only one exercised —
+/// so the check whose own comment argues it prevents **silent partial loss on
+/// paste** (*"a payload with one bad subtree in five would paste four layers
+/// and say it pasted four, with nothing anywhere naming the one that
+/// vanished"*) was itself unasserted, and deleting it left the workspace green.
+///
+/// ⚠️ **Each fixture is written out rather than produced by `write`**, because
+/// four of these are states `write` cannot reach. That is the point: they model
+/// a payload from somewhere else, which is the only kind that can be hostile.
+///
+/// Flips, five, each run against its own clause and each red only at its own
+/// row: `is_empty` disabled, the single-root destructuring weakened to
+/// `roots.first()` (the plausible wrong version — it still refuses zero and now
+/// accepts two), `root_at != 0` disabled, `seen.contains` disabled, and the
+/// image `retain` neutered.
+///
+/// 🚨 **The first flip is why these assert the *message* and not just
+/// `is_err()`.** With the empty-subtree refusal gone the payload is still
+/// refused — the root scan finds nothing and reports *"a clipboard subtree has
+/// **0 roots**"* — so a test asking only "was it an error" stays green while
+/// the user is told the wrong thing about their own clipboard. The refusal and
+/// the diagnosis are two claims, and only one of them survives that mutation.
+#[test]
+fn every_refusal_the_clipboard_door_makes_has_a_test() {
+    let ok = clip_group_json("aa:1", None, &[]);
+    let img = |id: &str| {
+        format!(
+            "{{\"id\":\"{id}\",\"source\":{{\"Embedded\":{{\"data\":\"AQIDBA==\"}}}},\
+             \"format\":\"Png\",\"width\":2,\"height\":2}}"
+        )
+    };
+    let cases: Vec<(&str, String, &str)> = vec![
+        (
+            "an empty subtree",
+            clip_wrap(&[vec![ok.clone()], vec![]], ""),
+            "empty subtree",
+        ),
+        (
+            "two roots in one subtree",
+            clip_wrap(&[vec![ok.clone(), clip_group_json("aa:2", None, &[])]], ""),
+            "2 roots",
+        ),
+        (
+            // `[X2-L2-02]` — the child listed first. Legal as a *set*, and the
+            // format says the root comes first because two paste decisions read
+            // position while `remap_subtree` reads the predicate.
+            "the root listed second",
+            clip_wrap(
+                &[vec![
+                    clip_group_json("bb:2", Some("bb:1"), &[]),
+                    clip_group_json("bb:1", None, &["bb:2"]),
+                ]],
+                "",
+            ),
+            "lists its root at 1",
+        ),
+        (
+            "a repeated image id",
+            clip_wrap(
+                &[vec![ok.clone()]],
+                &format!(",\"images\":[{},{}]", img("dup"), img("dup")),
+            ),
+            "duplicate image id",
+        ),
+    ];
+    for (name, text, needle) in cases {
+        let err = match io::clip::read(&text).expect("the fence is ours") {
+            Ok(_) => panic!("{name} was accepted"),
+            Err(e) => e,
+        };
+        assert!(
+            err.to_string().contains(needle),
+            "{name}: the refusal must name what is wrong — got {err}"
+        );
+    }
+
+    // `[X2-L5-01]` — an entry no node keys into is **dropped, not refused**: a
+    // payload that over-carries should still paste, and D179's rule is that a
+    // dangling reference draws a placeholder rather than failing the load.
+    let over = clip_wrap(
+        &[vec![ok]],
+        &format!(",\"images\":[{}]", img("unreferenced")),
+    );
+    let payload = io::clip::read(&over).unwrap().expect("it still pastes");
+    assert!(
+        payload.images.is_empty(),
+        "an image entry no node references must not be planted in the document"
+    );
+    assert_eq!(payload.subtrees.len(), 1, "and the layer still crosses");
+}
+
+/// 🚨 **`Payload::from` crossed in every payload and was `None` in every test**
+/// (§15 D836).
+///
+/// It is what `paste_aim` points *Paste here* with, so an
+/// `Option<[f64; 4]>` → `Rect` path that dropped or mangled the box would land
+/// a paste in the wrong place with nothing able to fail on it. So the first
+/// half asserts a real box makes the round trip.
+///
+/// 🚨 **The second half is a measurement, not an assertion about paste: the
+/// non-finite `from` filter cannot be reached from the wire at all.**
+/// `[R2-L6-01]` asks for a test of that filter and there cannot be one through
+/// `io::clip::read` (plain backticks — an integration test is its own crate
+/// root and the doc gate cannot see it, §15 D319), because the only door is
+/// JSON and `serde_json` refuses
+/// every spelling of a non-finite `f64` — it writes `NaN` as `null` and rejects
+/// `null` where an `f64` is wanted, and rejects an overflowing literal
+/// outright. `1e999` comes back **`Serde("number out of range")`** from
+/// `from_str`, one function *before* the filter. That is `io::schema`'s own
+/// recorded argument for why the loader carries no finiteness check, arriving
+/// at the clipboard door.
+///
+/// **So this asserts the refusal, and the filter is recorded as unreachable
+/// rather than left looking merely untested.** It is kept — it costs one
+/// expression, and `parse` is one `pub` away from a caller that is not JSON —
+/// but unlike §15 D639's *"no external route"*, which `io::clip` falsified,
+/// this one is true by the **format** rather than by who happens to call it
+/// today, and a format does not acquire a new caller quietly.
+#[test]
+fn the_paste_here_box_makes_the_round_trip_and_a_broken_one_cannot_arrive() {
     let (doc, root) = rich_document();
     let frame = doc.get(root).unwrap().children()[0];
     let captured = vec![doc.capture_subtree(frame).unwrap()];
 
-    let text = io::clip::write(&captured, &[], None, io::clip::FENCE).unwrap();
-    assert!(
-        io::clip::read(&text).unwrap().is_ok(),
-        "the heading is not part of the format and cannot make it unreadable"
+    let from = ondin_core::kurbo::Rect::new(10.0, 20.0, 110.0, 220.0);
+    let text = io::clip::write(&captured, &[], Some(from), "One").unwrap();
+    let payload = io::clip::read(&text).unwrap().unwrap();
+    assert_eq!(
+        payload.from,
+        Some(from),
+        "the box Paste here aims with must survive the crossing"
     );
+
+    let broken = clip_wrap(
+        &[vec![clip_group_json("ff:1", None, &[])]],
+        ",\"from\":[1e999,20.0,110.0,220.0]",
+    );
+    let err = match io::clip::read(&broken).expect("the fence is ours") {
+        Ok(_) => panic!("an overflowing box parsed, so the filter IS reachable"),
+        Err(e) => e.to_string(),
+    };
+    assert!(
+        err.contains("number out of range"),
+        "a non-finite box cannot reach `parse`'s filter — serde refuses it \
+         first, and this is the assertion that says so: got {err}"
+    );
+}
+
+/// The first `NodeKind::Text` at or under `from`, for
+/// `a_fence_inside_the_payload_still_crosses`.
+///
+/// ⚠️ Named rather than called *"the test above"*, which is what it said until
+/// two tests were inserted between the two (§15 D790: a pronoun is a citation
+/// with no name in it, and nothing resolves one).
+fn find_text_node(doc: &Document, from: NodeId) -> Option<NodeId> {
+    let node = doc.get(from)?;
+    if matches!(node.kind(), NodeKind::Text { .. }) {
+        return Some(from);
+    }
+    node.children().iter().find_map(|c| find_text_node(doc, *c))
 }
 
 /// 🚨 **The clipboard is an external route into `op_insert_subtree`, and this is
@@ -3426,56 +3691,37 @@ fn a_layer_named_like_the_fence_still_crosses() {
 /// test stays green, and under the depth flip the cycle test does.
 #[test]
 fn a_hostile_clipboard_payload_is_refused_and_leaves_the_document_openable() {
-    fn group_json(id: &str, parent: Option<&str>, children: &[&str]) -> String {
-        let parent = parent.map_or_else(|| "null".to_string(), |p| format!("\"{p}\""));
-        let kids = children
-            .iter()
-            .map(|c| format!("\"{c}\""))
-            .collect::<Vec<_>>()
-            .join(",");
-        format!(
-            "{{\"id\":\"{id}\",\"parent\":{parent},\"children\":[{kids}],\"kind\":\"Group\",\
-             \"transform\":[1.0,0.0,0.0,1.0,0.0,0.0],\"name\":\"n\",\"visible\":true,\
-             \"locked\":false,\"proportions_locked\":false,\"opacity\":1.0,\"clip\":false,\
-             \"paint\":{{\"fills\":[],\"strokes\":[]}}}}"
-        )
-    }
-    fn wrap(nodes: &[String]) -> String {
-        format!(
-            "two layers\n{}\n{{\"schema_version\":{},\"subtrees\":[[{}]]}}",
-            io::clip::FENCE,
-            io::CURRENT_SCHEMA_VERSION,
-            nodes.join(",")
-        )
-    }
-
     // `[X2-L1-01]` — `[R, A, B]` with `A` and `B` pointing at each other. One
     // root, every child listed once, every back-pointer consistent: the count
     // this door used to make balances at `2 + 1 == 3`.
-    let cycle = wrap(&[
-        group_json("c0ffee:1", None, &[]),
-        group_json("c0ffee:2", Some("c0ffee:3"), &["c0ffee:3"]),
-        group_json("c0ffee:3", Some("c0ffee:2"), &["c0ffee:2"]),
-    ]);
+    let cycle = clip_wrap(
+        &[vec![
+            clip_group_json("c0ffee:1", None, &[]),
+            clip_group_json("c0ffee:2", Some("c0ffee:3"), &["c0ffee:3"]),
+            clip_group_json("c0ffee:3", Some("c0ffee:2"), &["c0ffee:2"]),
+        ]],
+        "",
+    );
 
     // `[R1-L2-02]` — a chain past the loader's own bound, arriving in one paste.
     let n = io::MAX_TREE_DEPTH + 8;
     let chain_ids: Vec<String> = (0..n).map(|i| format!("dee9:{i}")).collect();
-    let chain = wrap(
-        &(0..n)
+    let chain = clip_wrap(
+        &[(0..n)
             .map(|i| {
                 let kids: Vec<&str> = chain_ids
                     .get(i + 1)
                     .map(String::as_str)
                     .into_iter()
                     .collect();
-                group_json(
+                clip_group_json(
                     &chain_ids[i],
                     i.checked_sub(1).map(|p| chain_ids[p].as_str()),
                     &kids,
                 )
             })
-            .collect::<Vec<_>>(),
+            .collect::<Vec<_>>()],
+        "",
     );
 
     // `[R1-L2-01]` — a gradient whose ramp opacity is finite and far out of

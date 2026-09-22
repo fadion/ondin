@@ -156,6 +156,30 @@ const MAX_SVG_NESTING: usize = 64;
 /// pasting a large SVG and no constant here can bound it.**
 const MAX_SVG_NODES: usize = 50_000;
 
+/// How many CSS rules one stylesheet may declare before the rest is skipped and
+/// reported (§15 D838).
+///
+/// **The third bomb shape in this module and the second one that is neither
+/// deep nor wide but *long*.** [`MAX_SVG_NESTING`] bounds depth and
+/// [`MAX_SVG_NODES`] bounds the emitted count; neither looks at the
+/// `<style>` element, so a sheet of 50,000 rules against 1,000 shapes froze a
+/// paste for **24.5 s** — `Css::declaration` walks every rule for every element
+/// for every property it is asked about, which is linear in each and therefore
+/// cubic in the file. §15 D806's ordering (the cheap tests before the tree
+/// walk) is what keeps the constant small and is not a bound; re-flipping that
+/// ordering was measured at 44.0 s against the shipped 24.5 s, so the shipped
+/// order is already the faster one and the cap is the fix rather than a
+/// reorder.
+///
+/// ⚠️ **2,048 is chosen with headroom over real exports rather than measured
+/// against a corpus**, which is the honest statement of where it comes from.
+/// Illustrator's `.st0….stN` convention emits one rule per distinct style and
+/// runs to the low hundreds on a detailed drawing; Inkscape emits fewer. Past
+/// this the sheet is reported through [`Css::complex`], which the import
+/// already surfaces as *"style (complex selector)"* — the shapes still import,
+/// they just take their presentation attributes instead.
+const MAX_CSS_RULES: usize = 2_048;
+
 /// What one `import` produced.
 #[derive(Debug)]
 pub struct Import {
@@ -912,29 +936,76 @@ impl Sel<'_> {
 
 /// Whether `el`'s ancestors satisfy `chain`, which runs right to left.
 ///
-/// **Recursive because a descendant combinator backtracks.** `.a .b .c` against a
-/// tree where the nearest `.b` above a `.c` has no `.a` above *it* must keep
-/// looking further up rather than failing — a greedy walk gets that wrong, and
-/// the case is not exotic: it is any repeated class in a nested group.
+/// **A descendant combinator backtracks.** `.a .b .c` against a tree where the
+/// nearest `.b` above a `.c` has no `.a` above *it* must keep looking further up
+/// rather than failing — a greedy walk gets that wrong, and the case is not
+/// exotic: it is any repeated class in a nested group.
+///
+/// 🚨 **It used to backtrack by recursing, and that made a kilobyte of SVG hang
+/// the import** (§15 D837). Each descendant arm looped over every ancestor and
+/// recursed on each match, with no memo, so
+/// `nope g g g g g g g g g g text` against sixty nested `<g>` searched every
+/// increasing sequence of ten ancestors before failing on the `nope` that never
+/// matches — and it is called once per element per property the cascade asks
+/// about. Measured at **334 bytes / 30 levels / 12.6 s**, with a 534-byte
+/// fixture not finishing in 120 s. Neither [`MAX_SVG_NESTING`] nor
+/// [`MAX_SVG_NODES`] is consulted here and neither is even approached: the file
+/// is tiny and shallow by both measures. §15 D446's *"a depth bound is not a
+/// size bound"* has a third member, and this one is neither.
+///
+/// **The fix is not a cap, because the search was never exponential in
+/// nature.** An element's ancestors are a **path** — `parent_element` walks one
+/// line, not a tree — so "does `chain` match some increasing subsequence of the
+/// ancestors" is ordinary subsequence matching, and the blow-up was the
+/// recursion re-deriving the same sub-answers rather than anything inherent.
+/// Written as a table over `(chain index, ancestor index)` it is exactly the
+/// same predicate in `O(chain × depth)`, so **no selector that used to be
+/// honoured stops being honoured**. A `MAX_SELECTOR_COMPOUNDS` was the other
+/// candidate and is deliberately not taken: it would cost expressiveness to buy
+/// a bound this already gives for free, and at 8 compounds over 64 levels
+/// `C(64, 8) ≈ 4.4 × 10⁹` is not a bound anyway — the cap would have looked like
+/// a fix while leaving the hang reachable.
+///
+/// `g(i, j)`, below, is *"can `chain[i..]` be satisfied using ancestors from the
+/// `j`-th upwards"*, and the answer is `g(0, 0)`.
 fn match_chain(chain: &[(Combinator, Compound<'_>)], el: roxmltree::Node<'_, '_>) -> bool {
-    let Some(((comb, comp), rest)) = chain.split_first() else {
+    if chain.is_empty() {
         return true;
-    };
-    match comb {
-        Combinator::Child => el
-            .parent_element()
-            .is_some_and(|p| comp.matches(p) && match_chain(rest, p)),
-        Combinator::Descendant => {
-            let mut cur = el.parent_element();
-            while let Some(p) = cur {
-                if comp.matches(p) && match_chain(rest, p) {
-                    return true;
-                }
-                cur = p.parent_element();
-            }
-            false
-        }
     }
+    // Nearest ancestor first, so `path[0]` is the parent. Bounded by the
+    // document's own nesting, which is all this ever walks.
+    let mut path: Vec<roxmltree::Node<'_, '_>> = Vec::new();
+    let mut cur = el.parent_element();
+    while let Some(p) = cur {
+        path.push(p);
+        cur = p.parent_element();
+    }
+    let n = path.len();
+    // `row[j]` is `g(i + 1, j)`, seeded with `g(chain.len(), _) = true`: an empty
+    // remainder is satisfied wherever it is asked.
+    let mut row = vec![true; n + 1];
+    for (comb, comp) in chain.iter().rev() {
+        let mut next = vec![false; n + 1];
+        match comb {
+            // The parent and nothing else, so there is one `j` to consider.
+            Combinator::Child => {
+                for j in 0..n {
+                    next[j] = comp.matches(path[j]) && row[j + 1];
+                }
+            }
+            // Any ancestor at or above `j`. Accumulated from the top down, which
+            // is what turns the old inner loop into one pass.
+            Combinator::Descendant => {
+                let mut acc = false;
+                for j in (0..n).rev() {
+                    acc = acc || (comp.matches(path[j]) && row[j + 1]);
+                    next[j] = acc;
+                }
+            }
+        }
+        row = next;
+    }
+    row[0]
 }
 
 impl<'a> Css<'a> {
@@ -1103,6 +1174,14 @@ fn parse_css(text: &str) -> (Vec<(Sel<'_>, u32, &str)>, bool) {
             let sel = sel.trim();
             if sel.is_empty() {
                 continue;
+            }
+            // The sheet's own length is a bound too (§15 D838). Reported rather
+            // than refused, and the rules already read still apply — a sheet
+            // past this is a generated one, and the shapes in such a file carry
+            // presentation attributes as well.
+            if rules.len() >= MAX_CSS_RULES {
+                complex = true;
+                break;
             }
             match parse_selector(sel) {
                 Some(s) => {
@@ -6640,6 +6719,185 @@ mod tests {
             fill(ids[5]),
             [255, 0, 255, 255],
             "a compound of a type and a class matches the element that is both"
+        );
+    }
+
+    /// 🚨 **A kilobyte of SVG used to hang the import here** (§15 D837).
+    ///
+    /// The selector is a long run of `g` that *does* match, led by a compound
+    /// that never can. Right-to-left matching gets all the way along the run and
+    /// then fails on `nope`, and the old recursive matcher re-derived that from
+    /// every increasing choice of ancestors — `C(nesting, chain)`. Thirty levels
+    /// was 12.6 s; a 534-byte version of this file did not finish in 120 s.
+    ///
+    /// ⚠️ **The assertion is that it *returns*, and there is deliberately no
+    /// wall-clock in it.** A timing assertion measures the machine, which is
+    /// what §15 D829 spent a session learning; an exponential matcher does not
+    /// come back at all, so the suite's own timeout is both the sharper
+    /// instrument and the honest one. **The flip is running this test against
+    /// the recursive version, and it was run: it does not finish in 120 s**,
+    /// against 0.27 s for the whole `svg_in` suite — 94 tests — with the table.
+    /// That is the whole check, and it is why the fixture is sized to be
+    /// hopeless rather than merely slow: a fixture tuned to "slow" would be a
+    /// wall-clock assertion wearing a disguise.
+    ///
+    /// ⚠️ **And it must reach the matcher**, so the leading compound is `nope`
+    /// rather than something absent from the sheet: `declaration` checks the
+    /// property's presence and the specificity *first*, and a rule that loses
+    /// either never walks the tree. The fixture asserts the shape came out
+    /// black, which is what says the rule was evaluated and lost rather than
+    /// skipped.
+    #[test]
+    fn a_long_selector_over_deep_nesting_returns() {
+        const LEVELS: usize = 60;
+        let chain = "g ".repeat(10);
+        let opens = "<g>".repeat(LEVELS);
+        let closes = "</g>".repeat(LEVELS);
+        let (doc, out) = imported(&format!(
+            r##"<svg xmlns="http://www.w3.org/2000/svg">
+                  <style>nope {chain}rect{{fill:#ff0000}}</style>
+                  {opens}<rect width="10" height="10"/>{closes}
+                </svg>"##
+        ));
+        let ids = shapes(&doc, &out);
+        let rect = *ids.last().expect("the rect is the innermost shape");
+        let Brush::Solid(c) = &doc.get(rect).unwrap().paint().fills[0].brush else {
+            panic!("a solid fill")
+        };
+        assert_eq!(
+            c.to_rgba8().to_u8_array(),
+            [0, 0, 0, 255],
+            "the rule is reached and loses on `nope`, which is what makes this \
+             fixture exercise the matcher rather than the presence check"
+        );
+    }
+
+    /// **A stylesheet is bounded by its own length, and says so** (§15 D838).
+    ///
+    /// `Css::declaration` walks every rule for every element for every property,
+    /// so 50,000 rules over 1,000 shapes froze a paste for 24.5 s from a file
+    /// that is shallow and small by both of this module's other bounds.
+    ///
+    /// ⚠️ **Both halves, because "capped" and "still works" are two claims.**
+    /// The sheet is reported through the same channel a selector this cannot
+    /// read uses, *and* the rules read before the cap still paint — a cap that
+    /// dropped the whole sheet would pass an assertion about the report alone
+    /// while losing every style in the file.
+    ///
+    /// Flip: the cap's branch disabled. Red on the report at `[]`, the
+    /// predicted site, and green on the fill — the pair working as intended,
+    /// since the first rule applies either way.
+    ///
+    /// 🚨 **The obvious flip — raising `MAX_CSS_RULES` past the fixture — is
+    /// vacuous here, and it was written down as the flip before it was run.**
+    /// The fixture is `MAX_CSS_RULES + 10` rules, so raising the constant raises
+    /// the fixture with it and the cap trips either way: at 100,000 the test
+    /// still passed, having quietly built a hundred thousand rules and taken
+    /// 1.63 s to do it. **A fixture defined in terms of the constant under test
+    /// cannot falsify that constant** — which is worth more than the cap is,
+    /// because the same shape is available to every threshold test in this
+    /// module, and the passing run looks exactly like a working one.
+    #[test]
+    fn a_stylesheet_past_the_rule_cap_is_reported_and_what_it_read_still_paints() {
+        let mut sheet = String::from("rect{fill:#00ff00}");
+        for i in 0..MAX_CSS_RULES + 10 {
+            sheet.push_str(&format!(".pad{i}{{stroke-width:1}}"));
+        }
+        let (doc, out) = imported(&format!(
+            r##"<svg xmlns="http://www.w3.org/2000/svg">
+                  <style>{sheet}</style>
+                  <rect width="10" height="10"/>
+                </svg>"##
+        ));
+        assert!(
+            out.skipped
+                .contains(&"style (complex selector)".to_string()),
+            "a sheet past the cap must be reported, not silently truncated: {:?}",
+            out.skipped
+        );
+        let ids = shapes(&doc, &out);
+        let Brush::Solid(c) = &doc.get(ids[0]).unwrap().paint().fills[0].brush else {
+            panic!("a solid fill")
+        };
+        assert_eq!(
+            c.to_rgba8().to_u8_array(),
+            [0, 255, 0, 255],
+            "and the rules read before the cap still apply — the first one is \
+             written first for exactly this assertion"
+        );
+    }
+
+    /// **The backtracking a descendant chain needs, in the one shape where a
+    /// greedy walk gives a different answer** (§15 D837).
+    ///
+    /// 🚨 **`match_chain`'s own doc could not be used to write this test**, and
+    /// §15 D806 carries the same sentence: it justifies the recursion with
+    /// `.a .b .c`, where greedy and backtracking **necessarily agree**, because
+    /// a descendant chain's ancestor sets are nested — having found the nearest
+    /// `.b`, any `.a` above a further `.b` is also above that one. The case that
+    /// separates them needs a `>` to the *left* of a descendant.
+    ///
+    /// Here `.a > .b .c` must match: the nearest `.b` above the target has a
+    /// plain `<g>` as its parent, not `.a`, so a matcher that commits to the
+    /// nearest `.b` fails, while the second `.b` further up does have `.a` as
+    /// its direct parent. **Flipped against a greedy walk — the descendant arm
+    /// taking the first matching ancestor and not reconsidering — and it is red
+    /// here**, black against green, with every other selector test green.
+    #[test]
+    fn a_descendant_chain_reconsiders_an_ancestor_that_fails_further_left() {
+        let (doc, out) = imported(
+            r##"<svg xmlns="http://www.w3.org/2000/svg">
+                  <style>.a > .b .c{fill:#00ff00}</style>
+                  <g class="a">
+                    <g class="b">
+                      <g>
+                        <g class="b">
+                          <rect class="c" width="10" height="10"/>
+                        </g>
+                      </g>
+                    </g>
+                  </g>
+                </svg>"##,
+        );
+        assert!(out.skipped.is_empty(), "{:?}", out.skipped);
+        let ids = shapes(&doc, &out);
+        let rect = *ids.last().expect("the rect is the innermost shape");
+        let Brush::Solid(c) = &doc.get(rect).unwrap().paint().fills[0].brush else {
+            panic!("a solid fill")
+        };
+        assert_eq!(
+            c.to_rgba8().to_u8_array(),
+            [0, 255, 0, 255],
+            "the nearest `.b` has no `.a` for a parent, so the match has to keep \
+             looking further up — this is the only shape where greedy and \
+             backtracking disagree"
+        );
+    }
+
+    /// **`*` matches any element, which nothing asserted** (§15 D837).
+    ///
+    /// ⚠️ Making the universal compound a literal tag name — i.e. matching only
+    /// an element called `*`, which is the shape somebody writes by forgetting
+    /// the case — passed the whole suite. Here it is red: the rect is not named
+    /// `*` and must still be reached through one.
+    #[test]
+    fn a_universal_compound_matches_any_element() {
+        let (doc, out) = imported(
+            r##"<svg xmlns="http://www.w3.org/2000/svg">
+                  <style>.a * rect{fill:#00ff00}</style>
+                  <g class="a"><g><rect width="10" height="10"/></g></g>
+                </svg>"##,
+        );
+        assert!(out.skipped.is_empty(), "{:?}", out.skipped);
+        let ids = shapes(&doc, &out);
+        let rect = *ids.last().expect("the rect is the innermost shape");
+        let Brush::Solid(c) = &doc.get(rect).unwrap().paint().fills[0].brush else {
+            panic!("a solid fill")
+        };
+        assert_eq!(
+            c.to_rgba8().to_u8_array(),
+            [0, 255, 0, 255],
+            "`*` stands for the intermediate `<g>`, so the chain matches"
         );
     }
 

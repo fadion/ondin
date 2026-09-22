@@ -2067,6 +2067,50 @@ pub struct ParagraphStyle {
     /// still ends every open run, exactly as it does at level 0.
     #[serde(default, skip_serializing_if = "is_default")]
     pub level: u8,
+    /// Whether each line is placed by its **ink** at the paragraph's two edges
+    /// rather than by its glyphs' advance origins — optical margin alignment
+    /// (§15 D830).
+    ///
+    /// **Off by default and the app authors nothing**, which is deliberately *not*
+    /// [`crate::typography::BoxTrim`]'s shape (§15 D199 turns trim on for new text
+    /// while the format default stays `None`). Trim moves the *box* around ink that
+    /// does not move; this moves the *ink* out past the box it was authored in, so
+    /// a document changes appearance the moment it is switched on. A default that
+    /// makes every new text node differ from what the same document shows in any
+    /// other tool is a bigger claim than trim's, and it can be made later without a
+    /// format change — which is not true in the other direction.
+    ///
+    /// **Why it is wanted**: a glyph's advance carries its side bearings, so a line
+    /// placed by the advance origin starts a bearing's width *inside* the measure,
+    /// and the width differs per glyph. Measured on the default face at 16 px, the
+    /// left bearing runs from **0.98%** of the font size (`f`) to **10.06%** (`'`),
+    /// with capitals spanning 2.34% (`W`, `A`, `V`, `Y`) to 8.59% (`H`, `I`, `L`) —
+    /// so two stacked left-aligned labels can sit about 9% of the font size out of
+    /// alignment, which is 1.5 px at 16 px and 9 px at 100 px.
+    ///
+    /// ⚠️ **`roadmap.md` named the wrong letter for as long as the bullet stood.**
+    /// (*For as long as* rather than a duration: `.git` was reset on 2026-09-16
+    /// and nothing dates that bullet, so any number here would be a figure the
+    /// tree cannot falsify.) Its statement
+    /// of this item read *"a left-aligned label still reads as indented, because
+    /// `H` has almost no left side bearing"*; `H` has the **largest** bearing of
+    /// the capitals measured. The complaint was real and the example inverted it,
+    /// which is what an unmeasured illustration costs.
+    ///
+    /// **Paragraph scope and not spannable**, on §15 D77's own test — the question
+    /// that entry asks is whether anyone would set the value *per paragraph*, and
+    /// nobody sets optical alignment on one paragraph of a layer and not the next.
+    /// It sits beside [`Self::align`], [`Self::wrap`] and [`Self::direction`] —
+    /// though only [`Self::wrap`] is non-spannable for *that* reason. ⚠️ **D77
+    /// gives two**, and this is in the weaker class: [`Self::align`] and the base
+    /// direction are one value per parley `Layout` and cannot be spanned **at
+    /// all**, where `wrap` and this merely have no user, so nothing but the
+    /// absence of demand would stop either being spanned later. It is
+    /// not [`crate::typography::BlockStyle`]'s either: that scope is about the
+    /// *box* — vertical alignment, trim, overflow, max lines — and this is about
+    /// how a line sits against its measure, which is flow.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub optical_margins: bool,
 }
 
 /// How deeply a list may nest. Past this the innermost item's start edge is eight

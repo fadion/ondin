@@ -1280,6 +1280,7 @@ fn the_text_attributes_round_trip_defaults_spans_and_all_three_scopes() {
         direction: ondin_core::TextDirection::Rtl,
         marker: Some(ondin_core::ListMarker::UpperRoman),
         level: 3,
+        optical_margins: true,
     };
     // The paragraph *overrides*, against those defaults — "all three scopes" is
     // four span-able lists now, and the one added last is the one a round-trip

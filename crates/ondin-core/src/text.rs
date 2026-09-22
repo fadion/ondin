@@ -2606,14 +2606,43 @@ fn shape(parts: TextRef<'_>) -> Shaped {
         (TextSizing::Fixed(s), TextOverflow::Clip | TextOverflow::Ellipsis) => Some(s.height),
         _ => None,
     };
-    let truncated = break_lines(
+    let mut truncated = break_lines(
         &mut layout,
         &paras,
         parts.style.font_size,
         wrap_width,
         parts.block.max_lines,
         height_limit,
+        None,
     );
+    // **The second break pass optical margin alignment needs** (§15 D830), run
+    // only for a node that asked for it — everything else pays one `paras` scan.
+    //
+    // ⚠️ **The pass is not free and it is not re-shaping either.** Breaking is a
+    // walk over clusters that are already shaped, so this is the cheaper half of
+    // laying out twice, and it happens on the same `Layout` — `break_lines()`
+    // hands out a fresh breaker that starts from the beginning.
+    //
+    // ⚠️ **The second pass can break somewhere the first did not, and that is
+    // accepted rather than iterated to a fixed point.** Every line's measure only
+    // ever *grows* here (by its own two bearings, together under a fifth of an em
+    // on the faces measured), so a line can gain a word it did not have — in which
+    // case its correction is the old last glyph's rather than the new one's, and
+    // the hang is a bearing's width out. The text is right either way; only the
+    // optical nicety is approximate, and re-breaking until the offsets settle
+    // could not be bounded without a loop nobody can prove terminates.
+    if paras.any_optical_margins() {
+        let offsets = optical_offsets(&layout);
+        truncated = break_lines(
+            &mut layout,
+            &paras,
+            parts.style.font_size,
+            wrap_width,
+            parts.block.max_lines,
+            height_limit,
+            Some(&offsets),
+        );
+    }
 
     layout.align(
         // ⚠️ **Redundant today, and measured to be so rather than assumed.**
@@ -2749,6 +2778,18 @@ impl<'a> Paragraphs<'a> {
     /// a paragraph the table did not predict should draw as.
     fn style(&self, index: usize) -> &ParagraphStyle {
         self.styles.get(index).unwrap_or(self.default)
+    }
+
+    /// Whether **any** paragraph asks for optical margin alignment — the gate on
+    /// the second break pass (§15 D830).
+    ///
+    /// **The node default has to be asked separately from the overrides**, and
+    /// that is the whole of why this is a method rather than a `styles.iter()` at
+    /// the call site: `styles` is deliberately *empty* when nothing is overridden
+    /// (see the field), so a walk over it alone answers `false` for the ordinary
+    /// node that simply has the setting on.
+    fn any_optical_margins(&self) -> bool {
+        self.default.optical_margins || self.styles.iter().any(|s| s.optical_margins)
     }
 }
 
@@ -2901,6 +2942,72 @@ fn line_geometry(
     (x, measure)
 }
 
+/// Each line's left and right **side bearings**, in layout px — the gap between
+/// where a line's ink starts and where its advance origin sits, and the same at
+/// the far end (§15 D830).
+///
+/// Read off a layout that has already been broken once, which is why optical
+/// margin alignment costs a second break pass: the correction depends on the
+/// first and last glyph of a line, and which glyphs those are is what breaking
+/// decides.
+///
+/// ⚠️ **A glyph with no ink contributes nothing rather than its own bearing.** A
+/// line ending in a space has a last glyph whose outline is empty, and its
+/// "right bearing" would be the whole advance — which would hang the line a space
+/// past the measure. The walk steps over empty glyphs from each end and gives up
+/// at zero, which is also the answer for a blank line.
+///
+/// ⚠️ **The font borrow never leaves the loop body**, which is the whole reason
+/// this walks the runs in place rather than collecting the glyphs first. A
+/// `RunFace` borrows the blob it was built from; carrying one out to a `Vec`
+/// alongside the glyphs would need the blob to outlive the run, and the only way
+/// to write that is a `transmute` to `'static`. This module's one `unsafe` budget
+/// is spent on nothing, and it should stay that way — the two ends of a line are
+/// both reachable in a single forward walk.
+fn optical_offsets(layout: &Layout<RunIndex>) -> Vec<(f32, f32)> {
+    use skrifa::MetadataProvider as _;
+    let mut out = Vec::new();
+    for line in layout.lines() {
+        // The first inked glyph's left bearing, and the last one's right bearing —
+        // `rsb` is overwritten by every inked glyph, so it ends as the last one's.
+        let mut lsb: Option<f32> = None;
+        let mut rsb = 0.0_f32;
+        for item in line.items() {
+            let PositionedLayoutItem::GlyphRun(glyph_run) = item else {
+                continue;
+            };
+            let run = glyph_run.run();
+            let font = run.font().clone();
+            let Ok(ff) = skrifa::FontRef::from_index(font.data.as_ref(), font.index) else {
+                continue;
+            };
+            let face = RunFace {
+                glyphs: ff.outline_glyphs(),
+                coords: run
+                    .normalized_coords()
+                    .iter()
+                    .map(|c| skrifa::instance::NormalizedCoord::from_bits(*c))
+                    .collect(),
+                size: skrifa::instance::Size::new(run.font_size()),
+            };
+            for g in glyph_run.positioned_glyphs() {
+                let mut path = BezPath::new();
+                face.draw(g.id, f64::from(g.x), 0.0, 0.0, &mut path);
+                let b = path.bounding_box();
+                if b.width() <= 0.0 || b.height() <= 0.0 {
+                    continue;
+                }
+                if lsb.is_none() {
+                    lsb = Some((b.x0 - f64::from(g.x)) as f32);
+                }
+                rsb = (f64::from(g.x + g.advance) - b.x1) as f32;
+            }
+        }
+        out.push((lsb.unwrap_or(0.0), rsb));
+    }
+    out
+}
+
 /// Break the lines, giving each the measure its paragraph asks for and stopping
 /// early at a line limit or a box height.
 ///
@@ -2941,6 +3048,17 @@ fn line_geometry(
 /// `align_impl` hard-coding a skip of `BreakReason::None | Explicit`, with `align`,
 /// `LayoutData` and `ClusterData::advance` all `pub(crate)`. The trigger is a patch
 /// upstream, not a decision here (§15 D825, `roadmap.md` *Later · Parked*).
+///
+/// 🚨 **This run was separated from its item on 2026-09-22 and restored the same
+/// hour** (§15 D830). An `Edit` adding `optical_offsets` was anchored on
+/// `fn break_lines(`'s signature, which put the new item between this run and the
+/// function it describes — and because both runs are `///` with nothing between
+/// them they **merged**, leaving `break_lines` with no doc at all and this prose
+/// sitting on a function about side bearings. ⚠️ **The `///`-run length ranking
+/// could not see it**: the merged run came to about 38 lines against a floor of
+/// 58, which is exactly the case `CLAUDE.md` calls *"a clean reading says nothing
+/// about the edit you just made."* **Habit 2, the neighbour grep, is what caught
+/// it**, run as a routine over every item the change inserted.
 fn break_lines(
     layout: &mut Layout<RunIndex>,
     paras: &Paragraphs<'_>,
@@ -2948,6 +3066,7 @@ fn break_lines(
     wrap_width: Option<f64>,
     max_lines: u32,
     height_limit: Option<f64>,
+    optical: Option<&[(f32, f32)]>,
 ) -> bool {
     let max_advance = wrap_width.map(|w| w as f32).unwrap_or(f32::MAX);
     let mut breaker = layout.break_lines();
@@ -2967,8 +3086,26 @@ fn break_lines(
     let mut paragraph = 0_usize;
     let mut first_line = true;
     loop {
-        let (x, measure) =
+        let (mut x, mut measure) =
             line_geometry(paras.style(paragraph), font_size, max_advance, first_line);
+        // **Optical margin alignment, and the reason it is one adjustment rather
+        // than four** (§15 D830). Start the line a left bearing earlier and widen
+        // its measure by both bearings: parley then aligns or justifies into the
+        // widened measure, so *every* alignment falls out of the same two numbers.
+        // Start-aligned, the line begins at `x - lsb`, putting its ink on the
+        // nominal edge; end-aligned, parley pushes the advance end to
+        // `nominal_end + rsb`, putting the ink there instead; centred, the two
+        // corrections apply symmetrically and the *ink* is what gets centred; and
+        // justified, the line stretches to the widened measure, so its ink spans
+        // exactly the nominal one. **No arm of this reads `align` at all**, which
+        // is what stops the four drifting apart.
+        if let Some(offs) = optical
+            && paras.style(paragraph).optical_margins
+            && let Some(&(lsb, rsb)) = offs.get(lines as usize)
+        {
+            x -= lsb;
+            measure += lsb + rsb;
+        }
         breaker.state_mut().set_line_x(x);
         breaker.state_mut().set_line_max_advance(measure);
         let Some(yielded) = breaker.break_next() else {
@@ -5742,7 +5879,7 @@ mod tests {
     use super::*;
     use crate::typography::{CharAttr, Decoration, ParaAttr, VerticalAlign};
 
-    fn parts(style: &TextStyle, sizing: &TextSizing) -> TextParts {
+    pub(super) fn parts(style: &TextStyle, sizing: &TextSizing) -> TextParts {
         TextParts {
             style: style.clone(),
             spans: CharSpans::default(),
@@ -11361,5 +11498,226 @@ mod rail_session_tests {
                 &content[byte..=byte]
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod optical_margin_tests {
+    //! **Optical margin alignment places a line by its ink** (§15 D830).
+    //!
+    //! ⚠️ **Names here are plain backticks, never `[links]`** — this is a
+    //! `#[cfg(test)]` module, so `cargo doc` cannot see it and a link would be
+    //! decoration no gate can validate (§15 D319).
+    //!
+    //! The three strings are chosen for their **left side bearings**, measured on
+    //! the default face at 16px before any of this was built: `W` is 2.34% of the
+    //! font size, `H` is 8.59% and `'` is 10.06%. A fixture of three `H` words
+    //! would assert nothing, because they already agree.
+    use super::*;
+    use crate::typography::TextAlign;
+
+    /// The union of every run's ink, which is what a reader sees as the text's
+    /// edges — deliberately *not* the layout's advance extents, since the gap
+    /// between the two is the whole subject.
+    fn ink(tl: &TextLayout) -> Rect {
+        let mut b: Option<Rect> = None;
+        for r in &tl.runs {
+            let rb = run_outline(r).bounding_box();
+            if rb.width() > 0.0 {
+                b = Some(b.map_or(rb, |a: Rect| a.union(rb)));
+            }
+        }
+        b.expect("the fixture must draw something")
+    }
+
+    fn label(s: &str, align: TextAlign, optical: bool, sizing: TextSizing) -> TextLayout {
+        let d = TextStyle::default();
+        let mut p = super::tests::parts(&d, &sizing);
+        p.paragraph.align = align;
+        p.paragraph.optical_margins = optical;
+        layout(p.as_ref(s))
+    }
+
+    /// **Three auto-width labels starting with different letters line up.** This
+    /// is `roadmap.md`'s complaint stated as an assertion: without the setting the
+    /// three inks start at three different x, and the spread is what a reader sees
+    /// as one label being indented.
+    ///
+    /// ⚠️ **Flipped** by dropping `x -= lsb` from the optical arm in `break_lines`
+    /// — the plausible half-fix, since widening the measure alone still hangs the
+    /// end: **red on the all-equal assertion**, the predicted site, with the three
+    /// original bearings back as `[0.375, 1.375, 1.609]`.
+    ///
+    /// ⚠️ **That flip takes the other two tests with it, and in the direction
+    /// nobody guesses**: with the measure widened and the line not moved, the end
+    /// test fails at **200.375** — an *overshoot* past the measure, not a
+    /// shortfall. Worth the sentence because the three assertions here read as
+    /// three views of one number and are not: this flip overshoots, the `rsb` flip
+    /// below undershoots, and only the pair of them pins the correction to
+    /// *both* bearings rather than to some bearing.
+    #[test]
+    fn optical_margins_put_every_labels_ink_on_the_start_edge() {
+        let off: Vec<f64> = ["Wamburg", "Hamburg", "'amburg"]
+            .iter()
+            .map(|s| ink(&label(s, TextAlign::Start, false, TextSizing::Auto)).x0)
+            .collect();
+        assert!(
+            off.windows(2).any(|w| (w[0] - w[1]).abs() > 0.5),
+            "the fixture is not in the state this test is about — these three \
+             strings must disagree without the setting, or the assertion below is \
+             true of nothing: {off:?}"
+        );
+
+        let on: Vec<f64> = ["Wamburg", "Hamburg", "'amburg"]
+            .iter()
+            .map(|s| ink(&label(s, TextAlign::Start, true, TextSizing::Auto)).x0)
+            .collect();
+        for x in &on {
+            assert!(
+                x.abs() < 0.01,
+                "every label's ink starts on the edge, not its advance origin: {on:?}"
+            );
+        }
+    }
+
+    /// **The node's box does not move, and that is what makes the feature usable.**
+    /// If switching this on shifted the box as well as the ink, two labels placed
+    /// at the same x would be misaligned again by their origins and nothing would
+    /// have been gained.
+    ///
+    /// **A guard rather than a flip target**: there is no plausible wrong version
+    /// that moves the box, because the correction is applied to parley's line
+    /// geometry and the box is derived from the layout afterwards. It is asserted
+    /// because the property is load-bearing and invisible.
+    #[test]
+    fn optical_margins_leave_the_box_where_it_was() {
+        for s in ["Wamburg", "Hamburg", "'amburg"] {
+            let off = label(s, TextAlign::Start, false, TextSizing::Auto).bounds();
+            let on = label(s, TextAlign::Start, true, TextSizing::Auto).bounds();
+            assert!(
+                (off.x0 - on.x0).abs() < 0.01,
+                "{s}: the box's start edge moved, {} to {}",
+                off.x0,
+                on.x0
+            );
+        }
+    }
+
+    /// **An end-aligned line hangs its last glyph out to the measure.** The
+    /// advance end was already aligned without the setting — that is what makes
+    /// this the *other* half of the feature rather than a restatement of the first
+    /// test: the numbers that were equal are still equal, and the ones that were
+    /// short now reach.
+    ///
+    /// ⚠️ **Flipped** by widening the measure by `lsb` alone instead of `lsb + rsb`:
+    /// **red on the ink-reaches-the-edge assertion**, the predicted site, at
+    /// 198.789 against 200 — which is the right bearing of the final `g`, and is
+    /// exactly the gap the setting exists to close.
+    #[test]
+    fn optical_margins_hang_an_end_aligned_line_out_to_the_measure() {
+        let box_ = TextSizing::Fixed(kurbo::Size::new(200.0, 80.0));
+        for s in ["Wamburg", "Hamburg", "'amburg"] {
+            let off = ink(&label(s, TextAlign::End, false, box_)).x1;
+            assert!(
+                off < 199.5,
+                "the fixture: without the setting the ink stops short of the \
+                 measure, which is the gap this closes ({s} at {off})"
+            );
+            let on = ink(&label(s, TextAlign::End, true, box_)).x1;
+            assert!(
+                (on - 200.0).abs() < 0.01,
+                "{s}: the last glyph's ink should reach the measure, not its \
+                 advance — got {on}"
+            );
+        }
+    }
+
+    /// 🚨 **A justified block spans its measure by ink at both ends**, which is the
+    /// case the whole design turns on. Shifting a justified line cannot work — its
+    /// two ends are pinned — so the correction is applied to the line's *measure*
+    /// before parley justifies into it, and parley does the stretching.
+    ///
+    /// ⚠️ **Flipped** by shifting the line and leaving the measure alone
+    /// (`x -= lsb` with no `measure += lsb + rsb`), which is the version that
+    /// works for the first test and looks like it should work here: **red on the
+    /// right-edge assertion**, at **199.023** against 200, with the left edge
+    /// green — the whole block slid left and the right margin went ragged, which
+    /// is the failure a start-edge-only implementation ships.
+    ///
+    /// ⚠️ **The predicted site was right and the predicted number was not**: this
+    /// was written as 198.789, which is what the *end-aligned* test fails at under
+    /// the `rsb` flip, and it is not what a justified line does. A justified line
+    /// is stretched to its measure, so sliding it left leaves a gap of `lsb`
+    /// rather than of `rsb` — a different bearing, from a different glyph, at the
+    /// other end of the line. Corrected against the run rather than left standing.
+    #[test]
+    fn a_justified_block_spans_its_measure_by_ink() {
+        let box_ = TextSizing::Fixed(kurbo::Size::new(200.0, 80.0));
+        let s = "Hamburg quick brown fox jumps over lazy dogs and runs away fast";
+        let tl = label(s, TextAlign::Justify, false, box_);
+        assert!(
+            tl.runs.iter().map(|r| r.glyphs.len()).sum::<usize>() > 20,
+            "the fixture must actually wrap, or there is no justification to test"
+        );
+
+        let on = ink(&label(s, TextAlign::Justify, true, box_));
+        assert!(
+            on.x0.abs() < 0.01,
+            "the justified block starts on the edge: {}",
+            on.x0
+        );
+        assert!(
+            (on.x1 - 200.0).abs() < 0.01,
+            "and reaches it at the far end, which a shift alone cannot do: {}",
+            on.x1
+        );
+    }
+
+    /// **The SVG writer gets this for free, and this test is what makes "for
+    /// free" a fact rather than a hope.**
+    ///
+    /// `export_lines` and the canvas's `layout` both go through `shape`, and the
+    /// correction is applied inside it — to parley's line geometry, before either
+    /// consumer sees a line. So the writer's own computed `x` already carries it,
+    /// which is what §15 D81 requires of every other alignment and indent: *"the
+    /// writer no longer asks a viewer to re-align text it re-shaped itself."*
+    ///
+    /// **Asserted on `ExportLine::x` rather than on emitted markup**, because that
+    /// is the seam — `ondin-export` turns this number into `<text x>`, and a test
+    /// over the string would be testing the formatter.
+    ///
+    /// ⚠️ **Flipped** by gating the second pass off in `shape`, the plausible
+    /// wrong version being a feature wired into the canvas path only: **red here**
+    /// and green on the four tests above, which is the whole reason it exists —
+    /// every one of those reads `layout`, so a canvas-only implementation passes
+    /// all four and still exports unaligned text.
+    ///
+    /// 🚨 **This test was itself a doc-comment theft for about a minute**, and it
+    /// is worth the sentence because of *when*. It was added by anchoring an
+    /// `Edit` on the tail of the previous test's doc run, which put an item
+    /// between that run and `a_justified_block_spans_its_measure_by_ink` — an
+    /// instance of the class `CLAUDE.md` opens with, committed inside the same
+    /// session that read that warning twice. Caught by habit 2, the neighbour
+    /// grep, run as a routine rather than because anything felt wrong.
+    /// *Knowing the trap is not what prevents the trap.*
+    ///
+    /// ⚠️ **No ordinal, deliberately.** This said *"the twenty-sixth instance"*,
+    /// and the same edit sequence committed a **second** theft — `optical_offsets`
+    /// merging its doc run with `break_lines`' — so one of the two is twenty-sixth
+    /// and one twenty-seventh, and naming a position for this one alone is a count
+    /// in prose that is already wrong. The tally lives in `CLAUDE.md` and is moved
+    /// there.
+    #[test]
+    fn the_svg_writers_line_x_carries_the_correction_too() {
+        let d = TextStyle::default();
+        let mut p = super::tests::parts(&d, &TextSizing::Auto);
+        let off = export_lines(p.as_ref("Hamburg"))[0].x;
+        p.paragraph.optical_margins = true;
+        let on = export_lines(p.as_ref("Hamburg"))[0].x;
+        assert!(
+            (off - on - 1.375).abs() < 0.01,
+            "the exported line must start a left bearing earlier — `H` measures \
+             1.375px at 16px, and the writer got {off} then {on}"
+        );
     }
 }

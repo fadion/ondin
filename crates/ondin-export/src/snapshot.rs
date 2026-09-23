@@ -429,7 +429,13 @@ fn node_snapshot(
         parent: node.parent().map(|p| p.to_wire()),
         children: node.children().iter().map(|c| c.to_wire()).collect(),
         artboard: artboard.map(|a| a.to_wire()),
-        local_transform: node.transform().as_coeffs(),
+        // **Used, not specified** (§15 D868), and the reason is this record's own
+        // arithmetic: `world_transform` below is `Resolved`'s, which composes used
+        // locals, so a document local here would stop multiplying out to it the
+        // first time container layout placed something. Whether a snapshot should
+        // *also* carry what the user set — which an agent editing the file needs —
+        // is the MCP work's question, and that work is parked.
+        local_transform: res.used_local_of(node).as_coeffs(),
         world_transform: res
             .world_transform(id)
             .unwrap_or(Affine::IDENTITY)
@@ -449,7 +455,8 @@ fn node_snapshot(
             let at = ondin_core::geometry::pivot_point(Some(p), local);
             [at.x, at.y]
         }),
-        geometry: geometry(node.kind()),
+        // Used, for `local_transform`'s reason: `world_bounds` is measured from it.
+        geometry: geometry(res.used_kind_of(node)),
         fills: node
             .paint()
             .fills

@@ -4477,7 +4477,9 @@ impl OndinApp {
     /// people computing a box the same way.
     fn crop_frame(&self, id: NodeId) -> Option<(Affine, KRect)> {
         let world = self.session.resolved.world_transform(id)?;
-        let kind = self.session.doc.get(id)?.kind();
+        // The **used** kind (§15 D868), because the renderer frames the picture
+        // at the kind it draws, and this has to be that rectangle.
+        let kind = self.session.resolved.used_kind(&self.session.doc, id)?;
         let frame = {
             use ondin_core::kurbo::Shape;
             ondin_core::geometry::local_path(kind)?.bounding_box()
@@ -6802,8 +6804,10 @@ impl OndinApp {
             image.name.clone(),
         );
         let (parent, parent_world) = self.draw_target(world);
-        // The frame's own box in its own units, or the visible world.
-        let frame = match self.session.doc.get(parent).map(|n| n.kind()) {
+        // The frame's own box in its own units, or the visible world — the
+        // frame's **used** box (§15 D868), the one on screen, since the picture is
+        // being fitted to it rather than written into it.
+        let frame = match self.session.resolved.used_kind(&self.session.doc, parent) {
             Some(NodeKind::Artboard { size, .. }) => *size,
             _ => {
                 let view = self.session.camera.viewport(self.canvas_px).view;
@@ -6874,7 +6878,9 @@ impl OndinApp {
         // and the visible world is the only bounded thing on bare canvas, so an
         // auto-width paste of a long paragraph would otherwise land one line wide,
         // mostly off screen, with nothing visible to grab.
-        let available = match self.session.doc.get(parent).map(|n| n.kind()) {
+        // The frame's **used** width (§15 D868): the page the paste has to fit on
+        // is the one on screen. Not an edit of the frame, so not its typed size.
+        let available = match self.session.resolved.used_kind(&self.session.doc, parent) {
             Some(NodeKind::Artboard { size, .. }) => size.width,
             _ => self.session.camera.viewport(self.canvas_px).view.width(),
         };

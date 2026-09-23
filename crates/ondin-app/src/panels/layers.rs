@@ -1880,7 +1880,9 @@ impl OndinApp {
         let badge = if node.mask() {
             Some(RowBadge::Icon(icon::CIRCLE_HALF, BADGE_MASK))
         } else {
-            match node.kind() {
+            // The frame's **used** size (§15 D868) — the badge reports the frame
+            // on the canvas, which is where container layout put it.
+            match self.session.resolved.used_kind_of(node) {
                 NodeKind::Artboard { size, .. } => Some(RowBadge::Text(format!(
                     "{} × {}",
                     size.width as i64, size.height as i64

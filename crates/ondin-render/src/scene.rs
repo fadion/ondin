@@ -652,9 +652,15 @@ fn mask_geometry(
     if !visible(ov, node, id) {
         return None;
     }
-    let kind = over.and_then(|o| o.kind.as_ref()).unwrap_or(node.kind());
+    // The override's, else the **used** geometry (§15 D868) — `paint_node`'s
+    // precedence, so a mask clips with the outline its layer is drawn with.
+    let kind = over
+        .and_then(|o| o.kind.as_ref())
+        .or_else(|| res.used_kind(doc, id))
+        .unwrap_or(node.kind());
     let local = over
         .and_then(|o| o.transform)
+        .or_else(|| res.used_local(doc, id))
         .unwrap_or_else(|| node.transform());
     let own = match kind {
         NodeKind::Boolean { .. } => ov
@@ -808,14 +814,23 @@ fn paint_node<P: ScenePainter>(
         return;
     }
 
+    // **A gesture's override first, then the *used* geometry** (§15 D868) —
+    // where container layout placed and sized the node, which is the document's
+    // until it places something. Every geometric read below goes through
+    // `painted.kind` and `world`, so these two lines are the walk's whole answer
+    // to "where is this node".
     let local = over
         .and_then(|o| o.transform)
+        .or_else(|| res.used_local(doc, id))
         .unwrap_or_else(|| node.transform());
     let world = parent_world * local;
     let opacity = over.and_then(|o| o.opacity).unwrap_or(node.opacity());
 
     let painted = Painted {
-        kind: over.and_then(|o| o.kind.as_ref()).unwrap_or(node.kind()),
+        kind: over
+            .and_then(|o| o.kind.as_ref())
+            .or_else(|| res.used_kind(doc, id))
+            .unwrap_or(node.kind()),
         paint: over.and_then(|o| o.paint.as_ref()).unwrap_or(node.paint()),
         // Committed only: a preview cannot change the rule (`absorb` refuses
         // `SetFillRule`), so there is no override to prefer here.

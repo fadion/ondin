@@ -743,8 +743,9 @@ fn visible_strokes(node: &Node) -> impl Iterator<Item = (usize, &Stroke)> {
 fn collect_defs(doc: &Document, res: &Resolved, id: NodeId, outer: Affine, defs: &mut Defs) {
     let Some(node) = doc.get(id) else { return };
     // The same composition `emit_node` makes, so the region and the element that
-    // references it are described in one space rather than two.
-    let transform = outer * node.transform();
+    // references it are described in one space rather than two — the **used**
+    // local, where container layout placed the node (§15 D868).
+    let transform = outer * res.used_local_of(node);
     if ondin_render::effects::any_ink(node.effects())
         && let Some(region) = effect_region(res, id, transform, node.effects())
     {
@@ -879,7 +880,7 @@ fn collect_defs(doc: &Document, res: &Resolved, id: NodeId, outer: Affine, defs:
 /// other consumer in this writer — would silently frame it to the ink instead,
 /// and the difference is only visible on a picture you already know.
 fn paint_frame(node: &Node, res: &Resolved, id: NodeId) -> Option<Rect> {
-    match node.kind() {
+    match res.used_kind_of(node) {
         NodeKind::Artboard { size, .. } => Some(Rect::new(0.0, 0.0, size.width, size.height)),
         NodeKind::Text { .. } => res.text_layout(id).map(|l| l.bounds()),
         _ => outline(node, res, id).map(|p| p.bounding_box()),
@@ -1080,7 +1081,17 @@ fn emit_missing(
         return;
     };
     let ground = format!(r##" fill="{}""##, hex(m.ground));
-    write_element(out, node, derived, pad, "", &ground, "", "");
+    write_element(
+        out,
+        node,
+        res.used_kind_of(node),
+        derived,
+        pad,
+        "",
+        &ground,
+        "",
+        "",
+    );
     let cid = format!("mi-{}-{slot}", id.to_wire().replace(':', "_"));
     // The shape as a clip, so the rim reads as an inner border and the cross
     // stops at the edge — `outline` rather than the box, for a rounded rect and
@@ -1495,7 +1506,12 @@ fn emit_node(
     };
 
     let pad = "  ".repeat(depth);
-    let transform = outer * node.transform();
+    // **Used geometry from here down** (§15 D868): this local, and the used kind
+    // every size below is read from — the frame's clip and background here,
+    // `outline`, `side_path` and `write_element` in the helpers. The questions
+    // about *what sort* of node this is (`is_container`, `wrap`) stay on
+    // `node.kind()`, since a used kind is always the same variant.
+    let transform = outer * res.used_local_of(node);
     let opacity = node.opacity();
 
     let is_container = matches!(
@@ -1530,7 +1546,7 @@ fn emit_node(
     // Where the frame's own border sits: inside the outer group, beside the clip one.
     let own_pad = "  ".repeat(depth + usize::from(wrap));
     if wrap {
-        let clip = match node.kind() {
+        let clip = match res.used_kind_of(node) {
             NodeKind::Artboard { size, .. } if node.clip() => {
                 let cid = format!("clip-{}", id.to_wire().replace(':', "_"));
                 let _ = writeln!(
@@ -1589,7 +1605,7 @@ fn emit_node(
     // (§15 D400). It is the id of the `<clipPath>`/`<pattern>` this rect refers
     // to, so it has to be the same string `collect_defs` wrote — which is now the
     // one `visible_fills` hands both of them.
-    if let NodeKind::Artboard { size } = node.kind() {
+    if let NodeKind::Artboard { size } = res.used_kind_of(node) {
         for (i, f) in visible_fills(node) {
             let slot = format!("fill-{i}");
             if missing_picture(doc, &f.brush) {
@@ -1856,8 +1872,8 @@ fn emit_shape(
             // subpath, each with its own `stroke-dasharray`, and a single element
             // carries a single pattern.
             [(_, s)] => {
-                align_clip(node, shape.as_ref(), s).is_none()
-                    && geometry::effective_sides(node.kind(), s).is_all()
+                align_clip(res.used_kind_of(node), shape.as_ref(), s).is_none()
+                    && geometry::effective_sides(res.used_kind_of(node), s).is_all()
                     && dash_pieces(shape.as_ref(), s, s.width).is_none()
             }
             _ => false,
@@ -1903,7 +1919,17 @@ fn emit_shape(
         ),
         None => String::new(),
     };
-    write_element(out, node, derived, pad, &t, &fill, &stroke, &op);
+    write_element(
+        out,
+        node,
+        res.used_kind_of(node),
+        derived,
+        pad,
+        &t,
+        &fill,
+        &stroke,
+        &op,
+    );
 }
 
 /// The pieces a fitted dash pattern has to be laid along, or `None` when one
@@ -1928,13 +1954,14 @@ fn dash_pieces(
 /// measured nothing and came out at its unscaled period, and outlined type exported
 /// with its stroke centred on the glyph edges instead of outside them.
 fn outline(node: &Node, res: &Resolved, id: NodeId) -> Option<BezPath> {
-    match node.kind() {
+    let kind = res.used_kind_of(node);
+    match kind {
         // Glyph outlines, built from the cached layout — the same path the scene walk
         // strokes, so the export cannot clip a text stroke differently (§6.3).
         NodeKind::Text { .. } => res.text_layout(id).map(ondin_core::text::outline),
         _ => match res.boolean_path(id) {
             Some(path) => Some(path.clone()),
-            None => geometry::local_path(node.kind()),
+            None => geometry::local_path(kind),
         },
     }
 }
@@ -2011,7 +2038,17 @@ fn emit_stacked(
             // filled in — while the canvas drew it correctly. Same document, two
             // pictures, no warning.
             let fill = with_fill_rule(paint_attr("fill", &f.brush, id, &slot, defs), node);
-            write_element(out, node, derived, pad, "", &fill, "", "");
+            write_element(
+                out,
+                node,
+                res.used_kind_of(node),
+                derived,
+                pad,
+                "",
+                &fill,
+                "",
+                "",
+            );
         });
     }
     emit_strokes(out, doc, node, res, id, &inner, strokes, defs);
@@ -2067,7 +2104,7 @@ fn emit_strokes(
         // still built from the whole shape, and wraps every side of one stroke
         // together: the sides are one paint, and a clip each would be three more
         // identical `clipPath`s in the file.
-        let sides = geometry::effective_sides(node.kind(), s).per_side(s.width);
+        let sides = geometry::effective_sides(res.used_kind_of(node), s).per_side(s.width);
         // **And a fitted dash on a multi-subpath path is one `<path>` per subpath**,
         // each carrying the pattern fitted to that subpath's own perimeter, because
         // an element can only say one `stroke-dasharray` (`geometry::dash_fit_pieces`).
@@ -2087,7 +2124,7 @@ fn emit_strokes(
             match (&sides, &pieces) {
                 (Some(sides), _) => {
                     for (side, w) in sides {
-                        let Some(edge) = geometry::side_path(node.kind(), *side) else {
+                        let Some(edge) = geometry::side_path(res.used_kind_of(node), *side) else {
                             continue;
                         };
                         // A side is one subpath, so its own fit is exact and needs no
@@ -2100,6 +2137,7 @@ fn emit_strokes(
                 (None, None) => write_element(
                     out,
                     node,
+                    res.used_kind_of(node),
                     derived,
                     pad,
                     "",
@@ -2130,7 +2168,7 @@ fn emit_strokes(
             &format!("stroke-{i}"),
             inner,
             |out, inner| {
-                match align_clip(node, shape.as_ref(), s) {
+                match align_clip(res.used_kind_of(node), shape.as_ref(), s) {
                     Some((clip_d, rule)) => {
                         // Per stroke, so two aligned strokes on one shape get a clip each
                         // rather than sharing — and the index is the paint's own, so
@@ -2162,6 +2200,9 @@ fn emit_strokes(
 fn write_element(
     out: &mut String,
     node: &Node,
+    // The node's **used** kind (§15 D868) — every size and outline below is read
+    // from it, and the caller has the `Resolved` this function does not.
+    kind: &NodeKind,
     // `derived` is the outline `Resolved` computed for a `Boolean` node — its
     // whole geometry, and `None` for every other kind, which builds its own.
     derived: Option<&BezPath>,
@@ -2171,7 +2212,7 @@ fn write_element(
     stroke: &str,
     op: &str,
 ) {
-    match node.kind() {
+    match kind {
         // `<rect rx>` can only say one number, so unequal corners are emitted
         // as the same outline the canvas draws — `local_path`, not a second
         // construction that could round them differently.
@@ -2190,7 +2231,7 @@ fn write_element(
                 );
             }
             None => {
-                let d = geometry::local_path(node.kind())
+                let d = geometry::local_path(kind)
                     .map(|p| path_d(&p))
                     .unwrap_or_default();
                 let _ = writeln!(out, r#"{pad}<path{t} d="{d}"{fill}{stroke}{op}/>"#);
@@ -2201,7 +2242,7 @@ fn write_element(
         // pile of line segments. The points come from `local_path`, so the
         // export cannot round a shape the canvas drew differently.
         NodeKind::Polygon { .. } | NodeKind::Star { .. } => {
-            let points = geometry::local_path(node.kind())
+            let points = geometry::local_path(kind)
                 .map(|p| {
                     p.elements()
                         .iter()
@@ -2245,7 +2286,7 @@ fn write_element(
         // same resolution the canvas draws (§15 D119). Free when there are no
         // radii: it hands the path straight back.
         NodeKind::Path { .. } => {
-            if let Some(resolved) = geometry::local_path(node.kind()) {
+            if let Some(resolved) = geometry::local_path(kind) {
                 let _ = writeln!(
                     out,
                     r#"{pad}<path{t} d="{d}"{fill}{stroke}{op}/>"#,
@@ -2306,7 +2347,7 @@ fn write_element(
         // `startOffset` in *percent*, which is the one spelling that does not also
         // depend on our measure of the text.
         NodeKind::Text { on_path, .. } => {
-            let Some(parts) = ondin_core::TextRef::of(node.kind()) else {
+            let Some(parts) = ondin_core::TextRef::of(kind) else {
                 return;
             };
             if on_path.is_some() {
@@ -2700,8 +2741,16 @@ fn matrix_attr(name: &str, a: Affine) -> String {
 ///
 /// `None` for a centred stroke, for an open shape (which has no interior to be
 /// inside of), and for a kind with no outline at all.
-fn align_clip(node: &Node, shape: Option<&BezPath>, s: &Stroke) -> Option<(String, &'static str)> {
-    if s.align == StrokeAlign::Center || !geometry::stroke_align_applies(node.kind()) {
+///
+/// `kind` is the node's **used** kind (§15 D868): whether an outline is closed is
+/// a question about the outline that is drawn, and a size layout shrinks to nothing
+/// has none.
+fn align_clip(
+    kind: &NodeKind,
+    shape: Option<&BezPath>,
+    s: &Stroke,
+) -> Option<(String, &'static str)> {
+    if s.align == StrokeAlign::Center || !geometry::stroke_align_applies(kind) {
         return None;
     }
     let path = shape?;
@@ -2714,8 +2763,8 @@ fn align_clip(node: &Node, shape: Option<&BezPath>, s: &Stroke) -> Option<(Strin
             // complement's outer edge *inside* a wide stroke — which clipped it into
             // straight rectangular bites. `scene::outer_bounds` states the same rule for
             // the canvas; the two must agree or an export differs from what was drawn.
-            let reach = geometry::effective_sides(node.kind(), s).max_width(s.width)
-                * s.miter_limit.max(1.0);
+            let reach =
+                geometry::effective_sides(kind, s).max_width(s.width) * s.miter_limit.max(1.0);
             let pad_out = (b.width() + b.height()).max(1.0) + reach;
             let mut complement = b.inflate(pad_out, pad_out).to_path(0.1);
             complement.extend(path.iter());

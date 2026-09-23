@@ -329,6 +329,11 @@ impl Selection {
 pub struct DisplayNode<'a> {
     node: &'a Node,
     over: Option<&'a NodeOverride>,
+    /// The **used** kind under the override (§15 D868) — where container layout
+    /// sized the node, which is the document's kind until it sizes something.
+    /// `None` for [`EditorSession::committed_node`], whose one job is to report
+    /// the value a commit is about to overwrite, which is the specified one.
+    used: Option<&'a NodeKind>,
 }
 
 impl<'a> DisplayNode<'a> {
@@ -349,9 +354,16 @@ impl<'a> DisplayNode<'a> {
     pub fn proportions_locked(&self) -> bool {
         self.node.proportions_locked()
     }
+    /// The override's kind, then the used one, then the document's.
+    ///
+    /// ⚠️ **Shown, not typed**: a control that computes an edit *from* this is
+    /// computing it from where layout put the node. Equal to what the user set
+    /// until container layout sizes something; the step that makes them differ
+    /// owes every such caller a decision.
     pub fn kind(&self) -> &'a NodeKind {
         self.over
             .and_then(|o| o.kind.as_ref())
+            .or(self.used)
             .unwrap_or_else(|| self.node.kind())
     }
     pub fn paint(&self) -> &'a Paint {
@@ -569,9 +581,11 @@ impl EditorSession {
     /// Panels must read through this rather than the document, or their
     /// controls snap back to the committed value on every frame of a drag.
     pub fn display_node(&self, id: NodeId) -> Option<DisplayNode<'_>> {
+        let node = self.doc.get(id)?;
         Some(DisplayNode {
-            node: self.doc.get(id)?,
+            node,
             over: self.overrides.get(id),
+            used: Some(self.resolved.used_kind_of(node)),
         })
     }
 
@@ -589,6 +603,7 @@ impl EditorSession {
         Some(DisplayNode {
             node: self.doc.get(id)?,
             over: None,
+            used: None,
         })
     }
 
@@ -607,7 +622,7 @@ impl EditorSession {
     /// a world transform would apply the parent chain twice.
     pub fn preview_local_transform(&self, id: NodeId) -> Option<Affine> {
         self.doc.get(id)?;
-        Some(self.overrides.transform_of(&self.doc, id))
+        Some(self.overrides.transform_of(&self.doc, &self.resolved, id))
     }
 
     /// Install the artwork explaining the mode that is open, or take it away.

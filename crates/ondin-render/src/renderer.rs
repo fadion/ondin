@@ -383,13 +383,18 @@ impl RenderOverrides {
     /// `Affine::IDENTITY` for one, having found neither an override nor a document
     /// node. Nothing drew wrong from that (the ghost walk reads `GhostNode::transform`
     /// directly), but a boolean evaluating over a ghost operand asks *here*.
-    pub fn transform_of(&self, doc: &Document, id: NodeId) -> Affine {
+    ///
+    /// **Then the override, then the *used* local** (§15 D868) — where container
+    /// layout placed the node, which is the document's transform until it places
+    /// something. Not the document's: a node the gesture does not touch is drawn
+    /// where it is, and a layout can put it somewhere other than where it was typed.
+    pub fn transform_of(&self, doc: &Document, res: &Resolved, id: NodeId) -> Affine {
         if let Some(g) = self.ghost(id) {
             return g.transform;
         }
         self.get(id)
             .and_then(|o| o.transform)
-            .or_else(|| doc.get(id).map(|n| n.transform()))
+            .or_else(|| res.used_local(doc, id))
             .unwrap_or(Affine::IDENTITY)
     }
 
@@ -467,7 +472,7 @@ impl RenderOverrides {
         }
         let mut world = Affine::IDENTITY;
         for node in chain.iter().rev() {
-            world *= self.transform_of(doc, *node);
+            world *= self.transform_of(doc, res, *node);
         }
         Some(world)
     }
@@ -598,13 +603,13 @@ impl RenderOverrides {
                 id,
                 op,
                 &ondin_core::boolean::Operands {
-                    local_of: &|c| self.transform_of(doc, c),
+                    local_of: &|c| self.transform_of(doc, res, c),
                     // **The overridden kind, not the committed one.** A resize
                     // expresses itself partly as new *geometry*, so reading the
                     // document here moved the operands without resizing them: the
                     // shape shuffled about under the pointer and snapped to the
                     // right size on release.
-                    kind_of: &|c| self.current_kind(doc, c),
+                    kind_of: &|c| self.drawn_kind(doc, res, c),
                     // The committed children plus this preview's ghosts — a preview
                     // cannot reparent, reorder or delete (`absorb` refuses all three),
                     // but it can *add*, and an added operand counts. See
@@ -975,6 +980,11 @@ impl RenderOverrides {
 
     /// The kind as the transaction has left it so far — later ops in the same
     /// transaction build on earlier ones, as they would when applied.
+    ///
+    /// **The document's kind under the overrides, not the used one** (§15 D868),
+    /// because this is what an op is *applied to*: a `SetGeometry` patches the size
+    /// the user set, and building it on a size layout computed would write the used
+    /// value back as though it had been typed. Drawing asks [`Self::drawn_kind`].
     fn current_kind(&self, doc: &Document, id: NodeId) -> Option<NodeKind> {
         if let Some(g) = self.ghost(id) {
             return Some(g.kind.clone());
@@ -982,6 +992,19 @@ impl RenderOverrides {
         self.get(id)
             .and_then(|o| o.kind.clone())
             .or_else(|| doc.get(id).map(|n| n.kind().clone()))
+    }
+
+    /// The kind to **measure and draw** `id` with: a ghost's, then the override's,
+    /// then the used kind (§15 D868) — [`Self::current_kind`]'s twin for the
+    /// reading side, and the only difference between them is that last fallback.
+    /// Equal until container layout resizes something.
+    fn drawn_kind(&self, doc: &Document, res: &Resolved, id: NodeId) -> Option<NodeKind> {
+        if let Some(g) = self.ghost(id) {
+            return Some(g.kind.clone());
+        }
+        self.get(id)
+            .and_then(|o| o.kind.clone())
+            .or_else(|| res.used_kind(doc, id).cloned())
     }
 
     fn current_paint(&self, doc: &Document, id: NodeId) -> Option<Paint> {

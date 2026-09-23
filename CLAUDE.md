@@ -8,7 +8,7 @@ documents, and is untracked.
 | --- | --- |
 | `docs/architecture.md` | The design and the invariants. **Source of truth.** ~12,000 lines. |
 | `docs/decisions.md` | **§15** — every deviation from that design, **D1–D830** with no gaps, each with a verdict. ~47,700 lines. |
-| `docs/roadmap.md` | Open work, decided non-goals, parked decisions, post-v1. **Every `Now` section is clear as of 2026-09-22** — what is left is *Later* and §0. |
+| `docs/roadmap.md` | Open work, decided non-goals, parked decisions, post-v1. **Every `Now` section but one is clear as of 2026-09-23** — *Files, library and storage* holds the cover cache's lifecycle (no eviction, `drain` only when a card asks); the rest is *Later* and §0. |
 | `docs/shortcuts.md` | The whole keymap — bound, unbound and agreed. |
 | `docs/context-menus.md` | The context-menu spec and its own deviation ledger. |
 | `docs/vm.md` | The language behind Command Mode. Nothing here is built. |
@@ -67,11 +67,12 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 860 index rows, 860 body headings, next free
-D861** — but trust the procedure over any number written down here, including that one.
-⚠️ **D845–D860 are spent** and **D861–D866 is reserved and unspent** (negative grep clean at
-the close of session 31) — confirm it with the negative grep anyway; a reservation recorded here
-is a claim about the moment it was written, which is the whole subject of this section.
+anywhere cited either. **The live figures: 862 index rows, 862 body headings, next free
+D863** — but trust the procedure over any number written down here, including that one.
+⚠️ **D861–D862 are spent** (session 32, the release review's last two) and **D863–D866 is
+reserved and unspent** (negative grep clean at the close of session 32) — confirm it with the
+negative grep anyway; a reservation recorded here is a claim about the moment it was written,
+which is the whole subject of this section.
 ⚠️ **Session 31 overran its block the ordinary way, and caught it the ordinary way**: it reserved
 D845–D856, reserved D857–D866 before the first ran out, and spent sixteen. Every number was typed
 into code only after its block was reserved and grep-checked, and the closing re-grep over the
@@ -131,13 +132,14 @@ nothing. Put the number on the doc of whatever a reader meets the question at.
 grep -rhoE 'D[0-9]{1,3}\b' crates/ --include=*.rs | sort -u
 ```
 
-755 distinct numbers at the close of session 31 — **sixteen arrivals (D845–D860) and no
-departures** against `348239b`, measured as a set-difference, which is the only reading that
+757 distinct numbers at the close of session 32 — **two arrivals (D861, D862) and no
+departures** against `edef605` (755 there, session 31's figure), measured as a set-difference,
+which is the only reading that
 says anything; the 744 this line carried was already not a reading of any recent commit, the
-same way the census figures below go stale — and **every one of them resolves**, the fourth clean reading
-in twenty-odd sessions, after D476 and D477 were reconstructed from their citation sites on
-2026-09-19 (§15 D806's neighbours; both entries say in their first line that they are
-reconstructions).
+same way the census figures below go stale — and **every one of them resolves** (measured at the
+close of session 32; the unresolved half has been reachable at zero only since D476 and D477 were
+reconstructed from their citation sites on 2026-09-19 — §15 D806's neighbours; both entries say in
+their first line that they are reconstructions).
 🚨 **A hex seed is a false positive of this sieve and one was manufactured in our own source**
 (§15 D832's test). `IdSource::new(0xD0)` matches `D[0-9]{1,3}\b` exactly, so it read as a
 dangling `D0` — the same shape as `target/`'s `D00`/`D000` below, in a file the census is
@@ -1101,10 +1103,12 @@ The real census cannot be scoped to its own answer:
 grep -rhoE 'cfg\(([a-z_]+)' crates/ --include=*.rs | sort | uniq -c
 ```
 
-Last run (2026-09-23, close of session 31): **368 `test`, 7 `windows`, 3 `unix`, 3 `panic`,
-3 `not`, 3 `debug_assertions`, 2 `target_os`, 2 `all`, 1 `debug`.** The tail did not move; `test`
-rose by 21 over test modules and `cfg(test)` seams this session added (`cover::covers_dir`'s
-`cfg!(test)` is one of them).
+Last run (2026-09-23, close of session 32): **370 `test`, 7 `windows`, 3 `unix`, 3 `panic`,
+3 `not`, 3 `debug_assertions`, 2 `target_os`, 2 `all`, 1 `debug`.** The tail did not move. `test`
+rose by 2 over session 32 and only **one** of those is an attribute (`Covers::asked_for`); the other is
+that item's doc saying *"this item is `cfg(test)`"* — **prose is source to this sieve**, the same
+reason the `1 debug` row below exists. (Session 31's reading was 368, a rise of 21 over test
+modules and `cfg(test)` seams it added.)
 🚨 **The `1 debug` row is not new and was never written down** — it is
 `cfg(debug_assertions)` matched a second time by the `[a-z_]+` sieve at a line the census
 itself prints, and every recorded reading of this command has silently dropped it (the release

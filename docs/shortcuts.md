@@ -768,7 +768,11 @@ five inspector and Export popovers each answer `Escape` by closing, and none of 
 rung — dismissing something opened by accident must not deselect, leave the group or drop the tool in
 the same keystroke. ⚠️ **The five popovers were the half nobody had measured**: until 2026-09-19 the
 typography, stroke and effects popovers closed *and* dropped a rung, and the Export card's two did
-not read the key at all, so `Escape` dropped a rung and left the popover standing. ⚠️ **Image
+not read the key at all, so `Escape` dropped a rung and left the popover standing. 🚨 **Only a
+popover that is on screen takes the press** (§15 D847): the gate read the popovers' flags, a flag
+outlives its popover whenever the panel that draws it is skipped — a non-text selection, present mode —
+and `Escape` was then swallowed for the rest of the session with nothing visible to spend it on. Such a
+flag is cleared by the press now, and the press pays out its rung. ⚠️ **Image
 editing's card is deliberately not in that set** — it is a tool, so `Escape` leaving it *is* the
 ladder's own last rung, and gating the key on it would swallow the way out of the mode.
 

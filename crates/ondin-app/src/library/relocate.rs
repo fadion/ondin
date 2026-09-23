@@ -374,8 +374,6 @@ fn merge_tree(from: &Path, to: &Path, collision: Collision, moved: &mut Moved) {
                             //
                             // `None` is no extension; `Some(None)` is one that is
                             // not text.
-                            // `None` is no extension; `Some(None)` is one that is
-                            // not text.
                             let ext = match path.extension().map(|e| e.to_str()) {
                                 None => None,
                                 Some(Some(e)) => Some(e),

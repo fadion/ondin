@@ -6990,6 +6990,13 @@ in `update` whose **body is empty** — the popovers still close themselves late
 the arm removes is the second thing the press was doing. ⚠️ **It gates `Escape` alone and not the
 keyboard**: a modal owns every key because the document behind it cannot be seen, and a popover sits
 over a canvas the user is still looking at.
+🚨 **And only a popover that is being drawn** (§15 D847). The five flags outlive their popovers — every
+handler that clears one is in a panel that can be skipped, the Type popover's for any selection that
+is not text and all five in present mode — so a gate on the flags alone swallowed `Escape` for the rest
+of the session behind a popover nobody could see, and in present mode swallowed the way out.
+`OndinApp::popover_heard` is set by each **open** popover's handler and read by the arm at the top of
+the next frame, `chrome_focus`'s one-frame-late shape; a flag nothing heard is cleared by the press,
+which then pays out its rung.
 
 **The chrome is one row type for both surfaces.** `ui::MenuRow` adds an accelerator column, a checked
 state, a destructive tint and a dimmed-but-hoverable state to what `menu_item` drew, and `menu_item`
@@ -7938,6 +7945,9 @@ right-click dismisses them; and `OndinApp::a_popover_owns_escape`, so `Escape` c
 paying out a rung of the ladder underneath (§15 D801). ⚠️ **These two read no key at all until
 2026-09-19**, so `Escape` left them standing and dropped a rung behind them; one `key_pressed(Escape)`
 block at the foot of `export_buttons` clears both flags, the two being mutually exclusive anyway.
+⚠️ **That block tells the router it heard the key only while one of the two is open** (§15 D847): it
+runs whenever the card does, unlike the inspector popovers' handlers, and a drawn card with nothing
+open vouching for the frame would let a Type flag nobody is drawing go on swallowing `Escape`.
 ⚠️ **They were in neither of the first two until 2026-09-08** (§15 D533): each is anchored at `POPOVER_W`, which is
 the width the lane's own clearance is computed from, so a picker opened after one of them landed
 underneath it with 236 of its 240 points inside the popover's span.
@@ -9682,7 +9692,12 @@ own way out is hidden by the state itself; the menu row that turns it on closes 
 the chrome it lives in. ⚠️ **One thing outside that ladder takes the key ahead of it, and since §15
 D756 it can happen**: a context menu opens in present mode now, R3 answers Escape at the top of the
 frame and returns without calling `escape`, so the first press closes the menu and the second leaves
-the mode — the right order, and it costs no code. §1 carries it as scope, and §15 D37 has why it is a View row at all when the
+the mode — the right order, and it costs no code. 🚨 **From 2026-09-19 until §15 D847 there was an
+undocumented second, and it was invisible**: the popover arm (§9.4's one-press-one-rung paragraph) read
+the popovers' flags, present mode draws none of the five, and a Type popover open when the mode was
+entered left its flag set — so every `Escape` was spent on a popover that was not there and the mode's
+own toast named a key that did nothing. The arm now asks for a popover heard last frame, and present mode
+draws none, so the menu is again the only thing that precedes this rung. §1 carries it as scope, and §15 D37 has why it is a View row at all when the
 design's menu has no such thing.
 
 **The rulers are two 20pt bars; the guides pulled out of them are document state.** The bars
@@ -11257,10 +11272,12 @@ partly-failed migration being able to strand every document in the library.
 `OndinApp::retry_migration` re-runs `relocate(from, to)`, and **not being idempotent is what makes it
 safe**: a successful move deletes its source, so the second walk meets only what was left behind. It is
 answered *after* the Save/Cancel match, so it cannot race a base-folder change. ⚠️ **It refuses, and
-keeps the report, in two cases** (§15 D846): when `to` is not the library root, and when `from`
+keeps the report, in three cases** (§15 D846, D848): when `to` is not the library root, when `from`
 cannot be listed — `relocate` answers *"Nothing to move"* for a source that does not exist, and the
 retry used to take that at its word and clear the only list of what was left behind, §15 D384's rule
-once more. The re-point loop is
+once more — and when the library's own root cannot be listed, where `relocate` records `to` itself as
+the one failure and the retry wrote that over the names, and where its `create_dir_all` would recreate
+an offline library empty at its own path. The re-point loop is
 `OndinApp::follow_moved_documents` now, a retry being a second migration that owes everything the first
 one did. ⚠️ **Rollback is still not offered and is a decision rather than a gap**: `relocate`
 deliberately overwrites nothing, so "undo" means deciding what to do with everything that *did* arrive.
@@ -11283,6 +11300,10 @@ skipped and nothing is lost. In `.trash` it is two unrelated documents that happ
 a status line reporting success. In `.recovery` it can be neither: a snapshot's stem *is* a document
 id, so a renamed one would be offered to the user and then be undiscardable, and the file is left
 where it is and **counted as a failure** so the summary says so.
+⚠️ **A `.trash` arrival whose *extension* is not text is the rename's one exception** (§15 D848): the
+rename put back no extension, so `notes.<not text>` arrived as a bare `notes` the trash cannot list, and
+it is counted as a failure instead. A *stem* that is not text is still renamed — `naming::slug("")` is
+`untitled`, so it arrives as an ordinary `untitled.ondin`.
 
 ⚠️ **The scan walks two levels and skips dot-directories.** A document sits at the root or inside a
 project folder, so that is the whole tree; `.versions`, `.trash` and `.recovery` hold real `.ondin`
@@ -11300,6 +11321,11 @@ re-derivation, there being no `&str` to derive from, and so a name already taken
 a **failure** rather than a rename, on `Collision::Stranded`'s argument. Until that landed, *Change
 base folder* left such a file alone in a folder the app no longer reads, uncounted, under a status line
 reporting success — the shape the bullet above fixed for a `.trash` collision and not for this.
+⚠️ **A *folder* whose name is not text is walked, not skipped** (§15 D848). The rule reached files only
+until 2026-09-23, so such a project folder was in neither output and a migration left every document in
+it behind, uncounted. Descending needs no `&str`; the dot rule does, and is asked of the lossy name,
+because a leading `.` survives the loss — a hidden folder is still hidden whatever follows the dot. The
+documents inside, whose own names are text, are ordinary entries.
 
 ⚠️ **A scan that could not read the folder is not evidence that the folder is empty (§15 D384).** The
 unit that goes missing is never one document — a document cannot live outside the base folder — it is
@@ -11372,6 +11398,13 @@ build an app first. ⚠️ **A guard that differs by profile is allowed here and
 two resources in this class**, and the test is what it costs in coverage: `load` and `save` hold no
 behaviour beyond resolving the path, where `Prefs`' latch test drives `save_to` and
 `clipboard_gate_tests` has to open a real `arboard` handle to prove its lock holds.
+🚨 **That priced the two functions and not what they produce, and the cost was there** (§15 D848). Every
+`Library` a test built through `open` carried an empty index, so `root_unavailable` could not be reached
+through the constructor the app uses, and the one test proving D384's latch through a settings change
+passed by construction. `Library::open_with_index` takes the index as a **parameter** — which a later
+`open` cannot discard, unlike the flag rejected above — and a base-folder change hands the in-memory
+index across rather than re-reading it: the same data bar another window's writes since launch, which
+the next `save` overwrites either way, and the `unreadable` latch, which stays set until relaunch.
 
 **Every write is metadata first, path second.** A rename writes the name into the document and *then*
 renames the file; a move writes the project id and *then* moves the file. The failure that leaves is a

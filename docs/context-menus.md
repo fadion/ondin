@@ -93,6 +93,11 @@ themselves and letting the press through to the ladder anyway, two not reading t
 `OndinApp::a_popover_owns_escape` over an arm that does nothing but stop `input::resolve` running.
 **The image-editing card is excluded on R4's own reason**: it is a mode rather than a thing somebody
 opened, and `Escape` is how that mode is left, so a gate holding the key would swallow the way out.
+🚨 **And the five did exactly that until §15 D847, because the gate read their flags.** A flag outlives
+its popover whenever the panel that draws it is skipped, and in present mode none is drawn — so a Type
+popover open when the mode was entered took every `Escape` ahead of `self.present`'s rung. That made
+this arm a second thing above the ladder beside the menu, and unlike the menu an invisible one. The arm
+now asks for a popover whose handler ran last frame, and a flag nothing drew is cleared by the press.
 
 ⚠️ **And R3 was broken by a route the guard at the top of the frame cannot reach** (§15 D533). While
 the effects popover survived R4's clear, one `Escape` over an open context menu closed **both** — the

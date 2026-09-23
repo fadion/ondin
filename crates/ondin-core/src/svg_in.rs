@@ -7062,6 +7062,55 @@ mod tests {
         );
     }
 
+    /// **A selector list keeps its readable members when another member is one
+    /// this importer does not support — which is what a browser does** (§15 D860,
+    /// `[X7-L1-03]`).
+    ///
+    /// 🚨 **The finding said the opposite and a browser says this.** It held that
+    /// `.a, rect:hover{fill:red}` should drop the whole rule, since *"every browser
+    /// drops the whole rule"* for an invalid member — and `rect:hover` is not
+    /// invalid, it is valid CSS this importer does not read. Measured in Chromium,
+    /// served over HTTP per CLAUDE.md's recipe: that rule paints the rect
+    /// **red**, and it is only a *syntactically invalid* member (`rect:::bad`) or
+    /// an unknown pseudo-class (`rect:nonsense-pseudo`) that makes Chromium drop
+    /// the rule and paint it black. So the importer already agrees with the browser
+    /// on the realistic case, and the finding's sketched fix — drop the rule when
+    /// any member is unreadable — would have made it disagree there.
+    ///
+    /// ⚠️ **What is left is the narrow case, kept by decision**: a list with an
+    /// *invalid* member applies its readable members here and not in a browser.
+    /// Telling invalid from unsupported needs a CSS validator this importer does
+    /// not have, and exporters do not write invalid selectors. The member it could
+    /// not read is still reported.
+    ///
+    /// **Flip-check, run** against the finding's own sketch — drop the whole rule
+    /// when any member is unreadable: red, the rect black (`[0, 0, 0, 255]`),
+    /// which is the answer the browser does *not* give for this file.
+    #[test]
+    fn a_selector_list_keeps_its_readable_members_as_a_browser_does() {
+        let (doc, out) = imported(
+            r##"<svg xmlns="http://www.w3.org/2000/svg">
+                  <style>.a, rect:hover{fill:#ff0000}</style>
+                  <rect class="a" width="10" height="10"/>
+                </svg>"##,
+        );
+        let rect = shapes(&doc, &out)[0];
+        let Brush::Solid(c) = &doc.get(rect).unwrap().paint().fills[0].brush else {
+            panic!("a solid fill")
+        };
+        assert_eq!(
+            c.to_rgba8().to_u8_array(),
+            [255, 0, 0, 255],
+            "`.a` still applies, as it does in a browser — `rect:hover` is valid \
+             CSS this importer merely cannot read"
+        );
+        assert_eq!(
+            out.skipped,
+            vec!["style (complex selector)"],
+            "and the member it could not read is reported"
+        );
+    }
+
     /// **`*` matches any element, which nothing asserted** (§15 D837).
     ///
     /// ⚠️ Making the universal compound a literal tag name — i.e. matching only

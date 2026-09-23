@@ -1325,7 +1325,8 @@ happened four times.
    clipboard of captured *subtrees*, and dispatched `Item::PasteHere`, whose canvas arm is
    `paste_at(world)`. So text copied in a browser offered a dead *Paste*, and a layer copied first
    offered a live one that pasted **layers onto the canvas** from inside a text session. Both halves
-   are now `ContextMenu::system_text` — the OS clipboard's text, read once at open. **It is the one
+   are now `ContextMenu::system_text` — the OS clipboard's text, read once at open (the receipt
+   check beside it read it a second time until §15 D857 made it take the text already read). **It is the one
    piece of a menu that is a snapshot rather than rebuilt per frame**, because reading it means
    opening an OS clipboard handle and doing that sixty times a second fights other applications for
    the lock; a clipboard that changes while a context menu is open is not a case worth serving live.

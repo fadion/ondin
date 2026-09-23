@@ -4766,6 +4766,10 @@ other were right, which is why both exist.
   `:pseudo` wants state, `[attr]` wants attribute matching — and that is reported once for the sheet as
   before. **The important tier is the half that is still absent, and it is the half the stripping turns
   on**, so the decision stands on a narrower reason than the sentence it used to give.
+  **A selector list is read member by member** (§15 D860): `.a, rect:hover` still paints `.a`, which is
+  what Chromium does too — `rect:hover` is valid CSS this reader does not support, not an invalid
+  selector. Only a list with a genuinely *invalid* member differs, applying its readable half here and
+  nothing in a browser; that is kept by decision, the unread member reported as above.
   ⚠️ **A `<style>` element is every one of its text children joined, and reading `roxmltree`'s
   `text()` truncated it** (§15 D544). That accessor answers the first child *and only when it is a
   text node*, so an XML comment inside the sheet ended it there — and a **leading** one,
@@ -9118,8 +9122,11 @@ box and so *deleted* a crescent's only subpath. Losing the winding correction is
 solid; losing the geometry is a shape that is not there. And `Exclude` is **not**
 `sub(add(a,b), intersect(a,b))`: the intersection's boundary is made entirely
 of pieces of the operands' own edges, so that subtraction hands the traversal the same graph as `a ∪ b`
-and gets the two operands straight back. It is `path_full_intersect`'s two exterior paths instead — `a \ b`
-and `b \ a` from one cut, disjoint by construction (§15 D91).
+and gets the two operands straight back. It **was** `path_full_intersect`'s two exterior paths instead —
+`a \ b` and `b \ a` from one cut, disjoint by construction (§15 D91) — until the fill rule made it the
+operands' outlines concatenated and read even-odd, with no arithmetic at all (§15 D239's fourth
+amendment). This sentence and the module doc's copy stayed in the present tense until §15 D856, above a
+`combine` arm nothing could reach.
 
 **The four operations and the order they read in.** Children are stored bottom-first, so operand order
 *is* layer order: `Subtract` is the bottom child less everything above it, which is what the layer list
@@ -9497,8 +9504,9 @@ accumulator one subpath per operand, so the old left fold was Θ(N²): **103 ms 
 paid **per repaint** through `scene::mask_geometry` and **per pointer move** through
 `resolve::mask_path`, neither of which caches. Folded as a balanced tree it is 6.4 ms at 256 and N
 log N thereafter, which is why the cache is still not to be built — but the reason is now the fold's
-shape rather than the ring's. `Exclude` is the outlier (19.9 ms at twenty,
-1.1 s at sixty-four), and worse, some operand sets make flo_curves **panic** out of
+shape rather than the ring's. `Exclude` **was** the outlier (19.9 ms at twenty,
+1.1 s at sixty-four) while it folded through `path_full_intersect`; it is `exclude_of` now, every
+outline in one path read even-odd, and costs a copy (§15 D239, D856). And worse, some operand sets make flo_curves **panic** out of
 `GraphPath::exterior_paths` on an intransitive comparator. **No operation is exempt from that**, which is why
 the unwind is caught at the one seam they all pass through: `boolean::evaluate` answers `None` and the
 boolean draws nothing, so a wrong shape is not a lost document. 🚨 **That guard is blind to a *hang*,
@@ -12068,9 +12076,12 @@ live on the canvas, participate in shared undo, and survive save/load.
   the JSON golden's keys, both being `skip_serializing_if`-elided and the fixture carrying neither, so
   **deleting `NodeSnapshot::effects` outright would have left both goldens byte-identical** against a
   header promising a golden *"notices … the field that quietly left the snapshot schema"*. The fixture
-  holds all four effect kinds and a `Normalized` pivot now, and `EVERY_EFFECT`/`effect_name` sit beside
-  `EVERY_KIND`/`kind_name` so a fifth `EffectKind` is a compile error — the same arrangement for the
-  second enum in the model with the same sweep hazard. ⚠️ **`<mask>` is the standing gap**, with
+  holds all four effect kinds and a `Normalized` pivot now, and `effect_name` sits beside `kind_name`
+  so a fifth `EffectKind` is a compile error — the same arrangement for the second enum in the model
+  with the same sweep hazard. ⚠️ **The compile error grows the coverage check only since §15 D858**:
+  the expected sets are read off those two `match`es' own arms (`every_kind`, `every_effect`), where
+  they were hand-kept lists a one-arm repair left standing still beside a fixture that had not grown
+  either — so the check passed, and the new variant was in neither golden. ⚠️ **`<mask>` is the standing gap**, with
   `<radialGradient>`, `<image>`, `<textPath>` and `<use>` beside it on the SVG side; one masked node
   would close most of it on both sides at once, and it is left because a mask restructures the markup
   around the run it covers and that diff wants reading on its own. **PNG is deliberately absent**: `vello_cpu`'s accuracy is not
@@ -12098,8 +12109,9 @@ live on the canvas, participate in shared undo, and survive save/load.
 - Color choke point: per-backend pixel verification tests, re-run on every renderer version bump.
 - Round-trip gates in CI: Document → SVG and Document → snapshot cover every NodeKind. **Real since
   2026-08-22**, after two milestones of being aspirational: `the_fixture_holds_one_node_of_every_kind`
-  walks the golden document and checks the set, and the exhaustive `match` beside it makes a new
-  variant a compile error rather than a silent gap.
+  walks the golden document and checks the set against `kind_name`'s own arms, and the exhaustive
+  `match` makes a new variant a compile error whose repair grows that set — rather than a silent gap,
+  which until §15 D858 it still was, the set being a hand-kept list the repair did not touch.
 - ⚠️ **A test may not write outside the repository, and the preferences file is where that was
   breached** (§15 D370). `OndinApp::headless` swaps three things for inert ones — the wgpu device,
   `FontService`'s five background threads and the preferences file (§15 D303) — and the third was only
@@ -12117,10 +12129,11 @@ live on the canvas, participate in shared undo, and survive save/load.
   static rather than a constructor argument, because the OS clipboard is one per *process***, and the
   check sits at the four callers rather than inside `app::with_clipboard` — the test that proves the
   lock below holds has to keep opening a real handle, and a refusal one level down would make it
-  assert nothing. **Every `arboard` handle in the process opens under one `Mutex`
+  assert nothing. **Every `arboard` handle this crate opens does so under one `Mutex`
   (`app::with_clipboard`)**, because two threads opening the global clipboard at once corrupt the
   heap and take the whole test binary down; that is a fix for the suite, the app having one UI
-  thread. ⚠️ **The per-machine index was the last resource with no injection point and has one**
+  thread. ⚠️ **"This crate", not "the process"** (§15 D859): `egui-winit` keeps a handle of its own,
+  serving `ctx.copy_text`, outside that lock — safe only while both are driven from that one thread. ⚠️ **The per-machine index was the last resource with no injection point and has one**
   (§15 D807): `library::cache::index_is_reachable()` is `!cfg!(test)`, read on the first line of
   `LocalIndex::load` and of `LocalIndex::save`. **A `cfg!` and not `headless`'s flag**, because
   `Library::open` rebuilds the index and tests call it directly after building the app, so anything a

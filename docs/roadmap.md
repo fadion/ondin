@@ -714,7 +714,8 @@ function it named.
   work* — `build::insert_subtrees` already remaps through `document::remap_subtree` — and the
   serialization that had to be *"not `NodeDto`"* **is** `NodeDto`, the visibility never having been
   the obstacle once the module sits in `ondin-core::io`. Copy puts layer *names* on the
-  system clipboard — and those names are now also the **receipt** that says whether the in-app payload
+  system clipboard — and those names were also the **receipt** (a digest of the whole stand-in since
+  §15 D857, the stand-in having grown into the full payload at D823) that says whether the in-app payload
   is still what the OS clipboard describes, without which a paste of text from another application
   could never be reached (§15 D218). A layer goes **out** as SVG since 2026-08-20 — *Copy as SVG* on
   every layer menu (§15 D259) — and **comes back in as layers**, `Ctrl+V` over markup, since 2026-08-31

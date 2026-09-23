@@ -2283,6 +2283,13 @@ impl eframe::App for OndinApp {
         // deliberate** — it is above this return now (§15 D526).
         if self.view == View::Dashboard {
             self.dashboard_ui(ui);
+            // 🚨 **`chrome_focus` is written here too, because this return is
+            // above the only other write** (§15 D850, `[X1.2-L6-01]`). The flag
+            // otherwise kept whatever the last editor frame recorded for the whole
+            // library visit — `true`, if the user left by a top-bar control, which
+            // is focused at the end of the frame that clicks it — and that is what
+            // the first editor frame after reopening a document read.
+            self.chrome_focus = ui.ctx().memory(|m| m.focused()).is_some();
             return;
         }
 
@@ -17424,7 +17431,7 @@ mod undo_rewind_tests {
 
     /// An open three-anchor path at `(0,0) (100,0) (100,100)`, selected, with the
     /// node tool armed — `edited_path`'s three preconditions.
-    fn app_with_three_anchors(ctx: &egui::Context) -> (OndinApp, NodeId) {
+    pub(super) fn app_with_three_anchors(ctx: &egui::Context) -> (OndinApp, NodeId) {
         let mut app = OndinApp::headless(ctx);
         let mut ids = ondin_core::IdSource::new(11);
         let root = ids.mint();
@@ -18755,6 +18762,102 @@ mod select_all_tests {
             app.session.doc.get(locked).is_some(),
             "the locked layer is still in the document — no keyboard verb re-checks \
              the lock, so a door that selects it has already armed Delete"
+        );
+    }
+}
+
+#[cfg(test)]
+mod chrome_focus_write_tests {
+    //! **Where `chrome_focus` is written, driven through whole frames** (§15 D821,
+    //! D850, `[X1.2-L6-01]`).
+    //!
+    //! 🚨 **The flag's rung was tested and its write site was not.**
+    //! `escape_out_of_a_chrome_field_does_not_also_clear_the_selection` sets the
+    //! field by hand, and says so — so deleting the write, moving it above the
+    //! `Tab` surrender D821 says it must follow, or skipping it for a whole view
+    //! all passed. These drive `eframe::App::ui` itself.
+    //!
+    //! Plain backticks: this module is `cfg(test)` (§15 D319).
+    use super::View;
+    use super::library_wiring_tests::whole_frame;
+    use super::undo_rewind_tests::app_with_three_anchors;
+
+    fn tab() -> egui::Event {
+        egui::Event::Key {
+            key: egui::Key::Tab,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        }
+    }
+
+    /// **The flag is the focus at the end of the frame, and in point editing that
+    /// is after the `Tab` surrender.**
+    ///
+    /// The control is an ordinary editor frame: a `Tab` there is egui's, the
+    /// focus ring steps into the chrome, and the flag says so. In point editing
+    /// the same `Tab` is the app's — it steps an anchor — and the focus egui moved
+    /// is handed back at the end of the frame, so the flag must say *nothing is
+    /// focused*, or the next `Escape` is spent on a field the app has just taken
+    /// the keyboard away from.
+    ///
+    /// ⚠️ **Flip-checks, run**: the write moved above the surrender fails at
+    /// *"after the surrender"*; the write deleted fails at the control, the flag
+    /// staying at the `false` it was built with.
+    #[test]
+    fn the_flag_is_the_focus_after_the_tab_surrender() {
+        let ctx = egui::Context::default();
+
+        let mut app = super::OndinApp::headless(&ctx);
+        whole_frame(&ctx, &mut app, Vec::new());
+        whole_frame(&ctx, &mut app, vec![tab()]);
+        assert!(
+            ctx.memory(|m| m.focused()).is_some() && app.chrome_focus,
+            "control: an ordinary Tab puts the focus ring in the chrome, and the flag \
+             records it"
+        );
+
+        let ctx = egui::Context::default();
+        let (mut app, _) = app_with_three_anchors(&ctx);
+        whole_frame(&ctx, &mut app, Vec::new());
+        assert!(app.edited_path().is_some(), "the fixture is point editing");
+        whole_frame(&ctx, &mut app, vec![tab()]);
+        assert!(
+            !app.chrome_focus,
+            "in point editing the Tab is ours, and the flag is written after the \
+             surrender that gives the focus back"
+        );
+    }
+
+    /// **The library screen writes the flag as well** — it returns from
+    /// `eframe::App::ui` above the editor's write, and until §15 D850 the flag
+    /// kept the last editor frame's answer for the whole visit.
+    ///
+    /// ⚠️ **Two frames, because the first still sees the editor's focus**: egui
+    /// drops focus from a widget that was not drawn at the *end* of the pass, which
+    /// is after this write. The second frame is the steady state, and it is the one
+    /// that was stale.
+    ///
+    /// ⚠️ **Flip-check, run**: the dashboard's write deleted fails at *"not
+    /// stale"*, with the flag still `true`.
+    #[test]
+    fn the_library_screen_does_not_keep_the_editors_answer() {
+        let ctx = egui::Context::default();
+        let mut app = super::OndinApp::headless(&ctx);
+        whole_frame(&ctx, &mut app, Vec::new());
+        whole_frame(&ctx, &mut app, vec![tab()]);
+        assert!(
+            app.chrome_focus,
+            "the fixture: the editor left something focused"
+        );
+
+        app.view = View::Dashboard;
+        whole_frame(&ctx, &mut app, Vec::new());
+        whole_frame(&ctx, &mut app, Vec::new());
+        assert!(
+            !app.chrome_focus,
+            "on the library screen the flag is not stale — nothing there is focused"
         );
     }
 }

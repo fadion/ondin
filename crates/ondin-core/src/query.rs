@@ -65,7 +65,10 @@ pub fn hit_test(res: &Resolved, doc: &Document, p: Point, slop: f64) -> Vec<Node
             if let Some(b) = boolean_placeholder(doc, res, *id) {
                 return b.inflate(slop, slop).contains(local_p);
             }
-            geometry::contains_local(node, local_p, res.text_layout(*id), slop)
+            let Some(kind) = res.used_kind(doc, *id) else {
+                return false;
+            };
+            geometry::contains_local(node, kind, local_p, res.text_layout(*id), slop)
         })
         .collect();
 
@@ -150,7 +153,13 @@ pub fn bounds(res: &Resolved, id: NodeId) -> Option<Rect> {
 /// cached one would measure well on a still canvas and change nothing under the hand.
 pub fn local_box(doc: &Document, res: &Resolved, id: NodeId) -> Option<Rect> {
     let node = doc.get(id)?;
-    if let Some(b) = geometry::local_bounds(node.kind(), res.text_layout(id)) {
+    // The **used** kind and, below, each child's **used** local (§15 D868): this
+    // is the box the handles and the W/H are drawn from, so it is the box that is
+    // drawn, not the one the user typed. ⚠️ It is also the box the resize tools
+    // edit *from*, and those will want the specified box once the two differ —
+    // equal until layout places something, so the step that makes them differ owes
+    // that split.
+    if let Some(b) = geometry::local_bounds(res.used_kind(doc, id)?, res.text_layout(id)) {
         return Some(b);
     }
     // **A boolean's box is its result's, not its operands'.** Falling through to the
@@ -173,7 +182,8 @@ pub fn local_box(doc: &Document, res: &Resolved, id: NodeId) -> Option<Rect> {
         .iter()
         .filter_map(|c| {
             let child = doc.get(*c)?;
-            let b = local_box(doc, res, *c).map(|b| geometry::transform_rect(child.transform(), b));
+            let local = res.used_local(doc, *c)?;
+            let b = local_box(doc, res, *c).map(|b| geometry::transform_rect(local, b));
             if child.mask() {
                 // **Not `b`** — the same correction `Resolved`'s two bounds
                 // passes take (§15 D460): a mask *group* narrows its own box with
@@ -183,8 +193,8 @@ pub fn local_box(doc: &Document, res: &Resolved, id: NodeId) -> Option<Rect> {
                 // fixture `[S4.1-L2-01]` measured. Local rather than shared
                 // because this whole function is in the node's own space and
                 // `Resolved`'s helper is in world.
-                mask_box = mask_extent_local(doc, res, *c)
-                    .map(|m| geometry::transform_rect(child.transform(), m));
+                mask_box =
+                    mask_extent_local(doc, res, *c).map(|m| geometry::transform_rect(local, m));
                 // **And nothing is contributed** (§15 D494), the third arm of the
                 // same correction: a mask is a clip, not an area. Returning `b`
                 // put a mask drawn larger than the artwork it passes into the
@@ -222,9 +232,8 @@ fn mask_extent_local(doc: &Document, res: &Resolved, id: NodeId) -> Option<Rect>
             .iter()
             .filter(|c| !doc.get(**c).is_some_and(|n| n.mask()))
             .filter_map(|c| {
-                let child = doc.get(*c)?;
-                mask_extent_local(doc, res, *c)
-                    .map(|b| geometry::transform_rect(child.transform(), b))
+                let local = res.used_local(doc, *c)?;
+                mask_extent_local(doc, res, *c).map(|b| geometry::transform_rect(local, b))
             })
             .reduce(|a, b| a.union(b)),
         _ => local_box(doc, res, id),
@@ -536,9 +545,10 @@ pub fn outline_at(res: &Resolved, doc: &Document, p: Point, slop: f64) -> Option
         if masked_away(doc, res, id, p) {
             continue;
         }
-        let (Some(path), Some(world)) =
-            (geometry::local_path(node.kind()), res.world_transform(id))
-        else {
+        let (Some(path), Some(world)) = (
+            res.used_kind(doc, id).and_then(geometry::local_path),
+            res.world_transform(id),
+        ) else {
             continue;
         };
         let mut in_world = path;

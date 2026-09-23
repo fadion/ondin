@@ -463,6 +463,22 @@ fn assert_resolved_matches_rebuild(doc: &Document, live: &Resolved, seed: u64) {
     // Walk the whole tree from the root via the public API.
     let mut stack = vec![doc.root()];
     while let Some(id) = stack.pop() {
+        // The used geometry first, because everything below is composed from it
+        // (§15 D868) — a divergence there shows up as a wrong world transform one
+        // line later, and naming the cause is worth the two assertions. Equal to
+        // the document on every node today, where the identity pass lays nothing
+        // out; asserted anyway, because D868's condition for the seventh map was
+        // that this guard *compare* it rather than join the maps it leaves out.
+        assert_eq!(
+            live.used_local(doc, id),
+            fresh.used_local(doc, id),
+            "used local mismatch for {id:?} (seed {seed})"
+        );
+        assert_eq!(
+            live.used_kind(doc, id),
+            fresh.used_kind(doc, id),
+            "used kind mismatch for {id:?} (seed {seed})"
+        );
         assert_eq!(
             live.world_transform(id),
             fresh.world_transform(id),

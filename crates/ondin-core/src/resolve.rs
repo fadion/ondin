@@ -19,7 +19,7 @@ use crate::document::Document;
 use crate::effect;
 use crate::geometry;
 use crate::id::NodeId;
-use crate::node::NodeKind;
+use crate::node::{Node, NodeKind};
 use crate::op::DirtySet;
 use crate::text::{self, TextLayout};
 use kurbo::{Affine, BezPath, Rect};
@@ -116,6 +116,68 @@ fn entry(id: NodeId, r: Rect) -> BoundsEntry {
     }
 }
 
+/// A node's **used** geometry, where it differs from what the document specifies
+/// (§15 D868) — CSS's *used* value against its *specified* one.
+///
+/// **Sparse, and that is the whole contract.** A node has an entry only when
+/// container layout placed or sized it somewhere other than the document says, so
+/// a document with no layout in it holds nothing here and every read falls back to
+/// [`Node::transform`] and [`Node::kind`]. The two fields are separate `Option`s
+/// because the two are separate facts: a flex item that moves along its row keeps
+/// its size, and one that grows keeps nothing but its kind.
+///
+/// Read through [`local_in`] and [`kind_in`] inside this module and through
+/// [`Resolved::used_local`] and [`Resolved::used_kind`] outside it — never off the
+/// map directly, which is what keeps "no entry" meaning "as specified" everywhere.
+#[derive(Clone, Debug, PartialEq)]
+struct Used {
+    /// The local transform layout places the node with.
+    local: Option<Affine>,
+    /// The kind layout sizes the node with. **Always the same variant as the
+    /// document's kind**: layout resizes a rectangle, it never makes one into
+    /// anything else — which is what lets every `match` on a node's *kind* to ask
+    /// what sort of node it is keep reading the document.
+    kind: Option<NodeKind>,
+}
+
+/// The used geometry of `id`, or `None` where it is the specified geometry.
+///
+/// 🚨 **The identity pass, and it is identity on purpose** (§15 D867's build step
+/// 1). Every consumer of geometry is routed through [`Used`] *before* anything can
+/// make it differ, so that the refactor is proved by the goldens staying
+/// byte-identical and the layout that follows lands on plumbing that already
+/// carries it. Nothing can be laid out yet — there is no `display` and no inset to
+/// author — so this answers `None` for every node, and step 2 (absolute insets on
+/// frames) is the first thing that answers anything else.
+///
+/// Under `cfg(test)` a probe can answer instead (`probe::set`), which is how this
+/// module's tests drive a non-identity used geometry through the plumbing that a
+/// real one will take.
+fn used_geometry(doc: &Document, id: NodeId) -> Option<Used> {
+    #[cfg(test)]
+    if let Some(used) = probe::used(doc, id) {
+        return Some(used);
+    }
+    let _ = (doc, id);
+    None
+}
+
+/// `node`'s used local transform: the entry's where layout moved it, the
+/// document's otherwise.
+fn local_in(used: &FxHashMap<NodeId, Used>, node: &Node) -> Affine {
+    used.get(&node.id())
+        .and_then(|u| u.local)
+        .unwrap_or_else(|| node.transform())
+}
+
+/// `node`'s used kind: the entry's where layout resized it, the document's
+/// otherwise.
+fn kind_in<'a>(used: &'a FxHashMap<NodeId, Used>, node: &'a Node) -> &'a NodeKind {
+    used.get(&node.id())
+        .and_then(|u| u.kind.as_ref())
+        .unwrap_or_else(|| node.kind())
+}
+
 /// Nodes that appear in the spatial index — the drawable/selectable leaves.
 /// Groups and Root are containers and are excluded.
 ///
@@ -206,11 +268,31 @@ pub struct Resolved {
     /// for it is the right answer. Only the other one is worth saying out loud.
     failed: FxHashSet<NodeId>,
     index: RTree<BoundsEntry>,
+    /// Used geometry, sparse (§15 D868) — see [`Used`].
+    ///
+    /// **The seventh map, and §5.9 calls a seventh map a decision rather than an
+    /// optimisation.** D868 is that decision: unlike the local-box cache D778
+    /// declined, which would have held what any caller could already derive, a
+    /// used box is derivable nowhere else. What it costs is the thing §5.9 warns
+    /// of — `update` must keep it equal to `rebuild` — and
+    /// `assert_resolved_matches_rebuild` compares it through [`Self::used_local`]
+    /// and [`Self::used_kind`] for every node.
+    ///
+    /// **Filled first**, before text is shaped and before any world transform is
+    /// composed, because both read it: a text node is shaped at its used kind, and
+    /// a world transform composes used locals.
+    used: FxHashMap<NodeId, Used>,
 }
 
 impl Resolved {
     /// Full reconstruction from the document.
     pub fn rebuild(doc: &Document) -> Self {
+        // Used geometry before anything else, since the walk below shapes text at
+        // its used kind and composes world transforms from used locals.
+        let used: FxHashMap<NodeId, Used> = crate::subtree_nodes(doc, &[doc.root()])
+            .into_iter()
+            .filter_map(|id| used_geometry(doc, id).map(|u| (id, u)))
+            .collect();
         let mut world = FxHashMap::default();
         let mut world_bounds = FxHashMap::default();
         let mut ink_bounds = FxHashMap::default();
@@ -220,6 +302,7 @@ impl Resolved {
             doc,
             doc.root(),
             Affine::IDENTITY,
+            &used,
             &mut Caches {
                 world: &mut world,
                 world_bounds: &mut world_bounds,
@@ -238,6 +321,7 @@ impl Resolved {
             boolean: FxHashMap::default(),
             failed: FxHashSet::default(),
             index,
+            used,
         };
         // **Booleans in a second pass, through `update`.** The walk above cannot do
         // them: a boolean's outline needs its children's outlines, and a nested one
@@ -274,6 +358,7 @@ impl Resolved {
             self.text.remove(id);
             self.boolean.remove(id);
             self.failed.remove(id);
+            self.used.remove(id);
         }
 
         let existing: Vec<NodeId> = dirty
@@ -301,16 +386,42 @@ impl Resolved {
         }
         let mut ordered: Vec<NodeId> = affected.keys().copied().collect();
 
+        // Used geometry before text and before transforms (§15 D868), since both
+        // read it. Over `affected` rather than `existing`: whether layout moves a
+        // node is a question about its container, so a dirty ancestor is exactly
+        // the thing that can change the answer. Each node whose entry actually
+        // *changed* is remembered, because a text node is shaped at its used kind
+        // and has to be re-shaped when that moves even though its own kind did not
+        // — which is the one door past D590's rule below, and it is only as wide
+        // as the entries that changed. ⚠️ **Siblings are not in `affected`**, and
+        // under flex they will have to be: an item moves when its neighbour grows,
+        // and nothing dirties the neighbour today. Identity layout cannot tell the
+        // difference; the step that makes one node's box depend on another's owes
+        // the widening.
+        let mut relaid: Vec<NodeId> = Vec::new();
+        for id in &ordered {
+            let fresh = used_geometry(doc, *id);
+            let changed = match fresh {
+                Some(u) => self.used.insert(*id, u.clone()).as_ref() != Some(&u),
+                None => self.used.remove(id).is_some(),
+            };
+            if changed {
+                relaid.push(*id);
+            }
+        }
+
         // Text first: bounds depend on the shaped size, so re-shape before
         // anything measures.
         //
         // 🚨 **Over `existing`, not over `affected`** (§15 D590, `[A4-L4-03]`).
         // The subtree expansion above is for *world transforms*, which really do
         // depend on a dirty ancestor; a text layout does not depend on one at all.
-        // `text::layout` reads `TextRef::of(node.kind())` and nothing else —
+        // `text::layout` reads the node's **used** kind and nothing else —
         // content, style, both span lists, sizing and the rail are all the node's
-        // own — so a node whose layout needs redoing is a node whose own kind
-        // changed, and the `op_*` handlers dirty exactly those. `op_insert_subtree`
+        // own, and the used kind differs from them only by a wrap width layout
+        // handed down (§15 D868) — so a node whose layout needs redoing is a node
+        // whose own kind changed, which the `op_*` handlers dirty, or whose used
+        // kind moved, which the `relaid` pass above caught. `op_insert_subtree`
         // and `op_delete_node` both enumerate every node they touch rather than
         // only the subtree root, which is what makes this safe for the two
         // structural doors.
@@ -328,6 +439,11 @@ impl Resolved {
         // produced are *identical* either way — the waste is invisible to any
         // assertion about the result. `text::shapes` is what makes it assertable.
         for id in &existing {
+            self.reshape_text(doc, *id);
+        }
+        // And the text whose used kind moved under it, above. Not already shaped
+        // above, or it would be shaped twice for one commit.
+        for id in relaid.iter().filter(|id| !existing.contains(id)) {
             self.reshape_text(doc, *id);
         }
 
@@ -369,11 +485,10 @@ impl Resolved {
         ordered.sort_by_cached_key(|id| affected.get(id).copied().unwrap_or(0));
         for id in &ordered {
             let node = doc.get(*id).expect("in document");
+            let local = local_in(&self.used, node);
             let world = match node.parent() {
-                Some(p) => {
-                    self.world.get(&p).copied().unwrap_or(Affine::IDENTITY) * node.transform()
-                }
-                None => node.transform(),
+                Some(p) => self.world.get(&p).copied().unwrap_or(Affine::IDENTITY) * local,
+                None => local,
             };
             self.world.insert(*id, world);
         }
@@ -411,6 +526,52 @@ impl Resolved {
 
     pub fn world_transform(&self, id: NodeId) -> Option<Affine> {
         self.world.get(&id).copied()
+    }
+
+    /// The local transform `id` is **placed** with — layout's where it moved the
+    /// node, the document's everywhere else (§15 D868). `None` for a node the
+    /// document does not hold.
+    ///
+    /// **Ask this to draw, measure or hit-test; read [`Node::transform`] to edit.**
+    /// The two are equal until container layout places something, and they part
+    /// exactly where the difference matters: a tool computing a new transform has
+    /// to start from what the user set, and everything that shows the node has to
+    /// start from where it is.
+    pub fn used_local(&self, doc: &Document, id: NodeId) -> Option<Affine> {
+        doc.get(id).map(|n| local_in(&self.used, n))
+    }
+
+    /// The kind `id` is **sized** with — layout's where it resized the node, the
+    /// document's everywhere else (§15 D868). `None` for a node the document does
+    /// not hold.
+    ///
+    /// Always the same variant as [`Node::kind`] (see `Used::kind`), so a question
+    /// about *what sort* of node this is can ask either; a question about its
+    /// geometry asks this. The same split as [`Self::used_local`]: edit from the
+    /// document, draw from here.
+    pub fn used_kind<'a>(&'a self, doc: &'a Document, id: NodeId) -> Option<&'a NodeKind> {
+        doc.get(id).map(|n| kind_in(&self.used, n))
+    }
+
+    /// [`Self::used_local`] for a node already in hand, so infallible.
+    ///
+    /// **For writers that pass a `&Node` down a chain of helpers with no document
+    /// in reach** — the SVG writer's are the case this was written for — where the
+    /// alternative was a new parameter on every one of them.
+    ///
+    /// ⚠️ **`node` must be this document's own**, borrowed out of the `Document`
+    /// this `Resolved` was built from. The map is keyed by id, so a *copy* — a
+    /// captured subtree, a clipboard node, a ghost — would be answered with
+    /// whatever layout did to the original, which is exactly wrong for a copy
+    /// that has not been placed anywhere yet.
+    pub fn used_local_of(&self, node: &Node) -> Affine {
+        local_in(&self.used, node)
+    }
+
+    /// [`Self::used_kind`] for a node already in hand, under
+    /// [`Self::used_local_of`]'s condition: `node` must be this document's own.
+    pub fn used_kind_of<'a>(&'a self, node: &'a Node) -> &'a NodeKind {
+        kind_in(&self.used, node)
     }
 
     /// The stroke-expanded world AABB of `id`.
@@ -500,8 +661,12 @@ impl Resolved {
         f: impl FnOnce(&boolean::Operands<'_>) -> R,
     ) -> R {
         f(&boolean::Operands {
-            local_of: &|c| doc.get(c).map(|n| n.transform()).unwrap_or_default(),
-            kind_of: &|c| doc.get(c).map(|n| n.kind().clone()),
+            local_of: &|c| {
+                doc.get(c)
+                    .map(|n| local_in(&self.used, n))
+                    .unwrap_or_default()
+            },
+            kind_of: &|c| doc.get(c).map(|n| kind_in(&self.used, n).clone()),
             children_of: &|c| {
                 doc.get(c)
                     .map(|n| n.children().to_vec())
@@ -537,7 +702,7 @@ impl Resolved {
     /// and groups in its own arms above, leaving exactly the two this answers.
     pub fn local_path(&self, doc: &Document, id: NodeId) -> Option<BezPath> {
         let node = doc.get(id)?;
-        match node.kind() {
+        match kind_in(&self.used, node) {
             NodeKind::Boolean { .. } => self.boolean.get(&id).cloned(),
             kind => geometry::local_path(kind),
         }
@@ -613,7 +778,7 @@ impl Resolved {
             // function's doc comment asked for.
             _ => self.local_path(doc, id),
         }?;
-        Some(node.transform() * own)
+        Some(local_in(&self.used, node) * own)
     }
 
     /// Re-shape every `Text` node and refresh everything that depends on it.
@@ -639,9 +804,15 @@ impl Resolved {
     /// Recompute the cached layout for `id` if it is a `Text` node; clear any
     /// stale entry if it is not (a kind can change identity across undo/redo).
     fn reshape_text(&mut self, doc: &Document, id: NodeId) {
-        match doc.get(id).map(|n| n.kind()).and_then(crate::TextRef::of) {
-            Some(parts) => {
-                let laid_out = text::layout(parts);
+        // At the **used** kind (§15 D868): layout sizes a text box by handing it a
+        // wrap width, and the glyphs are shaped at that width, not the typed one.
+        let laid_out = doc
+            .get(id)
+            .map(|n| kind_in(&self.used, n))
+            .and_then(crate::TextRef::of)
+            .map(text::layout);
+        match laid_out {
+            Some(laid_out) => {
                 self.text.insert(id, laid_out);
             }
             None => {
@@ -750,9 +921,12 @@ impl Resolved {
             // box is what its *result* covers, which is smaller than the union of
             // its operands for every operation except Union.
             NodeKind::Boolean { .. } => match self.boolean.get(&id) {
-                Some(path) => {
-                    geometry::world_bounds_of_path(path, node.paint(), node.kind(), world)
-                }
+                Some(path) => geometry::world_bounds_of_path(
+                    path,
+                    node.paint(),
+                    kind_in(&self.used, node),
+                    world,
+                ),
                 // **A boolean that gave up still has a box, because it still draws
                 // something** — the placeholder (§15 D298), over the operands' union.
                 // Without this it has no bounds at all, which is three separate
@@ -768,7 +942,7 @@ impl Resolved {
                 // arm of this function that reaches [`geometry::transform_rect`]
                 // raw** (§15 D667, `[S4.1-L1-07]`). Every other route into
                 // `world_bounds` already filters: `world_bounds_of_path` and
-                // `world_bounds_of` end in `measurable` (§15 D495), and a
+                // `world_bounds_of_parts` end in `measurable` (§15 D495), and a
                 // container's union is of boxes that passed it. The placeholder
                 // did not, and `query::local_box` composes child transforms
                 // itself — so a `scale(1e308)` two levels down gives an ordered,
@@ -781,7 +955,12 @@ impl Resolved {
                 }
                 None => None,
             },
-            _ => geometry::world_bounds_of(node, world, self.text.get(&id)),
+            _ => geometry::world_bounds_of_parts(
+                kind_in(&self.used, node),
+                node.paint(),
+                world,
+                self.text.get(&id),
+            ),
         };
         match bounds {
             Some(b) => {
@@ -868,13 +1047,15 @@ impl Resolved {
     }
 }
 
-/// Recursively compute world transforms and bounds for the subtree at `id`,
-/// returning this node's world bounds (if any) so parents can union them.
-/// The four maps [`resolve_subtree`] fills, which always travel together.
+/// The five maps [`resolve_subtree`] fills, which always travel together.
 ///
-/// A struct rather than four `&mut` parameters: they are one thing — everything a
+/// A struct rather than five `&mut` parameters: they are one thing — everything a
 /// pass down the tree caches — and the alternative was silencing
 /// `too_many_arguments`, which is the same admission with the reason left out.
+///
+/// **The used-geometry map is not one of them**, because the walk reads it and
+/// does not fill it: [`Resolved::rebuild`] computes it whole first, and it travels
+/// beside this as a shared borrow.
 struct Caches<'a> {
     world: &'a mut FxHashMap<NodeId, Affine>,
     world_bounds: &'a mut FxHashMap<NodeId, Rect>,
@@ -883,18 +1064,28 @@ struct Caches<'a> {
     text: &'a mut FxHashMap<NodeId, TextLayout>,
 }
 
+/// Recursively compute world transforms and bounds for the subtree at `id`,
+/// returning this node's world bounds and ink bounds (if any) so parents can
+/// union them.
+///
+/// Every transform and kind it reads is the **used** one (§15 D868), out of
+/// `used`, which is [`Resolved::update`]'s reading too — the two are asserted
+/// equal, so one reading the document and the other the map would be a
+/// divergence the first laid-out node exposed.
 fn resolve_subtree(
     doc: &Document,
     id: NodeId,
     parent_world: Affine,
+    used: &FxHashMap<NodeId, Used>,
     c: &mut Caches<'_>,
 ) -> (Option<Rect>, Option<Rect>) {
     let node = doc.get(id).expect("valid tree");
-    let w = parent_world * node.transform();
+    let kind = kind_in(used, node);
+    let w = parent_world * local_in(used, node);
     c.world.insert(id, w);
 
     // Shape before measuring: the text box size comes out of the layout.
-    if let Some(parts) = crate::TextRef::of(node.kind()) {
+    if let Some(parts) = crate::TextRef::of(kind) {
         c.text.insert(id, text::layout(parts));
     }
 
@@ -910,7 +1101,7 @@ fn resolve_subtree(
     let mut mask_ink: Option<Rect> = None;
     for child in node.children() {
         let is_mask = doc.get(*child).is_some_and(|n| n.mask());
-        let (cb, ci) = resolve_subtree(doc, *child, w, c);
+        let (cb, ci) = resolve_subtree(doc, *child, w, used, c);
         if is_mask {
             // Not `cb`/`ci` — a mask group narrows its own boxes with its own
             // inner mask and clips with the un-narrowed union (§15 D460). The
@@ -948,7 +1139,7 @@ fn resolve_subtree(
 
     let bounds = match node.kind() {
         NodeKind::Group | NodeKind::Root => child_union,
-        _ => geometry::world_bounds_of(node, w, c.text.get(&id)),
+        _ => geometry::world_bounds_of_parts(kind, node.paint(), w, c.text.get(&id)),
     };
     if let Some(b) = bounds {
         c.world_bounds.insert(id, b);
@@ -1040,6 +1231,52 @@ fn depth(doc: &Document, id: NodeId) -> usize {
         cursor = doc.get(p).and_then(|n| n.parent());
     }
     d
+}
+
+/// A stand-in layout for this module's tests: whatever the installed closure
+/// answers, `used_geometry` answers.
+///
+/// **Why it exists**: the identity pass answers `None` for every node, so nothing
+/// in production can put an entry in the used-geometry map — and a refactor whose
+/// new path is never taken is proved by nothing but the goldens staying the same,
+/// which is exactly what a consumer still reading the document would also do.
+/// This makes the map non-empty on purpose, so the tests below can ask whether
+/// each consumer inside `Resolved` and `query` actually follows it.
+///
+/// Thread-local, like the test harness's threads, so two tests installing probes
+/// cannot see each other's.
+#[cfg(test)]
+mod probe {
+    use super::Used;
+    use crate::document::Document;
+    use crate::id::NodeId;
+    use std::cell::RefCell;
+
+    type Layout = Box<dyn Fn(&Document, NodeId) -> Option<Used>>;
+
+    thread_local! {
+        static PROBE: RefCell<Option<Layout>> = const { RefCell::new(None) };
+    }
+
+    /// Install `f` as this thread's layout until the returned guard drops.
+    pub(super) fn set(f: impl Fn(&Document, NodeId) -> Option<Used> + 'static) -> Guard {
+        PROBE.with(|p| *p.borrow_mut() = Some(Box::new(f)));
+        Guard
+    }
+
+    pub(super) fn used(doc: &Document, id: NodeId) -> Option<Used> {
+        PROBE.with(|p| p.borrow().as_ref().and_then(|f| f(doc, id)))
+    }
+
+    /// Uninstalls the probe on drop, so a failing assertion cannot leave it
+    /// answering for the next test the harness runs on this thread.
+    pub(super) struct Guard;
+
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            PROBE.with(|p| *p.borrow_mut() = None);
+        }
+    }
 }
 
 /// The two guards §15 D667 added, tested from inside the module because both
@@ -1448,6 +1685,371 @@ mod measurable_bounds_tests {
             res.ink_bounds(node),
             None,
             "an escape past f64 is an absence, not the original box"
+        );
+    }
+}
+
+/// Used geometry driven through the plumbing on purpose (§15 D868, D867's build
+/// step 1).
+///
+/// The identity pass never puts an entry in the used-geometry map, so every
+/// consumer that still read the document would pass every other test in the
+/// workspace. These install a `probe` layout that places and sizes three nodes
+/// somewhere other than the document says, and ask each consumer inside
+/// `Resolved` and `query` whether it followed.
+#[cfg(test)]
+mod used_geometry_tests {
+    use super::*;
+    use crate::TextSizing;
+    use crate::id::IdSource;
+    use crate::op::{GeometryPatch, Operation, Transaction};
+    use kurbo::{Point, RoundedRectRadii, Shape, Size};
+
+    fn rect_kind(w: f64, h: f64) -> NodeKind {
+        NodeKind::Rect {
+            size: Size::new(w, h),
+            corner_radii: RoundedRectRadii::default(),
+        }
+    }
+
+    fn text_kind(sizing: TextSizing) -> NodeKind {
+        NodeKind::Text {
+            content: "several short words that can wrap".into(),
+            style: Box::new(crate::TextStyle::default()),
+            spans: Default::default(),
+            para_spans: Default::default(),
+            paragraph: Default::default(),
+            block: Default::default(),
+            sizing,
+            on_path: None,
+            on_path_flip: false,
+            on_path_offset: 0.0,
+        }
+    }
+
+    fn create(doc: &mut Document, id: NodeId, parent: NodeId, kind: NodeKind, t: Affine) {
+        let index = doc.get(parent).unwrap().children().len();
+        doc.apply(&Transaction(vec![Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind,
+            transform: Some(t),
+            name: None,
+        }]))
+        .unwrap();
+    }
+
+    struct Fixture {
+        doc: Document,
+        frame: NodeId,
+        rect: NodeId,
+        group: NodeId,
+        inner: NodeId,
+        text: NodeId,
+    }
+
+    /// A 300×200 frame holding a 100×50 rect at (10, 10), a group at (0, 120)
+    /// with a 20×20 rect in it, and an auto-width text node at (10, 80).
+    fn fixture() -> Fixture {
+        let mut ids = IdSource::new(1);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let [frame, rect, group, inner, text] = [(); 5].map(|_| ids.mint());
+        create(
+            &mut doc,
+            frame,
+            root,
+            NodeKind::Artboard {
+                size: Size::new(300.0, 200.0),
+            },
+            Affine::IDENTITY,
+        );
+        let at = |x: f64, y: f64| Affine::translate((x, y));
+        create(
+            &mut doc,
+            rect,
+            frame,
+            rect_kind(100.0, 50.0),
+            at(10.0, 10.0),
+        );
+        create(&mut doc, group, frame, NodeKind::Group, at(0.0, 120.0));
+        create(
+            &mut doc,
+            inner,
+            group,
+            rect_kind(20.0, 20.0),
+            Affine::IDENTITY,
+        );
+        create(
+            &mut doc,
+            text,
+            frame,
+            text_kind(TextSizing::Auto),
+            at(10.0, 80.0),
+        );
+        Fixture {
+            doc,
+            frame,
+            rect,
+            group,
+            inner,
+            text,
+        }
+    }
+
+    /// The stand-in layout: while the frame is at least 100 wide, the rect is
+    /// placed at (5, 5) and stretched to the frame's width less 10, the grouped
+    /// rect is slid 30 along inside its group, and the text wraps at a tenth of
+    /// the frame's width (a fifth once the frame is faded). Below 100 wide nothing
+    /// is laid out — so shrinking the frame is how a test makes entries *leave*
+    /// the map.
+    fn install(f: &Fixture) -> probe::Guard {
+        let (frame, rect, inner, text) = (f.frame, f.rect, f.inner, f.text);
+        probe::set(move |doc, id| {
+            let NodeKind::Artboard { size } = doc.get(frame)?.kind() else {
+                return None;
+            };
+            let width = size.width;
+            if width < 100.0 {
+                return None;
+            }
+            if id == rect {
+                Some(Used {
+                    local: Some(Affine::translate((5.0, 5.0))),
+                    kind: Some(rect_kind(width - 10.0, 50.0)),
+                })
+            } else if id == inner {
+                Some(Used {
+                    local: Some(Affine::translate((30.0, 0.0))),
+                    kind: None,
+                })
+            } else if id == text {
+                // A faded frame halves the wrap: an input that dirties the frame
+                // and nothing below it, which a resize does not (it dirties the
+                // whole subtree).
+                let share = if doc.get(frame)?.opacity() < 1.0 {
+                    5.0
+                } else {
+                    10.0
+                };
+                Some(Used {
+                    local: None,
+                    kind: Some(text_kind(TextSizing::AutoHeight(width / share))),
+                })
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Every measure `Resolved` and `query` take of a node follows its used
+    /// geometry, not the document's.
+    ///
+    /// Each assertion is placed where the two answers differ by a long way — the
+    /// specified rect covers x 10..110 and the used one 5..295 — so no assertion
+    /// here can be passed by a consumer reading the document.
+    ///
+    /// **Flips**, each run and each failing where predicted: `hit_test` handing
+    /// `contains_local` the document's kind fails *"a click at x 250 lands on the
+    /// stretched rect"*; `local_box` composing `child.transform()` fails the
+    /// group's box, `(0,0)-(20,20)` against `(30,0)-(50,20)`; `resolve_subtree`
+    /// shaping at `node.kind()` fails the wrapped-text assertion. ⚠️ **Shaping at
+    /// `node.kind()` in `reshape_text` instead does not bite here** — this test
+    /// only rebuilds, and `rebuild` shapes through `resolve_subtree` — and was
+    /// predicted to; it is the next test's, failing there at the resize.
+    #[test]
+    fn every_measure_in_resolved_and_query_follows_the_used_geometry() {
+        let f = fixture();
+        let _probe = install(&f);
+        let res = Resolved::rebuild(&f.doc);
+        let doc = &f.doc;
+
+        assert_eq!(
+            res.used_local(doc, f.rect),
+            Some(Affine::translate((5.0, 5.0)))
+        );
+        assert_eq!(res.used_kind(doc, f.rect), Some(&rect_kind(290.0, 50.0)));
+        assert_eq!(
+            res.used_local(doc, f.frame),
+            Some(Affine::IDENTITY),
+            "a node with no entry answers what the document says"
+        );
+
+        assert_eq!(
+            res.world_bounds(f.rect),
+            Some(Rect::new(5.0, 5.0, 295.0, 55.0))
+        );
+        assert_eq!(res.ink_bounds(f.rect), res.world_bounds(f.rect));
+        assert_eq!(
+            res.world_bounds(f.inner),
+            Some(Rect::new(30.0, 120.0, 50.0, 140.0)),
+            "a used local composes into the world transform of the node below it"
+        );
+
+        assert!(
+            crate::hit_test(&res, doc, Point::new(250.0, 30.0), 0.0).contains(&f.rect),
+            "a click at x 250 lands on the stretched rect"
+        );
+        assert!(
+            crate::hit_test(&res, doc, Point::new(7.0, 7.0), 0.0).contains(&f.rect),
+            "and at (7, 7), which is outside the rect the document holds"
+        );
+        assert_eq!(
+            crate::outline_at(&res, doc, Point::new(295.0, 30.0), 1.0),
+            Some(f.rect),
+            "the outline a rail can be picked from is the used one"
+        );
+
+        assert_eq!(
+            crate::local_box(doc, &res, f.rect),
+            Some(Rect::new(0.0, 0.0, 290.0, 50.0))
+        );
+        assert_eq!(
+            crate::local_box(doc, &res, f.group),
+            Some(Rect::new(30.0, 0.0, 50.0, 20.0)),
+            "a group's box unions its children through their used locals"
+        );
+        assert_eq!(
+            res.local_path(doc, f.rect).map(|p| p.bounding_box()),
+            Some(Rect::new(0.0, 0.0, 290.0, 50.0))
+        );
+        assert_eq!(
+            res.mask_path(doc, f.rect).map(|p| p.bounding_box()),
+            Some(Rect::new(5.0, 5.0, 295.0, 55.0)),
+            "a mask clips with its used outline, placed by its used local"
+        );
+
+        let specified = text::layout(crate::TextRef::of(doc.get(f.text).unwrap().kind()).unwrap());
+        let used = res.text_layout(f.text).unwrap();
+        assert_eq!(
+            specified.baselines.len(),
+            1,
+            "the fixture's own text is one line at auto width"
+        );
+        assert!(
+            used.baselines.len() > 1,
+            "text is shaped at its used kind, wrapping at 30: {} line(s)",
+            used.baselines.len()
+        );
+    }
+
+    /// Every map `Resolved` keeps, used geometry included, compared node by node.
+    fn assert_equal_to_rebuild(doc: &Document, live: &Resolved, when: &str) {
+        let fresh = Resolved::rebuild(doc);
+        for id in crate::subtree_nodes(doc, &[doc.root()]) {
+            assert_eq!(
+                live.used_local(doc, id),
+                fresh.used_local(doc, id),
+                "{when}: used local of {id:?}"
+            );
+            assert_eq!(
+                live.used_kind(doc, id),
+                fresh.used_kind(doc, id),
+                "{when}: used kind of {id:?}"
+            );
+            assert_eq!(
+                live.world_transform(id),
+                fresh.world_transform(id),
+                "{when}: world of {id:?}"
+            );
+            assert_eq!(
+                live.world_bounds(id),
+                fresh.world_bounds(id),
+                "{when}: bounds of {id:?}"
+            );
+            assert_eq!(
+                live.ink_bounds(id),
+                fresh.ink_bounds(id),
+                "{when}: ink of {id:?}"
+            );
+            assert_eq!(
+                live.text_layout(id),
+                fresh.text_layout(id),
+                "{when}: text of {id:?}"
+            );
+        }
+    }
+
+    fn commit(doc: &mut Document, res: &mut Resolved, op: Operation) {
+        let out = doc.apply(&Transaction(vec![op])).unwrap();
+        res.update(doc, &out.dirty);
+    }
+
+    /// `update` keeps the used geometry equal to `rebuild` when it moves, when it
+    /// leaves, and when nothing it depends on changed — and re-shapes text exactly
+    /// when its used kind moved.
+    ///
+    /// **The frame is the only node any commit here names**, and that is the
+    /// point: every used entry that changes belongs to a node the commit did not
+    /// name. ⚠️ A resize dirties the frame's whole subtree (`op_set_geometry`), so
+    /// only the fade and the move leave the children out of `existing` — the fade
+    /// is the case the re-shape of `relaid` text exists for, and the move is the
+    /// case D590's saving has to survive.
+    ///
+    /// **Flips**, each run: composing world transforms from `node.transform()` in
+    /// `update` fails *"frame widened to 400: world of"* the rect; shaping at
+    /// `node.kind()` in `reshape_text` fails the same comparison on the text's
+    /// bounds, the resize having dirtied it; dropping the re-shape of `relaid`
+    /// text fails the fade's count, 0 against 1; and recomputing used geometry
+    /// over `existing` instead of `affected` fails that same count — not the
+    /// resize, as a first reading predicts, because the resize dirties the rect
+    /// itself, and it is the fade that leaves a node whose entry moves out of
+    /// `existing`.
+    #[test]
+    fn update_keeps_the_used_geometry_equal_to_rebuild() {
+        let mut f = fixture();
+        let _probe = install(&f);
+        let mut res = Resolved::rebuild(&f.doc);
+        let size = |w: f64| Operation::SetGeometry {
+            id: f.frame,
+            geometry: GeometryPatch::Size(Size::new(w, 200.0)),
+        };
+
+        commit(&mut f.doc, &mut res, size(400.0));
+        assert_equal_to_rebuild(&f.doc, &res, "frame widened to 400");
+        assert_eq!(res.used_kind(&f.doc, f.rect), Some(&rect_kind(390.0, 50.0)));
+
+        // Opacity dirties the frame alone, so the text reaches the re-shape only
+        // through the door for text whose *used* kind moved.
+        let before = text::shapes();
+        commit(
+            &mut f.doc,
+            &mut res,
+            Operation::SetOpacity {
+                id: f.frame,
+                opacity: 0.5,
+            },
+        );
+        assert_eq!(
+            text::shapes() - before,
+            1,
+            "the text's used kind moved under an undirtied node, so it is re-shaped — once"
+        );
+        assert_equal_to_rebuild(&f.doc, &res, "frame faded");
+
+        let before = text::shapes();
+        commit(
+            &mut f.doc,
+            &mut res,
+            Operation::SetTransform {
+                id: f.frame,
+                transform: Affine::translate((40.0, 0.0)),
+            },
+        );
+        assert_eq!(
+            text::shapes(),
+            before,
+            "a move changes no used kind, so D590's saving still holds: nothing re-shaped"
+        );
+        assert_equal_to_rebuild(&f.doc, &res, "frame moved");
+
+        commit(&mut f.doc, &mut res, size(50.0));
+        assert_equal_to_rebuild(&f.doc, &res, "frame narrowed below the probe's floor");
+        assert_eq!(
+            res.world_bounds(f.rect),
+            Some(Rect::new(50.0, 10.0, 150.0, 60.0)),
+            "the entry left, and the rect is back where the document puts it"
         );
     }
 }

@@ -1250,17 +1250,16 @@ pub fn stroke_expansion(kind: &NodeKind, paint: &Paint) -> f64 {
         .fold(0.0, f64::max)
 }
 
-/// World-space, stroke-expanded bounds of a non-container node. `None` for
-/// Group/Root (handled by union at the `Resolved` level). See [`local_bounds`]
-/// for the `text` argument.
-pub fn world_bounds_of(node: &Node, world: Affine, text: Option<&TextLayout>) -> Option<Rect> {
-    world_bounds_of_parts(node.kind(), node.paint(), world, text)
-}
-
-/// [`world_bounds_of`] from loose parts rather than a `Node`.
+/// World-space, stroke-expanded bounds of a non-container node, from loose parts
+/// rather than a `Node`. `None` for Group/Root (handled by union at the
+/// `Resolved` level). See [`local_bounds`] for the `text` argument.
 ///
-/// Render previews need the bounds a node *would* have under a pending edit,
-/// where the kind and paint come from an override rather than the document.
+/// **Parts, because no caller has the kind a `Node` would hand it.** Render
+/// previews measure the bounds a node *would* have under a pending edit, where the
+/// kind and paint come from an override; `Resolved` measures at the **used** kind,
+/// which is the node's own only until container layout resizes it (§15 D868).
+/// There was a `world_bounds_of(node, …)` wrapper beside this for the second
+/// caller, and it went when that caller stopped being able to use it.
 pub fn world_bounds_of_parts(
     kind: &NodeKind,
     paint: &Paint,
@@ -1309,7 +1308,7 @@ pub fn measurable(r: Rect) -> Option<Rect> {
 /// World bounds of a node whose outline is *derived* rather than declared — a
 /// [`NodeKind::Boolean`], measured from the outline `Resolved` has cached for it.
 ///
-/// Separate from [`world_bounds_of`] rather than a fifth argument to it, because
+/// Separate from [`world_bounds_of_parts`] rather than a fifth argument to it, because
 /// the two are asked by different callers: everything measures a shape from its
 /// kind, and only `Resolved` — which owns the cache — can measure this.
 pub fn world_bounds_of_path(
@@ -1383,9 +1382,20 @@ pub fn transform_rect(affine: Affine, rect: Rect) -> Rect {
 /// The allowance is the ink's own reach plus `slop`, exactly as a `Line` has
 /// always computed it — so a heavy stroke is grabbable across its whole width
 /// *and* keeps the same comfort margin beyond it.
-pub fn contains_local(node: &Node, p: Point, text: Option<&TextLayout>, slop: f64) -> bool {
-    let tol = stroke_expansion(node.kind(), node.paint()) + slop;
-    match node.kind() {
+///
+/// **`kind` is the node's *used* kind and `node` supplies everything else** —
+/// the paint the stroke reach comes from and the fill rule a path is tested
+/// under (§15 D868). They are the node's own kind until container layout resizes
+/// it, and then the click target has to be the box that is drawn.
+pub fn contains_local(
+    node: &Node,
+    kind: &NodeKind,
+    p: Point,
+    text: Option<&TextLayout>,
+    slop: f64,
+) -> bool {
+    let tol = stroke_expansion(kind, node.paint()) + slop;
+    match kind {
         NodeKind::Rect { size, .. } | NodeKind::Artboard { size, .. } => {
             p.x >= -tol && p.y >= -tol && p.x <= size.width + tol && p.y <= size.height + tol
         }
@@ -1418,8 +1428,9 @@ pub fn contains_local(node: &Node, p: Point, text: Option<&TextLayout>, slop: f6
         // Star spokes and a polygon's corners leave a lot of the box empty, so
         // these test the outline rather than the box — clicking the gap between
         // two points of a star must fall through to whatever is behind it.
-        NodeKind::Polygon { .. } | NodeKind::Star { .. } => local_path(node.kind())
-            .is_some_and(|path| path.contains(p) || near_outline(&path, p, tol)),
+        NodeKind::Polygon { .. } | NodeKind::Star { .. } => {
+            local_path(kind).is_some_and(|path| path.contains(p) || near_outline(&path, p, tol))
+        }
         // **An open path is grabbed by its stroke, not only by the region it
         // happens to enclose.** `BezPath::contains` closes the path implicitly and
         // asks for a winding number, so a pen squiggle was selectable by the empty
@@ -1433,7 +1444,7 @@ pub fn contains_local(node: &Node, p: Point, text: Option<&TextLayout>, slop: f6
         // it with a winding number makes those holes clickable — a hit target over
         // artwork that is not there. `near_outline` stays either way, because the
         // ink of the outline is grabbable under both rules.
-        NodeKind::Path { .. } => local_path(node.kind())
+        NodeKind::Path { .. } => local_path(kind)
             .is_some_and(|path| node.fill_rule().contains(&path, p) || near_outline(&path, p, tol)),
         // ⚠️ **This arm spent nothing until §15 D483** (`[S4.2-L2-03]`), and it is
         // the kind users click most. D115 rewrote every arm to add `tol` and its
@@ -1445,7 +1456,7 @@ pub fn contains_local(node: &Node, p: Point, text: Option<&TextLayout>, slop: f6
         // text node with a 40pt **outside** stroke reported world bounds 40 units
         // wider on every side than the region that could be clicked — a band of the
         // layer's own stated extent selecting nothing.
-        NodeKind::Text { .. } => match local_bounds(node.kind(), text) {
+        NodeKind::Text { .. } => match local_bounds(kind, text) {
             Some(b) => b.inflate(tol, tol).contains(p),
             None => false,
         },
@@ -1735,20 +1746,26 @@ mod tests {
         let slop = 4.0;
 
         assert!(
-            contains_local(&node, Point::new(50.0, 25.0), None, slop),
+            contains_local(&node, node.kind(), Point::new(50.0, 25.0), None, slop),
             "the interior still hits"
         );
         assert!(
-            contains_local(&node, Point::new(-2.0, 25.0), None, slop),
+            contains_local(&node, node.kind(), Point::new(-2.0, 25.0), None, slop),
             "2 units outside the left edge is inside the allowance"
         );
         assert!(
-            !contains_local(&node, Point::new(-9.0, 25.0), None, slop),
+            !contains_local(&node, node.kind(), Point::new(-9.0, 25.0), None, slop),
             "9 units outside is not: the band is a few units, not a halo"
         );
         // And with no allowance asked for, the old exact behaviour is unchanged —
         // which is what keeps a marquee or a snapshot hit test from widening.
-        assert!(!contains_local(&node, Point::new(-2.0, 25.0), None, 0.0));
+        assert!(!contains_local(
+            &node,
+            node.kind(),
+            Point::new(-2.0, 25.0),
+            None,
+            0.0
+        ));
     }
 
     /// An open path is grabbed by its **stroke**, where it used to be grabbed by
@@ -1770,11 +1787,11 @@ mod tests {
         });
 
         assert!(
-            contains_local(&node, Point::new(50.0, 2.0), None, 4.0),
+            contains_local(&node, node.kind(), Point::new(50.0, 2.0), None, 4.0),
             "2 units off a straight open path is on its ink"
         );
         assert!(
-            !contains_local(&node, Point::new(50.0, 40.0), None, 4.0),
+            !contains_local(&node, node.kind(), Point::new(50.0, 40.0), None, 4.0),
             "40 units away is not"
         );
     }
@@ -2232,7 +2249,9 @@ mod tests {
 
     /// **A box that is not a number is no box at all** (`[S4.2-L1-01]`, §15 D495).
     ///
-    /// `world_bounds_of` used to have exactly one `None` route — an empty
+    /// `world_bounds_of` — a wrapper over `world_bounds_of_parts`, deleted when
+    /// §15 D868 left it no production caller — used to have exactly one `None`
+    /// route — an empty
     /// `local_bounds` — so a bad *transform* had none, and every one of the four
     /// cases below came back `Some` with a rectangle nothing can use.
     ///
@@ -2289,7 +2308,7 @@ mod tests {
             ("a finite scale whose product overflows", overflowing),
         ] {
             assert_eq!(
-                world_bounds_of(&node, world, None),
+                world_bounds_of_parts(node.kind(), node.paint(), world, None),
                 None,
                 "{name}: a node with no measurable extent has no bounds"
             );
@@ -2301,7 +2320,7 @@ mod tests {
         }
 
         assert!(
-            world_bounds_of(&node, Affine::IDENTITY, None).is_some(),
+            world_bounds_of_parts(node.kind(), node.paint(), Affine::IDENTITY, None).is_some(),
             "control: an ordinary transform still measures"
         );
         assert!(

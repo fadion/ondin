@@ -1326,12 +1326,23 @@ pub enum TextSizing {
   its measure by *both* bearings — `x -= lsb`, `measure += lsb + rsb` — so **no arm of it reads
   `align`**: start, end, centre and justify all fall out of those two numbers, and parley does the
   re-justification. Shifting the line instead, the obvious version, cannot work under `Justify` at all,
-  whose two ends are pinned. **The bearings cost a second break pass** — `text::optical_offsets` reads
-  them off the once-broken layout and `shape` breaks again, gated on `Paragraphs::any_optical_margins()`
-  — and the second pass may break somewhere the first did not, which is **accepted rather than iterated
-  to a fixed point**. ⚠️ **The node's box does not move when it is switched on**, only the ink, which is
-  what lets two labels placed at the same x line up by their letters; and it is **off by default**,
-  deliberately not the shape D199 gave box trim.
+  whose two ends are pinned. **The bearings cost at least a second break pass** — `text::optical_offsets`
+  reads them off the once-broken layout, outlining only the first and last inked glyph of each line, and
+  `shape` breaks again, gated on `Paragraphs::any_optical_margins()`. 🚨 **This said the second pass
+  may break somewhere the first did not and that this was *accepted rather than iterated to a fixed
+  point*, and accepting it corrected each re-broken line by another line's glyphs** (§15 D855) — at 160
+  wide the start edge came out raggeder than with no correction. `shape` now **settles a line at a
+  time from the top**: the first line whose bearings disagree with the ones it was given starts where it
+  did, so its left bearing is exact and it takes the right bearing it actually has; a line that returns
+  to a guess already tried is **pinned** to that left bearing and a right bearing of zero, ending its
+  ink inside the far edge; and past `4 + 3 × lines` passes the node is laid out uncorrected. A
+  whole-layout fixed point is the version that cycles. ⚠️ **The node's box does not move when it is
+  switched on**, only the ink, which is what lets two labels placed at the same x line up by their
+  letters — **and that includes its width** (§15 D855): an auto-width box is sized by the uncorrected
+  pass (`box_of`'s `natural_width`), because a line started a bearing earlier pulls parley's width in
+  with it, and it once narrowed a box by exactly that. On `TextSizing::Auto` there is no measure for the
+  end to hang to, so "both edges" is the start edge alone there. It is **off by default**, deliberately
+  not the shape D199 gave box trim.
 - Layout is computed by `parley` in `text.rs` and cached in `Resolved` (derived state, never
   serialized). Shaping is the most expensive thing in the pipeline and *three* consumers need it —
   bounds, hit-testing, and the scene walk — so nothing outside `Resolved` may call `text::layout` in a
@@ -3368,9 +3379,11 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   never named it, so the kind users click most tested its bare layout box — and a text node with a 40pt
   **outside** stroke reported world bounds 40 units wider on every side than a click could reach, a band
   of its own stated extent selecting nothing. It is the *caller's* number because only the
-  caller knows the zoom — `canvas::pick_slop` is `PICK_SLOP_PX / camera.zoom`, so the band under the
-  pointer is the same size on screen at any magnification, which no constant in world units could be —
-  and `0.0` means exactly.
+  caller knows the zoom — `canvas::pick_slop` is `PICK_SLOP_PX / points_per_world`, so the band under
+  the pointer is the same size on screen at any magnification, which no constant in world units could
+  be — and `0.0` means exactly. ⚠️ **Points per world unit, not `camera.zoom`** (§15 D853): the zoom is
+  device pixels per world unit and the pointer is measured in points, so dividing by the zoom alone
+  made the band 2.67 points at 150% display scaling and 2 at 200%.
   It widens the **candidate query** as well as the exact test, which it has to: a horizontal line's
   cached bounds are a zero-height rectangle, so a point beside it never became a candidate at all
   (§15 D222).
@@ -3454,14 +3467,16 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   the honest answer to a schema this build does not know is to say so. *Do not "fix" that asymmetry
   by routing `clip` through `migrate.rs`* — it is the decision, not an omission.
   ⚠️ **`io::clip::read` carries the envelope's own integrity checks, which are not the tree's**
-  (§15 D833, D834, D835, D836). The **fence is a marker and not a landmark** — it answers *is this
+  (§15 D833, D834, D835, D836, D852). The **fence is a marker and not a landmark** — it answers *is this
   ours* and the payload is located as the final line, which makes `write`'s single-line
   `serde_json::to_string` load-bearing rather than a size choice. Beyond the version, `parse` refuses
   an empty subtree, a subtree with other than exactly one root, a subtree whose root is not its first
   entry (the field's own stated rule, which two paste decisions read by *position* while
-  `remap_subtree` reads it by *predicate*) and a duplicate image id; it **drops** an image entry no
-  node keys into, §5.11's own asymmetry for a value that is ancillary, and drops a non-finite
-  *Paste here* box. 🚨 **None of that validates the tree**, which is `op_insert_subtree`'s business
+  `remap_subtree` reads it by *predicate*), a duplicate image id, and an image entry **linked** to a
+  file rather than embedded — refused whole, which is linked images' v1 non-goal enforced at the one
+  door that could put a link in a document with no file involved, the alternative being an
+  attacker-chosen URL written verbatim into every SVG export as an `href`; it **drops** an image entry no node keys into, §5.11's own asymmetry for a value
+  that is ancillary, and drops a non-finite *Paste here* box. 🚨 **None of that validates the tree**, which is `op_insert_subtree`'s business
   (§5.7) and was short of it in three places on the day this door opened.
 - **The library block is the first key after `schema_version`** (§5.11a). Its position is a decision
   about *reading* rather than about diffs: the dashboard lists a folder by reading each document's
@@ -4886,7 +4901,10 @@ other were right, which is why both exist.
   gradient fill, per gradient stroke, per image (three ids), per effect stack and per text rail, which
   made D defs cost Θ(D²) comparisons over ids sharing a long common prefix. At 16,000 defs that was
   **87% of export time** while the bytes emitted grew exactly linearly, and the output is
-  byte-identical either way, so no golden can see it.
+  byte-identical either way, so no golden can see it. What does is a **count** of those comparisons
+  (§15 D854): the ids are a `DefKey` newtype whose equality is counted under `cfg(test)`, and
+  `def_count_tests` bounds 2,000 defs below 2,000 comparisons — a timed ratio having been this
+  regression's test until it proved to measure the machine.
   An **image** fill is a `<pattern>`, which is a paint server exactly as a gradient is — so it goes
   through the same `Defs` machinery (`image_id`, spelled like `gradient_id`), `paint_attr` names it in
   the `fill` or `stroke` attribute, and `write_element` learnt nothing. The tile is the source's
@@ -7477,9 +7495,9 @@ the middle of the shape. `pivot_marker_tests::the_two_marker_weights_differ_and_
 holds the two apart and against `PIVOT_PICK_PX`, since a marker wider than its own grab radius is a
 control you can see and cannot press, and `the_marker_paints_no_ground_behind_itself` counts the shapes:
 one glyph, nothing else. A drag snaps to the nine points of the box (corners,
-side middles, centre) within 6 screen px — ⚠️ **and the comparison happens in the node's *local* space,
-so that threshold is divided by the zoom and by the node's own basis, one column norm per axis** (§15
-D695): `|column 0|` of the world transform for local x and `|column 1|` for local y, because a group
+side middles, centre) within 6 screen points — ⚠️ **and the comparison happens in the node's *local*
+space, so that threshold is divided by the zoom — in points per world unit, §15 D853 — and by the
+node's own basis, one column norm per axis** (§15 D695): `|column 0|` of the world transform for local x and `|column 1|` for local y, because a group
 carries scale and skew is a shipped gesture, so a single scalar cannot be right for both axes — and
 the mean of the two is the quantity §5.6 refuses for a guide, the same wrong choice made twice in one
 session in files that share no code. It read *"by the zoom and by nothing else"* until 2026-09-09,

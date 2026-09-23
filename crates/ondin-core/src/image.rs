@@ -161,13 +161,14 @@ impl ImageEntry {
         }
     }
 
-    /// ⚠️ **No caller, again**, and this is the second time round for exactly the
-    /// same reason. It sat `pub` here with none until `tools::original_refusal`
-    /// gave it one (§15 D280) — and that mattered, because the two doors it
-    /// replaced had each hand-rolled `bytes().is_some()`, which is equally false
-    /// for a *linked* picture and for an id the table does not hold, so a document
-    /// that had simply lost a picture was told it used linking. `original_refusal`
-    /// went with the *Export original…* rows on 2026-08-23 and took this with it.
+    /// ⚠️ **Twice without a caller, and each time for the same reason.** It sat
+    /// `pub` here with none until `tools::original_refusal` gave it one (§15 D280)
+    /// — and that mattered, because the two doors it replaced had each hand-rolled
+    /// `bytes().is_some()`, which is equally false for a *linked* picture and for
+    /// an id the table does not hold, so a document that had simply lost a picture
+    /// was told it used linking. `original_refusal` went with the *Export
+    /// original…* rows on 2026-08-23 and took this with it, and it had none again
+    /// until `io::clip::parse` (§15 D852).
     ///
     /// **The distinction is the thing to keep, not this function.** Ask it
     /// explicitly rather than inferring "linked" from absent bytes; that inference
@@ -181,15 +182,16 @@ impl ImageEntry {
     /// joins.
     ///
     /// ⚠️ **This said *"`ImageSource::Linked` is constructed in one place … and
-    /// nothing can make one"*, and both halves were false for a range** (§15
-    /// D852, `[R2-L8-03]`). `io::schema`'s `into_entry` has **two** callers — the
-    /// file loader and `io::clip::parse`, the clipboard crossing — and
-    /// `build::missing_image_ops` carries whatever entries a paste brings into the
-    /// document. So the doors onto a linked source are:
+    /// nothing can make one"*, and the second half was false for a range** (§15
+    /// D852, `[R2-L8-03]`) — the first staying literally true, one constructor,
+    /// which is why nothing caught it. `io::schema`'s `into_entry` has **two**
+    /// callers — the file loader and `io::clip::parse`, the clipboard crossing —
+    /// and `build::missing_image_ops` carries whatever entries a paste brings into
+    /// the document. So the doors onto a linked source are:
     ///
     /// - **A hand-written or foreign `.ondin`**, which the app opens as it always
     ///   has: the non-goal is authoring, not reading.
-    /// - **The clipboard, which refuses one** — this function's first production
+    /// - **The clipboard, which refuses one** — this function's only production
     ///   caller, and the non-goal's only enforcement. A link arriving there was an
     ///   attacker-chosen URL written verbatim into every SVG export.
     ///

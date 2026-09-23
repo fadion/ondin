@@ -286,7 +286,9 @@ other unread element, so `svg_in`'s *"nothing is lost silently"* contract alread
 sat in *Now · SVG import* for sixteen days with its own text saying it belonged here.
 **Linked images** (§15 D819) are three Asset rows blocked on one missing thing — a gesture that
 **authors** a linked source — where `ImageSource::Linked` is built only by the deserializer and
-every app path funnels through `load_image_bytes`, which builds `Embedded` unconditionally. ⚠️ **The
+every app path funnels through `load_image_bytes`, which builds `Embedded` unconditionally. The one
+other door onto the deserializer, the clipboard, **refuses** a linked picture (§15 D852); from the day
+it opened until that refusal, a paste could put one in. ⚠️ **The
 model keeps the subject**: `is_linked` and `tools::original_refusal`'s three-state reasoning stay, a
 foreign `.ondin` being able to put a link in front of the app, and D280 is the bug that comes of
 inferring linked from absent bytes. **Rollback** (§15 D814) is refused because `relocate` overwrites

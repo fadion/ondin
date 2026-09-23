@@ -41,7 +41,7 @@ which is this file's own §9.5 lesson: **check the section before believing the 
 | *Now · Path editing* | **Nothing open as of 2026-09-22.** The one item — whole-path geometry patches — **moved to *Later · Parked decisions*** that day: it is non-blocking with a stated trigger (revisited *with* MCP, which is parked), which is what *Later* is for by this file's own table above. ⚠️ **That honours §15 D123's closing note rather than breaking it** — the note asks for it to stay *"in the todo as a decision rather than a gap"*, and it stays in this file; what changes is that it stops sitting under a heading meaning *open work on live code*. ⚠️ **The `retain_valid`/`subpath_lengths` pair left this row on 2026-09-19**, ruled to the narrow `#[allow(dead_code)]` with the no-effect call removed (§15 D637, *Resolved*) — it had been here since 2026-09-09. |
 | *Now · Files, library and storage* | **Nothing open as of 2026-09-23** — the cover cache's lifecycle, opened that day while closing §15 D862, closed the same day: `Covers::pass` drains once a dashboard pass and the project mosaic asks only on screen (§15 D863), and textures past a cap of 128 go least recently asked-for first (§15 D864). *The text below is the row as it stood that morning.* **One item as of 2026-09-23**: the cover cache's lifecycle — no texture is ever evicted, `drain` runs only when a card asks, and the project mosaic is ungated. Found while closing §15 D862; no behaviour is wrong, it is memory and wasted repaints. *The text below is the row as it stood before.* **Nothing open as of 2026-09-19** — the last two closed that day: the cover render moved onto **a worker of its own** rather than onto `Writer`'s FIFO queue, `FRAME_BUDGET` deleted with what it bounded (§15 D820), and **rollback was refused outright** and is a §0 non-goal, the retry being the recovery (§15 D814). 🚨 **The threading then flaked a *dashboard* test 2 runs in 20**, found by running the filter twenty times after six clean runs had said nothing. *The text below is the row as it stood that morning.* **Two**, as of 2026-09-19: a dashboard cover rendered synchronously on the UI thread, which needs a thread, and **rollback** after a partly-failed migration, which needs a ruling. **Three left this row that day.** The non-Unicode filename was **reproduced** — a lone UTF-16 surrogate, which NTFS accepts and `to_str` refuses — and the migration now carries such a file by its `OsStr` name (§15 D809); the per-machine index has an injection point, and it is a `cfg!` rather than any of the four answers the bullet proposed (§15 D807); and the partly-failed migration got its list in the modal and a *Try again* button, leaving only the third of its three asks (§15 D810). ⚠️ **This row said *"Three, all from the codebase review"* while the section held four**, the migration bullet never having been named in it — so it was short by one from the day it was written and the arithmetic in it was never a count of anything. ⚠️ **This row did not exist until 2026-09-09** and the section had held open work since 2026-09-06; the *"nothing open"* line below was the half that got corrected first, and a missing row is the same failure with nothing to contradict. |
 | *Now · Text alignment* | **Nothing open as of 2026-09-22.** Side bearings / optical margin alignment moved to *Later · Parked decisions*, undecided — it had been filed `Later:` inside a `Now` section since the section was written, which is the prefix table broken from the inside — **and was built hours later the same day** (§15 D830): both edges, `ParagraphStyle::optical_margins`, off by default, one adjustment to the line's geometry that no arm of reads `align`. ⚠️ **The bullet's own example was backwards the whole time it stood** — it blamed `H` for having *almost no* left bearing, and `H` has the largest of the capitals measured. ⚠️ *This row said "Side bearings / optical margin alignment, marked **Later**" and was perfectly accurate for weeks — it described the bullet exactly, including the contradiction, and that is why nobody acted on it.* What is left in the section is one standing rule: don't use ink bounds for alignment — **which D830 does not break, and which now says it is about the *datum***. |
-| *Next · Container layout* | **Opened 2026-09-23, designed and not built** (§15 D867–D873): five steps — used geometry behind an identity pass, absolute insets, flex, grid, then components — plus the decisions still open. The only `Next` section in the file, and not a `Now`, because nothing in it has shipped. |
+| *Next · Container layout* | **Opened 2026-09-23 and designed** (§15 D867–D873): five steps — used geometry behind an identity pass, absolute insets, flex, grid, then components — plus the decisions still open. **Step 1 is built** (2026-09-24, §15 D868), and step 2 carries what it left. The only `Next` section in the file, and not a `Now`, because nothing in it has shipped. |
 | *Later* | The command palette and cheatsheet; the parked decisions; post-v1 (MCP, Command Mode, multiplayer). |
 
 **Sections with nothing open**: *Doc drift*, *Now · Images*, *Now · Inspector*, *Now · Keyboard*,
@@ -1439,28 +1439,39 @@ snapping with its labels, §15 D198, D200.)
 
 ## Next · Container layout (flexbox, grid, absolute insets)
 
-**Designed 2026-09-23, not built.** `architecture.md` §5.3c is the design and §15 **D867–D873** its
-decisions — CSS semantics under CSS's names, taffy as the engine, layout derived in `Resolved` and
-never saved, groups taking `display`, a frame allowed under any group, constraints as absolute
-insets, shapes as replaced elements. **This section is the order of work and what is still open; it
+**Designed 2026-09-23; step 1 built 2026-09-24** (§15 D868 has what, and is its record now).
+`architecture.md` §5.3c is the design and §15 **D867–D873** its decisions — CSS semantics under
+CSS's names, taffy as the engine, layout derived in `Resolved` and never saved, groups taking
+`display`, a frame allowed under any group, constraints as absolute insets, shapes as replaced
+elements. **This section is the order of work and what is still open; it
 restates none of those.** ⚠️ *Grid* here is the CSS grid container — not §5.3b's layout grids, which
 are chrome.
 
-1. **Route every geometry consumer through used geometry, behind an identity layout pass.**
-   Rendering, export, hit-testing, snapping and the inspector's X/Y/W/H all read `Node::transform`
-   and the kind's size off the document today (§15 D868). A pure refactor, **proved by the goldens
-   staying byte-identical**, and the riskiest step — which is why it goes first.
+1. ~~Route every geometry consumer through used geometry, behind an identity layout pass.~~ **Built
+   2026-09-24**; §15 D868 is the record.
 2. **Absolute insets on frames — constraints** (§15 D871). The smallest visible feature that
-   exercises the whole pipeline.
-3. **Flex**, with live reflow during gestures and reorder by drag.
+   exercises the whole pipeline, and it owes what step 1 left (§15 D868):
+   - the resize tools the **specified** box to edit from, since `query::local_box` answers the used
+     one;
+   - **a decision per edit site that mixes sources** — `res.world_transform(id)`, used now, composed
+     with the stored `node.transform()` in `tools::resize_geometry`, `resize_selection`,
+     `rotate_node`, `skew_to_handle`, `skew_selection` and `inspector::multi_angle_tx`, and every
+     control computing an edit from `DisplayNode::kind` — correct only while used equals specified;
+   - **the cross-crate routing test.** Core's `cfg(test)` probe is the only non-identity test and no
+     other crate can reach it, so this step's feature is the proof: one fixture, a right-pinned child
+     after a frame resize, asserted through the render, the SVG, the PNG, hit-testing, snapping, the
+     inspector and the rulers.
+3. **Flex**, with live reflow during gestures and reorder by drag. It owes `Resolved::update` its
+   siblings: an item moves when its neighbour grows, and nothing dirties the neighbour (§15 D868).
 4. **Grid**, with the track editor.
 5. **Components and overrides**, on the same pipeline. **Not designed** — sequenced here because
    derived instances are meant to share layout's derive-from-specified path (§15 D868), and nothing
    more is decided about them.
 
-**Owed somewhere in 1–4 and not placed in the order by anyone yet**: the used-box store in
-`Resolved`, and a comparison of it in `incremental_update_equals_rebuild_over_random_ops` (§15 D868,
-D778); core's min-content query and a measure memo keyed by wrap width (§15 D872); `display` on
+**Owed somewhere in 1–4 and not placed in the order by anyone yet**: random operations that author
+layout inputs, once there are any — `incremental_update_equals_rebuild_over_random_ops` compares the
+used map now, and can only ever see identity until it can generate something layout reads (§15
+D868); core's min-content query and a measure memo keyed by wrap width (§15 D872); `display` on
 groups (§15 D869); the `can_parent` relaxation and the audit of what assumed the refusal (§15 D870);
 taffy in core's manifest with its justification paragraph, and `architecture.md` §2's table and §3's
 core list updated to match (§15 D867).

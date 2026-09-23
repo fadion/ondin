@@ -1242,8 +1242,8 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D864** — **Past 128 resident covers the least recently asked-for texture is let go, and one asked for on this pass or the last never is.** Not a finding: found closing **D862**, which bounded a first visit and not a long one — nothing evicted short of `Covers::clear`, so scrolling a whole library left every cover resident, ~640 MB at 1,000 large covers by arithmetic on `COVER_MAX_PX`. `Cover::Ready` carries a stamp, the `Covers::pass` count it arrived on or was last returned by `get` on — `Covers`' own count, not egui's pass number, since what ages a cover is the *dashboard* drawing without asking for it. `evict` sorts the `Ready` covers by (stamp, key) and removes the oldest down to `MAX_RESIDENT_COVERS`, **breaking at the first stamped this pass or the one before**, so a card on screen cannot lose its picture and a screen holding more than the cap exceeds it rather than churning. Only `Ready` goes — `Unreadable` is the red mark's fact, `Blank` holds nothing — and an evicted cover is not queued, so the next `get` asks the worker, which reads the disk cache. *(Fixed and tested 2026-09-23; **Keep.** ⚠️ **128 is chosen, not measured**: ~80 MB at the 400² × 4-byte worst case, and more than twice a 2,160 pt window's 48 file cards. 🚨 **Not twice a screen of project cards** — five covers a mosaic, twenty a row, so seven rows of *Recent* pass it, and `MAX_RESIDENT_COVERS`' doc said *"any screen"* until corrected the day it was written; the recency guard is what holds there. **Test** `past_the_cap_the_least_recently_asked_cover_goes_and_a_recent_one_never_does`, three flips run: the sort deleted fails at *"back to the cap"* with 135 left, **not** the predicted named-ten assertion — unsorted, a protected cover comes up within a few and the `break` ends the loop, so it mostly evicts nothing; the recency guard disabled, and `get`'s `*seen = now` dropped, each fail where predicted. §9.5 amended; D862 amended in body and index; `MAX_RESIDENT_COVERS`' doc and `file_card`'s gate comment corrected; struck from `roadmap.md` with D863)*
 - **D865** — **The Type panel's two chords and its line-height field read their `Bounds`, where they had spelled the same numbers from the constants.** Not a finding: noticed closing **D861**. §15 **D817**'s *a held key stops where the field stops* was honoured by value — the tracking arm bounded its em step by `MIN_TRACKING_PCT / 100.0 ..= MAX_TRACKING_PCT / 100.0` and its px step by `px_range_for` over the same constants, both by hand, beside a field reading `Bounds::TRACKING` — D861's shape one function over. Line height had no `Bounds` at all, and the `Leading` arm (§15 **D840**) and `type_line_height_field` each spelled `MIN_LINE_HEIGHT_PCT..=MAX_LINE_HEIGHT_PCT`. `Bounds::LINE_HEIGHT` (the field's existing `0..=1000%`) and `Bounds::em()`, the `%` range over a hundred — the scale a `Length::Em` holds; both arms and the field read their faces off a `Bounds` now. *(Fixed and tested 2026-09-23; **Resolved** — no range moved, `stepped_into` untouched. ⚠️ **`em()` is the chords' face and not the field's**: the field shows an em ×100 and bounds on `.pct`, and handing it `.em()` would cap line height at 10%. `both_ends_of_every_length_field_bound_the_same_quantity` derives `LINE_HEIGHT` with the rest and asserts every `em()` is its `%` face ÷100; flip run, `em()` undivided, red there at `TRACKING` — predicted — and in two tracking-chord tests. ⚠️ **No leading-chord test failed**: the one there was pinned line height's floor, 0 in either scale — **closed the same day**, that test now driving both ceilings and red under the same flip at `Em(21.0)`. D425's scope sentence amended and the test's own copy corrected; D817 and D861 carry a line; `architecture.md` unchanged; nothing struck from `roadmap.md`)*
 - **D866** — **The deep-resample GPU test bounds a ratio to the ordinary path, not a wall clock, after one unexplained 54 ms on a healthy tree — which is D593's shape, taken with far more margin, and still a clock.** `fx_gpu.rs · a_deeply_resampled_shadow_costs_the_buffer_and_not_the_block` is **D743**'s test of the `coarsen` loop bound (D403's promise) and asserted *best of three under 50 ms* against 0.45 ms healthy and 116.3 ms broken. The release bar for v0.2.0 read **54.4 ms** with the code under test unchanged since v0.1.0, then passed 21 runs running; the reading was never recreated and its cause is unknown. The degenerate shadow is timed now **interleaved** with a control — `k = 3`, blur 120, the shadow `a_resampled_drop_shadow_matches_the_reference` checks — one warm-up each, best of five each, and `deep / ordinary < 20` is asserted: **1.73–1.85×** healthy, **1.29–2.01×** with two other GPU suites looping in a second process, **176–208×** with the loop unbounded. *(Changed and measured 2026-09-23; **Keep** — test-only. 🚨 **Not a way out of D854**: D593's test was a ratio of two clocks too, chosen so as not to measure the machine, and failed 13 in 60 under load after two re-samplings; what differs is margin — about ten times each side here, against D829's 46% and 31% — and a load that lands on one arm alone still counterfeits a regression, which the interleave is meant to prevent and was not shown to against the unknown cause. **Counting**, CLAUDE.md's first question of a timing flake, needs an atomic counter compiled into the shader and was judged too invasive for a test. *Revisit if it goes red on a healthy tree* — with the count, not more samples or a wider bound. Flip run with `fx.wgsl` reverted and its diff against `HEAD` confirmed empty. D743 amended in body and index; `architecture.md` unchanged; nothing struck from `roadmap.md`)*
-- **D867** — **Container layout is being built, as CSS flexbox and CSS grid under CSS's names, on taffy — and §1's deferral of it is reversed.** "v1" in these documents names the phase in which the basic editing tools were finished, not a release tag; that phase is over, so layout starts and components follow it. **Where CSS and design-tool convention disagree, CSS wins** — transforms do not affect layout, child order is flow and paint order, text wraps at the available width, specified and used values are kept apart. **Not §13's constraint engine**: a fixed algorithm re-run from specified values. taffy 0.14.0, MIT, f32, measured on a spike: 1,000 rects in a wrapping flex frame **0.558 ms**, a 900-cell grid **1.087 ms**, 100 text cards **29.2 ms** full and **0.302 ms** after one text edit — shaping, not taffy, is the bill. *(Decided 2026-09-23 by the maintainer; **not built** — no line of `crates/` changed and no code cites it. ⚠️ **No verdict word existed for a decision taken ahead of its code**; *Decided; not built* is proposed for D867–D872, to become *Built and tested* per step. Build order recorded; open: mirror tree against trait implementation, how taffy is declared, the module's name. `architecture.md` §5.3c written, §1 and §13 amended; `roadmap.md` §0 loses auto layout, constraints and components and gains *Next · Container layout*; `context-menus.md` §7 corrected)*
-- **D868** — **What the user sets and what is drawn become two numbers, and the drawn one is never saved.** Amends §5.6's *"one number in one place"* into a specified number and a used one; the used boxes are derived in `Resolved` from specified properties plus the registered fonts, for three reasons — CSS keeps the two apart, components will derive instances on the same pipeline, and a font arriving just re-resolves. 🚨 **The cost is the risk**: rendering, export, hit-testing, snapping and the inspector all read `Node::transform` and the kind's size today, and `RenderOverrides` cannot express a reflow. ⚠️ **It breaks two arguments true at `HEAD`**: D590's text pass skipping the subtree expansion, and D778's decline of a seventh map on `Resolved` — whose grounds do not transfer and whose cost does. *(Decided 2026-09-23 by the maintainer; **not built**. Open: how previews reflow, what a resize writes, the rotation origin, `TextSizing`'s mapping, and — unstated by the design — what an in-flow item's stored translation means. §5.6 and two §5.9 bullets carry pointers)*
+- **D867** — **Container layout is being built, as CSS flexbox and CSS grid under CSS's names, on taffy — and §1's deferral of it is reversed.** "v1" in these documents names the phase in which the basic editing tools were finished, not a release tag; that phase is over, so layout starts and components follow it. **Where CSS and design-tool convention disagree, CSS wins** — transforms do not affect layout, child order is flow and paint order, text wraps at the available width, specified and used values are kept apart. **Not §13's constraint engine**: a fixed algorithm re-run from specified values. taffy 0.14.0, MIT, f32, measured on a spike: 1,000 rects in a wrapping flex frame **0.558 ms**, a 900-cell grid **1.087 ms**, 100 text cards **29.2 ms** full and **0.302 ms** after one text edit — shaping, not taffy, is the bill. *(Decided 2026-09-23 by the maintainer; **step 1 built 2026-09-24** — core's half, then render, export and the app the same day (D868), cited from `resolve.rs`; steps 2–5 not built. It read *not built — no line of `crates/` changed and no code cites it* until then. ⚠️ **No verdict word existed for a decision taken ahead of its code**; *Decided; not built* is proposed for D867–D872, to become *Built and tested* per step. Build order recorded; open: mirror tree against trait implementation, how taffy is declared, the module's name. `architecture.md` §5.3c written, §1 and §13 amended; `roadmap.md` §0 loses auto layout, constraints and components and gains *Next · Container layout*; `context-menus.md` §7 corrected)*
+- **D868** — **What the user sets and what is drawn become two numbers, and the drawn one is never saved.** Amends §5.6's *"one number in one place"* into a specified number and a used one; the used boxes are derived in `Resolved` from specified properties plus the registered fonts, for three reasons — CSS keeps the two apart, components will derive instances on the same pipeline, and a font arriving just re-resolves. 🚨 **The cost is the risk**: rendering, export, hit-testing, snapping and the inspector all read `Node::transform` and the kind's size when this was decided, and `RenderOverrides` cannot express a reflow. ⚠️ **It breaks two arguments true at `HEAD`**: D590's text pass skipping the subtree expansion, and D778's decline of a seventh map on `Resolved` — whose grounds do not transfer and whose cost does. *(Decided 2026-09-23 by the maintainer; **D867's step 1 built and tested 2026-09-24**, steps 2–5 not built. Core's half: a sparse seventh map `used` on `Resolved`, read through `used_local`/`used_kind` — *draw, measure and hit-test from these; edit from the node* — behind an identity pass proved by byte-identical goldens and, because that proof cannot see a consumer still reading the document, by a `cfg(test)` probe; `update` recomputes it over `affected` and re-shapes text whose used kind changed, the one door past D590, while ⚠️ siblings are not yet dirtied; the guard compares it, five of seven maps; `geometry::world_bounds_of` deleted. Then render, export and the app, the same day: `scene::paint_node` and `mask_geometry`, `RenderOverrides::transform_of` and a new `drawn_kind` fall back to used geometry while 🚨 `current_kind` stays on the document, because it is what a preview op is *applied to*; the SVG writer through `used_local_of`/`used_kind_of`; the snapshot's `local_transform` and `geometry` report **used** values — ⚠️ the session's default, not ruled on by the maintainer; `DisplayNode::kind` and every `preview_*` helper fall back to used, `committed_node` deliberately not. 🚨 **Owed to step 2**: the edit sites that mix a used world with a stored local (`rotate_node` and five more), each owed a decision; and the only non-identity routing test is core's, so nothing outside core proves a used geometry arrives — step 2's right-pinned-child fixture is to. 🚨 A doc-comment theft on `resolve_subtree` found by reading and repaired. Open: how previews reflow, what a resize writes, the rotation origin, `TextSizing`'s mapping, and — unstated by the design — what an in-flow item's stored translation means. §5.6 carries a pointer; §5.3c, §5.9 and §5.10 amended 2026-09-24, and §5.3c, §5.9, §6.2, §7, §9.3 and §9.4's booleans again for the second half)*
 - **D869** — **A group with `display` has a box; a group without one is exactly today's group.** Setting `display` makes a group's bounds its layout box, padding included, and a resize writes `width`/`height` and reflows instead of `tools::resize_group`'s scale. **Paint and clip stay frame-only**: pass-through paint and scale-on-resize are design-tool behaviours with no CSS equivalent, and merging the kinds would lose them. `Boolean` ignores `display`; the root is no container; a mask is out of flow. *(Decided 2026-09-23 by the maintainer; **not built**. *Revisit when components land.* ⚠️ Four passages argue from *"a group has no box"* and become conditional on `display` — listed in the body, not decided by it. §5.6's group-resize bullet carries a pointer)*
 - **D870** — **A frame may sit inside any group, and `paint_targets` already stops at one.** A flex row of frame-cards in a group is illegal under `can_parent` today. Relaxed for *any* group, since legality hanging on `display` would refuse removing `display` from a group holding a frame. Of the two reasons `can_parent`'s doc gives, *"clipped by something with no edges"* is weak — groups do not clip — and the `paint_targets` one was **checked**: its `takes_paint` arm takes a frame and does not descend. *(Decided 2026-09-23 by the maintainer; **not built** — `can_parent` still refuses. ⚠️ The four enforcers read one function; what needs the audit is what *assumed* the refusal, D62's four leaks being the precedent. §5.3 and §5.7a carry pointers; D62 carries a line)*
 - **D871** — **Constraints are `position: absolute` with insets, and a child with none stays where it is.** Pin left, pin right, stretch and scale are a left inset, a right inset, both, and percentages — in a frame or a group with `display`, and not in a group without, which has no edges. No authored inset means the stored position stands, so no existing document moves. Spike, frame 300 → 500: pin-left stays at 10, pin-right 240 → 440, stretch 280 → 480, 25%/25% 75/150 → 125/250. *(Decided 2026-09-23 by the maintainer; **not built** — step 2 of D867's order. Not §13's persistent constraints)*
@@ -19179,7 +19179,8 @@ the present-mode guard fails at its own assertion while leaving the other two gr
 three suppressions are one test rather than three.
 
 **D867 — Container layout is being built, as CSS flexbox and CSS grid under CSS's names, on taffy —
-and §1's deferral of it is reversed. *Decided 2026-09-23 by the maintainer; not built.*** Filed
+and §1's deferral of it is reversed. *Decided 2026-09-23 by the maintainer; step 1 built 2026-09-24
+(D868), steps 2–5 not built.*** Filed
 beside D385 because the word *grid* now names two features in this document, and a reader looking
 for one will land on the other: D385's layout grids are chrome drawn over a frame, and this is the
 CSS grid **container**, which places children. `architecture.md` §5.3c opens by saying so.
@@ -19247,10 +19248,16 @@ lands, §3's core list — *"thirteen names here, the same thirteen declared the
 fourteenth, and §2's stack table a row. `architecture.md` §5.3c written; §1's *Deferred* bullet
 rewritten; §13's decision 1 carries a pointer; `roadmap.md` §0 loses auto layout, constraints and
 components and gains *Next · Container layout*; `context-menus.md` §7's deferred-features bullet
-corrected)*
+corrected. **Amended 2026-09-24**: step 1 has begun and planted the citation — `resolve.rs` cites this
+number at `used_geometry` and at `mod used_geometry_tests` — so *"no line of `crates/` changed"* is
+history now. What is built and what is left of the step are D868's amendment; taffy is still not in
+the workspace, the identity pass needing no engine. **Amended again the same day**: step 1 is
+**built** — render, export and the app were routed too, and D868's second amendment has how and the
+two debts that go to step 2 with it. Still no citation of this number outside `resolve.rs`)*
 
 **D868 — What the user sets and what is drawn become two numbers, and the drawn one is never saved.
-*Decided 2026-09-23 by the maintainer; not built.*** §5.6 opens with the rule that keeps scale out of
+*Decided 2026-09-23 by the maintainer; D867's step 1 built and tested 2026-09-24, steps 2–5 not
+built.*** §5.6 opens with the rule that keeps scale out of
 the transform — *"a layer's size must be one number in one place (its geometry)"*. Under container
 layout that becomes one **specified** number and one **used** number, CSS's pair, and this entry is
 the amendment. **Not in effect**: §5.6 carries a pointer and the rule is true of `HEAD` as written.
@@ -19311,6 +19318,201 @@ the wrapping is decided and the mapping is not. ⚠️ **Not stated by the desig
 omission**: what an in-flow item's stored translation means once its slot comes from the container —
 D871 settles it for an absolutely positioned child with no insets, and nothing settles it for one in
 flow. §5.6's rule bullet and §5.9's map-count and text-pass bullets carry pointers)*
+
+🚨 **Amended 2026-09-24: core's half of D867's step 1 is built, and the seventh map exists.**
+`Resolved` has a seventh map, `used: FxHashMap<NodeId, Used>`, **sparse** — an entry only where
+layout places or sizes a node differently from the document, so a document with no layout in it
+holds nothing and every read falls back to the node. `Used` is private and holds two separate
+`Option`s, `local: Option<Affine>` and `kind: Option<NodeKind>`, because moving and resizing are
+separate facts. ⚠️ **A used kind is always the same variant as the document's** — layout resizes a
+rectangle and never makes it anything else — which is what lets every `match` asking *what sort* of
+node this is keep reading `Node::kind`. Inside `resolve.rs` the map is read only through `local_in`
+and `kind_in`; outside it, through `Resolved::used_local(doc, id)` and `Resolved::used_kind(doc, id)`,
+both falling back to the document. **Their docs carry the rule the rest of the build hangs on: draw,
+measure and hit-test from these; edit from `Node::transform` and `Node::kind`** — a tool computing a
+new value has to start from what the user set.
+
+**The pass is identity, on purpose.** `resolve::used_geometry` answers `None` for every node — there
+is no `display` and no inset to author yet — so the refactor is proved by the goldens staying
+byte-identical, and they did: `ondin-export`'s `goldens.rs` 5/5 and `svg_roundtrip.rs` 16/16
+(corrected by the second amendment — this read *8/8* and *68/68*). ⚠️ **That proof
+cannot see the defect the refactor is most likely to have**: a consumer still reading the document
+passes it too, since the two answers are equal on every node. So under `cfg(test)` a thread-local
+`probe` in `resolve.rs` can answer instead, and `mod used_geometry_tests` installs a stand-in layout
+that moves and resizes three nodes a long way from where the document puts them. The module and its
+one call inside `used_geometry` are each `#[cfg(test)]`, so no production build contains it — and for
+the same reason `ondin-core/tests/` cannot reach it either, those targets compiling core without the
+`test` cfg.
+
+**What reads it, in core**: world composition in `rebuild`'s walk and in `update`; the committed view
+booleans are evaluated through (`local_of`, `kind_of`); `local_path`; `mask_path`; text shaping in
+`reshape_text` and in the walk; and both bounds passes, which call `geometry::world_bounds_of_parts`
+with the used kind. `geometry::world_bounds_of(node, …)` is **deleted** — its only production callers
+were those two, which can no longer hand it a node. In `query.rs`: `hit_test`, `local_box`,
+`mask_extent_local` and `outline_at`. `geometry::contains_local` takes a `kind: &NodeKind` beside the
+node now — the used kind, with the node still supplying the paint and the fill rule.
+
+**Order.** `rebuild` fills the map first and then walks, because the walk shapes text at the used kind
+and composes world transforms from used locals. `update` recomputes the entries over **`affected`** —
+the dirty nodes and their descendants — before text and before transforms, since whether layout
+moves a node is a question about its container and a dirty ancestor is exactly what can change the
+answer; a deleted node drops its entry. ⚠️ **That is not the sequence *Where it runs* gives above**,
+which re-shapes text first and lays out second. The code's reason is that the cached layout is the
+one shaped *at* the used kind, so the text pass needs the map's answer; a text leaf measured *for*
+layout goes through D872's measure function, which that entry already says is not this cache.
+*Whether flex keeps this order is step 3's question.*
+
+**D590's re-argument, in the shape it took.** `update` records which entries actually *changed* —
+`relaid` — and re-shapes the text among them the dirty set did not already cover: **the one door past
+D590's rule, and only as wide as the entries that changed.** A translate changes no used kind, so the
+saving survives it; an edit that moves a wrap width re-shapes that text node once. 🚨 **Siblings are
+not in `affected`**, and under flex they will have to be — an item moves when its neighbour grows, and
+nothing dirties the neighbour. Identity layout cannot tell the difference; the step that makes one
+node's box depend on another's owes the widening, and `update`'s comment says so. ⚠️ **And
+`query::local_box` is the box the resize tools edit *from*.** It answers the used box now, because the
+handles and the W/H are drawn from it, and those tools will want the specified box once the two
+differ — owed by step 2, and the function's comment says that too.
+
+**The guard compares it, which was this entry's condition for the map.** `assert_resolved_matches_rebuild`
+asserts `used_local` and `used_kind` for every node, ahead of the world transform so a divergence is
+named at its cause: **five of the seven maps, where it was four of six** — ⚠️ `boolean`, `inner_ink`
+and `failed` are still compared by nothing there. And at `HEAD` it can only ever see identity: the
+random operations author nothing layout reads, and the probe does not reach `tests/`. What exercises a
+non-identity map is the two inline tests. `every_measure_in_resolved_and_query_follows_the_used_geometry`
+places each assertion where the used and specified answers differ by a long way, so no consumer
+reading the document can pass it; `update_keeps_the_used_geometry_equal_to_rebuild` commits only to
+the frame, so every entry that changes belongs to a node no commit named. **Seven flips, all run**,
+and the docs record the two predictions that were wrong: shaping at `node.kind()` in `reshape_text`
+does not bite the first test, which only rebuilds, and fails the second at the resize; and recomputing
+over `existing` instead of `affected` fails the fade's re-shape count rather than the resize, because
+`op_set_geometry` dirties the frame's whole subtree.
+
+**What was left of step 1**, none of it in core — `ondin-render`'s scene walk and `RenderOverrides`,
+`ondin-export`'s SVG writer and snapshot, and the app's preview helpers and direct readers — **landed
+the same day**, and the second amendment below has it.
+
+🚨 **A doc-comment theft was found beside this change and repaired in it.** The two summary lines
+*"Recursively compute world transforms and bounds for the subtree at `id`, returning this node's
+world bounds (if any) so parents can union them"* sat at the head of `struct Caches`' doc, above
+*"The four maps [`resolve_subtree`] fills"* — `resolve_subtree`'s summary on the wrong item, and the
+function itself with no doc at all. Somebody had inserted `Caches` between the function's doc and its
+`fn`. Moving it back turned up two more errors in the same few lines: `Caches` holds **five** maps,
+not four, and the summary understated the return, which is world bounds **and** ink bounds. How long
+it had stood is unknown. **Found by reading** `resolve_subtree` while editing it for this change, and
+by neither of `CLAUDE.md`'s sweeps: the merged run is far under the length ranking's floor, and the
+neighbour grep only helps at an insertion somebody knows they made. Both items now head-describe
+themselves, and both corrections went with the move.
+
+*(Amended 2026-09-24 from the brief and a read of `resolve.rs`, `query.rs`, `geometry.rs` and
+`tests/resolve.rs` in the working tree, uncommitted; gates as reported by the caller — fmt,
+`cargo test --workspace`, clippy `--workspace --all-targets` and per package, `cargo doc`
+with `--document-private-items`, `check --release -p ondin-app`. **No D-number spent.** Verdict line
+and index row rewritten; D867's verdict amended; `architecture.md` §5.3c, §5.9's listing and three
+bullets, and §5.10's `hit_test` and `local_box` bullets amended; `roadmap.md`'s step 1 narrowed to
+what is left, and the used-box store struck from its *owed* list)*
+
+🚨 **Amended again 2026-09-24: step 1 is built — the render, export and app half landed the same
+day**, and *What it costs* above is history for the drawing, measuring and hit-testing side of every
+consumer it names — the editing side is the first debt below. Core gained two accessors
+for it, `Resolved::used_local_of(&Node)` and `used_kind_of(&Node)`, infallible, for a caller with a
+node in hand and no document in reach — the SVG writer's helpers, where the alternative was a new
+parameter on every one. ⚠️ **Their doc carries the condition that makes them safe: the node must be
+this document's own.** The map is keyed by id, so a captured subtree, a clipboard node or a ghost
+would be answered with whatever layout did to the original, which is exactly wrong for a copy that
+has not been placed anywhere yet.
+
+**In `ondin-render` the walk's answer is two lines.** `scene::paint_node` takes its local and its
+kind override → used → document, and every other geometric read in the walk goes through
+`painted.kind` and `world`; `scene::mask_geometry` takes the same precedence, so a mask clips with
+the outline its layer is drawn with. `RenderOverrides::transform_of` gained a `&Resolved` and answers
+ghost → override → **used local**, and `world_transform`, the preview boolean pass's `local_of` and
+the app's `preview_local_transform` all read it. ⚠️ **That fallback is what keeps
+`world_transform`'s two arms equal**: with nothing overridden it returns `Resolved`'s world
+transform, which composes used locals, and with anything overridden it composes `transform_of` down
+the whole chain — so a document fallback there would answer a different world transform for
+anything below a laid-out node the moment a gesture began. 🚨 **The kind is two functions, and the difference
+between them is the rule this entry hangs on.** `current_kind` stays ghost → override →
+**document**, because it is what a preview op is *applied to* — its only callers are `absorb`'s
+`SetGeometry` arm and `patch_text` — and a `SetGeometry` built on a size layout computed would write
+the used value back as though the user had typed it. The new private `drawn_kind` is ghost →
+override → **used**, and is what `reevaluate_booleans` hands `Operands::kind_of`. *Do not merge
+them*: they are equal until layout resizes something, so the merge passes every test at `HEAD`.
+`renderer.rs`'s `build_ghost` is left alone on purpose: it reads an `InsertSubtree`'s captured nodes,
+specified values of nodes the document does not hold yet, with no `Resolved` behind them — the case
+`used_local_of`'s condition exists for.
+
+**In `ondin-export`**, `collect_defs` and `emit_node` compose `outer * res.used_local_of(node)`, and
+the frame's clip rect and background, `paint_frame`, and `outline` and `side_path` in `emit_strokes`
+read the used kind. `write_element` takes the used kind as a parameter — every size and outline in
+it, and the text arm's `export_lines(TextRef::of(kind))`, which re-shapes and so has to see the used
+wrap width. `align_clip` takes a kind where it took a node, because `stroke_align_applies` goes
+through `local_path` and a zero used size can change its answer; the `effective_sides` calls in
+`emit_shape` and `emit_strokes` take the used kind too. The questions about *what sort* of node this
+is stay on `node.kind()` — `is_container`, `wrap`, the text-fill fallback, `report_node`, the rail def
+in `collect_defs` — which the same-variant rule above allows.
+
+🚨 **The snapshot's `local_transform` and `geometry` report used values, and the maintainer has not
+ruled on it.** It is the session's default, taken for the snapshot's own arithmetic: `world_transform`
+and `world_bounds` were already `Resolved`'s, which composes used locals, so a document local would
+stop multiplying out to its own world transform the first time layout placed something. What it
+costs is the value an agent editing the file needs — what the user set — and §8.4's *"Snapshot
+exposes world transforms so agents can compute local placements"* is where that will bite: a local
+computed from a used world and sent back through `set_transform` is the used value saved as though
+typed. **Whether a snapshot should also carry specified values is left to the MCP work, which is
+parked**, and `snapshot.rs`'s comment says so. No `snapshot_version` bump: identity layout moves no
+byte, which `goldens.rs · json_snapshot_matches_its_golden` staying green says. *Revisit when the MCP work resumes, or before any
+tool writes a transform computed from a snapshot.*
+
+**In the app**, `session::DisplayNode` gained `used: Option<&NodeKind>`, and its `kind()` is override
+→ used → document; `display_node` fills it from `used_kind_of`, and with that and `transform_of`
+routed, every `preview_*` helper — world and local transform, world bounds, local box, the pivot
+helpers — falls back to used geometry. ⚠️ **`committed_node` leaves `used` at `None`**, because its
+one job is reporting the value a commit is about to overwrite, which is the specified one; its only
+caller is `panels::typography`'s `TypeSubject::committed`, taken on `CharWrite::Commit`. Direct readers
+switched: `canvas::crop_frame`, since the renderer frames a picture at the kind it draws and the crop
+gesture has to share that rectangle; the layers panel's frame-size badge; and — deliberately, though
+both sit in edit paths — `image_tx` and `paste_text_as_layer`, which read the **parent frame's** box
+as context for sizing a new node: the picture and the paste are fitted to the frame on screen, and
+the frame itself is not being edited. `inspector::shared_frame_size` stays on the document, since a
+template lights when it matches the size the user set, and so do `tools/mod.rs` and every other edit
+site.
+
+**Two debts go to step 2 with it, and each is a place that step would otherwise be green and
+wrong.**
+
+- 🚨 **The edit sites mix sources.** A sweep before the work counted about 163 display-side and 111
+  edit-side read sites across the workspace; the display ones funnel through the chokepoints above,
+  and the edit ones were left on the document — but many compose `res.world_transform(id)`, which is
+  used now, with the stored `node.transform()`: `tools::resize_geometry`, `resize_selection`,
+  `rotate_node`, `skew_to_handle`, `skew_selection` and `inspector::multi_angle_tx`. `rotate_node`
+  derives its new local from the used world and compares it against the node's own. Correct while
+  used equals specified, and **owed an explicit decision per site** by the step that makes them
+  differ — as is every control computing an edit from `DisplayNode::kind`, whose doc says so, and
+  `TypeSubject::of` on the valve and preview arms is one.
+- 🚨 **Routing is proved only inside core.** The probe is `cfg(test)` and no other crate can reach it,
+  so render, export and the app have **no test that a non-identity used geometry reaches them**, and
+  the goldens staying byte-identical is the same proof that, as above, cannot see a consumer still
+  reading the document. The plan is for step 2's feature to be the cross-crate proof: one fixture, a
+  right-pinned child after a frame resize, asserted through the render, the SVG, the PNG,
+  hit-testing, snapping, the inspector and the rulers. *Until that test exists, every line routed in
+  this half is routed by reading.*
+
+*(Amended again 2026-09-24 from the brief and a read of `renderer.rs`, `scene.rs`, `svg.rs`,
+`snapshot.rs`, `session.rs`, `canvas.rs`, `layers.rs`, `typography.rs`, `tools/mod.rs` and
+`resolve.rs` in the working tree, uncommitted; gates as reported by the caller — fmt, `cargo test
+--workspace`, `cargo test -p ondin-render --release -- --ignored` 28/28 on the RTX 4070 Ti, clippy
+`--workspace --all-targets` and `-p` for all five crates, `cargo doc` with
+`--document-private-items`, `check --release -p ondin-app`. **No D-number spent.** ⚠️ **The first
+amendment's test counts were wrong** and are corrected in place: *8/8* and *68/68* are the `#[test]`
+counts of `tests/boolean.rs` and `tests/svg.rs`, where `goldens.rs` holds 5 and `svg_roundtrip.rs`
+16 — counted from their `#[test]`s here and measured passing by the caller, whose two subagent
+reports had also given other figures. A count carried from a brief is not a reading. Two core
+comments the first amendment's read flagged were corrected with this half: the D590 comment in
+`update` says `text::layout` reads the used kind and names the `relaid` door, and `geometry.rs`'s
+test doc says `world_bounds_of` was a wrapper deleted, not renamed. Verdict line and
+index row rewritten, D867's too; `architecture.md` §5.3c, §5.9's listing and `used` bullet, §6.2's
+`RenderOverrides` bullet, §7's SVG and snapshot bullets, §9.3's panels bullet and §9.4's booleans
+amended; `roadmap.md`'s step 1 struck and step 2 given the two debts)*
 
 **D869 — A group with `display` has a box; a group without one is exactly today's group. *Decided
 2026-09-23 by the maintainer; not built.*** **Containers are not frame-only.** `display: flex | grid`
@@ -40934,8 +41136,9 @@ a copy, the assertion has to cover the case the copy could not reach.*
 lived. *Fixed and tested 2026-09-07; Fix — the arm inflates the box, and the case goes in the test that
 claims "every kind".***
 
-`geometry::contains_local`'s first line is `let tol = stroke_expansion(node.kind(), node.paint()) +
-slop;` and the `NodeKind::Text` arm never read it. **D115 rewrote every arm to add the band**, and its
+`geometry::contains_local`'s first line was `let tol = stroke_expansion(node.kind(), node.paint()) +
+slop;` — `kind`, the used kind passed beside the node, since D868 — and the `NodeKind::Text` arm never
+read it. **D115 rewrote every arm to add the band**, and its
 own enumeration of what it had rewritten — `Rect`/`Artboard`, `Ellipse`, `Polygon`/`Star`/`Path` —
 never says `Text`, so the sweep skipped the kind users click most and nothing afterwards noticed.
 §5.10's *"every kind spends it"* and the function's own *"every kind uses it now"* were both false

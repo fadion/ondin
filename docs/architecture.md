@@ -1146,17 +1146,29 @@ wants otherwise creates containers with an explicit alignment, which is a defaul
 deviation.
 
 **Layout is derived, never stored** (§15 D868). Only specified properties are saved; used boxes live
-in `Resolved` and are never serialized (invariant 4). Layout runs in `Resolved` before world
-transforms: re-shape text → lay out dirty containers → world transforms, composing used positions →
-bounds → reindex. Edits to specified properties are ordinary operations — a new `Operation` or new
-`GeometryPatch` variants, undecided — so undo needs nothing of its own. They save as additive
-`#[serde(default)]` fields with no schema bump (§5.11), because the default — no `display`, no
-insets — is exactly what every existing file means. ⚠️ **The cost is the risk.** Every consumer of
-geometry reads the document today — `scene::paint_node` composes `parent_world * node.transform()`
-and takes the size off `node.kind()`, and the exporters, hit-testing, snapping and the inspector's
-X/Y/W/H read the same fields — and all of them must read used geometry. And `RenderOverrides` (§6.2)
-patches the walk without re-resolving, so it cannot express a reflow: a preview that changes a
-layout input has to run layout on the preview state, and how is open.
+in `Resolved` and are never serialized (invariant 4) — as `Resolved`'s seventh map, `used`, sparse,
+read through `used_local` and `used_kind` (§5.9). Layout runs in `Resolved` before world transforms.
+⚠️ **As built, the used entries come first**: used geometry → re-shape text at the used kind → world
+transforms, composing used locals → bounds → reindex. This design first read *re-shape text → lay out
+dirty containers*; the built order puts the map ahead because the cached layout is shaped *at* the
+used kind, and a text leaf measured *for* layout goes through §15 D872's measure function rather than
+that cache — whether flex keeps the order is step 3's question (§15 D868). Edits to specified
+properties are ordinary operations — a new `Operation` or new `GeometryPatch` variants, undecided —
+so undo needs nothing of its own. They save as additive `#[serde(default)]` fields with no schema
+bump (§5.11), because the default — no `display`, no insets — is exactly what every existing file means. ⚠️ **The cost is the risk.** Every consumer of
+geometry must read used geometry, and **every one that draws, measures or hit-tests now does**
+(2026-09-24, §15 D868): in core, `Resolved`'s world transforms, text, both bounds passes,
+`local_path`, `mask_path` and the boolean view, and `query`'s `hit_test`, `local_box` and
+`outline_at`; `scene::paint_node` and `scene::mask_geometry`, and `RenderOverrides`' `transform_of`
+and `drawn_kind` (§6.2); the SVG writer and the snapshot (§7); and the app's `DisplayNode::kind`,
+its `preview_*` helpers, `canvas::crop_frame`, the layers panel's frame-size badge, and the
+parent-frame box `image_tx` and `paste_text_as_layer` fit a new node to. **The edit paths stay on the
+document** — `RenderOverrides::current_kind`, `EditorSession::committed_node`, `tools/`, the
+inspector's edits — because an edit starts from what the user set; many of them also read a
+`Resolved` world transform, so they mix the two, which is correct while the two are equal and owed a
+decision per site by step 2. And `RenderOverrides` (§6.2) patches the walk without re-resolving, so
+it cannot express a reflow: a preview that changes a layout input has to run layout on the preview
+state, and how is open.
 
 **Engine: taffy 0.14.0**, f32, MIT (§15 D867), chosen on a measured spike; used values come back
 through a *proposed* **1/64-px** quantization (§15 D873), so that f32's noise digits never reach a
@@ -1164,8 +1176,9 @@ field or a file.
 
 **Build order**: (1) route rendering, export, hit-testing, snapping and the inspector through used
 geometry with an **identity** layout pass — a pure refactor, the goldens staying byte-identical its
-proof, and the riskiest step; (2) absolute insets on frames — the smallest visible feature that
-exercises the whole pipeline; (3) flex, with live reflow during gestures and reorder by drag;
+proof, and the riskiest step, **built 2026-09-24** (§15 D868); (2) absolute insets on
+frames — the smallest visible feature that exercises the whole pipeline, and the first test that a
+used geometry reaches anything outside core; (3) flex, with live reflow during gestures and reorder by drag;
 (4) grid, with the track editor; (5) components and overrides, on the same pipeline.
 
 **Open, not decided**: the rotation origin of a laid-out item (CSS's `transform-origin` defaults to
@@ -3266,10 +3279,15 @@ pub struct Resolved {
     boolean: FxHashMap<NodeId, BezPath>,     // combined outline per Boolean node, its own local space
     failed: FxHashSet<NodeId>,               // booleans whose arithmetic was abandoned (§15 D239)
     index: rstar::RTree<BoundsEntry>,        // leaves = paintable nodes
+    used: FxHashMap<NodeId, Used>,           // SPARSE: only where layout moves or resizes a node (§15 D868)
 }
 impl Resolved {
     pub fn rebuild(doc: &Document) -> Self;
     pub fn update(&mut self, doc: &Document, dirty: &DirtySet);
+    pub fn used_local(&self, doc: &Document, id: NodeId) -> Option<Affine>;       // falls back to the node
+    pub fn used_kind<'a>(&'a self, doc: &'a Document, id: NodeId) -> Option<&'a NodeKind>; // likewise
+    pub fn used_local_of(&self, node: &Node) -> Affine;           // node in hand: MUST be doc's own
+    pub fn used_kind_of<'a>(&'a self, node: &'a Node) -> &'a NodeKind;   // likewise
     pub fn ink_bounds(&self, id: NodeId) -> Option<Rect>;
     pub fn text_layout(&self, id: NodeId) -> Option<&TextLayout>;
     pub fn invalidate_text(&mut self, doc: &Document);
@@ -3277,7 +3295,8 @@ impl Resolved {
 }
 ```
 
-- ⚠️ **Six maps, a set and an index** — and the listing above showed **five fields**, omitting
+- ⚠️ **Seven maps, a set and an index** — six until container layout's `used` joined on 2026-09-24
+  (§15 D868, below) — and the listing above once showed **five fields**, omitting
   `inner_ink`, `boolean` and `failed`, none of which appeared anywhere else in this document either,
   so a reader checking a count against §5.9 came up short and found nothing to correct it with. Each
   is a *different question* rather than a convenience: `world_bounds` is
@@ -3289,29 +3308,53 @@ impl Resolved {
   intersection that is correctly empty"* and *"an upstream panic"* (§15 D239). **The count is
   load-bearing in prose**: §15 D764 turns on there being six, and D741 and `roadmap.md` each proposed
   "a fourth map" and "a fifth map" for what would be the seventh and eighth.
-  ⚠️ **Both of those proposals were declined on 2026-09-15 and the count stays at six** (§15 D778) —
+  ⚠️ **Both of those proposals were declined on 2026-09-15 and the count stayed at six** (§15 D778) —
   D741's local-box map and D510's rounded-outline one. **A seventh map is a decision rather than an
   optimisation**, and the reason is this bullet: `update` has to keep every one of them equal to
   `rebuild` for the life of a document, while `ondin-core/tests/resolve.rs`'s
-  `assert_resolved_matches_rebuild` compares only **four** of the six — `boolean` has a fixed-fixture
+  `assert_resolved_matches_rebuild` compared only **four** of the six — `boolean` has a fixed-fixture
   differential and `inner_ink` is compared by nothing anywhere — so a new map joins a partial guard.
   D778 carries what would re-open the question. ⚠️ **Container layout's used boxes are that seventh
-  map, or a per-node cache that is one in all but name** (§5.3c, §15 D868, designed and not built) —
-  reopened on a different ground from D778's, and owing the guard a comparison of its own.
+  map**, `used` (§5.3c, §15 D868) — reopened on a different ground from D778's, since a used box is
+  derivable nowhere else, and it came with the comparison it owed: the guard asserts `used_local` and
+  `used_kind` for every node, so it compares **five of the seven**, with `boolean`, `inner_ink` and
+  `failed` still outside it.
+- **`used` is sparse and is read only through `used_local` and `used_kind`**, which answer the node's
+  own `transform()` and `kind()` wherever there is no entry — so "no entry" means "as specified"
+  everywhere, and a document with no layout in it holds nothing here. `used_local_of` and
+  `used_kind_of` are the same two questions for a caller holding a `&Node` and no document — the SVG
+  writer's helpers — and ⚠️ **the node must be this document's own**: the map is keyed by id, so a
+  captured copy or a ghost would be answered with the original's layout. **Draw, measure and hit-test
+  from those two; edit from `Node::transform` and `Node::kind`**: a tool computing a new value starts
+  from what the user set. A used kind is always the same variant as the document's, so a `match` asking
+  *what sort* of node this is may read either. ⚠️ **The pass that fills it is identity today**
+  (`resolve::used_geometry` answers `None` for every node — §15 D867's build step 1), which makes the
+  goldens staying byte-identical its proof and also blinds that proof to a consumer still reading the
+  document; a `cfg(test)` probe in `resolve.rs` is what drives a non-identity map through the plumbing,
+  and D868 has what it covers. ⚠️ **Core's plumbing only**: no other crate can reach the probe, so
+  nothing yet proves a used geometry reaches render, export or the app — step 2's test is to.
 - No `FontContext` is threaded through: `core::text` owns a thread-local parley engine and returns
   layouts carrying the exact `peniko::FontData` blob parley resolved, so the renderer draws glyphs
   straight from it.
-- `update` consumes `DirtySet`, in this order: re-shape the **dirty** nodes' text, recompute world
-  transforms parents-first, recompute bounds children-first, then propagate bound changes up to the
-  root. ⚠️ **The text pass is the one step that does *not* run over the subtree expansion** (§15
+- `update` consumes `DirtySet`, in this order: recompute the **used** entries over the subtree
+  expansion (§15 D868), re-shape the **dirty** nodes' text, recompute world transforms parents-first
+  from used locals, recompute bounds children-first, then propagate bound changes up to the root; a
+  deleted node drops its entry in every map, `used` included. `rebuild` fills `used` whole before its
+  walk, for the same reason — the walk shapes text at the used kind and composes used locals.
+  ⚠️ **The text pass is the one step that does *not* run over the subtree expansion** (§15
   D590). A descendant's world transform depends on a dirty ancestor and a descendant's *layout* does
-  not — `text::layout` reads `TextRef::of(node.kind())` and nothing else — so re-shaping the
+  not — `text::layout` reads the node's own (used) kind and nothing else — so re-shaping the
   expansion meant a nudged group of twenty text blocks paid twenty parley shapes per keypress for a
   change that cannot move a glyph. `core::text::shapes()` is the counter that makes this assertable;
   nothing else can see it, since the layouts produced are identical either way and the differential
-  against `rebuild` is green under both. ⚠️ **Container layout breaks this premise when it lands**
-  (§5.3c, §15 D868): text in flow wraps at its container's available width, so a container resize
-  re-shapes its text children and the saving has to be re-argued for them.
+  against `rebuild` is green under both. ⚠️ **Container layout breaks this premise, and the
+  re-argument is built** (§5.3c, §15 D868): text in flow wraps at its container's available width and
+  is shaped at its **used** kind, so a text node's layout can move without its own kind changing.
+  `update` therefore records which used entries actually *changed* and re-shapes the text among them
+  the dirty set did not already cover — **the one door past this rule, only as wide as the entries
+  that changed**, so a translate still re-shapes nothing. 🚨 **Siblings are not in the expansion**:
+  under flex an item moves when its neighbour grows, nothing dirties the neighbour today, and the step
+  that makes one box depend on another owes the widening.
 - ⚠️ **The affected set carries each node's depth, and the parents-first sort caches its key** (§15
   D594). `collect_subtree` records depth as it descends — a child's is its parent's plus one, free
   there — into an `FxHashMap<NodeId, usize>`, and the sort is `sort_by_cached_key` over a lookup.
@@ -3475,7 +3518,10 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
 - `hit_test` = R-tree candidates → **exact geometric test** (point-in-path for fills, distance ≤
   half-width for strokes, glyph-box test for text), topmost-first, respecting visible/locked.
   The exact tests live in `geometry.rs`, not in callers. Both flags are read **through the ancestors**
-  (`is_effectively_interactable`), so a layer inside a hidden or locked group is unpickable.
+  (`is_effectively_interactable`), so a layer inside a hidden or locked group is unpickable. The test
+  is at the node's **used** kind (§15 D868): `geometry::contains_local(node, kind, p, text, slop)`
+  takes the kind apart from the node, which still supplies the paint and the fill rule, so the click
+  target is the box that is drawn.
 - **`is_effectively_locked` is the lock half of that, and it is `pub` because the whole app needs it**
   (§15 D321). **A locked group locks its contents** — that is what a lock on a container means, not a
   convenience laid over it — and until 2026-08-23 the only ancestor-aware reading of the lock in the
@@ -3529,8 +3575,12 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
 - `bounds` and `local_box` answer different questions and are not interchangeable. `bounds` is the
   axis-aligned world region a node covers — right for culling, snapping and marquee tests.
   `local_box` is the node's *own* rectangle in its own space, which is what a selection outline and
-  its resize handles need: on a rotated node the first is a box the shape does not have. `local_box`
-  also covers containers, by unioning children through their transforms — each masked child clipped to
+  its resize handles need: on a rotated node the first is a box the shape does not have. ⚠️ **It is the
+  *used* box** (§15 D868) — measured from the used kind, children placed by their used locals —
+  because the handles and the W/H are drawn from it; and it is also the box the resize tools edit
+  *from*, which will want the specified box once the two differ, a split owed by D867's step 2.
+  `local_box` also covers containers, by unioning children through their transforms — each masked
+  child clipped to
   what its governing mask *clips with*, exactly as `Resolved`'s world box does it (§5.9, §15 D283,
   D460), through `query::mask_extent_local` rather than the shared helper because this function works
   in the node's own space throughout and composing the two would mean an inverse per child — which is
@@ -4120,7 +4170,14 @@ pub trait ScenePainter {
   copy sat exactly on top of the original it came from. **The readers owe the same order**, which is
   newer and was missed once: `transform_of` answered `Affine::IDENTITY` for a ghost id — a ghost has
   no override entry, precisely because `absorb` writes into the ghost — and nothing drew wrong from it
-  until a boolean began evaluating over a ghost operand (§15 D94). **`InsertSubtree`'s `index` is
+  until a boolean began evaluating over a ghost operand (§15 D94). **After the override, a reader
+  falls back to *used* geometry, not the document's** (§15 D868): `transform_of` answers ghost →
+  override → used local, the private `drawn_kind` ghost → override → used kind, and `scene::paint_node`
+  and `scene::mask_geometry` take their local and kind override → used → document. 🚨 **Except
+  `current_kind`, which stays ghost → override → document**, because it is what an op is *applied
+  to* — `absorb`'s `SetGeometry` and `patch_text` — and patching a size layout computed would write
+  the used value back as though typed. The two are equal until layout resizes something, so merging
+  them passes every test there is. **`InsertSubtree`'s `index` is
   honoured**, and `scene::paint_node` interleaves ghosts among their parent's real children by it
   rather than drawing them last. Drawing last was the same z-order only while every caller appended;
   a copy that lands immediately above its original previews between that original and whatever sits
@@ -4192,7 +4249,11 @@ pub trait ScenePainter {
   needs a value of every `Operation` variant and is `op.rs`'s fixture's job.
 
   Empty overrides reduce the walk to the committed document exactly — the world transforms it
-  composes down the tree are bit-identical to `Resolved`'s, so export is unaffected. **One transform
+  composes down the tree are bit-identical to `Resolved`'s, so export is unaffected. ⚠️ **That holds
+  under layout only because the fallback is the used local**: `Resolved` composes used locals, so a
+  walk or a `RenderOverrides::world_transform` falling back to `Node::transform` would part from it
+  the first time layout placed something — and the latter would answer a different world transform
+  for anything below a laid-out node the moment a gesture began (§15 D868). **One transform
   is deliberately not**: an axis-aligned box whose device edges do not already land on whole pixels
   is rounded onto them (§6.3, §15 D197), which is a function of the viewport and so could never have
   come out of `Resolved` at all. A box already on the grid is returned untouched, which is what keeps
@@ -4719,7 +4780,8 @@ other were right, which is why both exist.
   meant and cannot check the order at all (§15 D259, D267). **Both halves are the caller's and both
   were once missed**: no caller met the ordering half until 2026-08-20, `Selection::ids` being pick
   order, so a selection made front-to-back exported upside down. **The parent's transform is what the walk's
-  `outer` means**: `emit_node` composes `outer * node.transform()`, so passing the origin's *own*
+  `outer` means**: `emit_node` composes `outer * res.used_local_of(node)` — the *used* local, and
+  every size below it is read off the used kind (§15 D868) — so passing the origin's *own*
   world applies its local twice, which a scoped export did until 2026-08-20 (§15 D258).
   Structurally faithful: groups
   and artboards become nested `<g>` elements carrying their *local* transform and opacity, shapes
@@ -5116,7 +5178,13 @@ other were right, which is why both exist.
   the precedent of 2 because a variant growing detail is what that bump was for, §15 D185, D186,
   **6 is masks**, §15 D282, **7 the mask *mode***, §15 D288, **8 the effect stack**, §15 D335, and
   **9 a frame's ground leaving `Geometry::Artboard`**, §15 D400);
-  decoupled from the save schema. `NodeSnapshot::pivot` is skipped when unset and reports the
+  decoupled from the save schema. 🚨 **`local_transform` and `geometry` are *used* values, not what
+  the user set** (§15 D868) — `world_transform` and `world_bounds` come from `Resolved`, which
+  composes used locals, and a document local would stop multiplying out to its own world transform
+  the first time layout placed something. That is a default the maintainer has not ruled on, and it
+  means a local an agent computes from these and writes back is a used value saved as typed; whether
+  the snapshot also carries specified values is the parked MCP work's question.
+  `NodeSnapshot::pivot` is skipped when unset and reports the
   **resolved local point** rather than the model's fraction-or-point enum (§5.3): a reader is asking
   where the thing turns, and which of the two ways the model stores that is a detail of how it
   survives a resize. Additive and write-only, so it needed no bump of its own. ⚠️ **It is the one
@@ -6794,7 +6862,11 @@ input event (winit/egui)
   the transaction does. Nothing checks that for you; §15 D51 has the create outline that did not.
 - Panels read through `EditorSession::display_node`, not the `Document`, so their controls show the
   in-progress value. Reading the document directly makes an accumulating control (a `DragValue`)
-  snap back to the committed value every frame.
+  snap back to the committed value every frame. Its `kind()` is override → **used** → document
+  (§15 D868), and every `preview_*` helper falls back to used geometry the same way; ⚠️ **so a control
+  computing an edit *from* it computes from where layout put the node**, which is correct until the
+  two differ and is owed a decision per caller by the step that makes them. `committed_node` has no
+  used kind at all: it reports the value a commit is about to overwrite, which is the specified one.
 - **A multi-selection Transform field carries its own drag total, and that is a real difference from
   the single-layer path.** The single-layer fields need no such state: they read their number back
   through the render override, so the preview *is* the running total and each frame's edit is an
@@ -9377,7 +9449,9 @@ stating plainly, because it narrows a rule stated above: a preview
 as new *geometry* as well as a new transform, so an evaluator that overrides only transforms moves a
 boolean's operands without resizing them: the shape shuffles about under the pointer and snaps to the
 right size on release (§15 D90). `Operands::kind_of` is what closes that, and `RenderOverrides` answers it
-with `current_kind`, which already existed for the text previews.
+with `drawn_kind` — ghost, override, then the **used** kind (§15 D868). It answered with `current_kind`,
+which already existed for the text previews, until container layout split the two: `current_kind` falls
+back to the document because ops are applied to it, and an operand is *drawn* at its used size.
 
 **Everything that measures a boolean measures its *result*.** `query::local_box` reads the cached
 outline ahead of the child union it uses for a group, and `session::preview_local_box` reads the

@@ -21849,6 +21849,41 @@ mod pick_policy_tests {
              guard runs before the chain is built so the same click does both"
         );
     }
+
+    /// **`Ctrl` reaching into a group also enters it**, exactly as a
+    /// double-click does (§15 D849, `[X5-L6-02]`; `architecture.md` §9.4 —
+    /// *"Both also enter the group"*).
+    ///
+    /// 🚨 **The second of `pick_for_click`'s two side effects on `self`, and
+    /// the one nothing asserted.** Replacing its condition with `false` passed
+    /// the whole suite, and `pick`'s `ctrl` parameter above was never given
+    /// `true` — the argument existed and selected nothing, §15 D803's decoy
+    /// shape one function over from where D805 lifted the policy. Without it
+    /// the next plain click jumps back out to the whole group, and the reach
+    /// before it looks undone.
+    ///
+    /// ⚠️ **The plain click is the control**: a version that entered on every
+    /// click passes the `ctrl` half.
+    ///
+    /// ⚠️ **Flip-check, run**: the condition replaced with `false` fails at
+    /// *"and Ctrl enters the group it reached into"*.
+    #[test]
+    fn a_ctrl_click_into_a_group_enters_it_and_a_plain_one_does_not() {
+        let ctx = egui::Context::default();
+        let (mut app, groups, leaves) = two_groups(&ctx);
+
+        let picked = pick(&mut app, &ctx, leaves[0], false);
+        assert_eq!(picked, groups[0], "control: a plain click takes the group");
+        assert_eq!(app.entered_group, None, "and enters nothing");
+
+        let picked = pick(&mut app, &ctx, leaves[0], true);
+        assert_eq!(picked, leaves[0], "Ctrl reaches the layer inside");
+        assert_eq!(
+            app.entered_group,
+            Some(groups[0]),
+            "and Ctrl enters the group it reached into"
+        );
+    }
 }
 
 #[cfg(test)]

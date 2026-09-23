@@ -2886,8 +2886,15 @@ mod text_colour_route_tests {
         }
     }
 
-    /// **A click on the picker's plane sets a text layer's colour, and it does
-    /// not go through `char_valve` at all** (§15 D802).
+    /// **A click on the picker's plane sets a text layer's colour** — by a
+    /// route that does not go through `char_valve` at all (§15 D802).
+    ///
+    /// ⚠️ **That second clause is the route, read, and not an assertion**: no
+    /// arm is instrumented here, and the title used to say it as though it were
+    /// asserted (§15 D849, `[X4-L6-03]`). The route that *does* enter the valve
+    /// is the drag, and `a_drag_on_the_picker_writes_a_text_layers_colour_once`
+    /// below is its test. The paragraph on the third arm is history: §15 D812
+    /// deleted that arm on the strength of this measurement.
     ///
     /// The route is `hue_slider`/`sv_plane` → `write_stop_colour` →
     /// `pointer_slot`, and the first thing `pointer_slot` does after the
@@ -2962,6 +2969,60 @@ mod text_colour_route_tests {
             app.session.history.undo_depth(),
             depth + 1,
             "and it is one undo step, not a preview left on the floor"
+        );
+    }
+
+    /// **A drag on the picker's plane sets a text layer's colour through
+    /// `char_valve`, and commits once, on the release** (§15 D849,
+    /// `[X4-L6-03]`).
+    ///
+    /// The click test above covers the route that returns before the valve; this
+    /// is the one that enters it — `pointer_slot`'s fall-through to `valve_slot`
+    /// → `write_char_slot(CharWrite::Valve)` → `char_valve`, previewing on every
+    /// frame the plane is dragged and committing on the falling edge. §15 D812
+    /// left `char_valve` with exactly those two arms, so a picker drag over a
+    /// text colour now commits through the falling edge alone, and until this
+    /// nothing in the workspace drove it.
+    ///
+    /// ⚠️ **One undo step, not one per frame**, is the assertion a
+    /// commit-while-dragging version fails; *"the colour landed"* is the one a
+    /// version with no falling edge fails.
+    ///
+    /// ⚠️ **Flip-check, run**: `char_valve`'s `else if was_engaged` arm disabled
+    /// fails at *"the drag writes a colour"* — the preview is dropped on the
+    /// floor and nothing commits.
+    #[test]
+    fn a_drag_on_the_picker_writes_a_text_layers_colour_once() {
+        let ctx = egui::Context::default();
+        let (mut app, id) = text_app(&ctx);
+        frame(&ctx, &mut app, Vec::new());
+        frame(&ctx, &mut app, Vec::new());
+        assert!(app.picker.is_some(), "the fixture: the picker is up");
+        assert_eq!(text_rgba(&app, id), None, "and the layer has no colour yet");
+        let depth = app.session.history.undo_depth();
+
+        let from = egui::pos2(500.0, 344.0);
+        let button = |at, pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(&ctx, &mut app, vec![egui::Event::PointerMoved(from)]);
+        frame(&ctx, &mut app, vec![button(from, true)]);
+        let mut at = from;
+        for _ in 0..4 {
+            at += egui::vec2(10.0, 8.0);
+            frame(&ctx, &mut app, vec![egui::Event::PointerMoved(at)]);
+        }
+        frame(&ctx, &mut app, vec![button(at, false)]);
+        frame(&ctx, &mut app, Vec::new());
+
+        assert!(text_rgba(&app, id).is_some(), "the drag writes a colour");
+        assert_eq!(
+            app.session.history.undo_depth(),
+            depth + 1,
+            "and it is one undo step for the whole drag, not one a frame"
         );
     }
 }

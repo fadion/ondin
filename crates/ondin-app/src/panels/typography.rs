@@ -8822,6 +8822,75 @@ mod loading_dot_tests {
     }
 }
 
+/// The panel tests' one text fixture: a headless app holding a single `Auto`
+/// text node of `content` in Inter at 20pt, selected, and its id.
+///
+/// 🚨 **There were three, each called `app_with_text`, in three modules** (§15
+/// D849, `[X4-L3-02]`) — two of them 37 lines long and differing in one string
+/// literal, an `expect` message. §15 D803 is the entry about exactly this shape
+/// in exactly this file: a flip or a fixture change described as "in
+/// `app_with_text`" named three functions, and editing the wrong one is a silent
+/// no-op that reads as *"the test has no teeth"*. One function cannot be the
+/// wrong one. `wrap_gate_tests::app_wrapping` stays its own: it takes the
+/// paragraph's wrap and keeps the default style, and its coordinates were swept
+/// against that.
+///
+/// Plain backticks: this item is `cfg(test)` (§15 D319).
+#[cfg(test)]
+fn app_with_text_of(content: &str) -> (egui::Context, crate::app::OndinApp, ondin_core::NodeId) {
+    use ondin_core::{Document, Operation, Transaction};
+    let ctx = egui::Context::default();
+    crate::theme::install(&ctx);
+    let mut app = crate::app::OndinApp::headless(&ctx);
+    let mut ids = ondin_core::IdSource::new(1);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let id = ids.mint();
+    doc.apply(&Transaction(vec![Operation::CreateNode {
+        id,
+        parent: root,
+        index: 0,
+        kind: ondin_core::NodeKind::Text {
+            content: content.into(),
+            style: Box::new(TextStyle {
+                font_family: "Inter".into(),
+                font_size: 20.0,
+                ..TextStyle::default()
+            }),
+            spans: CharSpans::default(),
+            para_spans: ParaSpans::default(),
+            paragraph: ParagraphStyle::default(),
+            block: BlockStyle::default(),
+            sizing: TextSizing::Auto,
+            on_path: None,
+            on_path_flip: false,
+            on_path_offset: 0.0,
+        },
+        transform: None,
+        name: None,
+    }]))
+    .expect("a text node");
+    app.session.adopt_document(doc, None);
+    app.session.selection.set_one(id);
+    (ctx, app, id)
+}
+
+/// `app_with_text_of("hello")` — the content two of the three old fixtures
+/// shared.
+#[cfg(test)]
+fn app_with_text() -> (egui::Context, crate::app::OndinApp, ondin_core::NodeId) {
+    app_with_text_of("hello")
+}
+
+/// The screen the panel tests lay a `Ui` out in, 400×600. Was declared three
+/// times with this value (and once, in `skip_ink_tests`, at 400×400, which keeps
+/// its own and is the only `AREA` left).
+#[cfg(test)]
+const TEST_AREA: egui::Rect = egui::Rect {
+    min: egui::pos2(0.0, 0.0),
+    max: egui::pos2(400.0, 600.0),
+};
+
 /// The Type panel's size field, driven through real pointer and key events
 /// (§15 D523).
 ///
@@ -8833,46 +8902,7 @@ mod loading_dot_tests {
 mod char_valve_tests {
     use super::*;
     use crate::app::OndinApp;
-    use crate::theme;
-    use ondin_core::{Document, NodeId, Operation, Transaction};
-
-    fn app_with_text() -> (egui::Context, OndinApp, NodeId) {
-        let ctx = egui::Context::default();
-        theme::install(&ctx);
-        let mut app = OndinApp::headless(&ctx);
-        let mut ids = ondin_core::IdSource::new(1);
-        let root = ids.mint();
-        let mut doc = Document::new(root);
-        let id = ids.mint();
-        let style = TextStyle {
-            font_family: "Inter".into(),
-            font_size: 20.0,
-            ..TextStyle::default()
-        };
-        doc.apply(&Transaction(vec![Operation::CreateNode {
-            id,
-            parent: root,
-            index: 0,
-            kind: ondin_core::NodeKind::Text {
-                content: "hello".into(),
-                style: Box::new(style),
-                spans: CharSpans::default(),
-                para_spans: ParaSpans::default(),
-                paragraph: ParagraphStyle::default(),
-                block: BlockStyle::default(),
-                sizing: TextSizing::Auto,
-                on_path: None,
-                on_path_flip: false,
-                on_path_offset: 0.0,
-            },
-            transform: None,
-            name: None,
-        }]))
-        .expect("a text node");
-        app.session.adopt_document(doc, None);
-        app.session.selection.set_one(id);
-        (ctx, app, id)
-    }
+    use ondin_core::NodeId;
 
     /// One frame with the size field alone in a `Ui`, returning the rect it was
     /// laid out in — found by drawing rather than guessed, since a `Ui` with no
@@ -10209,13 +10239,7 @@ mod type_popup_readout_tests {
 
     use super::*;
     use crate::app::OndinApp;
-    use crate::theme;
-    use ondin_core::{CharSpans, Document, NodeId, Operation, ParaSpans, Transaction};
-
-    const AREA: egui::Rect = egui::Rect {
-        min: egui::pos2(0.0, 0.0),
-        max: egui::pos2(400.0, 600.0),
-    };
+    use ondin_core::NodeId;
 
     /// A face offering `liga`, plus 43 withheld private features — the shape the
     /// finding measured, whose reveal read "Show all features (43 more)".
@@ -10247,41 +10271,8 @@ mod type_popup_readout_tests {
     }
 
     /// A headless app holding one plain text node, and its id.
-    fn app_with_text() -> (egui::Context, OndinApp, NodeId) {
-        let ctx = egui::Context::default();
-        theme::install(&ctx);
-        let mut app = OndinApp::headless(&ctx);
-        let mut ids = ondin_core::IdSource::new(1);
-        let root = ids.mint();
-        let mut doc = Document::new(root);
-        let id = ids.mint();
-        doc.apply(&Transaction(vec![Operation::CreateNode {
-            id,
-            parent: root,
-            index: 0,
-            kind: ondin_core::NodeKind::Text {
-                content: "gypsy".into(),
-                style: Box::new(TextStyle {
-                    font_family: "Inter".into(),
-                    font_size: 20.0,
-                    ..TextStyle::default()
-                }),
-                spans: CharSpans::default(),
-                para_spans: ParaSpans::default(),
-                paragraph: ParagraphStyle::default(),
-                block: BlockStyle::default(),
-                sizing: TextSizing::Auto,
-                on_path: None,
-                on_path_flip: false,
-                on_path_offset: 0.0,
-            },
-            transform: None,
-            name: None,
-        }]))
-        .expect("a text node");
-        app.session.adopt_document(doc, None);
-        app.session.selection.set_one(id);
-        (ctx, app, id)
+    fn app_with_gypsy() -> (egui::Context, OndinApp, NodeId) {
+        app_with_text_of("gypsy")
     }
 
     /// The reveal's text this frame, if it drew one.
@@ -10294,7 +10285,7 @@ mod type_popup_readout_tests {
         let subject = TypeSubject::of(app, id).expect("a text node has a subject");
         let out = ctx.run_ui(
             egui::RawInput {
-                screen_rect: Some(AREA),
+                screen_rect: Some(TEST_AREA),
                 ..Default::default()
             },
             |ui| {
@@ -10330,7 +10321,7 @@ mod type_popup_readout_tests {
     /// reported symptom verbatim.
     #[test]
     fn a_needle_that_hides_every_withheld_feature_hides_the_offer() {
-        let (ctx, mut app, id) = app_with_text();
+        let (ctx, mut app, id) = app_with_gypsy();
         let available = a_face_with_43_withheld();
 
         assert_eq!(
@@ -10368,7 +10359,7 @@ mod type_popup_readout_tests {
     /// two inputs the old spelling happened to get right.
     #[test]
     fn the_language_field_reads_its_name_rather_than_its_tag() {
-        let (ctx, mut app, id) = app_with_text();
+        let (ctx, mut app, id) = app_with_gypsy();
 
         let field = |app: &mut OndinApp, locale: Option<&str>| -> Vec<String> {
             app.apply_char_attrs(
@@ -10378,7 +10369,7 @@ mod type_popup_readout_tests {
             let subject = TypeSubject::of(app, id).expect("a subject");
             let out = ctx.run_ui(
                 egui::RawInput {
-                    screen_rect: Some(AREA),
+                    screen_rect: Some(TEST_AREA),
                     ..Default::default()
                 },
                 |ui| {
@@ -10433,7 +10424,7 @@ mod type_popup_readout_tests {
     /// typed would pass that one and fail this.
     #[test]
     fn a_needle_that_matches_withheld_features_offers_exactly_those() {
-        let (ctx, mut app, id) = app_with_text();
+        let (ctx, mut app, id) = app_with_gypsy();
         let available = a_face_with_43_withheld();
 
         // `zk4` matches `Zk40`..`Zk43` by name and nothing else.
@@ -10665,52 +10656,6 @@ mod valve_arm_tests {
     //! tracking chord stops where its field stops** (§15 D817).
     use super::*;
     use crate::app::OndinApp;
-    use crate::theme;
-    use ondin_core::{CharSpans, Document, NodeId, Operation, ParaSpans, Transaction};
-
-    const AREA: egui::Rect = egui::Rect {
-        min: egui::pos2(0.0, 0.0),
-        max: egui::pos2(400.0, 600.0),
-    };
-
-    /// A headless app holding one plain text node at 20pt, and its id.
-    fn app_with_text() -> (egui::Context, OndinApp, NodeId) {
-        let ctx = egui::Context::default();
-        theme::install(&ctx);
-        let mut app = OndinApp::headless(&ctx);
-        let mut ids = ondin_core::IdSource::new(1);
-        let root = ids.mint();
-        let mut doc = Document::new(root);
-        let id = ids.mint();
-        let style = TextStyle {
-            font_family: "Inter".into(),
-            font_size: 20.0,
-            ..TextStyle::default()
-        };
-        doc.apply(&Transaction(vec![Operation::CreateNode {
-            id,
-            parent: root,
-            index: 0,
-            kind: ondin_core::NodeKind::Text {
-                content: "hello".into(),
-                style: Box::new(style),
-                spans: CharSpans::default(),
-                para_spans: ParaSpans::default(),
-                paragraph: ParagraphStyle::default(),
-                block: BlockStyle::default(),
-                sizing: TextSizing::Auto,
-                on_path: None,
-                on_path_flip: false,
-                on_path_offset: 0.0,
-            },
-            transform: None,
-            name: None,
-        }]))
-        .expect("build the fixture");
-        app.session.adopt_document(doc, None);
-        app.session.selection.set_one(id);
-        (ctx, app, id)
-    }
 
     /// **A control reporting `changed()` while it holds no focus and is not
     /// dragged commits nothing** — `char_valve` has two arms, not three
@@ -10769,7 +10714,7 @@ mod valve_arm_tests {
             let subject = TypeSubject::of(&app, id).expect("a subject");
             let _ = ctx.run_ui(
                 egui::RawInput {
-                    screen_rect: Some(AREA),
+                    screen_rect: Some(TEST_AREA),
                     ..Default::default()
                 },
                 |ui| {
@@ -11080,11 +11025,6 @@ mod wrap_gate_tests {
     use crate::theme;
     use ondin_core::{Document, IdSource, NodeId, Operation, Transaction};
 
-    const AREA: egui::Rect = egui::Rect {
-        min: egui::pos2(0.0, 0.0),
-        max: egui::pos2(400.0, 600.0),
-    };
-
     fn app_wrapping(wrap: WrapMode) -> (egui::Context, OndinApp, NodeId) {
         let ctx = egui::Context::default();
         theme::install(&ctx);
@@ -11124,7 +11064,7 @@ mod wrap_gate_tests {
     fn frame(ctx: &egui::Context, app: &mut OndinApp, id: NodeId, events: Vec<egui::Event>) {
         let subject = TypeSubject::of(app, id).expect("a text node has a subject");
         let input = egui::RawInput {
-            screen_rect: Some(AREA),
+            screen_rect: Some(TEST_AREA),
             events,
             ..Default::default()
         };

@@ -8875,7 +8875,10 @@ impl OndinApp {
             || self.edited_image().is_some()
     }
 
-    /// Whether an open popover has first claim on an `Escape` press (§15 D801).
+    /// Whether a popover *flag* is set that would claim an `Escape` press (§15
+    /// D801) — **half of the claim**: the router also asks
+    /// [`Self::popover_heard`], since a flag nothing is drawing claims nothing
+    /// (§15 D847).
     ///
     /// **D527's rule — a press that dismisses a floating thing is spent on it —
     /// applied to the five popovers that were breaking it.** Measured before it
@@ -16237,7 +16240,11 @@ mod context_menu_rule_tests {
     //! unwritten"** (`[A7-L8-06]`, §15 D795).
     //!
     //! R1's spent click, R4's replacement, R3's single rung, and "no document
-    //! action fires while a menu is open". They are here rather than in `menu.rs`
+    //! action fires while a menu is open". ⚠️ **R1's *spent click* was claimed by
+    //! this list for a range and covered by nothing** — its first test never put a
+    //! gesture in flight — until
+    //! `a_right_click_that_cancels_a_gesture_is_spent_and_the_next_one_opens`
+    //! (§15 D849, `[X6-L6-01]`). They are here rather than in `menu.rs`
     //! because every one of them is about a rule that only exists **between**
     //! frames or **between** subsystems: which of a press and a release opens the
     //! menu, whether the dismissal beats the open, and whether `input::resolve`
@@ -16342,6 +16349,96 @@ mod context_menu_rule_tests {
             menu.at, at,
             "and it opens at the press position, which is why `secondary_press` \
              is recorded on the way past"
+        );
+    }
+
+    /// **R1's other half — a right-click that cancels a gesture is spent: it opens
+    /// no menu *and selects nothing*, and the next one opens a menu** (§15 D849,
+    /// `[X6-L6-01]`, `context-menus.md` §10, §15 D315).
+    ///
+    /// 🚨 **The test above was written to close this bullet and never puts a
+    /// gesture in flight**, so `gesture_cancelled` is false on every frame of it
+    /// and D315's guard is not on its path: deleting the guard passed the whole
+    /// suite. §10 asks for *press · move · press · release* — a primary press, a
+    /// move, then the secondary press that cancels.
+    ///
+    /// **A marquee, from empty canvas to over the first group**, because the
+    /// gesture has to leave the pointer on a layer it is *not* about: D315 was
+    /// reported as a right-click that cancelled a scrub and then selected the
+    /// layer it happened to land on. A layer drag cannot show that — the dragged
+    /// layer follows the pointer, so the click lands on it. The selection is set
+    /// to the *second* group first, so "selected the one under the pointer" and
+    /// "left it alone" are different answers.
+    ///
+    /// ⚠️ **The second right-click is the control**, with nothing in flight: a
+    /// `canvas_context_menu` that never opened anything would pass the first half.
+    ///
+    /// ⚠️ **Flip-check, run**: deleting `canvas_context_menu`'s
+    /// `if self.gesture_cancelled { return; }` fails at *"and it selected
+    /// nothing"* — the menu stays shut either way, since `open_context_menu`
+    /// refuses on the same flag, which is exactly why a menu-only assertion
+    /// could not see the regression D315 fixed.
+    #[test]
+    fn a_right_click_that_cancels_a_gesture_is_spent_and_the_next_one_opens() {
+        let primary = |pos: egui::Pos2, pressed: bool| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        let ctx = egui::Context::default();
+        let (mut app, g1, g2, made) = app_with_two_groups(&ctx);
+        whole_frame(&ctx, &mut app, Vec::new());
+        app.session.selection.set(vec![g2]);
+        let ppp = ctx.pixels_per_point();
+        let canvas = app.canvas_rect;
+        let empty = app.to_screen(ondin_core::kurbo::Point::new(200.0, 200.0), canvas, ppp);
+        let over_g1 = app.to_screen(
+            app.session
+                .preview_world_bounds(made[0])
+                .expect("a rect")
+                .center(),
+            canvas,
+            ppp,
+        );
+        assert!(
+            canvas.contains(empty) && canvas.contains(over_g1),
+            "the fixture's points are on the canvas: {empty:?} {over_g1:?} in {canvas:?}"
+        );
+
+        whole_frame(&ctx, &mut app, vec![egui::Event::PointerMoved(empty)]);
+        whole_frame(&ctx, &mut app, vec![primary(empty, true)]);
+        for step in 1..=4 {
+            let t = step as f32 / 4.0;
+            whole_frame(
+                &ctx,
+                &mut app,
+                vec![egui::Event::PointerMoved(empty.lerp(over_g1, t))],
+            );
+        }
+        assert!(
+            !matches!(app.drag, crate::preview::Drag::None),
+            "the fixture reached the state: a marquee is in flight"
+        );
+
+        whole_frame(&ctx, &mut app, vec![secondary(over_g1, true)]);
+        whole_frame(&ctx, &mut app, vec![secondary(over_g1, false)]);
+        assert!(
+            app.context_menu.is_none(),
+            "the cancelling click opens no menu"
+        );
+        assert_eq!(
+            app.session.selection.ids(),
+            &[g2],
+            "and it selected nothing — not the group it landed on ({g1:?})"
+        );
+
+        whole_frame(&ctx, &mut app, vec![primary(over_g1, false)]);
+        whole_frame(&ctx, &mut app, vec![secondary(over_g1, true)]);
+        whole_frame(&ctx, &mut app, vec![secondary(over_g1, false)]);
+        assert!(
+            app.context_menu.is_some(),
+            "and the next right-click, with nothing in flight, opens one"
         );
     }
 

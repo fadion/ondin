@@ -3623,10 +3623,12 @@ mod origin_tests {
     /// from two different corners**, which is the whole reason the number is
     /// unhelpful, and asserting the width alone would have hidden it.
     ///
-    /// ⚠️ **No selection and a non-frame both answer `Point::ZERO`**, which is a
-    /// third arm worth an assertion rather than a third test: it is the reason
-    /// the bars show *document* coordinates most of the time, and it is one
-    /// `matches!` away from being silently lost.
+    /// ⚠️ **No selection and a non-frame both answer `Point::ZERO`**, and this
+    /// test used to assert the first of those on *this* fixture — where it was
+    /// vacuous, since a frame rotated about the world origin keeps its corner at
+    /// `Point::ZERO` whether it is selected or not (§15 D849, `[X6-L6-03]`).
+    /// The arm lives in `only_a_lone_selected_frame_moves_the_origin` now, on the
+    /// upright fixture where clearing the selection moves the answer.
     ///
     /// ⚠️ **The first flip tried was a no-op, and it is worth recording because
     /// it looks like a flip.** Taking the origin from the affine's `translation()`
@@ -3683,15 +3685,70 @@ mod origin_tests {
              bounds of a rotated rectangle, which is what D36 means by honest \
              and not useful"
         );
+    }
 
-        // The third arm, and the reason the bars are usually document-relative.
-        let (bare, _) = app_with_a_frame(&ctx, Size::new(480.0, 320.0), Some(turn));
-        let mut bare = bare;
-        bare.session.selection.clear();
+    /// **Only a lone selected frame moves the origin** — no selection, a lone
+    /// non-frame, and a frame selected with something else all leave it at the
+    /// document's (§15 D36, D849, `[X6-L6-03]`).
+    ///
+    /// 🚨 **The `is_frame` guard was untested, and so was `single()`.** D36's
+    /// whole rule is *re-origin for a lone selected frame, never for its
+    /// contents*, and `ruler_origin`'s doc spends a paragraph on why: the
+    /// inspector shows world X/Y by decision, so a ruler counting from a rect's
+    /// corner would disagree with the panel about where the same shape is.
+    /// Deleting the guard — so a lone rect re-origins the bars — passed the whole
+    /// suite. The one assertion written for this arm sat on the rotated fixture,
+    /// whose corner is at the world origin either way.
+    ///
+    /// **Every case sits under the same translate**, so each `ZERO` is a real
+    /// answer and not a coincidence of the fixture, and the frame's own
+    /// `(100, 60)` is the control that says the translate is there.
+    ///
+    /// ⚠️ **Flip-checks, run**: the `!is_frame` return replaced with
+    /// `let _ = is_frame;` fails at *"a lone rect does not"*; `single()`
+    /// replaced with `ids().first()` fails at *"nor a frame selected with
+    /// something else"*.
+    #[test]
+    fn only_a_lone_selected_frame_moves_the_origin() {
+        let ctx = egui::Context::default();
+        let at = Affine::translate((100.0, 60.0));
+        let (mut app, frame) = app_with_a_frame(&ctx, Size::new(480.0, 320.0), Some(at));
+        let rect = app.session.ids.mint();
+        let parent = app.session.doc.root();
+        app.session
+            .try_commit(Transaction(vec![Operation::CreateNode {
+                id: rect,
+                parent,
+                index: 1,
+                kind: NodeKind::Rect {
+                    size: Size::new(40.0, 40.0),
+                    corner_radii: Default::default(),
+                },
+                transform: Some(at),
+                name: None,
+            }]))
+            .expect("create the rect");
+        let zero = ondin_core::kurbo::Point::ZERO;
+
+        app.session.selection.set(vec![frame]);
+        let origin = app.ruler_origin();
         assert_eq!(
-            bare.ruler_origin(),
-            ondin_core::kurbo::Point::ZERO,
-            "nothing selected is the document's own origin"
+            (origin.x, origin.y),
+            (100.0, 60.0),
+            "control: the frame alone moves it"
+        );
+
+        app.session.selection.clear();
+        assert_eq!(app.ruler_origin(), zero, "nothing selected does not");
+
+        app.session.selection.set(vec![rect]);
+        assert_eq!(app.ruler_origin(), zero, "a lone rect does not");
+
+        app.session.selection.set(vec![frame, rect]);
+        assert_eq!(
+            app.ruler_origin(),
+            zero,
+            "nor a frame selected with something else"
         );
     }
 }

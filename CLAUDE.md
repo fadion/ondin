@@ -67,12 +67,15 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 844 index rows, 844 body headings, next free
-D845** — but trust the procedure over any number written down here, including that one.
-⚠️ **D831–D844 are spent** and **D845–D850 is reserved and unspent** — so for once there *is*
-a tail to read, and it is the exception rather than the rule. Confirm it with the negative grep
-anyway; a reservation recorded here is a claim about the moment it was written, which is the
-whole subject of this section.
+anywhere cited either. **The live figures: 860 index rows, 860 body headings, next free
+D861** — but trust the procedure over any number written down here, including that one.
+⚠️ **D845–D860 are spent** and **D861–D866 is reserved and unspent** (negative grep clean at
+the close of session 31) — confirm it with the negative grep anyway; a reservation recorded here
+is a claim about the moment it was written, which is the whole subject of this section.
+⚠️ **Session 31 overran its block the ordinary way, and caught it the ordinary way**: it reserved
+D845–D856, reserved D857–D866 before the first ran out, and spent sixteen. Every number was typed
+into code only after its block was reserved and grep-checked, and the closing re-grep over the
+unspent tail (D861–D866: zero sites) is what says so.
 🚨 **And session 30 is the strongest instance yet of the warning below.** It reserved ten
 numbers for **six** planned entries, spent all ten, needed a **second block**, and finished on
 **fourteen** — D831–D844. Two of those were typed into comments *before* the block covering
@@ -128,7 +131,10 @@ nothing. Put the number on the doc of whatever a reader meets the question at.
 grep -rhoE 'D[0-9]{1,3}\b' crates/ --include=*.rs | sort -u
 ```
 
-744 distinct numbers today, and **every one of them resolves** — the fourth clean reading
+755 distinct numbers at the close of session 31 — **sixteen arrivals (D845–D860) and no
+departures** against `348239b`, measured as a set-difference, which is the only reading that
+says anything; the 744 this line carried was already not a reading of any recent commit, the
+same way the census figures below go stale — and **every one of them resolves**, the fourth clean reading
 in twenty-odd sessions, after D476 and D477 were reconstructed from their citation sites on
 2026-09-19 (§15 D806's neighbours; both entries say in their first line that they are
 reconstructions).
@@ -316,6 +322,10 @@ threshold count is the least sensitive thing you can measure about this list.**
 modules** — `canvas.rs` moved 22,091 → 22,286 and nothing crossed the line in either
 direction. *Three sessions running, the total has said nothing and the ranking has moved
 every time.*
+⚠️ **Session 31 moved it to 42**: `library/cover.rs` crossed at 1,291 (from 806), and every
+line of the growth is the cover worker's new tests and the prose recording why they exist — a
+module joins by having a *repair* finished in it as often as a feature. `canvas.rs` is 22,416,
+`app.rs` 19,000, `inspector.rs` 24,927.
 
 ⚠️ **On Windows a scripted rewrite also re-decides the line endings.** A three-line Python
 `read()`/`replace()`/`write()` used for a *flip-check* — the most tempting case, because
@@ -497,6 +507,10 @@ biting, the two-defence measurement, and the past-tensing of an argument that ha
 line by line against the item beneath it before being excused, per the first rule below: its
 first line describes the test and the run ends at the `#[test]`. **The floor did not move while
 the head gained an entry**, which is exactly what that third rule says to expect.
+⚠️ **Re-run at the close of session 31: head 107, floor 59, and two new entries** — goldens.rs's
+`the_fixture_holds_one_node_of_every_effect_kind` at **84** (§15 D858 added the arm-scan
+paragraph and its flip) and `library/cover.rs`'s `Covers::clear` at **61** (§15 D845's teardown
+paragraph). Both read line by line against the item beneath: each first line describes it.
 
 ⚠️ **Read the head, do not just rank it** — the ranking's first run under this command turned
 up nineteen entries describing their items and one opening ***"And it holds…"***, which is
@@ -892,24 +906,21 @@ never captured**. It did not recur in **31** further runs. ⚠️ **Keep the who
 the file**, never the stream: this gate runs *once a session*, which makes every red run a
 sample you cannot ask for again.
 
-🚨 **It was `collecting_defs_does_not_grow_with_the_square_of_their_count`, and it is fixed**
-(§15 D829) — but note *how* that was settled, because waiting for it to recur would not have
-worked. Thirty-one clean runs said nothing; what named it was **reproducing the condition on
-purpose**, with 64 spin loops on 24 cores, where it failed **4 times in 10**. The test asserts
-a *ratio* of two timed exports precisely so it is not a measurement of the machine, and took
-the best of three — but of three *small* and then three *large*, and the large phase is four
-times longer in wall-clock, so a burst inside it is missed by all three of its repetitions
-while none of the small's are touched. Interleaved and raised to fifteen rounds it is **0 in
-20** under the same load, with the bound and the discrimination untouched.
-⚠️ **Interleaving alone was worth almost nothing — 3 in 10 — and was written up as the fix
-before it was measured.** The count is what pays.
-🚨 **And the failure message had been telling the reader the wrong thing.** It offered *"a
-stall (both times inflated)"* versus *"the square coming back (the large one alone inflated)"*
-— and **the large one alone inflated is the signature of a stall**, by that same exposure
-argument. A one-in-thirty red run was therefore going to arrive already labelled as a
-performance regression in code that was correct. **When a flake's own diagnostic is part of
-the record, fix it with the flake**: a rare failure is read once, by someone who will believe
-what it says.
+🚨 **It was `collecting_defs_does_not_grow_with_the_square_of_their_count`, and it no longer
+exists** (§15 D854). What named it was **reproducing the condition on purpose** — 64 spin loops
+on 24 cores, 4 failures in 10 — after thirty-one clean runs said nothing; that half of the story
+stands and is the lesson worth keeping. **The repair did not.** §15 D829 interleaved the samples,
+raised the rounds to fifteen, measured 0 in 20 and was marked *Resolved*; the release review
+reproduced the load and got **13 in 60**, against **6 in 60** for the version D829 had replaced —
+statistically inseparable. Its rewritten failure message also diagnosed from absolute wall-clock,
+the one thing the test existed not to measure. **Three repairs to the *sampling* were the evidence
+that sampling was the wrong thing to repair**: the maintainer ruled to count instead, and the
+regression is now pinned by a thread-local count of id comparisons in `ondin-export`'s
+`svg::def_count_tests` — 202 for the set, 1,999,190 for the scan, no clock anywhere.
+⚠️ **So the gate this paragraph was written for has no flake now, and a red run means something.**
+Keep the `tee`: the next flake will be a different test, and it will be read once.
+⚠️ **When a flake's own diagnostic is part of the record, fix it with the flake** — and when the
+flake is a timing assertion, ask first whether the property can be *counted*.
 
 **It is the only thing that *runs* anything under the release cfg**, and `check --release`
 is scoped `-p ondin-app`, so it does not compile the other four crates' test targets at
@@ -1023,6 +1034,14 @@ the third. `arch-scribe` found it by reading the file. **Ask whether the *item* 
 `cfg(test)`, not whether it is inside a test module**, and know that the tempting place to
 put a shared test helper — module level, next to what it is about — is the one place the
 habit does not cover.
+🚨 **And it had not been zero for a while: session 31 found fifteen** — links on the docs of
+`cfg(test)` items and of `cfg(test)` *modules* (the doc above `#[cfg(test)] mod tests` is as
+invisible as the prose inside it), across six files, none dangling, all converted (commit
+`4325872`). Found by a scan rather than by reading, and the scan is worth keeping: an `awk` over
+every `///` run that is followed — attributes skipped — by `#[cfg(test)]`, printing the run's
+lines that contain `` [` ``. **Controlled**: a planted `/// see [`Foo`]` over a `#[cfg(test)] fn`
+is reported. The scan lives only in this paragraph; its blind spot is prose *inside* a test
+module, which the diff grep below is for.
 
 **The re-check is your own diff**, not a tree-wide scan:
 
@@ -1082,8 +1101,10 @@ The real census cannot be scoped to its own answer:
 grep -rhoE 'cfg\(([a-z_]+)' crates/ --include=*.rs | sort | uniq -c
 ```
 
-Last run (2026-09-23): **347 `test`, 7 `windows`, 3 `unix`, 3 `panic`, 3 `not`, 3
-`debug_assertions`, 2 `target_os`, 2 `all`, 1 `debug`.**
+Last run (2026-09-23, close of session 31): **368 `test`, 7 `windows`, 3 `unix`, 3 `panic`,
+3 `not`, 3 `debug_assertions`, 2 `target_os`, 2 `all`, 1 `debug`.** The tail did not move; `test`
+rose by 21 over test modules and `cfg(test)` seams this session added (`cover::covers_dir`'s
+`cfg!(test)` is one of them).
 🚨 **The `1 debug` row is not new and was never written down** — it is
 `cfg(debug_assertions)` matched a second time by the `[a-z_]+` sieve at a line the census
 itself prints, and every recorded reading of this command has silently dropped it (the release
@@ -1153,8 +1174,9 @@ D699 bracket the same attribute from opposite sides).
 
 ### Gates that look like they cover the code and do not
 
-**Fourteen, by fourteen unrelated mechanisms.** The list matters less than the standing advice
-under it:
+**Sixteen, by sixteen unrelated mechanisms** — the header said fourteen after the fifteenth was
+added, which is the count-in-prose failure this file warns about, arriving in its own list. The
+list matters less than the standing advice under it:
 
 1. Clippy without `--all-targets` never lints a test (D302).
 2. `cargo doc` cannot see a `#[cfg(test)]` module (D319).
@@ -1218,7 +1240,10 @@ under it:
     recreated.* Use the paced reading to decide whether something is real, and a reproduction
     to find out what it is — and note that this instance shares neither an OS resource nor a
     settling deadline but **the machine's scheduler**, with nothing to wait on, because the
-    work was finished and merely slow.
+    work was finished and merely slow. ⚠️ **And the repair D829 then made — more rounds,
+    interleaved — did not hold under a harsher load** (13 in 60, §15 D854). The test is gone:
+    its property is now *counted*. *When the thing a test waits on is the scheduler, the fix
+    is to stop asking the scheduler.*
 14. 🚨 **A lint that is on by default, names the defect exactly, and does not see most of
     this codebase.** `clippy::duplicated_attributes` is warn-by-default and fires on a
     duplicated `#[allow(..)]`; `svg_in::Builder::text_node` carried one **twice on
@@ -1251,13 +1276,24 @@ under it:
     which is a decision about where they go. **Found by reading a gate's predicate against a
     defect it did not catch** — the cheapest of the routes on this list, and the first time
     one was found by asking *"why was this quiet?"* of a bug rather than of a gate.
+16. 🚨 **A gate whose two sides are both hand-kept, so it passes whenever neither moves.**
+    `ondin-export/tests/goldens.rs`' coverage tests compared the fixture's node and effect
+    kinds against `EVERY_KIND`/`EVERY_EFFECT`, lists written beside exhaustive `match`es — and
+    their docs said the compile error from a new variant *"is what then forces the fixture to
+    grow"*. It could not: the minimum repair was one arm in the `match`, and the list and the
+    fixture could both stay still and agree (§15 D858, `[X8-L6-04]`). **Closed**: the lists
+    are read off the `match` arms by a scan of the test's own source, so the arm the compiler
+    demands is the entry. ⚠️ **The tell is an assertion of equality between two things a
+    person maintains**: it checks that they agree, which is not the same as checking either
+    is complete. Found by the release review reading the assertion's operands rather than its
+    name.
 
 **Three questions to ask of a gate**: does it check the rule, with a predicate wide enough,
 **against the thing that actually ships?** And two of an *absent* one: **when the record says
 a check is impossible, check** (D445), and **when the record says a check is unnecessary,
 check** (D622).
 
-⚠️ **Suspect a sixteenth.** None of the first thirteen was found by looking for it — two came
+⚠️ **Suspect a seventeenth.** None of the first thirteen was found by looking for it — two came
 from a subagent's aside, one from reading a doc link against the type it named, and one from
 writing an unrelated test. **The fourteenth was found by looking**, which is the one change
 worth making to this paragraph: the move below was run deliberately, against a lint nobody

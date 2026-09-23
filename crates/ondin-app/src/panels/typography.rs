@@ -517,13 +517,11 @@ const SEG_CELL_H: f32 = ui::SEGMENT_CELL_H;
 /// What one cell of an alignment track comes out at on a 284pt card: the design's
 /// module, near enough, and reached from the *columns* rather than pinned. Used
 /// only to state the tolerance a test holds the row to — see
-/// [`OndinApp::type_alignment_row`] for why the grid is what is pinned instead.
-///
-/// [`OndinApp::type_alignment_row`]: crate::app::OndinApp
+/// `OndinApp::type_alignment_row` for why the grid is what is pinned instead.
 #[cfg(test)]
 const SEG_CELL: f32 = 28.0;
 
-/// How wide a [`ui::segmented`] track of `n` cells is, given the cell width: the
+/// How wide a `ui::segmented` track of `n` cells is, given the cell width: the
 /// cells, a 2pt gap between each pair, and the recessed track's own 2pt padding
 /// plus 1pt hairline at each end. The inverse of what `segmented` does to a width
 /// it is handed — **six**, not four, since the track gained the design's border

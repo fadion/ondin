@@ -60,7 +60,7 @@ impl Frame2 {
     /// The bounding box of `points` **measured in this frame** — an oriented
     /// bounding box, expressed in frame coordinates.
     ///
-    /// Test-only for [`Frame2::to_local`]'s reason, and worth one more sentence:
+    /// Test-only for `Frame2::to_local`'s reason, and worth one more sentence:
     /// this is the very shape that could not hold a *sheared* outline, since no
     /// rotation makes a parallelogram square-on and the box is therefore looser than
     /// the shape at every non-zero lean. It measures a turned rectangle exactly,

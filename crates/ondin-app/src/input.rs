@@ -472,8 +472,8 @@ impl ViewSwitch {
     ///
     /// ⚠️ **Written by hand, so it cannot police the enum on its own** — the same
     /// admission `Item::ALL`'s doc makes two files over, and `node::kind_fixture`'s
-    /// in core. What makes it answerable is that [`Self::label`] and
-    /// [`Self::accel`] are exhaustive `match`es in this same `impl`: a **thirteenth**
+    /// in core. What makes it answerable is that `Self::label` and
+    /// `Self::accel` are exhaustive `match`es in this same `impl`: a **thirteenth**
     /// variant does not compile three lines above this, and the author is already
     /// on the screen the list is on.
     ///

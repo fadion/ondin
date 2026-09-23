@@ -106,7 +106,7 @@ impl CanvasRenderer {
     /// keeping: `ImageStore` is CPU work that the layers panel and the placeholder
     /// rule both ask questions of (§15 D179), so a headless app that had no store
     /// would be unable to test the very thing most likely to be wrong about it.
-    /// [`Self::render`] is the only method that notices the difference, and it
+    /// `Self::render` is the only method that notices the difference, and it
     /// already had a `None` to return.
     #[cfg(test)]
     pub(crate) fn headless() -> Self {

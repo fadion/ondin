@@ -510,10 +510,10 @@ impl ImageStore {
     /// D596).
     ///
     /// 🚨 **The one observation the store did not offer, and its absence made a
-    /// test vacuous.** `derived_len` is a count, and [`trim_derived`] runs on
+    /// test vacuous.** `derived_len` is a count, and `trim_derived` runs on
     /// every insertion — so after an eviction the count is back at the budget
     /// whichever buffer went, and asking for the survivor through
-    /// [`Self::pixels`] rebuilds it and evicts another, returning the same
+    /// `Self::pixels` rebuilds it and evicts another, returning the same
     /// number. `a_stale_derived_buffer_goes_before_a_live_one` was written that
     /// way and passed under a *reversed* preference; `arch-scribe` caught it
     /// reading the test against what it can see. **A test about *which* entry
@@ -529,9 +529,9 @@ impl ImageStore {
     /// Shrink the derived-buffer budget, for a test that would otherwise have to
     /// build 256 MB of pixels to reach it (§15 D596).
     ///
-    /// [`Self::with_budget`]'s twin, and test-only for the reason that one is
+    /// `Self::with_budget`'s twin, and test-only for the reason that one is
     /// not: nothing in the app has any business choosing this number —
-    /// [`ADJUSTED_BYTES`] is the one answer and its doc is where the argument for
+    /// `ADJUSTED_BYTES` is the one answer and its doc is where the argument for
     /// it lives.
     #[cfg(test)]
     fn set_derived_budget(&mut self, bytes: usize) {

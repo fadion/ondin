@@ -4347,7 +4347,7 @@ impl OndinApp {
         f(&index)
     }
 
-    /// How many document walks [`Self::artboards`] has actually paid for.
+    /// How many document walks `Self::artboards` has actually paid for.
     ///
     /// Test-facing; see `FrameIndex::walks` — plain backticks because this item is
     /// `#[cfg(test)]` and `cargo doc` cannot see it (§15 D319). ⚠️ **`cfg(test)` on the accessor
@@ -9817,7 +9817,7 @@ mod chrome_hold_tests {
     }
 }
 
-/// [`edit_note`] against real value fields, because it is the half of the chrome
+/// `edit_note` against real value fields, because it is the half of the chrome
 /// hide that shipped wrong and the failure was invisible in the code: every
 /// expression read correctly and the box vanished a second and a half after the hand
 /// stopped moving.
@@ -11103,7 +11103,7 @@ mod copy_as_png_tests {
 /// `Ctrl`+`←`/`→` widen and narrow the selection.
 ///
 /// ⚠️ **The keymap test beside this one proves nothing about a shape.** It proves
-/// the chord resolves to an [`Action::SizeStep`]; whether that then holds the left
+/// the chord resolves to an `Action::SizeStep`; whether that then holds the left
 /// edge, floors at a point, or does anything at all is a separate question, and it
 /// is the one a user would notice.
 #[cfg(test)]
@@ -12319,7 +12319,7 @@ mod valve_condition_gate {
     }
 }
 
-/// What [`OndinApp::edit_valve`] *reports*, which one caller now depends on
+/// What `OndinApp::edit_valve` *reports*, which one caller now depends on
 /// (§15 D524).
 #[cfg(test)]
 mod edit_valve_report_tests {

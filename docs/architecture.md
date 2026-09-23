@@ -11283,9 +11283,20 @@ where to open, or what a file is called on disk:
   documents in release and kept for v1 — so an unconditional `Covers::get` in `file_card` handed the
   worker the whole library on the grid's first frame, repainted at that cost after every answer, and
   kept every texture until the next base-folder change. Gated on `ui.is_rect_visible`, the rendering
-  and the textures grow with what has been scrolled past; the price is a plain plate on a card seen
-  for the first time, until its cover renders. The list asks for no covers at all, and the project
-  mosaic asks, ungated, for up to `MOSAIC_MAX` per project card.
+  grows with what has been scrolled past; the price is a plain plate on a card seen for the first
+  time, until its cover renders. The list asks for no covers at all, and the project mosaic — up to
+  `MOSAIC_MAX` a project card — asks under the same gate (§15 D863).
+  ⚠️ **The worker's answers are taken once a dashboard pass, not only when a card asks** (§15 D863).
+  `Covers::pass` runs at the top of `dashboard_ui`, before any card, and drains; `get` drains too,
+  which costs nothing the second time. An answer is a fact as well as a picture — `Cover::Unreadable`
+  is the red mark — so one that arrived after the grid was left used to sit in the channel for as long
+  as the list was up.
+  ⚠️ **Past `MAX_RESIDENT_COVERS` = 128 textures, the least recently asked-for goes** (§15 D864),
+  aged by `Covers`' own pass count rather than egui's. One asked for on this pass or the one before
+  never does, so a screen showing more covers than the cap — a tall *Recent* of project mosaics can —
+  exceeds it rather than churning. Only `Ready` covers are evicted, `Unreadable` being the mark's
+  fact, and an evicted one is asked of the worker again, which reads the disk cache. 128 is a chosen
+  value: ~80 MB at the 400² worst case, arithmetic rather than a measurement.
 
 ⚠️ **A `Project::folder` is a single path component, and until 2026-09-06 only its doc comment said
 so** (`library::project::is_folder_stem`, §15 D420). With `"folder": "../.."` every *New file* into
@@ -11926,7 +11937,9 @@ come back yet answers *not known to be broken* and the flag is what carries the 
 window that is now as long as the render takes rather than one pass per document. ⚠️ **And it opens
 only once the card is on screen** (§15 D862): the grid asks for a cover only for a card on screen and
 the list asks for none, so for a document only the loader refuses, the mark reaches what the grid has
-shown and nothing further. Until 2026-09-09 `unread` had no reader outside `library/` at all
+shown and nothing further. Once asked, though, the answer is taken on the next dashboard pass whichever
+view is up (§15 D863), so a render that finished after the grid was left still marks the list.
+Until 2026-09-09 `unread` had no reader outside `library/` at all
 and the card was pixel-identical to a healthy one.
 
 **A `.ondin` dropped on the library is filed in it (§15 D373).** `OndinApp::take_dropped_documents` runs

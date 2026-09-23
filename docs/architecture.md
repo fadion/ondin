@@ -81,7 +81,12 @@
   pixel, and probably a *fill* rather than an effect). §15 D333 has the reasoning for each, so none of
   the three is re-argued; `shortcuts.md` §2 still reserves `Shift+3`…`Shift+9` behind the blend modes.
   ~~Filters, blur, shadows~~ — built 2026-08-24, §5.3a.
-- Components/instances/variants; auto-layout/constraints.
+- Components/instances/variants — **sequenced after layout**, on the same derive-from-specified
+  pipeline (§5.3c, §15 D867). ~~Auto-layout/constraints~~ **left this list on 2026-09-23 and are
+  designed, not built**: CSS flexbox, CSS grid and absolute insets (§5.3c, §15 D867, D871). "v1" in
+  this document names the phase in which the basic editing tools were finished, not a release tag,
+  and that phase is over. *Persistent* constraints in §13's sense — live relationships between
+  arbitrary properties, a dependency graph — are not that feature and stay on this list.
 - Real-time multiplayer — **a real future goal, not a fantasy**. The operation and identity model is
   designed now so it is not precluded (§5.2, §12); the sync layer itself is not.
 - **Command Mode** — the keyboard-driven modal workflow (embedded CLI, leap labels, structural
@@ -631,7 +636,9 @@ pub enum DashStyle { Solid, Dotted, Dashed, Custom }  // presentation only: clas
   page, and a page inside a page is how a card, a component or a state is expressed. A group is the
   exception because it has no box of its own — a clipping page inside one would be clipped by
   something with no edges — and because §5.7a's `paint_targets` relies on no frame being reachable
-  through a group.
+  through a group. ⚠️ **Designed to change, not yet in effect** (§5.3c, §15 D870): container layout
+  needs a frame inside a group, so the rule is to admit a frame under *any* group. D870 weighs the
+  two reasons given here and names the audit owed when it lands.
 - **`Artboard` is the type's name; "frame" is the user's.** Every string a designer reads says frame
   — the tool, the default layer name, the nesting error — while the variant, the serde tag and the
   MCP snapshot's `"artboard"` keep the older word. This document uses both for the same reason;
@@ -956,6 +963,9 @@ pub fn escaped(bounds: Rect, escape: Insets, world: Affine) -> Rect;   // local 
 
 ### 5.3b Layout grids (`layout.rs`, §15 D385)
 
+*Not CSS grid.* These are chrome drawn over a frame; the grid **container** that places children is
+§5.3c's, designed and not built, and a different feature.
+
 ```rust
 pub struct LayoutGrid {
     pub axis: GridAxis,      // Columns divide the width, Rows the height
@@ -1068,6 +1078,103 @@ pub fn next_grid_color(existing: &[LayoutGrid]) -> Color;    // the first of GRI
   are 120° apart rather than 60. Past six it repeats, stepping by the list's length. Only the panel's
   `+` steps: `LayoutGrid::new` carries the plain default, which is what a loaded file or a fixture
   should get.
+
+### 5.3c Container layout — flexbox, grid and insets (designed, not built; §15 D867–D873)
+
+> **Nothing in this section is built.** It is design ahead of code, in the sense §12 and §13 are,
+> and it sits here rather than at the end because what it changes is the node model. Every other
+> passage of this document still describes `HEAD`; where one states a rule this design will change,
+> it carries a forward pointer here instead of being rewritten. **When a step below lands, this
+> section is rewritten in the present tense and the pointers go.**
+>
+> ⚠️ **"Grid" names two unrelated things in this document.** §5.3b's *layout grids* are chrome —
+> columns and rows drawn over a frame, in no export — and `ondin-core/src/layout.rs` is theirs. The
+> *grid* here is the CSS grid **container**, which places a node's children. The engine's module
+> needs a name that does not collide with `layout.rs`, or that file is renamed; which is open.
+
+**The model is CSS, under CSS's names** (§15 D867) — `display: flex` and `display: grid` and the
+properties CSS spells them with, explicitly not Figma's auto layout. It is behaviour designers
+already know, and it is what a future HTML/CSS export writes without translating. **Where CSS and
+design-tool convention disagree, CSS wins**, and four cases are decided:
+
+- **Transforms do not affect layout.** A rotated item keeps its unrotated slot and may overlap its
+  neighbours.
+- **Child order is flow order and paint order.** `children` is already z-order (§5.3), so in the
+  layers panel, where the frontmost is on top, a flex row reads bottom-up. Accepted.
+- **Text wraps at the available width**, as CSS text does.
+- **What the user sets and what is drawn are separate** — CSS's *specified* and *used* values
+  (below, §15 D868).
+
+**The first cut of the property set.**
+
+| | |
+|---|---|
+| Container | `display` (unset \| flex \| grid), `flex-direction`, `flex-wrap`, `justify-content`, `align-items`, `align-content`, `gap` (row/column), `padding` (four sides), `grid-template-columns`/`-rows` (px, %, fr, auto, min-content, max-content, `minmax()`, `repeat(n)`), `grid-auto-flow` |
+| Item | `width`/`height` (auto \| px \| %), `min-`/`max-` of both, `flex-grow`, `flex-shrink`, `flex-basis`, `align-self`, `justify-self`, `grid-column`/`grid-row` (auto \| line \| span), `position` (in flow \| absolute) with `top`/`right`/`bottom`/`left` (px \| % \| auto) |
+| Deferred | `margin`, `order`, named grid areas, `auto-fill`/`auto-fit`, `calc`, `aspect-ratio`, block/inline/float layout — the engine supports each, so each is cheap later |
+
+**Who is a container** (§15 D869). `display` applies to a `Group` and to an `Artboard`. **Setting
+it gives a group a box**: its bounds become its layout box, padding included, instead of the union
+of its children; resizing it sets `width`/`height` and reflows, instead of scaling the contents as
+`tools::resize_group` does (§5.6); `width: auto` means fit the content. **A group without `display`
+behaves exactly as it does today.** A `Boolean` ignores `display` — its children are operands, not
+items. The root is not a container: the canvas is unbounded. A mask layer is out of flow, as though
+`position: absolute`. **Paint and clip stay frame-only**, so §5.7a's *a group is organisation, a
+frame is a thing* stands; D869 has why, and the CSS each kind would export as.
+
+**A frame may sit inside any group** (§15 D870), where §5.3's `can_parent` refuses every group
+today — the case is a flex row of cards, each card a frame for its fill and clip, the row a group.
+
+**Constraints are `position: absolute` with insets** (§15 D871). In a box — a frame, or a group
+with `display` — a child's authored `top`/`right`/`bottom`/`left` (px or %) are the constraints:
+pin left is a left inset, pin right a right inset, stretch is both, scale is percentages. **A child
+with no authored insets keeps its stored position** (the implicit left/top), so every existing
+document is unchanged and a frame resize still leaves children pinned top-left. A group without
+`display` has no edges, so insets do not apply there. This is **not** §13's persistent constraints:
+it is a fixed algorithm re-run from specified values, and nobody authors a relationship between two
+properties.
+
+**Every leaf is measured, and shapes are replaced elements** (§15 D872). `Rect`, `Ellipse`,
+`Polygon`, `Star`, `Path`, `Line` and `Boolean` have an intrinsic size equal to their stored
+geometry (bounds for a path, a line and a boolean), with `width`/`height` defaulting to `auto` —
+CSS's behaviour for `<img>`, and what stops CSS's default `flex-shrink: 1` squeezing a 40-unit
+rectangle to 30.643. A group without `display`, placed as an item, is atomic the same way, its
+intrinsic size its children's union bounds. Text is measured through `core::text`, which owes two
+things first: a min-content query and a memo keyed by wrap width. ⚠️ CSS's default
+`align-items: stretch` stretches a replaced element's cross size too, and that is kept; a UI that
+wants otherwise creates containers with an explicit alignment, which is a default and not a
+deviation.
+
+**Layout is derived, never stored** (§15 D868). Only specified properties are saved; used boxes live
+in `Resolved` and are never serialized (invariant 4). Layout runs in `Resolved` before world
+transforms: re-shape text → lay out dirty containers → world transforms, composing used positions →
+bounds → reindex. Edits to specified properties are ordinary operations — a new `Operation` or new
+`GeometryPatch` variants, undecided — so undo needs nothing of its own. They save as additive
+`#[serde(default)]` fields with no schema bump (§5.11), because the default — no `display`, no
+insets — is exactly what every existing file means. ⚠️ **The cost is the risk.** Every consumer of
+geometry reads the document today — `scene::paint_node` composes `parent_world * node.transform()`
+and takes the size off `node.kind()`, and the exporters, hit-testing, snapping and the inspector's
+X/Y/W/H read the same fields — and all of them must read used geometry. And `RenderOverrides` (§6.2)
+patches the walk without re-resolving, so it cannot express a reflow: a preview that changes a
+layout input has to run layout on the preview state, and how is open.
+
+**Engine: taffy 0.14.0**, f32, MIT (§15 D867), chosen on a measured spike; used values come back
+through a *proposed* **1/64-px** quantization (§15 D873), so that f32's noise digits never reach a
+field or a file.
+
+**Build order**: (1) route rendering, export, hit-testing, snapping and the inspector through used
+geometry with an **identity** layout pass — a pure refactor, the goldens staying byte-identical its
+proof, and the riskiest step; (2) absolute insets on frames — the smallest visible feature that
+exercises the whole pipeline; (3) flex, with live reflow during gestures and reorder by drag;
+(4) grid, with the track editor; (5) components and overrides, on the same pipeline.
+
+**Open, not decided**: the rotation origin of a laid-out item (CSS's `transform-origin` defaults to
+the centre; Ondin's transform has its own origin and `Pivot`, §5.3); how `TextSizing`'s three states
+map onto `width`/`height`/`white-space` inside a layout (the wrapping is decided, the mapping is
+not); how previews reflow; a `TaffyTree` mirrored inside `Resolved` against taffy's low-level traits
+implemented over Ondin's own nodes with a per-node cache (leaning to the second); the module's name;
+whether resizing a laid-out item writes `width`/`height` in px and what that does to its
+`flex-grow`; and how taffy is declared. D867 and D868 carry the detail of each.
 
 ### 5.4 Text node
 
@@ -2357,7 +2464,10 @@ end of one JSON file keep both, which is the whole reason the table sits where i
   editing.** Scale is the one factor kept out, and for a reason the others do not share: a layer's
   size must be one number in one place (its geometry), or a stroke thickens when its group is
   resized. Skew is admitted because it has no geometry field it could live in instead — there is
-  nowhere else to put a lean.
+  nowhere else to put a lean. ⚠️ **Designed to be amended, not yet in effect** (§5.3c, §15 D868):
+  under container layout the one number becomes one *specified* number and one *used* one, CSS's
+  pair, with the used one derived in `Resolved` and never saved. Scale stays out of the transform
+  either way.
 - Interactive resize edits *geometry* (`SetGeometry`: rect/ellipse size, path points scaled, text
   box size) — stroke widths and children are unaffected, matching Figma.
 - A resize moves the text **box**, never the text size — and **a scale may not change which of
@@ -2443,6 +2553,8 @@ end of one JSON file keep both, which is the whole reason the table sits where i
   D481). The same mechanism serves a multi-selection resize
   (`tools::resize_selection`, §9.4), which is where it matters most: a *selection* is exactly where
   unrelated, differently-turned layers end up together. §15 D50 has what this replaced.
+  ⚠️ **Designed, not built** (§5.3c, §15 D869): a group with `display` set will not take this path —
+  resizing it writes its `width`/`height` and reflows. A group without `display` is unchanged.
 - **A leaf whose geometry *is* its shape scales that geometry** (`tools::resize_geometry`): a `Line`
   or a `Path` has no authored `size` and no children, so it belongs to neither of the two paths above
   and used to fall through to `resize_group`, whose body iterates *children* and therefore produced
@@ -2915,7 +3027,9 @@ reach everything inside it, and what changed is that the panel no longer starts 
 selected frame (§9.4, §15 D401). The census function is unchanged. Frames cannot sit inside groups
 (`can_parent`), so no frame is ever reached by
 passing through one — and a frame *inside a frame* is not reached either, because the walk stops at
-the outer one (§15 D62).
+the outer one (§15 D62). ⚠️ **§15 D870 designs that first clause away** (not built): a frame will be
+allowed under any group. Checked against the walk, not assumed — its `takes_paint` arm already takes
+a frame as the target and does not descend, so the answer would not change.
 
 **One layer's appearance is liftable, and `Properties` is the three fields that means.** Fills,
 strokes and opacity — the payload behind *Copy properties* / *Paste properties* (`shortcuts.md` §7,
@@ -3181,7 +3295,9 @@ impl Resolved {
   `rebuild` for the life of a document, while `ondin-core/tests/resolve.rs`'s
   `assert_resolved_matches_rebuild` compares only **four** of the six — `boolean` has a fixed-fixture
   differential and `inner_ink` is compared by nothing anywhere — so a new map joins a partial guard.
-  D778 carries what would re-open the question.
+  D778 carries what would re-open the question. ⚠️ **Container layout's used boxes are that seventh
+  map, or a per-node cache that is one in all but name** (§5.3c, §15 D868, designed and not built) —
+  reopened on a different ground from D778's, and owing the guard a comparison of its own.
 - No `FontContext` is threaded through: `core::text` owns a thread-local parley engine and returns
   layouts carrying the exact `peniko::FontData` blob parley resolved, so the renderer draws glyphs
   straight from it.
@@ -3193,7 +3309,9 @@ impl Resolved {
   expansion meant a nudged group of twenty text blocks paid twenty parley shapes per keypress for a
   change that cannot move a glyph. `core::text::shapes()` is the counter that makes this assertable;
   nothing else can see it, since the layouts produced are identical either way and the differential
-  against `rebuild` is green under both.
+  against `rebuild` is green under both. ⚠️ **Container layout breaks this premise when it lands**
+  (§5.3c, §15 D868): text in flow wraps at its container's available width, so a container resize
+  re-shapes its text children and the saving has to be re-argued for them.
 - ⚠️ **The affected set carries each node's depth, and the parents-first sort caches its key** (§15
   D594). `collect_subtree` records depth as it descends — a child's is its parent's plus one, free
   there — into an `FxHashMap<NodeId, usize>`, and the sort is `sort_by_cached_key` over a lookup.
@@ -12230,6 +12348,8 @@ here so v1 reserves the seams instead of accidentally closing them.
    forgotten; `a.width = b.width - 5` copies a value, it does not create a live relationship.
    Persistent constraints are a separate future feature (a dependency-graph system) and stay on
    the deferred list — do not let expression syntax grow into an accidental constraint engine.
+   ⚠️ **§5.3c's inset "constraints" are not this** (§15 D867, D871): a fixed layout algorithm re-run
+   from specified values, where nobody authors a relationship between two properties.
 2. **World-space property projection.** The CLI speaks `x/y/width/height/rotation/opacity/fill…`
    in world space (Figma inspector semantics), projected onto local transforms + geometry ops by a
    facade in `ondin-core` — the same machinery as MCP's `place_at_world` (§8.4), which also enables

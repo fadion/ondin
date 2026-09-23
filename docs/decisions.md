@@ -1242,6 +1242,13 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D864** — **Past 128 resident covers the least recently asked-for texture is let go, and one asked for on this pass or the last never is.** Not a finding: found closing **D862**, which bounded a first visit and not a long one — nothing evicted short of `Covers::clear`, so scrolling a whole library left every cover resident, ~640 MB at 1,000 large covers by arithmetic on `COVER_MAX_PX`. `Cover::Ready` carries a stamp, the `Covers::pass` count it arrived on or was last returned by `get` on — `Covers`' own count, not egui's pass number, since what ages a cover is the *dashboard* drawing without asking for it. `evict` sorts the `Ready` covers by (stamp, key) and removes the oldest down to `MAX_RESIDENT_COVERS`, **breaking at the first stamped this pass or the one before**, so a card on screen cannot lose its picture and a screen holding more than the cap exceeds it rather than churning. Only `Ready` goes — `Unreadable` is the red mark's fact, `Blank` holds nothing — and an evicted cover is not queued, so the next `get` asks the worker, which reads the disk cache. *(Fixed and tested 2026-09-23; **Keep.** ⚠️ **128 is chosen, not measured**: ~80 MB at the 400² × 4-byte worst case, and more than twice a 2,160 pt window's 48 file cards. 🚨 **Not twice a screen of project cards** — five covers a mosaic, twenty a row, so seven rows of *Recent* pass it, and `MAX_RESIDENT_COVERS`' doc said *"any screen"* until corrected the day it was written; the recency guard is what holds there. **Test** `past_the_cap_the_least_recently_asked_cover_goes_and_a_recent_one_never_does`, three flips run: the sort deleted fails at *"back to the cap"* with 135 left, **not** the predicted named-ten assertion — unsorted, a protected cover comes up within a few and the `break` ends the loop, so it mostly evicts nothing; the recency guard disabled, and `get`'s `*seen = now` dropped, each fail where predicted. §9.5 amended; D862 amended in body and index; `MAX_RESIDENT_COVERS`' doc and `file_card`'s gate comment corrected; struck from `roadmap.md` with D863)*
 - **D865** — **The Type panel's two chords and its line-height field read their `Bounds`, where they had spelled the same numbers from the constants.** Not a finding: noticed closing **D861**. §15 **D817**'s *a held key stops where the field stops* was honoured by value — the tracking arm bounded its em step by `MIN_TRACKING_PCT / 100.0 ..= MAX_TRACKING_PCT / 100.0` and its px step by `px_range_for` over the same constants, both by hand, beside a field reading `Bounds::TRACKING` — D861's shape one function over. Line height had no `Bounds` at all, and the `Leading` arm (§15 **D840**) and `type_line_height_field` each spelled `MIN_LINE_HEIGHT_PCT..=MAX_LINE_HEIGHT_PCT`. `Bounds::LINE_HEIGHT` (the field's existing `0..=1000%`) and `Bounds::em()`, the `%` range over a hundred — the scale a `Length::Em` holds; both arms and the field read their faces off a `Bounds` now. *(Fixed and tested 2026-09-23; **Resolved** — no range moved, `stepped_into` untouched. ⚠️ **`em()` is the chords' face and not the field's**: the field shows an em ×100 and bounds on `.pct`, and handing it `.em()` would cap line height at 10%. `both_ends_of_every_length_field_bound_the_same_quantity` derives `LINE_HEIGHT` with the rest and asserts every `em()` is its `%` face ÷100; flip run, `em()` undivided, red there at `TRACKING` — predicted — and in two tracking-chord tests. ⚠️ **No leading-chord test failed**: the one there was pinned line height's floor, 0 in either scale — **closed the same day**, that test now driving both ceilings and red under the same flip at `Em(21.0)`. D425's scope sentence amended and the test's own copy corrected; D817 and D861 carry a line; `architecture.md` unchanged; nothing struck from `roadmap.md`)*
 - **D866** — **The deep-resample GPU test bounds a ratio to the ordinary path, not a wall clock, after one unexplained 54 ms on a healthy tree — which is D593's shape, taken with far more margin, and still a clock.** `fx_gpu.rs · a_deeply_resampled_shadow_costs_the_buffer_and_not_the_block` is **D743**'s test of the `coarsen` loop bound (D403's promise) and asserted *best of three under 50 ms* against 0.45 ms healthy and 116.3 ms broken. The release bar for v0.2.0 read **54.4 ms** with the code under test unchanged since v0.1.0, then passed 21 runs running; the reading was never recreated and its cause is unknown. The degenerate shadow is timed now **interleaved** with a control — `k = 3`, blur 120, the shadow `a_resampled_drop_shadow_matches_the_reference` checks — one warm-up each, best of five each, and `deep / ordinary < 20` is asserted: **1.73–1.85×** healthy, **1.29–2.01×** with two other GPU suites looping in a second process, **176–208×** with the loop unbounded. *(Changed and measured 2026-09-23; **Keep** — test-only. 🚨 **Not a way out of D854**: D593's test was a ratio of two clocks too, chosen so as not to measure the machine, and failed 13 in 60 under load after two re-samplings; what differs is margin — about ten times each side here, against D829's 46% and 31% — and a load that lands on one arm alone still counterfeits a regression, which the interleave is meant to prevent and was not shown to against the unknown cause. **Counting**, CLAUDE.md's first question of a timing flake, needs an atomic counter compiled into the shader and was judged too invasive for a test. *Revisit if it goes red on a healthy tree* — with the count, not more samples or a wider bound. Flip run with `fx.wgsl` reverted and its diff against `HEAD` confirmed empty. D743 amended in body and index; `architecture.md` unchanged; nothing struck from `roadmap.md`)*
+- **D867** — **Container layout is being built, as CSS flexbox and CSS grid under CSS's names, on taffy — and §1's deferral of it is reversed.** "v1" in these documents names the phase in which the basic editing tools were finished, not a release tag; that phase is over, so layout starts and components follow it. **Where CSS and design-tool convention disagree, CSS wins** — transforms do not affect layout, child order is flow and paint order, text wraps at the available width, specified and used values are kept apart. **Not §13's constraint engine**: a fixed algorithm re-run from specified values. taffy 0.14.0, MIT, f32, measured on a spike: 1,000 rects in a wrapping flex frame **0.558 ms**, a 900-cell grid **1.087 ms**, 100 text cards **29.2 ms** full and **0.302 ms** after one text edit — shaping, not taffy, is the bill. *(Decided 2026-09-23 by the maintainer; **not built** — no line of `crates/` changed and no code cites it. ⚠️ **No verdict word existed for a decision taken ahead of its code**; *Decided; not built* is proposed for D867–D872, to become *Built and tested* per step. Build order recorded; open: mirror tree against trait implementation, how taffy is declared, the module's name. `architecture.md` §5.3c written, §1 and §13 amended; `roadmap.md` §0 loses auto layout, constraints and components and gains *Next · Container layout*; `context-menus.md` §7 corrected)*
+- **D868** — **What the user sets and what is drawn become two numbers, and the drawn one is never saved.** Amends §5.6's *"one number in one place"* into a specified number and a used one; the used boxes are derived in `Resolved` from specified properties plus the registered fonts, for three reasons — CSS keeps the two apart, components will derive instances on the same pipeline, and a font arriving just re-resolves. 🚨 **The cost is the risk**: rendering, export, hit-testing, snapping and the inspector all read `Node::transform` and the kind's size today, and `RenderOverrides` cannot express a reflow. ⚠️ **It breaks two arguments true at `HEAD`**: D590's text pass skipping the subtree expansion, and D778's decline of a seventh map on `Resolved` — whose grounds do not transfer and whose cost does. *(Decided 2026-09-23 by the maintainer; **not built**. Open: how previews reflow, what a resize writes, the rotation origin, `TextSizing`'s mapping, and — unstated by the design — what an in-flow item's stored translation means. §5.6 and two §5.9 bullets carry pointers)*
+- **D869** — **A group with `display` has a box; a group without one is exactly today's group.** Setting `display` makes a group's bounds its layout box, padding included, and a resize writes `width`/`height` and reflows instead of `tools::resize_group`'s scale. **Paint and clip stay frame-only**: pass-through paint and scale-on-resize are design-tool behaviours with no CSS equivalent, and merging the kinds would lose them. `Boolean` ignores `display`; the root is no container; a mask is out of flow. *(Decided 2026-09-23 by the maintainer; **not built**. *Revisit when components land.* ⚠️ Four passages argue from *"a group has no box"* and become conditional on `display` — listed in the body, not decided by it. §5.6's group-resize bullet carries a pointer)*
+- **D870** — **A frame may sit inside any group, and `paint_targets` already stops at one.** A flex row of frame-cards in a group is illegal under `can_parent` today. Relaxed for *any* group, since legality hanging on `display` would refuse removing `display` from a group holding a frame. Of the two reasons `can_parent`'s doc gives, *"clipped by something with no edges"* is weak — groups do not clip — and the `paint_targets` one was **checked**: its `takes_paint` arm takes a frame and does not descend. *(Decided 2026-09-23 by the maintainer; **not built** — `can_parent` still refuses. ⚠️ The four enforcers read one function; what needs the audit is what *assumed* the refusal, D62's four leaks being the precedent. §5.3 and §5.7a carry pointers; D62 carries a line)*
+- **D871** — **Constraints are `position: absolute` with insets, and a child with none stays where it is.** Pin left, pin right, stretch and scale are a left inset, a right inset, both, and percentages — in a frame or a group with `display`, and not in a group without, which has no edges. No authored inset means the stored position stands, so no existing document moves. Spike, frame 300 → 500: pin-left stays at 10, pin-right 240 → 440, stretch 280 → 480, 25%/25% 75/150 → 125/250. *(Decided 2026-09-23 by the maintainer; **not built** — step 2 of D867's order. Not §13's persistent constraints)*
+- **D872** — **Every leaf is measured, and shapes are replaced elements.** As an empty `width: 40px` box a rectangle shrank to **30.643** under `flex-shrink: 1`; as a measured leaf it held **40**. Rect, Ellipse, Polygon, Star, Path, Line and Boolean take their stored geometry as intrinsic size, `width`/`height` `auto`; a group without `display` is atomic likewise. ⚠️ `align-items: stretch` still stretches them — CSS-faithful, kept. **Text has two gaps in core**: no min-content query (`AutoHeight(1.0)` reports 1.000 wide where the widest word is 45.148), and 16 `measure` calls per leaf per compute with no memo by width. *(Decided 2026-09-23 by the maintainer; **not built**. Measured in D867's spike. §5.3c)*
+- **D873** — **Used values would come back from taffy's f32 quantized to 1/64 px — proposed, not decided.** f32 is accurate enough — worst error 0.000005 at 400 wide, 0.0047 at 100,000, always under an ulp, and parent-relative so canvas coordinates never enter — but `7.3f32 as f64` is `7.300000190734863`, and that would reach fields and exports. 1/64 is Chromium's `LayoutUnit`. ⚠️ **At 1,000,000 wide the error is 0.044, nearly three units**, so quantizing hides f32 noise and not f32 error. *(Proposed 2026-09-23 in the spike's write-up; **not decided and not built** — the brief carried it as a proposal and this entry does not promote it)*
 
 ---
 
@@ -5652,7 +5659,10 @@ frame in that one" was inexpressible. A frame is a page, and a page inside a pag
 component or a state gets expressed — the same shape of mistake as the old "the root parents nothing but
 artboards" rule D25 relaxed, and relaxed the same way. A `Group` is still refused, having no box of its
 own for a clipping page to be clipped by and because §5.7a's `paint_targets` relies on no frame being
-reachable through one. `OpError::ArtboardNesting` became `ArtboardPlacement`.
+reachable through one. `OpError::ArtboardNesting` became `ArtboardPlacement`. ⚠️ **Designed to relax
+again, not yet in effect** (D870, 2026-09-23): container layout wants a frame under any group, and of
+the two reasons just given the first is weak and the second was checked — the walk already stops at
+a frame.
 
 Four app-side readings of the old rule had to go with it, each the ban leaking somewhere it did not
 belong. **`begin_create` forced a frame to the root** whatever it was drawn over, so `create_artboard`
@@ -19167,6 +19177,273 @@ was wrong was which one a reader should treat as load-bearing. In the overlay, d
 read fails at *"the in-flight count is what is drawn"* with the committed 4 against 7, and removing
 the present-mode guard fails at its own assertion while leaving the other two green — which is why the
 three suppressions are one test rather than three.
+
+**D867 — Container layout is being built, as CSS flexbox and CSS grid under CSS's names, on taffy —
+and §1's deferral of it is reversed. *Decided 2026-09-23 by the maintainer; not built.*** Filed
+beside D385 because the word *grid* now names two features in this document, and a reader looking
+for one will land on the other: D385's layout grids are chrome drawn over a frame, and this is the
+CSS grid **container**, which places children. `architecture.md` §5.3c opens by saying so.
+
+§1 carried *"Components/instances/variants; auto-layout/constraints"* under *Deferred (design for,
+do not build)*, and `roadmap.md` §0 listed auto layout, components and constraints among the decided
+non-goals for v1. **Both were statements about "v1", and the maintainer settled on 2026-09-23 what
+that word means in these documents: the phase in which the basic editing tools were finished, not a
+release tag.** That phase is over, so layout starts now and components and overrides come after it.
+This entry records the start as a decision, so that it is not re-argued from §1's old line or from a
+`v0.x` tag that happens to say something else.
+
+**CSS semantics under CSS's names, and explicitly not Figma's auto layout**, whose handling and
+naming the maintainer finds unintuitive. Two reasons: it is behaviour designers already know, and it
+is what a future HTML/CSS export writes without a translation layer. The rule that follows is the
+part a later reader will want to soften, so it is stated flatly: **where CSS and design-tool
+convention disagree, CSS wins.** Four such cases were decided in advance — transforms do not affect
+layout, so a rotated item keeps its unrotated slot and may overlap its neighbours; child order is
+flow order *and* paint order, so in the layers panel, frontmost on top, a flex row reads bottom-up,
+which is accepted; text wraps at the available width, as CSS text does; and what the user sets is
+kept apart from what is drawn (D868). None of the four is an oversight to be "fixed" toward another
+tool's convention.
+
+**This is not §13's constraint engine.** §13's decision 1 keeps *persistent constraints* — live,
+user-authored relationships between arbitrary properties, a dependency graph — out of the design so
+that expression syntax cannot grow into one. Layout is a fixed-shape algorithm re-run from specified
+values: no user authors a relationship between two properties, and the "constraints" D871 builds
+are CSS insets, one more specified value on one node. §1 keeps the persistent kind on its deferred
+list and §13 now says which is which.
+
+**The engine is taffy 0.14.0, and it was measured before it was chosen.** The spike ran on
+2026-09-23 in a throwaway crate outside the repository: taffy plus a path dependency on
+`ondin-core`, real parley text through `ondin_core::text::measure`, `disable_rounding()`, `--release`.
+taffy is MIT, depends on `arrayvec` and `smallvec` — plus `slotmap`, only with its own `TaffyTree` —
+and implements flexbox, CSS grid, block and absolute positioning, with tests generated from browser
+layouts. It computes in **f32** (D873). It is not in the workspace lock today, and ⚠️ **its API still
+moves between 0.x releases** — `AlignItems::CENTER` is an associated const in 0.14 — which is
+`flo_curves`' situation and argues for the same exact pin (D703, D782).
+
+**The cost, median, says shaping is the bill and taffy is not.** 1,000 fixed rectangles in a
+wrapping flex frame: **0.558 ms** for a full compute. A 900-cell 30×30 grid with `fr`/`minmax`
+tracks: **1.087 ms**. 100 cards of one text and five icons each: **29.2 ms** full, **0.302 ms** to
+relayout after editing one text (16 `measure` calls), and **0 ms and 0 calls** for a clean relayout,
+taffy's own cache answering. The 29.2 is D872's second gap, not the engine.
+
+**Build order, decided**, riskiest first: (1) route rendering, export, hit-testing, snapping and the
+inspector through used geometry with an **identity** layout pass — a pure refactor, whose proof is
+the goldens staying byte-identical; (2) absolute insets on frames, D871 — the smallest visible
+feature that exercises the whole pipeline; (3) flex, with live reflow during gestures and reorder by
+drag; (4) grid, with the track editor; (5) components and overrides, on the same pipeline.
+
+*(Decided 2026-09-23 by the maintainer, in conversation; **not built** — no line of `crates/` changed,
+and no code cites this number, which is expected for a design recorded ahead of its code and is the
+reason the citation census cannot see it until step 1 plants one. ⚠️ **This file had no verdict
+word for a decision taken ahead of its code**: D358's *Decided …; Keep.* is a non-goal, and D333's
+reversal of a §1 deferral was built the day it was decided. *Decided; not built* is proposed for this
+cluster, and **each entry's verdict is to be rewritten** as its step lands rather than left reading as
+a plan. ⚠️ **Open, and recorded as open**: a `TaffyTree` mirrored inside `Resolved`, as the spike used
+— a second tree to keep equal to the first — against taffy's low-level traits implemented over
+Ondin's own nodes with a per-node cache in `Resolved`, no mirror, which is where it is leaning; how
+taffy is declared — pinned `=` like `flo_curves`, and likely `default-features = false` with `std`,
+`flexbox`, `grid` and `content_size` — with the justification paragraph every crate-local dependency
+in core's manifest carries; and the module's name, `ondin-core/src/layout.rs` being D385's. When it
+lands, §3's core list — *"thirteen names here, the same thirteen declared there"* — gains a
+fourteenth, and §2's stack table a row. `architecture.md` §5.3c written; §1's *Deferred* bullet
+rewritten; §13's decision 1 carries a pointer; `roadmap.md` §0 loses auto layout, constraints and
+components and gains *Next · Container layout*; `context-menus.md` §7's deferred-features bullet
+corrected)*
+
+**D868 — What the user sets and what is drawn become two numbers, and the drawn one is never saved.
+*Decided 2026-09-23 by the maintainer; not built.*** §5.6 opens with the rule that keeps scale out of
+the transform — *"a layer's size must be one number in one place (its geometry)"*. Under container
+layout that becomes one **specified** number and one **used** number, CSS's pair, and this entry is
+the amendment. **Not in effect**: §5.6 carries a pointer and the rule is true of `HEAD` as written.
+Scale stays out of the transform either way — the used number is derived, not a second place where
+the user's size lives.
+
+**Layout is derived, not stored.** Only specified properties are saved; the used boxes live in
+`Resolved` and are never serialized (invariant 4). Three reasons, all the maintainer's. CSS itself
+keeps specified and used values apart, so saving the used box as though it had been typed would need
+a second field to remember what the user actually set. Components will derive instance subtrees from
+a master plus overrides, so derived layout and derived instances share one pipeline instead of two.
+And a font arriving just re-resolves, where stored positions would go stale — invariant 4's D735
+clause from another side: the used boxes are reconstructible from the document **plus the registered
+fonts**, exactly as text layouts are, because text is measured.
+
+**What it costs, recorded because it is the risk.** Every consumer of geometry reads the document
+today. `scene::paint_node` composes `parent_world * node.transform()` and takes the kind off
+`node.kind()`, and `scene::mask_geometry` does the same for a mask's outline; the exporters walk the
+same way; hit-testing, snapping and the inspector's X/Y/W/H read the same fields. All of them must
+read used geometry, which is why D867's step 1 is a refactor behind an identity pass with the goldens
+as its proof. 🚨 **And a preview cannot express a reflow.** `RenderOverrides` patches the walk without
+re-resolving — O(nodes the gesture touches), by design (§9.3) — while one changed layout input can
+move every sibling in its container. A preview that changes a layout input has to run layout on the
+preview state, and how is open.
+
+**Two arguments that are true at `HEAD` stop being true when this lands**, and each is the kind of
+thing a step's author would not think to re-read:
+
+- ⚠️ **§5.9's text pass does not run over the subtree expansion** (D590), because *"a descendant's
+  layout does not"* depend on a dirty ancestor — *"`text::layout` reads `TextRef::of(node.kind())` and
+  nothing else"*. Text in flow wraps at its container's available width, so a container resize
+  re-shapes its text children. D590's saving has to be re-argued for them, not assumed; §5.9 carries a
+  pointer.
+- 🚨 **The used boxes are a seventh map on `Resolved`**, or a per-node cache that is one in all but
+  name — which §5.9 calls *a decision rather than an optimisation*, and which D778 declined for a
+  local-box cache. D778's grounds do not transfer: that map would have cached what every caller could
+  already derive, for a saving under the noise, and a used box is derivable nowhere else. **Its cost
+  transfers in full**: `update` has to keep the map equal to `rebuild` for the life of a document, and
+  `assert_resolved_matches_rebuild` compares four of the six maps `Resolved` already has.
+  `incremental_update_equals_rebuild_over_random_ops` is to extend to layout, and the extension has to
+  *compare* the used boxes, or the new map joins a partial guard. D778's other observation — that the
+  preview door bypasses `Resolved` altogether — is this entry's open preview question under another
+  name.
+
+**Where it runs**: in `Resolved`, before world transforms — re-shape text, lay out dirty containers,
+compose world transforms from used positions, bounds, reindex. Edits to specified properties are
+ordinary operations — a new `Operation` or new `GeometryPatch` variants, undecided — so undo needs
+nothing of its own. They save as additive `#[serde(default)]` fields with no schema bump, which is
+§5.11's policy on its own terms: the default, no `display` and no insets, is exactly what every
+existing file means.
+
+*(Decided 2026-09-23 by the maintainer; **not built**. **Amends §5.6's one-number rule when it
+lands.** ⚠️ **Open**: how previews reflow; whether resizing a laid-out item writes `width`/`height` in
+px and what that does to its `flex-grow`; the rotation origin of a laid-out item, CSS's
+`transform-origin` defaulting to the centre where Ondin's transform has its own origin and `Pivot`
+(§5.3); and how `TextSizing`'s three states map onto `width`/`height`/`white-space` inside a layout —
+the wrapping is decided and the mapping is not. ⚠️ **Not stated by the design at all, and so open by
+omission**: what an in-flow item's stored translation means once its slot comes from the container —
+D871 settles it for an absolutely positioned child with no insets, and nothing settles it for one in
+flow. §5.6's rule bullet and §5.9's map-count and text-pass bullets carry pointers)*
+
+**D869 — A group with `display` has a box; a group without one is exactly today's group. *Decided
+2026-09-23 by the maintainer; not built.*** **Containers are not frame-only.** `display: flex | grid`
+applies to a `Group` as well as to an `Artboard`, and setting it gives the group a box: its bounds
+become its layout box, padding included, instead of the union of its children; resizing it sets
+`width`/`height` and reflows, instead of scaling its contents as `tools::resize_group` does (§5.6);
+and `width: auto` means fit the content. **A group without `display` behaves exactly as it does
+today**, which is what keeps every existing document unchanged.
+
+**Paint and clip stay frame-only, and the reason is what merging would lose.** `paint_targets`' doc
+puts the distinction as *"a group is organisation; a frame is a thing"* (§5.7a): a paint edit passes
+through a group to what it holds, and resizing a group scales what it holds. Both are design-tool
+behaviours with no CSS equivalent, and folding the two kinds into one — a group with a fill and a
+clip *is* a frame — would lose both. *Revisit when components land.* For a future HTML/CSS export the
+mapping is: frame → a `div` with a background and `overflow`; group with `display` → a `div`; group
+without → a positioned `div` with absolutely positioned children.
+
+**Three smaller rules.** A `Boolean` ignores `display`: its children are operands, not items. The
+root is not a container: the canvas is unbounded. And a mask layer is out of flow, as though
+`position: absolute`.
+
+⚠️ **Several passages argue from "a group has no box"; each is true today and becomes conditional on
+`display`.** §5.3's two-`Pivot` rule — normalized where the box is authored, absolute where it is
+emergent, *"a group's box is its children's union"* — and `pivot_for`, which asks
+`tools::resizable_size`'s question; D385's reason for offering layout grids on frames alone, *"a
+group's box is derived from its contents"*; §5.3's `takes_paint` bullet, *"a group has no box"*; and
+the first of `can_parent`'s two reasons (D870). **None is decided here**: each is a question for the
+step that lands `display` on groups — and this is a list in prose, so re-derive it from `crates/`
+then rather than trusting it.
+
+*(Decided 2026-09-23 by the maintainer; **not built**. §5.3c; §5.6's group-resize bullet carries a
+pointer)*
+
+**D870 — A frame may sit inside any group, and `paint_targets` already stops at one. *Decided
+2026-09-23 by the maintainer; not built.*** `build::can_parent` lets a frame hang off the root or
+another frame and never off a `Group` (D62). **Container layout needs the case it refuses**: a flex
+row of cards, each card a frame for its fill and its clip, the row a group. The rule is to be relaxed
+for *any* group — not only a group with `display`, because legality that depended on a property
+would force refusing the removal of `display` from a group that holds a frame.
+
+**`can_parent`'s doc gives two reasons for the rule, and they are not equal.** *"A clipping page
+inside one would be clipped by something with no edges"* is weak: a group does not clip —
+`clips_children` answers for `Artboard` alone — so nothing without edges is doing any clipping.
+*"`paint_targets` relies on no frame being reachable through a group (§5.7a)"* is the real one, and
+it was **checked against the code rather than assumed**: `paint_targets` matches `Group | Root` first
+and descends; the next arm, `k if k.takes_paint()`, pushes the node and does **not** descend; and a
+frame has answered `true` to `takes_paint` since D400. So a frame reached through a group would be
+taken as the target and the walk would stop there — exactly what §5.7a describes for a selected
+frame. **What the rule guarantees today is that the case never arises, not that the walk would get
+it wrong**: §5.7a's *"no frame is ever reached by passing through one"* becomes false when this lands
+and the walk's answer does not change.
+
+⚠️ **That is one walk, and the audit is wider.** `can_parent`'s doc names four enforcers — `apply`,
+the loader, the layer tree's drop targets, and render previews refusing a create that would be
+rejected — and all four read the one function, so relaxing it is one match arm. What needs reading
+when it lands is everything that *assumed* the refusal. D62 found four app-side readings of the
+previous version of this rule, each the ban leaking somewhere it did not belong; the same search is
+owed here, and `OpError::ArtboardPlacement`'s message describes the rule a user meets.
+
+*(Decided 2026-09-23 by the maintainer; **not built** — `can_parent` still refuses. The walk was read
+2026-09-23 in `build::paint_targets` and `NodeKind::takes_paint`. §5.3's rule bullet and §5.7a's
+`paint_targets` paragraph carry pointers; D62 carries a line)*
+
+**D871 — Constraints are `position: absolute` with insets, and a child with none stays where it is.
+*Decided 2026-09-23 by the maintainer; not built.*** **There is no separate constraints feature.** In
+a box — a frame, or a group with `display` (D869) — a child's authored insets, `top`, `right`,
+`bottom` and `left` in px or %, are the constraints: pin left is a left inset, pin right a right
+inset, stretch is left and right together, and scale is percentage insets. One mechanism where there
+would have been two, and it is CSS's (D867).
+
+**A child with no authored insets keeps its stored position** — the implicit left/top — so every
+existing document is unchanged, and resizing a frame still leaves its children pinned top-left as it
+does today. A group without `display` has no edges, so insets do not apply inside one.
+
+**Measured in D867's spike**, a frame resized from 300 to 500 wide: pin-left stays at x 10; pin-right
+moves 240 → 440; left+right stretch widens 280 → 480; 25%/25% insets scale 75/150 → 125/250. All
+four correct. It is step 2 of D867's build order because it is the smallest visible feature that
+exercises the whole pipeline.
+
+*(Decided 2026-09-23 by the maintainer; **not built**. ⚠️ **Not §13's persistent constraints** — an
+inset is one specified value on one node, and D867 has the distinction. §5.3c; §13's decision 1
+carries a pointer)*
+
+**D872 — Every leaf is measured, and shapes are replaced elements. *Decided 2026-09-23 by the
+maintainer; not built.*** **Shapes hold their size because they are replaced elements, and the spike
+showed what happens otherwise.** Modelled as an empty box with `width: 40px`, a 40-unit rectangle in
+an overflowing flex row shrank to **30.643** under CSS's default `flex-shrink: 1`, because an empty
+box's min-content is 0. Modelled as a measured leaf whose intrinsic size is its geometry — CSS's
+replaced-element behaviour, `<img>`'s — it held **40** exactly, and the text beside it took the
+remainder, 84. So `Rect`, `Ellipse`, `Polygon`, `Star`, `Path`, `Line` and `Boolean` are replaced
+elements: intrinsic size is the stored geometry (bounds for a path, a line and a boolean), and
+`width`/`height` default to `auto`. **A group without `display`, placed as an item, is atomic the
+same way**, its intrinsic size its children's union bounds.
+
+⚠️ **CSS's default `align-items: stretch` stretches a replaced element's cross size too** — observed,
+40 → 58.078 tall. That is faithful and it stays. A UI may create containers with an explicit
+alignment, which is a UI default rather than a semantic deviation; a later reader "fixing" the stretch
+in the engine would be the deviation.
+
+**Text works through a measure function, and has two gaps, both in `ondin-core`.** The function is
+built on `TextSizing::Auto` for max-content and `TextSizing::AutoHeight(w)` for a definite width.
+🚨 **Core has no min-content query, and taffy asks for one** — observed. `AutoHeight(1.0)` on *"Hello
+layout world"* returns a box **1.000 × 58.078**: it wraps per word and reports the box's width, not
+the widest word's, which is **45.148**. parley 0.11 has `Layout::calculate_content_widths() ->
+ContentWidths { min, max }`, so what is owed is a core entry point in the manner of
+`text::content_widths` that applies core's own box rules, rather than parley's bare answer. **And
+shaping repeats**: 16 `text::measure` calls per text leaf per full compute, at about **0.017 ms** each,
+which is D867's 29.2 ms for 100 cards. A memo keyed by wrap width is owed; `Resolved`'s text map holds
+one layout per node, so it is not that memo as it stands.
+
+*(Decided 2026-09-23 by the maintainer; **not built**. Measured in D867's spike. ⚠️ **Open**: how
+`TextSizing`'s three states map onto `width`/`height`/`white-space` inside a layout (D868). §5.3c)*
+
+**D873 — Used values would come back from taffy's f32 quantized to 1/64 px. *Proposed 2026-09-23; not
+decided, not built.*** **f32 is accurate enough; its conversion to f64 is not clean.** taffy computes
+in f32. A flex row with grows 1:2:3, padding 13.7 and gap 7.3, compared with the exact f64 answer, is
+off by at worst **0.000005** at 400 wide, **0.000012** at 1920, **0.000195** at 10,000, **0.0047** at
+100,000 and **0.044** at 1,000,000 — always under one f32 ulp. Layout locations are parent-relative,
+so canvas coordinates, where this project's large numbers live, never enter. **But f32 → f64 leaks
+noise digits**: `7.3f32 as f64` is `7.300000190734863`, and that would reach the inspector's fields and
+every export writer — §5.3's mitre-ratio bullet refuses the same thing at a smaller scale, converting
+at the panel edge rather than writing `3.9998` into files.
+
+**The proposal is to quantize used values to 1/64 px** on the way back to f64 — the unit Chromium's
+layout engine uses (`LayoutUnit`), so it is faithful to CSS as browsers compute it rather than a tidy
+number of this project's choosing. ⚠️ **It hides f32's noise and not f32's error, and the table above
+says where those part**: 1/64 is 0.015625, so at 100,000 wide the worst error is under a third of a
+unit, and at 1,000,000 it is **0.044**, nearly three — a quantized value there is a clean number that
+is still wrong by the f32 error. Whoever decides the unit should decide it knowing that.
+
+*(Proposed 2026-09-23 in the spike's write-up; **not decided and not built**. The brief that
+recorded this cluster carried it as *"proposed rule"*, and this entry does not promote it — the
+maintainer's word on the unit is what turns *Proposed* into *Decided*. §5.3c names it as proposed)*
 
 **D386 — The chrome's hairline was resolved against the wrong ground, and its rhythm was seven
 numbers. *Fixed and tested 2026-08-29; the outline is reviewed and accepted.*** Two audits in one

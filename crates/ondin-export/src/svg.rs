@@ -232,7 +232,7 @@ struct Defs {
     /// **Insertion-ordered**, which [`Defs::emit`] depends on: a `<defs>` block
     /// whose contents reshuffled between two exports of one document would break
     /// invariant 9's byte-stability and every golden in §11.
-    entries: Vec<(String, String)>,
+    entries: Vec<(DefKey, String)>,
     /// The same ids again as a set, so [`Defs::add`] and [`Defs::has`] are O(1)
     /// (§15 D593, `[A4-L4-02]`).
     ///
@@ -255,11 +255,63 @@ struct Defs {
     /// **`std::collections::HashSet` rather than `FxHashSet`**: this crate does
     /// not depend on `rustc_hash` and §3's dependency rules are not worth a hash
     /// function here — the win is O(D) against O(D²), not a constant factor.
-    seen: std::collections::HashSet<String>,
+    seen: std::collections::HashSet<DefKey>,
+}
+
+/// A def's id, as `Defs` keeps it: a `String` whose **equality is counted in
+/// tests** (§15 D854, `[X8-L6-01]`).
+///
+/// 🚨 **This is what the release gate measures now, instead of the clock.** D593's
+/// regression was `add` scanning `entries` for a match — Θ(D²) id comparisons —
+/// and the test that guarded it timed two exports and compared the ratio. A ratio
+/// of two wall-clock measurements is a measurement of the machine as well as of
+/// the code: under load it failed **13 runs in 60**, statistically inseparable
+/// from the version §15 D829 had replaced, and its failure message diagnosed a
+/// quadratic regression from wall-clock alone. **The maintainer ruled to count
+/// rather than time** (2026-09-23). A comparison count is exact, the same on every
+/// machine, and says *what* grew: a set compares a handful of ids per insert, a
+/// scan compares every id already there.
+///
+/// ⚠️ **Its blind spot, stated**: a regression spelled on the inner `String` —
+/// `e.0 == id.0` rather than `e == id` — compares uncounted. The newtype is what
+/// makes the natural spelling the counted one, which is as much as a count
+/// placed in the code under test can do.
+#[derive(Clone, Eq)]
+struct DefKey(String);
+
+/// Written out beside `PartialEq` rather than derived, so the two cannot come to
+/// disagree — and hashing the inner `String` exactly as `str` does is what makes
+/// the `Borrow<str>` lookup in [`Defs::has`] sound.
+impl std::hash::Hash for DefKey {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
+
+impl PartialEq for DefKey {
+    fn eq(&self, other: &Self) -> bool {
+        #[cfg(test)]
+        DEF_KEY_COMPARISONS.with(|c| c.set(c.get() + 1));
+        self.0 == other.0
+    }
+}
+
+impl std::borrow::Borrow<str> for DefKey {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many times two `DefKey`s have been compared on this thread — see
+    /// `DefKey`. Plain backticks: this item is `cfg(test)` (§15 D319).
+    static DEF_KEY_COMPARISONS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 impl Defs {
     fn add(&mut self, id: String, body: String) {
+        let id = DefKey(id);
         if self.seen.insert(id.clone()) {
             self.entries.push((id, body));
         }
@@ -2897,5 +2949,97 @@ fn brush_color(brush: &Brush) -> Color {
     match brush {
         Brush::Solid(c) => *c,
         _ => Color::from_rgba8(128, 128, 128, 255),
+    }
+}
+
+#[cfg(test)]
+mod def_count_tests {
+    //! **Collecting defs compares ids linearly in their count — counted, not
+    //! timed** (§15 D593, D854).
+    use super::*;
+
+    /// `n` rects, each with its own linear gradient fill: `n` defs.
+    fn gradients(n: usize) -> (Document, Resolved) {
+        use ondin_core::kurbo::{Point, Size};
+        use ondin_core::peniko::Gradient;
+        use ondin_core::{Fill, IdSource, NodeKind, Operation, Transaction};
+        let mut ids = IdSource::new(0xDEF5);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let mut ops = Vec::with_capacity(n * 2);
+        for i in 0..n {
+            let id = ids.mint();
+            ops.push(Operation::CreateNode {
+                id,
+                parent: root,
+                index: i,
+                kind: NodeKind::Rect {
+                    size: Size::new(10.0, 10.0),
+                    corner_radii: Default::default(),
+                },
+                transform: None,
+                name: None,
+            });
+            let g =
+                Gradient::new_linear(Point::new(0.0, 0.0), Point::new(10.0, 10.0)).with_stops([
+                    (0.0_f32, Color::from_rgba8(255, 0, 0, 255)),
+                    (1.0_f32, Color::from_rgba8((i % 256) as u8, 0, 255, 255)),
+                ]);
+            ops.push(Operation::SetFills {
+                id,
+                fills: vec![Fill {
+                    brush: Brush::Gradient(g.into()),
+                    visible: true,
+                }],
+            });
+        }
+        doc.apply(&Transaction(ops)).expect("the fixture");
+        let res = Resolved::rebuild(&doc);
+        (doc, res)
+    }
+
+    /// **An export of D defs compares fewer than D ids**, where the quadratic
+    /// version §15 D593 removed compares about D²/2 (§15 D854, `[X8-L6-01]`,
+    /// `[X8-L2-01]`, `[R2-L6-04]`).
+    ///
+    /// 🚨 **This replaces `collecting_defs_does_not_grow_with_the_square_of_their_count`
+    /// in `tests/svg.rs`**, which timed two exports and bounded their ratio — the
+    /// once-a-session release gate's one flake. §15 D705 and D829 each repaired its
+    /// *sampling* (best of three, then fifteen interleaved rounds) and neither held:
+    /// under load it failed 13 runs in 60 against 6 in 60 for the version it had
+    /// replaced, and its message diagnosed a regression from absolute wall-clock,
+    /// the one thing both entries said it must not measure. The maintainer ruled to
+    /// count instead. The count is exact, so the test has no load to be wrong under
+    /// and its message can say what grew.
+    ///
+    /// **The fixture assertion comes first**: an export that emitted no defs would
+    /// compare nothing at all.
+    ///
+    /// **Measured**: the set compares **202** times over 2,000 defs — the hash
+    /// table's tag collisions, and not a fixed number, since `RandomState` seeds
+    /// each run — and the bound of 2,000 sits ten times above it.
+    ///
+    /// ⚠️ **Flip-check, run**: `Defs::add` put back to the linear scan
+    /// (`if !self.entries.iter().any(|(e, _)| *e == id)`) fails with
+    /// **1,999,190** comparisons, a thousand times the bound.
+    #[test]
+    fn collecting_defs_compares_fewer_ids_than_there_are_defs() {
+        const N: usize = 2_000;
+        let (doc, res) = gradients(N);
+        DEF_KEY_COMPARISONS.with(|c| c.set(0));
+        let out = svg(&doc, &res, None);
+        let compared = DEF_KEY_COMPARISONS.with(std::cell::Cell::get);
+        assert_eq!(
+            out.matches("<linearGradient").count(),
+            N,
+            "the fixture: every rect must earn a def"
+        );
+        assert!(
+            compared < N as u64,
+            "collecting {N} defs compared ids {compared} times — a set compares a \
+             handful per insert and a scan compares every id already collected, so \
+             a count near N²/2 = {} is the square coming back",
+            (N * N / 2)
+        );
     }
 }

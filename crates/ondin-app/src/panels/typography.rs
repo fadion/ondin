@@ -1491,6 +1491,9 @@ impl OndinApp {
         {
             self.type_menu = None;
         }
+        // Heard: the router may spend next frame's `Escape` on this popover
+        // (§15 D847 — see `OndinApp::popover_heard`).
+        self.popover_heard = true;
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.type_menu = None;
         }

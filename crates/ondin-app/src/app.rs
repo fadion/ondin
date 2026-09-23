@@ -684,6 +684,29 @@ pub struct OndinApp {
     /// the key already has everywhere — *drop what has the keyboard* — and
     /// narrowing it would need a widget kind egui does not report.
     pub(crate) chrome_focus: bool,
+    /// Whether an **open** popover's own `Escape` handler ran this frame —
+    /// written by the handler, read (and cleared) at the top of the next frame by
+    /// the key router (§15 D847, `[X6-L1-01]`).
+    ///
+    /// 🚨 **The gate used to read the popover's flag, and a flag is not a
+    /// popover.** [`Self::a_popover_owns_escape`] reads five plain fields, and
+    /// every handler that clears one sits in a panel that can be skipped:
+    /// `type_menu_popup` only for a text selection, the stroke and effect
+    /// popovers inside their rows' loops, the Export card's inside the card —
+    /// and all five behind `if !self.present`. So a Type popover left open while
+    /// the user selected a rect, or while they entered present mode, **swallowed
+    /// `Escape` for the rest of the session** with nothing on screen to explain
+    /// it — in present mode the one key the mode's own toast names as the way
+    /// out. §15 D801 met this exact state as a *fixture* hazard (*"a popover that
+    /// nothing is drawing answers every key the same way, which is
+    /// indistinguishable from ignoring them"*) and never asked it of production.
+    ///
+    /// **One frame late, which is `chrome_focus`'s shape and for its reason**:
+    /// the router runs at the top of the frame and the handlers run inside the
+    /// panels, so the only thing the router can know is what happened last time.
+    /// A popover drawn last frame is drawn this one; a flag with no handler behind
+    /// it last frame has nothing behind it now.
+    pub(crate) popover_heard: bool,
     /// In-progress name edit (node id + buffer), so typing persists across
     /// frames and commits once, on defocus.
     pub(crate) name_edit: Option<(NodeId, String)>,
@@ -2157,6 +2180,7 @@ impl OndinApp {
             library_settings: None,
             stranded: None,
             chrome_focus: false,
+            popover_heard: false,
         }
     }
 }
@@ -2350,6 +2374,9 @@ impl eframe::App for OndinApp {
         // using. Which row an arrow lands on is not known until the menu is built
         // at the bottom of the frame, so the press travels there as a value.
         let mut nav = None;
+        // Last frame's answer, taken so this frame's handlers write a fresh one —
+        // see the field.
+        let popover_heard = std::mem::take(&mut self.popover_heard);
         if self.context_menu.is_some() {
             if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
                 self.context_menu = None;
@@ -2393,7 +2420,10 @@ impl eframe::App for OndinApp {
             // card by name, with a note that `OndinApp::ui` draws that card and
             // `dashboard.rs` knows nothing about it (D383). The same question was
             // answered on one screen and not the other.
-        } else if self.a_popover_owns_escape() && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        } else if popover_heard
+            && self.a_popover_owns_escape()
+            && ctx.input(|i| i.key_pressed(egui::Key::Escape))
+        {
             // **The press is spent on the popover and must not also pay out a
             // rung** (§15 D801, D527's rule). Nothing is done here on purpose:
             // the three inspector popovers close themselves further down the
@@ -2404,7 +2434,24 @@ impl eframe::App for OndinApp {
             //
             // ⚠️ **It gates `Escape` alone and lets every other key through**,
             // unlike the modal arm above. See `a_popover_owns_escape`.
+            //
+            // 🚨 **And only a popover that was heard last frame** (§15 D847,
+            // `[X6-L1-01]`). A flag whose handler did not run is a popover
+            // nobody can see; see `popover_heard`.
         } else {
+            // **A dead flag is cleared rather than left to swallow the next
+            // press** — nothing is drawing it, so nothing else ever would, and a
+            // Type popover left over from a text selection would otherwise pop
+            // back up the next time one is made. The press then pays out its rung
+            // like any other: the user saw no popover to spend it on.
+            if self.a_popover_owns_escape() && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                self.type_menu = None;
+                self.stroke_menu = None;
+                self.stroke_dash_text = None;
+                self.effect_menu = None;
+                self.export_menu = false;
+                self.export_row_open = None;
+            }
             for action in input::resolve(&ctx, self.mode, self.prefs.nudge) {
                 self.dispatch(&ctx, action);
             }
@@ -16698,6 +16745,11 @@ mod context_menu_rule_tests {
     ///   two halves are independent** — one arm stops the rung, one block closes
     ///   the popover — which is the argument for asserting both per case and not
     ///   one at the end.
+    /// - **The arm swallowing every key, not only `Escape`** (§15 D847,
+    ///   `[X6-L6-02]`, added with the tool-letter half of each case): red on
+    ///   `stroke_menu`'s *"a tool letter still reaches the keymap"*, `Rect`
+    ///   against `Ellipse`. Before that half existed this flip passed the whole
+    ///   suite.
     #[test]
     fn escape_over_a_popover_closes_it_and_pays_out_no_rung() {
         use crate::tools::Tool;
@@ -16727,6 +16779,21 @@ mod context_menu_rule_tests {
                 Tool::Rect,
                 "{name}: and the press is spent on it — the tool is the rung \
                  underneath and one press does not pay out two"
+            );
+
+            // 🚨 **The other half of the arm: every key that is not `Escape`
+            // goes through** (§15 D847, `[X6-L6-02]`). A version that swallowed
+            // *every* key while a popover was open passed this whole suite, and
+            // under it `Delete`, the arrows, every tool letter and every chord
+            // were dead.
+            open(&mut app);
+            whole_frame(ctx, &mut app, Vec::new());
+            assert!(up(&app), "{name}: reopened for the second half");
+            whole_frame(ctx, &mut app, vec![key(egui::Key::E)]);
+            assert_eq!(
+                app.tool,
+                Tool::Ellipse,
+                "{name}: a tool letter still reaches the keymap over an open popover"
             );
         };
 
@@ -16782,6 +16849,69 @@ mod context_menu_rule_tests {
             "with nothing open the press reaches the ladder and drops the tool — \
              without this the five cases above pass against an `escape` that has \
              stopped working entirely"
+        );
+    }
+
+    /// **A popover flag nothing is drawing does not own `Escape`** (§15 D847,
+    /// `[X6-L1-01]`) — the two cases the finding reproduced, both through
+    /// `whole_frame`.
+    ///
+    /// *Case B, the ordinary one*: the Type popover is open over a text layer
+    /// and the selection moves off it. `inspector_type` runs only for a text
+    /// selection, so nothing draws the popover and nothing can clear its flag —
+    /// and the flag alone gated `Escape`, so the whole ladder was dead, with
+    /// nothing on screen to say why. **Here the press pays out its rung** (the
+    /// tool drops to Select) **and the dead flag goes**, so it cannot pop back up
+    /// on the next text selection.
+    ///
+    /// *Case A, present mode*: entering it clears `open_menu` and nothing else,
+    /// and the inspector is behind `if !self.present`. The toast says *"Escape to
+    /// leave"*, and `Escape` was the one key the stale flag swallowed.
+    ///
+    /// ⚠️ **Flip-checks, run**: dropping `popover_heard` from the gate — the
+    /// shipped predicate — fails case B at *"the press reaches the ladder"*,
+    /// with `Rect` against `Select`; keeping it and dropping the dead-flag
+    /// clearing fails at *"and the dead flag is cleared"*. **Case A has no flip
+    /// of its own** — case B's failure stops the test first — so its teeth are
+    /// the same predicate's, argued rather than observed.
+    #[test]
+    fn a_popover_flag_nothing_draws_does_not_own_escape() {
+        use crate::input::ViewSwitch;
+        use crate::tools::Tool;
+        let ctx = egui::Context::default();
+
+        // Case B.
+        let mut app = probe_text_app(&ctx);
+        app.tool = Tool::Rect;
+        whole_frame(&ctx, &mut app, Vec::new());
+        app.type_menu = Some(crate::app::TypeTab::Character);
+        whole_frame(&ctx, &mut app, Vec::new());
+        assert!(app.type_menu.is_some(), "the popover is up over the text");
+        app.session.selection.clear();
+        whole_frame(&ctx, &mut app, Vec::new());
+        assert!(
+            app.type_menu.is_some(),
+            "the fixture reached the state: the flag survives with nothing drawing it"
+        );
+        whole_frame(&ctx, &mut app, vec![key(egui::Key::Escape)]);
+        assert_eq!(app.tool, Tool::Select, "the press reaches the ladder");
+        assert!(app.type_menu.is_none(), "and the dead flag is cleared");
+
+        // Case A.
+        let mut app = probe_text_app(&ctx);
+        whole_frame(&ctx, &mut app, Vec::new());
+        app.type_menu = Some(crate::app::TypeTab::Character);
+        whole_frame(&ctx, &mut app, Vec::new());
+        app.set_view_switch(ViewSwitch::Present, true);
+        whole_frame(&ctx, &mut app, Vec::new());
+        assert!(
+            app.present && app.type_menu.is_some(),
+            "the fixture reached the state: presenting, with the flag still set"
+        );
+        whole_frame(&ctx, &mut app, vec![key(egui::Key::Escape)]);
+        assert!(
+            !app.present,
+            "one Escape leaves present mode, as its toast says"
         );
     }
 }

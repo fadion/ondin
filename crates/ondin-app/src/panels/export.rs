@@ -1520,6 +1520,13 @@ impl OndinApp {
         // inspector popovers — `OndinApp::a_popover_owns_escape` is what stops the
         // ladder seeing it, so consuming here would make the same claim twice and
         // in the place that is harder to find.
+        //
+        // Heard only when one of the two is open: this block runs whenever the
+        // card does, and a card with nothing open must not vouch for a Type
+        // popover nobody is drawing (§15 D847, `OndinApp::popover_heard`).
+        if self.export_menu || self.export_row_open.is_some() {
+            self.popover_heard = true;
+        }
         if ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {
             self.export_menu = false;
             self.export_row_open = None;

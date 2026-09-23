@@ -6564,7 +6564,8 @@ impl OndinApp {
         // answer to the same key and egui dismisses the list itself, so one press
         // clears both — which is what Escape means everywhere else in the app
         // (`input::escape`'s ladder) rather than a state to unwind one layer at a
-        // time.
+        // time. Heard, for the router's sake (§15 D847, `OndinApp::popover_heard`).
+        self.popover_heard = true;
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.stroke_menu = None;
             self.stroke_dash_text = None;
@@ -10041,6 +10042,8 @@ impl OndinApp {
         // answer to the same key and egui dismisses the list itself, so one press
         // clears both — which is what Escape means everywhere else in the app
         // (`input::escape`'s ladder) rather than a state to unwind a layer at a time.
+        // Heard, for the router's sake (§15 D847, `OndinApp::popover_heard`).
+        self.popover_heard = true;
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.effect_menu = None;
         }

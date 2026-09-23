@@ -39,15 +39,16 @@ which is this file's own §9.5 lesson: **check the section before believing the 
 | *Now · Text* | **Nothing open as of 2026-09-22**, the four deferred features having been ruled on that day (§15 D825): tab stops, columns and widow/orphan control are **decided non-goals** in §0, and justify-all is in *Later · Parked decisions*, **blocked upstream** — which is the split the entry exists for, since its trigger is a patch to parley and not a ruling here. ⚠️ **What is left is not an item**: the paragraph scope's absence from the MCP snapshot is parked with MCP, and §15 D171's watch-note is a thing to read when a symptom appears. 🚨 **Do not put a count back on this row** — *a count of items is what goes wrong when one of them is a note*, which is this table's own lesson from the *Inspector* row and has now bitten this section's opener twice. *The text below is the row as it stood before.* Justify-all, tab stops, columns, widow/orphan — **four** now, and **not one of them is short of a dependency**; hyphenation was the last to hold that claim, lost it on 2026-09-01 and left this row the same day for §0 as a decided non-goal (§15 D399), and **text-on-path left it hours later by being built** (§15 D405). Plus the paragraph scope's absence from the MCP snapshot, parked with MCP — to which D405 adds `on_path` itself. ⚠️ **And one line to suspect if the canvas ever looks a frame stale during a text session** (§15 D171), which this row had never named. **Whether a chord stops where its field stops was ruled on 2026-09-19** (§15 D817) — it does, and the bound is at the **arm** and deliberately not at `TextStyle::set`, these caps being on the controls rather than on the model. |
 | *Now · Inspector* | **Nothing open as of 2026-09-19**, `char_valve`'s third arm having been ruled on and **deleted** that day (§15 D812) — on a *read* of the five unmeasured call sites rather than a third measurement, all seven being engagement-bearing with both `DragValue` helpers opted out of egui's clamp (§15 D425, D552), so the arm had no live user at all. *The row below is the history of a count that was wrong in three directions.* **One item** as of 2026-09-19, the hex field's routing and the menu-row border having left this row: `[S14.4-L1-04]`'s open half was answered with the **sentence** it asked for rather than with the valve (§15 D808) — `parse_hex` accepts three digits, so a half-typed hex is a real colour and there is nothing a valve could preview. 🚨 **The item's own premise was false while it stood** — it read *"there is nothing measured left to fix"*, and `Escape` was committing a typed colour at that field and at three others beside it, nobody having pressed the other key at any of them. What is left: `char_valve`'s third arm, **which as of 2026-09-19 is a maintainer question and no longer a test** — §15 D802 wrote the test D523 asked for and found the picker's raw sensed regions do not reach the arm at all, and §15 D803 the same day found the one thing that *does* reach it: an egui clamp rewrite `ui::value_field_f64` already opts out of, which makes deleting the arm a second defence against `[S6.2-L1-01]` rather than tidying, so what is open is that ruling. ⚠️ **The menu-row border was never work, and this row counted it as an item for ten days**: this row gained it on 2026-09-09 by being corrected against the section, and the section's bullet had been a standing trap rather than an item since the day it was written — everything in it was in `ui::menu_rows`' and `ui::MENU_ROW_H`'s own docs already, and the one sentence that was not is a paragraph on `ui::MENU_ITEM_H` now (§15 D811). *A count of items is what goes wrong when one of them is a note*, which is this row's own §9.5 lesson from a third direction. 🚨 **This row was stale in *two* directions on 2026-09-09 and was corrected by `arch-scribe` reading it against the section.** It named the multi Transform card's **angle** fields, which §15 **D628** closed and struck from the section that same day, and it did not name the menu-row border, which had been the section's third bullet all along — so *"every one is a remainder of a landed fix"* and *"all three are valve remainders"* were both false. **A row that summarises a section is a second copy of it**, and this is §9.5's lesson at the table rather than in a bullet. |
 | *Now · Path editing* | **Nothing open as of 2026-09-22.** The one item — whole-path geometry patches — **moved to *Later · Parked decisions*** that day: it is non-blocking with a stated trigger (revisited *with* MCP, which is parked), which is what *Later* is for by this file's own table above. ⚠️ **That honours §15 D123's closing note rather than breaking it** — the note asks for it to stay *"in the todo as a decision rather than a gap"*, and it stays in this file; what changes is that it stops sitting under a heading meaning *open work on live code*. ⚠️ **The `retain_valid`/`subpath_lengths` pair left this row on 2026-09-19**, ruled to the narrow `#[allow(dead_code)]` with the no-effect call removed (§15 D637, *Resolved*) — it had been here since 2026-09-09. |
-| *Now · Files, library and storage* | **Nothing open as of 2026-09-19** — the last two closed that day: the cover render moved onto **a worker of its own** rather than onto `Writer`'s FIFO queue, `FRAME_BUDGET` deleted with what it bounded (§15 D820), and **rollback was refused outright** and is a §0 non-goal, the retry being the recovery (§15 D814). 🚨 **The threading then flaked a *dashboard* test 2 runs in 20**, found by running the filter twenty times after six clean runs had said nothing. *The text below is the row as it stood that morning.* **Two**, as of 2026-09-19: a dashboard cover rendered synchronously on the UI thread, which needs a thread, and **rollback** after a partly-failed migration, which needs a ruling. **Three left this row that day.** The non-Unicode filename was **reproduced** — a lone UTF-16 surrogate, which NTFS accepts and `to_str` refuses — and the migration now carries such a file by its `OsStr` name (§15 D809); the per-machine index has an injection point, and it is a `cfg!` rather than any of the four answers the bullet proposed (§15 D807); and the partly-failed migration got its list in the modal and a *Try again* button, leaving only the third of its three asks (§15 D810). ⚠️ **This row said *"Three, all from the codebase review"* while the section held four**, the migration bullet never having been named in it — so it was short by one from the day it was written and the arithmetic in it was never a count of anything. ⚠️ **This row did not exist until 2026-09-09** and the section had held open work since 2026-09-06; the *"nothing open"* line below was the half that got corrected first, and a missing row is the same failure with nothing to contradict. |
+| *Now · Files, library and storage* | **One item as of 2026-09-23**: the cover cache's lifecycle — no texture is ever evicted, `drain` runs only when a card asks, and the project mosaic is ungated. Found while closing §15 D862; no behaviour is wrong, it is memory and wasted repaints. *The text below is the row as it stood before.* **Nothing open as of 2026-09-19** — the last two closed that day: the cover render moved onto **a worker of its own** rather than onto `Writer`'s FIFO queue, `FRAME_BUDGET` deleted with what it bounded (§15 D820), and **rollback was refused outright** and is a §0 non-goal, the retry being the recovery (§15 D814). 🚨 **The threading then flaked a *dashboard* test 2 runs in 20**, found by running the filter twenty times after six clean runs had said nothing. *The text below is the row as it stood that morning.* **Two**, as of 2026-09-19: a dashboard cover rendered synchronously on the UI thread, which needs a thread, and **rollback** after a partly-failed migration, which needs a ruling. **Three left this row that day.** The non-Unicode filename was **reproduced** — a lone UTF-16 surrogate, which NTFS accepts and `to_str` refuses — and the migration now carries such a file by its `OsStr` name (§15 D809); the per-machine index has an injection point, and it is a `cfg!` rather than any of the four answers the bullet proposed (§15 D807); and the partly-failed migration got its list in the modal and a *Try again* button, leaving only the third of its three asks (§15 D810). ⚠️ **This row said *"Three, all from the codebase review"* while the section held four**, the migration bullet never having been named in it — so it was short by one from the day it was written and the arithmetic in it was never a count of anything. ⚠️ **This row did not exist until 2026-09-09** and the section had held open work since 2026-09-06; the *"nothing open"* line below was the half that got corrected first, and a missing row is the same failure with nothing to contradict. |
 | *Now · Text alignment* | **Nothing open as of 2026-09-22.** Side bearings / optical margin alignment moved to *Later · Parked decisions*, undecided — it had been filed `Later:` inside a `Now` section since the section was written, which is the prefix table broken from the inside — **and was built hours later the same day** (§15 D830): both edges, `ParagraphStyle::optical_margins`, off by default, one adjustment to the line's geometry that no arm of reads `align`. ⚠️ **The bullet's own example was backwards the whole time it stood** — it blamed `H` for having *almost no* left bearing, and `H` has the largest of the capitals measured. ⚠️ *This row said "Side bearings / optical margin alignment, marked **Later**" and was perfectly accurate for weeks — it described the bullet exactly, including the contradiction, and that is why nobody acted on it.* What is left in the section is one standing rule: don't use ink bounds for alignment — **which D830 does not break, and which now says it is about the *datum***. |
 | *Later* | The command palette and cheatsheet; the parked decisions; post-v1 (MCP, Command Mode, multiplayer). |
 
 **Sections with nothing open**: *Doc drift*, *Now · Images*, *Now · Inspector*, *Now · Keyboard*,
-*Now · Files, library and storage*, *Now · Canvas and interaction*, *Now · SVG import*, *Now · Text*,
-*Now · Path editing*, *Now · Text alignment and measurement*. **That is every `Now` section there
-is** — the first time this line has been able to say so, and the reason it is said as a property of
-the set rather than as a count of it.
+*Now · Canvas and interaction*, *Now · SVG import*, *Now · Text*, *Now · Path editing*, *Now · Text
+alignment and measurement*. **That is every `Now` section but one**: *Now · Files, library and
+storage* came off on 2026-09-23 with the cover cache's lifecycle (§15 D862's neighbour, not its
+subject). From 2026-09-22 until then this line could say *every* `Now` section. It is still said
+as a property of the set rather than as a count.
 🚨 **Four joined on 2026-09-22 and four on 2026-09-19, and the 09-22 four are the two the previous
 batch expected to clear and did not, plus two more.** Canvas by one build and one test (§15 D823,
 D824), SVG import by a **ruling** (D826), Text by a ruling that also **split** an item out to *Later*
@@ -1262,10 +1263,35 @@ the last untested decision in the path-editing work and is now pinned — §15 D
 
 ## Now · Files, library and storage
 
-**Nothing is open here as of 2026-09-19**, the last two having closed that day: the synchronous
-cover render was threaded (§15 D820) and rollback was refused outright (§15 D814, now a §0
-non-goal). *What follows is the record of how each item closed — read it for the traps, not as a
-queue.* The paragraph below is kept for what it says about counting.
+**One thing is open here as of 2026-09-23: the cover cache's lifecycle**, the bullet directly
+below, left behind by §15 D862 closing the release review's last finding. Before it, nothing had
+been open since 2026-09-19, the last two having closed that day: the synchronous cover render was
+threaded (§15 D820) and rollback was refused outright (§15 D814, now a §0 non-goal). *Everything
+after the bullet is the record of how each item closed — read it for the traps, not as a queue.*
+The paragraph below it is kept for what it says about counting.
+
+- **The cover cache keeps every texture it makes, and only a card asking for a cover empties the
+  worker's answers.** Opened 2026-09-23, found while closing `[X1.2-L4-02]` (§15 D862) and not part
+  of that finding. Three gaps in `library::cover::Covers`, largest first:
+  1. **Nothing evicts a texture.** `Covers::covers` holds every `Ready` cover for the session;
+     `clear` — on a base-folder change — is the only thing that lets go. D862 made the set grow with
+     what has been scrolled past rather than with the whole library, which bounds a first visit and
+     not a long one: scrolling an entire library to the bottom still ends with every cover resident.
+     At `COVER_MAX_PX` = 400 a cover is up to ~640 KB of RGBA, so ~640 MB at 1,000 large covers —
+     **arithmetic, not a measurement.** The disk cache makes a re-fetch cheap, which is what makes
+     evicting safe: drop a texture whose card has been off screen for a while, or cap the count.
+  2. **`Covers::drain` runs only inside `get`**, and `get` is only called by a card that is on
+     screen in the grid, or by the project mosaic. The list view asks for no covers at all, so while
+     it is up finished answers sit in the channel. The worker's `request_repaint` redraws a frame
+     that uploads nothing, and a document the loader refuses gets its *UNREADABLE* chip in the list
+     only once something calls `get` again — the grid, or a project card's mosaic. The shape of the fix is one `drain` per dashboard pass rather
+     than one per card.
+  3. **The project mosaic's `covers.get` is not gated** by D862 (`panels::dashboard::project_mosaic`).
+     It asks for up to `MOSAIC_MAX` = 5 covers per project card, so it grows with projects rather
+     than documents. Small, and the same one-line `is_rect_visible` if it is ever worth it.
+
+  **No defect in behaviour is reported against any of the three**: nothing draws wrong. What is
+  open is memory and wasted repaints, and at the library sizes measured for D862 neither shows.
 
 **Four things were open here, and all four came out of the codebase review or out of closing one of
 its findings** — the last three on 2026-09-09, when §15 D613 struck one item while §15 D619 and §15
@@ -1656,6 +1682,31 @@ than an oversight. None blocks v1.
   a nominal point snapped to whole device pixels since 2026-09-10 (§15 D721), which is a **different
   question** from this one — that was a width disagreeing with its own record, this is a base nobody
   has ruled on.
+- **The Type panel's four new `%` caps hold a number nobody chose for them.** Opened 2026-09-23 by
+  §15 D861, which gave paragraph spacing, the indents and a decoration's thickness and offset their own
+  constants — `MAX_PARAGRAPH_SPACING_PCT`, `MAX_INDENT_PCT`, `MAX_DECORATION_THICKNESS_PCT`,
+  `MAX_DECORATION_OFFSET_PCT` in `panels::typography` — where all six fields had been capped by
+  tracking's `MAX_TRACKING_PCT`. Each is **200.0, inherited on the day of the split** so that the
+  refactor moved no field's range. **No defect is reported against any of them**; what is open is a
+  decision per quantity, and each answer is one constant — the `Bounds` over it, and so both unit
+  faces, follow.
+- **The dashboard draws a widget for every document on every frame, and virtualising it is deferred
+  rather than declined.** Opened 2026-09-23 by §15 D862 (`[X1.2-L4-02]`), which measured it and which
+  the maintainer accepted for v1: `panels::dashboard`'s `file_grid` and `file_list` sit in a plain
+  `ScrollArea::vertical()`, and in release that is ~4 ms a frame at 1,000 documents — linear, ~2.8 µs
+  a card and ~3.8 µs a row — paid only on frames that repaint, and nearing the whole frame around
+  3,000. 🚨 **It is not a one-line `show_rows`**, because three things depend on a card being drawn:
+  (a) the inline rename's `TextEdit` lives on the card (`rename_field`, committing on `lost_focus`),
+  so a card scrolled out of the drawn range would stop drawing it and the rename could neither commit
+  nor cancel while `rename_entry` stays set; (b) the ⋮ menu hangs off the card (`file_menu_button` →
+  `file_menu_popup`), and would vanish while `menu_for` stays set and goes on blocking the keyboard
+  through `library_menu_open`; (c) `follow_selection` scrolls to the *drawn* card's rect, so the arrows
+  would need the row geometry computed instead. Two smaller per-frame costs belong with it:
+  `visible_entries` clones and sorts the list every frame (~0.2 ms, about 7%, at 1,000), and every list
+  row formats its *Created* date through `clock::date_label`, which is two Win32 time-zone calls
+  (`clock::local_offset`) per row per frame. ⚠️ **The cover half of the finding is not open** — D862
+  gated `Covers::get` on the card being on screen. **No trigger was ruled**; the measurement puts
+  the drawing alone near a whole frame at about 3,000 documents.
 
 ---
 

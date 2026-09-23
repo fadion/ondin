@@ -4548,8 +4548,9 @@ no value moves**, and the divisor stays `k²` — the transparent-off-edge rule,
 **Both of those numbers are capped, because a document is allowed to hold a deviation no stage
 downstream of it can survive** (`effect::MAX_SHADOW_BLOCK` = 4096, `effect::MAX_KERNEL_RADIUS` = 512,
 §15 D454). `<feDropShadow stdDeviation="1e30">` imports with nothing reported, saves, and reloads —
-and the dashboard rasterizes every document in the base folder, so one such file is a hang at launch
-rather than a bad drawing somebody asked for. ⚠️ **Since §15 D820 that hang is on the cover thread
+and the dashboard rasterizes every document whose card it puts on screen — every document in the base
+folder, until §15 D862 — so one such file is a hang at launch rather than a bad drawing somebody asked
+for. ⚠️ **Since §15 D820 that hang is on the cover thread
 rather than in the egui pass, which changes its shape and not the case for the caps**: the window
 comes up, and the one worker is stuck on that document for ever, so every cover queued behind it in
 FIFO order never arrives either. A library that renders no covers past the first bad file is a
@@ -8701,7 +8702,7 @@ though nothing else disagreed** (§15 D636; the sentence read *"this panel does 
 card, so the departure is the numeric fields' and not the panel's).
 `typography::mixed_text` replaces a `DragValue`'s digits with the dash at five call sites
 — the Size field, the list *Level* field, `length_char_field`'s three character lengths,
-`length_field`'s five paragraph ones, and since 2026-09-09 the variable-axis field — and the line
+`length_field`'s four paragraph ones, and since 2026-09-09 the variable-axis field — and the line
 height field carries its own copy of the same formatter, while the inspector's numeric fields spell
 the word. Whether a 74pt field behind a two-letter prefix is *"too small to hold five letters"* is
 the size question D130 leaves to be asked; it has not been asked, and D636 widened the population by
@@ -8739,10 +8740,19 @@ in the other unit, it is a second quantity and wants naming as one.
 
 ⚠️ **The *floor* is the caller's, not the shared function's** (§15 D546). `optional_length_field`
 serves a decoration's thickness and its offset and had one symmetric range for both — chosen for the
-offset, the signed one — so a thickness of `−5 px` was accepted, shown and saved. It takes a `signed`
-flag now, and the model floors the thickness too (§5.4), because the panel is the door a hand-edited
-file does not use. *A range shared by two fields is a claim that the two fields are the same kind of
-quantity.*
+offset, the signed one — so a thickness of `−5 px` was accepted, shown and saved. It takes the field's
+own `Bounds` now — `DECORATION_THICKNESS` from zero, `DECORATION_OFFSET` both ways, the floor being the
+constant's first number rather than the `signed` flag it was until §15 D861 — and the model floors the
+thickness too (§5.4), because the panel is the door a hand-edited file does not use. *A range shared by
+two fields is a claim that the two fields are the same kind of quantity.*
+
+⚠️ **So is a cap, and one quantity's cap bounded six fields until 2026-09-23** (§15 D861).
+`MAX_TRACKING_PCT`, letter spacing's 200%, was spelled by hand as the cap of paragraph spacing, the
+three indents and both decoration fields, so an edit to tracking would have moved all six. Each of
+the six is handed a `Bounds` for its own quantity now — `INDENT` serving the three indents, which are
+one — and `MAX_TRACKING_PCT` is read by tracking alone. ⚠️ **The four new caps all hold
+200%, inherited from tracking on the day of the split and not chosen**; what each should be is open
+(`docs/roadmap.md`, *Later · Parked decisions*).
 
 ⚠️ **Every `Length` field reports on a frame the value changed and again on the frame the drag ends,
 and `optional_length_field` did not until 2026-09-15** (§15 D765). It reported on **every** frame it
@@ -11252,7 +11262,8 @@ where to open, or what a file is called on disk:
   — of a document in `library.entries`, which is also what removes the superseded covers of documents
   that are still here. Nothing in the path and nothing in the key namespaces per library, **so
   changing the base folder throws away the old library's covers and switching back re-renders all of
-  them** — on the cover thread since §15 D820, where it used to be one document per egui pass. That
+  them** as their cards come back on screen — on the cover thread since §15 D820, where it used to be
+  one document per egui pass. That
   is affordable because covers are disposable, and it is stated
   here because it was stated nowhere: a doc comment on `Covers::clear` was claiming the opposite, and
   a rule about the whole cache written on one function is invisible to anyone changing either.
@@ -11267,6 +11278,14 @@ where to open, or what a file is called on disk:
   backlog and joins the render in progress — so no job is still reading a document at its pre-move
   path, where it would fail and cache `Unreadable` under a key with no path in it — id and mtime,
   and a move keeps the mtime (§15 D509).
+  ⚠️ **A cover is asked for only while its card is on screen** (§15 D862). The grid and the list are
+  not virtualised — every card and row is drawn on every frame, measured at ~4 ms a frame for 1,000
+  documents in release and kept for v1 — so an unconditional `Covers::get` in `file_card` handed the
+  worker the whole library on the grid's first frame, repainted at that cost after every answer, and
+  kept every texture until the next base-folder change. Gated on `ui.is_rect_visible`, the rendering
+  and the textures grow with what has been scrolled past; the price is a plain plate on a card seen
+  for the first time, until its cover renders. The list asks for no covers at all, and the project
+  mosaic asks, ungated, for up to `MOSAIC_MAX` per project card.
 
 ⚠️ **A `Project::folder` is a single path component, and until 2026-09-06 only its doc comment said
 so** (`library::project::is_folder_stem`, §15 D420). With `"folder": "../.."` every *New file* into
@@ -11904,7 +11923,10 @@ well-formed JSON that `io::load` refuses, and a synced folder is exactly where o
 already computing for the thumbnail and throwing away; the cache is lazy and **answered off the egui
 pass** (§15 D820, where it used to be lazy and per-pass budgeted), so a document whose cover has not
 come back yet answers *not known to be broken* and the flag is what carries the early passes — a
-window that is now as long as the render takes rather than one pass per document. Until 2026-09-09 `unread` had no reader outside `library/` at all
+window that is now as long as the render takes rather than one pass per document. ⚠️ **And it opens
+only once the card is on screen** (§15 D862): the grid asks for a cover only for a card on screen and
+the list asks for none, so for a document only the loader refuses, the mark reaches what the grid has
+shown and nothing further. Until 2026-09-09 `unread` had no reader outside `library/` at all
 and the card was pixel-identical to a healthy one.
 
 **A `.ondin` dropped on the library is filed in it (§15 D373).** `OndinApp::take_dropped_documents` runs

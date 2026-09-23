@@ -1236,6 +1236,8 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D858** — **The goldens' coverage lists are read off the `match`es they guard, because a hand-kept list could not be forced to grow.** `[X8-L6-04]`. §15 **D658** said a fifth `EffectKind` breaks `goldens.rs`'s compile at `effect_name` — true — and that `the_fixture_holds_one_node_of_every_effect_kind` *"is what then forces the fixture to grow it"*, and `EVERY_KIND`'s doc said the same for `NodeKind`. It could not: the minimum repair of the compile is one new arm, and with the list and the fixture both untouched the assertion compared two hand-kept sets that had both stood still, and passed. ⚠️ **D304 had it right the day the goldens landed** — *"it cannot force the fixture to grow the new node"* — and the comment it cited was later rewritten to claim the opposite. `every_kind()` and `every_effect()` are `arm_names("kind_name")` / `arm_names("effect_name")`, a scan of the test file's own source for each function's `=> "…"` arms, so the arm the compiler demands *is* the entry. *(Fixed and tested 2026-09-23; **Resolved** — test-only. Not the finding's sketch, an exemplar array mapped through `effect_name`, which is itself a hand-kept list no compile error reaches — read, not run. Flip run: a guarded fifth arm `E::Filters(_) if false => "halftone"` red at *"the golden fixture no longer covers every EffectKind"*, naming `halftone`; ⚠️ **the `NodeKind` side was not flipped on its own**. 🚨 ***Fix*: the scan ends a function at `"\n}\n"` and `.gitattributes` covers `tests/goldens/**`, not `goldens.rs`**, so a `core.autocrlf=true` checkout — the clone D304's rule was written for — would panic both tests; loud, and reasoned rather than run. D304 and D658 amended; §11 in two places)*
 - **D859** — **`with_clipboard`'s gate covers the handles this crate opens, and there is a second one.** `[X2-L2-01]`. §15 **D796** said *"every `arboard` handle in the process"* opens under `GATE`, and `with_clipboard`'s doc said so verbatim. `egui-winit` 0.35 depends on `arboard` (`Cargo.lock`) and keeps a long-lived `Clipboard` of its own, which serves `ctx.copy_text` — the route `stamp_clipboard` puts every stand-in on the clipboard by — and is the handle that makes `Event::Paste` fire, and it never passes through the gate. **Tolerated for one reason, and the reason is what to re-check**: both handles are driven from the one UI thread, so the concurrent open D796 measured cannot happen in the app. *(Corrected 2026-09-23; **Keep** — no production line changed; making the sentence literal would change how every copy reaches the clipboard, for a race no user can reach. ⚠️ **That `arboard`'s Windows backend opens the OS clipboard per operation, so a second live handle is inert on one thread too, is read from its source and not measured.** *Revisit if a clipboard read ever moves onto a worker*, which reopens D796's `STATUS_HEAP_CORRUPTION` on a handle the gate does not cover. D796 amended in body and index, D798's account of it and §11's clipboard paragraph with it)*
 - **D860** — **A selector list keeps its readable members, as a browser does, and the finding that said otherwise did not survive one.** `[X7-L1-03]`. The finding read `parse_css`'s per-member split as applying *"half a dropped rule"*, *"every browser"* invalidating a rule one of whose members is invalid — and its example, `.a, rect:hover{fill:#ff0000}`, has no invalid member: `rect:hover` is valid CSS this importer does not read. 🚨 **Measured in Chromium**, in the Browser pane over HTTP from `target/probe`, `getComputedStyle(rect).fill`: `.a, rect:hover` → **`rgb(255, 0, 0)`**, `.a` applied; `.b, rect:::bad` → `rgb(0, 0, 0)`, a syntactically invalid member; `.c, rect:nonsense-pseudo` → `rgb(0, 0, 0)`, an unknown pseudo-class. So the importer already agrees with the browser on the realistic case, and **the sketch — drop the rule if any member is unreadable — would have made them disagree there**: its flip turns the rect black. *(Tested 2026-09-23; **Keep** — no production line changed. ⚠️ **The residue is kept by decision**: a list with a *genuinely invalid* member applies its readable members here and nothing in a browser, and telling invalid from unsupported needs a CSS validator the importer does not have; exporters do not write invalid selectors, and the unread member is still reported. **Test** `svg_in::tests::a_selector_list_keeps_its_readable_members_as_a_browser_does`, the red **and** the report. Beside D831's `1e39`, D832's *"three"* `InsertSubtree` sites and D848's hidden `.ondin` — premises of this review that did not survive checking — with the difference that here the fix would have **created** the divergence it described. D806 carries a line; §7's selector paragraph states the list rule)*
+- **D861** — **Each `Length` field is capped by its own quantity, and tracking's 200% stopped bounding six fields that are not tracking.** `[X4-L3-03]`, pre-existing. The finding named `optional_length_field` alone, as *"the one `Length` field that bypasses `Bounds`"*; **its premise was four fields short** — `MAX_TRACKING_PCT` was the cap of paragraph spacing, the three indents and a decoration's thickness and offset, spelled by hand at `length_field`'s four callers and inside `optional_length_field` behind a `signed: bool`, so an edit to letter spacing's cap would have moved all six (§15 **D425**'s class, at the `%` end). Four `%` constants and four `Bounds` — `PARAGRAPH_SPACING`, `INDENT` (one for three fields, being one quantity), `DECORATION_THICKNESS`, `DECORATION_OFFSET` — and both functions take a `Bounds`, the floor living in the constant and the px face derived through `Bounds::px`. *(Fixed and tested 2026-09-23; **Fixed** — no field's range moved. ⚠️ **The four values are inherited, not decided**: each is 200.0, tracking's number on the day of the split, and choosing them is open in `roadmap.md`'s *Later · Parked decisions*. `both_ends_of_every_length_field_bound_the_same_quantity` reads its ranges off the constants now — its hand-kept list had the thickness **signed**. **Test** `an_unsigned_bound_starts_at_zero_and_a_signed_one_runs_both_ways`; flip run, `DECORATION_THICKNESS` made symmetric, red at its unsigned `assert_eq` with the other 77 tests in `panels::typography` green — nothing else in the panel pinned §15 **D546**'s floor. ⚠️ **It pins the constants, not the call sites.** §9.4's floor paragraph amended; D425, D546 and D718 carry a line; two sentences of the tests' docs corrected)*
+- **D862** — **The dashboard still draws a widget for every document, and asks for a cover only for the ones on screen.** `[X1.2-L4-02]`, pre-existing. `file_grid` and `file_list` sit in a plain `ScrollArea::vertical()`, so every card and row is drawn every frame. **Measured**, the finding having measured nothing: in release at 1440×900, ~2.6–3.1 ms of pass plus ~0.9 of tessellation for 1,000 cards, ~3.6–3.9 plus ~0.2 for 1,000 rows, linear at ~2.8 µs a card and ~3.8 µs a row, ~10.5–14 ms in all at 3,000; an empty nav is ≤0.05 ms, so the cost is the cards. **Kept for v1 by the maintainer** — a quarter of a frame, paid only on frames that repaint — and virtualising deferred, because the rename `TextEdit`, the ⋮ menu and `follow_selection`'s scroll target all live on a *drawn* card. 🚨 **The cover half was right about the grid and wrong about the list**: the grid queued every document on the first frame at every size counted; the list queued **none**, `file_row` never calling `Covers::get`. ⚠️ **And `FRAME_BUDGET` never bounded the total** — it rationed the rate, every drawn card being rendered eventually before §15 **D820** as after. **Fixed**: `file_card` asks only when `ui.is_rect_visible(thumb)`, so the renderer's work and the never-evicted textures grow with what has been scrolled past. *(Measured and ruled 2026-09-23; **Keep** the drawing, **Fixed and tested** the request. ⚠️ **The price**: a card seen for the first time shows the plate until its cover renders; and `Covers::unreadable` is now known only for what the grid has shown, so a loader-only `UNREADABLE` mark in the list reaches that and no further — one grid visit used to reach the whole library. The project mosaic's `get` is ungated, bounded by `MOSAIC_MAX` per project. **Test** `only_a_card_on_screen_asks_for_its_cover`, through a new `#[cfg(test)] Covers::asked_for`; flip run, the gate forced true, red at the predicted site. The ~640 MB texture figure is arithmetic, not a measurement. Deferred half in `roadmap.md`'s *Later · Parked decisions*; §6.4 and §9.5 amended in three places; D820 carries a line)*
 
 ---
 
@@ -26069,7 +26071,8 @@ test that checked only the *unit* would pass against arms that had swapped their
 `both_ends_of_every_length_field_bound_the_same_quantity` drives `Bounds::TRACKING`,
 `Bounds::SIGNED_TRACKING` and `Bounds::px` at three font sizes, and its own doc states its scope,
 including that it does *not* reach `optional_length_field`, `length_field` or
-`type_line_height_field`, each of which calls `px_range_for` inline. **A finding's list of uncovered
+`type_line_height_field`, each of which calls `px_range_for` inline — true of the first two until §15
+D861 put them through `Bounds::px`. **A finding's list of uncovered
 items is a claim about the day it was written**, and this one had been half-closed by a §15 D546-era
 test before it was ranked.
 
@@ -36773,6 +36776,9 @@ above it — the model outlives the control, and a range the model does not enfo
 hand-edited file or a future writer ignores. The **panel**: the range is the caller's now,
 `optional_length_field` taking a `signed: bool`, so the field stops offering the value at all. The
 **writer**: `export::svg::run_attrs` floors too, so the two consumers of one number agree.
+⚠️ **The panel's `signed: bool` is gone** (§15 D861): the floor is the first number of
+`Bounds::DECORATION_THICKNESS` now, and `an_unsigned_bound_starts_at_zero_and_a_signed_one_runs_both_ways`
+is the panel's first test of it — making that bound symmetric left every other test in the panel green.
 
 ⚠️ **Zero is kept rather than turned into `None`, and that is a decision.** They are different
 answers — `None` is *"the font decides"* and draws the face's own weight, `Some(0.0)` is *"no line"*,
@@ -43421,6 +43427,10 @@ before `relocate`, and a `cancel` flag set first makes the join one render long.
 ⚠️ **The next paragraph's *"nothing in production waits for a cover"* still holds**: the migration
 cancels the answers in flight rather than waiting for them. What it does wait for is the *render* in
 progress, through the join, and D845 prices that.
+⚠️ **`queued` bounds repeats, not the queue's length** (§15 **D862**, `[X1.2-L4-02]`). The grid drew —
+and still draws — every card on every frame, so its first frame asked for every document in the
+library; the budget this entry deleted had rationed the rate and never that total. A card asks only
+while it is on screen now.
 
 ⚠️ **`settle` is `cfg(test)` and not `pub`, which is D672's answer rather than D699's.** Nothing in
 production waits for a cover, and `ondin-app` has no lib target, so `dead_code` *does* analyse a
@@ -43614,6 +43624,91 @@ its predicted site**, and its test's doc carries the site it actually failed at.
 D820, D844, D708 and D366 carry a line. Nothing struck from `roadmap.md`, which held none of these.
 Closes `[X1.1-L1-01]`, `[X1.1-L1-02]`, `[X1.1-L1-03]`, `[X1.1-L1-04]`, `[R2-L6-02]`, `[X1.1-L6-02]`,
 `[X1.1-L6-04]`.)*
+
+**D862 — The dashboard still draws a widget for every document, and asks for a cover only for the
+ones on screen. *Measured and ruled by the maintainer 2026-09-23; Keep for the drawing — about 4 ms a
+frame at 1,000 documents — and Fixed and tested for the cover request.***
+
+`[X1.2-L4-02]`, Medium, pre-existing. The finding: `file_grid` and `file_list` sit inside a plain
+`egui::ScrollArea::vertical()` with no `show_rows` or `show_viewport`, so every card and every row is
+laid out and painted on every frame rather than the ones on screen; and every document is queued to
+the cover worker on the first frame, §15 **D820** having — on the finding's reading — deleted the one
+bound on that. Its own confidence note said no frame time had been measured.
+
+**Measured, in a throwaway headless probe since deleted** — `-p ondin-app` in release, a 1440×900
+window at `pixels_per_point` 1, the median of 20 frames after warm-up with the covers settled so the
+worker was idle, timing the egui pass and `ctx.tessellate` with no GPU upload. At 1,000 documents the
+grid costs ~2.6–3.1 ms of pass and ~0.9 ms of tessellation, the list ~3.6–3.9 ms and ~0.2; at 3,000,
+~8.5–9.4 + ~2 and ~11–13 + ~0.8; at 100, ~0.3 + ~0.25. **Linear, at about 2.8 µs a card and 3.8 µs a
+row**, with 16 cards or 17 rows on screen at that size, and debug about seven times slower. A frame
+with no cards to draw — *Starred*, empty — is ≤0.05 ms with 3,000 documents in the library, so **the
+cost is the cards** and not the screen around them. The per-frame `visible_entries` clone and sort is
+~0.2 ms of the 1,000-document figure, about 7%.
+
+**The per-frame drawing is kept for v1, by the maintainer's ruling.** ~4 ms at 1,000 documents is a
+quarter of a frame, and it is paid only on frames that repaint — a hover, a scroll, a cover arriving;
+it approaches the whole budget near 3,000. Virtualising is deferred to `roadmap.md`'s *Later · Parked
+decisions*, and 🚨 **it is not a one-line `show_rows`, because three things depend on a card being
+drawn** — each found by reading the code, none by running it. The inline rename's `TextEdit` lives on
+the card (`rename_field`, which commits on `lost_focus`), so a card scrolled out of the drawn range
+would stop drawing it and the rename could neither commit nor cancel while `rename_entry` stayed set.
+The ⋮ menu hangs off the card (`file_menu_button` → `file_menu_popup`), so it would vanish while
+`menu_for` stayed set — and `menu_for` still holds the keyboard, through `library_menu_open`. And
+`follow_selection` scrolls to the **drawn** card's rect, so the arrows would need the row's geometry
+computed rather than read back. *A virtualised grid owes all three an answer before it can ship.*
+
+🚨 **The cover half of the finding was right about the grid and wrong about the list.** Counted after
+one frame: the grid queued every document at 12, 100, 500, 1,000 and 3,000. The list queued **none,
+at every size** — `file_row` never calls `Covers::get`, and the only callers in `dashboard.rs` are
+`file_card` and the project mosaic. ⚠️ **And the bound the finding says D820 removed never bounded the
+total.** `FRAME_BUDGET` rationed how much rendering one pass could do, and D820's own account is that
+the progress guarantee under it rendered one document per pass *whatever the budget said* — so every
+card drawn was rendered in the end, before D820 as after it. D820 changed the **rate**, from a pass's
+worth to the worker's; the whole-library queue is older than the thread. What it costs is the rest of
+this paragraph. Every answer calls `ctx.request_repaint()`, so a first visit repaints at the full
+drawing cost for as long as the backlog lasts — read from the code, not measured. And the textures
+are never evicted short of `Covers::clear` at a base-folder change: at `COVER_MAX_PX` = 400 a cover
+is up to ~640 KB of RGBA, which makes ~640 MB at 1,000 large covers an **arithmetic upper bound**,
+not a measurement.
+
+**Fixed: `file_card` asks for a cover only when `ui.is_rect_visible(thumb)`.** An off-screen card
+draws the plain plate, which the scroll area's clip hides anyway. The renderer's work and the texture
+map now grow with what has been scrolled past rather than with the library — the bound on the
+queue's length that nothing had ever set. ⚠️ **The project mosaic's `get` is not gated**; it asks for
+up to `MOSAIC_MAX` = 5 covers per project card drawn, a bound in projects rather than documents.
+⚠️ **The cost, accepted by the maintainer**: on a first visit, scrolling onto cards nobody has seen
+shows the plate until their covers render. The disk cache makes every later visit immediate.
+
+⚠️ **A side effect on the red mark, recorded at the gate in `file_card`.** `Covers::unreadable` is one
+of `mark_of`'s two sources, and it is now known only for a document whose card has been on screen;
+the scan's `entry.unread` is the other and is untouched. So for a document only the loader refuses —
+the newer-build case §15 D613 exists for — the `UNREADABLE` chip reaches what the grid has shown and
+nothing past it, in the list as in the grid. **The list never had this half on its own**, asking for
+no covers, so the mark was always a function of grid visits. What narrows is how far one visit
+reaches: it used to be the whole library, and it is the cards scrolled past.
+
+**Test** `panels::dashboard::tests::only_a_card_on_screen_asks_for_its_cover`: forty documents and one
+draw — the first card has asked, the last has not, and fewer than twenty have. Then the last is
+selected with `scroll_to_selected` set, the arrows' path through `follow_selection`, and after the
+next draw it has asked. ⚠️ **The second half is the other decision, not a control**: a gate that never
+asked once a card had been off screen would pass the first. It reads a new `#[cfg(test)]
+Covers::asked_for` — queued, or answered either way — because the question is about the **request**,
+and a texture would have made it a question about how quickly the worker ran. **Flip, run**: the gate
+forced true fails at *"the last card is off screen and must not have asked"*, the predicted site. The
+dashboard test module was green 20 runs in 20 afterwards.
+
+*(Measured and ruled 2026-09-23; **Keep** the per-frame drawing, **Fixed and tested** the cover
+request. ⚠️ **The virtualisation is deferred, not declined**: `roadmap.md`'s *Later · Parked
+decisions* carries the three dependencies above with the two smaller per-frame costs — the
+`visible_entries` clone and sort, and the list's *Created* column, which formats through
+`clock::date_label` and so makes two Win32 time-zone calls (`clock::local_offset`) a row every frame.
+*Revisit where the measurement says to*: near 3,000 documents the drawing alone approaches the frame.
+⚠️ **The cover cache's own gaps are not this entry's and are open work**, in `roadmap.md`'s *Now ·
+Files, library and storage*: no texture is ever evicted, `Covers::drain` runs only when a card asks,
+and the project mosaic's request is not gated. They were found reading this change, not in the finding.
+§6.4's cap paragraph and §9.5's cover-cache bullet and `Covers::unreadable` paragraph amended; D820
+carries a line; `cover.rs`'s `COVER_MAX_PX`, `Covers::unreadable` and `Covers::clear` docs corrected.
+Closes `[X1.2-L4-02]`.)*
 
 **D448 — A gradient stop whose offset is `nan` cost the document, and the fix was one step too broad
 the first time. *Fixed and tested 2026-09-07; Keep, with the operation-side check recorded as open.***
@@ -44631,7 +44726,9 @@ sizes, because the disagreement is a function of font size and 16pt alone was on
 still reads as "large" rather than as "wrong". ⚠️ **Its honest scope**: it asserts the ranges are
 coherent, not that every field asks for one, since `length_field`, `optional_length_field` and
 `type_line_height_field` each call `px_range_for` inline and a `RangeInclusive` is a literal anyone can
-write.
+write. ⚠️ **Two of those three are not inline any more** (§15 D861): `length_field` and
+`optional_length_field` take a `Bounds` and derive through `Bounds::px`, and `type_line_height_field`
+is the one still calling `px_range_for` itself. The scope stands — a `Bounds` is a literal too.
 
 **The second half is egui's default, and it was rewriting documents.** `DragValue`'s
 `clamp_existing_to_range` is `true` and applies on every frame, so a stored value outside a field's
@@ -44654,6 +44751,69 @@ not hypothetical: this build's predecessor wrote it.** The Settings field shippe
 verbatim. What the user then saw was the Settings field painting **1** — the modal clamps its draft —
 over a document where an arrow key still moved 0.1px, and *Save changes* lit on a form nobody had
 touched. Not clamped in `Prefs::load`, deliberately, for the same §5.3 reason as above.
+
+**D861 — Each `Length` field is capped by its own quantity, and tracking's 200% stopped bounding six
+fields that are not tracking. *Fixed and tested 2026-09-23; Fixed — no field's range moved, and what
+the four new caps should be is open.***
+
+`[X4-L3-03]`, Low, pre-existing. The finding read `optional_length_field` as *"the one `Length` field
+that bypasses `Bounds`, hard-coding a constant named for tracking as the cap for decoration thickness
+and offset"*. **Its premise was four fields short.** `MAX_TRACKING_PCT` — 200%, the cap on letter and
+word spacing — was the cap of **six** fields that measure nothing like a tracking. `optional_length_field`
+spelled its range from it itself, a `signed: bool` from the caller choosing between `−MAX_TRACKING_PCT`
+and zero for the floor, for a decoration's thickness and offset; and `length_field` took a bare
+`pct_range`, which each of its four callers spelled from the same constant by hand — paragraph spacing
+at `0..=200%`, and the first-line (or hanging) indent, indent start and indent end at `±200%`. Only the
+three character fields — letter spacing, word spacing and baseline shift — went through `Bounds`, as
+`TRACKING` and `SIGNED_TRACKING`. So an edit to how far letter spacing may go would have moved six other
+fields with it, silently: D425's *"one px cap and nine fields used it"*, over again at the `%` end, in the
+type D425 had built to close it. §9.4 states the rule D546 left behind in one line — *a range shared by
+two fields is a claim that the two fields are the same kind of quantity* — and a *cap* shared by them is
+the same claim.
+
+**One constant per quantity, and one `Bounds` per quantity.** Four `%` constants —
+`MAX_PARAGRAPH_SPACING_PCT`, `MAX_INDENT_PCT`, `MAX_DECORATION_THICKNESS_PCT` and
+`MAX_DECORATION_OFFSET_PCT` — and four `Bounds` over them: `PARAGRAPH_SPACING` and `DECORATION_THICKNESS`
+from zero, `INDENT` and `DECORATION_OFFSET` both ways. **`INDENT` is one bound for three fields on
+purpose**: each indent is how far a line's edge comes in from the box's, so the three sharing a range is
+the claim above made truthfully. `length_field` takes a `Bounds` where it took a `pct_range`, and
+`optional_length_field` takes one where it took `signed` — **the floor is the constant's first number
+now rather than a flag beside it** — and both derive their px face through `Bounds::px`.
+`MAX_TRACKING_PCT` is read by tracking alone: the two character `Bounds`, the `Alt`+`←`/`→` chord's
+tracking arm, and tests.
+
+⚠️ **No field's range moved, and the four values are not decisions.** Each new constant is 200.0,
+numerically identical to the tracking cap it replaces, because the split is a refactor and one that also
+re-bounded fields would be two changes in one. So the numbers were **inherited on the day of the split**
+rather than chosen for paragraph spacing, indents or decorations, and choosing them is a separate design
+question, open in `roadmap.md`'s *Later · Parked decisions*. The constants' own doc says so, so that four
+identical numbers are not read as four identical conclusions. **Do not fold them back into one because
+they agree today** — `MAX_TRACKING_PCT` and the six fields agreed too, which is what made the share
+invisible.
+
+🚨 **The test that exists to check these ranges had one of them wrong.**
+`both_ends_of_every_length_field_bound_the_same_quantity` (D425) carried its own list of the panel's `%`
+ranges, re-typing four of them from `MAX_TRACKING_PCT` beside the fields that spelled the same — and it
+listed decoration thickness as **signed**, `±`, when the field had been floored since D546. Two hand-kept
+statements of one fact, checked against nothing but each other: §15 D858's shape. It passed regardless,
+a symmetric range being as coherent under the unit chip as a floored one, so what it asserted was the
+coherence of a range no field had. It reads the `Bounds` constants now, and checks that all six derive
+their px face through `Bounds::px`.
+
+**Test**: `panels::typography::tests::an_unsigned_bound_starts_at_zero_and_a_signed_one_runs_both_ways`
+— `PARAGRAPH_SPACING` and `DECORATION_THICKNESS` start at zero, `INDENT`, `DECORATION_OFFSET` and
+`SIGNED_TRACKING` are symmetric, and each admits a value. **Flip, run**: `DECORATION_THICKNESS` made
+symmetric fails it at the unsigned `assert_eq`, the predicted site, and **leaves the other 77 tests in
+`panels::typography` green** — so on this tree nothing else in the panel pinned D546's floor, and the one
+test the change rewrote could not have, having had the thickness signed. ⚠️ **Its honest scope is the
+constants, not the call sites**: handing the thickness field `Bounds::DECORATION_OFFSET` passes it, and
+what catches that is the name at the call, read. The model's `typography::canonical_decoration` floor is
+the second defence and is tested where it lives (D546).
+
+*(§9.4's floor paragraph amended — it said `optional_length_field` takes a `signed` flag. D425, D546 and
+D718 carry a line; `both_ends_of_every_length_field_bound_the_same_quantity`'s scope sentence and the
+new test's count corrected. Nothing struck from `roadmap.md`, which held no entry for this; the four
+values are added to its parked decisions. Closes `[X4-L3-03]`.)*
 
 **D424 — The canonicalizer manufactured the infinity it exists to prevent. *Fixed and tested
 2026-09-06; Keep.***

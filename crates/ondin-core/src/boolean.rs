@@ -44,8 +44,12 @@
 //! `sub(add(a,b), intersect(a,b))`** however much it looks like it should be: the
 //! intersection's boundary is made entirely of pieces of the operands' own edges, so
 //! that subtraction hands the traversal the same graph as `a ∪ b` and gets the two
-//! operands back. It is `path_full_intersect`'s two exterior paths instead — `a \ b`
-//! and `b \ a` from one cut, disjoint by construction, concatenated.
+//! operands back. It **was** `path_full_intersect`'s two exterior paths — `a \ b`
+//! and `b \ a` from one cut, disjoint by construction, concatenated — and that fold
+//! was replaced for accumulating error on dense operand sets: it is `exclude_of`
+//! now, every outline in one path read even-odd, with no arithmetic at all (§15
+//! D239). This paragraph read in the present tense until §15 D856, above a
+//! `combine` arm nothing could reach.
 //!
 //! ## What it costs, measured
 //!
@@ -157,9 +161,7 @@
 
 use crate::node::BoolOp;
 use flo_curves::Coord2;
-use flo_curves::bezier::path::{
-    BezierPath, SimpleBezierPath, path_add, path_full_intersect, path_intersect, path_sub,
-};
+use flo_curves::bezier::path::{BezierPath, SimpleBezierPath, path_add, path_intersect, path_sub};
 use kurbo::{BezPath, PathEl, Point};
 
 /// A hundredth of a world unit — the tolerance this module's tests read, and
@@ -680,27 +682,18 @@ fn combine(
         BoolOp::Union => path_add(acc, rhs, FLO_ACCURACY),
         BoolOp::Subtract => path_sub(acc, rhs, FLO_ACCURACY),
         BoolOp::Intersect => path_intersect(acc, rhs, FLO_ACCURACY),
-        // **XOR is the two exteriors, not union-minus-intersection.**
-        //
-        // flo_curves has no `path_xor`, and the obvious composition —
-        // `sub(add(a,b), intersect(a,b))` — does not work: the lens's boundary
-        // is made *entirely* of pieces of the operands' own edges, so the graph
-        // it hands `path_sub` is the same graph as `a ∪ b`, and the traversal
-        // re-assembles `a` and `b` as two separate loops. Measured, not guessed:
-        // the result came back as the two original shapes untouched, which is
-        // why Exclude looked exactly like Union.
-        //
-        // `path_full_intersect` cuts once and reports all three regions, so
-        // `a \ b` and `b \ a` come out of a single traversal with no second
-        // boolean over coincident edges. Their union *is* the symmetric
-        // difference, and they are disjoint by construction — one lies only in
-        // `a`, the other only in `b` — so they need no combining, just
-        // concatenating.
-        BoolOp::Exclude => {
-            let cut = path_full_intersect::<SimpleBezierPath>(acc, rhs, FLO_ACCURACY);
-            let [only_a, only_b] = cut.exterior_paths;
-            only_a.into_iter().chain(only_b).collect()
-        }
+        // 🚨 **Unreachable, and it used to read as live** (§15 D856,
+        // `[X8-L6-03]`). `fold_operands` answers `Exclude` through `exclude_of`
+        // before it can reach this function, and the only other caller is a
+        // test that passes `Union`. The arm this replaced — `path_full_intersect`'s
+        // two exterior paths, under twenty lines arguing XOR in the present tense
+        // — was the remnant of the fold `exclude_of` replaced for being
+        // measurably wrong; a `panic!` in it left every test green. It was also
+        // the fourth of the four `FLO_ACCURACY` sites §15 D794 counts as retuned,
+        // and so the one a flip of that tolerance could land on and read as *"no
+        // teeth"* — §15 D803's decoy. The module doc keeps the argument for why
+        // XOR is the two exteriors.
+        BoolOp::Exclude => unreachable!("fold_operands answers Exclude through exclude_of"),
     }
 }
 
@@ -2066,7 +2059,15 @@ mod tests {
         // 0.02 and above were always right; 0.01 and below were the defect, and
         // 0.001 was where the shape disappeared entirely. The sweep spans all
         // three so a regression cannot hide in the half nobody measured.
-        for t in [1.0f64, 0.1, 0.02, 0.01, 0.005, 0.001, 0.0001] {
+        //
+        // 🚨 **`0.00002` is what pins `FLO_SCALE` to the floor D794 states**
+        // (§15 D856, `[X8-L6-02]`). The sweep stopped at 10⁻⁴, ten times above
+        // the 10⁻⁵ the entry claims, so any scale clearing `CLOSE_DISTANCE` there
+        // passed: the constant could fall from 1000 to 110 with all of core
+        // green. At 2 × 10⁻⁵ it has to be roughly 500 or more. **Flip-check,
+        // run**: `FLO_SCALE = 200.0` fails here at *"t=0.00002: area 0.0039…,
+        // expected 0.008"* — the bow-tie, half the area — and 1000 passes.
+        for t in [1.0f64, 0.1, 0.02, 0.01, 0.005, 0.001, 0.0001, 0.00002] {
             let slot =
                 kurbo::Rect::new(0.0, 100.0 - t / 2.0, 400.0, 100.0 + t / 2.0).to_path(0.001);
             let got = evaluate(BoolOp::Intersect, &[wide.clone(), slot])

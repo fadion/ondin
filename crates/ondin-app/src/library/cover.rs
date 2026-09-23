@@ -52,6 +52,26 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// show, on every document whose card reaches the screen (§15 D862).
 const COVER_MAX_PX: f64 = 400.0;
 
+/// How many cover textures [`Covers`] keeps resident before
+/// [`Covers::pass`] starts letting go of the least recently asked-for (§15 D864).
+///
+/// Nothing evicted one before, so a session that scrolled a whole library kept
+/// every cover it had drawn: at [`COVER_MAX_PX`] a cover is up to 400² × 4 bytes,
+/// **~640 KB, which is ~640 MB at 1,000 documents** — arithmetic on the cap,
+/// not a measurement of real covers, most of which are not square.
+///
+/// **128 is ~80 MB at that worst case, and more than twice what a screen of
+/// file cards shows**: the grid is four columns of ~172 pt rows, so a 2,160
+/// pt-tall window shows about 12 rows, 48 cards. ⚠️ **Not a screen of project
+/// cards**: a mosaic asks for up to five, twenty a row of four, and *Recent*
+/// lists every active project with files — so at a `PROJECT_CARD_H` of 185 pt,
+/// seven rows pass 128 (arithmetic, not measured). The floor that matters is
+/// *"more than one screen"*, and eviction never takes a cover asked for on the
+/// current or previous pass whatever this says, which is what holds there: the
+/// cap is exceeded rather than churned. The rest is how far back a scroll finds
+/// its covers still in memory rather than a disk-cache read away.
+const MAX_RESIDENT_COVERS: usize = 128;
+
 // 🚨 **There was a `FRAME_BUDGET` here and it is gone with what it bounded**
 // (§15 D820). Eight milliseconds — larger than `ImageThumbs`' two, on the
 // argument that this path runs the whole document→pixels walk rather than
@@ -116,8 +136,9 @@ fn cache_path(dir: &Path, key: &str) -> PathBuf {
 /// answer already is: `io::load` runs here, over the whole file, once per document
 /// per session, and the result was being thrown away.
 enum Cover {
-    /// Rendered and uploaded.
-    Ready(egui::TextureHandle),
+    /// Rendered and uploaded, with the dashboard pass it was last asked for on —
+    /// or arrived on — which is what [`Covers::pass`] evicts by (§15 D864).
+    Ready(egui::TextureHandle, u64),
     /// The file could not be read or would not load. **Remembered**, so a broken
     /// document is not re-parsed on every pass for the life of the session.
     Unreadable,
@@ -178,6 +199,11 @@ pub struct Covers {
     /// [`covers_dir`] answers when there is no cache directory at all and what
     /// every test gets unless it names one.
     dir: Option<PathBuf>,
+    /// How many dashboard passes [`Self::pass`] has seen — the clock a `Ready`
+    /// cover's stamp is read against. Its own count rather than egui's pass
+    /// number, because what ages a cover is the *dashboard* being drawn without
+    /// asking for it; a pass spent in the editor is not evidence of anything.
+    pass: u64,
 }
 
 impl Default for Covers {
@@ -187,6 +213,7 @@ impl Default for Covers {
             queued: std::collections::HashSet::new(),
             render: None,
             dir: covers_dir(),
+            pass: 0,
         }
     }
 }
@@ -324,13 +351,19 @@ impl Covers {
     /// The two are deliberately not distinguished, exactly as in
     /// `ImageThumbs::get`: the caller does the same thing either way, which is to
     /// draw the plain plate it drew before covers existed. A `None` that means
-    /// "later" also asks for a repaint, so later arrives.
+    /// "later" is answered by the worker, which requests a repaint when it
+    /// sends, so later arrives — this function requests none itself.
     pub fn get(&mut self, ctx: &egui::Context, entry: &Entry) -> Option<&egui::TextureHandle> {
         self.drain(ctx);
         let key = key(entry)?;
-        if self.covers.contains_key(&key) {
-            return match self.covers.get(&key) {
-                Some(Cover::Ready(t)) => Some(t),
+        let now = self.pass;
+        if let Some(cover) = self.covers.get_mut(&key) {
+            return match cover {
+                // Stamped, so a cover on screen is never the one evicted.
+                Cover::Ready(t, seen) => {
+                    *seen = now;
+                    Some(t)
+                }
                 _ => None,
             };
         }
@@ -365,12 +398,70 @@ impl Covers {
         None
     }
 
+    /// Once per dashboard pass, before any card asks: take what the renderer has
+    /// finished, and let go of covers nothing has asked for in a while.
+    ///
+    /// **The drain is here as well as in [`Self::get`]** (§15 D863). It used to be
+    /// `get`'s alone, on the argument that *"the only thing that ever wants a
+    /// cover is a card asking for one"* — and that stopped being the whole story
+    /// when the answer carries a fact as well as a picture. `Cover::Unreadable` is
+    /// what puts the red mark on a document the loader refuses, the list view asks
+    /// for no covers at all, and since §15 D862 an off-screen card does not ask
+    /// either, so an answer that arrived after the grid was left sat in the
+    /// channel with the mark it carried. The worker's `request_repaint` then woke
+    /// a pass that uploaded nothing. `get` keeps its own call because it is a
+    /// `try_recv` and a caller that forgets this one still gets its covers.
+    ///
+    /// **And the eviction** (§15 D864): see [`MAX_RESIDENT_COVERS`].
+    pub fn pass(&mut self, ctx: &egui::Context) {
+        self.pass += 1;
+        self.drain(ctx);
+        self.evict(MAX_RESIDENT_COVERS);
+    }
+
+    /// Drop the least recently asked-for textures until at most `cap` remain —
+    /// **never one asked for on this pass or the one before**, so a card on screen
+    /// cannot lose its picture to make room, and a screen holding more than `cap`
+    /// covers exceeds the cap rather than churning.
+    ///
+    /// Only `Ready` goes. `Unreadable` and `Blank` hold no texture, and the first
+    /// is the fact `mark_of` reads; forgetting it would take the mark away until
+    /// the card was asked for again. An evicted cover is not queued either, so the
+    /// next `get` asks the worker afresh — which reads the disk cache when there is
+    /// one, the case this is priced against.
+    fn evict(&mut self, cap: usize) {
+        let resident = self
+            .covers
+            .values()
+            .filter(|c| matches!(c, Cover::Ready(..)))
+            .count();
+        if resident <= cap {
+            return;
+        }
+        let mut ready: Vec<(u64, String)> = self
+            .covers
+            .iter()
+            .filter_map(|(k, c)| match c {
+                Cover::Ready(_, seen) => Some((*seen, k.clone())),
+                _ => None,
+            })
+            .collect();
+        // Oldest first, and the key breaks a tie so the order is not the map's.
+        ready.sort_unstable();
+        for (seen, key) in ready.into_iter().take(resident - cap) {
+            if seen + 1 >= self.pass {
+                break;
+            }
+            self.covers.remove(&key);
+        }
+    }
+
     /// Take what the renderer has finished and turn it into textures.
     ///
-    /// **Called from [`Self::get`] rather than once per frame by the dashboard**,
-    /// which is the cheaper of the two and the one that cannot be forgotten: the
-    /// only thing that ever wants a cover is a card asking for one, and a pass
-    /// that draws no cards has nothing to upload.
+    /// **Called from [`Self::pass`] once a dashboard pass and from [`Self::get`]
+    /// per card** — see the first for why both (§15 D863). It is a `try_recv`
+    /// loop, so a second call in one pass finds the channel empty and costs
+    /// nothing.
     ///
     /// ⚠️ **The texture upload stays on this thread and has to.** `load_texture`
     /// needs the `Context`, which is not `Send` to a worker in any useful sense —
@@ -428,11 +519,10 @@ impl Covers {
                     [rgba.width as usize, rgba.height as usize],
                     &rgba.pixels,
                 );
-                Cover::Ready(ctx.load_texture(
-                    format!("cover-{key}"),
-                    image,
-                    egui::TextureOptions::LINEAR,
-                ))
+                Cover::Ready(
+                    ctx.load_texture(format!("cover-{key}"), image, egui::TextureOptions::LINEAR),
+                    self.pass,
+                )
             }
             Err(NoCover::Unreadable) => Cover::Unreadable,
             Err(NoCover::Blank) => Cover::Blank,
@@ -517,7 +607,9 @@ impl Covers {
     /// lazy and rendered on a worker, so a document whose cover has not been
     /// attempted yet answers `false` — which is why the dashboard asks
     /// `entry.unread || this`, and why the mark can arrive a pass late on a large
-    /// library. `get` requests a repaint, so late arrives — for a card on screen.
+    /// library. The worker requests a repaint and [`Self::pass`] takes the answer
+    /// whether or not a card asks again (§15 D863), so late arrives — in the list
+    /// as well as the grid; until D863 it arrived only for a card on screen.
     /// ⚠️ A document whose card has never been on screen has never been asked
     /// for (§15 D862), so for it `false` lasts until it is; the list view asks
     /// for no covers at all.
@@ -1302,6 +1394,155 @@ mod tests {
             dir.join(&kept_png).exists() && dir.join("superseded.png").exists(),
             "an empty list is not evidence that the documents are gone"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **Past the cap the least recently asked-for cover goes, and one asked for
+    /// on this pass or the one before never does** (§15 D864).
+    ///
+    /// Three decisions, and a fixture for each, because each has a plausible wrong
+    /// version the other two pass:
+    /// - *oldest first*: evicting in the map's order would take any ten, so the
+    ///   ten that go are named;
+    /// - *never a recent one*: a plain LRU down to the cap would evict a screen's
+    ///   worth of covers asked for this pass, so a burst larger than the cap is
+    ///   asserted to **exceed** it;
+    /// - *asking refreshes*: a stamp set only on arrival would evict a cover a card
+    ///   is still drawing, so a real document is asked for through `get` and must
+    ///   outlive fillers that arrived after it.
+    ///
+    /// Answers go in through `arrive`, the one place an answer becomes a `Cover`,
+    /// with a 1×1 picture: what is under test is the bookkeeping, and three
+    /// hundred real renders would test the renderer.
+    ///
+    /// **Flips, run, one per decision:**
+    /// - deleting `evict`'s `sort_unstable` fails at *"back to the cap"* with 135
+    ///   left, not at the named-ten assertion predicted: in the map's order a
+    ///   protected cover comes up within a few and the `break` stops the loop.
+    ///   Either way it is red, and the site is the more telling one — an unsorted
+    ///   eviction mostly evicts *nothing*;
+    /// - making the recency guard never fire fails at *"a cover from the previous
+    ///   pass is never evicted"* — predicted;
+    /// - dropping `get`'s `*seen = now` fails at *"a cover a card asked for this
+    ///   pass outlives every older one"* — predicted.
+    #[test]
+    fn past_the_cap_the_least_recently_asked_cover_goes_and_a_recent_one_never_does() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let mut covers = Covers::default();
+        let pixel = || {
+            Ok(Rgba {
+                pixels: vec![0; 4],
+                width: 1,
+                height: 1,
+            })
+        };
+        let ready = |c: &Covers| {
+            c.covers
+                .values()
+                .filter(|c| matches!(c, Cover::Ready(..)))
+                .count()
+        };
+        let resident = |c: &Covers, k: &str| matches!(c.covers.get(k), Some(Cover::Ready(..)));
+
+        // Oldest first.
+        covers.pass(&ctx);
+        for i in 0..MAX_RESIDENT_COVERS {
+            covers.arrive(&ctx, format!("old-{i:03}"), pixel());
+        }
+        covers.pass(&ctx);
+        covers.pass(&ctx);
+        for i in 0..10 {
+            covers.arrive(&ctx, format!("new-{i}"), pixel());
+        }
+        assert_eq!(
+            ready(&covers),
+            MAX_RESIDENT_COVERS + 10,
+            "the fixture: ten over"
+        );
+        covers.pass(&ctx);
+        assert_eq!(ready(&covers), MAX_RESIDENT_COVERS, "back to the cap");
+        assert!(
+            (0..10).all(|i| !resident(&covers, &format!("old-{i:03}"))),
+            "the ten that go are the ten asked for longest ago"
+        );
+        assert!(
+            resident(&covers, "old-010") && (0..10).all(|i| resident(&covers, &format!("new-{i}"))),
+            "and nothing newer goes with them"
+        );
+
+        // Never a recent one: a burst bigger than the cap, all on one pass.
+        let burst = MAX_RESIDENT_COVERS + 72;
+        for i in 0..burst {
+            covers.arrive(&ctx, format!("burst-{i:03}"), pixel());
+        }
+        covers.pass(&ctx);
+        assert!(
+            (0..burst).all(|i| resident(&covers, &format!("burst-{i:03}"))),
+            "a cover from the previous pass is never evicted, even past the cap"
+        );
+        assert_eq!(
+            ready(&covers),
+            burst,
+            "so a screen of more than the cap exceeds it rather than churning"
+        );
+
+        // Asking refreshes: a real document, asked for through `get`.
+        let root = temp("evict");
+        let entry = doc_with_a_rect(&root, "Landing v4");
+        let _ = covers.get(&ctx, &entry);
+        covers.settle(&ctx);
+        let k = key(&entry).expect("a filed document has a key");
+        assert!(resident(&covers, &k), "the fixture: its cover is in");
+        for _ in 0..5 {
+            covers.pass(&ctx);
+        }
+        for i in 0..MAX_RESIDENT_COVERS {
+            covers.arrive(&ctx, format!("late-{i:03}"), pixel());
+        }
+        let _ = covers.get(&ctx, &entry);
+        covers.pass(&ctx);
+        assert!(
+            resident(&covers, &k),
+            "a cover a card asked for this pass outlives every older one"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **`pass` takes the worker's answers whether or not a card asks** (§15 D863).
+    ///
+    /// The case is the list view's: it asks for no covers, so an answer that
+    /// arrived after the grid was left — carrying `Unreadable`, the red mark — sat
+    /// in the channel for as long as the list was up. Here the ask is made and then
+    /// nothing asks again; only `pass` runs.
+    ///
+    /// ⚠️ **Waits on the worker, with a deadline rather than a sleep** — §15 D820's
+    /// lesson for anything whose assertion depends on work finishing. The
+    /// deadline is ten seconds for one tiny document, so a red run is a worker
+    /// that never answered, not a slow one.
+    ///
+    /// **Flip, run:** `pass` without its `drain` fails at the assertion, after the
+    /// whole deadline — predicted.
+    #[test]
+    fn a_pass_takes_the_answers_a_card_never_came_back_for() {
+        let root = temp("pass-drain");
+        let refused = written_by_a_newer_build(&root);
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let mut covers = Covers::default();
+
+        let _ = covers.get(&ctx, &refused);
+        assert!(!covers.unreadable(&refused), "the fixture: not known yet");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !covers.unreadable(&refused) && std::time::Instant::now() < deadline {
+            covers.pass(&ctx);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(
+            covers.unreadable(&refused),
+            "a pass with no card asking still takes the answer and its mark"
+        );
+        covers.settle(&ctx);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

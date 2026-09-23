@@ -705,6 +705,12 @@ impl OndinApp {
         // arrived"* still has the right answer.
         self.dash.menu_was_up = self.library_menu_open();
 
+        // **Before any card asks** (§15 D863, D864): the answers the worker has
+        // finished are taken whether or not a card on this screen asks — the list
+        // view asks for none, and its *UNREADABLE* chip is one of those answers —
+        // and covers nothing has asked for in a while are let go.
+        self.covers.pass(ui.ctx());
+
         // ⚠️ **Here, and not in `<OndinApp as eframe::App>::ui`'s
         // `take_dropped_images`.** That
         // call sits several lines *below* the `View::Dashboard` return, so the
@@ -2460,6 +2466,13 @@ impl OndinApp {
         rect: egui::Rect,
         dot: egui::Color32,
     ) {
+        // **Off screen, nothing** (§15 D863) — `file_card`'s gate (§15 D862), and
+        // the per-project scan below with it. It asks for up to [`MOSAIC_MAX`]
+        // covers a card, so ungated it grew with projects rather than documents,
+        // which is why D862 could leave it; it is the same line either way.
+        if !ui.is_rect_visible(rect) {
+            return;
+        }
         let mut files: Vec<Entry> = self
             .library
             .entries
@@ -2758,8 +2771,9 @@ impl OndinApp {
         // virtualised — so an unconditional `get` handed the worker the whole
         // library on the first frame: every document rendered in the background,
         // a full-cost repaint after each, and every texture kept. Gated, the
-        // work and the memory grow with what has been scrolled past, and a card
-        // scrolled to asks on the frame it arrives. What it costs is a plain
+        // work grows with what has been scrolled past — the memory too, up to
+        // `Covers`' cap, past which the least recently asked-for go (§15
+        // D864) — and a card scrolled to asks on the frame it arrives. What it costs is a plain
         // plate for a moment on a card nobody had seen before; the disk cache
         // makes the second visit immediate.
         //
@@ -9220,6 +9234,60 @@ mod tests {
             "a card scrolled to asks for its cover once it is on screen"
         );
 
+        app.covers.settle(&ctx);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A project card off screen asks for none of its mosaic** (§15 D863) —
+    /// `file_card`'s gate at the other caller of `Covers::get`.
+    ///
+    /// Twenty-four projects of one document each, on *Recent*, is six rows of
+    /// project cards: the first is on screen and the last is not.
+    ///
+    /// **Flip, run:** deleting `project_mosaic`'s `is_rect_visible` return fails at
+    /// *"the last project's mosaic is off screen"* — predicted.
+    #[test]
+    fn a_project_card_off_screen_asks_for_no_covers() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, root) = app(&ctx, "mosaic-viewport");
+        let mut docs = Vec::new();
+        for i in 0..24 {
+            let p = project::Project {
+                id: format!("p-{i:02}"),
+                name: format!("Project {i:02}"),
+                color: project::PROJECT_COLORS[0].into(),
+                folder: None,
+                created: 0,
+                archived: false,
+            };
+            app.library.projects.projects.push(p.clone());
+            let mut doc = ondin_core::Document::new(app.session.ids.mint());
+            let path =
+                store::file_document(&root, Some(&p), &format!("Screen {i:02}"), &mut doc).unwrap();
+            docs.push(path);
+        }
+        app.library.refresh();
+        app.dash.nav = Nav::Recent;
+        let entry = |app: &OndinApp, path: &PathBuf| {
+            app.library
+                .entries
+                .iter()
+                .find(|e| &e.path == path)
+                .cloned()
+                .expect("the fixture: every document is listed")
+        };
+        let (first, last) = (entry(&app, &docs[0]), entry(&app, &docs[23]));
+
+        let _ = galleys(&mut app, &ctx);
+        assert!(
+            app.covers.asked_for(&first),
+            "the fixture: the first project's mosaic is on screen and asks"
+        );
+        assert!(
+            !app.covers.asked_for(&last),
+            "the last project's mosaic is off screen and must not have asked"
+        );
         app.covers.settle(&ctx);
         let _ = std::fs::remove_dir_all(&root);
     }

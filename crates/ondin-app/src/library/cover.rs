@@ -49,7 +49,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// **Sized for the card it fills at 2× display scaling** — the grid's cards are
 /// around 170pt wide and 116pt tall — rather than for the document. A cover is a
 /// thumbnail; asking the renderer for more is paying for pixels the card cannot
-/// show, on every document in the library.
+/// show, on every document whose card reaches the screen (§15 D862).
 const COVER_MAX_PX: f64 = 400.0;
 
 // 🚨 **There was a `FRAME_BUDGET` here and it is gone with what it bounded**
@@ -491,6 +491,18 @@ impl Covers {
         }
     }
 
+    /// Whether this document's cover has ever been asked for — queued, or
+    /// answered either way. For the dashboard's test that a card off screen asks
+    /// for nothing (§15 D862), which is a question about the *request*, so it
+    /// cannot be read off the textures: an answer that has not arrived yet leaves
+    /// none.
+    ///
+    /// Plain backticks: this item is `cfg(test)` (§15 D319).
+    #[cfg(test)]
+    pub(crate) fn asked_for(&self, entry: &Entry) -> bool {
+        key(entry).is_some_and(|k| self.queued.contains(&k) || self.covers.contains_key(&k))
+    }
+
     /// Whether this document has been **found unloadable** — `io::load` was run
     /// over the whole file to draw its cover and refused it.
     ///
@@ -505,7 +517,10 @@ impl Covers {
     /// lazy and rendered on a worker, so a document whose cover has not been
     /// attempted yet answers `false` — which is why the dashboard asks
     /// `entry.unread || this`, and why the mark can arrive a pass late on a large
-    /// library. `get` requests a repaint, so late arrives.
+    /// library. `get` requests a repaint, so late arrives — for a card on screen.
+    /// ⚠️ A document whose card has never been on screen has never been asked
+    /// for (§15 D862), so for it `false` lasts until it is; the list view asks
+    /// for no covers at all.
     ///
     /// ⚠️ **This said *"per-pass budgeted"* until §15 D844.** That was the
     /// mechanism before §15 D820 deleted `FRAME_BUDGET` and moved the render off
@@ -532,7 +547,8 @@ impl Covers {
     /// library alone, over one shared directory that nothing in the path or the
     /// key namespaces per library. So switching from library A to B and entering
     /// the dashboard deletes every one of A's cached covers, and switching back
-    /// re-renders every one of them on the worker. (That read *"at one document
+    /// re-renders each of them on the worker as its card comes back on screen
+    /// (§15 D862). (That read *"at one document
     /// per pass"* until §15 D845 — one more copy of the rationing §15 D820
     /// deleted, in the paragraph §15 D844 amended for another.) The claim was true of
     /// *this function* and false of the program, which is the worst shape a doc

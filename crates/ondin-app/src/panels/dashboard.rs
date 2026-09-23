@@ -2753,7 +2753,27 @@ impl OndinApp {
             se: 0,
         };
         p.rect_filled(thumb.shrink(1.0), plate_radius, dot.gamma_multiply(0.14));
-        let cover = self.covers.get(ui.ctx(), entry).cloned();
+        // **Asked for only while the plate is on screen** (§15 D862,
+        // `[X1.2-L4-02]`). The grid draws every card on every frame — it is not
+        // virtualised — so an unconditional `get` handed the worker the whole
+        // library on the first frame: every document rendered in the background,
+        // a full-cost repaint after each, and every texture kept. Gated, the
+        // work and the memory grow with what has been scrolled past, and a card
+        // scrolled to asks on the frame it arrives. What it costs is a plain
+        // plate for a moment on a card nobody had seen before; the disk cache
+        // makes the second visit immediate.
+        //
+        // ⚠️ **It also means `Covers::unreadable` is known only for documents
+        // that have been on screen**, and it is one of `mark_of`'s two sources —
+        // so for a document only the loader refuses (the scan's `unread` flag
+        // is the other source and is unaffected), the list's *UNREADABLE* chip
+        // now reaches only what the grid has shown. It never reached further
+        // than the grid's visits: the list asks for no covers at all.
+        let cover = if ui.is_rect_visible(thumb) {
+            self.covers.get(ui.ctx(), entry).cloned()
+        } else {
+            None
+        };
         match cover {
             Some(texture) => {
                 // ⚠️ **Fitted inside the plate, never filled to it.** A cover is
@@ -9141,6 +9161,66 @@ mod tests {
         assert_eq!(chips(&mut app, &ctx), 1, "exactly the broken one is marked");
         app.dash.list_view = true;
         assert_eq!(chips(&mut app, &ctx), 1, "and the list marks it too");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A card off screen asks for no cover, and a card scrolled to asks on the
+    /// frame it arrives** (§15 D862, `[X1.2-L4-02]`).
+    ///
+    /// The grid is not virtualised — every card is drawn every frame — so before
+    /// D862 the first frame handed the cover worker the **whole library**. Measured
+    /// in a release probe on a 1440×900 window: 1,000 documents queued 1,000
+    /// renders to put 16 cards on screen, and each answer repainted a frame that
+    /// cost ~3.5 ms to draw.
+    ///
+    /// ⚠️ **The second half is not a control, it is the other decision.** A gate
+    /// that never asked once a card had been off screen would pass the first
+    /// half. `follow_selection` is the path that scrolls with no pointer
+    /// involved, so it is the one that has to be shown to arrive with a request.
+    ///
+    /// **Flip, run:** dropping the `is_rect_visible` gate fails at *"the last card
+    /// is off screen and must not have asked"* — the predicted site.
+    #[test]
+    fn only_a_card_on_screen_asks_for_its_cover() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, root) = app(&ctx, "cover-viewport");
+        for i in 0..40 {
+            let mut doc = ondin_core::Document::new(app.session.ids.mint());
+            store::file_document(&root, None, &format!("Screen {i:02}"), &mut doc).unwrap();
+        }
+        app.library.refresh();
+        app.dash.nav = Nav::All;
+        let order = app.visible_entries();
+        assert_eq!(order.len(), 40, "the fixture: forty documents listed");
+        let (first, last) = (&order[0], &order[39]);
+
+        let _ = galleys(&mut app, &ctx);
+        assert!(
+            app.covers.asked_for(first),
+            "the fixture: the first card is on screen and asks — or every card \
+             answers `false` for a reason that is not the gate"
+        );
+        assert!(
+            !app.covers.asked_for(last),
+            "the last card is off screen and must not have asked"
+        );
+        let asked = order.iter().filter(|e| app.covers.asked_for(e)).count();
+        assert!(
+            asked < 40 / 2,
+            "{asked} of 40 covers asked for with at most four rows on screen"
+        );
+
+        // The arrows' path: select the last card and let the grid scroll to it.
+        app.dash.selected = Some(last.path.clone());
+        app.dash.scroll_to_selected = true;
+        let _ = galleys(&mut app, &ctx);
+        assert!(
+            app.covers.asked_for(last),
+            "a card scrolled to asks for its cover once it is on screen"
+        );
+
+        app.covers.settle(&ctx);
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -55,19 +55,46 @@ use ondin_export::svg::svg;
 /// the coverage check agree with whatever the projection currently does, which is
 /// the one thing it must not do — the projection is under test.
 ///
-/// Kept beside `kind_name`, whose `match` is exhaustive and is the actual
-/// tripwire: **adding a variant to `NodeKind` breaks this file's compile**, which
-/// is the point — a hand-written list alone would go on passing while the new
-/// kind was never exported and never asserted, and a `NodeKind` sweep is
-/// precisely the kind the compiler only half-finds. What the tripwire cannot do
-/// is force the *fixture* to grow the new node; that is what the arm's neighbour
-/// in this list is for, and why they sit together.
-const EVERY_KIND: &[&str] = &[
-    "root", "artboard", "group", "rect", "ellipse", "polygon", "star", "line", "path", "boolean",
-    "text",
-];
+/// Beside `kind_name`, whose `match` is exhaustive and is the tripwire: **adding
+/// a variant to `NodeKind` breaks this file's compile**, and a `NodeKind` sweep is
+/// precisely the kind the compiler only half-finds.
+///
+/// 🚨 **This was a hand-written list, and the tripwire could not reach it** (§15
+/// D858, `[X8-L6-04]`). The doc said the list was *"what forces the fixture to
+/// grow the new node"* — but the minimum edit that repairs the compile is one new
+/// arm in `kind_name`, and with the list and the fixture both untouched the
+/// coverage test compared two things that had both stood still, and passed. **The
+/// list is read off `kind_name`'s own arms now** (`arm_names`), so the edit the
+/// compiler forces is the edit that grows what the fixture has to hold.
+fn every_kind() -> BTreeSet<&'static str> {
+    arm_names("kind_name")
+}
 
-/// Every `EffectKind` the model has, one name per variant — `EVERY_KIND`'s
+/// The names a `*_name` function's `match` gives, read out of **this file's own
+/// source** — the arms are the list (§15 D858).
+///
+/// A source scan, the shape `ondin-core`'s `deps_forbidden` takes, because the
+/// question is what a `match` *says*, which nothing at run time can enumerate.
+/// It reads the function's body up to its first column-zero `}` and takes every
+/// `=> "…"` in it; the scanner's own source spells that pattern with a backslash,
+/// so it cannot read itself.
+fn arm_names(function: &str) -> BTreeSet<&'static str> {
+    const SRC: &str = include_str!("goldens.rs");
+    let start = SRC
+        .find(&format!("fn {function}("))
+        .unwrap_or_else(|| panic!("`{function}` is in this file"));
+    let body = &SRC[start..];
+    let end = body
+        .find("\n}\n")
+        .expect("and ends at a closing brace in column 0");
+    body[..end]
+        .split("=> \"")
+        .skip(1)
+        .filter_map(|s| s.split('"').next())
+        .collect()
+}
+
+/// Every `EffectKind` the model has, one name per variant — `every_kind`'s
 /// shape for the **second** enum in the model with the same sweep hazard (§15
 /// D658, `[S8.3-L6-07]`).
 ///
@@ -91,10 +118,14 @@ const EVERY_KIND: &[&str] = &[
 /// is the **change-detector**, which is a different thing and is what a golden is
 /// for.
 ///
-/// Kept beside `effect_name`, whose `match` is exhaustive and is the actual
-/// tripwire, exactly as `EVERY_KIND` sits beside `kind_name`: a fifth variant
-/// breaks this file's compile.
-const EVERY_EFFECT: &[&str] = &["drop-shadow", "inner-shadow", "layer-blur", "filters"];
+/// Read off `effect_name`'s arms, exactly as `every_kind` is off `kind_name`'s:
+/// a fifth variant breaks this file's compile, and the arm that repairs it is
+/// what grows this set (§15 D858, `[X8-L6-04]` — it was a hand-written list the
+/// compile error could not reach, so a fifth `EffectKind` shipped uncovered with
+/// the coverage test green).
+fn every_effect() -> BTreeSet<&'static str> {
+    arm_names("effect_name")
+}
 
 fn effect_name(k: &ondin_core::EffectKind) -> &'static str {
     use ondin_core::EffectKind as E;
@@ -609,7 +640,12 @@ fn the_fixture_holds_one_node_of_every_kind() {
     }
     let mut present = BTreeSet::new();
     walk(&doc, doc.root(), &mut present);
-    let expected: BTreeSet<&str> = EVERY_KIND.iter().copied().collect();
+    let expected = every_kind();
+    // At least, not exactly: an exact count would be a hand-kept number again.
+    assert!(
+        expected.len() >= 11,
+        "the fixture: the scan read `kind_name`'s arms, got {expected:?}"
+    );
 
     let missing: Vec<&&str> = expected.difference(&present).collect();
     assert!(
@@ -620,7 +656,7 @@ fn the_fixture_holds_one_node_of_every_kind() {
     );
     assert_eq!(
         present, expected,
-        "`EVERY_KIND` and the fixture disagree about what kinds exist"
+        "`kind_name` and the fixture disagree about what kinds exist"
     );
 }
 
@@ -642,11 +678,16 @@ fn the_fixture_holds_one_node_of_every_kind() {
 /// would have left both goldens byte-identical**, against a header that claims
 /// this file notices *"the field that quietly left the snapshot schema"*.
 ///
-/// The tripwire is `effect_name`'s exhaustive `match`, not the assertion below:
-/// a fifth `EffectKind` breaks this file's compile, and the assertion is what then
-/// forces the *fixture* to grow it. Exactly `EVERY_KIND`'s arrangement, and it is
-/// written out twice rather than shared because the two enums have nothing in
-/// common but the hazard.
+/// The tripwire is `effect_name`'s exhaustive `match`: a fifth `EffectKind`
+/// breaks this file's compile, and the arm that repairs it grows `every_effect`,
+/// which is what then forces the *fixture* to grow. ⚠️ **This said the
+/// assertion did that forcing, and it could not** (§15 D858): the expected set
+/// was a hand-written list, so one new arm and nothing else left both sides still
+/// and the assertion green. **Flip-check, run**: a guarded arm
+/// `E::Filters(_) if false => "halftone"` in `effect_name` — a fifth name the
+/// fixture does not hold, which is what a new variant looks like to this test —
+/// fails at *"the golden fixture no longer covers every EffectKind"*, naming
+/// `halftone`.
 ///
 /// ⚠️ **Read off the model, not off the snapshot**, for the reason the kind sweep
 /// gives one function up: the projection is under test, and an effect it had
@@ -718,7 +759,12 @@ fn the_fixture_holds_one_node_of_every_effect_kind() {
     }
     let mut present = BTreeSet::new();
     walk(&doc, doc.root(), &mut present);
-    let expected: BTreeSet<&str> = EVERY_EFFECT.iter().copied().collect();
+    let expected = every_effect();
+    // At least, not exactly: an exact count would be a hand-kept number again.
+    assert!(
+        expected.len() >= 4,
+        "the fixture: the scan read `effect_name`'s arms, got {expected:?}"
+    );
 
     assert_eq!(
         present,

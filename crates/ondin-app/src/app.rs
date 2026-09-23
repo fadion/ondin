@@ -1345,8 +1345,21 @@ pub(crate) fn system_clipboard_text() -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
-/// Every `arboard` handle in the process is opened under this, and it is not a
-/// tidiness measure (§15 D796).
+/// Every `arboard` handle **this crate** opens is opened under this, and it is not
+/// a tidiness measure (§15 D796).
+///
+/// ⚠️ **"This crate", not "the process" — this said the process, and there is a
+/// second handle** (§15 D859, `[X2-L2-01]`). `egui-winit` depends on `arboard`
+/// and keeps its own long-lived `Clipboard`, which serves `ctx.copy_text` —
+/// `stamp_clipboard`'s route onto the clipboard, and the one that makes
+/// `Event::Paste` fire — and it never passes through `GATE`. It is tolerated for
+/// one reason, and the reason is what to re-check before relying on this gate:
+/// **both handles are driven from the one UI thread**, so the concurrent open
+/// measured below cannot happen in the app. A change that moves a clipboard read
+/// onto a worker reopens it with this doc's protection not covering it. (That
+/// `arboard`'s Windows backend opens the OS clipboard per operation, so the
+/// second live handle is also inert on one thread, is read from its source
+/// rather than measured.)
 ///
 /// 🚨 **Two threads opening the clipboard at once corrupt the heap.** Measured on
 /// Windows with four `#[test]`s doing nothing but calling the two readers below

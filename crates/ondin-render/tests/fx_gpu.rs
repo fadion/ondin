@@ -375,13 +375,23 @@ fn a_resampled_drop_shadow_matches_the_reference() {
 /// not writing. It is the *only* cost here that does not track the picture, which
 /// is why this asserts a clock rather than a pixel.
 ///
-/// ⚠️ **A wall-clock assertion, deliberately, and the threshold is a hundred
-/// times the measured figure rather than a tight one.** Best of three on this
-/// machine, a 4070 Ti, release: **0.45 ms** with the loop bounded by the source
-/// and **116.3 ms** without — **258×** — and the 116 does not move when the
-/// buffer does, which is the control that says the block is what is being paid
-/// for. The bound is what fails; the exact number is not portable and is not
-/// asserted.
+/// ⚠️ **A clock, but a ratio of two clocks, and it used to be one** (§15 D866).
+/// The assertion was *"best of three under 50 ms"* against a healthy 0.45 ms and a
+/// broken 116.3 ms, and on 2026-09-23 the release bar read **54.4 ms** on a
+/// healthy tree — neither figure — and then passed 21 runs running. That reading
+/// was never recreated, so what slowed it is unknown; what is known is that an
+/// absolute bound asks the device how busy it is, which is not the question. So
+/// the degenerate case is timed **interleaved against the ordinary path** —
+/// `k = 3`, the shadow `a_resampled_drop_shadow_matches_the_reference` checks the
+/// pixels of — best of five each, and the *ratio* is asserted.
+///
+/// Measured on this machine, a 4070 Ti, release: **1.73–1.85×** healthy over five
+/// runs (0.44 ms against 0.24 ms), **1.29–2.01×** over ten runs with two other GPU
+/// suites looping in a second process, which moved the absolute figures by up to
+/// 2× and kept the ratio within about a tenth of the threshold. **Flip, run:** the shader's loop unbounded
+/// again — running to `base + radius` with the old in-loop `if` — reads
+/// **176–208×** (105 ms against 0.5–0.6 ms) and fails. The threshold, 20×, is
+/// about the geometric mean of the two, so it is ten times from either.
 ///
 /// ⚠️ The fixture assertions are the anti-vacuity half. `k` must be past
 /// `max(W, H)` or the dispatch is not degenerate and this test is timing the
@@ -412,21 +422,37 @@ fn a_deeply_resampled_shadow_costs_the_buffer_and_not_the_block() {
         0.0,
         [0, 0, 0, 255],
     )))];
+    // The control: the ordinary resampled path, `k = 3`, the case
+    // `a_resampled_drop_shadow_matches_the_reference` checks the pixels of.
+    let control = vec![Effect::new(EffectKind::DropShadow(shadow(
+        0.0,
+        0.0,
+        120.0,
+        0.0,
+        [0, 0, 0, 255],
+    )))];
     let src = upload(&g, &fixture());
-    let once = || {
+    let once = |effects: &[Effect]| {
         let at = std::time::Instant::now();
-        let out = fx_gpu::run(&g.device, &g.queue, &g.fx, &src, whole(), &list, SCALE)
+        let out = fx_gpu::run(&g.device, &g.queue, &g.fx, &src, whole(), effects, SCALE)
             .expect("the stack has ink");
         // The readback polls to completion, so this times the work rather than
         // the submission.
         let _ = readback(&g, &out);
         at.elapsed()
     };
-    once();
-    let best = (0..3).map(|_| once()).min().expect("three runs");
+    once(&list);
+    once(&control);
+    let (mut deep, mut ordinary) = (std::time::Duration::MAX, std::time::Duration::MAX);
+    for _ in 0..5 {
+        deep = deep.min(once(&list));
+        ordinary = ordinary.min(once(&control));
+    }
+    let ratio = deep.as_secs_f64() / ordinary.as_secs_f64().max(1e-6);
     assert!(
-        best.as_millis() < 50,
-        "one resampled shadow is a frame's worth of work, not a stall: {best:?}"
+        ratio < 20.0,
+        "one resampled shadow at k = {k} costs what the ordinary path does, not \
+         k² over the buffer: {deep:?} against {ordinary:?} at k = 3, {ratio:.1}×"
     );
 }
 

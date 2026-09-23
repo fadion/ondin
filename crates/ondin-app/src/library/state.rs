@@ -135,6 +135,29 @@ pub struct Library {
 impl Library {
     /// Open the library at `root` and scan it.
     pub fn open(root: PathBuf) -> Self {
+        Self::open_with_index(root, LocalIndex::load())
+    }
+
+    /// [`Self::open`], with the per-machine index handed in rather than read.
+    ///
+    /// **For a change of base folder, which already holds the index** (§15
+    /// D848, `[X1.1-L6-01]`). The index is one file per machine and keyed by
+    /// document id rather than by folder, so the copy in memory is what `load`
+    /// would read, with two exceptions worth naming: a write by another window
+    /// since launch, which this window's next `save` overwrites whole either way;
+    /// and the `unreadable` latch, which stays set until relaunch rather than
+    /// being asked again — the conservative direction for a latch that exists to
+    /// stop a write. Handing it across is what lets a test reach
+    /// [`Self::root_unavailable`] through the constructor the app uses. Under
+    /// §15 D807's `cfg!(test)` gate `load` answers an empty index, so a library
+    /// built by `open` in a test could never be unavailable, and the one test
+    /// that said it existed to prove D384's latch through a settings change was
+    /// green for a reason unrelated to the line it was about.
+    ///
+    /// ⚠️ **A parameter, not the constructor-set flag `cache::index_is_reachable`
+    /// rejects** — that argument is about a field a later `open` would silently
+    /// discard, which a value passed in cannot be.
+    pub fn open_with_index(root: PathBuf, local: LocalIndex) -> Self {
         let read = Projects::read(&root);
         let projects_unreadable = matches!(read, ProjectsRead::Unreadable);
         let mut lib = Self {
@@ -143,7 +166,7 @@ impl Library {
             entries: Vec::new(),
             // Both filled by the `refresh` below, which is what `open` is for.
             trashed: Vec::new(),
-            local: LocalIndex::load(),
+            local,
             projects_unreadable,
             root_unavailable: false,
         };

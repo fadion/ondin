@@ -411,6 +411,28 @@ fn collect(dir: &Path, descend: bool, out: &mut Vec<Entry>, unnameable: &mut Vec
     for entry in entries.flatten() {
         let path = entry.path();
         let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            // 🚨 **A *folder* with such a name is walked, not dropped** (§15
+            // D848, `[R1-L2-04]`). This arm used to `continue` on anything that
+            // was not a document, so a project folder named by a sync client
+            // with a lone surrogate was in neither output — and a migration,
+            // which iterates exactly those two, left every document in it behind
+            // uncounted, under a *Stranded* card that could not name it. The
+            // walk needs no `&str` to descend; only the two rules below it do,
+            // and the dot rule is asked of the lossy form, where a leading `.`
+            // survives: a name that is not text can still be hidden, and
+            // `.versions` spelled with a bad unit after the dot is still not a
+            // project. (The finding's sketch said neither rule could be true of
+            // such a name, which holds for `PROJECTS_FILE` and not for the dot.)
+            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            if is_dir {
+                let hidden = path
+                    .file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with('.'));
+                if descend && !hidden {
+                    collect(&path, false, out, unnameable);
+                }
+                continue;
+            }
             // **Recorded, not merely skipped** (§15 D809). The extension is
             // compared as an `OsStr`, since the whole case here is a name that
             // has no `&str` to compare — and the file type is asked because a

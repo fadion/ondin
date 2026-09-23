@@ -533,8 +533,8 @@ impl Covers {
     /// key namespaces per library. So switching from library A to B and entering
     /// the dashboard deletes every one of A's cached covers, and switching back
     /// re-renders every one of them on the worker. (That read *"at one document
-    /// per pass"* until §15 D845 — a fourth copy of the rationing §15 D820
-    /// deleted, in the paragraph §15 D844 amended for the third.) The claim was true of
+    /// per pass"* until §15 D845 — one more copy of the rationing §15 D820
+    /// deleted, in the paragraph §15 D844 amended for another.) The claim was true of
     /// *this function* and false of the program, which is the worst shape a doc
     /// comment has: correct about its own three lines and wrong about what
     /// happens.
@@ -575,7 +575,8 @@ impl Covers {
     /// putting the new library's covers behind all of it. Worse, with *Move my
     /// existing files there* on, a job queued before the move read its document
     /// at the pre-move path, failed, and cached `Unreadable` under a key that is
-    /// path-independent by design (§15 D509) — so the moved, healthy document
+    /// path-independent by design (§15 D366's id-and-mtime key; a move keeps the
+    /// mtime, which §15 D509 records) — so the moved, healthy document
     /// wore the red *"will not open"* mark for the session. **Dropping the
     /// renderer discards every answer still owed**, and the caller does this
     /// *before* `relocate` so no job is reading a file while it moves.

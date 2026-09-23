@@ -14971,6 +14971,16 @@ mod library_wiring_tests {
     /// Flip-check, run: removing that line fails at `may_write`, and leaves the
     /// `root` assertion above it green — the library does move, it simply cannot
     /// be used.
+    ///
+    /// 🚨 **That flip stopped biting for a range, and nothing said so** (§15
+    /// D848, `[X1.1-L6-01]`). §15 D807's `cfg!(test)` gate makes `LocalIndex::load`
+    /// answer an empty index, and `apply_library_settings` built the new library
+    /// with `Library::open` — so the `mark_opened` below was set on a library that
+    /// was then thrown away, `root_unavailable` was false by construction, and the
+    /// assertion this test exists for passed for a reason unrelated to the line.
+    /// The fixture visibly *tried*, which is what made it easy to believe. The
+    /// index is handed across now (`Library::open_with_index`), and the flip was
+    /// re-run: red at `may_write` again, the documented site.
     #[test]
     fn a_base_folder_that_does_not_exist_yet_is_created_rather_than_refused() {
         let ctx = egui::Context::default();

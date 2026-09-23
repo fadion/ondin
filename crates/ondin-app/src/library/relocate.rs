@@ -355,11 +355,42 @@ fn merge_tree(from: &Path, to: &Path, collision: Collision, moved: &mut Moved) {
                             continue;
                         }
                         Collision::Rename => {
+                            // ⚠️ **An extension that is not text is stranded
+                            // rather than dropped** (§15 D848, `[X1.1-L1-05]`).
+                            // It read `.and_then(to_str)`, so `notes.<not text>`
+                            // arrived as a bare `notes` — no `.ondin`, so nothing
+                            // the trash listing would ever show, restore or
+                            // purge. There is no extension to put back, which is
+                            // §15 D809's argument for the unnameable loop above,
+                            // so the honest outcome is `Stranded`'s.
+                            //
+                            // 🚨 **The finding's headline case is not a defect.**
+                            // It said a stem that is not text became `.ondin`, a
+                            // hidden name; it becomes `slug("")`'s fallback, and
+                            // the file arrives as a listable `untitled.ondin`.
+                            // Measured by the flip that was meant to prove the
+                            // opposite, which left *"nothing arrives under a name
+                            // the library cannot list"* green.
+                            //
+                            // `None` is no extension; `Some(None)` is one that is
+                            // not text.
+                            // `None` is no extension; `Some(None)` is one that is
+                            // not text.
+                            let ext = match path.extension().map(|e| e.to_str()) {
+                                None => None,
+                                Some(Some(e)) => Some(e),
+                                Some(None) => {
+                                    moved.fail(&path);
+                                    continue;
+                                }
+                            };
+                            // A stem that is not text becomes `""`, which `slug`
+                            // turns into its fallback — so the arrival is an
+                            // ordinary, listable `untitled.ondin` in the trash.
+                            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
                             // The extension is put back afterwards, so the
                             // suffix lands on the stem and `notes.ondin` becomes
                             // `notes-1.ondin` rather than `notes.ondin-1`.
-                            let ext = path.extension().and_then(|e| e.to_str());
-                            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
                             let named = |s: &str| match ext {
                                 Some(e) => to.join(format!("{s}.{e}")),
                                 None => to.join(s),
@@ -1016,6 +1047,181 @@ mod tests {
         assert!(
             to.join("landing-v4.ondin").is_file(),
             "control: the ordinary document went too"
+        );
+
+        let _ = std::fs::remove_dir_all(&from);
+        let _ = std::fs::remove_dir_all(&to);
+    }
+
+    /// A folder name the OS accepts and `OsStr::to_str` refuses — the stem of
+    /// `scan::unnameable_doc_name`, so the one platform fact stays spelled once.
+    fn unnameable_folder_name() -> std::ffi::OsString {
+        Path::new(&scan::unnameable_doc_name())
+            .file_stem()
+            .expect("the doc name has a stem")
+            .to_os_string()
+    }
+
+    /// **A document in a project folder whose name is not text is moved and
+    /// counted, and a hidden one is still hidden** (§15 D848, `[R1-L2-04]`).
+    ///
+    /// 🚨 **It was in neither half of the scan.** `scan::collect`'s non-Unicode
+    /// arm recorded documents and `continue`d past everything else, so such a
+    /// *folder* was never descended into, and a migration — which iterates exactly
+    /// `scan` and `unnameable` — left every document in it behind, absent from
+    /// `Moved::failed` and so from the *Stranded* card.
+    ///
+    /// ⚠️ **The hidden folder is the control for the dot rule**, which the walk
+    /// now asks of the lossy name: a leading `.` survives the loss, and a folder
+    /// that starts with one is not a project whatever follows it.
+    ///
+    /// **Flip-checks, run**: the directory arm's descent disabled fails at *"the
+    /// walk reaches the folder whose name is not text"* — the listing, before the
+    /// migration is ever asked; its `!hidden` term removed fails at *"the hidden
+    /// one is not a project"*, with `stray` in the listing.
+    #[test]
+    fn a_document_in_a_non_unicode_project_folder_is_carried_across_and_counted() {
+        let from = temp("odd-folder-from");
+        let to = temp("odd-folder-to");
+        store::file_document(&from, None, "Landing v4", &mut blank()).unwrap();
+        let odd = from.join(unnameable_folder_name());
+        std::fs::create_dir_all(&odd).expect("the OS accepts this name");
+        let mut doc = ondin_core::Document::new(IdSource::new(0xDB).mint());
+        let filed = store::file_document(&from, None, "Pricing table", &mut doc).unwrap();
+        std::fs::rename(&filed, odd.join("pricing-table.ondin")).unwrap();
+        let mut hidden_name = std::ffi::OsString::from(".");
+        hidden_name.push(unnameable_folder_name());
+        let hidden = from.join(hidden_name);
+        std::fs::create_dir_all(&hidden).unwrap();
+        // A real document, or the scan would skip it for not being one and the
+        // control would be about nothing.
+        let mut stray = ondin_core::Document::new(IdSource::new(0xDC).mint());
+        let filed = store::file_document(&from, None, "Stray", &mut stray).unwrap();
+        std::fs::rename(&filed, hidden.join("stray.ondin")).unwrap();
+
+        let listed: Vec<String> = scan::scan(&from).into_iter().map(|e| e.stem).collect();
+        assert!(
+            listed.iter().any(|s| s == "pricing-table"),
+            "the walk reaches the folder whose name is not text: {listed:?}"
+        );
+        assert!(
+            !listed.iter().any(|s| s == "stray"),
+            "the hidden one is not a project: {listed:?}"
+        );
+
+        let moved = relocate(&from, &to);
+        let arrived = to
+            .join(unnameable_folder_name())
+            .join("pricing-table.ondin");
+        assert!(
+            arrived.is_file(),
+            "and it arrived, in a folder of the same name"
+        );
+        assert!(
+            !odd.join("pricing-table.ondin").exists(),
+            "and it is not in two places"
+        );
+        assert_eq!(moved.documents(), 2, "both counted: {:?}", moved.paths);
+        assert!(
+            to.join("landing-v4.ondin").is_file(),
+            "control: the ordinary document went too"
+        );
+
+        let _ = std::fs::remove_dir_all(&from);
+        let _ = std::fs::remove_dir_all(&to);
+    }
+
+    /// **A destination already holding the unnameable file's name is a failure,
+    /// and the file there is untouched** (§15 D848, `[X1.1-L6-03]`).
+    ///
+    /// `target.exists()` is §15 D809's whole collision policy for this loop and
+    /// the only thing between it and `move_file`, which overwrites on both of its
+    /// arms. The sibling test's destination never existed, so deleting the guard
+    /// passed all five of its assertions.
+    ///
+    /// **The loss is asserted first**, the ordering the sibling test learned by
+    /// predicting the wrong site. **Flip-check, run**: the `target.exists()` term
+    /// removed fails at *"the file already there is untouched"*.
+    #[test]
+    fn an_unnameable_file_does_not_overwrite_one_already_at_the_destination() {
+        let from = temp("odd-collide-from");
+        let to = temp("odd-collide-to");
+        let odd = from.join(scan::unnameable_doc_name());
+        std::fs::write(&odd, b"the one moving").unwrap();
+        let there = to.join(scan::unnameable_doc_name());
+        std::fs::write(&there, b"the one already there").unwrap();
+
+        let moved = relocate(&from, &to);
+        assert_eq!(
+            std::fs::read(&there).unwrap(),
+            b"the one already there",
+            "the file already there is untouched"
+        );
+        assert!(
+            odd.exists(),
+            "and the one that could not move is still at home"
+        );
+        assert_eq!(
+            moved.failed,
+            vec![odd.clone()],
+            "and it is named as stranded"
+        );
+
+        let _ = std::fs::remove_dir_all(&from);
+        let _ = std::fs::remove_dir_all(&to);
+    }
+
+    /// **A `.trash` collision on a name that is not text: a bad *stem* is renamed
+    /// to something listable, a bad *extension* is stranded** (§15 D848,
+    /// `[X1.1-L1-05]`).
+    ///
+    /// 🚨 **The finding's headline was wrong and this test is what said so.** It
+    /// claimed `Collision::Rename`'s `.unwrap_or("")` named the arrival `.ondin`,
+    /// a leading-dot name `scan` skips; the first version of this test asserted
+    /// that nothing arrived under that name, and the flip meant to prove the
+    /// guard left it green. `slug("")` answers its fallback, so the arrival is
+    /// `untitled.ondin` — ordinary, listable, restorable — and the first half
+    /// below pins that as the behaviour rather than a defect. What *was* real is
+    /// the finding's aside: an extension that is not text was dropped, and a bare
+    /// `notes` in the trash is a file nothing will ever list.
+    ///
+    /// **Flip-check, run**: the `Some(None)` arm restored to dropping the
+    /// extension fails at *"a bad extension is not dropped"*.
+    #[test]
+    fn a_trash_collision_on_a_name_that_is_not_text_keeps_the_file_findable() {
+        let from = temp("odd-trash-from");
+        let to = temp("odd-trash-to");
+        let (from_trash, to_trash) = (from.join(TRASH_DIR), to.join(TRASH_DIR));
+        std::fs::create_dir_all(&from_trash).unwrap();
+        std::fs::create_dir_all(&to_trash).unwrap();
+        // A stem that is not text.
+        let odd = from_trash.join(scan::unnameable_doc_name());
+        std::fs::write(&odd, b"odd stem").unwrap();
+        std::fs::write(to_trash.join(scan::unnameable_doc_name()), b"already there").unwrap();
+        // An extension that is not text.
+        let mut bad_ext = std::ffi::OsString::from("notes.");
+        bad_ext.push(unnameable_folder_name());
+        let odd_ext = from_trash.join(&bad_ext);
+        std::fs::write(&odd_ext, b"odd extension").unwrap();
+        std::fs::write(to_trash.join(&bad_ext), b"already there").unwrap();
+
+        let moved = relocate(&from, &to);
+        assert_eq!(
+            std::fs::read(to_trash.join("untitled.ondin"))
+                .ok()
+                .as_deref(),
+            Some(&b"odd stem"[..]),
+            "a bad stem arrives under the fallback name, which the trash lists"
+        );
+        assert!(
+            !to_trash.join("notes").exists(),
+            "a bad extension is not dropped"
+        );
+        assert!(odd_ext.exists(), "that file stays where it was");
+        assert_eq!(
+            moved.failed,
+            vec![odd_ext.clone()],
+            "and is named as stranded"
         );
 
         let _ = std::fs::remove_dir_all(&from);

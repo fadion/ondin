@@ -5497,15 +5497,23 @@ impl OndinApp {
     /// a scan of a folder that has just changed. The `disk_settle` is the same one
     /// the first run takes and for the same reason.
     ///
-    /// 🚨 **Two refusals, and each keeps the report** (§15 D846). A report is
+    /// 🚨 **Three refusals, and each keeps the report** (§15 D846). A report is
     /// answerable only against the library it was made for: run against any other
     /// folder it moves files somewhere nothing lists them (`[X1.2-L1-01]`). And an
     /// old folder that cannot be reached is not an old folder with nothing left in
     /// it — `relocate` answers *"Nothing to move"* for a source that does not
     /// exist, and this used to take that at its word and **clear the list**, the
     /// only record of which files were left behind and where, while a network
-    /// share was merely down (`[R3-L5-02]`). §15 D384's rule, a third time: an
-    /// empty listing is not evidence.
+    /// share was merely down (`[R3-L5-02]`). §15 D384's rule again: an empty
+    /// listing is not evidence.
+    ///
+    /// ⚠️ **The third is the same finding's other half, which the finding named
+    /// and the first repair missed** (§15 D848). With the *library's* folder unreachable and the old one
+    /// fine, `relocate` records the destination root itself as the one failure,
+    /// and the retry wrote that one-item list over the report — the file names
+    /// gone again, by the other door. Refusing it also keeps `relocate`'s
+    /// `create_dir_all` from resurrecting an offline library at its own path,
+    /// which is the hazard `Library::may_write` exists for.
     pub(crate) fn retry_migration(&mut self) {
         let Some(stranded) = self.stranded.clone() else {
             return;
@@ -5522,6 +5530,13 @@ impl OndinApp {
             self.session.fail(format!(
                 "Could not reach {} — nothing was moved, and the list is kept.",
                 stranded.from.display()
+            ));
+            return;
+        }
+        if !crate::library::scan::readable(&self.library.root) {
+            self.session.fail(format!(
+                "Could not reach the library folder {} — nothing was moved, and the list is kept.",
+                self.library.root.display()
             ));
             return;
         }
@@ -5670,7 +5685,14 @@ impl OndinApp {
             // ⚠️ **Re-opened rather than refreshed.** `Library` caches the root
             // it was built with, so a `refresh` here would re-scan the folder the
             // user just left — and every subsequent write would go there too.
-            self.library = crate::library::state::Library::open(new_root);
+            //
+            // **The per-machine index is handed across rather than re-read**
+            // (§15 D848): it is one file per machine, so this is the data `load`
+            // would return, bar the two exceptions `Library::open_with_index`
+            // names — and it is what lets a test reach the latch the paragraph
+            // above is about.
+            let local = std::mem::take(&mut self.library.local);
+            self.library = crate::library::state::Library::open_with_index(new_root, local);
             // A nav pointing at a project from the old library names nothing in
             // the new one.
             self.dash.nav = Nav::from_id(&self.prefs.dashboard_page);
@@ -7970,6 +7992,34 @@ mod tests {
             app.session.status().text
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A retry with the library's own folder unreachable keeps the list**
+    /// (§15 D848, `[R3-L5-02]`'s second half).
+    ///
+    /// `relocate` records an uncreatable destination root as its one failure, and
+    /// the retry wrote that over the report — the names gone by the other door.
+    /// Here the root has been removed outright, so without the refusal
+    /// `relocate` would *recreate* it: an offline library resurrected empty at its
+    /// own path, D384's hazard.
+    ///
+    /// ⚠️ **Flip-check, run**: deleting the library-root refusal fails at *"the
+    /// list is kept"*.
+    #[test]
+    fn a_retry_with_the_library_folder_unreachable_keeps_the_list() {
+        let ctx = egui::Context::default();
+        let (mut app, root) = app(&ctx, "retry-root-gone");
+        let old = root.with_file_name(format!("{}-old", root.file_name().unwrap().display()));
+        let _ = std::fs::remove_dir_all(&old);
+        let (report, left) = planted_report(&old, &root);
+        app.stranded = Some(report.clone());
+        std::fs::remove_dir_all(&root).unwrap();
+
+        app.retry_migration();
+        assert_eq!(app.stranded, Some(report), "the list is kept");
+        assert!(left.exists(), "and the file is where it was");
+        assert!(!root.exists(), "and nothing recreated the library's folder");
+        let _ = std::fs::remove_dir_all(&old);
     }
 
     /// **The stranded list shows `STRANDED_ROWS` names and says how many it did

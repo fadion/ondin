@@ -6927,6 +6927,8 @@ impl OndinApp {
     /// layer**, silently, which is deliberate rather than an omission: the user asked
     /// for a paste and gets one, and a second message contradicting the "Pasted text"
     /// they are about to see would explain a failure they did not have.
+    /// ⚠️ **Except one nested too deeply to parse** (§15 D851), which is refused
+    /// out loud and spends the paste — see the `TooDeep` arm below.
     ///
     /// **Placed by measuring, not by guessing.** The import's own transform is its
     /// `viewBox`, so where the drawing *lands* is not known until the nodes exist —

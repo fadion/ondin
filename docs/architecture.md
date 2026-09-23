@@ -3496,8 +3496,14 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   `Resolved::rebuild` — **an abort rather than a panic**, which nothing catches and which takes the
   session's unsaved work with it. It rides on the reachability walk, which was already visiting every
   node once. `svg_in` enforces a far tighter 64 at its own recursion, so an import can never build a
-  document the loader would refuse. ⚠️ **`op_insert_subtree` enforces it as well, since 2026-09-22**
-  (§15 D832): D416 had left the operation layer unbounded on the argument that nothing in the app
+  document the loader would refuse. 🚨 **64 bounds the walk and not the import** (§15 D851): the XML
+  parser runs first and recurses too, and 1,500 nested `<g>` — 25 KB — overflowed the shipped binary's
+  1 MiB main-thread stack inside `roxmltree` before 64 was asked. `svg_in::MAX_XML_DEPTH` (96) is read
+  off the text before the parser sees it, and past it `import` refuses the whole file as
+  `SvgError::TooDeep`; **the debug profile set the number**, the parser surviving 170 levels there on
+  1 MiB against 1,200 in release. Between 65 and 96 a file still imports, the builder skipping and
+  reporting what lies past 64. ⚠️ **`op_insert_subtree` enforces `MAX_TREE_DEPTH` as well, since
+  2026-09-22** (§15 D832): D416 had left the operation layer unbounded on the argument that nothing in the app
   nests without a user click per level, and `io::clip` is the importer that does — 300 levels in one
   paste, saving cleanly and then failing this check for ever. `CreateNode` in a loop is still
   unbounded and still has no measured route. ⚠️ **A depth bound is not a size bound, and for a fortnight nothing
@@ -10471,7 +10477,9 @@ decides what is picked and, separately, that isolation follows.
 the hover outline and the click share one statement of them by construction. The two side effects
 stay on the method — clearing the scope on the way out, opening it on a `Ctrl` reach — and the first
 of them runs *before* the chain is built, which is what makes the click that leaves isolation also
-select by the ordinary rule.
+select by the ordinary rule. ⚠️ **The second — the `Ctrl` reach entering the group — was asserted by
+nothing until §15 D849**, its condition replaced by `false` passing the whole suite; it is pinned for
+`Ctrl` now, and `Ctrl`+`Alt` takes the same branch and is read rather than driven.
 
 **The canvas never selects a locked layer, by any gesture** (§15 D321, D746). A click refuses it
 (`query::hit_test`), and so does a rubber band: `canvas::apply_marquee` picks frame *contents* rather
@@ -11164,6 +11172,12 @@ library's bar that separates a failure from a report. ⚠️ **A dot cannot be a
 sentence was** — a tooltip's ink never reaches `.shapes` — so the three tests watching this split
 their assertions: the dot and its colour for the surface, `session.status().text` for the wording.
 *Asserting the text alone is the bug this whole passage is about.*
+
+⚠️ **`OndinApp::chrome_focus`'s write sat below that return too, and it is above it now** (§15 D850).
+The flag is §15 D821's record of whether anything held focus at the end of the frame, and its only write
+was the last statement of `ui`, so the library screen never wrote it: the editor's last answer — `true`,
+when the user left by a top-bar control — stood for the whole visit and was what the first editor frame
+after reopening a document read. The library branch writes it before returning.
 
 **Storage.** One base folder, defaulting to `~/.ondin` and user-settable. Nothing asks where to save,
 where to open, or what a file is called on disk:

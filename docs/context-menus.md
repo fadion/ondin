@@ -1499,7 +1499,10 @@ open. Each bullet's own flip was run and is recorded on the test it belongs to. 
 the queue survived until 2026-09-22** (§15 D824): the Escape bullet asks for `entered_group` and the
 tool as well as the selection, and what was written asserts the menu and the selection. 🚨 **It was
 closed by a *second* test and not by widening the first, which is what this bullet asked for and
-would have been wrong** — see the bullet itself. **The queue is now empty.**
+would have been wrong** — see the bullet itself. **The queue is now empty.** 🚨 **And R1's spent
+click was not in it when it should have been** (§15 D849): the test written for R1 covers the press and
+the release and never puts a gesture in flight, so the half R1 is named for had no test until
+2026-09-23 — see its bullet.
 
 The rule this project applies to a green test is *what would also pass this* — so each of these
 names the plausible wrong implementation it is aimed at.
@@ -1510,7 +1513,15 @@ names the plausible wrong implementation it is aimed at.
   argument and is invisible in the source. ⚠️ **Written** as
   `a_right_click_opens_its_menu_on_the_release_and_not_on_the_press` (§15 D795), and that flip is
   red on the **press** assertion while the release assertion stays green under it — a test asking
-  only whether a menu is up at the end passes against the bug.
+  only whether a menu is up at the end passes against the bug. 🚨 **That test drives *move · press ·
+  release* and this bullet asks for *press · move · press · release*, so "Written" was true of the
+  first half only** (§15 D849): nothing was ever dragged, `gesture_cancelled` was false on every
+  frame, and deleting `canvas_context_menu`'s guard passed the whole suite. The spent click is
+  `a_right_click_that_cancels_a_gesture_is_spent_and_the_next_one_opens` — a **marquee** cancelled
+  over the unselected group, since a dragged layer follows the pointer and the cancelling click
+  would land on it. Its flip is red on the **selection** and green on the menu, `open_context_menu`
+  refusing on the same flag: *"opens no menu"* was never the half that could fail, and this bullet's
+  first line names only that half.
 - **Right-clicking a member of a multi-selection leaves the selection whole; right-clicking a
   non-member replaces it.** Flip against "always select the hit" — with five layers selected, the
   wrong version leaves one and *Union* produces nothing.

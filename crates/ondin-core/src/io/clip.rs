@@ -210,6 +210,25 @@ fn parse(json: &str) -> Result<Payload, IoError> {
     let mut seen: Vec<ImageId> = Vec::new();
     for dto_image in dto.images {
         let (id, entry) = dto_image.into_entry()?;
+        // 🚨 **A linked picture is refused, and this is the v1 non-goal's first
+        // gate** (§15 D852, `[R3-L5-01]`, D819). `into_entry` builds
+        // `ImageSource::Linked(path)` from whatever string the payload carries,
+        // with no check of any kind, and the SVG export writes that string out
+        // verbatim as an `href` — so OS-clipboard text could put an
+        // attacker-chosen URL into the user's document, keep it through save,
+        // and publish it in every export, while the canvas showed only a
+        // missing-picture placeholder. D819 had declared linked images out of v1
+        // on the ground that *"nothing can make one"*; this door, added in the
+        // same range, could. **The maintainer ruled the non-goal stands**
+        // (2026-09-23), so a payload carrying one is refused whole rather than
+        // pasted with a placeholder: the refusal says why, and a picture that
+        // silently stops drawing does not.
+        if entry.is_linked() {
+            return Err(IoError::Integrity(format!(
+                "image {id} is linked to a file rather than embedded, and linked \
+                 pictures cannot be pasted"
+            )));
+        }
         if seen.contains(&id) {
             return Err(IoError::Integrity(format!("duplicate image id {id}")));
         }

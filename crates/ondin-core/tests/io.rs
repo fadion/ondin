@@ -3500,7 +3500,8 @@ fn a_fence_inside_the_payload_still_crosses() {
 /// row: `is_empty` disabled, the single-root destructuring weakened to
 /// `roots.first()` (the plausible wrong version — it still refuses zero and now
 /// accepts two), `root_at != 0` disabled, `seen.contains` disabled, and the
-/// image `retain` neutered.
+/// image `retain` neutered. A sixth since §15 D852: the `is_linked` refusal
+/// disabled, red at *"a linked picture was accepted"*.
 ///
 /// 🚨 **The first flip is why these assert the *message* and not just
 /// `is_err()`.** With the empty-subtree refusal gone the payload is still
@@ -3549,6 +3550,20 @@ fn every_refusal_the_clipboard_door_makes_has_a_test() {
                 &format!(",\"images\":[{},{}]", img("dup"), img("dup")),
             ),
             "duplicate image id",
+        ),
+        (
+            // `[R3-L5-01]`, §15 D852 — the maintainer's ruling that linked
+            // pictures stay out of v1, enforced at the one door that could make
+            // one. The URL is the attack: it was written verbatim into every
+            // SVG export as an `href`.
+            "a linked picture",
+            clip_wrap(
+                &[vec![ok.clone()]],
+                ",\"images\":[{\"id\":\"lnk\",\"source\":{\"Linked\":{\"path\":\
+                 \"https://example.invalid/x.png\"}},\"format\":\"Png\",\
+                 \"width\":2,\"height\":2}]",
+            ),
+            "linked pictures cannot be pasted",
         ),
     ];
     for (name, text, needle) in cases {
@@ -3807,4 +3822,55 @@ fn a_hostile_clipboard_payload_is_refused_and_leaves_the_document_openable() {
         io::load(&io::save(&doc).unwrap())
             .unwrap_or_else(|e| panic!("after {name} the document no longer opens: {e}"));
     }
+}
+
+/// **Every door onto `ImageSource::Linked` is one somebody decided about**
+/// (§15 D852, D819).
+///
+/// `into_entry` is where a stored image becomes an `ImageEntry`, and it builds a
+/// linked source from any string it is given. The v1 non-goal was once argued
+/// from *"constructed in one place, so nothing can make one"* — and a second
+/// caller, the clipboard, arrived in the same range as that sentence and made it
+/// false. So this lists the callers: **the file loader, which opens a link a
+/// foreign `.ondin` carries** (reading is not the non-goal), **and the clipboard,
+/// which refuses one**. A third caller fails here until someone decides which of
+/// those two it is and adds it.
+///
+/// ⚠️ **A source scan, the shape `deps_forbidden` and the app's
+/// `valve_condition_gate` already take**, because the question is about where a
+/// function is *called*, which no test that calls it can answer. Its blind spot
+/// is the usual one for a scan: a caller spelled through a function pointer or a
+/// macro would not match. And a *comment* spelling the call with its leading dot
+/// does match — a false positive, in the direction that asks a question rather
+/// than hiding one. Plain backticks throughout — an integration test is its own
+/// crate root, which the doc gate cannot see (§15 D319).
+///
+/// **Flip-check, run**: the call's text planted in `io/migrate.rs` fails here
+/// with that file in the list.
+#[test]
+fn every_caller_of_into_entry_decided_about_linked_pictures() {
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut callers = Vec::new();
+    let mut stack = vec![src.clone()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                let text = std::fs::read_to_string(&path).unwrap();
+                if text.contains(".into_entry()") {
+                    let rel = path.strip_prefix(&src).unwrap();
+                    callers.push(rel.to_string_lossy().replace('\\', "/"));
+                }
+            }
+        }
+    }
+    callers.sort();
+    assert_eq!(
+        callers,
+        ["io/clip.rs", "io/schema.rs"],
+        "a new door onto ImageSource::Linked — decide whether it opens a link (the \
+         loader) or refuses one (the clipboard), per §15 D819 and D852, and list it here"
+    );
 }

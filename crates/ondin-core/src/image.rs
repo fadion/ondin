@@ -174,15 +174,27 @@ impl ImageEntry {
     /// is what cost behaviour last time, and `dead_code` will not warn here because
     /// this is a library.
     ///
-    /// 🚨 **And it will have no production caller in v1, by decision** (§15 D819).
-    /// The three Asset rows that would need one — *Embed*/*Link*, *Relink…* and a
-    /// document-wide *Embed all* — are a **decided non-goal for v1**, because all
-    /// three wait on the same missing thing: a gesture that **authors** a linked
-    /// source. `ImageSource::Linked` is constructed in one place, `io/schema.rs`'s
-    /// deserializer, and every app path onto a picture funnels through
-    /// `load_image_bytes`, which builds `Embedded` unconditionally — so a
-    /// hand-written or foreign `.ondin` can carry a link and the app will open it,
-    /// and nothing can make one. §15 D191 is the out-of-v1 image list this joins.
+    /// 🚨 **Linked sources are a decided non-goal for v1** (§15 D819). The three
+    /// Asset rows that would author one — *Embed*/*Link*, *Relink…* and a
+    /// document-wide *Embed all* — all wait on the same missing thing: a gesture
+    /// that **authors** a linked source. §15 D191 is the out-of-v1 image list this
+    /// joins.
+    ///
+    /// ⚠️ **This said *"`ImageSource::Linked` is constructed in one place … and
+    /// nothing can make one"*, and both halves were false for a range** (§15
+    /// D852, `[R2-L8-03]`). `io::schema`'s `into_entry` has **two** callers — the
+    /// file loader and `io::clip::parse`, the clipboard crossing — and
+    /// `build::missing_image_ops` carries whatever entries a paste brings into the
+    /// document. So the doors onto a linked source are:
+    ///
+    /// - **A hand-written or foreign `.ondin`**, which the app opens as it always
+    ///   has: the non-goal is authoring, not reading.
+    /// - **The clipboard, which refuses one** — this function's first production
+    ///   caller, and the non-goal's only enforcement. A link arriving there was an
+    ///   attacker-chosen URL written verbatim into every SVG export.
+    ///
+    /// Every app path that *makes* a picture still funnels through
+    /// `load_image_bytes`, which builds `Embedded` unconditionally.
     ///
     /// **This function stays**, and so does `tools::original_refusal`'s three-state
     /// reasoning in the comments where that function stood: the subject exists in

@@ -8565,9 +8565,10 @@ mod tests {
             // the scale a `Length::Em` holds and the field shows ×100 (§15 D865).
             // **Flip, run:** `em` returning the `%` range undivided fails here
             // on `TRACKING` — predicted — and two tracking-chord tests fail with
-            // it. ⚠️ **No leading-chord test does**: they pin line height's
-            // floor, which is 0 in either scale, and nothing drives the leading
-            // chord to its 1000% ceiling. This assertion is what covers it.
+            // it. ⚠️ **No leading-chord test did** when this was written: the
+            // one there was pinned line height's floor, which is 0 in either
+            // scale. `a_held_leading_chord_stops_at_the_fields_ends` drives both
+            // ceilings now and fails under the same flip.
             let em = b.em();
             assert_eq!(
                 (*em.start() * 100.0, *em.end() * 100.0),
@@ -10872,9 +10873,15 @@ mod valve_arm_tests {
     /// reach the cap, which is what the *"the fixture must reach the state"*
     /// assertion below demands before the interesting one runs.
     ///
-    /// **Flip-check, run** by removing the `clamp` from the `Em` arm: fails at
+    /// **Flip-check, run** by letting the chord's `Em` arm take the step
+    /// unbounded — the tracking arm of `OndinApp::text_chord`, its `(Em, Em)`
+    /// case returning the stepped value instead of `stepped_into` it: fails at
     /// *"the em face stops at the same percentage"* with **`Em(4.0)`** against
-    /// `Em(2.0)` — 400%, twice the field's own maximum. ⚠️ The predicted site was
+    /// `Em(2.0)` — 400%, twice the field's own maximum. (Re-run 2026-09-23. This
+    /// note said *"removing the `clamp` from the `Em` arm"* until then, which
+    /// named text §15 D840 had already replaced with `stepped_into` — a mutation
+    /// named by the text it removes stops naming a line when the text goes,
+    /// which is §15 D803's warning.) ⚠️ The predicted site was
     /// the *first* cap assertion, and that one is the **px** arm, which the flip
     /// does not touch: the two arms are two clamps, and a flip of one cannot be
     /// caught by an assertion about the other. *The stored default being `Px` is
@@ -11000,6 +11007,9 @@ mod valve_arm_tests {
     ///
     /// Flip: `stepped_into` replaced by the bare `step_length` this arm used to
     /// end in. Red at the floor, the predicted site, with a negative line height.
+    /// **And a second, run 2026-09-23** (§15 D865): `Bounds::em` returning the
+    /// `%` range undivided is red at the em ceiling, the predicted site, with
+    /// `Em(21.0)` against `Em(10.0)` — the chord walked to 2100%.
     /// (Plain backticks — this is a `cfg(test)` module and `cargo doc` cannot
     /// see it, so a link here is checked by nothing, §15 D319.)
     #[test]
@@ -11036,6 +11046,42 @@ mod valve_arm_tests {
             leading(&app),
             before,
             "control: the chord still moves away from the floor"
+        );
+
+        // ⚠️ **And the ceiling, in both units, which nothing drove the chord to
+        // until 2026-09-23** (§15 D865). `em()` returning the `%` range undivided
+        // failed two tracking-chord tests and none here, because the floor is 0
+        // in either scale; the cap is where the two scales differ. From the
+        // floor, 400 presses of `LEADING_STEP_PX` pass the px cap at 20pt (1000%
+        // of 20 is 200).
+        assert!(
+            matches!(leading(&app), Some(Length::Px(_))),
+            "the fixture must reach the state: the floor left line height in px, \
+             not {:?}",
+            leading(&app)
+        );
+        for _ in 0..400 {
+            app.text_chord(TextChord::Leading(1));
+        }
+        assert_eq!(
+            leading(&app),
+            Some(Length::Px(*Bounds::LINE_HEIGHT.px(20.0).end())),
+            "a held key stops at the field's px ceiling"
+        );
+        let subject = TypeSubject::of(&app, id).expect("a subject");
+        app.apply_char_attrs(&subject, vec![CharAttr::LineHeight(Some(Length::Em(1.0)))]);
+        assert!(
+            matches!(leading(&app), Some(Length::Em(_))),
+            "the fixture must reach the state: line height is in em now, not {:?}",
+            leading(&app)
+        );
+        for _ in 0..200 {
+            app.text_chord(TextChord::Leading(1));
+        }
+        assert_eq!(
+            leading(&app),
+            Some(Length::Em(MAX_LINE_HEIGHT_PCT / 100.0)),
+            "the em face stops at the same percentage"
         );
     }
 

@@ -244,7 +244,14 @@ const GHOST_ID: NodeId = NodeId {
     seq: u64::MAX,
 };
 
-/// How close (screen px) the pointer must be to grab a corner handle.
+/// How close the pointer must be to grab a corner handle, in **logical points**.
+///
+/// ⚠️ **One unit since §15 D853, and it was two**: `Handles::grab` measures it
+/// in screen space, which is points, while the point box, the crop box and the
+/// pen's rings divided it by `camera.zoom`, which is device pixels — so the same
+/// 9 was 6 points at 150% there and 9 on a layer. Every `*_PX` allowance below
+/// that is aimed at by the pointer goes through `OndinApp::points_per_world`, and
+/// the `px` in their names is the historical spelling rather than the unit.
 const HANDLE_PICK_PX: f32 = 9.0;
 /// The handle square, in screen px (`design/Editor.dc.html` draws 7).
 const HANDLE_PX: f32 = 7.0;
@@ -908,6 +915,7 @@ impl OndinApp {
             ((rect.width() * ppp).round() as u32).max(1),
             ((rect.height() * ppp).round() as u32).max(1),
         );
+        self.canvas_ppp = ppp;
         // Kept for `fold_chrome_hold`, which asks whether the pointer moved over the
         // artwork *before* this runs and therefore reads the previous frame's.
         self.canvas_rect = rect;
@@ -2457,7 +2465,7 @@ impl OndinApp {
             Drag::Create {
                 id, start, shape, ..
             } => {
-                let screen_len = (world - start).hypot() * self.session.camera.zoom;
+                let screen_len = (world - start).hypot() * self.points_per_world();
                 if screen_len > MIN_CREATE_PX {
                     // `create_tx` reads the still-live gesture, so restore it.
                     self.drag = drag_create_again(&drag, id, start);
@@ -3159,7 +3167,9 @@ impl OndinApp {
     /// means everywhere else and because the switches are reachable from the menu
     /// while a modifier held mid-drag is not (§15).
     pub(crate) fn snapping(&self, moving: &[NodeId]) -> snap::Snapping {
-        let zoom = self.session.camera.zoom;
+        // Points per world unit, not the camera's device pixels (§15 D853) —
+        // the tolerance is aimed at by a pointer.
+        let zoom = self.points_per_world();
         let view = self.session.camera.viewport(self.canvas_px).view;
         snap::Snapping {
             targets: if self.snap_shapes {
@@ -3878,7 +3888,7 @@ impl OndinApp {
         if self.pen.as_ref().is_some_and(|p| p.shaping)
             && let Some(p) = resp.hover_pos().or_else(|| resp.interact_pointer_pos())
         {
-            let retract = f64::from(PEN_PICK_PX) / self.session.camera.zoom.max(1e-6);
+            let retract = f64::from(PEN_PICK_PX) / self.points_per_world();
             // Dragging away from the anchor is the outgoing handle, and the
             // incoming one mirrors it — **unless Alt is held**, which leaves the
             // incoming handle where it was and breaks the pair. That is how a
@@ -3904,7 +3914,7 @@ impl OndinApp {
             // so it is already smooth and `tangent_snap` declines to offer the
             // collinear candidate. With `Alt` the pair is broken and the direction
             // that puts it back together joins them.
-            let tangent = f64::from(TANGENT_SNAP_PX) / self.session.camera.zoom.max(1e-6);
+            let tangent = f64::from(TANGENT_SNAP_PX) / self.points_per_world();
             let world = self.to_world(p, rect, ppp);
             if let Some(last) = self.pen.as_mut().and_then(|s| s.anchors.last_mut()) {
                 let aim = tools::tangent_snap(last, Side::Out, world, tangent);
@@ -3991,15 +4001,12 @@ impl OndinApp {
         // broken by a fraction of a pixel at the boundary, which is worse than
         // either answer.
         let at = self.pen_point(world, shift).0;
+        let points_per_world = self.points_per_world();
         let Some(pen) = self.pen.as_mut() else {
             return;
         };
-        let closes = tools::pen_close_snap(
-            &pen.anchors,
-            at,
-            self.session.camera.zoom,
-            f64::from(PEN_PICK_PX),
-        );
+        let closes =
+            tools::pen_close_snap(&pen.anchors, at, points_per_world, f64::from(PEN_PICK_PX));
         if closes.is_some() {
             self.finish_pen(true);
             // **Swallow the rest of this press.** Closing happens on the press,
@@ -4211,7 +4218,7 @@ impl OndinApp {
 
     /// [`Self::pen_resume_target`], restricted to one node when `only` names one.
     fn pen_resume_target_in(&self, world: Point, only: Option<NodeId>) -> Option<PenEdit> {
-        let slop = f64::from(PEN_PICK_PX) / self.session.camera.zoom.max(1e-6);
+        let slop = f64::from(PEN_PICK_PX) / self.points_per_world();
         // Topmost first, as everywhere else — but a `Path` under something else
         // is still resumable, because only paths offer this at all.
         hit_test(&self.session.resolved, &self.session.doc, world, slop)
@@ -4845,7 +4852,8 @@ impl OndinApp {
     /// here for the same reason they are live there: a box that drew four handles
     /// and only answered on the diagonals reads as three broken edges.
     fn crop_handle_at(&self, frame: KRect, at: Point) -> Option<Handle> {
-        let zoom = self.session.camera.zoom.max(1e-6);
+        // Points, not device pixels — see `points_per_world` (§15 D853).
+        let zoom = self.points_per_world();
         Handle::CORNERS
             .into_iter()
             .map(|h| (h, (box_handle_at(frame, h) - at).hypot()))
@@ -5148,7 +5156,7 @@ impl OndinApp {
     fn node_grab(&self, world: Point) -> Option<NodeGrab> {
         let id = self.edited_path()?;
         let (_, subpaths) = self.edited_subpaths(id)?;
-        let slop = f64::from(PEN_PICK_PX) / self.session.camera.zoom.max(1e-6);
+        let slop = f64::from(PEN_PICK_PX) / self.points_per_world();
         let anchors = || {
             subpaths.iter().enumerate().flat_map(|(s, sub)| {
                 sub.anchors
@@ -5186,7 +5194,8 @@ impl OndinApp {
         }
         // The box over the selected points, after the points themselves — see
         // [`NodeGrab`] for why that order and not the other.
-        let zoom = self.session.camera.zoom.max(1e-6);
+        // Points, not device pixels — see `points_per_world` (§15 D853).
+        let zoom = self.points_per_world();
         if let Some(box_) = self.point_box(id) {
             let corner = Handle::CORNERS
                 .into_iter()
@@ -5914,7 +5923,7 @@ impl OndinApp {
     /// already decides a shape-drawing drag was really a click, in the same units,
     /// so there is one answer to "did the hand actually move" rather than two.
     fn gesture_travelled(&self, raw: Vec2) -> bool {
-        raw.hypot() * self.session.camera.zoom >= MIN_CREATE_PX
+        raw.hypot() * self.points_per_world() >= MIN_CREATE_PX
     }
 
     /// Where the anchor `at` of `id` sits in the **committed** document — the
@@ -6199,7 +6208,8 @@ impl OndinApp {
         // question that constant answers — "is the pointer on the anchor" — and
         // the marker flipping from a circle to a square is the affordance, drawn
         // from the preview so it appears the moment the snap takes.
-        let zoom = self.session.camera.zoom.max(1e-6);
+        // Points, not device pixels — see `points_per_world` (§15 D853).
+        let zoom = self.points_per_world();
         let snap = f64::from(PEN_PICK_PX) / zoom;
         tools::pull_handle(
             &mut subpaths,
@@ -7272,7 +7282,7 @@ impl OndinApp {
             &self.session.resolved,
             &self.session.doc,
             world,
-            f64::from(PEN_PICK_PX) / self.session.camera.zoom.max(1e-6),
+            f64::from(PEN_PICK_PX) / self.points_per_world(),
         )
     }
 
@@ -9080,7 +9090,27 @@ impl OndinApp {
     /// the current zoom, so the band under the pointer is the same size on screen
     /// whatever the magnification.
     fn pick_slop(&self) -> f64 {
-        f64::from(PICK_SLOP_PX) / self.session.camera.zoom.max(1e-6)
+        f64::from(PICK_SLOP_PX) / self.points_per_world()
+    }
+
+    /// Logical points per world unit — what every pointer allowance on the canvas
+    /// is divided by to become world units (§15 D853, `[X5-L1-03]`).
+    ///
+    /// 🚨 **Every such allowance used to divide by `camera.zoom` alone**, which is
+    /// *device pixels* per world unit, while the pointer that aims at the allowance
+    /// is reported in points — so each one shrank with the display scale: the
+    /// 4-point pick band measured **4.0 / 3.2 / 2.67 / 2.0** points at 100 / 125 /
+    /// 150 / 200%. And `HANDLE_PICK_PX` meant points in `Handles::grab`, which
+    /// measures in screen space, and device pixels at the point box and the crop
+    /// box, which divided by the zoom. **The maintainer ruled points** (2026-09-23):
+    /// the constants' own docs said so, and a target should not get smaller
+    /// because the display got sharper.
+    ///
+    /// ⚠️ **Framing is not an allowance and does not go through this**:
+    /// `reveal_selection`'s margin is about what the canvas *shows*, in device
+    /// pixels like everything else it draws.
+    pub(crate) fn points_per_world(&self) -> f64 {
+        self.session.camera.zoom.max(1e-6) / f64::from(self.canvas_ppp.max(1e-3))
     }
 
     /// A frame with at least one layer in it — the case `pick_leaf` skips.
@@ -10038,7 +10068,7 @@ impl OndinApp {
         // cannot be right for both under a shear, where the two columns
         // genuinely differ.
         let c = to_world.as_coeffs();
-        let zoom = self.session.camera.zoom.max(f64::EPSILON);
+        let zoom = self.points_per_world();
         let per_local_unit = |dx: f64, dy: f64| (dx * dx + dy * dy).sqrt().max(f64::EPSILON);
         let tol_x = PIVOT_SNAP_PX as f64 / (zoom * per_local_unit(c[0], c[1]));
         let tol_y = PIVOT_SNAP_PX as f64 / (zoom * per_local_unit(c[2], c[3]));
@@ -10538,7 +10568,7 @@ impl OndinApp {
                 tools::pen_close_snap(
                     &pen.anchors,
                     w,
-                    self.session.camera.zoom,
+                    self.points_per_world(),
                     f64::from(PEN_PICK_PX),
                 )
             });
@@ -22334,5 +22364,53 @@ mod frame_edge_tests {
             Some(board),
             "and does not clear the entered group, which only the marquee arm does"
         );
+    }
+}
+
+#[cfg(test)]
+mod pointer_allowance_tests {
+    //! **A pointer allowance is the same number of points at every display
+    //! scale** (§15 D853, `[X5-L1-03]`).
+    use crate::app::OndinApp;
+    use ondin_core::kurbo::Point;
+
+    /// The pick band, measured **on screen** — through `to_screen`, which divides
+    /// by `pixels_per_point` on its own path — at 100, 125, 150 and 200%.
+    ///
+    /// ⚠️ **On screen, because the obvious check is circular.** `pick_slop` is
+    /// `PICK_SLOP_PX / points_per_world`, so `pick_slop * points_per_world` is 4
+    /// whatever `points_per_world` answers, including the version that ignored the
+    /// display scale. `to_screen` is the canvas's own mapping and does not go
+    /// through the helper.
+    ///
+    /// The finding's measurement before the fix: **4.0 / 3.2 / 2.67 / 2.0**.
+    /// The snap tolerance's scale is asserted beside it, since `Snapping.zoom` is
+    /// the same conversion carried in a struct.
+    ///
+    /// ⚠️ **Flip-check, run**: `points_per_world` answering `camera.zoom` alone —
+    /// the shipped arithmetic — fails at 125%, *"3.2 points"*.
+    #[test]
+    fn the_pick_band_is_four_points_at_every_display_scale() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        app.session.camera.zoom = 1.0;
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+        for ppp in [1.0_f32, 1.25, 1.5, 2.0] {
+            app.canvas_ppp = ppp;
+            let slop = app.pick_slop();
+            let a = app.to_screen(Point::new(0.0, 0.0), rect, ppp);
+            let b = app.to_screen(Point::new(slop, 0.0), rect, ppp);
+            let points = (b.x - a.x).abs();
+            assert!(
+                (points - 4.0).abs() < 1e-3,
+                "at {}% the band is {points} points, and it is 4 at every scale",
+                ppp * 100.0
+            );
+            assert_eq!(
+                app.snapping(&[]).zoom,
+                app.points_per_world(),
+                "and snapping's tolerance scale is the same conversion"
+            );
+        }
     }
 }

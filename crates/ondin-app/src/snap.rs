@@ -102,9 +102,14 @@ pub struct Snapping {
     /// *Snap to grid*. The one source that has to be a flag rather than an empty
     /// list, because the lattice is everywhere.
     pub pixel: bool,
-    /// Device pixels per world unit, which turns the screen-space tolerance into
+    /// Logical points per world unit, which turns the screen-space tolerance into
     /// world units. Deliberately not `Default`-able: a zero zoom would make the
     /// tolerance effectively infinite and snap everything to everything.
+    ///
+    /// ⚠️ **This said device pixels, and was built from `camera.zoom`, until §15
+    /// D853** — so the snap tolerance shrank with the display scale while the
+    /// pointer it is aimed by is measured in points. `OndinApp::snapping` passes
+    /// `points_per_world` now; at 100% scaling the two are the same number.
     pub zoom: f64,
 }
 

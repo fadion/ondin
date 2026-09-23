@@ -799,6 +799,17 @@ pub struct OndinApp {
     pub(crate) confirming_close: bool,
     /// Canvas size in device pixels as of the last frame — zoom-to-fit needs it.
     pub(crate) canvas_px: (u32, u32),
+    /// The display scale the canvas was last laid out at, `pixels_per_point`.
+    ///
+    /// **What turns a pointer allowance into world units** (§15 D853,
+    /// `[X5-L1-03]`). `camera.zoom` is *device pixels* per world unit, because
+    /// the canvas renders in device pixels, while every `*_PX` allowance — a
+    /// handle's grab, a hairline's pick band, the pen's snap — is aimed at by a
+    /// pointer that egui reports in logical points. Divided by the zoom alone, a
+    /// 4-point band was 2.67 points at 150% and 2 at 200%, while the layer
+    /// handles, measured in screen points, never moved. See
+    /// `OndinApp::points_per_world`.
+    pub(crate) canvas_ppp: f32,
     /// The canvas widget's rect as of the last frame, in screen points.
     ///
     /// **Last frame's, and that is the honest version of the question it answers.**
@@ -2082,6 +2093,7 @@ impl OndinApp {
             layers_edge: EdgeDwell::default(),
             confirming_close: false,
             canvas_px: (1, 1),
+            canvas_ppp: 1.0,
             canvas_rect: egui::Rect::NOTHING,
             chrome_hold: ChromeHold::default(),
             pending_edit: None,

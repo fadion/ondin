@@ -8,7 +8,7 @@ documents, and is untracked.
 | --- | --- |
 | `docs/architecture.md` | The design and the invariants. **Source of truth.** ~12,000 lines. |
 | `docs/decisions.md` | **§15** — every deviation from that design, **D1–D830** with no gaps, each with a verdict. ~47,700 lines. |
-| `docs/roadmap.md` | Open work, decided non-goals, parked decisions, post-v1. **Every `Now` section is clear as of 2026-09-23** — *Files, library and storage* reopened and closed that day (the cover cache's lifecycle, §15 D863–D864); what is left is *Later* and §0. |
+| `docs/roadmap.md` | Open work, decided non-goals, parked decisions, post-v1. **Every `Now` section is clear as of 2026-09-23** — *Files, library and storage* reopened and closed that day (the cover cache's lifecycle, §15 D863–D864); what is left is *Later* and §0. **`Next · Container layout`** (flexbox, CSS grid and insets — `architecture.md` §5.3c, §15 D867–D873) is designed and unbuilt. |
 | `docs/shortcuts.md` | The whole keymap — bound, unbound and agreed. |
 | `docs/context-menus.md` | The context-menu spec and its own deviation ledger. |
 | `docs/vm.md` | The language behind Command Mode. Nothing here is built. |
@@ -67,12 +67,14 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 866 index rows, 866 body headings, next free
-D867** — but trust the procedure over any number written down here, including that one.
-⚠️ **D861–D866 are spent** (session 32: the release review's last two, then an unattended batch
-of four) and **D867–D874 is reserved and unspent** (negative grep clean at the close of session
-32) — confirm it with the negative grep anyway; a reservation recorded here is a claim about the
-moment it was written, which is the whole subject of this section.
+anywhere cited either. **The live figures: 873 index rows, 873 body headings, next free
+D874** — but trust the procedure over any number written down here, including that one.
+⚠️ **D867–D873 are spent** (session 33: container layout's design, written ahead of its code —
+**none of the seven is cited from `crates/` yet**, so check 3's per-number `grep -rl` finds only
+`docs/` for them until build step 1 plants a citation) and **D874 is reserved and unspent**
+(negative grep clean at the close of session 33) — confirm it with the negative grep anyway; a
+reservation recorded here is a claim about the moment it was written, which is the whole subject
+of this section.
 ⚠️ **Session 31 overran its block the ordinary way, and caught it the ordinary way**: it reserved
 D845–D856, reserved D857–D866 before the first ran out, and spent sixteen. Every number was typed
 into code only after its block was reserved and grep-checked, and the closing re-grep over the

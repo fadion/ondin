@@ -2283,6 +2283,7 @@ impl OndinApp {
         // `Escape` or `Enter`, and the context menu is aimed at the picture the
         // mode is on.
         self.type_menu = None;
+        let system_text = crate::app::system_clipboard_text();
         self.context_menu = Some(ContextMenu {
             at,
             target,
@@ -2290,13 +2291,16 @@ impl OndinApp {
             just_opened: true,
             // One OS clipboard read per open, answering both halves of what a
             // *Paste* row can offer — see the fields for why this is a snapshot
-            // where the rest of a menu is not.
-            system_text: crate::app::system_clipboard_text().is_some(),
+            // where the rest of a menu is not. ⚠️ **It was two**, this line and
+            // `owns_the_clipboard` beside it, each reading the whole clipboard for
+            // one `bool` — which since §15 D823 can be megabytes of base64 (§15
+            // D857). `system_text` is read above and both answers come from it.
+            system_text: system_text.is_some(),
             // The third payload, and the one that costs something to ask about —
             // see `system_clipboard_has_image` for why it is asked once and
             // answered with a `bool` rather than with the picture.
             system_image: crate::app::system_clipboard_has_image(),
-            payload_current: self.owns_the_clipboard(),
+            payload_current: self.owns_the_clipboard(system_text.as_deref()),
             // Asked here rather than per frame — see the field for the cost, and
             // only of a layer target, since no other target has a layer to ask
             // about.

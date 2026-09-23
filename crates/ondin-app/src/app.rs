@@ -134,6 +134,33 @@ enum Clipboard {
     Unreadable,
 }
 
+/// The receipt for the stand-in a copy put on the system clipboard: its length
+/// and a 64-bit hash, where it used to be the text itself (§15 D857,
+/// `[X1.2-L4-01]`).
+///
+/// **As strong as the text for the question it answers** — *is the clipboard
+/// still exactly what we wrote* — at a collision rate of one in 2⁶⁴, and a
+/// collision's cost is a stale in-app paste, not a lost one. `DefaultHasher::new`
+/// is deterministic within a process, which is the whole of the receipt's
+/// lifetime; it is never written anywhere.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ClipStamp {
+    len: usize,
+    hash: u64,
+}
+
+impl ClipStamp {
+    pub(crate) fn of(text: &str) -> Self {
+        use std::hash::{Hash as _, Hasher as _};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        text.hash(&mut h);
+        Self {
+            len: text.len(),
+            hash: h.finish(),
+        }
+    }
+}
+
 /// The values a gesture holds **while it is running**, in one place so that
 /// "is anything in flight?" is answered by the type instead of by a list somebody
 /// has to remember to extend (§15 D785, `[A2-L7-02]`).
@@ -518,10 +545,20 @@ pub struct OndinApp {
     /// pair that disagrees the moment the original is moved, which is the same bug
     /// one step milder.
     pub(crate) clipboard_from: Option<Rect>,
-    /// The stand-in text the last in-app copy put on the **system** clipboard, kept
-    /// as the receipt [`Self::owns_the_clipboard`] reads back to tell whether
-    /// [`Self::clipboard`] and [`Self::guide_clipboard`] still describe it.
-    pub(crate) clipboard_stamp: Option<String>,
+    /// A digest of the stand-in text the last in-app copy put on the **system**
+    /// clipboard, kept as the receipt [`Self::owns_the_clipboard`] reads back to
+    /// tell whether [`Self::clipboard`] and [`Self::guide_clipboard`] still
+    /// describe it.
+    ///
+    /// ⚠️ **A digest and not the text, since §15 D857** (`[X1.2-L4-01]`). It was
+    /// the text, which was tens of bytes of layer names until §15 D823 made the
+    /// stand-in the whole `io::clip` payload — base64 pictures and all. One 4 MB
+    /// photo in a copy was then a ~5.4 MB `String` held for the session, in the
+    /// copying window *and* the pasting one, beside the `Arc` of the same bytes
+    /// in [`Self::clipboard`], and compared whole on every paste. The receipt's job
+    /// is "is the clipboard still exactly what we wrote", which a length and a
+    /// 64-bit hash answer as well as the text did.
+    pub(crate) clipboard_stamp: Option<ClipStamp>,
     /// The guides Ctrl+C put on the clipboard.
     ///
     /// **A second field rather than a variant, and the two are kept mutually
@@ -2766,7 +2803,9 @@ impl OndinApp {
             // one of a session finds out where.
             Action::ExportAll => self.export_all(crate::panels::ExportAll::Asking),
             Action::PlaceImage => self.place_image_action(),
-            Action::Copy => self.copy_selection(ctx),
+            Action::Copy => {
+                self.copy_selection(ctx);
+            }
             Action::Cut => self.cut_selection(ctx),
             Action::Paste => self.paste(),
             Action::PasteInPlace => self.paste_in_place(),
@@ -4564,15 +4603,21 @@ impl OndinApp {
     /// The stamp is written at the same moment as the payload
     /// ([`Self::stamp_clipboard`]) so the two cannot come apart, which is what lets
     /// "no stamp" mean "nothing of ours is on it" rather than "unknown".
-    pub(crate) fn owns_the_clipboard(&self) -> bool {
-        let Some(stamp) = &self.clipboard_stamp else {
+    ///
+    /// ⚠️ **It takes the text rather than reading it** (§15 D857,
+    /// `[X1.2-L4-01]`), so a caller that needs the text as well — a paste door
+    /// adopting a foreign copy, a context menu snapshotting both — reads the OS
+    /// clipboard **once**. Each used to read it here and again beside the call, and
+    /// since §15 D823 a read can be megabytes of base64.
+    pub(crate) fn owns_the_clipboard(&self, text: Option<&str>) -> bool {
+        let Some(stamp) = self.clipboard_stamp else {
             debug_assert!(
                 self.clipboard.is_none() && self.guide_clipboard.is_none(),
                 "a clipboard payload was set without its stamp"
             );
             return false;
         };
-        system_clipboard_text().as_deref() == Some(stamp.as_str())
+        text.is_some_and(|t| ClipStamp::of(t) == stamp)
     }
 
     /// What the clipboard is holding for the layer arm — and, when the answer is
@@ -4606,13 +4651,18 @@ impl OndinApp {
     /// written for it. ⚠️ **The exception is the case that looks like a bug and
     /// is not**: the *same document* open in two windows does resolve, and the
     /// paste lands back in its own group, which is what someone doing that meant.
+    ///
+    /// ⚠️ **One OS read, not two** (§15 D857, `[X1.2-L4-01]`). This asked
+    /// `owns_the_clipboard`, which read the whole clipboard to compare it and threw
+    /// the string away, and then read it again to adopt it — two multi-megabyte
+    /// reads per `Ctrl+V` of a foreign copy carrying a picture.
     fn take_clipboard(&mut self) -> Clipboard {
-        if self.owns_the_clipboard() {
-            return Clipboard::Layers;
-        }
         let Some(text) = system_clipboard_text() else {
             return Clipboard::Foreign;
         };
+        if self.owns_the_clipboard(Some(&text)) {
+            return Clipboard::Layers;
+        }
         self.adopt_clip_text(text)
     }
 
@@ -4663,7 +4713,7 @@ impl OndinApp {
         // one at a copy: it is what makes `owns_the_clipboard` answer *yes* from
         // now on, so a second paste of the same foreign copy takes the fast path
         // above instead of decoding the payload again.
-        self.clipboard_stamp = Some(text);
+        self.clipboard_stamp = Some(ClipStamp::of(&text));
         // One clipboard, two typed fields — see `Self::guide_clipboard`. A
         // foreign payload carries no guides, so whatever this window was holding
         // is no longer what the system clipboard describes.
@@ -4677,7 +4727,7 @@ impl OndinApp {
     /// One function rather than two lines at each copy site, because a copy that set
     /// the payload and forgot the stamp is a copy `Ctrl+V` silently declines.
     fn stamp_clipboard(&mut self, ctx: &egui::Context, text: String) {
-        self.clipboard_stamp = Some(text.clone());
+        self.clipboard_stamp = Some(ClipStamp::of(&text));
         ctx.copy_text(text);
     }
 
@@ -4696,12 +4746,20 @@ impl OndinApp {
     /// until that landed. The names stay on the **first line** for the reason
     /// above and because they are what someone pasting an Ondin copy into a note
     /// wants to read — the stand-in was extended, not replaced.
-    fn copy_selection(&mut self, ctx: &egui::Context) {
+    ///
+    /// **Returns the text a layer copy put on the system clipboard**, or `None`
+    /// for a guide copy or nothing copied. Nothing in the app reads it; the tests
+    /// that model a second window do, since the stamp that used to hand them the
+    /// text is a digest now (§15 D857) and a headless app has no OS clipboard to
+    /// read it back from (§15 D798). The cost is one clone of the text per copy,
+    /// dropped by the caller on the spot — transient, where the stamp it replaced
+    /// held the same bytes for the session.
+    fn copy_selection(&mut self, ctx: &egui::Context) -> Option<String> {
         // Guides are the other kind of subject Ctrl+C can be aimed at, and they
         // are never selected alongside layers, so this is an early return rather
         // than a second half.
         if self.copy_guides(ctx) {
-            return;
+            return None;
         }
         // The outermost members only: copying a group and its child would
         // paste the child twice.
@@ -4716,7 +4774,7 @@ impl OndinApp {
             .filter_map(|id| self.session.doc.capture_subtree(*id))
             .collect();
         if templates.is_empty() {
-            return;
+            return None;
         }
         // **Taken here, while the originals still exist.** `cut_selection` copies
         // and *then* deletes, so this is the last moment either gesture can answer
@@ -4749,7 +4807,7 @@ impl OndinApp {
         let heading = names.join(", ");
         let text = ondin_core::io::clip::write(&templates, &images, self.clipboard_from, &heading)
             .unwrap_or(heading);
-        self.stamp_clipboard(ctx, text);
+        self.stamp_clipboard(ctx, text.clone());
         self.session
             .info(format!("Copied {} layer(s)", templates.len()));
         self.clipboard = Some(Clip {
@@ -4758,6 +4816,7 @@ impl OndinApp {
         });
         // One clipboard, two typed fields — see `OndinApp::guide_clipboard`.
         self.guide_clipboard = None;
+        Some(text)
     }
 
     /// Copy the selected guides. Returns whether there were any, so
@@ -10087,8 +10146,10 @@ mod guide_copy_tests {
     /// read, and could disturb, whatever the person running it had copied", and
     /// since §15 D798 it is false** — a headless app cannot reach the clipboard
     /// at all. The verdict is unchanged and the reason is now **stronger**:
-    /// `owns_the_clipboard` is `system_clipboard_text() == Some(stamp)`, which
-    /// under `CLIPBOARD_OFF` is permanently `false`, so that wiring is
+    /// `owns_the_clipboard` is asked of `system_clipboard_text()`, which under
+    /// `CLIPBOARD_OFF` is `None`, so the answer is permanently `false` (the
+    /// receipt is a digest of the text since §15 D857, which changes nothing
+    /// here) and that wiring is
     /// unreachable from a headless test **by construction** rather than merely
     /// non-deterministic. The three call sites pass a named constant or a literal
     /// `0.0` and the compiler checks both; what is worth asserting is that a zero
@@ -17218,11 +17279,9 @@ mod clipboard_crossing_tests {
              selection copies nothing and every assertion below would be vacuous"
         );
 
-        source.copy_selection(&ctx);
         let text = source
-            .clipboard_stamp
-            .clone()
-            .expect("a copy stamps the clipboard");
+            .copy_selection(&ctx)
+            .expect("a layer copy writes the clipboard");
         let from_source = node_ids(&source);
 
         // A second window: its own app, its own `IdSource`, its own document,
@@ -17323,11 +17382,9 @@ mod clipboard_crossing_tests {
         source.session.adopt_document(doc, None);
         source.session.selection.set_one(rect);
 
-        source.copy_selection(&ctx);
         let text = source
-            .clipboard_stamp
-            .clone()
-            .expect("a copy stamps the clipboard");
+            .copy_selection(&ctx)
+            .expect("a layer copy writes the clipboard");
 
         let mut target = OndinApp::headless(&ctx);
         assert!(
@@ -17393,8 +17450,7 @@ mod clipboard_crossing_tests {
     fn an_unreadable_copy_is_reported_rather_than_pasted_as_text() {
         let ctx = egui::Context::default();
         let (mut source, _, _, _) = super::ungroup_tests::app_with_two_groups(&ctx);
-        source.copy_selection(&ctx);
-        let text = source.clipboard_stamp.clone().unwrap();
+        let text = source.copy_selection(&ctx).unwrap();
         let bumped = text.replace(
             &format!(
                 "\"schema_version\":{}",
@@ -17415,6 +17471,62 @@ mod clipboard_crossing_tests {
                 crate::session::StatusKind::Error
             ),
             "and the user is told, because nothing else in the paste path will"
+        );
+    }
+
+    /// **The receipt answers exactly the text a copy wrote, and holds none of it**
+    /// (§15 D857, `[X1.2-L4-01]`).
+    ///
+    /// The stamp was the text, which since §15 D823 is the whole payload — so a
+    /// copy of one photo held megabytes of base64 for the session in both windows.
+    /// It is a length and a hash now, and what it must still do is the receipt's
+    /// whole job: say *yes* to the text written and *no* to anything else,
+    /// including a text that differs by one byte and no text at all. The target
+    /// side is asserted too, since adopting a foreign copy stamps it.
+    ///
+    /// ⚠️ **Flip-check, run**: `ClipStamp::of` hashing nothing (a constant hash,
+    /// the length alone) fails at *"a text of the same length that is not ours"*.
+    #[test]
+    fn the_receipt_answers_exactly_the_text_written_and_holds_none_of_it() {
+        let ctx = egui::Context::default();
+        let (mut source, _, _, _) = super::ungroup_tests::app_with_two_groups(&ctx);
+        let text = source.copy_selection(&ctx).expect("a layer copy");
+        assert!(
+            text.len() > 200,
+            "the fixture: a payload, not a name — {} bytes",
+            text.len()
+        );
+
+        assert!(
+            source.owns_the_clipboard(Some(&text)),
+            "the text written is ours"
+        );
+        let mut same_len = text.clone().into_bytes();
+        let last = same_len.len() - 1;
+        same_len[last] = if same_len[last] == b'}' { b']' } else { b'}' };
+        let same_len = String::from_utf8(same_len).unwrap();
+        assert!(
+            !source.owns_the_clipboard(Some(&same_len)),
+            "a text of the same length that is not ours"
+        );
+        assert!(
+            !source.owns_the_clipboard(Some(&format!("{text} "))),
+            "a longer one"
+        );
+        assert!(!source.owns_the_clipboard(None), "and an empty clipboard");
+        assert!(
+            std::mem::size_of_val(&source.clipboard_stamp) <= 24,
+            "and the receipt is a fixed size, whatever was copied"
+        );
+
+        let mut target = OndinApp::headless(&ctx);
+        assert!(matches!(
+            target.adopt_clip_text(text.clone()),
+            Clipboard::Layers
+        ));
+        assert!(
+            target.owns_the_clipboard(Some(&text)),
+            "an adopted copy is stamped, so a second paste takes the fast path"
         );
     }
 }

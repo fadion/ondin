@@ -189,7 +189,12 @@ pub fn framed_sampler(
 /// RGBA8 (PNG's format).
 pub fn straight_rgba8_from_premul(premul: &[u8]) -> Vec<u8> {
     let mut out = vec![0u8; premul.len()];
-    for (dst, px) in out.chunks_exact_mut(4).zip(premul.chunks_exact(4)) {
+    for (dst, px) in out
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(premul.as_chunks::<4>().0)
+    {
         let a = px[3];
         if a == 0 {
             // Fully transparent: leave color zeroed.

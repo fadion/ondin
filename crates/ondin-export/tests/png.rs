@@ -172,7 +172,9 @@ fn text_rasterizes_ink_pixels() {
     );
 
     let dark = rgba
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .filter(|p| p[3] > 128 && p[0] < 100 && p[1] < 100 && p[2] < 100)
         .count();
     assert!(dark > 50, "expected glyph ink pixels, found {dark}");
@@ -189,7 +191,7 @@ fn empty_viewport_region_is_transparent() {
     let (rgba, _, _) =
         VelloCpuRenderer::new().render_to_rgba(&doc, &res, &vp, &ondin_render::ImageStore::new());
     assert!(
-        rgba.chunks_exact(4).all(|p| p[3] == 0),
+        rgba.as_chunks::<4>().0.iter().all(|p| p[3] == 0),
         "all pixels transparent"
     );
 }
@@ -632,7 +634,9 @@ fn dark_pixels(doc: &Document, res: &Resolved) -> usize {
         &viewport(),
         &ondin_render::ImageStore::new(),
     );
-    rgba.chunks_exact(4)
+    rgba.as_chunks::<4>()
+        .0
+        .iter()
         .filter(|p| p[3] > 128 && p[0] < 100 && p[1] < 100 && p[2] < 100)
         .count()
 }
@@ -737,11 +741,15 @@ fn a_decoration_colour_overrides_the_text_ink() {
         &ondin_render::ImageStore::new(),
     );
     let red = rgba
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .filter(|p| p[0] > 200 && p[1] < 60 && p[2] < 60)
         .count();
     let blue = rgba
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .filter(|p| p[2] > 200 && p[0] < 60 && p[1] < 60)
         .count();
     assert!(red > 50, "expected a red underline, found {red} red pixels");

@@ -1308,7 +1308,12 @@ fn adjusted_data(src: &ImageData, pipeline: &AdjustPipeline) -> ImageData {
     }
     let lut = AdjustLut::build(pipeline);
     let mut out = vec![0u8; bytes.len()];
-    for (dst, px) in out.chunks_exact_mut(4).zip(bytes.chunks_exact(4)) {
+    for (dst, px) in out
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(bytes.as_chunks::<4>().0)
+    {
         dst[..3].copy_from_slice(&lut.apply([px[0], px[1], px[2]]));
         dst[3] = px[3];
     }
@@ -2677,7 +2682,9 @@ mod tests {
         fn quads(data: &ImageData) -> Vec<(u8, u8, u8)> {
             data.data
                 .data()
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .map(|p| (p[0], p[1], p[2]))
                 .collect()
         }

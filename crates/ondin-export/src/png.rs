@@ -271,7 +271,7 @@ fn square_bytes(side: u32) -> usize {
 fn composite_under(r: &mut Raster, bg: ondin_core::peniko::Color) {
     let c = bg.to_rgba8();
     let (br, bgc, bb) = (c.r as u32, c.g as u32, c.b as u32);
-    for px in r.rgba.chunks_exact_mut(4) {
+    for px in r.rgba.as_chunks_mut::<4>().0 {
         let a = px[3] as u32;
         if a == 255 {
             continue;

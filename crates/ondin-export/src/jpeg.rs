@@ -24,11 +24,11 @@ use image::codecs::jpeg::JpegEncoder;
 /// whatever colour was underneath it, which is the same thing every JPEG encoder
 /// does and is why the decision is not left this late.
 pub fn encode_rgba8(rgba: &[u8], width: u32, height: u32, quality: u8) -> Vec<u8> {
-    // Three bytes per pixel, dropping the fourth. `chunks_exact(4)` rather than an
+    // Three bytes per pixel, dropping the fourth. `as_chunks::<4>()` rather than an
     // index walk so a buffer whose length disagrees with its stated size truncates
     // instead of panicking on the last row.
     let mut rgb = Vec::with_capacity((width as usize * height as usize).saturating_mul(3));
-    for px in rgba.chunks_exact(4) {
+    for px in rgba.as_chunks::<4>().0 {
         rgb.extend_from_slice(&px[..3]);
     }
     let mut out = Vec::new();

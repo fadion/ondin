@@ -4543,7 +4543,7 @@ fn raw_crossings(
                 hits.push(ax + (bx - ax) * (row - ay) / (by - ay));
             }
             hits.sort_by(f64::total_cmp);
-            for pair in hits.chunks_exact(2) {
+            for pair in hits.as_chunks::<2>().0 {
                 if let Some(s) = widened(pair[0], pair[1], band, clear) {
                     spans.push(s);
                 }

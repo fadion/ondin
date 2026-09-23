@@ -197,7 +197,7 @@ fn compose(b: &[f32; 20], a: &[f32; 20]) -> [f32; 20] {
 /// coefficient depend on the alpha it happens to sit next to — which shows up as
 /// a hue shift confined to soft edges, i.e. exactly where nobody looks for it.
 pub fn apply_matrix(s: &mut Surface<'_>, m: &[f32; 20]) {
-    for px in s.px.chunks_exact_mut(4) {
+    for px in s.px.as_chunks_mut::<4>().0 {
         let a = px[3] as f32 / 255.0;
         if a == 0.0 {
             // Nothing to transform, and dividing by it would produce a colour
@@ -681,7 +681,7 @@ fn shadow_layer(
     // step the buffer build above no longer does. `255 - v` on a `u8` is exact, so
     // this costs no precision the old spelling had.
     let [r, g, b, ca] = sh.color.components;
-    for px in mask.chunks_exact_mut(4) {
+    for px in mask.as_chunks_mut::<4>().0 {
         let v = if inner { 255 - px[3] } else { px[3] };
         let a = (v as f32 / 255.0) * ca;
         px[0] = (r * a * 255.0 + 0.5) as u8;
@@ -692,7 +692,12 @@ fn shadow_layer(
     if inner {
         // Confine it to the layer, or the inverted silhouette paints the whole
         // buffer outside the shape. `graphic`'s alpha is the shape.
-        for (px, src) in mask.chunks_exact_mut(4).zip(graphic.chunks_exact(4)) {
+        for (px, src) in mask
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(graphic.as_chunks::<4>().0)
+        {
             let k = src[3] as f32 / 255.0;
             for v in px.iter_mut() {
                 *v = (*v as f32 * k + 0.5) as u8;
@@ -839,7 +844,12 @@ fn spread_alpha(s: &mut Surface<'_>, r: (f64, f64), inner: bool) {
 
 /// Source-over, both sides premultiplied.
 fn over(dst: &mut [u8], src: &[u8]) {
-    for (d, s) in dst.chunks_exact_mut(4).zip(src.chunks_exact(4)) {
+    for (d, s) in dst
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(src.as_chunks::<4>().0)
+    {
         let ia = 1.0 - s[3] as f32 / 255.0;
         for i in 0..4 {
             d[i] = (s[i] as f32 + d[i] as f32 * ia + 0.5).min(255.0) as u8;

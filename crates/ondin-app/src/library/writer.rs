@@ -289,7 +289,7 @@ impl Writer {
     /// `on_exit` and `relocate`, none of which happen on their own.
     pub fn drain(&mut self) -> Vec<Done> {
         // This side's own answers first — see [`Self::reports`].
-        let mut out: Vec<Done> = self.reports.drain(..).collect();
+        let mut out: Vec<Done> = std::mem::take(&mut self.reports);
         loop {
             match self.done.try_recv() {
                 Ok(msg) => {

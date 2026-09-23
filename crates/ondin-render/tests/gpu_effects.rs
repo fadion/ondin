@@ -357,7 +357,7 @@ fn three_photographs_on_one_page_all_draw() {
         "three of these do not fit at full resolution, so the budget must bite"
     );
     let px = render_gpu_store(&mut g, &doc, &res, &store, &viewport());
-    let opaque = px.chunks_exact(4).filter(|p| p[3] > 200).count();
+    let opaque = px.as_chunks::<4>().0.iter().filter(|p| p[3] > 200).count();
     assert_eq!(
         opaque, 1875,
         "three 25×25 rects at 625 pixels each — this was 1250 before"
@@ -372,7 +372,7 @@ fn three_photographs_on_one_page_all_draw() {
     );
     let px2 = render_gpu_store(&mut g, &doc2, &res2, &store2, &viewport());
     assert_eq!(
-        px2.chunks_exact(4).filter(|p| p[3] > 200).count(),
+        px2.as_chunks::<4>().0.iter().filter(|p| p[3] > 200).count(),
         1250,
         "and both of them draw"
     );
@@ -467,7 +467,10 @@ fn a_layer_needing_more_than_the_texture_limit_still_draws() {
     let px = render_gpu_vp(&mut g, &doc, &res, &vp);
 
     assert_eq!(px.len(), (SIDE * SIDE * 4) as usize, "a frame came back");
-    assert!(px.chunks_exact(4).any(|p| p[3] > 0), "and it has ink in it");
+    assert!(
+        px.as_chunks::<4>().0.iter().any(|p| p[3] > 0),
+        "and it has ink in it"
+    );
 }
 
 /// **An inner shadow on a rect reaches all four edges here too** — the on-device

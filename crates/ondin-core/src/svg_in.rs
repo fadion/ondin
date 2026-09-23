@@ -1890,7 +1890,7 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
                 }
                 let mut path = BezPath::new();
                 path.move_to(Point::new(pts[0], pts[1]));
-                for p in pts[2..].chunks_exact(2) {
+                for p in pts[2..].as_chunks::<2>().0 {
                     path.line_to(Point::new(p[0], p[1]));
                 }
                 if el.tag_name().name() == "polygon" {

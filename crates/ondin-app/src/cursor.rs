@@ -1050,7 +1050,7 @@ mod tests {
             let img = cursors.image(&ctx, which).expect(name);
             let expected = usize::from(img.size[0]) * usize::from(img.size[1]) * 4;
             assert_eq!(img.rgba.len(), expected, "{name}: buffer vs {:?}", img.size);
-            let opaque = || img.rgba.chunks_exact(4).filter(|p| p[3] > 0);
+            let opaque = || img.rgba.as_chunks::<4>().0.iter().filter(|p| p[3] > 0);
             assert!(opaque().count() > 0, "{name}: blank cursor");
             assert!(opaque().any(|p| p[0] > 200), "{name}: no light core");
             assert!(opaque().any(|p| p[0] < 60), "{name}: no dark rim");
@@ -1259,7 +1259,9 @@ mod tests {
             assert_eq!(edge, None, "step {k}: ink on the buffer's own border");
             mass.push(
                 img.rgba
-                    .chunks_exact(4)
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
                     .map(|p| u32::from(p[3]))
                     .sum::<u32>(),
             );

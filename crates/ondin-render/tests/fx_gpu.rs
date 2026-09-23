@@ -39,7 +39,9 @@ fn q(v: f32) -> u8 {
 
 fn premultiply(straight: &[u8]) -> Vec<u8> {
     straight
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|p| {
             let a = p[3] as f32 / 255.0;
             [
@@ -54,7 +56,9 @@ fn premultiply(straight: &[u8]) -> Vec<u8> {
 
 fn unpremultiply(premul: &[u8]) -> Vec<u8> {
     premul
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|p| {
             let a = p[3] as f32 / 255.0;
             if a <= 0.0 {

@@ -614,8 +614,8 @@ fn fold_operands(op: BoolOp, operands: &[BezPath]) -> Option<BezPath> {
         std::iter::once(acc).chain(live.map(to_flo)).collect();
     while level.len() > 1 {
         let mut next = Vec::with_capacity(level.len().div_ceil(2));
-        let mut pairs = level.chunks_exact(2);
-        for pair in &mut pairs {
+        let (pairs, rest) = level.as_chunks::<2>();
+        for pair in pairs {
             let merged = combine(op, &pair[0], &pair[1]);
             // An intersection that came out empty stays empty however many more
             // operands it would have met, at this level or any above it.
@@ -635,7 +635,7 @@ fn fold_operands(op: BoolOp, operands: &[BezPath]) -> Option<BezPath> {
         }
         // The odd one out rides up a level untouched rather than being folded into
         // its neighbour, which is what keeps the tree balanced at odd counts.
-        next.extend(pairs.remainder().iter().cloned());
+        next.extend(rest.iter().cloned());
         level = next;
     }
     acc = level.pop()?;

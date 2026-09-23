@@ -122,6 +122,11 @@ use peniko::Color;
 /// that it is generous by any real measure — Figma and Illustrator exports nest
 /// in the tens, and a subtree past it is *skipped and reported* rather than
 /// dropped silently.
+///
+/// 🚨 **"Clears both" was true of the walk and not of the import** (§15 D851,
+/// `[X7-L1-01]`). The XML parser runs first and recurses too, and nothing here
+/// bounded it: 1,500 nested `<g>` aborted the release build inside `roxmltree`
+/// before this constant was ever consulted. [`MAX_XML_DEPTH`] is that third bound.
 const MAX_SVG_NESTING: usize = 64;
 
 /// How many nodes one import may emit before the rest is skipped and reported
@@ -335,15 +340,22 @@ fn data_uri(href: &str) -> Option<(Vec<u8>, crate::image::ImageFormat)> {
 
 /// Why a string could not be read as SVG at all.
 ///
-/// **Only two, and neither is about the drawing.** Anything inside a well-formed
-/// `<svg>` that this cannot read is a *skip* rather than an error, because a paste
-/// that refuses a whole icon over one unsupported element is the wrong trade.
+/// **Neither of the first two is about the drawing.** Anything inside a
+/// well-formed `<svg>` that this cannot read is a *skip* rather than an error,
+/// because a paste that refuses a whole icon over one unsupported element is the
+/// wrong trade. ⚠️ **The third is the one exception, and it is not about the
+/// drawing either**: [`SvgError::TooDeep`] is a refusal to hand the text to a
+/// parser that would overflow the stack on it (§15 D851), so it is decided before
+/// there is anything to skip.
 #[derive(Debug, PartialEq, Eq)]
 pub enum SvgError {
     /// Not well-formed XML.
     NotXml,
     /// Well-formed XML whose root is not `<svg>` — HTML, a plist, a fragment.
     NotSvg,
+    /// Elements nested past [`MAX_XML_DEPTH`], refused before the XML parser is
+    /// asked (§15 D851).
+    TooDeep,
 }
 
 impl std::fmt::Display for SvgError {
@@ -351,8 +363,168 @@ impl std::fmt::Display for SvgError {
         f.write_str(match self {
             SvgError::NotXml => "not well-formed XML",
             SvgError::NotSvg => "not an SVG document",
+            SvgError::TooDeep => "nested too deeply to read",
         })
     }
+}
+
+/// How deeply the *markup* may nest before [`import`] refuses it unparsed
+/// (§15 D851, `[X7-L1-01]`).
+///
+/// 🚨 **A 25 KB SVG aborted the process.** 1,500 nested `<g>` overflowed the
+/// 1 MiB main-thread stack the shipped binary reserves — `STATUS_STACK_OVERFLOW`,
+/// which nothing catches and nothing reports, taking the session with it — and it
+/// did so inside `roxmltree`, *before* [`MAX_SVG_NESTING`] or any other budget
+/// here is consulted. Measured: a `<notsvg>` root that bails three lines after
+/// the parse aborted at the same depth, and 20,000 *sibling* elements imported in
+/// 9 ms, so it is depth and it is the parser. `roxmltree` offers no depth option,
+/// so the depth is read off the text first ([`nests_deeper_than`]).
+///
+/// **96, measured rather than chosen, and the debug profile is what sets it.**
+/// On a fresh thread with the 1 MiB main-thread stack, the parser alone survives
+/// **170** levels in debug and overflows at **180** (≈6 KB a level), and survives
+/// **1,200** in release and overflows at **1,400** (≈0.8 KB a level). The first
+/// draft of this said 256 on the release figure and its own test overflowed in
+/// debug at 255. The real main thread is not fresh — `paste_svg` runs under the
+/// whole egui frame — so the bound keeps about 45% of the debug stack for that:
+/// 96 levels is ~560 KB there and ~75 KB in the shipped build.
+///
+/// **1.5× the builder's own [`MAX_SVG_NESTING`]**, because the two bound
+/// different things: a document nested 65–96 deep still imports, with the
+/// subtrees past 64 skipped and reported as they always were, and only one the
+/// parser itself might not survive is refused whole.
+pub const MAX_XML_DEPTH: usize = 96;
+
+/// Whether `svg`'s elements nest deeper than `limit`, read from the text without
+/// parsing it — so a document the XML parser would overflow its stack on is
+/// refused before it gets there (§15 D851).
+///
+/// **Conservative in the direction that refuses**, and it has to be: the question
+/// is asked of the most untrusted input the app takes. Comments, CDATA,
+/// processing instructions and quoted attribute values are stepped over, since a
+/// `<` inside any of them is not a tag. ⚠️ **Entity expansion is the door a plain
+/// tag count cannot see**: a `<!DOCTYPE>` internal subset can declare an entity
+/// whose value is markup, and `roxmltree` expands references ten deep — so the
+/// deepest markup inside any quoted string in the doctype is counted **ten
+/// times** on top of the document's own depth. That over-counts every real file,
+/// none of which puts nested elements in an entity.
+///
+/// Malformed text (an unclosed comment, a tag with no `>`) answers `false` and is
+/// left to the parser to refuse as not XML.
+fn nests_deeper_than(svg: &str, limit: usize) -> bool {
+    /// `roxmltree`'s own entity-reference depth (its `EntityReferenceLoop`).
+    const ENTITY_DEPTH: usize = 10;
+    let b = svg.as_bytes();
+    let find = |from: usize, needle: &[u8]| -> Option<usize> {
+        b.get(from..)?
+            .windows(needle.len())
+            .position(|w| w == needle)
+            .map(|i| from + i)
+    };
+    let mut depth = 0usize;
+    let mut entity_depth = 0usize;
+    let mut i = 0usize;
+    while let Some(off) = b.get(i..).and_then(|r| r.iter().position(|&c| c == b'<')) {
+        i += off;
+        let rest = &b[i..];
+        if rest.starts_with(b"<!--") {
+            let Some(end) = find(i + 4, b"-->") else {
+                return false;
+            };
+            i = end + 3;
+        } else if rest.starts_with(b"<![CDATA[") {
+            let Some(end) = find(i + 9, b"]]>") else {
+                return false;
+            };
+            i = end + 3;
+        } else if rest.starts_with(b"<?") {
+            let Some(end) = find(i + 2, b"?>") else {
+                return false;
+            };
+            i = end + 2;
+        } else if rest.starts_with(b"<!") {
+            // A doctype, possibly with an internal subset in brackets; a quoted
+            // string in it may be an entity value holding markup.
+            let mut j = i + 2;
+            let mut brackets = 0usize;
+            loop {
+                match b.get(j) {
+                    None => return false,
+                    Some(b'[') => brackets += 1,
+                    Some(b']') => brackets = brackets.saturating_sub(1),
+                    Some(b'>') if brackets == 0 => break,
+                    Some(&q @ (b'"' | b'\'')) => {
+                        let Some(close) =
+                            b.get(j + 1..).and_then(|r| r.iter().position(|&c| c == q))
+                        else {
+                            return false;
+                        };
+                        let value = &svg[j + 1..j + 1 + close];
+                        entity_depth = entity_depth.max(markup_depth(value));
+                        j += close + 1;
+                    }
+                    Some(_) => {}
+                }
+                j += 1;
+            }
+            i = j + 1;
+        } else {
+            let closing = rest.starts_with(b"</");
+            // Step to the tag's `>`, over quoted attribute values.
+            let mut j = i + 1;
+            let mut quote = None;
+            loop {
+                match (b.get(j), quote) {
+                    (None, _) => return false,
+                    (Some(&c), Some(q)) if c == q => quote = None,
+                    (Some(_), Some(_)) => {}
+                    (Some(&c @ (b'"' | b'\'')), None) => quote = Some(c),
+                    (Some(b'>'), None) => break,
+                    (Some(_), None) => {}
+                }
+                j += 1;
+            }
+            if closing {
+                depth = depth.saturating_sub(1);
+            } else if b[j - 1] != b'/' {
+                depth += 1;
+                if depth + ENTITY_DEPTH * entity_depth > limit {
+                    return true;
+                }
+            }
+            i = j + 1;
+        }
+    }
+    false
+}
+
+/// The deepest element nesting in a fragment of markup — an entity value — by
+/// the same stepping [`nests_deeper_than`] does, without the doctype arm (an
+/// entity value cannot hold one).
+fn markup_depth(fragment: &str) -> usize {
+    let (mut depth, mut deepest) = (0usize, 0usize);
+    let b = fragment.as_bytes();
+    let mut i = 0;
+    while let Some(off) = b.get(i..).and_then(|r| r.iter().position(|&c| c == b'<')) {
+        i += off;
+        let closing = b.get(i + 1) == Some(&b'/');
+        let Some(end) = b.get(i..).and_then(|r| r.iter().position(|&c| c == b'>')) else {
+            break;
+        };
+        let gt = i + end;
+        if closing {
+            depth = depth.saturating_sub(1);
+        } else if b
+            .get(i + 1)
+            .is_some_and(|c| c.is_ascii_alphabetic() || *c == b'_' || *c == b':')
+            && b[gt - 1] != b'/'
+        {
+            depth += 1;
+            deepest = deepest.max(depth);
+        }
+        i = gt + 1;
+    }
+    deepest
 }
 
 impl std::error::Error for SvgError {}
@@ -444,6 +616,12 @@ pub fn import<'s>(
         allow_dtd: true,
         nodes_limit: 500_000,
     };
+    // 🚨 **Depth first, because the parser is where the stack goes** (§15 D851):
+    // `nodes_limit` bounds how *many* nodes, never how deep, and 1,500 nested
+    // `<g>` — 0.3% of it — aborted the process inside the call below.
+    if nests_deeper_than(svg, MAX_XML_DEPTH) {
+        return Err(SvgError::TooDeep);
+    }
     let doc = roxmltree::Document::parse_with_options(svg, opts).map_err(|_| SvgError::NotXml)?;
     let root = doc.root_element();
     if root.tag_name().name() != "svg" {
@@ -7935,8 +8113,13 @@ mod tests {
         assert!(out.skipped.is_empty(), "{:?}", out.skipped);
         assert_eq!(max_depth(&doc, out.root), 31, "the group chain is kept");
 
-        // The bomb: reported, and bounded.
-        let (doc, out) = imported(&bomb(200));
+        // The bomb: reported, and bounded. ⚠️ **90 and not the 200 the doc below
+        // measured at**, because 200 is refused whole by `MAX_XML_DEPTH` now,
+        // before the builder is reached (§15 D851) — and this test is about the
+        // builder. 90 sits between the two bounds, which is the only band where
+        // the builder's own skip can still be seen.
+        const { assert!(MAX_SVG_NESTING < 90 && 90 < MAX_XML_DEPTH) };
+        let (doc, out) = imported(&bomb(90));
         assert!(
             out.skipped.iter().any(|s| s == "deeply nested elements"),
             "the user is told what was dropped: {:?}",
@@ -8434,6 +8617,113 @@ mod tests {
             out.skipped.iter().any(|s| s == "deeply nested elements"),
             "the mutual form too: {:?}",
             out.skipped
+        );
+    }
+
+    /// `depth` nested `<g>` in an `<svg>`, with one rect at the bottom.
+    fn nested(depth: usize) -> String {
+        let mut s = String::from(r#"<svg xmlns="http://www.w3.org/2000/svg">"#);
+        s.push_str(&"<g>".repeat(depth));
+        s.push_str(r#"<rect width="1" height="1"/>"#);
+        s.push_str(&"</g>".repeat(depth));
+        s.push_str("</svg>");
+        s
+    }
+
+    /// Run `f` on a thread with the **1 MiB** stack the shipped binary reserves
+    /// for its main thread (read from `ondin.exe`'s PE header; nothing sets
+    /// `/STACK`) — which is where `paste_svg` runs. A test thread's default is
+    /// larger, so a test on it would pass a depth the app cannot survive.
+    fn on_the_main_threads_stack<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+        std::thread::Builder::new()
+            .stack_size(1 << 20)
+            .spawn(f)
+            .expect("spawn")
+            .join()
+            .expect("the import returned rather than overflowing")
+    }
+
+    /// **Nesting the parser cannot survive is refused before it is asked** (§15
+    /// D851, `[X7-L1-01]`).
+    ///
+    /// 🚨 **This test could not be written as an assertion before the guard**,
+    /// and that is the argument for the guard: 2,000 nested `<g>` — 34 KB —
+    /// aborted the process with `STATUS_STACK_OVERFLOW` inside `roxmltree`, and a
+    /// test that overflows takes its whole binary with it.
+    ///
+    /// ⚠️ **Flip-check, run**: the `nests_deeper_than` refusal removed — the test
+    /// binary dies with `STATUS_STACK_OVERFLOW` rather than failing, which is the
+    /// reported symptom, and the only way this failure can be observed at all.
+    #[test]
+    fn markup_nested_past_the_parsers_depth_is_refused_before_the_parser() {
+        let answer = on_the_main_threads_stack(|| {
+            let mut ids = IdSource::new(1);
+            let root = ids.mint();
+            import(&nested(2_000), &mut ids, root, 0, None).map(|_| ())
+        });
+        assert_eq!(answer, Err(SvgError::TooDeep));
+    }
+
+    /// **At the bound, the document still imports — on the main thread's stack,
+    /// in whichever profile runs this** — with what lies past the builder's own
+    /// `MAX_SVG_NESTING` skipped and reported as it always was.
+    ///
+    /// This is the half that says the bound is *survivable* and not only a
+    /// number: release was measured surviving 1,200 levels on 1 MiB, and the debug
+    /// profile, whose frames are larger, is the one this is most likely to run in.
+    ///
+    /// ⚠️ **Flip-check, run**: `MAX_XML_DEPTH` lowered below the fixture fails at
+    /// *"at the bound it imports"*, `Err(TooDeep)`.
+    #[test]
+    fn nesting_at_the_bound_still_imports_on_the_main_threads_stack() {
+        let skipped = on_the_main_threads_stack(|| {
+            let mut ids = IdSource::new(1);
+            let root = ids.mint();
+            import(&nested(MAX_XML_DEPTH - 1), &mut ids, root, 0, None).map(|out| out.skipped)
+        });
+        let skipped = skipped.expect("at the bound it imports");
+        assert!(
+            !skipped.is_empty(),
+            "and the builder's own depth bound still reports what it cut"
+        );
+    }
+
+    /// **What the depth scan steps over, and the one thing it counts that a tag
+    /// count cannot see** (§15 D851).
+    ///
+    /// A `<` inside a comment, a CDATA section, a processing instruction or a
+    /// quoted attribute value is not a tag, and a self-closed element does not
+    /// nest — each would refuse a file that parses at depth one. Twenty thousand
+    /// *siblings* are the control that the scan measures depth rather than size.
+    /// ⚠️ **And an entity**: a doctype can declare one whose value is markup, and
+    /// `roxmltree` expands references ten deep, so a shallow document can parse
+    /// deep. The deepest markup in a doctype string is counted ten times.
+    ///
+    /// ⚠️ **Flip-check, run**: the `ENTITY_DEPTH * entity_depth` term dropped fails
+    /// at *"an entity holding markup counts ten times"*.
+    #[test]
+    fn the_depth_scan_counts_tags_and_nothing_else() {
+        let deep = |s: &str| nests_deeper_than(s, 8);
+        let noise = r#"<svg><!-- <g><g><g><g><g><g><g><g><g> --><![CDATA[<g><g><g><g><g><g><g><g><g>]]><?pi <g><g><g><g><g><g><g><g><g> ?><rect title="<g><g><g><g><g><g><g><g><g>" data-x='>'/><g/><g/><g/></svg>"#;
+        assert!(
+            !deep(noise),
+            "comments, CDATA, PIs, attribute values and self-closing tags do not nest"
+        );
+        assert!(deep(&nested(9)), "nine real levels inside an svg do");
+        assert!(!deep(&nested(6)), "and six do not");
+        let siblings = format!("<svg>{}</svg>", "<g></g>".repeat(20_000));
+        assert!(
+            !nests_deeper_than(&siblings, 8),
+            "control: twenty thousand siblings are shallow"
+        );
+        let entity = r#"<!DOCTYPE svg [<!ENTITY e "<g><g><g></g></g></g>">]><svg>&e;</svg>"#;
+        assert!(
+            nests_deeper_than(entity, 8),
+            "an entity holding markup counts ten times — three levels read as thirty"
+        );
+        assert!(
+            !nests_deeper_than(r#"<!DOCTYPE svg [<!ENTITY e "plain">]><svg>&e;</svg>"#, 8),
+            "an entity holding only text adds nothing"
         );
     }
 }

@@ -6951,14 +6951,29 @@ impl OndinApp {
         let mut sink = SvgImages {
             images: self.canvas.images_mut(),
         };
-        let Ok(mut out) = ondin_core::svg_in::import(
+        let mut out = match ondin_core::svg_in::import(
             &text,
             &mut self.session.ids,
             parent,
             index,
             Some(&mut sink),
-        ) else {
-            return false;
+        ) {
+            Ok(out) => out,
+            // **An SVG too deep to read is still an SVG**, so it is refused out
+            // loud rather than falling through to a text layer of its markup —
+            // which for the file that used to abort the app is thirty-four
+            // kilobytes of `<g>` (§15 D851, `[X7-L1-01]`). The other two errors
+            // are about text that is not a drawing, where a text layer is the
+            // honest answer.
+            Err(ondin_core::svg_in::SvgError::TooDeep) => {
+                // Untested at this arm: `system_clipboard_text` is unreachable
+                // under `cfg(test)` (§15 D798). The refusal it reports is
+                // `svg_in`'s, and tested there.
+                self.session
+                    .fail("That SVG is nested too deeply to read — nothing was pasted.");
+                return true;
+            }
+            Err(_) => return false,
         };
         // An `<svg>` holding nothing this can draw is not a paste. Falling through
         // leaves the markup as a text layer, which is what the user can act on.

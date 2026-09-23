@@ -5496,10 +5496,35 @@ impl OndinApp {
     /// documents, so the open one can be among them, and the library's listing is
     /// a scan of a folder that has just changed. The `disk_settle` is the same one
     /// the first run takes and for the same reason.
+    ///
+    /// 🚨 **Two refusals, and each keeps the report** (§15 D846). A report is
+    /// answerable only against the library it was made for: run against any other
+    /// folder it moves files somewhere nothing lists them (`[X1.2-L1-01]`). And an
+    /// old folder that cannot be reached is not an old folder with nothing left in
+    /// it — `relocate` answers *"Nothing to move"* for a source that does not
+    /// exist, and this used to take that at its word and **clear the list**, the
+    /// only record of which files were left behind and where, while a network
+    /// share was merely down (`[R3-L5-02]`). §15 D384's rule, a third time: an
+    /// empty listing is not evidence.
     pub(crate) fn retry_migration(&mut self) {
         let Some(stranded) = self.stranded.clone() else {
             return;
         };
+        if stranded.to != self.library.root {
+            self.session.fail(format!(
+                "That list is from a move into {}, which is not the library folder any more — \
+                 nothing was moved.",
+                stranded.to.display()
+            ));
+            return;
+        }
+        if !crate::library::scan::readable(&stranded.from) {
+            self.session.fail(format!(
+                "Could not reach {} — nothing was moved, and the list is kept.",
+                stranded.from.display()
+            ));
+            return;
+        }
         self.disk_settle();
         let moved = crate::library::relocate::relocate(&stranded.from, &stranded.to);
         self.follow_moved_documents(&moved);
@@ -5563,6 +5588,30 @@ impl OndinApp {
         } else if new_root != self.library.root {
             let old_root = self.library.root.clone();
             self.prefs.base_folder = requested;
+            // ⚠️ **The in-memory textures go.** They are keyed correctly and
+            // would still be *right*, but they are for a set of documents that is
+            // no longer on screen and would sit in memory for the session.
+            //
+            // 🚨 **This used to add "and the disk cache stays … which is what
+            // makes a library that has been seen before come back with its
+            // covers already drawn", and that is false** (§15 D708,
+            // `[S1.3-L8-07]`). `Covers::sweep` runs on the very next
+            // `go_to_dashboard` with a keep set built from the **new** library
+            // alone, over one un-namespaced directory, so the old library's
+            // covers are deleted rather than kept. The claim was written in two
+            // places and both said it; `Covers::clear`'s doc carries the whole
+            // account and the two options for making it true.
+            //
+            // 🚨 **And it is here, before the migration, rather than after the
+            // re-open where it used to be** (§15 D845, `[X1.1-L1-02]`). `clear`
+            // ends the cover renderer, and the renderer is a second worker aimed
+            // at the old root — `disk_settle` below exists for the first. A cover
+            // job queued before the move read its document at the pre-move path,
+            // failed, and cached `Unreadable` under a key that does not contain
+            // the path, so the moved and perfectly healthy document wore the red
+            // *"will not open"* mark. **Cancelled rather than waited for**: its
+            // answers are about paths that are about to stop existing.
+            self.covers.clear();
             if d.migrate {
                 // ⚠️ **The snapshot writer is drained before the folder moves.**
                 // `relocate` carries `.recovery/` across on this thread, and the
@@ -5592,6 +5641,17 @@ impl OndinApp {
                     to: new_root.clone(),
                     failed: moved.failed.clone(),
                 });
+            } else {
+                // 🚨 **And a change that does not migrate clears it too**
+                // (§15 D846, `[X1.2-L1-01]`). "Both directions" above was both
+                // directions *of a migration*, and this branch had neither: a
+                // report from moving A to B survived pointing the library at C,
+                // so *Try again* ran `relocate(A, B)` into a folder that was no
+                // longer the library, re-pointed the open document there, and
+                // then cleared the only list of where the files had gone. The
+                // files it names are still in A, which is exactly where the user
+                // left them by choosing not to move them.
+                self.stranded = None;
             }
             // ⚠️ **Why the folder is created at all — the call itself has moved
             // to the top of this block** (§15 D700). It is not tidiness: it is
@@ -5611,20 +5671,6 @@ impl OndinApp {
             // it was built with, so a `refresh` here would re-scan the folder the
             // user just left — and every subsequent write would go there too.
             self.library = crate::library::state::Library::open(new_root);
-            // ⚠️ **The in-memory textures go.** They are keyed correctly and
-            // would still be *right*, but they are for a set of documents that is
-            // no longer on screen and would sit in memory for the session.
-            //
-            // 🚨 **This used to add "and the disk cache stays … which is what
-            // makes a library that has been seen before come back with its
-            // covers already drawn", and that is false** (§15 D708,
-            // `[S1.3-L8-07]`). `Covers::sweep` runs on the very next
-            // `go_to_dashboard` with a keep set built from the **new** library
-            // alone, over one un-namespaced directory, so the old library's
-            // covers are deleted rather than kept. The claim was written in two
-            // places and both said it; `Covers::clear`'s doc carries the whole
-            // account and the two options for making it true.
-            self.covers.clear();
             // A nav pointing at a project from the old library names nothing in
             // the new one.
             self.dash.nav = Nav::from_id(&self.prefs.dashboard_page);
@@ -7785,6 +7831,185 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&from);
         let _ = std::fs::remove_dir_all(&to);
+    }
+
+    /// A report the tests below plant by hand: one file left in `from` on the
+    /// way to `to`. **Planted rather than produced**, because what is under test
+    /// is what a *later* settings change and a *later* retry do with a report,
+    /// and `a_partly_failed_migration_is_listed_and_can_be_run_again` already
+    /// covers how one is made.
+    fn planted_report(from: &Path, to: &Path) -> (Stranded, PathBuf) {
+        std::fs::create_dir_all(from).unwrap();
+        let left = from.join("left-behind.ondin");
+        let doc = ondin_core::Document::new(ondin_core::IdSource::new(0xDA).mint());
+        std::fs::write(&left, ondin_core::io::save(&doc).unwrap()).unwrap();
+        let report = Stranded {
+            from: from.to_path_buf(),
+            to: to.to_path_buf(),
+            failed: vec![left.clone()],
+        };
+        (report, left)
+    }
+
+    /// **Every change of base folder settles the last report, migrating or not**
+    /// (§15 D846, `[X1.2-L1-01]`, `[X1.2-L6-03]`).
+    ///
+    /// §15 D810 says the report is *"assigned in both directions so a clean
+    /// migration clears a previous report"*, and nothing tested that half: a
+    /// version with no `None` arm passed the suite. And the both-directions
+    /// assignment sat inside `if d.migrate`, so a change that did **not** migrate
+    /// assigned nothing — and that is where the retry into a folder that is no
+    /// longer the library came from.
+    ///
+    /// ⚠️ **Flip-checks, run**: `if !failed.is_empty() { stranded = Some(..) }`
+    /// in place of the `then` fails at *"a clean migration clears"*; deleting
+    /// the `else { self.stranded = None }` fails at *"and so does a change that
+    /// moves nothing"*.
+    #[test]
+    fn every_change_of_base_folder_settles_the_last_report() {
+        let ctx = egui::Context::default();
+        let (mut app, root) = app(&ctx, "report-settles");
+        let elsewhere = root.with_file_name(format!("{}-b", root.file_name().unwrap().display()));
+        let third = root.with_file_name(format!("{}-c", root.file_name().unwrap().display()));
+        for dir in [&elsewhere, &third] {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+        let (report, _) = planted_report(&root.join("old"), &root);
+
+        // A clean migration.
+        app.stranded = Some(report.clone());
+        let mut d = LibrarySettings::from_prefs(&app.prefs, &app.library.root);
+        d.base_folder = elsewhere.display().to_string();
+        d.migrate = true;
+        app.library_settings = Some(d);
+        app.apply_library_settings();
+        assert_eq!(app.library.root, elsewhere, "the fixture moved the library");
+        assert!(
+            app.stranded.is_none(),
+            "a clean migration clears the last report: {:?}",
+            app.stranded
+        );
+
+        // A change that moves nothing.
+        app.stranded = Some(report);
+        let mut d = LibrarySettings::from_prefs(&app.prefs, &app.library.root);
+        d.base_folder = third.display().to_string();
+        d.migrate = false;
+        app.library_settings = Some(d);
+        app.apply_library_settings();
+        assert_eq!(app.library.root, third, "the fixture moved the library");
+        assert!(
+            app.stranded.is_none(),
+            "and so does a change that moves nothing: {:?}",
+            app.stranded
+        );
+
+        for dir in [&root, &elsewhere, &third] {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    /// **A retry refuses a report made for another library, and keeps it**
+    /// (§15 D846, `[X1.2-L1-01]`).
+    ///
+    /// The planted report says the files were going to a folder that is not the
+    /// library. Run anyway, that moved them somewhere nothing lists and then
+    /// cleared the one record of where. **The fixture file is the loss**, so it
+    /// is asserted first.
+    ///
+    /// ⚠️ **Flip-check, run**: deleting the `stranded.to != self.library.root`
+    /// refusal fails at *"the file is where it was"* — the move happened.
+    #[test]
+    fn a_retry_refuses_a_report_made_for_another_library() {
+        let ctx = egui::Context::default();
+        let (mut app, root) = app(&ctx, "retry-other");
+        let not_the_library = root.join("not-the-library");
+        let (report, left) = planted_report(&root.join("old"), &not_the_library);
+        app.stranded = Some(report.clone());
+
+        app.retry_migration();
+        assert!(left.exists(), "the file is where it was");
+        assert!(
+            !not_the_library.join("left-behind.ondin").exists(),
+            "and nothing went to the folder that is not the library"
+        );
+        assert_eq!(app.stranded, Some(report), "and the list is kept");
+        assert!(
+            app.session.status().text.contains("not the library folder"),
+            "and the refusal says why: {}",
+            app.session.status().text
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A retry against an old folder that cannot be reached keeps the list**
+    /// (§15 D846, `[R3-L5-02]`).
+    ///
+    /// `relocate` answers *"Nothing to move"* for a source that does not exist,
+    /// which is true of a folder that is gone and false of a share that is down
+    /// — and the retry took it at its word, clearing the only record of which
+    /// files were left behind.
+    ///
+    /// ⚠️ **Flip-check, run**: deleting the `scan::readable` refusal fails at
+    /// *"the list is kept"*, `left: None` — the list cleared, the symptom as the
+    /// finding reported it.
+    #[test]
+    fn a_retry_against_an_unreachable_old_folder_keeps_the_list() {
+        let ctx = egui::Context::default();
+        let (mut app, root) = app(&ctx, "retry-unreachable");
+        let (mut report, _) = planted_report(&root.join("old"), &root);
+        // Unplugged: the folder the report names is not there to list.
+        report.from = root.join("an-unplugged-drive");
+        app.stranded = Some(report.clone());
+
+        app.retry_migration();
+        assert_eq!(app.stranded, Some(report), "the list is kept");
+        assert!(
+            app.session.status().text.contains("Could not reach"),
+            "and the status says the folder was not there rather than empty: {}",
+            app.session.status().text
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **The stranded list shows `STRANDED_ROWS` names and says how many it did
+    /// not** (§15 D846, `[X1.2-L6-04]`).
+    ///
+    /// The only test that draws the list strands one file, so deleting
+    /// `.take(STRANDED_ROWS)` — letting the card grow past the window, which is
+    /// the reason the cap exists — passed, and so did deleting the *"…and N
+    /// more"* line.
+    ///
+    /// ⚠️ **Flip-checks, run**: removing the `.take` fails at *"the seventh is
+    /// not drawn"*; removing the *"…and N more"* block fails at *"and the rest
+    /// are counted"*.
+    #[test]
+    fn the_stranded_list_is_capped_and_counts_the_rest() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, root) = app(&ctx, "stranded-cap");
+        let failed: Vec<PathBuf> = (1..=STRANDED_ROWS + 2)
+            .map(|n| root.join("old").join(format!("stranded-{n}.ondin")))
+            .collect();
+        app.stranded = Some(Stranded {
+            from: root.join("old"),
+            to: root.clone(),
+            failed,
+        });
+        app.library_settings = Some(LibrarySettings::from_prefs(&app.prefs, &app.library.root));
+
+        let shown = galleys(&mut app, &ctx);
+        let text = |needle: &str| shown.iter().any(|(_, _, t)| t.contains(needle));
+        assert!(
+            text(&format!("stranded-{STRANDED_ROWS}.ondin")),
+            "the last row under the cap is drawn — the fixture reached the list"
+        );
+        assert!(
+            !text(&format!("stranded-{}.ondin", STRANDED_ROWS + 1)),
+            "the seventh is not drawn"
+        );
+        assert!(text("…and 2 more"), "and the rest are counted");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// The header's three controls are one row of one height, sharing one centre.

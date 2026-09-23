@@ -6149,7 +6149,7 @@ impl OndinApp {
         // was clicking. Entering the screen is the moment where a few
         // milliseconds cost nothing, and a stale cover left for one session is
         // a file nobody sees.
-        crate::library::cover::Covers::sweep(&self.library.entries);
+        self.covers.sweep(&self.library.entries);
         // Chrome that belongs to the document behind the dashboard: a picker or
         // a context menu left floating would come back with it, over a screen
         // that has no idea what they refer to.

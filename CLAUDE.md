@@ -69,12 +69,13 @@ three times and twice *self-contradictory* — one version read *"D689 and D690 
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
 anywhere cited either. **The live figures: 873 index rows, 873 body headings, next free
 D874** — but trust the procedure over any number written down here, including that one.
-⚠️ **D867–D873 are spent** (session 33: container layout's design, written ahead of its code —
-**none of the seven is cited from `crates/` yet**, so check 3's per-number `grep -rl` finds only
-`docs/` for them until build step 1 plants a citation) and **D874 is reserved and unspent**
-(negative grep clean at the close of session 33) — confirm it with the negative grep anyway; a
-reservation recorded here is a claim about the moment it was written, which is the whole subject
-of this section.
+⚠️ **D867–D873 are spent** (session 33: container layout's design, written ahead of its code).
+**D867 and D868 are cited from `crates/` since build step 1 landed; D869–D873 are not yet**, so
+check 3's per-number `grep -rl` finds only `docs/` for those five until the steps that build them
+plant a citation. **D874–D881 is reserved and unspent** (negative grep clean in session 33; step 1
+was recorded as amendments to D868 rather than new entries) — confirm it with the negative grep
+anyway; a reservation recorded here is a claim about the moment it was written, which is the whole
+subject of this section.
 ⚠️ **Session 31 overran its block the ordinary way, and caught it the ordinary way**: it reserved
 D845–D856, reserved D857–D866 before the first ran out, and spent sixteen. Every number was typed
 into code only after its block was reserved and grep-checked, and the closing re-grep over the
@@ -355,7 +356,14 @@ exactly as it found it only holds if the probe comes back out the way it went in
 and its doc comment — and the result compiles, tests, lints, formats and passes
 `cargo doc`, while paragraphs of reasoning now describe the wrong thing.
 
-**There are twenty-eight recorded instances.** 🚨 **The twenty-eighth is the one that says the
+**There are twenty-nine recorded instances.** ⚠️ **The twenty-ninth (§15 D868's 2026-09-24
+amendment) is an accumulated one, found by reading the function beside the one being edited**:
+`resolve_subtree`'s two summary lines sat at the head of `struct Caches`' doc, above a count that
+was wrong as well (*"The four maps"* over five fields), and the function itself had no doc at all.
+How long it had been there is unknown — someone inserted `Caches` between a function and its doc
+and anchored on the `fn`. Neither sweep had found it; it was two lines, well under any floor.
+
+🚨 **The twenty-eighth is the one that says the
 habits are not optional, because it was committed by a session that ran them correctly on every
 other insertion it made that day** (§15 D843). Inserting a test above
 `a_thin_intersect_keeps_its_area`, it anchored the `Edit` on the `#[test]` / `fn` pair — the

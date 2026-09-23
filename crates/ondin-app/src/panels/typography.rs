@@ -1639,7 +1639,7 @@ impl OndinApp {
                     d.thickness,
                     font_size,
                     // **Unsigned**: a negative thickness has no meaning (§15 D546).
-                    false,
+                    Bounds::DECORATION_THICKNESS,
                     // What the face is drawing, so leaving *Font* changes the unit
                     // and not the line (§15 D570). Filtered above zero because a
                     // seed of zero is the bug this closes — a face that reports no
@@ -1668,9 +1668,9 @@ impl OndinApp {
                     Prefix::Icon(icon::ARROW_UP),
                     d.offset,
                     font_size,
-                    // **Signed**, and this is the field the shared range was
-                    // written for.
-                    true,
+                    // **Signed** — this is the field whose range the thickness
+                    // once inherited, sign and all (§15 D546).
+                    Bounds::DECORATION_OFFSET,
                     // Nothing to seed from — the face's own offset is on the same
                     // metrics, but its sign is parley's and this field's is not
                     // (§15 D151, D570).
@@ -2759,7 +2759,7 @@ impl OndinApp {
                     shown.spacing,
                     subject.para_mixed(ParaAttrKind::Spacing),
                     font_size,
-                    0.0..=MAX_TRACKING_PCT,
+                    Bounds::PARAGRAPH_SPACING,
                     "Space before this paragraph",
                 );
                 self.paragraph_length(subject, &e, ParaAttr::Spacing);
@@ -2774,7 +2774,7 @@ impl OndinApp {
                     shown.indent,
                     subject.para_mixed(ParaAttrKind::Indent),
                     font_size,
-                    -MAX_TRACKING_PCT..=MAX_TRACKING_PCT,
+                    Bounds::INDENT,
                     // **The tooltip follows the state, because the field does.**
                     // One value, two meanings, and the only other thing that says
                     // which is the prefix glyph flipping between two icons that
@@ -2845,7 +2845,7 @@ impl OndinApp {
                     shown.indent_start,
                     subject.para_mixed(ParaAttrKind::IndentStart),
                     font_size,
-                    -MAX_TRACKING_PCT..=MAX_TRACKING_PCT,
+                    Bounds::INDENT,
                     "Indent from the start edge — every line",
                 );
                 self.paragraph_length(subject, &e, ParaAttr::IndentStart);
@@ -2856,7 +2856,7 @@ impl OndinApp {
                     shown.indent_end,
                     subject.para_mixed(ParaAttrKind::IndentEnd),
                     font_size,
-                    -MAX_TRACKING_PCT..=MAX_TRACKING_PCT,
+                    Bounds::INDENT,
                     // Says what it does *and* where it does nothing: an auto-width
                     // node has no wrap width for an end indent to narrow (§15 D163),
                     // and "inert" is indistinguishable from "broken" unnamed.
@@ -4369,23 +4369,25 @@ fn length_field(
     current: Length,
     mixed: bool,
     font_size: f64,
-    pct_range: std::ops::RangeInclusive<f64>,
+    bounds: Bounds,
     tooltip: &str,
 ) -> LengthEdit {
     // ⚠️ **One range in, not two, and the px face is derived** — see [`Bounds`]
     // for the class this closes. The four callers used to pass a `px_range` of
-    // `±MAX_LINE_HEIGHT_PX` beside a `pct_range` of `±MAX_TRACKING_PCT`, which
-    // are the same two numbers every other `Length` field in this file was
-    // passing and describe no quantity in common.
+    // `±MAX_LINE_HEIGHT_PX` beside a `pct_range` spelled from
+    // `MAX_TRACKING_PCT`, which are the same two numbers every other `Length`
+    // field in this file was passing and describe no quantity in common. **And a `Bounds` rather than a
+    // bare `%` range** (§15 D861): the range alone still let every caller spell
+    // tracking's cap by hand, and all four did.
     let (mut shown, scrub, typed) = match current {
         Length::Em(m) => (
             m * 100.0,
-            Scrub::whole(0.5).range(pct_range),
+            Scrub::whole(0.5).range(bounds.pct.clone()),
             expr::Unit::Pct,
         ),
         Length::Px(v) => (
             v,
-            Scrub::whole(0.5).range(px_range_for(pct_range, font_size)),
+            Scrub::whole(0.5).range(bounds.px(font_size)),
             expr::Unit::Px,
         ),
     };
@@ -4493,8 +4495,10 @@ struct OptionalLengthEdit {
 /// `Option`, and its own doc records D109 being caused by a guard in that position.
 /// They have a different contract, not a different opinion.
 ///
-/// ⚠️ **`signed` is the caller's, because this one function serves a signed
-/// field and an unsigned one** (§15 D546). `[S6.3-L1-02]`: it chose a symmetric
+/// ⚠️ **`bounds` is the caller's, because this one function serves a signed
+/// field and an unsigned one** (§15 D546, D861). It was a `signed: bool` over a
+/// range this function spelled from `MAX_TRACKING_PCT` itself, which made the
+/// sign the caller's and the *cap* tracking's. `[S6.3-L1-02]`: it chose a symmetric
 /// range for both, and the range was chosen for the **offset** — which is
 /// legitimately signed, positive-up, so pushing an underline clear of the
 /// descenders means typing a negative number. **Thickness inherited that sign
@@ -4533,11 +4537,10 @@ fn optional_length_field(
     prefix: Prefix,
     current: Option<Length>,
     font_size: f64,
-    signed: bool,
+    bounds: Bounds,
     resolved: Option<f64>,
     tooltip: &str,
 ) -> OptionalLengthEdit {
-    let floor = |lo: f64| if signed { lo } else { 0.0 };
     // `length_field`'s `before`, for the release-frame rule at the foot of this
     // function (§15 D765): the value as the field was handed it, so `shown != before`
     // means *this frame moved it*.
@@ -4552,22 +4555,19 @@ fn optional_length_field(
             expr::Unit::Px,
         ),
         // ⚠️ **Derived from the `%` face below rather than hard-coded**, which is
-        // the whole of [`Bounds`]' argument at the one field that took no
-        // `Bounds` at all: these two ends used to be `±10 000 px` against
-        // `±200 %`, so `Px(50)` at 16pt converted to `Em(3.125)` and came back
-        // as 32px — a measured loss on one click of the unit chip.
+        // the whole of [`Bounds`]' argument: these two ends used to be
+        // `±10 000 px` against `±200 %`, so `Px(50)` at 16pt converted to
+        // `Em(3.125)` and came back as 32px — a measured loss on one click of the
+        // unit chip.
         Some(Length::Px(v)) => (
             v,
-            Scrub::fine(0.1, 2).range(px_range_for(
-                floor(-MAX_TRACKING_PCT)..=MAX_TRACKING_PCT,
-                font_size,
-            )),
+            Scrub::fine(0.1, 2).range(bounds.px(font_size)),
             "px",
             expr::Unit::Px,
         ),
         Some(Length::Em(m)) => (
             m * 100.0,
-            Scrub::whole(0.5).range(floor(-MAX_TRACKING_PCT)..=MAX_TRACKING_PCT),
+            Scrub::whole(0.5).range(bounds.pct.clone()),
             "%",
             expr::Unit::Pct,
         ),
@@ -5701,6 +5701,26 @@ impl Bounds {
     const SIGNED_TRACKING: Bounds = Bounds {
         pct: -MAX_TRACKING_PCT..=MAX_TRACKING_PCT,
     };
+    /// Space before a paragraph. Unsigned, as the field always was.
+    const PARAGRAPH_SPACING: Bounds = Bounds {
+        pct: 0.0..=MAX_PARAGRAPH_SPACING_PCT,
+    };
+    /// The three indents — first-line (or hanging), start and end. **One bound
+    /// for three fields because they are one quantity**: each is how far a line's
+    /// edge comes in from the box's, and each runs both ways.
+    const INDENT: Bounds = Bounds {
+        pct: -MAX_INDENT_PCT..=MAX_INDENT_PCT,
+    };
+    /// A decoration's thickness. Unsigned — a negative thickness has no meaning
+    /// (§15 D546), and the model floors one anyway.
+    const DECORATION_THICKNESS: Bounds = Bounds {
+        pct: 0.0..=MAX_DECORATION_THICKNESS_PCT,
+    };
+    /// A decoration's offset from the baseline, positive-up, so pushing an
+    /// underline clear of the descenders is a negative number.
+    const DECORATION_OFFSET: Bounds = Bounds {
+        pct: -MAX_DECORATION_OFFSET_PCT..=MAX_DECORATION_OFFSET_PCT,
+    };
 
     /// The same range in px, at this font size.
     fn px(&self, font_size: f64) -> std::ops::RangeInclusive<f64> {
@@ -5789,7 +5809,7 @@ fn stepped_into(from: f64, next: f64, range: std::ops::RangeInclusive<f64>) -> f
 /// legal attribute and a file may hold one; what these bound is what can be typed
 /// or scrubbed, past which the number has stopped describing type.
 ///
-/// ⚠️ **All four are `%`, and there is deliberately no px constant any more.**
+/// ⚠️ **Every one is `%`, and there is deliberately no px constant any more.**
 /// There used to be one — `MAX_LINE_HEIGHT_PX = 10_000.0`, named for line height
 /// and used as the px cap of all *nine* `Length` fields in this panel, including
 /// six that measure nothing like a line height. Every px face is now derived
@@ -5797,10 +5817,23 @@ fn stepped_into(from: f64, next: f64, range: std::ops::RangeInclusive<f64>) -> f
 /// the only arrangement under which the unit chip cannot change the value it
 /// converts. If a px cap is wanted that is *not* the `%` cap in the other unit,
 /// it is a second quantity and wants naming as one.
+///
+/// ⚠️ **One constant per quantity, even where four of them hold the same number**
+/// (§15 D861). `MAX_TRACKING_PCT` used to be the cap of *six* fields that measure
+/// nothing like a tracking — paragraph spacing, the three indents, and a
+/// decoration's thickness and offset — so an edit to how far letter spacing may go
+/// moved all six, which is the class [`Bounds`] exists to close. The four below
+/// took tracking's 200% on the day they were split out, so the split changed no
+/// field's range; **the value of each is its own decision now**, and none of them
+/// has been made on its own merits yet.
 const MIN_LINE_HEIGHT_PCT: f64 = 0.0;
 const MAX_LINE_HEIGHT_PCT: f64 = 1000.0;
 const MIN_TRACKING_PCT: f64 = -50.0;
 const MAX_TRACKING_PCT: f64 = 200.0;
+const MAX_PARAGRAPH_SPACING_PCT: f64 = 200.0;
+const MAX_INDENT_PCT: f64 = 200.0;
+const MAX_DECORATION_THICKNESS_PCT: f64 = 200.0;
+const MAX_DECORATION_OFFSET_PCT: f64 = 200.0;
 
 #[cfg(test)]
 mod tests {
@@ -7431,7 +7464,7 @@ mod tests {
                     *current,
                     false,
                     16.0,
-                    0.0..=1000.0,
+                    Bounds { pct: 0.0..=1000.0 },
                     "indent",
                 );
                 out = Some((e.next, e.resp.dragged(), e.resp.drag_stopped()));
@@ -7556,7 +7589,7 @@ mod tests {
                     Prefix::Text("T"),
                     *current,
                     16.0,
-                    false,
+                    Bounds::DECORATION_THICKNESS,
                     Some(2.0),
                     "thickness",
                 );
@@ -8496,9 +8529,10 @@ mod tests {
     ///
     /// ⚠️ **Its honest scope**: this asserts the *ranges* are coherent and that
     /// `Bounds` derives its own. It does not drive `length_field`,
-    /// `optional_length_field` or `type_line_height_field`, each of which calls
-    /// `px_range_for` inline — so a future field that hard-codes a px range again
-    /// is not caught here. The thing that would catch it is `px_range_for` being
+    /// `optional_length_field` or `type_line_height_field` — the first two derive
+    /// through `Bounds::px` (§15 D861), the third calls `px_range_for` inline —
+    /// so a future field that hard-codes a px range again is not caught here.
+    /// The thing that would catch it is `px_range_for` being
     /// the only way to build one, and it is not, because a `RangeInclusive` is a
     /// literal anyone can write.
     #[test]
@@ -8507,6 +8541,10 @@ mod tests {
         for (name, b) in [
             ("TRACKING", &Bounds::TRACKING),
             ("SIGNED_TRACKING", &Bounds::SIGNED_TRACKING),
+            ("PARAGRAPH_SPACING", &Bounds::PARAGRAPH_SPACING),
+            ("INDENT", &Bounds::INDENT),
+            ("DECORATION_THICKNESS", &Bounds::DECORATION_THICKNESS),
+            ("DECORATION_OFFSET", &Bounds::DECORATION_OFFSET),
         ] {
             for font_size in [8.0, 16.0, 72.0] {
                 assert_eq!(
@@ -8518,18 +8556,22 @@ mod tests {
         }
 
         // Every pct range the panel hands a `Length` field, with the name of the
-        // field or fields it belongs to.
+        // field or fields it belongs to. **Read off the `Bounds` the fields are
+        // handed**, not re-typed: this list used to spell four of them from
+        // `MAX_TRACKING_PCT` beside the fields spelling the same, and had the
+        // thickness signed when its field was not (§15 D861).
         let ranges: Vec<(&str, std::ops::RangeInclusive<f64>)> = vec![
             ("letter/word spacing", Bounds::TRACKING.pct.clone()),
             ("baseline shift", Bounds::SIGNED_TRACKING.pct.clone()),
             (
-                "decoration thickness/offset",
-                -MAX_TRACKING_PCT..=MAX_TRACKING_PCT,
+                "decoration thickness",
+                Bounds::DECORATION_THICKNESS.pct.clone(),
             ),
-            ("paragraph spacing", 0.0..=MAX_TRACKING_PCT),
+            ("decoration offset", Bounds::DECORATION_OFFSET.pct.clone()),
+            ("paragraph spacing", Bounds::PARAGRAPH_SPACING.pct.clone()),
             (
                 "first-line indent, indent start, indent end",
-                -MAX_TRACKING_PCT..=MAX_TRACKING_PCT,
+                Bounds::INDENT.pct.clone(),
             ),
             ("line height", MIN_LINE_HEIGHT_PCT..=MAX_LINE_HEIGHT_PCT),
         ];
@@ -8589,6 +8631,46 @@ mod tests {
             r.contains(&1.0),
             "and something ordinary can still be typed"
         );
+    }
+
+    /// **Each bound carries its field's sign rule**, now that the sign is the
+    /// bound's and not a flag beside it (§15 D861).
+    ///
+    /// The case this is for is `[S6.3-L1-02]`'s: a decoration's thickness once
+    /// inherited the offset's symmetric range, so `−5 px` was offered, saved and
+    /// drawn three different ways (§15 D546). Before D861 the floor was a
+    /// `signed: bool` at the call site; it is the constant's first number now,
+    /// and **nothing else in this panel pinned it** — making
+    /// `DECORATION_THICKNESS` symmetric left the other 77 tests in
+    /// `panels::typography` green.
+    ///
+    /// ⚠️ **Its honest scope is the constants, not the call sites.** Handing the
+    /// thickness field `Bounds::DECORATION_OFFSET` passes this; what catches that
+    /// is the name at the call, read. The model's own floor
+    /// (`typography::canonical_decoration`) is the second defence and is tested
+    /// where it lives.
+    #[test]
+    fn an_unsigned_bound_starts_at_zero_and_a_signed_one_runs_both_ways() {
+        for (name, b) in [
+            ("PARAGRAPH_SPACING", &Bounds::PARAGRAPH_SPACING),
+            ("DECORATION_THICKNESS", &Bounds::DECORATION_THICKNESS),
+        ] {
+            assert_eq!(*b.pct.start(), 0.0, "{name} is unsigned: {:?}", b.pct);
+            assert!(*b.pct.end() > 0.0, "{name} must admit a value: {:?}", b.pct);
+        }
+        for (name, b) in [
+            ("INDENT", &Bounds::INDENT),
+            ("DECORATION_OFFSET", &Bounds::DECORATION_OFFSET),
+            ("SIGNED_TRACKING", &Bounds::SIGNED_TRACKING),
+        ] {
+            assert_eq!(
+                *b.pct.start(),
+                -*b.pct.end(),
+                "{name} runs both ways from zero: {:?}",
+                b.pct
+            );
+            assert!(*b.pct.end() > 0.0, "{name} must admit a value: {:?}", b.pct);
+        }
     }
 }
 

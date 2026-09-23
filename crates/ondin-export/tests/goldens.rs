@@ -84,8 +84,12 @@ fn arm_names(function: &str) -> BTreeSet<&'static str> {
         .find(&format!("fn {function}("))
         .unwrap_or_else(|| panic!("`{function}` is in this file"));
     let body = &SRC[start..];
+    // `"\n}"` and not `"\n}\n"`: on a checkout with `core.autocrlf=true` the
+    // line ends in `\r\n`, and the longer pattern never matches (§15 D858's
+    // *Fix*, found by `arch-scribe` reading the pattern against `.gitattributes`,
+    // which does not exempt this file).
     let end = body
-        .find("\n}\n")
+        .find("\n}")
         .expect("and ends at a closing brace in column 0");
     body[..end]
         .split("=> \"")

@@ -2289,7 +2289,8 @@ impl OndinApp {
             target,
             world,
             just_opened: true,
-            // One OS clipboard read per open, answering both halves of what a
+            // One OS clipboard *text* read per open (the image probe below is its
+            // own open, for its own reason), answering both halves of what a
             // *Paste* row can offer — see the fields for why this is a snapshot
             // where the rest of a menu is not. ⚠️ **It was two**, this line and
             // `owns_the_clipboard` beside it, each reading the whole clipboard for

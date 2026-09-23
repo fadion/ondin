@@ -689,7 +689,7 @@ fn combine(
         // two exterior paths, under twenty lines arguing XOR in the present tense
         // — was the remnant of the fold `exclude_of` replaced for being
         // measurably wrong; a `panic!` in it left every test green. It was also
-        // the fourth of the four `FLO_ACCURACY` sites §15 D794 counts as retuned,
+        // the fourth of the four `FLO_ACCURACY` sites §15 D794 counted as retuned,
         // and so the one a flip of that tolerance could land on and read as *"no
         // teeth"* — §15 D803's decoy. The module doc keeps the argument for why
         // XOR is the two exteriors.
@@ -2024,7 +2024,8 @@ mod tests {
         );
     }
 
-    /// A thin `Intersect` keeps its area all the way down to 10⁻⁴ world units.
+    /// A thin `Intersect` keeps its area all the way down to 2 × 10⁻⁵ world units
+    /// (10⁻⁴ until §15 D856 extended the sweep to pin `FLO_SCALE`).
     ///
     /// **The defect this pins was a bow-tie, not a rounding error** (§15 D794).
     /// flo_curves' `GraphPath` merges two points closer than its own compiled-in

@@ -4532,7 +4532,10 @@ rather than a bad drawing somebody asked for. ⚠️ **Since §15 D820 that hang
 rather than in the egui pass, which changes its shape and not the case for the caps**: the window
 comes up, and the one worker is stuck on that document for ever, so every cover queued behind it in
 FIFO order never arrives either. A library that renders no covers past the first bad file is a
-quieter symptom than a frozen launch and no less a fault. The two caps bound different things and neither covers
+quieter symptom than a frozen launch and no less a fault. ⚠️ **And since §15 D845 a base-folder
+change joins that worker before anything moves**, waiting on the render in progress — so the same
+file would freeze the settings Save on the UI thread as well. The thread took the hang out of the
+pass; the teardown can bring it back. The two caps bound different things and neither covers
 the other: `coarsen` was Θ(k) whatever the surface it walked, and behind it the kernel is `2⌈3σ⌉+1`
 taps with nothing else to stop it. ⚠️ **D743 bounded that walk, so `MAX_SHADOW_BLOCK` is now a
 correctness cap rather than a cost one** — `coarsen` costs `w·h` however large `k` is, and what the
@@ -11198,6 +11201,17 @@ where to open, or what a file is called on disk:
   is affordable because covers are disposable, and it is stated
   here because it was stated nowhere: a doc comment on `Covers::clear` was claiming the opposite, and
   a rule about the whole cache written on one function is invisible to anyone changing either.
+  🚨 **An empty list sweeps nothing** (§15 D845). An unlistable root — a share that is down, a drive
+  that is out — scans as no documents, and because the directory is shared, sweeping on that list
+  took **every** library's covers, another window's healthy one included: §15 D384's rule on a second
+  membership sweep. The guard is in `sweep` on `live.is_empty()`, not at the call site on
+  `may_write()`, since `root_unavailable` needs the per-machine index to have something in it and an
+  empty index would have let the sweep through.
+  ⚠️ **`Covers::clear` is the renderer's teardown**, and `apply_library_settings` calls it on every
+  change of base folder **before** `relocate` (§15 D845). It drops the worker, which abandons the
+  backlog and joins the render in progress — so no job is still reading a document at its pre-move
+  path, where it would fail and cache `Unreadable` under a key with no path in it — id and mtime,
+  and a move keeps the mtime (§15 D509).
 
 ⚠️ **A `Project::folder` is a single path component, and until 2026-09-06 only its doc comment said
 so** (`library::project::is_folder_stem`, §15 D420). With `"folder": "../.."` every *New file* into
@@ -11233,14 +11247,20 @@ open and whether what is still there is a document or a sidecar.
 
 ⚠️ **A status line is a sentence and this is a list, so the modal keeps the list and offers the run
 again** (§15 D810). `OndinApp::stranded` holds `{ from, to, failed }` after a migration that left
-anything behind and is assigned in **both** directions, so a clean run clears a previous one's report;
-it is session state and not a preference, the files being the record. The *Library settings* card draws
+anything behind and is assigned in **both** directions, so a clean run clears a previous one's report
+— and **a base-folder change that does not migrate clears it too** (§15 D846), or *Try again* would
+run the old move into a folder that is no longer the library. It is session state and not a
+preference, the files being the record. The *Library settings* card draws
 the count, the old folder's path, up to `STRANDED_ROWS` = 6 filenames, an *"…and N more"*, and a *Try
 again* button — **six being a bound on the modal's height**, that card having no scroll area and a
 partly-failed migration being able to strand every document in the library.
 `OndinApp::retry_migration` re-runs `relocate(from, to)`, and **not being idempotent is what makes it
 safe**: a successful move deletes its source, so the second walk meets only what was left behind. It is
-answered *after* the Save/Cancel match, so it cannot race a base-folder change. The re-point loop is
+answered *after* the Save/Cancel match, so it cannot race a base-folder change. ⚠️ **It refuses, and
+keeps the report, in two cases** (§15 D846): when `to` is not the library root, and when `from`
+cannot be listed — `relocate` answers *"Nothing to move"* for a source that does not exist, and the
+retry used to take that at its word and clear the only list of what was left behind, §15 D384's rule
+once more. The re-point loop is
 `OndinApp::follow_moved_documents` now, a retry being a second migration that owes everything the first
 one did. ⚠️ **Rollback is still not offered and is a decision rather than a gap**: `relocate`
 deliberately overwrites nothing, so "undo" means deciding what to do with everything that *did* arrive.

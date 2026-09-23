@@ -1118,7 +1118,7 @@ impl OndinApp {
             ),
             Some(Length::Em(m)) => (
                 m * 100.0,
-                Scrub::whole(0.5).range(MIN_LINE_HEIGHT_PCT..=MAX_LINE_HEIGHT_PCT),
+                Scrub::whole(0.5).range(Bounds::LINE_HEIGHT.pct),
                 expr::Unit::Pct,
             ),
             // ⚠️ **Derived, like every other `Length` face in this panel.** This
@@ -1128,10 +1128,7 @@ impl OndinApp {
             // floored at zero); the magnitudes never did. See [`Bounds`].
             Some(Length::Px(v)) => (
                 v,
-                Scrub::whole(0.5).range(px_range_for(
-                    MIN_LINE_HEIGHT_PCT..=MAX_LINE_HEIGHT_PCT,
-                    font_size,
-                )),
+                Scrub::whole(0.5).range(Bounds::LINE_HEIGHT.px(font_size)),
                 expr::Unit::Px,
             ),
         };
@@ -3568,10 +3565,11 @@ impl OndinApp {
                 // chords agree about *behaviour* — held keys stop at the field's
                 // ends — and deliberately not about where the bound is written.
                 //
-                // The px face is derived from the `%` face at the current font
-                // size, through the same [`px_range_for`] the field itself uses, so
-                // the chord and the scrub cannot come to disagree about the cap in
-                // the unit the user happens to be in.
+                // **Both faces are read off the field's own [`Bounds`]** (§15
+                // D865) — the `%` one as an em multiple, the px one derived at the
+                // current font size — so the chord and the scrub cannot come to
+                // disagree about the cap in either unit. They used to spell it
+                // from the constants, agreeing by value.
                 // ⚠️ **[`stepped_into`] and not `clamp`**, which is the whole of
                 // §15 D840: a bare clamp here honoured D817 and broke D425, by
                 // rewriting a stored out-of-range value the paragraph above says
@@ -3580,15 +3578,11 @@ impl OndinApp {
                     current,
                     step_length(current, step, TRACKING_STEP_EM, TRACKING_STEP_PX),
                 ) {
-                    (Length::Em(c), Length::Em(v)) => Length::Em(stepped_into(
-                        c,
-                        v,
-                        MIN_TRACKING_PCT / 100.0..=MAX_TRACKING_PCT / 100.0,
-                    )),
+                    (Length::Em(c), Length::Em(v)) => {
+                        Length::Em(stepped_into(c, v, Bounds::TRACKING.em()))
+                    }
                     (Length::Px(c), Length::Px(v)) => {
-                        let r =
-                            px_range_for(MIN_TRACKING_PCT..=MAX_TRACKING_PCT, subject.font_size());
-                        Length::Px(stepped_into(c, v, r))
+                        Length::Px(stepped_into(c, v, Bounds::TRACKING.px(subject.font_size())))
                     }
                     // `step_length` returns the unit it was handed, so a mixed
                     // pair cannot arise; taking the step unbounded is the honest
@@ -3625,18 +3619,14 @@ impl OndinApp {
                     from,
                     step_length(from, step, LEADING_STEP_EM, LEADING_STEP_PX),
                 ) {
-                    (Length::Em(c), Length::Em(v)) => Length::Em(stepped_into(
+                    (Length::Em(c), Length::Em(v)) => {
+                        Length::Em(stepped_into(c, v, Bounds::LINE_HEIGHT.em()))
+                    }
+                    (Length::Px(c), Length::Px(v)) => Length::Px(stepped_into(
                         c,
                         v,
-                        MIN_LINE_HEIGHT_PCT / 100.0..=MAX_LINE_HEIGHT_PCT / 100.0,
+                        Bounds::LINE_HEIGHT.px(subject.font_size()),
                     )),
-                    (Length::Px(c), Length::Px(v)) => {
-                        let r = px_range_for(
-                            MIN_LINE_HEIGHT_PCT..=MAX_LINE_HEIGHT_PCT,
-                            subject.font_size(),
-                        );
-                        Length::Px(stepped_into(c, v, r))
-                    }
                     (_, stepped) => stepped,
                 }
                 .canonical();
@@ -5721,10 +5711,27 @@ impl Bounds {
     const DECORATION_OFFSET: Bounds = Bounds {
         pct: -MAX_DECORATION_OFFSET_PCT..=MAX_DECORATION_OFFSET_PCT,
     };
+    /// Line height, which is never negative and runs to ten lines.
+    const LINE_HEIGHT: Bounds = Bounds {
+        pct: MIN_LINE_HEIGHT_PCT..=MAX_LINE_HEIGHT_PCT,
+    };
 
     /// The same range in px, at this font size.
     fn px(&self, font_size: f64) -> std::ops::RangeInclusive<f64> {
         px_range_for(self.pct.clone(), font_size)
+    }
+
+    /// The same range as an em multiple — what a `Length::Em` holds, where the
+    /// field shows it ×100.
+    ///
+    /// **For the chords** (§15 D865). `Alt`+`←`/`→` and `Alt`+`↑`/`↓` step a
+    /// `Length` in the unit it carries and stop where the field stops (§15
+    /// D817), and they spelled that stop from the `MIN_`/`MAX_` constants by
+    /// hand — the same numbers the field read through its `Bounds`, so the two
+    /// agreed by the values rather than by construction, which is the shape
+    /// §15 D861 took out of six fields.
+    fn em(&self) -> std::ops::RangeInclusive<f64> {
+        (self.pct.start() / 100.0)..=(self.pct.end() / 100.0)
     }
 }
 
@@ -8530,8 +8537,8 @@ mod tests {
     /// ⚠️ **Its honest scope**: this asserts the *ranges* are coherent and that
     /// `Bounds` derives its own. It does not drive `length_field`,
     /// `optional_length_field` or `type_line_height_field` — the first two derive
-    /// through `Bounds::px` (§15 D861), the third calls `px_range_for` inline —
-    /// so a future field that hard-codes a px range again is not caught here.
+    /// through `Bounds::px` (§15 D861), the third reads `Bounds::LINE_HEIGHT`
+    /// (§15 D865) — so a future field that hard-codes a px range again is not caught here.
     /// The thing that would catch it is `px_range_for` being
     /// the only way to build one, and it is not, because a `RangeInclusive` is a
     /// literal anyone can write.
@@ -8545,6 +8552,7 @@ mod tests {
             ("INDENT", &Bounds::INDENT),
             ("DECORATION_THICKNESS", &Bounds::DECORATION_THICKNESS),
             ("DECORATION_OFFSET", &Bounds::DECORATION_OFFSET),
+            ("LINE_HEIGHT", &Bounds::LINE_HEIGHT),
         ] {
             for font_size in [8.0, 16.0, 72.0] {
                 assert_eq!(
@@ -8553,6 +8561,19 @@ mod tests {
                     "{name} @{font_size}pt must derive its px face, not carry one"
                 );
             }
+            // And the chords' em face is the `%` face over a hundred, which is
+            // the scale a `Length::Em` holds and the field shows ×100 (§15 D865).
+            // **Flip, run:** `em` returning the `%` range undivided fails here
+            // on `TRACKING` — predicted — and two tracking-chord tests fail with
+            // it. ⚠️ **No leading-chord test does**: they pin line height's
+            // floor, which is 0 in either scale, and nothing drives the leading
+            // chord to its 1000% ceiling. This assertion is what covers it.
+            let em = b.em();
+            assert_eq!(
+                (*em.start() * 100.0, *em.end() * 100.0),
+                (*b.pct.start(), *b.pct.end()),
+                "{name}'s em face must be its % face"
+            );
         }
 
         // Every pct range the panel hands a `Length` field, with the name of the
@@ -8573,7 +8594,7 @@ mod tests {
                 "first-line indent, indent start, indent end",
                 Bounds::INDENT.pct.clone(),
             ),
-            ("line height", MIN_LINE_HEIGHT_PCT..=MAX_LINE_HEIGHT_PCT),
+            ("line height", Bounds::LINE_HEIGHT.pct.clone()),
         ];
 
         for (name, pct) in ranges {

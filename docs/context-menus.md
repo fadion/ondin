@@ -871,8 +871,9 @@ Recorded so they are not re-argued, the way `shortcuts.md`'s *Deliberately unbou
   `architecture.md` §1, and a menu row is not the place a deferred feature first appears. ⚠️ **The
   other two are not deferred and are still not rows**: effects were built on 2026-08-24 and are
   authored in the inspector's Effects card (§5.3a), and auto layout left §1's list on 2026-09-23 and
-  is designed, not built (§5.3c, §15 D867). *This bullet said "Deferred in §1" of all four until
-  then, which had been false of effects for a month.*
+  is designed (§5.3c, §15 D867) — its absolute insets built on 2026-09-24 and authored in the
+  inspector's Position card (§15 D874), flex and grid not built. *This bullet said "Deferred in §1" of
+  all four until then, which had been false of effects for a month.*
 - **Paste to replace** (Figma). Attractive, and it needs a rule for what "replace" means when the
   clipboard and the target hold different numbers of layers. A candidate, not a v1 row.
 - **Collapse all / Expand all**, **Keep proportions**, **the four image fit modes**, **guide

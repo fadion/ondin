@@ -83,7 +83,8 @@
   ~~Filters, blur, shadows~~ — built 2026-08-24, §5.3a.
 - Components/instances/variants — **sequenced after layout**, on the same derive-from-specified
   pipeline (§5.3c, §15 D867). ~~Auto-layout/constraints~~ **left this list on 2026-09-23 and are
-  designed, not built**: CSS flexbox, CSS grid and absolute insets (§5.3c, §15 D867, D871). "v1" in
+  designed**: CSS flexbox, CSS grid and absolute insets (§5.3c, §15 D867, D871) — insets on frames
+  built 2026-09-24, inspector card included (§15 D874), flex and grid not built. "v1" in
   this document names the phase in which the basic editing tools were finished, not a release tag,
   and that phase is over. *Persistent* constraints in §13's sense — live relationships between
   arbitrary properties, a dependency graph — are not that feature and stay on this list.
@@ -569,6 +570,9 @@ pub struct Node {
                                // node until someone adds one, and skipped by the save format
     grids: Vec<LayoutGrid>,    // the columns and rows drawn over this layer — §5.3b, §15 D385;
                                // empty and skipped on `exports`' terms, offered on frames only
+    insets: Insets,            // CSS top/right/bottom/left + auto margins inside its frame — §5.3c,
+                               // §15 D874; SPECIFIED, unset and skipped until pinned, inert
+                               // outside a frame and on a Group or Boolean
 }
 
 pub enum NodeKind {
@@ -1079,11 +1083,14 @@ pub fn next_grid_color(existing: &[LayoutGrid]) -> Color;    // the first of GRI
   `+` steps: `LayoutGrid::new` carries the plain default, which is what a loaded file or a fixture
   should get.
 
-### 5.3c Container layout — flexbox, grid and insets (designed, not built; §15 D867–D873)
+### 5.3c Container layout — flexbox, grid and insets (steps 1–2 built; §15 D867–D874)
 
-> **Nothing in this section is built.** It is design ahead of code, in the sense §12 and §13 are,
-> and it sits here rather than at the end because what it changes is the node model. Every other
-> passage of this document still describes `HEAD`; where one states a rule this design will change,
+> **Mostly design ahead of code**, in the sense §12 and §13 are, and it sits here rather than at the
+> end because what it changes is the node model. **Built as of 2026-09-24**: the used-geometry
+> routing (step 1, §15 D868) and absolute insets on frames with their inspector card (step 2, §15
+> D874) — the paragraphs on those say so in the present tense. Flex, grid and components are not.
+> Every other passage of this document still describes `HEAD`; where one states a rule this design
+> will change,
 > it carries a forward pointer here instead of being rewritten. **When a step below lands, this
 > section is rewritten in the present tense and the pointers go.**
 >
@@ -1111,7 +1118,7 @@ design-tool convention disagree, CSS wins**, and four cases are decided:
 |---|---|
 | Container | `display` (unset \| flex \| grid), `flex-direction`, `flex-wrap`, `justify-content`, `align-items`, `align-content`, `gap` (row/column), `padding` (four sides), `grid-template-columns`/`-rows` (px, %, fr, auto, min-content, max-content, `minmax()`, `repeat(n)`), `grid-auto-flow` |
 | Item | `width`/`height` (auto \| px \| %), `min-`/`max-` of both, `flex-grow`, `flex-shrink`, `flex-basis`, `align-self`, `justify-self`, `grid-column`/`grid-row` (auto \| line \| span), `position` (in flow \| absolute) with `top`/`right`/`bottom`/`left` (px \| % \| auto) |
-| Deferred | `margin`, `order`, named grid areas, `auto-fill`/`auto-fit`, `calc`, `aspect-ratio`, block/inline/float layout — the engine supports each, so each is cheap later |
+| Deferred | `margin` other than `auto` (which is built, for centring between two insets — §15 D874), `order`, named grid areas, `auto-fill`/`auto-fit`, `calc`, `aspect-ratio`, block/inline/float layout — the engine supports each, so each is cheap later |
 
 **Who is a container** (§15 D869). `display` applies to a `Group` and to an `Artboard`. **Setting
 it gives a group a box**: its bounds become its layout box, padding included, instead of the union
@@ -1134,11 +1141,48 @@ document is unchanged and a frame resize still leaves children pinned top-left. 
 it is a fixed algorithm re-run from specified values, and nobody authors a relationship between two
 properties.
 
+**Built 2026-09-24 in frames, inspector card included** (§15 D874) — the group-with-`display` half
+waits on D869. `ondin-core/src/container.rs` holds the arithmetic: `LengthPct` (`Px`, or `Percent`
+stored as typed, horizontal insets against the frame's width and vertical against its height),
+`AutoMargins`, `Insets`, and `place`/`inverse`, CSS's absolute-positioning rule for one axis and
+its reverse. `Node::insets` is the specified property, saved as an additive `NodeDto` field skipped
+when unset, and `Operation::SetInsets` writes the whole set with no kind or parent gate. Four
+rulings, the maintainer's:
+
+- **Both insets on an axis stretch** a layer with a size of its own, to the frame less both insets.
+  🚨 **Not CSS**: CSS holds a replaced element at its intrinsic size there, and §15 D872 makes
+  shapes replaced elements — between two insets is the one place that rule gives way. A kind that cannot stretch
+  is over-constrained the CSS way, its end inset ignored.
+- **Rotation, skew and flip turn about the box centre**, CSS's default `transform-origin`: the
+  unrotated box is placed and the linear transform applied about its middle.
+- **Centring is `margin: auto`** between two insets, one auto side pushing instead; the only margin
+  value there is.
+- **The inspector shows a pin diagram and top/right/bottom/left fields** in px or %: the *Position*
+  card (§9.4), whose title is the session's choice and not part of the ruling. `container::with_edge`
+  is the diagram's click, and pinning through it never moves the layer; an unpin never moves it
+  either, because the card writes the drawn placement into the stored transform and size in the same
+  commit (`inspector::baked_placement`).
+
+**What stretches** is a kind whose size is a field — `Rect`, `Ellipse`, `Polygon`, `Star`,
+`Artboard`, and `Text`, whose stretched width is a wrap width (`AutoHeight(w)`, a `Fixed` box keeping
+its height) and whose stretched height makes it `Fixed`. `Path`, `Line` and `Boolean` are positioned
+and keep their size. **`Group` and `Boolean` take no insets at all**, their box being their children's
+and measured after placement; the field is stored and inert on them. **An edit to a pinned layer is
+an edit of its insets, converted in one place**: tools compute from where the layer is drawn and
+write ordinary `SetTransform`/`SetGeometry`, and `build::keep_insets`, at the top of
+`EditorSession::commit_inner`, appends the `SetInsets` that draws each pinned layer there, each inset
+kept in its unit — judged against the frame the edit leaves it in, and a no-op returning the
+transaction untouched when nothing it places is pinned. ⚠️ **Only a patch that can change the box is
+a resize there** (`GeometryPatch::resizes`, no wildcard): a corner radius, a side count or an inner
+ratio is applied to a kind still at its *stored* size, and reading it as a resize un-stretched a
+stretched layer until §15 D874 fixed it.
+
 **Every leaf is measured, and shapes are replaced elements** (§15 D872). `Rect`, `Ellipse`,
 `Polygon`, `Star`, `Path`, `Line` and `Boolean` have an intrinsic size equal to their stored
 geometry (bounds for a path, a line and a boolean), with `width`/`height` defaulting to `auto` —
 CSS's behaviour for `<img>`, and what stops CSS's default `flex-shrink: 1` squeezing a 40-unit
-rectangle to 30.643. A group without `display`, placed as an item, is atomic the same way, its
+rectangle to 30.643 — except between two absolute insets, which stretch a sized shape (§15 D874).
+A group without `display`, placed as an item, is atomic the same way, its
 intrinsic size its children's union bounds. Text is measured through `core::text`, which owes two
 things first: a min-content query and a memo keyed by wrap width. ⚠️ CSS's default
 `align-items: stretch` stretches a replaced element's cross size too, and that is kept; a UI that
@@ -1153,8 +1197,8 @@ transforms, composing used locals → bounds → reindex. This design first read
 dirty containers*; the built order puts the map ahead because the cached layout is shaped *at* the
 used kind, and a text leaf measured *for* layout goes through §15 D872's measure function rather than
 that cache — whether flex keeps the order is step 3's question (§15 D868). Edits to specified
-properties are ordinary operations — a new `Operation` or new `GeometryPatch` variants, undecided —
-so undo needs nothing of its own. They save as additive `#[serde(default)]` fields with no schema
+properties are ordinary operations — for insets a new `Operation`, `SetInsets`; for flex and grid
+undecided — so undo needs nothing of its own. They save as additive `#[serde(default)]` fields with no schema
 bump (§5.11), because the default — no `display`, no insets — is exactly what every existing file means. ⚠️ **The cost is the risk.** Every consumer of
 geometry must read used geometry, and **every one that draws, measures or hit-tests now does**
 (2026-09-24, §15 D868): in core, `Resolved`'s world transforms, text, both bounds passes,
@@ -1162,13 +1206,17 @@ geometry must read used geometry, and **every one that draws, measures or hit-te
 `outline_at`; `scene::paint_node` and `scene::mask_geometry`, and `RenderOverrides`' `transform_of`
 and `drawn_kind` (§6.2); the SVG writer and the snapshot (§7); and the app's `DisplayNode::kind`,
 its `preview_*` helpers, `canvas::crop_frame`, the layers panel's frame-size badge, and the
-parent-frame box `image_tx` and `paste_text_as_layer` fit a new node to. **The edit paths stay on the
-document** — `RenderOverrides::current_kind`, `EditorSession::committed_node`, `tools/`, the
-inspector's edits — because an edit starts from what the user set; many of them also read a
-`Resolved` world transform, so they mix the two, which is correct while the two are equal and owed a
-decision per site by step 2. And `RenderOverrides` (§6.2) patches the walk without re-resolving, so
-it cannot express a reflow: a preview that changes a layout input has to run layout on the preview
-state, and how is open.
+parent-frame box `image_tx` and `paste_text_as_layer` fit a new node to. **And every one that edits
+reads it too** (§15 D874), reversing step 1's *edit from the document*: `tools/`' resize, scale,
+rotate, skew and line-end paths and `inspector::multi_angle_tx` compute from where a layer is drawn,
+and `build::keep_insets` turns the placement they write into insets for a pinned layer, once, at the
+commit seam. For an unpinned layer the two are equal, so nothing else moved. What stays on the
+document is what an operation is *applied to* — `RenderOverrides::current_kind` mirrors `apply`,
+which patches the stored kind — plus `EditorSession::committed_node`, which reports the value a
+commit overwrites, and pen and path point editing, since a path does not stretch. And
+`RenderOverrides` (§6.2) patches the walk without re-resolving, so it cannot express a reflow in
+general; **for insets it re-runs `container::place`** in its `relayout` pass, since a pinned child's
+placement depends on its frame and itself alone, and how a flex or grid preview reflows is open.
 
 **Engine: taffy 0.14.0**, f32, MIT (§15 D867), chosen on a measured spike; used values come back
 through a *proposed* **1/64-px** quantization (§15 D873), so that f32's noise digits never reach a
@@ -1178,13 +1226,15 @@ field or a file.
 geometry with an **identity** layout pass — a pure refactor, the goldens staying byte-identical its
 proof, and the riskiest step, **built 2026-09-24** (§15 D868); (2) absolute insets on
 frames — the smallest visible feature that exercises the whole pipeline, and the first test that a
-used geometry reaches anything outside core; (3) flex, with live reflow during gestures and reorder by drag;
+used geometry reaches anything outside core — **built 2026-09-24**, inspector card included (§15
+D874), `ondin-export/tests/insets.rs` proving the SVG, PNG and snapshot writers draw it; (3) flex, with live reflow during gestures and reorder by drag;
 (4) grid, with the track editor; (5) components and overrides, on the same pipeline.
 
-**Open, not decided**: the rotation origin of a laid-out item (CSS's `transform-origin` defaults to
-the centre; Ondin's transform has its own origin and `Pivot`, §5.3); how `TextSizing`'s three states
-map onto `width`/`height`/`white-space` inside a layout (the wrapping is decided, the mapping is
-not); how previews reflow; a `TaffyTree` mirrored inside `Resolved` against taffy's low-level traits
+**Open, not decided**: the rotation origin of an item in flow (CSS's `transform-origin` defaults to
+the centre; Ondin's transform has its own origin and `Pivot`, §5.3 — an absolutely positioned child
+turns about its box centre, §15 D874); how `TextSizing`'s three states map onto
+`width`/`height`/`white-space` inside a flex or grid layout (the wrapping is decided, the mapping is
+not; between two insets it is D874's); how flex and grid previews reflow; a `TaffyTree` mirrored inside `Resolved` against taffy's low-level traits
 implemented over Ondin's own nodes with a per-node cache (leaning to the second); the module's name;
 whether resizing a laid-out item writes `width`/`height` in px and what that does to its
 `flex-grow`; and how taffy is declared. D867 and D868 carry the detail of each.
@@ -2477,10 +2527,10 @@ end of one JSON file keep both, which is the whole reason the table sits where i
   editing.** Scale is the one factor kept out, and for a reason the others do not share: a layer's
   size must be one number in one place (its geometry), or a stroke thickens when its group is
   resized. Skew is admitted because it has no geometry field it could live in instead — there is
-  nowhere else to put a lean. ⚠️ **Designed to be amended, not yet in effect** (§5.3c, §15 D868):
-  under container layout the one number becomes one *specified* number and one *used* one, CSS's
-  pair, with the used one derived in `Resolved` and never saved. Scale stays out of the transform
-  either way.
+  nowhere else to put a lean. ⚠️ **Amended by container layout** (§5.3c, §15 D868): the one number
+  becomes one *specified* number and one *used* one, CSS's pair, with the used one derived in
+  `Resolved` and never saved — **in effect since 2026-09-24 for a layer two insets stretch** (§15
+  D874), where the drawn size is not the stored one. Scale stays out of the transform either way.
 - Interactive resize edits *geometry* (`SetGeometry`: rect/ellipse size, path points scaled, text
   box size) — stroke widths and children are unaffected, matching Figma.
 - A resize moves the text **box**, never the text size — and **a scale may not change which of
@@ -2704,6 +2754,9 @@ pub enum Operation {
                                                           // be exported" is a question about bounds, and
                                                           // `changes_ink` is false, since nothing drawn
                                                           // reads it.
+    SetInsets   { id: NodeId, insets: Insets },       // the whole set — §5.3c, §15 D874. No kind or
+                                                      // parent gate; refused NonFinite; `changes_ink`
+                                                      // is true, since an inset moves the layer
     // the ops with no node to name — the ground and the guides belong to the document (§5.5):
     SetCanvasBackground { background: peniko::Color },
     AddGuide    { guide: Guide },
@@ -3244,7 +3297,7 @@ pub struct History { undo: Vec<Transaction>, redo: Vec<Transaction>, run: Option
   inside it where the payload names one, and the subject. A merge is refused unless the shapes are
   equal, because keeping the older inverse only restores both edits if the second overwrote exactly what
   the first did. ⚠️ **The field is part of the key and has to be** (§15 D482): a discriminant names the
-  variant, which is the field set for 22 of the 23 overwriting operations and is not for `SetGeometry`,
+  variant, which is the field set for 23 of the 24 overwriting operations and is not for `SetGeometry`,
   whose payload is itself a field selector — a size edit and a corner-radius edit on one node merged, and
   one undo restored the size and stranded the radius with an empty stack. **And `shape_key` is not
   `Operation::overwrites`**, which answers *"which node does this operation write"* for two app callers
@@ -3324,23 +3377,34 @@ impl Resolved {
   everywhere, and a document with no layout in it holds nothing here. `used_local_of` and
   `used_kind_of` are the same two questions for a caller holding a `&Node` and no document — the SVG
   writer's helpers — and ⚠️ **the node must be this document's own**: the map is keyed by id, so a
-  captured copy or a ghost would be answered with the original's layout. **Draw, measure and hit-test
-  from those two; edit from `Node::transform` and `Node::kind`**: a tool computing a new value starts
-  from what the user set. A used kind is always the same variant as the document's, so a `match` asking
-  *what sort* of node this is may read either. ⚠️ **The pass that fills it is identity today**
-  (`resolve::used_geometry` answers `None` for every node — §15 D867's build step 1), which makes the
-  goldens staying byte-identical its proof and also blinds that proof to a consumer still reading the
-  document; a `cfg(test)` probe in `resolve.rs` is what drives a non-identity map through the plumbing,
-  and D868 has what it covers. ⚠️ **Core's plumbing only**: no other crate can reach the probe, so
-  nothing yet proves a used geometry reaches render, export or the app — step 2's test is to.
+  captured copy or a ghost would be answered with the original's layout. **Draw, measure, hit-test
+  and edit from those two** (§15 D874): a tool computes from where a layer is drawn, and
+  `build::keep_insets` turns a placement written for a pinned layer into its insets at the commit
+  seam. Step 1 had *edit from `Node::transform` and `Node::kind`*, and a pinned layer's stored
+  transform not being where it is drawn is what reversed it. A used kind is always the same variant
+  as the document's, so a `match` asking *what sort* of node this is may read either.
+  **`resolve::used_geometry` places a child of an `Artboard` with authored insets** by
+  `container::place`, against the frame's **used** size read out of the map being filled — so a
+  frame another frame has stretched hands its children the stretched size — and answers `None` for
+  everything else, which is still the identity pass step 1 was proved behind: a document with no
+  insets holds nothing in `used`, and the goldens staying byte-identical are still the check of
+  that. A `cfg(test)` probe in `resolve.rs` answers first when it answers `Some`, and D868 has what
+  it covers. What
+  proves a used geometry reaches render and export is `ondin-export/tests/insets.rs`, a pinned
+  document written byte for byte as its baked twin. ⚠️ **The app side has only the Position card's**
+  (`inspector::inset_card_tests`, through the real commit path); nothing tests that hit-testing,
+  snapping or the rulers read used geometry.
 - No `FontContext` is threaded through: `core::text` owns a thread-local parley engine and returns
   layouts carrying the exact `peniko::FontData` blob parley resolved, so the renderer draws glyphs
   straight from it.
 - `update` consumes `DirtySet`, in this order: recompute the **used** entries over the subtree
   expansion (§15 D868), re-shape the **dirty** nodes' text, recompute world transforms parents-first
   from used locals, recompute bounds children-first, then propagate bound changes up to the root; a
-  deleted node drops its entry in every map, `used` included. `rebuild` fills `used` whole before its
-  walk, for the same reason — the walk shapes text at the used kind and composes used locals.
+  deleted node drops its entry in every map, `used` included. **The parents-first sort comes before
+  the used pass**, not before world transforms as it did, because a pinned child is placed against its
+  frame's used size and the frame's entry has to be fresh first (§15 D874). `rebuild` fills `used`
+  whole before its walk, **pre-order** for the same reason — and before the walk because the walk
+  shapes text at the used kind and composes used locals.
   ⚠️ **The text pass is the one step that does *not* run over the subtree expansion** (§15
   D590). A descendant's world transform depends on a dirty ancestor and a descendant's *layout* does
   not — `text::layout` reads the node's own (used) kind and nothing else — so re-shaping the
@@ -3578,7 +3642,8 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   its resize handles need: on a rotated node the first is a box the shape does not have. ⚠️ **It is the
   *used* box** (§15 D868) — measured from the used kind, children placed by their used locals —
   because the handles and the W/H are drawn from it; and it is also the box the resize tools edit
-  *from*, which will want the specified box once the two differ, a split owed by D867's step 2.
+  *from*, which is right — tools compute from where a layer is drawn and `build::keep_insets`
+  converts for a pinned one (§15 D874), so the split step 1 thought owed is not.
   `local_box` also covers containers, by unioning children through their transforms — each masked
   child clipped to
   what its governing mask *clips with*, exactly as `Resolved`'s world box does it (§5.9, §15 D283,
@@ -4177,7 +4242,21 @@ pub trait ScenePainter {
   `current_kind`, which stays ghost → override → document**, because it is what an op is *applied
   to* — `absorb`'s `SetGeometry` and `patch_text` — and patching a size layout computed would write
   the used value back as though typed. The two are equal until layout resizes something, so merging
-  them passes every test there is. **`InsertSubtree`'s `index` is
+  them passes every test there is. **Then `relayout` re-places what the preview moves by insets**
+  (§15 D874): after `absorb` and before the booleans, which read the transforms it changes, it runs
+  `container::place` — the function `Resolved` runs — for every pinned child of a frame the preview
+  resizes and every layer whose insets it sets (recorded by `absorb` as `NodeOverride::insets`),
+  parents first, a re-sized frame re-placing its own children, and writes the result as ordinary
+  transform and kind overrides. ⚠️ **It skips any layer the transaction itself places** with a
+  `SetTransform` or a `SetGeometry` whose patch `resizes()`: that op is where the layer should be
+  drawn, and re-placing it by its old insets would draw a drag away from the pointer. **A patch that
+  does not resize places nothing** — a corner radius is absorbed onto a kind at the *stored* size — so
+  a pinned layer carrying such a kind override is queued and re-placed **from that override kind**,
+  and a rounded stretched rect previews stretched; a layer with no insets that the preview only gave a
+  new kind is left alone. *"Did the kind change"* is judged against what would be drawn now — the
+  override kind, else the committed used kind — so an absorbed stored-size kind is always replaced by
+  the placed one (§15 D874). Flex and grid will need more than this.
+  **`InsertSubtree`'s `index` is
   honoured**, and `scene::paint_node` interleaves ghosts among their parent's real children by it
   rather than drawing them last. Drawing last was the same z-order only while every caller appended;
   a copy that lands immediately above its original previews between that original and whatever sits
@@ -6864,8 +6943,10 @@ input event (winit/egui)
   in-progress value. Reading the document directly makes an accumulating control (a `DragValue`)
   snap back to the committed value every frame. Its `kind()` is override → **used** → document
   (§15 D868), and every `preview_*` helper falls back to used geometry the same way; ⚠️ **so a control
-  computing an edit *from* it computes from where layout put the node**, which is correct until the
-  two differ and is owed a decision per caller by the step that makes them. `committed_node` has no
+  computing an edit *from* it computes from where layout put the node**, which is the rule since step
+  2 (§15 D874): `build::keep_insets` turns the placement written for a pinned layer into its insets.
+  What is written back is still the used value, so a stretched auto-width text node resized stores
+  `AutoHeight(w)`. `committed_node` has no
   used kind at all: it reports the value a commit is about to overwrite, which is the specified one.
 - **A multi-selection Transform field carries its own drag total, and that is a real difference from
   the single-layer path.** The single-layer fields need no such state: they read their number back
@@ -7961,6 +8042,30 @@ what "set the fill of these" means. §15 D53 has the reasoning, of which the loa
 **"Mixed" is a panel rather than a label**. A selection with **frames** in it also gets *Frame
 templates* and *Layout grid*, second and third, directly under the identity card and in the same order
 as on a single frame — the two frame panels that are not a single layer's (§15 D389, D390, below).
+A selection holding a layer a frame can pin gets **Position** under Transform, as a single one does
+(below).
+
+**A layer inside a frame gets a *Position* card, directly under Transform** (§5.3c, §15 D871, D874) —
+under the numbers it changes the meaning of, since a pinned layer's X and W are where its insets put
+it. *Position* is CSS's name for the property; *Constraints*, the design-tool word, is the one the
+maintainer asked not to borrow, and the title itself is the session's choice. It is offered for any
+selection with a layer in it whose parent is an `Artboard` and whose kind takes insets
+(`inset_subjects`, filtered rather than all-or-nothing on `frame_subjects`' rule), and every edit
+applies to each of those layers at its own distances. **A pin diagram** — a frame, a layer in its
+middle, four struts, solid accent where an edge is pinned, faint where not, dashed where it is pinned
+between two auto margins — takes a click anywhere in the band between the layer's edge and the
+frame's, and pins or unpins that edge where it is (`container::with_edge`). **Two buttons** beside it
+centre an axis: both insets at their current distances plus `margin: auto`, so nothing jumps and the
+layer then follows the frame by half; off unpins the axis's end edge, margins with it. **Four
+fields**, L/R over T/B: a pinned inset in its own unit with a clickable `px`/`%` suffix that converts
+without moving anything, committed directly; an unpinned edge's current distance beside an inert
+`auto`, which typing or dragging pins in px through the valve. ⚠️ **A field only clicked through pins
+nothing** — the edit it hands the valve is empty until the number differs from the one shown. 🚨
+**Every pin, unpin and centre commit also writes where the layer is drawn into its stored transform
+and, for a stretched layer, its stored size** (`baked_placement`): an axis that loses its insets is
+placed by the stored values again, and without this a frame resize since the pin would make unpinning
+jump the layer back. The fields read `DisplayNode::insets`, which has an override behind it, for the
+accumulating-control reason §9.3 gives.
 
 **A frame gets two cards of its own, *Frame templates* and *Layout grid*, and the ordinary Fill and
 Stroke panels for its paint** (§5.3b, §15 D385, D387). The two sit **second and third,

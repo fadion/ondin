@@ -1242,13 +1242,14 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D864** — **Past 128 resident covers the least recently asked-for texture is let go, and one asked for on this pass or the last never is.** Not a finding: found closing **D862**, which bounded a first visit and not a long one — nothing evicted short of `Covers::clear`, so scrolling a whole library left every cover resident, ~640 MB at 1,000 large covers by arithmetic on `COVER_MAX_PX`. `Cover::Ready` carries a stamp, the `Covers::pass` count it arrived on or was last returned by `get` on — `Covers`' own count, not egui's pass number, since what ages a cover is the *dashboard* drawing without asking for it. `evict` sorts the `Ready` covers by (stamp, key) and removes the oldest down to `MAX_RESIDENT_COVERS`, **breaking at the first stamped this pass or the one before**, so a card on screen cannot lose its picture and a screen holding more than the cap exceeds it rather than churning. Only `Ready` goes — `Unreadable` is the red mark's fact, `Blank` holds nothing — and an evicted cover is not queued, so the next `get` asks the worker, which reads the disk cache. *(Fixed and tested 2026-09-23; **Keep.** ⚠️ **128 is chosen, not measured**: ~80 MB at the 400² × 4-byte worst case, and more than twice a 2,160 pt window's 48 file cards. 🚨 **Not twice a screen of project cards** — five covers a mosaic, twenty a row, so seven rows of *Recent* pass it, and `MAX_RESIDENT_COVERS`' doc said *"any screen"* until corrected the day it was written; the recency guard is what holds there. **Test** `past_the_cap_the_least_recently_asked_cover_goes_and_a_recent_one_never_does`, three flips run: the sort deleted fails at *"back to the cap"* with 135 left, **not** the predicted named-ten assertion — unsorted, a protected cover comes up within a few and the `break` ends the loop, so it mostly evicts nothing; the recency guard disabled, and `get`'s `*seen = now` dropped, each fail where predicted. §9.5 amended; D862 amended in body and index; `MAX_RESIDENT_COVERS`' doc and `file_card`'s gate comment corrected; struck from `roadmap.md` with D863)*
 - **D865** — **The Type panel's two chords and its line-height field read their `Bounds`, where they had spelled the same numbers from the constants.** Not a finding: noticed closing **D861**. §15 **D817**'s *a held key stops where the field stops* was honoured by value — the tracking arm bounded its em step by `MIN_TRACKING_PCT / 100.0 ..= MAX_TRACKING_PCT / 100.0` and its px step by `px_range_for` over the same constants, both by hand, beside a field reading `Bounds::TRACKING` — D861's shape one function over. Line height had no `Bounds` at all, and the `Leading` arm (§15 **D840**) and `type_line_height_field` each spelled `MIN_LINE_HEIGHT_PCT..=MAX_LINE_HEIGHT_PCT`. `Bounds::LINE_HEIGHT` (the field's existing `0..=1000%`) and `Bounds::em()`, the `%` range over a hundred — the scale a `Length::Em` holds; both arms and the field read their faces off a `Bounds` now. *(Fixed and tested 2026-09-23; **Resolved** — no range moved, `stepped_into` untouched. ⚠️ **`em()` is the chords' face and not the field's**: the field shows an em ×100 and bounds on `.pct`, and handing it `.em()` would cap line height at 10%. `both_ends_of_every_length_field_bound_the_same_quantity` derives `LINE_HEIGHT` with the rest and asserts every `em()` is its `%` face ÷100; flip run, `em()` undivided, red there at `TRACKING` — predicted — and in two tracking-chord tests. ⚠️ **No leading-chord test failed**: the one there was pinned line height's floor, 0 in either scale — **closed the same day**, that test now driving both ceilings and red under the same flip at `Em(21.0)`. D425's scope sentence amended and the test's own copy corrected; D817 and D861 carry a line; `architecture.md` unchanged; nothing struck from `roadmap.md`)*
 - **D866** — **The deep-resample GPU test bounds a ratio to the ordinary path, not a wall clock, after one unexplained 54 ms on a healthy tree — which is D593's shape, taken with far more margin, and still a clock.** `fx_gpu.rs · a_deeply_resampled_shadow_costs_the_buffer_and_not_the_block` is **D743**'s test of the `coarsen` loop bound (D403's promise) and asserted *best of three under 50 ms* against 0.45 ms healthy and 116.3 ms broken. The release bar for v0.2.0 read **54.4 ms** with the code under test unchanged since v0.1.0, then passed 21 runs running; the reading was never recreated and its cause is unknown. The degenerate shadow is timed now **interleaved** with a control — `k = 3`, blur 120, the shadow `a_resampled_drop_shadow_matches_the_reference` checks — one warm-up each, best of five each, and `deep / ordinary < 20` is asserted: **1.73–1.85×** healthy, **1.29–2.01×** with two other GPU suites looping in a second process, **176–208×** with the loop unbounded. *(Changed and measured 2026-09-23; **Keep** — test-only. 🚨 **Not a way out of D854**: D593's test was a ratio of two clocks too, chosen so as not to measure the machine, and failed 13 in 60 under load after two re-samplings; what differs is margin — about ten times each side here, against D829's 46% and 31% — and a load that lands on one arm alone still counterfeits a regression, which the interleave is meant to prevent and was not shown to against the unknown cause. **Counting**, CLAUDE.md's first question of a timing flake, needs an atomic counter compiled into the shader and was judged too invasive for a test. *Revisit if it goes red on a healthy tree* — with the count, not more samples or a wider bound. Flip run with `fx.wgsl` reverted and its diff against `HEAD` confirmed empty. D743 amended in body and index; `architecture.md` unchanged; nothing struck from `roadmap.md`)*
-- **D867** — **Container layout is being built, as CSS flexbox and CSS grid under CSS's names, on taffy — and §1's deferral of it is reversed.** "v1" in these documents names the phase in which the basic editing tools were finished, not a release tag; that phase is over, so layout starts and components follow it. **Where CSS and design-tool convention disagree, CSS wins** — transforms do not affect layout, child order is flow and paint order, text wraps at the available width, specified and used values are kept apart. **Not §13's constraint engine**: a fixed algorithm re-run from specified values. taffy 0.14.0, MIT, f32, measured on a spike: 1,000 rects in a wrapping flex frame **0.558 ms**, a 900-cell grid **1.087 ms**, 100 text cards **29.2 ms** full and **0.302 ms** after one text edit — shaping, not taffy, is the bill. *(Decided 2026-09-23 by the maintainer; **step 1 built 2026-09-24** — core's half, then render, export and the app the same day (D868), cited from `resolve.rs`; steps 2–5 not built. It read *not built — no line of `crates/` changed and no code cites it* until then. ⚠️ **No verdict word existed for a decision taken ahead of its code**; *Decided; not built* is proposed for D867–D872, to become *Built and tested* per step. Build order recorded; open: mirror tree against trait implementation, how taffy is declared, the module's name. `architecture.md` §5.3c written, §1 and §13 amended; `roadmap.md` §0 loses auto layout, constraints and components and gains *Next · Container layout*; `context-menus.md` §7 corrected)*
-- **D868** — **What the user sets and what is drawn become two numbers, and the drawn one is never saved.** Amends §5.6's *"one number in one place"* into a specified number and a used one; the used boxes are derived in `Resolved` from specified properties plus the registered fonts, for three reasons — CSS keeps the two apart, components will derive instances on the same pipeline, and a font arriving just re-resolves. 🚨 **The cost is the risk**: rendering, export, hit-testing, snapping and the inspector all read `Node::transform` and the kind's size when this was decided, and `RenderOverrides` cannot express a reflow. ⚠️ **It breaks two arguments true at `HEAD`**: D590's text pass skipping the subtree expansion, and D778's decline of a seventh map on `Resolved` — whose grounds do not transfer and whose cost does. *(Decided 2026-09-23 by the maintainer; **D867's step 1 built and tested 2026-09-24**, steps 2–5 not built. Core's half: a sparse seventh map `used` on `Resolved`, read through `used_local`/`used_kind` — *draw, measure and hit-test from these; edit from the node* — behind an identity pass proved by byte-identical goldens and, because that proof cannot see a consumer still reading the document, by a `cfg(test)` probe; `update` recomputes it over `affected` and re-shapes text whose used kind changed, the one door past D590, while ⚠️ siblings are not yet dirtied; the guard compares it, five of seven maps; `geometry::world_bounds_of` deleted. Then render, export and the app, the same day: `scene::paint_node` and `mask_geometry`, `RenderOverrides::transform_of` and a new `drawn_kind` fall back to used geometry while 🚨 `current_kind` stays on the document, because it is what a preview op is *applied to*; the SVG writer through `used_local_of`/`used_kind_of`; the snapshot's `local_transform` and `geometry` report **used** values — ⚠️ the session's default, not ruled on by the maintainer; `DisplayNode::kind` and every `preview_*` helper fall back to used, `committed_node` deliberately not. 🚨 **Owed to step 2**: the edit sites that mix a used world with a stored local (`rotate_node` and five more), each owed a decision; and the only non-identity routing test is core's, so nothing outside core proves a used geometry arrives — step 2's right-pinned-child fixture is to. 🚨 A doc-comment theft on `resolve_subtree` found by reading and repaired. Open: how previews reflow, what a resize writes, the rotation origin, `TextSizing`'s mapping, and — unstated by the design — what an in-flow item's stored translation means. §5.6 carries a pointer; §5.3c, §5.9 and §5.10 amended 2026-09-24, and §5.3c, §5.9, §6.2, §7, §9.3 and §9.4's booleans again for the second half)*
+- **D867** — **Container layout is being built, as CSS flexbox and CSS grid under CSS's names, on taffy — and §1's deferral of it is reversed.** "v1" in these documents names the phase in which the basic editing tools were finished, not a release tag; that phase is over, so layout starts and components follow it. **Where CSS and design-tool convention disagree, CSS wins** — transforms do not affect layout, child order is flow and paint order, text wraps at the available width, specified and used values are kept apart. **Not §13's constraint engine**: a fixed algorithm re-run from specified values. taffy 0.14.0, MIT, f32, measured on a spike: 1,000 rects in a wrapping flex frame **0.558 ms**, a 900-cell grid **1.087 ms**, 100 text cards **29.2 ms** full and **0.302 ms** after one text edit — shaping, not taffy, is the bill. *(Decided 2026-09-23 by the maintainer; **step 1 built 2026-09-24** — core's half, then render, export and the app the same day (D868), cited from `resolve.rs`; **step 2** the same day (D874), model half then inspector card, steps 3–5 not built. It read *not built — no line of `crates/` changed and no code cites it* until then. ⚠️ **No verdict word existed for a decision taken ahead of its code**; *Decided; not built* is proposed for D867–D872, to become *Built and tested* per step. Build order recorded; open: mirror tree against trait implementation, how taffy is declared, the module's name. `architecture.md` §5.3c written, §1 and §13 amended; `roadmap.md` §0 loses auto layout, constraints and components and gains *Next · Container layout*; `context-menus.md` §7 corrected)*
+- **D868** — **What the user sets and what is drawn become two numbers, and the drawn one is never saved.** Amends §5.6's *"one number in one place"* into a specified number and a used one; the used boxes are derived in `Resolved` from specified properties plus the registered fonts, for three reasons — CSS keeps the two apart, components will derive instances on the same pipeline, and a font arriving just re-resolves. 🚨 **The cost is the risk**: rendering, export, hit-testing, snapping and the inspector all read `Node::transform` and the kind's size when this was decided, and `RenderOverrides` cannot express a reflow. ⚠️ **It breaks two arguments true at `HEAD`**: D590's text pass skipping the subtree expansion, and D778's decline of a seventh map on `Resolved` — whose grounds do not transfer and whose cost does. *(Decided 2026-09-23 by the maintainer; **D867's step 1 built and tested 2026-09-24**, step 2's model half the same day (**D874**), which 🚨 **reverses the editing rule below** — tools compute from used geometry and `build::keep_insets` converts — and pays both step-1 debts, the cross-crate one for render and export only. Core's half: a sparse seventh map `used` on `Resolved`, read through `used_local`/`used_kind` — *draw, measure and hit-test from these; edit from the node* — behind an identity pass proved by byte-identical goldens and, because that proof cannot see a consumer still reading the document, by a `cfg(test)` probe; `update` recomputes it over `affected` and re-shapes text whose used kind changed, the one door past D590, while ⚠️ siblings are not yet dirtied; the guard compares it, five of seven maps; `geometry::world_bounds_of` deleted. Then render, export and the app, the same day: `scene::paint_node` and `mask_geometry`, `RenderOverrides::transform_of` and a new `drawn_kind` fall back to used geometry while 🚨 `current_kind` stays on the document, because it is what a preview op is *applied to*; the SVG writer through `used_local_of`/`used_kind_of`; the snapshot's `local_transform` and `geometry` report **used** values — ⚠️ the session's default, not ruled on by the maintainer; `DisplayNode::kind` and every `preview_*` helper fall back to used, `committed_node` deliberately not. 🚨 **Owed to step 2**: the edit sites that mix a used world with a stored local (`rotate_node` and five more), each owed a decision; and the only non-identity routing test is core's, so nothing outside core proves a used geometry arrives — step 2's right-pinned-child fixture is to. 🚨 A doc-comment theft on `resolve_subtree` found by reading and repaired. Open: how previews reflow, what a resize writes, the rotation origin, `TextSizing`'s mapping, and — unstated by the design — what an in-flow item's stored translation means; the first, third and fourth answered **for absolute insets only** by D874. §5.6 carries a pointer; §5.3c, §5.9 and §5.10 amended 2026-09-24, and §5.3c, §5.9, §6.2, §7, §9.3 and §9.4's booleans again for the second half, and again for D874)*
 - **D869** — **A group with `display` has a box; a group without one is exactly today's group.** Setting `display` makes a group's bounds its layout box, padding included, and a resize writes `width`/`height` and reflows instead of `tools::resize_group`'s scale. **Paint and clip stay frame-only**: pass-through paint and scale-on-resize are design-tool behaviours with no CSS equivalent, and merging the kinds would lose them. `Boolean` ignores `display`; the root is no container; a mask is out of flow. *(Decided 2026-09-23 by the maintainer; **not built**. *Revisit when components land.* ⚠️ Four passages argue from *"a group has no box"* and become conditional on `display` — listed in the body, not decided by it. §5.6's group-resize bullet carries a pointer)*
 - **D870** — **A frame may sit inside any group, and `paint_targets` already stops at one.** A flex row of frame-cards in a group is illegal under `can_parent` today. Relaxed for *any* group, since legality hanging on `display` would refuse removing `display` from a group holding a frame. Of the two reasons `can_parent`'s doc gives, *"clipped by something with no edges"* is weak — groups do not clip — and the `paint_targets` one was **checked**: its `takes_paint` arm takes a frame and does not descend. *(Decided 2026-09-23 by the maintainer; **not built** — `can_parent` still refuses. ⚠️ The four enforcers read one function; what needs the audit is what *assumed* the refusal, D62's four leaks being the precedent. §5.3 and §5.7a carry pointers; D62 carries a line)*
-- **D871** — **Constraints are `position: absolute` with insets, and a child with none stays where it is.** Pin left, pin right, stretch and scale are a left inset, a right inset, both, and percentages — in a frame or a group with `display`, and not in a group without, which has no edges. No authored inset means the stored position stands, so no existing document moves. Spike, frame 300 → 500: pin-left stays at 10, pin-right 240 → 440, stretch 280 → 480, 25%/25% 75/150 → 125/250. *(Decided 2026-09-23 by the maintainer; **not built** — step 2 of D867's order. Not §13's persistent constraints)*
-- **D872** — **Every leaf is measured, and shapes are replaced elements.** As an empty `width: 40px` box a rectangle shrank to **30.643** under `flex-shrink: 1`; as a measured leaf it held **40**. Rect, Ellipse, Polygon, Star, Path, Line and Boolean take their stored geometry as intrinsic size, `width`/`height` `auto`; a group without `display` is atomic likewise. ⚠️ `align-items: stretch` still stretches them — CSS-faithful, kept. **Text has two gaps in core**: no min-content query (`AutoHeight(1.0)` reports 1.000 wide where the widest word is 45.148), and 16 `measure` calls per leaf per compute with no memo by width. *(Decided 2026-09-23 by the maintainer; **not built**. Measured in D867's spike. §5.3c)*
+- **D871** — **Constraints are `position: absolute` with insets, and a child with none stays where it is.** Pin left, pin right, stretch and scale are a left inset, a right inset, both, and percentages — in a frame or a group with `display`, and not in a group without, which has no edges. No authored inset means the stored position stands, so no existing document moves. Spike, frame 300 → 500: pin-left stays at 10, pin-right 240 → 440, stretch 280 → 480, 25%/25% 75/150 → 125/250. *(Decided 2026-09-23 by the maintainer; **built and tested 2026-09-24** (D874) — frames only, the model and then the inspector's *Position* card. Not §13's persistent constraints)*
+- **D872** — **Every leaf is measured, and shapes are replaced elements.** As an empty `width: 40px` box a rectangle shrank to **30.643** under `flex-shrink: 1`; as a measured leaf it held **40**. Rect, Ellipse, Polygon, Star, Path, Line and Boolean take their stored geometry as intrinsic size, `width`/`height` `auto`; a group without `display` is atomic likewise. ⚠️ `align-items: stretch` still stretches them — CSS-faithful, kept. **Text has two gaps in core**: no min-content query (`AutoHeight(1.0)` reports 1.000 wide where the widest word is 45.148), and 16 `measure` calls per leaf per compute with no memo by width. *(Decided 2026-09-23 by the maintainer; **not built**. Measured in D867's spike. §5.3c. ⚠️ **Gives way between two insets**, which stretch a shape — D874's first ruling)*
 - **D873** — **Used values would come back from taffy's f32 quantized to 1/64 px — proposed, not decided.** f32 is accurate enough — worst error 0.000005 at 400 wide, 0.0047 at 100,000, always under an ulp, and parent-relative so canvas coordinates never enter — but `7.3f32 as f64` is `7.300000190734863`, and that would reach fields and exports. 1/64 is Chromium's `LayoutUnit`. ⚠️ **At 1,000,000 wide the error is 0.044, nearly three units**, so quantizing hides f32 noise and not f32 error. *(Proposed 2026-09-23 in the spike's write-up; **not decided and not built** — the brief carried it as a proposal and this entry does not promote it)*
+- **D874** — **A pinned layer is placed by its CSS insets against its frame's used size, and every tool edits from where a layer is drawn, with one core function turning that into insets.** D867's step 2, model half and then the inspector card. **The maintainer's four rulings**: both insets on an axis **stretch** a layer with a size — 🚨 departing from CSS's replaced elements and so from D872 — and over-constrain one without; rotation, skew and flip turn about the **box centre**; centring is **`margin: auto`**, the only margin value; the inspector shows a **pin diagram** plus four px/% fields. **The session's**: 🚨 step 1's *edit from the document* (D868) is **reversed** — tools compute from used geometry and `build::keep_insets`, once at the top of `commit_inner`, appends the `SetInsets` that draws each pinned layer where the edit put it, dropping a write-back to where it already is, with `commit_inner` re-checking for empty because `changes_nothing` answers `false` there. `container.rs`, `Node::insets`, an additive `NodeDto` field with no schema bump, `Operation::SetInsets`; `resolve::used_geometry` places against the frame's **used** size, `update` sorting parents first before the used pass; `RenderOverrides::relayout` answers D868's preview question for insets alone. Stretch on sized kinds and `Text`; `Path`, `Line`, `Boolean` positioned only; `Group` and `Boolean` take none. **The card**, titled ***Position*** — the session's title, the maintainer having ruled out only *Constraints* — sits under Transform: a pin diagram whose struts pin an edge where it is, two `margin: auto` centre buttons, and four fields showing a pinned inset in its unit (a `px`/`%` suffix converting) or an unpinned edge's distance as `auto`, a field only clicked through pinning nothing. 🚨 Every pin, unpin and centre commit writes the drawn transform and, for a stretched layer, its drawn size into the stored values (`baked_placement`), so an unpinned axis stays where it is drawn. *(Built and tested 2026-09-24: the model half, then the card the same day. `ondin-export/tests/insets.rs` — pinned against baked, SVG, PNG and snapshot, each writer's flip failing only its own test — pays step 1's cross-crate debt for render and export; the model half added no app test; the card's `mod inset_card_tests`, five on a headless app through the real commit path, is the first app test of insets. **Two defects found by reading the model half, both fixed before the card shipped**: a non-size geometry patch — a corner radius — un-stretched a stretched layer, now `GeometryPatch::resizes`, wildcard-free, read by `keep_insets` and `relayout` (flip: `true` for `CornerRadius` rewrites `right` to 190); and `with_edge`'s unpin moved a layer whose stored placement was stale, now `baked_placement` (flip: removing it puts the layer at 40 against 240 and shrinks a half-unpinned stretch to 100 wide against 300). ⚠️ **Not verified in the GUI.** `container.rs`' *"Four rulings"* corrected to three and a decision. D867, D868, D871, D872 amended; §1, §5.3, §5.3c, §5.6, §5.7, §5.8, §5.9, §5.10, §6.2, §9.3, §9.4; `roadmap.md`'s step 2 struck)*
 
 ---
 
@@ -19180,7 +19181,7 @@ three suppressions are one test rather than three.
 
 **D867 — Container layout is being built, as CSS flexbox and CSS grid under CSS's names, on taffy —
 and §1's deferral of it is reversed. *Decided 2026-09-23 by the maintainer; step 1 built 2026-09-24
-(D868), steps 2–5 not built.*** Filed
+(D868), step 2 the same day (D874), the rest not built.*** Filed
 beside D385 because the word *grid* now names two features in this document, and a reader looking
 for one will land on the other: D385's layout grids are chrome drawn over a frame, and this is the
 CSS grid **container**, which places children. `architecture.md` §5.3c opens by saying so.
@@ -19256,8 +19257,8 @@ the workspace, the identity pass needing no engine. **Amended again the same day
 two debts that go to step 2 with it. Still no citation of this number outside `resolve.rs`)*
 
 **D868 — What the user sets and what is drawn become two numbers, and the drawn one is never saved.
-*Decided 2026-09-23 by the maintainer; D867's step 1 built and tested 2026-09-24, steps 2–5 not
-built.*** §5.6 opens with the rule that keeps scale out of
+*Decided 2026-09-23 by the maintainer; D867's step 1 built and tested 2026-09-24, step 2's model
+half the same day (D874), the rest not built.*** §5.6 opens with the rule that keeps scale out of
 the transform — *"a layer's size must be one number in one place (its geometry)"*. Under container
 layout that becomes one **specified** number and one **used** number, CSS's pair, and this entry is
 the amendment. **Not in effect**: §5.6 carries a pointer and the rule is true of `HEAD` as written.
@@ -19330,7 +19331,9 @@ node this is keep reading `Node::kind`. Inside `resolve.rs` the map is read only
 and `kind_in`; outside it, through `Resolved::used_local(doc, id)` and `Resolved::used_kind(doc, id)`,
 both falling back to the document. **Their docs carry the rule the rest of the build hangs on: draw,
 measure and hit-test from these; edit from `Node::transform` and `Node::kind`** — a tool computing a
-new value has to start from what the user set.
+new value has to start from what the user set. 🚨 **Reversed by step 2 (D874)**: tools compute from
+used geometry and `build::keep_insets` converts at the commit seam, because a pinned layer's stored
+transform is not where it is drawn; the docs say so now.
 
 **The pass is identity, on purpose.** `resolve::used_geometry` answers `None` for every node — there
 is no `display` and no inset to author yet — so the refactor is proved by the goldens staying
@@ -19514,6 +19517,24 @@ index row rewritten, D867's too; `architecture.md` §5.3c, §5.9's listing and `
 `RenderOverrides` bullet, §7's SVG and snapshot bullets, §9.3's panels bullet and §9.4's booleans
 amended; `roadmap.md`'s step 1 struck and step 2 given the two debts)*
 
+🚨 **Amended a third time 2026-09-24: step 2's model half is built (D874), and it reverses this
+entry's editing rule.** *Draw from used geometry, edit from the document* did not survive the first
+layer drawn somewhere its stored transform does not say: **tools now compute from used geometry, and
+one core function converts** — `build::keep_insets`, at the top of `commit_inner`, turns a placement
+written for a pinned layer into its insets. So the first debt above is paid by a rule rather than a
+decision per site: the six mixed-source edit sites were moved to used geometry by a sweep of 21
+reads in `tools/mod.rs` plus `multi_angle_tx`, and `local_box`'s *owed split* is owed no longer —
+the used box is the one to edit from. The second is paid for render and export by `ondin-export/tests/insets.rs`, a pinned
+document against its baked twin, and **not for the app**, which has no new test. Of the questions
+opened above, three are answered **for absolute insets only**: previews reflow through
+`RenderOverrides::relayout`, which re-runs `container::place`; the rotation origin is the box centre,
+the maintainer's ruling; and a stretched `TextSizing` wraps at the width and fixes only for a height.
+Flex and grid inherit none of the three by default. ⚠️ **`current_kind` is unchanged and still
+right**: it mirrors what `apply` patches, and `apply` patches the stored kind — which is what makes a
+non-size patch on a stretched layer carry the stored size into `keep_insets`, D874's *Fix*. `resolve.rs`'s
+`used_local` and `used_kind`, `DisplayNode::kind` and `query::local_box` carry the new rule in their
+comments.
+
 **D869 — A group with `display` has a box; a group without one is exactly today's group. *Decided
 2026-09-23 by the maintainer; not built.*** **Containers are not frame-only.** `display: flex | grid`
 applies to a `Group` as well as to an `Artboard`, and setting it gives the group a box: its bounds
@@ -19577,7 +19598,7 @@ owed here, and `OpError::ArtboardPlacement`'s message describes the rule a user 
 `paint_targets` paragraph carry pointers; D62 carries a line)*
 
 **D871 — Constraints are `position: absolute` with insets, and a child with none stays where it is.
-*Decided 2026-09-23 by the maintainer; not built.*** **There is no separate constraints feature.** In
+*Decided 2026-09-23 by the maintainer; built and tested 2026-09-24 in frames (D874), the model and then its inspector card.*** **There is no separate constraints feature.** In
 a box — a frame, or a group with `display` (D869) — a child's authored insets, `top`, `right`,
 `bottom` and `left` in px or %, are the constraints: pin left is a left inset, pin right a right
 inset, stretch is left and right together, and scale is percentage insets. One mechanism where there
@@ -19594,7 +19615,13 @@ exercises the whole pipeline.
 
 *(Decided 2026-09-23 by the maintainer; **not built**. ⚠️ **Not §13's persistent constraints** — an
 inset is one specified value on one node, and D867 has the distinction. §5.3c; §13's decision 1
-carries a pointer)*
+carries a pointer. **Amended 2026-09-24: the model half is built and tested** — `container.rs`,
+`Node::insets`, `Operation::SetInsets`, the layout pass, `build::keep_insets` and a preview reflow —
+and D874 has it, with the maintainer's four rulings the build turned on. **In frames only**: the
+*"group with `display`"* half waits on D869. The inspector card — a pin diagram and four px/% fields —
+was not built with it, so nothing in the app pinned a layer. **Amended again the same day: it is
+built**, titled *Position*, and D874 has it — pin left, pin right, stretch and scale are now
+something a user can reach)*
 
 **D872 — Every leaf is measured, and shapes are replaced elements. *Decided 2026-09-23 by the
 maintainer; not built.*** **Shapes hold their size because they are replaced elements, and the spike
@@ -19624,7 +19651,10 @@ which is D867's 29.2 ms for 100 cards. A memo keyed by wrap width is owed; `Reso
 one layout per node, so it is not that memo as it stands.
 
 *(Decided 2026-09-23 by the maintainer; **not built**. Measured in D867's spike. ⚠️ **Open**: how
-`TextSizing`'s three states map onto `width`/`height`/`white-space` inside a layout (D868). §5.3c)*
+`TextSizing`'s three states map onto `width`/`height`/`white-space` inside a layout (D868). §5.3c.
+🚨 **Amended 2026-09-24: the replaced-element rule gives way in one place, by the maintainer's
+ruling** — two insets on an axis stretch a shape between them, where CSS holds an `<img>` at its
+intrinsic size; D874 has why. Nothing else here moves: in flow, a shape is still a measured leaf)*
 
 **D873 — Used values would come back from taffy's f32 quantized to 1/64 px. *Proposed 2026-09-23; not
 decided, not built.*** **f32 is accurate enough; its conversion to f64 is not clean.** taffy computes
@@ -19646,6 +19676,257 @@ is still wrong by the f32 error. Whoever decides the unit should decide it knowi
 *(Proposed 2026-09-23 in the spike's write-up; **not decided and not built**. The brief that
 recorded this cluster carried it as *"proposed rule"*, and this entry does not promote it — the
 maintainer's word on the unit is what turns *Proposed* into *Decided*. §5.3c names it as proposed)*
+
+**D874 — A pinned layer is placed by its CSS insets against its frame's used size, and every tool
+edits from where a layer is drawn, with one core function turning that into insets. *Rulings 1–4
+the maintainer's, 2026-09-24; the rest the session's. Built and tested 2026-09-24 — the model half,
+then the inspector card the same day, which completes step 2.*** This is D867's step 2, D871's
+insets made real: the arithmetic in a new `ondin-core/src/container.rs`, the property on `Node`, an
+operation, a layout pass in `Resolved`, a conversion at the commit seam, a preview reflow, the
+cross-crate test step 1 owed, and the inspector card. **The card came second** — the pin diagram and
+the four fields of ruling 4, titled *Position* (below) — and until it landed no user could pin
+anything, insets arriving only through a file or a test.
+
+**The maintainer's four rulings**, given in conversation on 2026-09-24 as answers to four questions,
+each the recommended option:
+
+1. **Both insets on an axis stretch** a layer with a size of its own, to the frame's size less both
+   insets. 🚨 **This departs from CSS**, and from D872 with it: D872 made shapes replaced elements,
+   and CSS keeps a replaced element — an `<img>` — at its intrinsic size between two insets. Pinning
+   both edges and not stretching is not what anyone pinning both edges means. A kind that *cannot*
+   stretch is over-constrained the CSS way: the end inset is ignored.
+2. **Rotation, skew and flip turn about the box centre**, CSS's default `transform-origin`: layout
+   places the unrotated box and the node's linear transform is applied about its middle. That closes
+   D868's open rotation-origin question for an absolutely positioned child; an item in flow is
+   step 3's to confirm.
+3. **Centring is `margin: auto` between two insets**, CSS's absolute-centring idiom; one auto side
+   pushes the box against the other. `auto` is the only margin value supported — numeric margins stay
+   on §5.3c's deferred list.
+4. **The inspector shows a pin diagram plus top/right/bottom/left fields**, in px or %. Built — the
+   *Position* card, below.
+
+**The session's decisions, not the maintainer's, and the first is a reversal.** 🚨 **Step 1's rule
+was *"draw, measure and hit-test from used geometry; edit from `Node::transform` and `Node::kind`"*
+(D868), and it is reversed: tools compute from used geometry, and one function converts.** The rule
+could not survive the first layer that is drawn somewhere its stored transform does not say. A
+child created at x 10, pinned `right: 10` and its 300 frame grown to 500, is drawn at 390 while its
+transform still reads 10, so a tool starting from the stored value composes its edit against a place
+the layer has left; and the alternative to converting centrally was every one of the ~110 placement-writing sites
+`keep_insets`' doc counts learning what an inset is. So a tool writes the placement it wants as an
+ordinary `SetTransform` or `SetGeometry`, and `build::keep_insets(doc, res, tx) -> Transaction`,
+called once at the top of `EditorSession::commit_inner`, appends for each pinned layer the
+`SetInsets` that draws it there — each inset kept in its own unit through `container::inverse`, so a
+`33%` stays a percentage. The tool's own ops stay, so the stored transform and size become the
+placement too. What the layer is placed against is judged **after** the transaction, so a `Reparent`
+into a frame pins against the new frame and a pasted copy is re-pinned where it lands; the frame's
+size is its used size unless the same edit resizes the frame too. **For every unpinned layer used
+equals stored**, so no existing tool changed behaviour — the app suite's 1356 tests unchanged, as
+reported by the caller. Previews need no conversion: a tool's own transaction already says where to
+draw.
+
+⚠️ **Two details of the conversion are load-bearing.** It has a fast path, returning the transaction
+untouched when nothing it places carries an authored inset, in the document or in a subtree it
+inserts — every commit on a document with no insets ends there, without the scratch copy of the
+document the full path applies the edit to. And it **drops** a pinned layer's `SetTransform` that
+writes the layer back exactly where it is already drawn: a handle pressed and released writes the
+*used* placement, which for a pinned layer is not its stored transform, so D428's no-op test would
+see a change and commit an invisible undo step. That can empty a transaction outright, and
+`Transaction::changes_nothing` answers `false` for an empty one — its doc says so, `!self.0.is_empty()
+&& …` — so `commit_inner` re-checks for empty **after** the conversion. `tests/container.rs ·
+a_pinned_child_written_back_where_it_is_drawn_changes_nothing` found the missing check. *Do not fold
+the second empty test into the first*: the first runs before anything could have emptied the
+transaction.
+
+**The model**, also the session's. `container::LengthPct` is `Px` or `Percent`, the percentage stored
+as typed (`25.0` is 25%) because it is read back in a field and CSS writes it that way; horizontal
+insets resolve against the frame's width and vertical against its height, CSS's rule for insets and
+not its width-only rule for padding. `AutoMargins` is four `bool`s, `auto` being the whole vocabulary.
+`Insets` holds four `Option<LengthPct>` and the margins; `is_authored` counts insets only, since a
+margin means nothing without two insets. `place`, `inverse`, `with_edge` (pin or unpin one edge — the
+diagram's click), `slot_of`, `resized`, `can_stretch` and `takes_insets` are the functions. `Node`
+carries `insets` with a getter; `NodeDto` saves it under `skip_serializing_if = Insets::is_unset`,
+additive, **no schema bump**, an unpinned layer's bytes unchanged. `Operation::SetInsets { id, insets }`
+writes the whole set, for `SetStrokes`' reason; its inverse is the old set; it answers `true` to
+`changes_ink`; it refuses a non-finite length with `OpError::NonFinite`; and it has **no kind or
+parent gate**, on `SetLayoutGrids`' terms — stored anywhere, inert where the layout pass does not
+read it.
+
+**Scope limits, the session's.** What stretches is a kind whose size is a field — `Rect`,
+`Ellipse`, `Polygon`, `Star`, `Artboard`, and `Text` through its sizing: a stretched width wraps an
+auto-width node at it, `AutoHeight(w)`, and keeps a `Fixed` node's height; a stretched height makes it
+`Fixed`. `Path`, `Line` and `Boolean` are positioned by their insets and keep their size, since
+stretching one scales its points and pen-editing a stretched path then needs the inverse — later
+work. **`Group` and `Boolean` take no insets at all**: their box is their children's, measured after
+placement, so there is nothing to place them by; the field is stored and inert on them. And insets
+place a child of an `Artboard` only — D871's *"or a group with `display`"* waits on D869, not built.
+
+**The layout pass.** `resolve::used_geometry(doc, used, id)` places a child of an `Artboard` with
+authored insets by `container::place` against the frame's **used** size, read out of the map being
+filled, so a frame another frame has stretched hands its children the stretched size. That needs
+parents first on both paths: `rebuild` fills `used` pre-order, and `update` now sorts `ordered` by
+depth **before** the used-geometry pass rather than before world transforms — the long §15 D594
+comment moved with the line. The `cfg(test)` probe still answers first when it answers `Some`.
+
+**The preview.** `RenderOverrides` records a `SetInsets` as `NodeOverride::insets`, and a new
+`relayout` pass — after `absorb`, before the booleans, which read the transforms it can change —
+re-places with `container::place` every pinned child of a frame the preview resizes and every layer
+whose insets it sets, parents first, a re-sized frame re-placing its own children. ⚠️ **It skips any
+layer the transaction itself places**: that layer's own `SetTransform` or `SetGeometry` is where it
+should be drawn, and re-placing it by its old insets would draw a drag somewhere the pointer is not.
+This answers D868's open preview question **for absolute insets only**, where a child's placement
+depends on its frame and itself; flex and grid still need the wider answer.
+
+**The tools sweep.** 21 stored-geometry reads in `tools/mod.rs` moved to used geometry —
+`resize_to_handle`, `move_line_end`, `line_ends_world`, `resize_geometry`, `resize_selection`,
+`scale_geometry`, `scale_subtree`, `rotate_node`, `skew_to_handle`, `skew_selection` — and
+`inspector::multi_angle_tx` with them, which pays D868's debt of edit sites composing a used world
+with a stored local. `scale_geometry` and `scale_subtree` take `res`, the latter at eight arguments
+under `#[allow(clippy::too_many_arguments)]`, D41's line being a parts struct before the ninth. **Pen
+and path point editing stays on the document**, since paths do not stretch in this step. ⚠️ **One
+consequence, recorded**: a stretched auto-width text node's used kind is `AutoHeight(w)`, so resizing
+it writes that mode back as stored — visible only if the node is later unpinned.
+
+**The evidence.** `ondin-export/tests/insets.rs` is the cross-crate proof step 1 owed: a pinned,
+frame-resized document — a right pin, a stretch, stretched text, a stretched nested frame whose own
+child is pinned at a 10% bottom inset, a rotated pinned rect — must write the same SVG, PNG and
+snapshot as its **baked twin**, each pinned layer's used placement written into the document and the
+pins removed. Flips run: reverting each writer's routing to `node.transform()` fails exactly its own
+test — SVG, PNG through `scene::paint_node`, snapshot. ⚠️ **The model half added no app test**: the
+session helpers' routing is covered by the unchanged app suite and `DisplayNode`'s used fallback, so
+hit-testing in the app, snapping, the inspector and the rulers are still routed by reading. In core,
+`container.rs`' nine tests pin the arithmetic: dropping the half-box from `placed_at` fails **only**
+the rotation test, the centre at (217.2, 68.9), because for an unrotated box the half cancels — which
+is also why no document without rotation could show it. 🚨 **The px-for-percent flip fails the
+*move* assertion, not the round trip, and that is the guard's doing**: `AxisInsets::inverse` returns
+an axis the edit did not move untouched, so that a nudge along x cannot rewrite a `33.3%` top inset
+into its float-noise neighbour and commit it — before the guard went in, the same flip failed the
+round trip. *Do not remove the guard as redundant*: the round trip now passes by returning early.
+`tests/container.rs`' eight tests pin the wiring, with `update` checked against `rebuild` after every
+commit; `used_geometry` reading the parent's *document* kind fails the nested-frame test, 80 against
+280. And `ondin-render/tests/overrides.rs` gained two: 🚨 **the fixture's first cut had unfilled
+shapes, drew nothing, and the inset-edit test passed with `relayout` disabled** — only the text was
+being compared. Painting every shape gave it teeth; both now fail with `relayout` returning early.
+
+🚨 **A defect found by reading, not run: a geometry patch that is not a size un-stretches a stretched
+layer.** A `CornerRadius`, `CornerRadii`, `Sides` or `InnerRatio` patch is applied to the
+**stored** kind — `document.rs`' arms for them replace the one field and keep the size — so after it
+the kind still carries the stored size. `keep_insets` reads any `SetGeometry` as a resize,
+takes that kind as the drawn size, and on a stretched axis rewrites the far inset to fit it: a
+100-wide rect stretched to 280 in a 300 frame, given a corner radius from the inspector, commits
+`right: 190` and is drawn 100 wide. `relayout` has the same shape — it treats any `SetGeometry` as the
+transaction placing the layer and skips it — so the preview agrees with the collapse rather than
+hiding it. Unreachable from the UI until the card lands; reachable from a file that carries insets.
+*Fix before the card ships*: a patch that sets no size is not a resize to either function.
+***Resolved 2026-09-24, before the card shipped.*** `GeometryPatch::resizes`, a match with **no
+wildcard**, answers `true` for `Size`, `LineEnd`, `Path`, `TextSizing`, the three rail patches and
+`BoolOp`, and `false` for `CornerRadius`, `CornerRadii`, `Sides` and `InnerRatio` — a polygon's and a
+star's outline is stretched to fill its size exactly (`geometry::star_path`), so neither of the last
+two moves the box. `keep_insets` marks a node resized only for a patch that `resizes()`. `relayout`
+counts as placed only a `SetTransform` or a resizing `SetGeometry`; it seeds its queue with every
+node carrying a kind override and re-places it from **that override kind** as base, so a rounded
+stretched rect previews stretched, while a layer with no insets and no inset override is left to be
+drawn with its kind where it is; and it judges *"did the kind change"* against what would be drawn
+now — the override kind, else the committed used kind — so an absorbed kind at the stored size is
+always replaced by the placed one. `tests/container.rs ·
+rounding_a_stretched_rects_corners_leaves_it_stretched` and a *"a stretched layer's corners rounded"*
+case in `ondin-render/tests/overrides.rs · an_inset_edit_previews_as_its_commit` pin it: `resizes`
+answering `true` for `CornerRadius` fails both, the core test with `right` rewritten to 190 — the
+defect exactly — and the render case with preview and commit diverging. *Keep the match
+wildcard-free*: the first draft missed three variants, and it was the compiler that said so.
+
+⚠️ **`with_edge` promises more on the unpin side than it can do alone.** Its doc says an edge is
+*"pinned or unpinned without moving the layer"*; pinning does, reading every inset back from the used
+placement, and `pinning_from_the_diagram_never_moves_the_layer` asserts it after each click. Unpinning
+only clears the edge and the orphaned auto margins — it returns insets and writes no transform — so a
+layer whose stored transform or size has gone stale since it was pinned (a frame resize leaves both
+alone) falls back to them: a right-pinned child jumps back to its stored x, and a stretched one
+un-pinned on one side shrinks to its stored width. The test asserts only the margins on that side.
+*Owed to the card*: an unpin writes the used placement as the stored transform and size in the same
+transaction. ***Resolved by the card, 2026-09-24***: `with_edge` still returns insets only, and the
+card writes the rest — `baked_placement`, below.
+
+**The card, the same day, completes the step.** `inspector::inspector_insets` is titled
+***Position***, CSS's name for the property insets belong to. ⚠️ **The title is the session's
+choice, not a ruling**: what the maintainer asked was only that it not be *Constraints*, the
+design-tool word for the same idea. It sits directly under Transform in both `inspector_single` and
+`inspector_multi`, since a pinned layer's X and W are where its insets put it, and is offered for any
+selection holding a layer a frame can pin — `inset_subjects`: parent an `Artboard`,
+`container::takes_insets` true, filtered rather than all-or-nothing on `frame_subjects`' rule. **The
+pin diagram** (`inset_diagram`, a free function) paints a frame, a layer in its middle and four
+struts, solid accent where an edge is pinned and faint where not (muted under the pointer), dashed
+where it is pinned between two auto margins; each strut's hit area is the whole band between the
+layer's edge and the frame's — four `ui.interact` rects over one painted picture — so the target is
+the gap and not a one-point line. A click is `toggle_pin`, pinning or unpinning that edge on every
+subject at its own current distance through `container::with_edge`. **Two centre buttons** beside it
+(`toggle_centre`) switch an axis: on pins both insets at their current distances and sets `margin:
+auto` on both sides, so nothing jumps and the layer follows the frame by half of every change after —
+the design-tool *centre*, reached the CSS way; off unpins the axis's end edge, which clears the
+margins with it. **Four fields**, L and R on one row and T and B on the next (`inset_field`, through
+`ui::value_field_suffixed`): a pinned inset shows its value in its own unit beside a clickable
+`px`/`%` suffix that converts — the same distance in the other unit, committed directly rather than
+through the valve, the suffixed field's documented rule for a conversion; an unpinned edge shows its
+current distance beside an inert `auto`, and typing or dragging pins it in px through `edit_valve` —
+preview while engaged, commit on release, Escape abandoning. The fields read the new
+`DisplayNode::insets`, which has an override behind it, so a drag accumulates rather than snapping
+back each frame. `InsetPlacement` — frame size, local transform, box and kind, all read through the
+preview — answers each edge's `distance` and the `extent` its percentage is a share of.
+⚠️ **An unpinned field only clicked through pins nothing**: the transaction it hands the valve is
+empty until the number differs from the distance it shows, so a click in and out cannot pin an edge
+by accident.
+
+🚨 **Every pin, unpin and centre commit writes where the layer is drawn into its stored values**, and
+that is what resolves the `with_edge` paragraph above. `baked_placement(id, placement)` emits the
+drawn local transform as a `SetTransform` where it differs from the stored one, and — where the
+drawn kind differs from the stored kind, which is a stretched size kind or stretched text — the drawn
+size as a `Size` patch or the drawn sizing as a `TextSizing` one, alongside the explicit `SetInsets`
+that `keep_insets` leaves to the edit rather than re-reading as a move. So an axis that loses its
+insets falls back to exactly where the layer is drawn, and unpinning one side of a stretch keeps the
+stretched size. **It cannot write a used size onto a layer that is not stretched**: it writes only
+when the kind the card measured — `DisplayNode::kind`, override → used → stored — differs from the
+stored one, and for an unstretched layer the used kind is the stored kind; any other kind (path,
+line) gets no patch at all. The stored-mode consequence recorded under the tools sweep reaches here
+too: pinning or unpinning a stretched auto-width text node stores `AutoHeight(w)`. *Do not drop
+`baked_placement` as redundant with `with_edge`*: pinning never needed it, `with_edge` reading every
+inset back from the used placement, so a test of pinning alone says nothing about it — the unpin
+tests below are the ones with teeth.
+
+**The card's evidence** is `inspector.rs · mod inset_card_tests`, five tests on a headless app that
+drive the card's own methods — so every edit takes the real commit path, `keep_insets` included —
+and assert where the rect is **drawn**: a pin never moves the layer and holds it through a frame
+resize; unpinning after a frame resize leaves it where it is drawn, and removing `baked_placement`
+from `toggle_pin` puts it back at 40 against 240; unpinning one side of a stretch keeps it 300 wide,
+the same flip giving 100; centring keeps it put and then follows by half, 40 → 140 as the frame goes
+300 → 500; and the card is offered to a frame's own layer and not to a top-level frame, and draws on
+a headless frame without panicking. ⚠️ **Not verified in the GUI** — the maintainer checks the look.
+Nothing drives a field through the valve or clicks a strut's band. And the fifth test's doc names
+more than it asserts — *"not for the frame, a group, or a layer outside any frame"*, where only the
+top-level frame is checked — *fix the comment or the test*.
+
+*(Rulings decided 2026-09-24 by the maintainer, in conversation; the rest decided, built and tested
+2026-09-24 by the session. Recorded from the brief and a read of `container.rs`, `build.rs`'s
+`keep_insets`, `resolve.rs`, `op.rs`, `document.rs`, `node.rs`, `io/schema.rs`, `renderer.rs`,
+`session.rs`, `tools/mod.rs`, `query.rs` and the three new or extended test files in the working
+tree, uncommitted; gates as reported by the caller, one run in progress when this was written.
+**One number spent, this one**: `container.rs`, `build.rs`, `node.rs`, `op.rs`, `session.rs`,
+`tools/mod.rs` and `tests/container.rs` already cited it, for the rulings and for the session's
+decisions alike, so splitting the decisions into a second entry would have left half those citations
+resolving to the wrong one. ⚠️ **`container.rs`' module doc says *"Four rulings shape the
+arithmetic"*** and its fourth bullet is the session's *specified-and-used* decision, not the
+maintainer's fourth ruling, which is the inspector's — *Fix the comment*: three rulings and one
+decision. The test counts are the brief's. D868's verdict and body amended, D867's verdict, D871
+marked built, D872 carries a pointer; `architecture.md` §1, §5.3's `Node` listing, §5.3c, §5.6's
+one-number bullet, §5.7's operation listing, §5.8's merge-key count, §5.9, §5.10's `local_box`
+bullet, §6.2's `RenderOverrides` bullet and §9.3's panels bullet amended; step 1's accessor-rule
+comments corrected in `resolve.rs`, `session.rs` and `query.rs`; `roadmap.md`'s step 2 narrowed to
+the card and what is left. **Amended the same day: the card is built and both defects above are
+fixed** — recorded from the brief and a read of `inspector.rs`' card and `mod inset_card_tests`,
+`session.rs`' `DisplayNode::insets`, `op.rs`' `GeometryPatch::resizes`, `build.rs`' `keep_insets`,
+`renderer.rs`' `relayout`, `document.rs`' `apply_geometry_patch` and the two new test cases, working
+tree uncommitted; flips and test counts are the brief's, a gate run in progress when this was
+written. `container.rs`' module doc now reads three rulings and one decision, as asked above. **No
+number spent**: the card is ruling 4 built and its choices are this entry's. D867's and D871's
+verdicts, `architecture.md` §1, §5.3c, §5.9, §6.2 and §9.4, `context-menus.md` §7 amended;
+`roadmap.md`'s step 2 struck)*
 
 **D386 — The chrome's hairline was resolved against the wrong ground, and its rhythm was seven
 numbers. *Fixed and tested 2026-08-29; the outline is reviewed and accepted.*** Two audits in one

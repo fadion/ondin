@@ -28,25 +28,37 @@ use peniko::Color;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Whether a node of `child` may be a direct child of a node of `parent`
-/// (§5.3): a frame hangs off the root or off another frame, and nothing may hold a
-/// `Root`.
+/// (§5.3): a frame hangs off the root, another frame or a group, and nothing may
+/// hold a `Root`.
 ///
 /// The root **may** hold loose shapes. A frame is a glorified group, so a shape
 /// dragged more than halfway out of one has to land somewhere — and the only
 /// honest destination is "no frame", i.e. the root. Forbidding that made the
 /// gesture impossible to express rather than making documents tidier.
 ///
-/// **Frames nest, and only inside frames.** A frame is a page, and a page inside a
+/// **Frames nest.** A frame is a page, and a page inside a
 /// page is how every design tool expresses a card, a component, a state — the rule
 /// that kept them at the root made "put this frame in that one" inexpressible, which
 /// is the same shape of mistake as the loose-shape rule above and was fixed for the
-/// same reason (§15). What a frame still may *not* sit in is a `Group`: a group has
-/// no box of its own, so a clipping page inside one would be clipped by something
-/// with no edges, and `paint_targets` relies on no frame being reachable through a
-/// group (§5.7a).
+/// same reason (§15).
 ///
-/// The one statement of the rule. `apply` enforces it, the loader enforces it,
-/// the layer tree greys out illegal drops with it, and render previews refuse
+/// **And inside groups, since container layout** (§15 D870, D876): a flex row of
+/// cards is a group whose cards are frames, for their fill and their clip. It
+/// held a frame out of every group until then, on two reasons of unequal weight —
+/// *"a clipping page inside one would be clipped by something with no edges"*,
+/// which was never true, since a group does not clip; and `paint_targets`, which
+/// already stops at a frame it reaches through a group. Any group, not only one
+/// with a `display`, or removing a group's layout would have to be refused
+/// whenever it held a frame.
+///
+/// ⚠️ **What a frame still may not sit under is a boolean or a mask, at any
+/// depth** — and that is not this function's question, because it is about an
+/// *ancestor* rather than a parent: a frame two groups inside an operand is as
+/// wrong as one directly in it. [`Document::frame_may_sit_under`] asks it, and
+/// every door that asks this asks that too.
+///
+/// The one statement of the parent rule. `apply` enforces it, the loader enforces
+/// it, the layer tree greys out illegal drops with it, and render previews refuse
 /// to draw a create that would be rejected — all from here, so they cannot
 /// disagree about what is legal.
 pub fn can_parent(parent: &NodeKind, child: &NodeKind) -> bool {
@@ -54,7 +66,10 @@ pub fn can_parent(parent: &NodeKind, child: &NodeKind) -> bool {
         // There is exactly one root and it is nobody's child.
         NodeKind::Root => false,
         NodeKind::Artboard { .. } => {
-            matches!(parent, NodeKind::Root | NodeKind::Artboard { .. })
+            matches!(
+                parent,
+                NodeKind::Root | NodeKind::Artboard { .. } | NodeKind::Group
+            )
         }
         _ => true,
     }
@@ -406,8 +421,13 @@ fn container_slot(siblings: &[NodeId], members: &FxHashSet<NodeId>) -> Result<us
 ///
 /// Returns the transaction and the id minted for the group. Members must be
 /// siblings — grouping across parents is ambiguous about which parent wins, so
-/// it is rejected rather than guessed. Artboards cannot be grouped (they may
-/// only be children of the root, §5.3).
+/// it is rejected rather than guessed.
+///
+/// **Frames can be grouped** (§15 D870, D876): a row of cards is a group of
+/// frames, and selecting the cards and grouping them is the gesture that makes
+/// one. The group lands where the members were, so a group of frames under a
+/// boolean or a mask is refused by `apply` — as is any frame there — and cannot
+/// arise from this function anyway, since a boolean holds no frame to group.
 ///
 /// The group is created with an identity transform in the shared parent's
 /// space, so every member keeps its existing local transform and nothing moves.
@@ -421,11 +441,12 @@ pub fn group(
     }
     let unique: FxHashSet<NodeId> = members.iter().copied().collect();
 
-    // One shared parent, and nothing that may not live inside a group.
+    // One shared parent, and nothing that may not live inside a group — which is
+    // only the root now.
     let mut parent = None;
     for id in &unique {
         let node = doc.get(*id).ok_or(OpError::NoSuchNode(*id))?;
-        if matches!(node.kind(), NodeKind::Artboard { .. } | NodeKind::Root) {
+        if matches!(node.kind(), NodeKind::Root) {
             return Err(OpError::WrongKindForOp);
         }
         let p = node.parent().ok_or(OpError::CannotModifyRoot)?;
@@ -475,9 +496,17 @@ pub fn group(
 
 /// Which of `members` becomes the mask: the **key** if one is designated among
 /// them, else the bottom-most member that is **not a picture**, else the
-/// bottom-most.
+/// bottom-most — among the members that **can be a mask** at all, when any can.
 ///
 /// `None` only when `members` is empty or names nothing in the document.
+///
+/// **"Can be a mask" is [`can_be_mask`], and it only filters since frames could
+/// be grouped** (§15 D876). A frame is not a picture, so a card sitting lowest
+/// was the bottom-most shape and would have been chosen, and refused — when the
+/// circle above it was the obvious mask and the card the obvious thing to crop.
+/// Before, no multi-member selection with a frame in it got this far: `group`
+/// refused it. When nothing can mask, the rule falls through unchanged and
+/// [`mask`] reports the refusal.
 ///
 /// **The middle clause is the one worth arguing.** A "picture" here is an
 /// image-filled layer ([`crate::Paint::image_fill`]), and in this model that is a
@@ -515,6 +544,12 @@ pub fn mask_target(doc: &Document, members: &[NodeId], key: Option<NodeId>) -> O
         .copied()
         .filter(|c| unique.contains(c))
         .collect();
+    let able: Vec<NodeId> = ordered
+        .iter()
+        .copied()
+        .filter(|id| can_be_mask(doc, *id))
+        .collect();
+    let ordered = if able.is_empty() { ordered } else { able };
     let not_a_picture = |id: &&NodeId| {
         doc.get(**id)
             .is_some_and(|n| n.paint().image_fill().is_none())
@@ -524,6 +559,14 @@ pub fn mask_target(doc: &Document, members: &[NodeId], key: Option<NodeId>) -> O
         .find(not_a_picture)
         .or_else(|| ordered.first())
         .copied()
+}
+
+/// Whether `id` may take [`Operation::SetMask`]` { mask: true }`: its kind can
+/// mask ([`NodeKind::can_mask`]), and nothing inside it is a frame, since a mask's
+/// outline is its contents unioned and a page is not an outline (§15 D876).
+/// The same two refusals `Document::apply` makes, asked in advance.
+pub fn can_be_mask(doc: &Document, id: NodeId) -> bool {
+    doc.get(id).is_some_and(|n| n.kind().can_mask()) && !doc.holds_a_frame(id)
 }
 
 /// *Use as mask* — make one of `members` the mask for the rest, **wrapping them
@@ -545,7 +588,8 @@ pub fn mask_target(doc: &Document, members: &[NodeId], key: Option<NodeId>) -> O
 /// would change *which* layers it masks, a group being a new parent.
 ///
 /// **[`mask_target`] picks which member becomes the mask** — the key if there is
-/// one, else the bottom-most member that is not a picture. Whatever it picks moves
+/// one, else the bottom-most member that is not a picture, among those that
+/// [`can_be_mask`] when any can (§15 D876). Whatever it picks moves
 /// to index 0 of the new group and everything else keeps its relative z-order: the
 /// smallest rearrangement that satisfies the choice, which is the rule [`boolean`]
 /// follows for a `Subtract`'s base operand.
@@ -613,6 +657,11 @@ pub fn mask(
     {
         return Err(OpError::WrongKindForOp);
     }
+    // A group with a frame in it (§15 D876). `apply` refuses the flag too; asked
+    // here so the refusal comes before a group is planned around it.
+    if doc.holds_a_frame(chosen) {
+        return Err(OpError::ArtboardPlacement);
+    }
 
     if unique.len() == 1 {
         return Ok((
@@ -624,8 +673,8 @@ pub fn mask(
         ));
     }
 
-    // `group` owns the rest of the admission test — no frame, no root, a parent
-    // that can hold a group — and the placement rule that keeps the result where
+    // `group` owns the rest of the admission test — no root, a parent that can
+    // hold a group — and the placement rule that keeps the result where
     // the topmost member was. Reusing it rather than repeating it is what stops the
     // two verbs drifting about where a new container lands.
     let (Transaction(mut ops), group_id) = group(doc, ids, members)?;
@@ -653,7 +702,7 @@ pub fn mask(
 /// wrong for as long as the citation was (D439).
 ///
 /// Returns the transaction and the id minted for the frame. [`group`]'s sibling,
-/// and deliberately a second function rather than a flag on it, because three of
+/// and deliberately a second function rather than a flag on it, because two of
 /// the rules differ and each difference is the frame having a *box* where a group
 /// has none:
 ///
@@ -662,13 +711,15 @@ pub fn mask(
 ///   untouched; a frame is created at the union's corner, so every member is moved
 ///   back by exactly that corner. Both are one statement — *nothing moves* — and
 ///   they need opposite amounts of work to hold.
-/// - **The parent has to accept a frame.** §5.3 lets an `Artboard` hang off the root
-///   or another `Artboard` and nowhere else, so a selection inside a `Group` cannot
-///   be framed where it stands. Refused with [`OpError::ArtboardPlacement`] rather
-///   than framed somewhere else, because moving the artwork out of its group to
-///   satisfy the frame is a second edit the user did not ask for.
-/// - **Frames may be members**, where [`group`] refuses them. A frame nests in a
-///   frame, so a selection of frames has an honest answer here and none there.
+/// - **The parent has to accept a frame.** §5.3 lets an `Artboard` hang off the root,
+///   another `Artboard` or a group, and never sit under a boolean or a mask (§15
+///   D876), so a selection among a boolean's operands, or anywhere under a mask,
+///   cannot be framed where it stands. Refused with [`OpError::ArtboardPlacement`]
+///   rather than framed somewhere else, because moving the artwork out to satisfy
+///   the frame is a second edit the user did not ask for.
+///
+/// A third difference was listed here until frames could be grouped (§15 D876):
+/// *"frames may be members, where [`group`] refuses them"*. Both take them now.
 ///
 /// The correction is a pure translation and needs no [`Resolved`] lookup of its
 /// own: the frame and its members-to-be are siblings for the length of the
@@ -696,9 +747,9 @@ pub fn frame(
     }
     let unique: FxHashSet<NodeId> = members.iter().copied().collect();
 
-    // One shared parent, and nothing that cannot be moved at all. Unlike `group`
-    // this admits an `Artboard` member — a frame nests in a frame — so the only
-    // kind refused is the root, which `parent()` already answers for.
+    // One shared parent, and nothing that cannot be moved at all. An `Artboard`
+    // member is admitted — a frame nests in a frame, as it groups (§15 D876) — so
+    // the only kind refused is the root, which `parent()` already answers for.
     let mut parent = None;
     for id in &unique {
         let node = doc.get(*id).ok_or(OpError::NoSuchNode(*id))?;
@@ -722,7 +773,8 @@ pub fn frame(
         &NodeKind::Artboard {
             size: kurbo::Size::ZERO,
         },
-    ) {
+    ) || !doc.frame_may_sit_under(parent)
+    {
         return Err(OpError::ArtboardPlacement);
     }
     let siblings = parent_node.children().to_vec();
@@ -786,7 +838,7 @@ pub fn frame(
 }
 
 /// Whether [`frame`] would accept `members` — one shared parent that can hold a
-/// frame, and nothing that cannot be moved.
+/// frame, with no boolean or mask above it, and nothing that cannot be moved.
 ///
 /// **The builder's own question, so a row cannot offer what the verb would
 /// refuse** (`context-menus.md` §3). It is the same rule `outlineable` follows and
@@ -819,7 +871,7 @@ pub fn can_frame(doc: &Document, members: &[NodeId]) -> bool {
             return false;
         }
     }
-    let Some(parent) = parent.and_then(|p| doc.get(p)) else {
+    let Some((parent_id, parent)) = parent.and_then(|p| Some((p, doc.get(p)?))) else {
         return false;
     };
     can_parent(
@@ -827,7 +879,7 @@ pub fn can_frame(doc: &Document, members: &[NodeId]) -> bool {
         &NodeKind::Artboard {
             size: kurbo::Size::ZERO,
         },
-    )
+    ) && doc.frame_may_sit_under(parent_id)
 }
 
 /// Wrap `members` in a [`NodeKind::Boolean`] container performing `op`.
@@ -888,6 +940,11 @@ pub fn boolean(
             NodeKind::Artboard { .. } | NodeKind::Root | NodeKind::Text { .. }
         ) {
             return Err(OpError::WrongKindForOp);
+        }
+        // A group with a frame in it would carry the frame into an operand
+        // (§15 D876); `apply` refuses the reparent, and this refuses first.
+        if doc.holds_a_frame(*id) {
+            return Err(OpError::ArtboardPlacement);
         }
         let p = node.parent().ok_or(OpError::CannotModifyRoot)?;
         match parent {
@@ -1280,7 +1337,7 @@ pub fn text_on_new_path(
     }
     // **And nothing becomes a rail that is a page** — `[S3.1-L2-03]`, and the
     // half of D453 the ancestry test above does *not* reach: a frame's parent is
-    // a frame or the root, so a frame passes straight through it.
+    // never a boolean (§15 D876), so a frame passes straight through it.
     //
     // ⚠️ **`local_path` answering `Some` is not a licence to consume.** It says
     // `Some` for an `Artboard` deliberately — *"a frame has an outline, and it is
@@ -1599,6 +1656,16 @@ fn flatten_union(
             NodeKind::Artboard { .. } | NodeKind::Root | NodeKind::Text { .. }
         ) {
             return Err(OpError::WrongKindForOp);
+        }
+        // **A group with a frame in it, refused as `boolean` refuses it** (§15
+        // D876) — and here it matters more than there, because nothing would stop
+        // it: the union deletes the members, so no frame is left anywhere for
+        // `apply` to object to. `operand_of` would take the frame's *box* for its
+        // outline, ignore its contents and then delete them, and the frame's guides
+        // would be left owned by a node that no longer exists — a file that then
+        // fails to load.
+        if doc.holds_a_frame(*id) {
+            return Err(OpError::ArtboardPlacement);
         }
         let p = node.parent().ok_or(OpError::CannotModifyRoot)?;
         match parent {
@@ -2491,8 +2558,9 @@ pub enum PaintTarget {
 /// still the right one for the colour census: "what colours are in here" *does*
 /// mean everything inside a frame, while "paint these" does not.
 ///
-/// Frames cannot nest inside groups (`can_parent`), so no frame is ever reached
-/// by passing through a group.
+/// **A frame reached by passing through a group is a target too** — the case
+/// the walk never met until frames could sit in groups (§15 D870). Selecting a row
+/// of cards and setting a fill colours the cards, not what is on them.
 pub fn paint_targets(doc: &Document, ids: &[NodeId]) -> Vec<NodeId> {
     let mut out = Vec::new();
     let mut stack: Vec<NodeId> = outermost(doc, ids).into_iter().rev().collect();
@@ -3601,6 +3669,312 @@ fn push_offset(doc: &Document, res: &Resolved, id: NodeId, delta: Vec2, ops: &mu
         id,
         transform: local_for_world(doc, res, id, Affine::translate(delta) * world),
     });
+}
+
+/// `tx` with each resized **flex item**'s properties set so the size it was
+/// resized to holds (§15 D875, the maintainer's ruling: *"set width and stop
+/// growth"*).
+///
+/// A shape's or a frame's stored size is its CSS width and height (§15 D872), so
+/// a resize tool's own `SetGeometry` already sets the size — but in a flex row a
+/// growing or shrinking item would take the space back and the drag would snap.
+/// So a resize that changes an in-flow item's **main-axis** size also writes
+/// `flex-grow: 0` and `flex-shrink: 0`; one that changes the **cross** size of an
+/// item its container stretches also writes `align-self: start`, since in CSS an
+/// explicit cross size is what stops a stretch. A layer whose item properties the
+/// transaction sets itself is left to it.
+///
+/// **And every `SetTransform` on an in-flow item keeps the item's stored
+/// translation** ([`kept_flow_translations`], §15 D877's amendment) — the other
+/// half of making a tool's edit of a flex item mean what is drawn; a write left
+/// changing nothing is dropped, so this can empty a transaction.
+///
+/// Run beside [`keep_insets`], at the same door and for the same reason: tools
+/// compute in drawn geometry and write what they want drawn; this is the one place
+/// that turns a resize into what makes it stick.
+pub fn keep_flex_sizes(doc: &Document, res: &Resolved, tx: Transaction) -> Transaction {
+    use crate::container::{self, Display, LayoutView};
+    let view = crate::resolve::DocView(doc);
+    let explicit: FxHashSet<NodeId> =
+        tx.0.iter()
+            .filter_map(|op| match op {
+                Operation::SetFlexItem { id, .. } => Some(*id),
+                _ => None,
+            })
+            .collect();
+    let mut items: FxHashMap<NodeId, crate::container::FlexItem> = FxHashMap::default();
+    for op in &tx.0 {
+        let Operation::SetGeometry { id, geometry } = op else {
+            continue;
+        };
+        if !geometry.resizes()
+            || explicit.contains(id)
+            || !container::parent_lays_out(&view, *id)
+            || !container::in_flow(&view, *id)
+        {
+            continue;
+        }
+        let (Some(parent), Some(used)) = (view.parent(*id), res.used_kind(doc, *id)) else {
+            continue;
+        };
+        let Some(Display::Flex(flex)) = view.display(parent) else {
+            continue;
+        };
+        let Some(now) = crate::geometry::local_bounds(used, None) else {
+            continue;
+        };
+        let Some(then) = geometry
+            .applied_to(used)
+            .and_then(|k| crate::geometry::local_bounds(&k, None))
+        else {
+            continue;
+        };
+        let item = *items.entry(*id).or_insert_with(|| view.item(*id));
+        items.insert(*id, held(&flex, item, now.size(), then.size()));
+    }
+    let mut ids: Vec<(NodeId, crate::container::FlexItem)> = items
+        .into_iter()
+        .filter(|(id, item)| doc.get(*id).is_some_and(|n| n.item() != item))
+        .collect();
+    ids.sort_by_key(|(id, _)| *id);
+    let mut out = kept_flow_translations(doc, tx);
+    for (id, item) in ids {
+        out.0.push(Operation::SetFlexItem { id, item });
+    }
+    out
+}
+
+/// `tx` with every `SetTransform` on an **in-flow flex item** keeping the item's
+/// stored translation — its new rotation, skew and flip taken, its position not
+/// (§15 D877's amendment).
+///
+/// **The tools write where they want a layer drawn, and for an item in a flow
+/// that is not where it is drawn.** A resize from a left or top handle holds the
+/// opposite edge by shifting the box's origin, and builds that shift on the
+/// item's *used* transform — its slot. Measured on a 40-wide rect laid at (20,
+/// 20) with a stored translation of (300, 150): a left-handle resize to 60 wide
+/// wrote `SetTransform` translate(0, 20) — the slot, shifted — beside its
+/// `SetGeometry`. Drawn nowhere while the item is in the flow, since its
+/// container places it (§15 D875); and when the layout is taken away the item
+/// would land at (0, 20) rather than where its own transform had it. A rotation
+/// about a pivot is expected to do the same — `rotate_node` also composes on the
+/// used transform — which is read, not measured. So every such write keeps the stored
+/// translation, here, once, rather than in every tool — the move's own answer
+/// (§15 D877), which stores nothing at all, arriving for the others.
+///
+/// ⚠️ **Not when the same transaction takes the item out of the flow** — a
+/// reparent, a delete, insets, hiding it, making it a mask, or its parent's
+/// layout changing: then the transform is where it will be drawn, and it stands.
+fn kept_flow_translations(doc: &Document, tx: Transaction) -> Transaction {
+    let leaves: FxHashSet<NodeId> =
+        tx.0.iter()
+            .filter_map(|op| match op {
+                Operation::Reparent { id, .. }
+                | Operation::DeleteNode { id }
+                | Operation::SetInsets { id, .. }
+                | Operation::SetVisible { id, .. }
+                | Operation::SetMask { id, .. } => Some(*id),
+                _ => None,
+            })
+            .collect();
+    let relaid: FxHashSet<NodeId> =
+        tx.0.iter()
+            .filter_map(|op| match op {
+                Operation::SetDisplay { id, .. } => Some(*id),
+                _ => None,
+            })
+            .collect();
+    // A write left changing nothing — a resize's shift, with the linear part as
+    // it was — is dropped rather than kept as a no-op step in history.
+    let ops =
+        tx.0.into_iter()
+            .filter_map(|op| match op {
+                Operation::SetTransform { id, transform }
+                    if is_flex_item(doc, id)
+                        && !leaves.contains(&id)
+                        && !doc
+                            .get(id)
+                            .and_then(|n| n.parent())
+                            .is_some_and(|p| relaid.contains(&p)) =>
+                {
+                    let stored = doc.get(id).map_or(transform, |n| n.transform());
+                    let kept = transform.with_translation(stored.translation());
+                    (kept.as_coeffs() != stored.as_coeffs()).then_some(Operation::SetTransform {
+                        id,
+                        transform: kept,
+                    })
+                }
+                op => Some(op),
+            })
+            .collect();
+    Transaction(ops)
+}
+
+/// `item` with growth stopped on whichever axes a resize from `from` to `to`
+/// changed, in a container laid out by `flex` — [`keep_flex_sizes`]' rule (§15
+/// D875), spelled once for it and for [`sized_flex_item`].
+fn held(
+    flex: &crate::container::Flex,
+    mut item: crate::container::FlexItem,
+    from: kurbo::Size,
+    to: kurbo::Size,
+) -> crate::container::FlexItem {
+    use crate::container::AlignItems;
+    let dw = (from.width - to.width).abs() > 1e-9;
+    let dh = (from.height - to.height).abs() > 1e-9;
+    let (main_changed, cross_changed) = if flex.direction.is_row() {
+        (dw, dh)
+    } else {
+        (dh, dw)
+    };
+    if main_changed {
+        item.grow = 0.0;
+        item.shrink = 0.0;
+    }
+    let stretched = match item.align_self {
+        Some(a) => a == AlignItems::Stretch,
+        None => flex.align_items == AlignItems::Stretch,
+    };
+    if cross_changed && stretched {
+        item.align_self = Some(AlignItems::Start);
+    }
+    item
+}
+
+/// The flex-item properties that make a **group with a layout** `size` — the
+/// resize of a box that has no size field of its own (§15 D869, D875).
+///
+/// A shape's or a frame's stored size is its CSS width and height, so a resize
+/// writes its geometry and [`keep_flex_sizes`] holds it. A group with a layout
+/// has only its box, which is `width`/`height` on its [`crate::container::FlexItem`]
+/// — `auto`, hugging its contents, until something sets them. So a resize writes
+/// them in px, and **its growth is stopped here rather than by
+/// `keep_flex_sizes`**, which leaves a transaction's own `SetFlexItem` alone.
+///
+/// `None` when `id` is not a group with a layout, or nothing changes.
+pub fn sized_flex_item(
+    doc: &Document,
+    res: &Resolved,
+    id: NodeId,
+    size: kurbo::Size,
+) -> Option<crate::container::FlexItem> {
+    use crate::container::{self, Dimension, Display, LayoutView};
+    let node = doc.get(id)?;
+    if !matches!(node.kind(), NodeKind::Group) || node.display().is_none() {
+        return None;
+    }
+    let mut item = *node.item();
+    item.width = Dimension::Px(size.width);
+    item.height = Dimension::Px(size.height);
+    let view = crate::resolve::DocView(doc);
+    if container::parent_lays_out(&view, id)
+        && container::in_flow(&view, id)
+        && let Some(Display::Flex(flex)) = node.parent().and_then(|p| view.display(p))
+        && let Some(now) = res.used_frame(id)
+    {
+        item = held(&flex, item, now, size);
+    }
+    (item != *node.item()).then_some(item)
+}
+
+/// The `Reorder` that dragging the flex item `id` by the world-space `delta`
+/// asks for — where in its container's flow its centre now falls (§15 D877).
+///
+/// **A drag inside a flex container is a reorder, not a move.** An in-flow
+/// item is placed by its container, not by its transform (§15 D875), so a
+/// translation dropped on it is undone by the next layout pass; what the drag
+/// can change is the item's place in the flow, which is its place among its
+/// siblings. So the dragged box's centre is read against every other in-flow
+/// sibling's used box, in the container's own space, in **reading order**: a
+/// sibling on the centre's line (its cross-axis extent spans the centre) comes
+/// before it when its main-axis centre does, and one on another line when that
+/// line does — which is what makes a wrapping row reorder by line, then along it.
+/// `row-reverse` and `column-reverse` read the main axis backwards.
+///
+/// ⚠️ **`wrap-reverse` is read as `wrap`** — lines compared top-down — which is
+/// the session's simplification and not CSS's reading; nothing builds that
+/// container from the app yet.
+///
+/// Siblings out of the flow — pinned, hidden, masks — keep their indices
+/// relative to the flow around them; the result is an index into the child list
+/// with `id` taken out, which is what `Reorder` means. `None` when `id` is not an
+/// in-flow flex item, or would land where it is.
+pub fn flex_reorder(doc: &Document, res: &Resolved, id: NodeId, delta: Vec2) -> Option<Operation> {
+    use crate::container::{self, Display, FlexDirection};
+    if !is_flex_item(doc, id) {
+        return None;
+    }
+    let view = crate::resolve::DocView(doc);
+    let parent = doc.get(id)?.parent()?;
+    let Display::Flex(flex) = *doc.get(parent)?.display()?;
+    let to_parent = res.world_transform(parent)?.inverse();
+    let at = to_parent * (res.world_bounds(id)?.center() + delta);
+    let reversed = matches!(
+        flex.direction,
+        FlexDirection::RowReverse | FlexDirection::ColumnReverse
+    );
+    let (at_main, at_cross) = main_cross(flex.direction, at);
+    let others: Vec<NodeId> = doc
+        .get(parent)?
+        .children()
+        .iter()
+        .copied()
+        .filter(|c| *c != id)
+        .collect();
+    let flow: Vec<usize> = (0..others.len())
+        .filter(|i| container::in_flow(&view, others[*i]))
+        .collect();
+    let before = flow
+        .iter()
+        .filter(|i| {
+            let s = others[**i];
+            let Some(bx) = crate::local_box(doc, res, s)
+                .zip(res.used_local(doc, s))
+                .map(|(b, t)| crate::geometry::transform_rect(t, b))
+            else {
+                return false;
+            };
+            let (lo, hi) = if flex.direction.is_row() {
+                (bx.y0, bx.y1)
+            } else {
+                (bx.x0, bx.x1)
+            };
+            let (s_main, s_cross) = main_cross(flex.direction, bx.center());
+            if (lo..=hi).contains(&at_cross) {
+                if reversed {
+                    s_main > at_main
+                } else {
+                    s_main < at_main
+                }
+            } else {
+                s_cross < at_cross
+            }
+        })
+        .count();
+    let index = match flow.get(before) {
+        Some(i) => *i,
+        None => flow.last().map_or(0, |i| i + 1),
+    };
+    let now = doc.get(parent)?.children().iter().position(|c| *c == id)?;
+    (index != now).then_some(Operation::Reorder { id, index })
+}
+
+/// Whether `id` is an item in its container's flow — its parent lays it out and
+/// it is not pinned, hidden or a mask. The question [`flex_reorder`] asks first,
+/// public for the app's drag, which has to know a reorder from a move before it
+/// knows whether the reorder changes anything.
+pub fn is_flex_item(doc: &Document, id: NodeId) -> bool {
+    let view = crate::resolve::DocView(doc);
+    crate::container::parent_lays_out(&view, id) && crate::container::in_flow(&view, id)
+}
+
+/// `p`'s main- and cross-axis coordinates under `direction`.
+fn main_cross(direction: crate::container::FlexDirection, p: Point) -> (f64, f64) {
+    if direction.is_row() {
+        (p.x, p.y)
+    } else {
+        (p.y, p.x)
+    }
 }
 
 /// `tx` with the insets of every **pinned** layer it moves or resizes rewritten,

@@ -2336,6 +2336,13 @@ impl OndinApp {
         });
     }
 
+    /// Why *Use as mask* would refuse the current selection — [`Self::mask_action`]'s
+    /// sentence, for the context menu's row (§15 D876), without handing out the
+    /// action type the control keeps to itself.
+    pub(crate) fn mask_refusal(&self) -> Option<&'static str> {
+        self.mask_action().err()
+    }
+
     /// What *Use as mask* would do to the current selection, or the sentence
     /// saying why the control is dim.
     ///
@@ -2405,7 +2412,8 @@ impl OndinApp {
         }
         // Which layer becomes the mask — **core's rule, not a second reading of
         // it**: the key if there is one, else the bottom-most member that is not a
-        // picture. Asked here only to answer *can it*; `build::mask` asks the same
+        // picture, among those that can be a mask at all (§15 D876). Asked here only
+        // to answer *can it*; `build::mask` asks the same
         // function again rather than being told, so the control and the verb cannot
         // disagree about which layer they are talking about.
         let key = self.session.selection.key().filter(|k| ids.contains(k));
@@ -2413,14 +2421,21 @@ impl OndinApp {
         if !doc.get(target).ok_or(PICK)?.kind().can_mask() {
             return Err("A frame already clips its own contents and cannot mask its siblings");
         }
+        // A group with a frame somewhere in it (§15 D876): its outline would be a
+        // union with a page in it. `mask_target` passes over such a member when
+        // another can mask, so reaching here means none of them can.
+        if doc.holds_a_frame(target) {
+            return Err("A group holding a frame cannot be a mask; use a shape above it instead");
+        }
         // **The builder gets the last word**, on a throwaway id source — the dry
         // run the boolean dropdown already does, and here it closes a class rather
         // than a case. The checks above are chosen for what they can *say*; this
         // one catches whatever `build::mask` inherits from `build::group` and the
-        // list above has not thought of, and the one that exists today is a
-        // selection with a frame in it, which cannot be wrapped. Without it the
-        // control is live and the click reports a failure, which is the state the
-        // identity row's tooltips exist to prevent.
+        // list above has not thought of. The one it existed for was a selection
+        // with a frame in it, which could not be wrapped; frames group now (§15
+        // D876), and **no case is known to reach it today** — which is what a
+        // last word is for. Without it the control is live and the click reports a
+        // failure, which is the state the identity row's tooltips exist to prevent.
         let mut probe = ondin_core::IdSource::new(0);
         if build::mask(doc, &mut probe, ids, key).is_err() {
             return Err("These layers cannot be wrapped in a group, so they cannot be masked");
@@ -14584,6 +14599,13 @@ mod mask_card_tests {
                 size: Size::new(100.0, 100.0),
             },
         );
+        let row = t.add(root, NodeKind::Group);
+        t.add(
+            row,
+            NodeKind::Artboard {
+                size: Size::new(100.0, 100.0),
+            },
+        );
         app.session.adopt_document(t.doc.clone(), None);
 
         let refusal = |app: &mut crate::app::OndinApp, sel: Vec<NodeId>| {
@@ -14606,18 +14628,31 @@ mod mask_card_tests {
             Some("A boolean's operands are combined rather than drawn, so nothing there can mask"),
             "a boolean's operands cannot be masked"
         );
+        // §15 D876: this row was a frame beside a shape, refused by the dry run
+        // because a frame could not be wrapped. Frames group now, so that selection
+        // masks — the frame is masked content, asserted below — and the refusal a
+        // frame still earns is a group holding one being the mask itself. **Flip
+        // run**, `mask_action`'s `holds_a_frame` check disabled: the dry run still
+        // refuses, with the generic *"cannot be wrapped"* sentence — redundant for
+        // correctness and load-bearing for the message, the same finding as the
+        // boolean flip above.
         assert_eq!(
-            refusal(&mut app, vec![frame, elsewhere]),
-            Some("These layers cannot be wrapped in a group, so they cannot be masked"),
-            "a frame cannot be wrapped, which is the builder's last word"
+            refusal(&mut app, vec![row]),
+            Some("A group holding a frame cannot be a mask; use a shape above it instead"),
+            "a group holding a frame cannot mask"
         );
 
-        // ⚠️ **The control, and it is the assertion that stops all four above from
-        // being satisfied by a function that refuses everything.**
+        // ⚠️ **The controls, and they are the assertions that stop all four above
+        // from being satisfied by a function that refuses everything.**
         app.session.selection.set(vec![a, b]);
         assert!(
             matches!(app.mask_action(), Ok(MaskAction::Make { .. })),
             "two shapes in one group is the case the whole control exists for"
+        );
+        app.session.selection.set(vec![frame, elsewhere]);
+        assert!(
+            matches!(app.mask_action(), Ok(MaskAction::Make { .. })),
+            "a frame beside a shape is masked by it"
         );
     }
 

@@ -166,6 +166,14 @@ pub struct Node {
     /// outside a frame and on a kind that takes no insets, on `grids`' terms: the
     /// model stores it and the layout pass asks the parent and the kind first.
     pub(crate) insets: crate::container::Insets,
+    /// How this layer lays out its children — CSS `display` (`crate::container`,
+    /// §15 D867). `None` on every layer until somebody gives one a layout, and read
+    /// only on a frame or a group (§15 D869); inert anywhere else, `grids`' terms.
+    pub(crate) display: Option<crate::container::Display>,
+    /// This layer's properties as a flex item — CSS's `flex-*`, `align-self` and
+    /// sizes (`crate::container::FlexItem`). At CSS's defaults on every layer until
+    /// set; read only when its parent has a `display`.
+    pub(crate) item: crate::container::FlexItem,
 }
 
 impl Node {
@@ -269,6 +277,15 @@ impl Node {
     /// values; where they put it is [`crate::Resolved::used_local`]'s answer.
     pub fn insets(&self) -> &crate::container::Insets {
         &self.insets
+    }
+    /// How this layer lays out its children (`crate::container::Display`), or
+    /// `None` for a container whose children are placed by their own transforms.
+    pub fn display(&self) -> Option<&crate::container::Display> {
+        self.display.as_ref()
+    }
+    /// This layer's properties as a flex item — the specified values.
+    pub fn item(&self) -> &crate::container::FlexItem {
+        &self.item
     }
 }
 

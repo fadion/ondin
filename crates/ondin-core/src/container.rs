@@ -1,5 +1,7 @@
-//! Container layout (§5.3c) — so far, build step 2: **absolute insets on
-//! frames**, which is what this project calls constraints (§15 D871).
+//! Container layout (§5.3c) — so far, build steps 2 and 3: **absolute insets**,
+//! which is what this project calls constraints (§15 D871), and **flex** (§15
+//! D875), the engine for which is further down (`LayoutView`, `FlexTree`,
+//! `lay_out`). The insets half is described first because it came first.
 //!
 //! **CSS, under CSS's names.** A child of a frame may carry `top`, `right`,
 //! `bottom` and `left` insets, each in px or % of the frame, and `margin: auto`
@@ -300,6 +302,41 @@ pub fn resized(kind: &NodeKind, size: Size, stretched: (bool, bool)) -> NodeKind
     out
 }
 
+/// A text node's kind at the `size` a flex container gave it, **each sizing mode
+/// keeping its meaning** (§15 D875, the maintainer's ruling): auto width stays
+/// auto (one line) unless the container stretched or grew it, when it becomes a
+/// fixed box at that size — which cannot wrap it, since a grown box is at least as
+/// wide as its line; auto height wraps at the width it was given, becoming fixed
+/// only if the container also made it taller than its lines; a fixed box takes
+/// the size whole.
+pub fn flexed_text(kind: &NodeKind, size: Size) -> NodeKind {
+    let NodeKind::Text { sizing, .. } = kind else {
+        return kind.clone();
+    };
+    let near = |a: f64, b: f64| (a - b).abs() < 1.0 / 128.0;
+    let with = |s: TextSizing| {
+        let mut k = kind.clone();
+        if let NodeKind::Text { sizing, .. } = &mut k {
+            *sizing = s;
+        }
+        k
+    };
+    match sizing {
+        TextSizing::Auto => match geometry::local_bounds(kind, None) {
+            Some(b) if near(b.width(), size.width) && near(b.height(), size.height) => kind.clone(),
+            _ => with(TextSizing::Fixed(size)),
+        },
+        TextSizing::AutoHeight(_) => {
+            let k = with(TextSizing::AutoHeight(size.width));
+            match geometry::local_bounds(&k, None) {
+                Some(b) if near(b.height(), size.height) => k,
+                _ => with(TextSizing::Fixed(size)),
+            }
+        }
+        TextSizing::Fixed(_) => with(TextSizing::Fixed(size)),
+    }
+}
+
 /// The linear part of `a` — its rotation, skew, flip and any scale, with the
 /// translation taken out.
 fn linear(a: Affine) -> Affine {
@@ -322,7 +359,7 @@ pub fn slot_of(local: Affine, bx: Rect) -> Point {
 /// The local transform that draws a box `bx` (in the node's own space) in the
 /// slot starting at `slot`, turned by `linear_of`'s linear part about the box's
 /// centre — [`slot_of`]'s inverse.
-fn placed_at(slot: Point, bx: Rect, linear_of: Affine) -> Affine {
+pub(crate) fn placed_at(slot: Point, bx: Rect, linear_of: Affine) -> Affine {
     let half = Vec2::new(bx.width() / 2.0, bx.height() / 2.0);
     Affine::translate((slot + half).to_vec2())
         * linear(linear_of)
@@ -389,6 +426,871 @@ pub fn inverse(insets: &Insets, frame: Size, local: Affine, bx: Rect, kind: &Nod
         top: v.start,
         bottom: v.end,
         margin_auto: insets.margin_auto,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Flexbox (build step 3, §15 D867)
+// ---------------------------------------------------------------------------
+
+/// CSS `flex-direction`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FlexDirection {
+    #[default]
+    Row,
+    RowReverse,
+    Column,
+    ColumnReverse,
+}
+
+impl FlexDirection {
+    /// Whether the main axis is horizontal.
+    pub fn is_row(self) -> bool {
+        matches!(self, FlexDirection::Row | FlexDirection::RowReverse)
+    }
+}
+
+/// CSS `flex-wrap`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FlexWrap {
+    #[default]
+    NoWrap,
+    Wrap,
+    WrapReverse,
+}
+
+/// CSS `justify-content` — the subset a flex container reads.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum JustifyContent {
+    #[default]
+    Start,
+    End,
+    Center,
+    SpaceBetween,
+    SpaceAround,
+    SpaceEvenly,
+}
+
+/// CSS `align-items` / `align-self`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AlignItems {
+    #[default]
+    Stretch,
+    Start,
+    End,
+    Center,
+    Baseline,
+}
+
+/// CSS `align-content` — how the lines of a wrapping container share its cross
+/// axis.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AlignContent {
+    #[default]
+    Stretch,
+    Start,
+    End,
+    Center,
+    SpaceBetween,
+    SpaceAround,
+    SpaceEvenly,
+}
+
+/// A flex container's properties — CSS's, under CSS's names (§15 D867).
+///
+/// **Padding and gap are world units**, not length-percentages: CSS resolves a
+/// percentage padding against the container's *width* on both axes, which is a
+/// rule nobody reaches for on purpose, and a percentage gap needs a definite
+/// container size to mean anything. Both can grow a unit later without changing
+/// what an existing file means.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Flex {
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub direction: FlexDirection,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub wrap: FlexWrap,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub justify_content: JustifyContent,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub align_items: AlignItems,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub align_content: AlignContent,
+    /// The gap between lines (CSS `row-gap`).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub row_gap: f64,
+    /// The gap between items on a line (CSS `column-gap`).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub column_gap: f64,
+    /// Top, right, bottom, left — CSS's order.
+    #[serde(default, skip_serializing_if = "is_zero4")]
+    pub padding: [f64; 4],
+}
+
+impl Flex {
+    fn is_finite(&self) -> bool {
+        self.row_gap.is_finite()
+            && self.column_gap.is_finite()
+            && self.padding.iter().all(|p| p.is_finite())
+    }
+}
+
+/// How a container lays out its children — CSS `display`. **`None` on the node
+/// is not CSS's `display: none`** (which hides): it is a container with no layout
+/// of its own, whose children are placed by their transforms and insets, which is
+/// what every frame was before this and what a group has always been.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum Display {
+    Flex(Flex),
+}
+
+impl Display {
+    pub fn is_finite(&self) -> bool {
+        match self {
+            Display::Flex(f) => f.is_finite(),
+        }
+    }
+}
+
+/// A CSS size: `auto`, a length, a percentage of the container, or `fit-content`
+/// (hug the content — a container's shrink-wrap).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub enum Dimension {
+    #[default]
+    Auto,
+    Px(f64),
+    Percent(f64),
+    FitContent,
+}
+
+impl Dimension {
+    fn is_finite(self) -> bool {
+        match self {
+            Dimension::Px(v) | Dimension::Percent(v) => v.is_finite(),
+            Dimension::Auto | Dimension::FitContent => true,
+        }
+    }
+}
+
+/// A layer's properties **as a flex item** — CSS's `flex-*`, `align-self` and the
+/// size properties (§15 D867).
+///
+/// **A shape's or a frame's own stored size is its CSS width and height** — the
+/// replaced-element reading §15 D872 decided — so `width`/`height` stay `Auto`
+/// for them and resizing one goes on writing its geometry. The two fields exist
+/// for what has no size of its own: a group with `display`, whose box is `Auto`
+/// (hug) until a size is typed, and a frame asked to hug with `FitContent`.
+///
+/// **`flex-shrink` defaults to 1, CSS's default**, and does not squeeze a shape
+/// below its own size, because a replaced element's automatic minimum is its
+/// intrinsic size — the §15 D872 spike's 40-stays-40.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FlexItem {
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub width: Dimension,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub height: Dimension,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub min_width: Dimension,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub min_height: Dimension,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub max_width: Dimension,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub max_height: Dimension,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub grow: f64,
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    pub shrink: f64,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub basis: Dimension,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub align_self: Option<AlignItems>,
+}
+
+impl Default for FlexItem {
+    fn default() -> Self {
+        FlexItem {
+            width: Dimension::Auto,
+            height: Dimension::Auto,
+            min_width: Dimension::Auto,
+            min_height: Dimension::Auto,
+            max_width: Dimension::Auto,
+            max_height: Dimension::Auto,
+            grow: 0.0,
+            shrink: 1.0,
+            basis: Dimension::Auto,
+            align_self: None,
+        }
+    }
+}
+
+impl FlexItem {
+    /// All at CSS's defaults — what the save format skips.
+    pub fn is_default(&self) -> bool {
+        *self == FlexItem::default()
+    }
+
+    /// Every number finite; the operation that writes this refuses anything else.
+    pub fn is_finite(&self) -> bool {
+        [
+            self.width,
+            self.height,
+            self.min_width,
+            self.min_height,
+            self.max_width,
+            self.max_height,
+            self.basis,
+        ]
+        .into_iter()
+        .all(Dimension::is_finite)
+            && self.grow.is_finite()
+            && self.shrink.is_finite()
+    }
+}
+
+fn is_default<T: Default + PartialEq>(v: &T) -> bool {
+    *v == T::default()
+}
+
+fn is_zero(v: &f64) -> bool {
+    *v == 0.0
+}
+
+fn is_zero4(v: &[f64; 4]) -> bool {
+    v.iter().all(|x| *x == 0.0)
+}
+
+fn one() -> f64 {
+    1.0
+}
+
+fn is_one(v: &f64) -> bool {
+    *v == 1.0
+}
+
+/// Round a length taffy computed in `f32` onto the 1/64 px grid (§15 D873, the
+/// maintainer's ruling) — Chrome's own layout unit, so what comes back is
+/// CSS-faithful and no float-noise digit reaches a field or a file.
+pub fn quantize(v: f32) -> f64 {
+    (f64::from(v) * 64.0).round() / 64.0
+}
+
+/// The questions the flex engine asks of a tree — answered from the committed
+/// document by `Resolved`, and from a preview's overrides by `RenderOverrides`,
+/// so the two run one layout rather than two (`boolean::Operands`' shape).
+///
+/// Every answer is a **specified** value — the kind with its stored size, the
+/// transform as typed — because layout is what turns specified into used.
+pub trait LayoutView {
+    fn parent(&self, id: crate::NodeId) -> Option<crate::NodeId>;
+    fn children(&self, id: crate::NodeId) -> Vec<crate::NodeId>;
+    fn kind(&self, id: crate::NodeId) -> Option<NodeKind>;
+    fn display(&self, id: crate::NodeId) -> Option<Display>;
+    fn item(&self, id: crate::NodeId) -> FlexItem;
+    fn insets(&self, id: crate::NodeId) -> Insets;
+    fn visible(&self, id: crate::NodeId) -> bool;
+    fn mask(&self, id: crate::NodeId) -> bool;
+    fn local(&self, id: crate::NodeId) -> Affine;
+}
+
+/// Whether `kind` can be a flex container: a frame, or a group (§15 D869).
+pub fn is_container(kind: &NodeKind) -> bool {
+    matches!(kind, NodeKind::Artboard { .. } | NodeKind::Group)
+}
+
+/// Whether `id` takes part in its container's flow: visible, not a mask, and not
+/// taken out by insets (which place it absolutely, `position: absolute`'s
+/// reading, §15 D874). **A hidden layer leaves the flow** — CSS's `display: none`
+/// rather than `visibility: hidden`, the design-tool reading of an eye switched
+/// off, and the session's default rather than a ruling (§15 D875).
+pub fn in_flow(view: &dyn LayoutView, id: crate::NodeId) -> bool {
+    view.visible(id) && !view.mask(id) && !view.insets(id).is_authored()
+}
+
+/// Whether `id`'s parent lays its children out — a frame or a group with a
+/// `display`.
+pub fn parent_lays_out(view: &dyn LayoutView, id: crate::NodeId) -> bool {
+    view.parent(id).is_some_and(|p| {
+        view.display(p).is_some() && view.kind(p).is_some_and(|k| is_container(&k))
+    })
+}
+
+/// Whether `id` roots a layout pass: a container with a layout that is **not**
+/// itself laid out by one — the top of a chain of nested flex containers, which
+/// [`lay_out`] lays out whole.
+pub fn is_layout_root(view: &dyn LayoutView, id: crate::NodeId) -> bool {
+    view.display(id).is_some()
+        && view.kind(id).is_some_and(|k| is_container(&k))
+        && !(parent_lays_out(view, id) && in_flow(view, id))
+}
+
+/// The layout root whose pass decides `id`'s placement — `id` itself, or the
+/// topmost container above it along an unbroken chain of in-flow items. **The
+/// widening step 1 owed**: under flex a node moves when a sibling grows, so a
+/// change to any item re-lays its whole chain from here.
+///
+/// ⚠️ **The first hop counts for any child of a flex container, in flow or not**:
+/// a layer pinned, hidden or made a mask *leaves* the flow, and its siblings close
+/// up — so a change to it is a change to its container's layout even though, by
+/// then, it is not in it. The rebuild comparison caught the first cut, which asked
+/// the dirty node whether it was in flow and stopped at itself. Only the hops
+/// above need the container to be in its own parent's flow.
+pub fn chain_root(view: &dyn LayoutView, id: crate::NodeId) -> crate::NodeId {
+    let mut root = id;
+    let mut cursor = id;
+    let mut first = true;
+    loop {
+        let flows = first || in_flow(view, cursor);
+        if !(parent_lays_out(view, cursor) && flows) {
+            break;
+        }
+        let Some(parent) = view.parent(cursor) else {
+            break;
+        };
+        root = parent;
+        cursor = parent;
+        first = false;
+    }
+    root
+}
+
+/// What layout makes of one node: the local transform it is drawn with, the kind
+/// it is sized with, and — for a group with a layout — its box. Each `None` means
+/// *as specified*.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Placed {
+    pub local: Option<Affine>,
+    pub kind: Option<NodeKind>,
+    pub frame: Option<Size>,
+}
+
+/// Approximately equal on the 1/64 grid layout results land on.
+fn near(a: f64, b: f64) -> bool {
+    (a - b).abs() < 1.0 / 128.0
+}
+
+/// A flex item's used geometry from where its container laid it (`slot`, in the
+/// parent's space) and at what `size` (§15 D867).
+///
+/// A group with a layout keeps its size as a box ([`Placed::frame`]); a group or
+/// a boolean without one is placed whole and keeps its own size; a sized kind is
+/// resized to what it was given; text keeps each sizing mode's meaning
+/// ([`flexed_text`], §15 D875). Every placement turns about the box's centre, the
+/// step-2 rule (§15 D874). `None` when the result is exactly the specified
+/// geometry.
+pub fn item_placed(
+    view: &dyn LayoutView,
+    id: crate::NodeId,
+    slot: Point,
+    size: Size,
+) -> Option<Placed> {
+    let kind = view.kind(id)?;
+    let stored = view.local(id);
+    let (used_kind, bx, frame) = match &kind {
+        NodeKind::Group if view.display(id).is_some() => {
+            (None, Rect::from_origin_size(Point::ZERO, size), Some(size))
+        }
+        NodeKind::Group | NodeKind::Boolean { .. } => (None, atomic_box(view, id, &kind)?, None),
+        NodeKind::Text { .. } => {
+            let k = flexed_text(&kind, size);
+            let bx = geometry::local_bounds(&k, None)?;
+            ((k != kind).then_some(k), bx, None)
+        }
+        _ => {
+            let own = geometry::local_bounds(&kind, None)?;
+            let stretched = (
+                !near(own.width(), size.width),
+                !near(own.height(), size.height),
+            );
+            if (stretched.0 || stretched.1) && can_stretch(&kind) {
+                let k = resized(&kind, size, stretched);
+                let bx = geometry::local_bounds(&k, None)?;
+                (Some(k), bx, None)
+            } else {
+                (None, own, None)
+            }
+        }
+    };
+    let local = placed_at(slot, bx, stored);
+    let moved = local
+        .as_coeffs()
+        .iter()
+        .zip(stored.as_coeffs())
+        .any(|(a, b)| (a - b).abs() > 1e-9);
+    (moved || used_kind.is_some() || frame.is_some()).then_some(Placed {
+        local: moved.then_some(local),
+        kind: used_kind,
+        frame,
+    })
+}
+
+/// A layout root's size as its own pass made it: a frame asked to hug grows its
+/// kind, a group with a layout takes the box. Where the root is *placed* is not
+/// the pass's business — that is its parent's (its transform, or insets).
+pub fn root_sized(
+    view: &dyn LayoutView,
+    id: crate::NodeId,
+    size: Size,
+) -> (Option<NodeKind>, Option<Size>) {
+    match view.kind(id) {
+        Some(NodeKind::Group) => (None, Some(size)),
+        Some(NodeKind::Artboard { size: own })
+            if !near(own.width, size.width) || !near(own.height, size.height) =>
+        {
+            (Some(NodeKind::Artboard { size }), None)
+        }
+        _ => (None, None),
+    }
+}
+
+/// One node's result from [`lay_out`]: where its box's top-left lands in its
+/// parent's local space, and its size.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Laid {
+    pub id: crate::NodeId,
+    pub slot: Point,
+    pub size: Size,
+}
+
+/// Lay out the flex container `root` and every flex container nested in its flow,
+/// returning a [`Laid`] for `root` (its size — a container that hugs grows to fit)
+/// and for every in-flow node beneath it, each in its parent's space.
+///
+/// Leaves are measured, not read (§15 D872): a shape's intrinsic size is its
+/// geometry, as an image's is, so CSS's automatic minimum keeps it from being
+/// squeezed below it; a text node by its sizing mode, each mode meaning what it
+/// means outside a container (§15 D875); a group or a boolean without a layout
+/// as one atomic box, its children's union. Results come back on the 1/64 px grid
+/// ([`quantize`]).
+pub fn lay_out(view: &dyn LayoutView, root: crate::NodeId) -> Vec<Laid> {
+    let mut tree = FlexTree::new(view);
+    let Some(r) = tree.push(root) else {
+        return Vec::new();
+    };
+    taffy::compute_root_layout(
+        &mut tree,
+        taffy::NodeId::from(r),
+        taffy::Size {
+            width: taffy::AvailableSpace::MaxContent,
+            height: taffy::AvailableSpace::MaxContent,
+        },
+    );
+    tree.ids
+        .iter()
+        .zip(&tree.layouts)
+        .map(|(id, l)| Laid {
+            id: *id,
+            slot: Point::new(quantize(l.location.x), quantize(l.location.y)),
+            size: Size::new(quantize(l.size.width), quantize(l.size.height)),
+        })
+        .collect()
+}
+
+/// What a node in a [`FlexTree`] is, for the engine's purposes.
+enum Leaf {
+    /// A flex container, laid out by taffy.
+    Container,
+    /// A box with a size of its own — a shape, a frame with no layout, a group or
+    /// a boolean taken whole.
+    Replaced(Size),
+    /// A text node, measured by its sizing mode. Boxed: the parts are several
+    /// times the size of the other variants.
+    Text(Box<crate::text::TextParts>, String),
+}
+
+/// taffy's view of one layout pass: the in-flow part of the subtree under a root
+/// container, indexed by position, with each node's style, cache and result.
+///
+/// **Built per pass and dropped after**, not kept between commits: the document
+/// is the one tree, and the incremental part is `Resolved`'s — which containers it
+/// re-lays at all.
+struct FlexTree<'v> {
+    view: &'v dyn LayoutView,
+    ids: Vec<crate::NodeId>,
+    children: Vec<Vec<taffy::NodeId>>,
+    styles: Vec<taffy::Style>,
+    leaves: Vec<Leaf>,
+    caches: Vec<taffy::Cache>,
+    layouts: Vec<taffy::Layout>,
+    /// Text measurements already made this pass, keyed by node and the width
+    /// asked about — the memo §15 D872 owed: taffy asks a text node the same
+    /// question several times a pass, and each answer is a parley shape.
+    measured: rustc_hash::FxHashMap<(usize, u32), taffy::Size<f32>>,
+}
+
+impl<'v> FlexTree<'v> {
+    fn new(view: &'v dyn LayoutView) -> Self {
+        FlexTree {
+            view,
+            ids: Vec::new(),
+            children: Vec::new(),
+            styles: Vec::new(),
+            leaves: Vec::new(),
+            caches: Vec::new(),
+            layouts: Vec::new(),
+            measured: Default::default(),
+        }
+    }
+
+    /// Add `id` (and, if it is a container, its in-flow children) and answer its
+    /// index.
+    fn push(&mut self, id: crate::NodeId) -> Option<usize> {
+        let kind = self.view.kind(id)?;
+        let display = self.view.display(id).filter(|_| is_container(&kind));
+        let item = self.view.item(id);
+        let index = self.ids.len();
+        self.ids.push(id);
+        self.children.push(Vec::new());
+        self.styles.push(style_of(&kind, display.as_ref(), &item));
+        self.caches.push(taffy::Cache::new());
+        self.layouts.push(taffy::Layout::with_order(index as u32));
+        let leaf = match (&display, &kind) {
+            (Some(_), _) => Leaf::Container,
+            (None, NodeKind::Text { content, .. }) => match crate::text::TextParts::of(&kind) {
+                Some(parts) => Leaf::Text(Box::new(parts), content.clone()),
+                None => Leaf::Replaced(Size::ZERO),
+            },
+            (None, _) => {
+                Leaf::Replaced(atomic_box(self.view, id, &kind).map_or(Size::ZERO, |b| b.size()))
+            }
+        };
+        self.leaves.push(leaf);
+        if display.is_some() {
+            for child in self.view.children(id) {
+                if in_flow(self.view, child)
+                    && let Some(c) = self.push(child)
+                {
+                    self.children[index].push(taffy::NodeId::from(c));
+                }
+            }
+        }
+        Some(index)
+    }
+
+    fn measure(
+        &mut self,
+        index: usize,
+        known: taffy::Size<Option<f32>>,
+        available: taffy::Size<taffy::AvailableSpace>,
+    ) -> taffy::Size<f32> {
+        let (parts, content) = match &self.leaves[index] {
+            Leaf::Replaced(s) => {
+                return taffy::Size {
+                    width: known.width.unwrap_or(s.width as f32),
+                    height: known.height.unwrap_or(s.height as f32),
+                };
+            }
+            Leaf::Container => return taffy::Size::ZERO,
+            Leaf::Text(parts, content) => ((**parts).clone(), content.clone()),
+        };
+        let at = |sizing: TextSizing| {
+            let mut p = parts.clone();
+            p.sizing = sizing;
+            crate::text::measure(p.as_ref(&content))
+        };
+        match parts.sizing {
+            // **Never wraps** (§15 D875): a label keeps its one line whatever room
+            // it is given, `white-space: nowrap`'s reading of auto width.
+            TextSizing::Auto => {
+                let key = (index, u32::MAX);
+                let m = match self.measured.get(&key) {
+                    Some(m) => *m,
+                    None => {
+                        let r = at(TextSizing::Auto);
+                        let m = taffy::Size {
+                            width: r.width() as f32,
+                            height: r.height() as f32,
+                        };
+                        self.measured.insert(key, m);
+                        m
+                    }
+                };
+                taffy::Size {
+                    width: known.width.unwrap_or(m.width),
+                    height: known.height.unwrap_or(m.height),
+                }
+            }
+            // **Wraps at the width it is given**; its stored width is only the
+            // width it prefers — its max-content — and it will not go narrower
+            // than its widest word.
+            TextSizing::AutoHeight(preferred) => {
+                let width = match known.width {
+                    Some(w) => w,
+                    None => {
+                        let (min, _) = crate::text::content_widths(parts.as_ref(&content));
+                        let preferred = preferred as f32;
+                        match available.width {
+                            taffy::AvailableSpace::MinContent => min as f32,
+                            taffy::AvailableSpace::MaxContent => preferred,
+                            taffy::AvailableSpace::Definite(a) => a.min(preferred).max(min as f32),
+                        }
+                    }
+                };
+                let key = (index, width.to_bits());
+                let m = match self.measured.get(&key) {
+                    Some(m) => *m,
+                    None => {
+                        let r = at(TextSizing::AutoHeight(f64::from(width)));
+                        let m = taffy::Size {
+                            width,
+                            height: r.height() as f32,
+                        };
+                        self.measured.insert(key, m);
+                        m
+                    }
+                };
+                taffy::Size {
+                    width,
+                    height: known.height.unwrap_or(m.height),
+                }
+            }
+            // A fixed box is a fixed box.
+            TextSizing::Fixed(s) => taffy::Size {
+                width: known.width.unwrap_or(s.width as f32),
+                height: known.height.unwrap_or(s.height as f32),
+            },
+        }
+    }
+}
+
+/// A group's or a boolean's box, taken whole — the union of its children's
+/// boxes through their transforms, in its own space; any other kind's own box.
+///
+/// **Specified geometry, not used**: a group with no layout is one atomic box to
+/// its container, and what is inside it is not re-laid by this pass. A boolean is
+/// measured by its operands' union, which is at least its result's box.
+pub fn atomic_box(view: &dyn LayoutView, id: crate::NodeId, kind: &NodeKind) -> Option<Rect> {
+    match kind {
+        NodeKind::Group | NodeKind::Boolean { .. } | NodeKind::Root => view
+            .children(id)
+            .into_iter()
+            .filter(|c| view.visible(*c) && !view.mask(*c))
+            .filter_map(|c| {
+                let k = view.kind(c)?;
+                atomic_box(view, c, &k).map(|b| geometry::transform_rect(view.local(c), b))
+            })
+            .reduce(|a, b| a.union(b)),
+        _ => geometry::local_bounds(kind, None),
+    }
+}
+
+/// A node's taffy style, from its kind, its layout and its item properties.
+///
+/// **A frame's stored size is its CSS size** unless it is asked to hug
+/// (`FitContent`); a group with a layout hugs unless a size is typed; a leaf's
+/// size is `auto` and comes from its measure.
+fn style_of(kind: &NodeKind, display: Option<&Display>, item: &FlexItem) -> taffy::Style {
+    use taffy::prelude::{auto, length, percent};
+    let dim = |d: Dimension, stored: Option<f64>| -> taffy::Dimension {
+        match d {
+            Dimension::Px(v) => length(v as f32),
+            Dimension::Percent(p) => percent((p / 100.0) as f32),
+            Dimension::FitContent => auto(),
+            Dimension::Auto => match stored {
+                Some(v) => length(v as f32),
+                None => auto(),
+            },
+        }
+    };
+    // The limits take a narrower type than the sizes, with no `fit-content`: a
+    // `FitContent` limit is no limit.
+    let limit = |d: Dimension| -> taffy::LengthPercentageAuto {
+        match d {
+            Dimension::Px(v) => taffy::LengthPercentageAuto::length(v as f32),
+            Dimension::Percent(p) => taffy::LengthPercentageAuto::percent((p / 100.0) as f32),
+            Dimension::Auto | Dimension::FitContent => taffy::LengthPercentageAuto::auto(),
+        }
+    };
+    let stored = match kind {
+        NodeKind::Artboard { size } => Some(*size),
+        _ => None,
+    };
+    let mut style = taffy::Style {
+        size: taffy::Size {
+            width: dim(item.width, stored.map(|s| s.width)),
+            height: dim(item.height, stored.map(|s| s.height)),
+        },
+        min_size: taffy::Size {
+            width: limit(item.min_width),
+            height: limit(item.min_height),
+        },
+        max_size: taffy::Size {
+            width: limit(item.max_width),
+            height: limit(item.max_height),
+        },
+        flex_grow: item.grow as f32,
+        flex_shrink: item.shrink as f32,
+        flex_basis: dim(item.basis, None),
+        align_self: item.align_self.map(align_items),
+        ..Default::default()
+    };
+    match display {
+        Some(Display::Flex(f)) => {
+            style.display = taffy::Display::Flex;
+            style.flex_direction = match f.direction {
+                FlexDirection::Row => taffy::FlexDirection::Row,
+                FlexDirection::RowReverse => taffy::FlexDirection::RowReverse,
+                FlexDirection::Column => taffy::FlexDirection::Column,
+                FlexDirection::ColumnReverse => taffy::FlexDirection::ColumnReverse,
+            };
+            style.flex_wrap = match f.wrap {
+                FlexWrap::NoWrap => taffy::FlexWrap::NoWrap,
+                FlexWrap::Wrap => taffy::FlexWrap::Wrap,
+                FlexWrap::WrapReverse => taffy::FlexWrap::WrapReverse,
+            };
+            style.justify_content = Some(match f.justify_content {
+                JustifyContent::Start => taffy::JustifyContent::START,
+                JustifyContent::End => taffy::JustifyContent::END,
+                JustifyContent::Center => taffy::JustifyContent::CENTER,
+                JustifyContent::SpaceBetween => taffy::JustifyContent::SPACE_BETWEEN,
+                JustifyContent::SpaceAround => taffy::JustifyContent::SPACE_AROUND,
+                JustifyContent::SpaceEvenly => taffy::JustifyContent::SPACE_EVENLY,
+            });
+            style.align_items = Some(align_items(f.align_items));
+            style.align_content = Some(match f.align_content {
+                AlignContent::Stretch => taffy::AlignContent::STRETCH,
+                AlignContent::Start => taffy::AlignContent::START,
+                AlignContent::End => taffy::AlignContent::END,
+                AlignContent::Center => taffy::AlignContent::CENTER,
+                AlignContent::SpaceBetween => taffy::AlignContent::SPACE_BETWEEN,
+                AlignContent::SpaceAround => taffy::AlignContent::SPACE_AROUND,
+                AlignContent::SpaceEvenly => taffy::AlignContent::SPACE_EVENLY,
+            });
+            style.gap = taffy::Size {
+                width: length(f.column_gap as f32),
+                height: length(f.row_gap as f32),
+            };
+            let [top, right, bottom, left] = f.padding.map(|p| length(p as f32));
+            style.padding = taffy::Rect {
+                left,
+                right,
+                top,
+                bottom,
+            };
+        }
+        // A leaf keeps taffy's default display: its layout is `compute_leaf_layout`
+        // over its measure either way (`FlexTree::compute_child_layout`), and the
+        // one value that would matter — `None`, which hides — is never set.
+        None => {}
+    }
+    style
+}
+
+fn align_items(a: AlignItems) -> taffy::AlignItems {
+    match a {
+        AlignItems::Stretch => taffy::AlignItems::STRETCH,
+        AlignItems::Start => taffy::AlignItems::START,
+        AlignItems::End => taffy::AlignItems::END,
+        AlignItems::Center => taffy::AlignItems::CENTER,
+        AlignItems::Baseline => taffy::AlignItems::BASELINE,
+    }
+}
+
+impl taffy::TraversePartialTree for FlexTree<'_> {
+    type ChildIter<'a>
+        = std::iter::Copied<std::slice::Iter<'a, taffy::NodeId>>
+    where
+        Self: 'a;
+
+    fn child_ids(&self, node: taffy::NodeId) -> Self::ChildIter<'_> {
+        self.children[usize::from(node)].iter().copied()
+    }
+
+    fn child_count(&self, node: taffy::NodeId) -> usize {
+        self.children[usize::from(node)].len()
+    }
+
+    fn get_child_id(&self, node: taffy::NodeId, index: usize) -> taffy::NodeId {
+        self.children[usize::from(node)][index]
+    }
+}
+
+impl taffy::TraverseTree for FlexTree<'_> {}
+
+impl taffy::LayoutPartialTree for FlexTree<'_> {
+    type CustomIdent = String;
+
+    type CoreContainerStyle<'a>
+        = &'a taffy::Style
+    where
+        Self: 'a;
+
+    fn get_core_container_style(&self, node: taffy::NodeId) -> Self::CoreContainerStyle<'_> {
+        &self.styles[usize::from(node)]
+    }
+
+    fn set_unrounded_layout(&mut self, node: taffy::NodeId, layout: &taffy::Layout) {
+        self.layouts[usize::from(node)] = *layout;
+    }
+
+    fn resolve_calc_value(&self, _val: *const (), _basis: f32) -> f32 {
+        // `calc` is off (`default-features = false`), so nothing can hand one in.
+        0.0
+    }
+
+    fn compute_child_layout(
+        &mut self,
+        node: taffy::NodeId,
+        inputs: taffy::tree::LayoutInput,
+    ) -> taffy::tree::LayoutOutput {
+        taffy::compute_cached_layout(self, node, inputs, |tree, node, inputs| {
+            let index = usize::from(node);
+            match tree.leaves[index] {
+                Leaf::Container => taffy::compute_flexbox_layout(tree, node, inputs),
+                _ => {
+                    let style = tree.styles[index].clone();
+                    taffy::compute_leaf_layout(
+                        inputs,
+                        &style,
+                        |_, _| 0.0,
+                        |known, available| tree.measure(index, known, available),
+                    )
+                }
+            }
+        })
+    }
+}
+
+impl taffy::CacheTree for FlexTree<'_> {
+    fn cache_get(
+        &mut self,
+        node: taffy::NodeId,
+        inputs: &taffy::tree::LayoutInput,
+    ) -> Option<taffy::tree::LayoutOutput> {
+        self.caches[usize::from(node)].get(inputs)
+    }
+
+    fn cache_store(
+        &mut self,
+        node: taffy::NodeId,
+        inputs: &taffy::tree::LayoutInput,
+        output: taffy::tree::LayoutOutput,
+    ) {
+        self.caches[usize::from(node)].store(inputs, output)
+    }
+
+    fn cache_clear(&mut self, node: taffy::NodeId) {
+        self.caches[usize::from(node)].clear();
+    }
+}
+
+impl taffy::LayoutFlexboxContainer for FlexTree<'_> {
+    type FlexboxContainerStyle<'a>
+        = &'a taffy::Style
+    where
+        Self: 'a;
+
+    type FlexboxItemStyle<'a>
+        = &'a taffy::Style
+    where
+        Self: 'a;
+
+    fn get_flexbox_container_style(&self, node: taffy::NodeId) -> Self::FlexboxContainerStyle<'_> {
+        &self.styles[usize::from(node)]
+    }
+
+    fn get_flexbox_child_style(&self, child: taffy::NodeId) -> Self::FlexboxItemStyle<'_> {
+        &self.styles[usize::from(child)]
     }
 }
 
@@ -777,5 +1679,307 @@ mod tests {
         assert_eq!((back.left, back.right), (px(30.0), px(-30.0)));
         let (slot, _) = placed(back, Affine::IDENTITY, &kind);
         assert_eq!(slot.x, 130.0, "and it is still centred between them");
+    }
+}
+
+/// The flex engine on its own, against an in-memory [`LayoutView`] — what taffy
+/// computes through `FlexTree`, before `Resolved` is involved (§15 D867, D875).
+#[cfg(test)]
+mod flex_tests {
+    use super::*;
+    use crate::id::{IdSource, NodeId};
+    use kurbo::RoundedRectRadii;
+    use rustc_hash::FxHashMap;
+
+    #[derive(Clone)]
+    struct Fake {
+        kind: NodeKind,
+        display: Option<Display>,
+        item: FlexItem,
+        insets: Insets,
+        visible: bool,
+        mask: bool,
+        children: Vec<NodeId>,
+    }
+
+    #[derive(Default)]
+    struct View {
+        nodes: FxHashMap<NodeId, Fake>,
+        ids: Option<IdSource>,
+    }
+
+    impl View {
+        fn add(&mut self, parent: Option<NodeId>, kind: NodeKind) -> NodeId {
+            let id = self.ids.get_or_insert_with(|| IdSource::new(3)).mint();
+            self.nodes.insert(
+                id,
+                Fake {
+                    kind,
+                    display: None,
+                    item: FlexItem::default(),
+                    insets: Insets::default(),
+                    visible: true,
+                    mask: false,
+                    children: Vec::new(),
+                },
+            );
+            if let Some(p) = parent {
+                self.nodes.get_mut(&p).unwrap().children.push(id);
+            }
+            id
+        }
+        fn set(&mut self, id: NodeId, f: impl FnOnce(&mut Fake)) {
+            f(self.nodes.get_mut(&id).unwrap());
+        }
+    }
+
+    impl LayoutView for View {
+        fn parent(&self, id: NodeId) -> Option<NodeId> {
+            self.nodes
+                .iter()
+                .find(|(_, n)| n.children.contains(&id))
+                .map(|(p, _)| *p)
+        }
+        fn children(&self, id: NodeId) -> Vec<NodeId> {
+            self.nodes[&id].children.clone()
+        }
+        fn kind(&self, id: NodeId) -> Option<NodeKind> {
+            self.nodes.get(&id).map(|n| n.kind.clone())
+        }
+        fn display(&self, id: NodeId) -> Option<Display> {
+            self.nodes[&id].display
+        }
+        fn item(&self, id: NodeId) -> FlexItem {
+            self.nodes[&id].item
+        }
+        fn insets(&self, id: NodeId) -> Insets {
+            self.nodes[&id].insets
+        }
+        fn visible(&self, id: NodeId) -> bool {
+            self.nodes[&id].visible
+        }
+        fn mask(&self, id: NodeId) -> bool {
+            self.nodes[&id].mask
+        }
+        fn local(&self, _id: NodeId) -> Affine {
+            Affine::IDENTITY
+        }
+    }
+
+    fn rect(w: f64, h: f64) -> NodeKind {
+        NodeKind::Rect {
+            size: Size::new(w, h),
+            corner_radii: RoundedRectRadii::default(),
+        }
+    }
+
+    fn frame(w: f64, h: f64) -> NodeKind {
+        NodeKind::Artboard {
+            size: Size::new(w, h),
+        }
+    }
+
+    fn row(gap: f64, pad: f64) -> Display {
+        Display::Flex(Flex {
+            column_gap: gap,
+            row_gap: gap,
+            padding: [pad; 4],
+            align_items: AlignItems::Start,
+            ..Default::default()
+        })
+    }
+
+    fn laid(out: &[Laid], id: NodeId) -> (Point, Size) {
+        let l = out.iter().find(|l| l.id == id).expect("laid out");
+        (l.slot, l.size)
+    }
+
+    /// A row places its items one after another from the padding, a gap apart,
+    /// each at its own size — the whole of flexbox's simplest case.
+    #[test]
+    fn a_row_places_items_from_the_padding_a_gap_apart() {
+        let mut v = View::default();
+        let f = v.add(None, frame(300.0, 100.0));
+        v.set(f, |n| n.display = Some(row(10.0, 20.0)));
+        let a = v.add(Some(f), rect(40.0, 30.0));
+        let b = v.add(Some(f), rect(60.0, 30.0));
+        let out = lay_out(&v, f);
+        assert_eq!(
+            laid(&out, a),
+            (Point::new(20.0, 20.0), Size::new(40.0, 30.0))
+        );
+        assert_eq!(
+            laid(&out, b),
+            (Point::new(70.0, 20.0), Size::new(60.0, 30.0))
+        );
+        assert_eq!(
+            laid(&out, f).1,
+            Size::new(300.0, 100.0),
+            "a frame keeps its stored size"
+        );
+    }
+
+    /// `flex-grow` shares the free space in proportion, and the share lands on the
+    /// 1/64 grid (§15 D873) — a third of 100 is not a number f32 or f64 can hold.
+    #[test]
+    fn grow_shares_the_free_space_on_the_sixty_fourth_grid() {
+        let mut v = View::default();
+        let f = v.add(None, frame(100.0, 50.0));
+        v.set(f, |n| n.display = Some(row(0.0, 0.0)));
+        let a = v.add(Some(f), rect(0.0, 10.0));
+        let b = v.add(Some(f), rect(0.0, 10.0));
+        v.set(a, |n| n.item.grow = 1.0);
+        v.set(b, |n| n.item.grow = 2.0);
+        let out = lay_out(&v, f);
+        let (_, sa) = laid(&out, a);
+        let (_, sb) = laid(&out, b);
+        assert_eq!(sa.width, (100.0_f64 / 3.0 * 64.0).round() / 64.0);
+        assert_eq!(sa.width * 64.0, (sa.width * 64.0).round(), "on the grid");
+        assert!((sa.width + sb.width - 100.0).abs() < 1.0 / 32.0);
+    }
+
+    /// A shape is not squeezed below its own size in an overflowing row — CSS's
+    /// automatic minimum for a replaced element (§15 D872's spike, 40 stays 40).
+    ///
+    /// **Flip:** a shape answering a min-content width of 0, as an empty box would,
+    /// fails here at 30 against 40 — the spike's 30.643, on the 1/64 grid.
+    #[test]
+    fn a_shape_holds_its_size_in_an_overflowing_row() {
+        let mut v = View::default();
+        let f = v.add(None, frame(60.0, 50.0));
+        v.set(f, |n| n.display = Some(row(0.0, 0.0)));
+        let a = v.add(Some(f), rect(40.0, 10.0));
+        let b = v.add(Some(f), rect(40.0, 10.0));
+        let out = lay_out(&v, f);
+        assert_eq!(laid(&out, a).1.width, 40.0);
+        assert_eq!(laid(&out, b).1.width, 40.0);
+    }
+
+    /// A group with a layout hugs what it holds: its box is its padding plus its
+    /// items plus the gaps between them.
+    #[test]
+    fn a_group_with_a_layout_hugs_its_items() {
+        let mut v = View::default();
+        let g = v.add(None, NodeKind::Group);
+        v.set(g, |n| n.display = Some(row(10.0, 5.0)));
+        v.add(Some(g), rect(40.0, 30.0));
+        v.add(Some(g), rect(60.0, 20.0));
+        let out = lay_out(&v, g);
+        assert_eq!(
+            laid(&out, g).1,
+            Size::new(5.0 + 40.0 + 10.0 + 60.0 + 5.0, 5.0 + 30.0 + 5.0)
+        );
+    }
+
+    /// Hidden layers, masks and pinned layers are out of the flow: the row closes
+    /// up around them, and they get no result.
+    #[test]
+    fn hidden_masked_and_pinned_layers_leave_the_flow() {
+        let mut v = View::default();
+        let f = v.add(None, frame(300.0, 100.0));
+        v.set(f, |n| n.display = Some(row(0.0, 0.0)));
+        let hidden = v.add(Some(f), rect(50.0, 10.0));
+        let mask = v.add(Some(f), rect(50.0, 10.0));
+        let pinned = v.add(Some(f), rect(50.0, 10.0));
+        let kept = v.add(Some(f), rect(50.0, 10.0));
+        v.set(hidden, |n| n.visible = false);
+        v.set(mask, |n| n.mask = true);
+        v.set(pinned, |n| {
+            n.insets.right = Some(LengthPct::Px(0.0));
+        });
+        let out = lay_out(&v, f);
+        assert_eq!(
+            laid(&out, kept).0.x,
+            0.0,
+            "the row closed up to the first in-flow layer"
+        );
+        for id in [hidden, mask, pinned] {
+            assert!(out.iter().all(|l| l.id != id), "{id:?} was laid out");
+        }
+    }
+
+    /// Text keeps each mode's meaning in a row (§15 D875): auto width never wraps
+    /// however narrow the row, auto height wraps at the width it is given but not
+    /// below its widest word.
+    ///
+    /// **Flips.** Answering auto-width text's min-content with its widest word and
+    /// wrapping it at whatever width taffy settles on — the "CSS default" option
+    /// the maintainer turned down — fails the one-line assertion, 116.2 tall
+    /// against 19.4. ⚠️ **Wrapping it at a *definite* available width instead does
+    /// not bite**, and was the first flip tried: taffy never asks an auto-width
+    /// item about a definite width, only its min- and max-content and then the
+    /// width it chose, so that input never arrives. The teeth are in min-content.
+    #[test]
+    fn text_keeps_each_modes_meaning_in_a_narrow_row() {
+        let text = |sizing| NodeKind::Text {
+            content: "several short words that can wrap".into(),
+            style: Box::default(),
+            spans: Default::default(),
+            para_spans: Default::default(),
+            paragraph: Default::default(),
+            block: Default::default(),
+            sizing,
+            on_path: None,
+            on_path_flip: false,
+            on_path_offset: 0.0,
+        };
+        let one_line =
+            crate::text::measure(crate::node::TextRef::of(&text(TextSizing::Auto)).unwrap());
+
+        let mut v = View::default();
+        let f = v.add(None, frame(60.0, 400.0));
+        v.set(f, |n| n.display = Some(row(0.0, 0.0)));
+        let auto = v.add(Some(f), text(TextSizing::Auto));
+        let out = lay_out(&v, f);
+        assert_eq!(
+            laid(&out, auto).1.height,
+            quantize(one_line.height() as f32),
+            "auto width stays one line in a 60-wide row"
+        );
+
+        let mut v = View::default();
+        let f = v.add(None, frame(60.0, 400.0));
+        v.set(f, |n| n.display = Some(row(0.0, 0.0)));
+        let wraps = v.add(Some(f), text(TextSizing::AutoHeight(500.0)));
+        let out = lay_out(&v, f);
+        let (_, size) = laid(&out, wraps);
+        assert!(
+            size.height > one_line.height() * 2.0,
+            "auto height wrapped: {size:?}"
+        );
+        let (widest, _) =
+            crate::text::content_widths(crate::node::TextRef::of(&text(TextSizing::Auto)).unwrap());
+        assert!(
+            size.width >= quantize(widest as f32),
+            "and no narrower than its widest word ({widest})"
+        );
+    }
+
+    /// A group with its own layout nested in a row is laid out in the same pass:
+    /// its size comes from the row, its children from it.
+    #[test]
+    fn a_nested_container_is_laid_out_in_the_same_pass() {
+        let mut v = View::default();
+        let outer = v.add(None, frame(300.0, 100.0));
+        v.set(outer, |n| n.display = Some(row(0.0, 10.0)));
+        let inner = v.add(Some(outer), NodeKind::Group);
+        v.set(inner, |n| {
+            n.display = Some(Display::Flex(Flex {
+                direction: FlexDirection::Column,
+                row_gap: 4.0,
+                align_items: AlignItems::Start,
+                ..Default::default()
+            }))
+        });
+        let a = v.add(Some(inner), rect(20.0, 20.0));
+        let b = v.add(Some(inner), rect(30.0, 20.0));
+        let out = lay_out(&v, outer);
+        assert_eq!(laid(&out, inner).0, Point::new(10.0, 10.0));
+        assert_eq!(
+            laid(&out, a).0,
+            Point::new(0.0, 0.0),
+            "in the inner group's own space"
+        );
+        assert_eq!(laid(&out, b).0, Point::new(0.0, 24.0), "a column, 4 apart");
     }
 }

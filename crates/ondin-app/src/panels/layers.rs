@@ -2451,10 +2451,10 @@ impl OndinApp {
         {
             return None;
         }
-        // A frame belongs to the canvas or to another frame and never to a group
-        // (§5.3) — refuse rather than offer an invalid drop. Every carried row has to
-        // be welcome, since they all land in the same parent: a set holding a frame
-        // and a shape can only be dropped where both fit.
+        // A frame never sits under a boolean or a mask, at any depth, and never in a
+        // shape (§5.3, §15 D876) — refuse rather than offer an invalid drop. Every
+        // carried row has to be welcome, since they all land in the same parent: a
+        // set holding a frame and a shape can only be dropped where both fit.
         dragged
             .iter()
             .all(|d| self.drop_is_legal(*d, target.parent))
@@ -2479,7 +2479,11 @@ impl OndinApp {
         let Some(parent_node) = self.session.doc.get(parent) else {
             return false;
         };
+        let doc = &self.session.doc;
+        // The ancestor half (§15 D876) is the one a kind pair cannot see: a group
+        // holding a card dropped into a boolean passes `can_parent` at every level.
         build::can_parent(parent_node.kind(), node.kind())
+            && (doc.frame_may_sit_under(parent) || !doc.holds_a_frame(dragged))
     }
 
     /// Read the pointer against the rows the walk just drew: work out where the drag
@@ -4342,6 +4346,77 @@ mod drop_indent_tests {
             d,
             e,
         }
+    }
+
+    /// **A drop is refused where `apply` would refuse the reparent, ancestors
+    /// included** (§15 D870, D876) — a page holding a mask group, a plain group, and
+    /// a group holding a card frame.
+    ///
+    /// The card's group may go into the plain group (a frame may sit in a group,
+    /// at any depth) and not into the mask, and every parent–child pair in that
+    /// refused drop is legal on its own — group into group — so the kind check
+    /// alone offered it and the commit bounced it.
+    ///
+    /// **Flip run**, the `frame_may_sit_under || !holds_a_frame` clause deleted:
+    /// fails on *"a card's group into a mask"* at `true`, the predicted site.
+    #[test]
+    fn a_frame_cannot_be_dropped_under_a_mask_at_any_depth() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0xD4A);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let (page, masked, r, plain, holder, card) = (
+            ids.mint(),
+            ids.mint(),
+            ids.mint(),
+            ids.mint(),
+            ids.mint(),
+            ids.mint(),
+        );
+        let create = |id, parent, kind| Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind,
+            transform: None,
+            name: None,
+        };
+        let frame = || NodeKind::Artboard {
+            size: Size::new(40.0, 40.0),
+        };
+        doc.apply(&Transaction(vec![
+            create(page, root, frame()),
+            create(masked, page, NodeKind::Group),
+            create(
+                r,
+                masked,
+                NodeKind::Rect {
+                    size: Size::new(10.0, 10.0),
+                    corner_radii: Default::default(),
+                },
+            ),
+            Operation::SetMask {
+                id: masked,
+                mask: true,
+            },
+            create(plain, page, NodeKind::Group),
+            create(holder, page, NodeKind::Group),
+            create(card, holder, frame()),
+        ]))
+        .expect("the tree");
+        app.session.adopt_document(doc, None);
+
+        assert!(app.drop_is_legal(card, plain), "a card into a group");
+        assert!(
+            app.drop_is_legal(holder, plain),
+            "a card's group into a group"
+        );
+        assert!(
+            !app.drop_is_legal(holder, masked),
+            "a card's group into a mask"
+        );
+        assert!(!app.drop_is_legal(card, masked), "a card into a mask");
     }
 
     /// ⚠️ **Five passes**, for the same reason `tree_guide_tests::dashes` takes

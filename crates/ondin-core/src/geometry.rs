@@ -1554,6 +1554,8 @@ mod tests {
             effects: Vec::new(),
             grids: Vec::new(),
             insets: Default::default(),
+            display: None,
+            item: Default::default(),
         }
     }
 

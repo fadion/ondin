@@ -5001,6 +5001,22 @@ pub fn measure(parts: TextRef<'_>) -> Rect {
     layout(parts).bounds()
 }
 
+/// The narrowest and the widest a text node's lines can be laid out — CSS's
+/// **min-content** width (every soft break taken: the widest word) and
+/// **max-content** width (none taken) — for container layout's measure (§15 D872).
+///
+/// **The gap §15 D867's spike found** (run before build step 1, and recorded as
+/// D872's): a flex container asks each item for its
+/// min-content width, and core could only answer with a *box* — `AutoHeight(1)`
+/// reports a box 1 wide, not the widest word — so a text item could be squeezed
+/// below its longest word. parley computes both from the shaped layout; this is
+/// that, through the same shaping seam as [`layout`], so [`shapes`] counts it.
+pub fn content_widths(parts: TextRef<'_>) -> (f64, f64) {
+    let shaped = shape(parts);
+    let w = shaped.layout.calculate_content_widths();
+    (f64::from(w.min), f64::from(w.max))
+}
+
 /// A family name shaped in the family it names — one row of the font picker.
 ///
 /// Positions are in strip-local space: `x` along the run from 0, `baseline` down

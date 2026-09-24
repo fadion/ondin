@@ -632,12 +632,22 @@ fn load_rejects_duplicate_child_listing() {
     assert!(matches!(err, IoError::Integrity(msg) if msg.contains("twice")));
 }
 
+/// Promote the layer inside the fixture's group to a frame and mark that group
+/// a mask: a frame may sit in a group (§15 D870) but never under a mask (§15
+/// D876), a rule `apply` enforces and the loader must not silently allow.
+///
+/// This promoted the layer alone and expected a refusal until D870 — the group
+/// was the violation then. The promotion alone is now the control, and it is
+/// what says the refusal below is about the mask. Every parent–child pair in the
+/// refused file is legal (group → frame), so the pairwise `check_child_kind`
+/// passes it; only check (7) sees it.
+///
+/// **Flip run**, `verify_integrity`'s check (7) disabled (`barred` never set):
+/// fails on *"corrupted document must be rejected"* in the second
+/// `load_corrupted`, the predicted site.
 #[test]
 fn load_enforces_the_same_kind_rules_as_operations() {
-    // Promote the rect inside the group to an Artboard: a frame nests inside a
-    // *frame* but never inside a group (§5.3), a rule `apply` enforces and the
-    // loader must not silently allow.
-    let err = load_corrupted(|value| {
+    fn promote(value: &mut serde_json::Value, and_mask: bool) {
         let groups: Vec<serde_json::Value> = value["nodes"]
             .as_array()
             .unwrap()
@@ -646,17 +656,30 @@ fn load_enforces_the_same_kind_rules_as_operations() {
             .map(|n| n["id"].clone())
             .collect();
         assert!(!groups.is_empty(), "fixture has no group");
-        for node in value["nodes"].as_array_mut().unwrap() {
-            if groups.contains(&node["parent"]) {
-                node["kind"] = serde_json::json!({
-                    "Artboard": { "size": {"width": 10.0, "height": 10.0}, "background": null }
-                });
-                return;
-            }
+        let nodes = value["nodes"].as_array_mut().unwrap();
+        let Some(inside) = nodes.iter_mut().find(|n| groups.contains(&n["parent"])) else {
+            panic!("fixture has nothing inside a group");
+        };
+        inside["kind"] = serde_json::json!({
+            "Artboard": { "size": {"width": 10.0, "height": 10.0}, "background": null }
+        });
+        let group = inside["parent"].clone();
+        if and_mask {
+            let g = nodes.iter_mut().find(|n| n["id"] == group).unwrap();
+            g["mask"] = serde_json::json!(true);
         }
-        panic!("fixture has nothing inside a group");
-    });
-    assert!(matches!(err, IoError::Integrity(_)));
+    }
+
+    let (doc, _root) = rich_document();
+    let mut value: serde_json::Value = serde_json::from_slice(&io::save(&doc).unwrap()).unwrap();
+    promote(&mut value, false);
+    io::load(&serde_json::to_vec(&value).unwrap()).expect("a frame in a group loads");
+
+    let err = load_corrupted(|value| promote(value, true));
+    assert!(
+        matches!(&err, IoError::Integrity(msg) if msg.contains("boolean or a mask")),
+        "{err}"
+    );
 }
 
 /// `Stroke::align` was added after v1 files existed. It is defaulted rather than

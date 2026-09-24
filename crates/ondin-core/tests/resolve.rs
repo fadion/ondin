@@ -300,20 +300,49 @@ fn run_random_session(seed: u64) {
                     name: None,
                 }]))
             }
-            // create a group under a random container
+            // create a group under a random container — or, one time in three, a
+            // card frame, clipping or not, which can land inside a group (§15
+            // D870). **A non-clipping frame's ink is its children's too** (§15
+            // D876), so it is a third route by which a box travels up the tree,
+            // and the one the two passes compute in different places. Flip run:
+            // that arm deleted from `recompute_bounds` alone fails here at seed 1,
+            // an ink mismatch on a frame — so the random ops do reach the case.
             2 => {
                 let parent = *pick(&mut rng, &container_targets(&doc, &containers, &movable))
                     .unwrap_or(&containers[1]);
                 let id = ids.mint();
                 movable.push(id);
-                Some(Transaction(vec![Operation::CreateNode {
-                    id,
-                    parent,
-                    index: 0,
-                    kind: NodeKind::Group,
-                    transform: Some(rand_transform(&mut rng)),
-                    name: None,
-                }]))
+                let transform = Some(rand_transform(&mut rng));
+                if rng.next_range(3) == 0 {
+                    Some(Transaction(vec![
+                        Operation::CreateNode {
+                            id,
+                            parent,
+                            index: 0,
+                            kind: NodeKind::Artboard {
+                                size: Size::new(
+                                    20.0 + rng.next_range(80) as f64,
+                                    20.0 + rng.next_range(80) as f64,
+                                ),
+                            },
+                            transform,
+                            name: None,
+                        },
+                        Operation::SetClip {
+                            id,
+                            clip: rng.next_range(2) == 0,
+                        },
+                    ]))
+                } else {
+                    Some(Transaction(vec![Operation::CreateNode {
+                        id,
+                        parent,
+                        index: 0,
+                        kind: NodeKind::Group,
+                        transform,
+                        name: None,
+                    }]))
+                }
             }
             // move a random movable node
             3 => pick(&mut rng, &movable).map(|&id| {
@@ -448,10 +477,13 @@ fn run_random_session(seed: u64) {
 }
 
 fn container_targets(doc: &Document, containers: &[NodeId], movable: &[NodeId]) -> Vec<NodeId> {
-    // Artboards plus any movable node that is a Group.
+    // Artboards plus any movable node that is a Group or a card frame.
     let mut out: Vec<NodeId> = containers.iter().copied().skip(1).collect(); // skip root
     for id in movable {
-        if matches!(doc.get(*id).map(|n| n.kind()), Some(NodeKind::Group)) {
+        if matches!(
+            doc.get(*id).map(|n| n.kind()),
+            Some(NodeKind::Group | NodeKind::Artboard { .. })
+        ) {
             out.push(*id);
         }
     }
@@ -466,9 +498,13 @@ fn assert_resolved_matches_rebuild(doc: &Document, live: &Resolved, seed: u64) {
         // The used geometry first, because everything below is composed from it
         // (§15 D868) — a divergence there shows up as a wrong world transform one
         // line later, and naming the cause is worth the two assertions. Equal to
-        // the document on every node today, where the identity pass lays nothing
-        // out; asserted anyway, because D868's condition for the seventh map was
-        // that this guard *compare* it rather than join the maps it leaves out.
+        // the document on every node *this test generates*, because none of its
+        // random ops authors a layout input — no `SetInsets`, `SetDisplay` or
+        // `SetFlexItem` — though since steps 2 and 3 the real pass lays out any
+        // document that has one (§15 D874, D875). Asserted anyway, because D868's
+        // condition for the seventh map was that this guard *compare* it rather
+        // than join the maps it leaves out; generating those ops is owed
+        // (`docs/roadmap.md`, *Next · Container layout*).
         assert_eq!(
             live.used_local(doc, id),
             fresh.used_local(doc, id),
@@ -549,6 +585,76 @@ impl Lcg {
     fn next_range(&mut self, n: u64) -> u64 {
         if n == 0 { 0 } else { self.next_u64() % n }
     }
+}
+
+/// **A frame that does not clip lends its group its children's ink; one that
+/// clips does not** (§15 D876) — Root → frame → `Group` → a 100×100 card frame at
+/// the origin → a rect overflowing it to x 300.
+///
+/// The reported symptom is culling: `scene::paint_node` skips a group's whole
+/// subtree when its ink is off screen, so with the ink stopping at the card's box
+/// the overflow vanished whenever the card itself scrolled out of view. Asserted on
+/// the group's `ink_bounds` because that is the rect the cull reads — and after a
+/// `SetClip` through `update`, beside a rebuild, so the incremental pass is held to
+/// the same answer.
+///
+/// **Flip run**, the `Artboard if !node.clip()` arm deleted from both passes: fails
+/// on *"the overflow is the group's ink"* at a `max_x` of 100 — the predicted site.
+/// With it deleted from `recompute_bounds` only, the rebuild half passes and the
+/// `update`-after-toggle assertion fails instead, which is the two passes'
+/// equality doing its job.
+#[test]
+fn a_frame_that_does_not_clip_lends_its_group_the_overflow() {
+    let mut ids = IdSource::new(0xF10);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (page, row, card, spill) = (ids.mint(), ids.mint(), ids.mint(), ids.mint());
+    create(&mut doc, page, root, 0, artboard(), Affine::IDENTITY);
+    create(&mut doc, row, page, 0, NodeKind::Group, Affine::IDENTITY);
+    create(
+        &mut doc,
+        card,
+        row,
+        0,
+        NodeKind::Artboard {
+            size: Size::new(100.0, 100.0),
+        },
+        Affine::IDENTITY,
+    );
+    create(
+        &mut doc,
+        spill,
+        card,
+        0,
+        rect(250.0, 10.0),
+        Affine::translate((50.0, 0.0)),
+    );
+
+    let mut live = Resolved::rebuild(&doc);
+    assert_eq!(
+        live.ink_bounds(row).map(|r| r.x1),
+        Some(100.0),
+        "a clipping card keeps its group's ink at its box"
+    );
+
+    let outcome = doc
+        .apply(&Transaction(vec![Operation::SetClip {
+            id: card,
+            clip: false,
+        }]))
+        .unwrap();
+    live.update(&doc, &outcome.dirty);
+    let rebuilt = Resolved::rebuild(&doc);
+    assert_eq!(
+        rebuilt.ink_bounds(row).map(|r| r.x1),
+        Some(300.0),
+        "the overflow is the group's ink"
+    );
+    assert_eq!(
+        live.ink_bounds(row),
+        rebuilt.ink_bounds(row),
+        "and `update` agrees after the toggle"
+    );
 }
 
 /// The text cache (§5.9): `Resolved` shapes each `Text` node once and everything

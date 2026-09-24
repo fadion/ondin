@@ -1033,9 +1033,12 @@ fn paint_node<P: ScenePainter>(
     let mut ghosts: Vec<&crate::renderer::Ghost> = ov.ghosts_of(id).collect();
     ghosts.sort_by_key(|g| g.index);
     let mut next_ghost = 0usize;
+    // The preview's order where it reorders this parent (§15 D877), so a dragged
+    // reorder draws in the z-order its release commits.
+    let children = ov.children_of(id).unwrap_or(node.children());
     // `..=len` so anything indexed at or past the end still gets drawn, which is what
     // an appending caller asks for.
-    for pos in 0..=node.children().len() {
+    for pos in 0..=children.len() {
         while let Some(ghost) = ghosts.get(next_ghost).filter(|g| g.index <= pos) {
             if ov.ghosts_escape_clip() {
                 close(painter, &mut open, &mut mask);
@@ -1045,7 +1048,7 @@ fn paint_node<P: ScenePainter>(
             paint_ghost(doc, ov, &ghost.node, world, base, painter);
             next_ghost += 1;
         }
-        let Some(child) = node.children().get(pos) else {
+        let Some(child) = children.get(pos) else {
             break;
         };
         // **A mask is not artwork, and this is the whole of what that means

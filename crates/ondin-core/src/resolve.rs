@@ -138,15 +138,73 @@ struct Used {
     /// anything else — which is what lets every `match` on a node's *kind* to ask
     /// what sort of node it is keep reading the document.
     kind: Option<NodeKind>,
+    /// The box of a container with a layout and **no size of its own** — a group
+    /// with `display` (§15 D869), whose size is whatever its layout makes it. Its
+    /// origin is the group's local origin. `None` for everything else, a frame
+    /// included: a frame's size is its kind's.
+    frame: Option<kurbo::Size>,
+}
+
+/// The committed document as the flex engine sees it (`container::LayoutView`):
+/// every answer a **specified** value, read straight off the node. Crate-visible
+/// for `build`'s conversions, which ask the same questions of the same tree.
+pub(crate) struct DocView<'a>(pub(crate) &'a Document);
+
+impl crate::container::LayoutView for DocView<'_> {
+    fn parent(&self, id: NodeId) -> Option<NodeId> {
+        self.0.get(id).and_then(|n| n.parent())
+    }
+    fn children(&self, id: NodeId) -> Vec<NodeId> {
+        self.0
+            .get(id)
+            .map(|n| n.children().to_vec())
+            .unwrap_or_default()
+    }
+    fn kind(&self, id: NodeId) -> Option<NodeKind> {
+        self.0.get(id).map(|n| n.kind().clone())
+    }
+    fn display(&self, id: NodeId) -> Option<crate::container::Display> {
+        self.0.get(id).and_then(|n| n.display().copied())
+    }
+    fn item(&self, id: NodeId) -> crate::container::FlexItem {
+        self.0.get(id).map(|n| *n.item()).unwrap_or_default()
+    }
+    fn insets(&self, id: NodeId) -> crate::container::Insets {
+        self.0.get(id).map(|n| *n.insets()).unwrap_or_default()
+    }
+    fn visible(&self, id: NodeId) -> bool {
+        self.0.get(id).is_some_and(|n| n.visible())
+    }
+    fn mask(&self, id: NodeId) -> bool {
+        self.0.get(id).is_some_and(|n| n.mask())
+    }
+    fn local(&self, id: NodeId) -> Affine {
+        self.0.get(id).map(|n| n.transform()).unwrap_or_default()
+    }
+}
+
+/// The box a pinned child is placed against: its parent frame's used size, or
+/// the laid-out box of a group with a layout. `None` for a parent with no edges.
+fn frame_box(used: &FxHashMap<NodeId, Used>, parent: &Node) -> Option<kurbo::Size> {
+    match kind_in(used, parent) {
+        NodeKind::Artboard { size } => Some(*size),
+        NodeKind::Group => used.get(&parent.id()).and_then(|u| u.frame),
+        _ => None,
+    }
 }
 
 /// The used geometry of `id`, or `None` where it is the specified geometry.
 ///
-/// **Absolute insets on frames** (§15 D871, D867's build step 2): a child of a
-/// frame with any inset set is placed by [`crate::container::place`] against the
-/// frame's **used** size — read out of `used`, which the caller fills parents
-/// first, so a frame another frame has stretched hands its children the stretched
-/// size. Everything else answers `None` and is drawn where the document says.
+/// **Flex first** (§15 D875): a node the pass laid out — an item placed from
+/// `laid`, or a layout root sized by its own layout — answers what the layout
+/// made of it, a group's box included.
+///
+/// **Then absolute insets** (§15 D871, D867's build step 2): a child of a frame,
+/// or of a group with a layout, with any inset set is placed by
+/// [`crate::container::place`] against its container's **used** box — read out
+/// of `used`, which the caller fills parents first, so a frame another frame has
+/// stretched hands its children the stretched size. Everything else answers
+/// `None` and is drawn where the document says.
 ///
 /// Until step 2 this answered `None` for every node, on purpose: step 1 routed
 /// every consumer through [`Used`] behind that identity pass so that the refactor
@@ -156,22 +214,93 @@ struct Used {
 /// Under `cfg(test)` a probe can answer instead (`probe::set`), which is how this
 /// module's tests drive arbitrary used geometry through the plumbing; a probe
 /// answering `None` falls through to the real layout.
-fn used_geometry(doc: &Document, used: &FxHashMap<NodeId, Used>, id: NodeId) -> Option<Used> {
+fn used_geometry(
+    doc: &Document,
+    used: &FxHashMap<NodeId, Used>,
+    laid: &FxHashMap<NodeId, crate::container::Laid>,
+    id: NodeId,
+) -> Option<Used> {
     #[cfg(test)]
     if let Some(u) = probe::used(doc, id) {
         return Some(u);
     }
     let node = doc.get(id)?;
+    // **Laid out by a flex container** (step 3): an in-flow item takes its slot
+    // and size from the pass its chain root ran; a layout root takes only its size
+    // from its own pass (it hugs), and is placed as any other child of its parent.
+    if let Some(l) = laid.get(&id) {
+        let view = DocView(doc);
+        let item =
+            crate::container::parent_lays_out(&view, id) && crate::container::in_flow(&view, id);
+        if item {
+            return crate::container::item_placed(&view, id, l.slot, l.size).map(|p| Used {
+                local: p.local,
+                kind: p.kind,
+                frame: p.frame,
+            });
+        }
+        return root_used(doc, used, node, l.size);
+    }
     let parent = doc.get(node.parent()?)?;
-    let NodeKind::Artboard { size } = kind_in(used, parent) else {
-        return None;
-    };
+    let frame = frame_box(used, parent)?;
     let (local, kind) =
-        crate::container::place(node.insets(), *size, node.transform(), node.kind())?;
+        crate::container::place(node.insets(), frame, node.transform(), node.kind())?;
     Some(Used {
         local: Some(local),
         kind,
+        frame: None,
     })
+}
+
+/// A layout root's used geometry: the size its own pass gave it — a frame asked
+/// to hug grows its kind, a group with a layout takes the box — placed as any
+/// other child of its parent (by its transform, or by insets in a frame).
+fn root_used(
+    doc: &Document,
+    used: &FxHashMap<NodeId, Used>,
+    node: &Node,
+    size: kurbo::Size,
+) -> Option<Used> {
+    let (kind, frame) = crate::container::root_sized(&DocView(doc), node.id(), size);
+    // Insets place a frame root inside a frame the step-2 way; a group root takes
+    // no insets yet (its box is new in this step, §15 D869).
+    let pinned = node
+        .parent()
+        .and_then(|p| doc.get(p))
+        .and_then(|p| frame_box(used, p))
+        .and_then(|f| {
+            let k = kind.clone().unwrap_or_else(|| node.kind().clone());
+            crate::container::place(node.insets(), f, node.transform(), &k)
+        });
+    match pinned {
+        Some((local, k)) => Some(Used {
+            local: Some(local),
+            kind: k.or(kind),
+            frame,
+        }),
+        None => (kind.is_some() || frame.is_some()).then_some(Used {
+            local: None,
+            kind,
+            frame,
+        }),
+    }
+}
+
+/// `id`'s used geometry, running its layout pass first when it roots one — so a
+/// chain's items find their results in `laid` when the parents-first walk reaches
+/// them.
+fn place_node(
+    doc: &Document,
+    used: &FxHashMap<NodeId, Used>,
+    laid: &mut FxHashMap<NodeId, crate::container::Laid>,
+    id: NodeId,
+) -> Option<Used> {
+    if crate::container::is_layout_root(&DocView(doc), id) {
+        for l in crate::container::lay_out(&DocView(doc), id) {
+            laid.insert(l.id, l);
+        }
+    }
+    used_geometry(doc, used, laid, id)
 }
 
 /// `node`'s used local transform: the entry's where layout moved it, the
@@ -304,8 +433,9 @@ impl Resolved {
         // Pre-order, so a frame's entry is in the map before its children are
         // placed against it.
         let mut used: FxHashMap<NodeId, Used> = FxHashMap::default();
+        let mut laid = FxHashMap::default();
         for id in crate::subtree_nodes(doc, &[doc.root()]) {
-            if let Some(u) = used_geometry(doc, &used, id) {
+            if let Some(u) = place_node(doc, &used, &mut laid, id) {
                 used.insert(id, u);
             }
         }
@@ -398,7 +528,12 @@ impl Resolved {
         // second traversal.
         let mut affected: FxHashMap<NodeId, usize> = FxHashMap::default();
         for id in &existing {
-            collect_subtree(doc, *id, depth(doc, *id), &mut affected);
+            // **From the root of its flex chain, not from itself** (step 3): an
+            // item's change moves its siblings and can resize every hugging
+            // container above it, and the pass that says where they all go runs
+            // at the chain's root. For a node in no chain this is the node.
+            let from = crate::container::chain_root(&DocView(doc), *id);
+            collect_subtree(doc, from, depth(doc, from), &mut affected);
         }
         let mut ordered: Vec<NodeId> = affected.keys().copied().collect();
 
@@ -448,14 +583,14 @@ impl Resolved {
         // *changed* is remembered, because a text node is shaped at its used kind
         // and has to be re-shaped when that moves even though its own kind did not
         // — which is the one door past D590's rule below, and it is only as wide
-        // as the entries that changed. ⚠️ **Siblings are not in `affected`**, and
-        // under flex they will have to be: an item moves when its neighbour grows,
-        // and nothing dirties the neighbour today. Identity layout cannot tell the
-        // difference; the step that makes one node's box depend on another's owes
-        // the widening.
+        // as the entries that changed. **Siblings are in `affected`** because the
+        // collection above starts from each dirty node's `chain_root` (§15 D868's
+        // widening, paid by step 3, D875): an item moves when its neighbour grows,
+        // and the whole chain is re-laid.
         let mut relaid: Vec<NodeId> = Vec::new();
+        let mut laid = FxHashMap::default();
         for id in &ordered {
-            let fresh = used_geometry(doc, &self.used, *id);
+            let fresh = place_node(doc, &self.used, &mut laid, *id);
             let changed = match fresh {
                 Some(u) => self.used.insert(*id, u.clone()).as_ref() != Some(&u),
                 None => self.used.remove(id).is_some(),
@@ -600,6 +735,13 @@ impl Resolved {
     /// [`Self::used_local_of`]'s condition: `node` must be this document's own.
     pub fn used_kind_of<'a>(&'a self, node: &'a Node) -> &'a NodeKind {
         kind_in(&self.used, node)
+    }
+
+    /// The box a group with a layout was given, in its own space from its origin
+    /// (§15 D869) — `None` for any other node, a frame included, whose size is
+    /// its kind's. What the selection, the W/H and a resize read for such a group.
+    pub fn used_frame(&self, id: NodeId) -> Option<kurbo::Size> {
+        self.used.get(&id).and_then(|u| u.frame)
     }
 
     /// The stroke-expanded world AABB of `id`.
@@ -908,7 +1050,17 @@ impl Resolved {
     fn recompute_bounds(&mut self, doc: &Document, id: NodeId) {
         let node = doc.get(id).expect("in document");
         let world = self.world.get(&id).copied().unwrap_or(Affine::IDENTITY);
+        let laid_box = self.used.get(&id).and_then(|u| u.frame);
         let bounds = match node.kind() {
+            // **A group with a layout is a box** (§15 D869): its bounds are the box
+            // its layout made, padding and all, not the union of what it holds —
+            // the selection outline and the W/H are the container's.
+            NodeKind::Group if laid_box.is_some() => laid_box.and_then(|s| {
+                geometry::measurable(geometry::transform_rect(
+                    world,
+                    Rect::from_origin_size(kurbo::Point::ZERO, s),
+                ))
+            }),
             // **The one place a mask reaches a box.** A masked layer keeps its own
             // bounds — see the note on [`Self::world_bounds`] — but what it lends
             // its *container* is only what the mask lets through, so zooming to a
@@ -1009,40 +1161,22 @@ impl Resolved {
         // children before parents, and the up-tree propagation in `update` walks
         // through here as well.
         let ink = match node.kind() {
-            NodeKind::Group | NodeKind::Root => {
-                let mut mask_ink: Option<Rect> = None;
-                node.children()
-                    .iter()
-                    .filter_map(|c| {
-                        let is_mask = doc.get(*c).is_some_and(|n| n.mask());
-                        let b = self.ink_bounds.get(c).copied();
-                        if is_mask {
-                            // The ink twin of the box above, and it needs
-                            // [`mask_extent`] for the same reason (§15 D460) —
-                            // more so, since this is the box `scene::paint_node`
-                            // culls a whole subtree on.
-                            mask_ink = mask_extent(doc, &self.ink_bounds, *c);
-                            // Nothing, for the box's reason (§15 D494). Safe in
-                            // the direction this union may not err: what is drawn
-                            // is every other child's ink *intersected* with this,
-                            // so dropping it can only shrink the union to ink
-                            // that is actually painted.
-                            return None;
-                        }
-                        match mask_ink {
-                            // **Clipped by the mask's *ink*, where the box above
-                            // uses the mask's box.** A blurred mask passes ink
-                            // beyond its own outline, so its geometry box is the
-                            // one thing here that could be too small — and too
-                            // small is the one error these bounds may not make.
-                            Some(m) => b.and_then(|b| clipped_to(b, m)),
-                            None => b,
-                        }
-                    })
-                    .reduce(|acc, b| acc.union(b))
+            NodeKind::Group | NodeKind::Root => self.children_ink(doc, node),
+            // **A frame that does not clip lets its children's ink out, so its own
+            // ink has to say so** (§15 D876). It was its box alone, on the reading
+            // that its children *"are either clipped to it or walked on their own
+            // terms"* — true of the walk, which descends into a frame whatever its
+            // ink, and false of every ancestor that culls a whole subtree on the
+            // union of its children's ink. That was only the root until frames
+            // could sit in groups; a group is culled on this union, and its card's
+            // overflow vanished whenever the group's box was off screen. Too large
+            // is the one direction these bounds may err, so a clipping frame keeps
+            // its box: nothing of its children is painted outside it.
+            NodeKind::Artboard { .. } if !node.clip() => {
+                union_of(bounds, self.children_ink(doc, node))
             }
-            // Everything else takes its own box: a frame's ink is its frame, and
-            // its children are either clipped to it or walked on their own terms.
+            // Everything else takes its own box, and a clipping frame's children
+            // are clipped to it.
             _ => bounds,
         };
         match ink {
@@ -1070,8 +1204,52 @@ impl Resolved {
         }
     }
 
+    /// The union of `node`'s children's ink, each clipped by the mask governing
+    /// it and no mask contributing — what a container's ink starts from, before
+    /// its own effects escape over it.
+    fn children_ink(&self, doc: &Document, node: &crate::Node) -> Option<Rect> {
+        let mut mask_ink: Option<Rect> = None;
+        node.children()
+            .iter()
+            .filter_map(|c| {
+                let is_mask = doc.get(*c).is_some_and(|n| n.mask());
+                let b = self.ink_bounds.get(c).copied();
+                if is_mask {
+                    // The ink twin of the box in `recompute_bounds`, and it needs
+                    // [`mask_extent`] for the same reason (§15 D460) — more so,
+                    // since this is the box `scene::paint_node` culls a whole
+                    // subtree on.
+                    mask_ink = mask_extent(doc, &self.ink_bounds, *c);
+                    // Nothing, for the box's reason (§15 D494). Safe in the
+                    // direction this union may not err: what is drawn is every
+                    // other child's ink *intersected* with this, so dropping it can
+                    // only shrink the union to ink that is actually painted.
+                    return None;
+                }
+                match mask_ink {
+                    // **Clipped by the mask's *ink*, where the box uses the mask's
+                    // box.** A blurred mask passes ink beyond its own outline, so
+                    // its geometry box is the one thing here that could be too
+                    // small — and too small is the one error these bounds may not
+                    // make.
+                    Some(m) => b.and_then(|b| clipped_to(b, m)),
+                    None => b,
+                }
+            })
+            .reduce(|acc, b| acc.union(b))
+    }
+
     fn reindex(&mut self, doc: &Document) {
         self.index = build_index(doc, &self.world_bounds);
+    }
+}
+
+/// Two optional rects unioned, either one standing alone when the other is
+/// absent.
+fn union_of(a: Option<Rect>, b: Option<Rect>) -> Option<Rect> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.union(b)),
+        (a, b) => a.or(b),
     }
 }
 
@@ -1165,7 +1343,15 @@ fn resolve_subtree(
         }
     }
 
+    // `recompute_bounds`' twin: a group with a layout is the box its layout made.
+    let laid_box = used.get(&id).and_then(|u| u.frame);
     let bounds = match node.kind() {
+        NodeKind::Group if laid_box.is_some() => laid_box.and_then(|s| {
+            geometry::measurable(geometry::transform_rect(
+                w,
+                Rect::from_origin_size(kurbo::Point::ZERO, s),
+            ))
+        }),
         NodeKind::Group | NodeKind::Root => child_union,
         _ => geometry::world_bounds_of_parts(kind, node.paint(), w, c.text.get(&id)),
     };
@@ -1177,6 +1363,9 @@ fn resolve_subtree(
     // children's *ink*, and this node's own escape applies over the result.
     let inner = match node.kind() {
         NodeKind::Group | NodeKind::Root => child_ink_union,
+        // `recompute_bounds`' arm, and its reason (§15 D876): a frame that does not
+        // clip lends its container its children's ink.
+        NodeKind::Artboard { .. } if !node.clip() => union_of(bounds, child_ink_union),
         _ => bounds,
     };
     if let Some(b) = inner {
@@ -1846,11 +2035,13 @@ mod used_geometry_tests {
                 Some(Used {
                     local: Some(Affine::translate((5.0, 5.0))),
                     kind: Some(rect_kind(width - 10.0, 50.0)),
+                    frame: None,
                 })
             } else if id == inner {
                 Some(Used {
                     local: Some(Affine::translate((30.0, 0.0))),
                     kind: None,
+                    frame: None,
                 })
             } else if id == text {
                 // A faded frame halves the wrap: an input that dirties the frame
@@ -1864,6 +2055,7 @@ mod used_geometry_tests {
                 Some(Used {
                     local: None,
                     kind: Some(text_kind(TextSizing::AutoHeight(width / share))),
+                    frame: None,
                 })
             } else {
                 None

@@ -613,7 +613,10 @@ fn a_subtree_of_existing_nodes_is_refused() {
 #[test]
 fn structural_transactions_are_refused() {
     // Refusing is the point: previewing these would need a real tree edit, and
-    // guessing would show something other than what commits.
+    // guessing would show something other than what commits. A **reorder** was a
+    // third row until it became representable as an order override on the parent
+    // (§15 D877) — `a_reorder_previews_as_its_commit` has it now — and an index
+    // `apply` would refuse still is refused, which is this row.
     let f = fixture();
     let res = Resolved::rebuild(&f.doc);
     for (tx, what) in [
@@ -632,9 +635,9 @@ fn structural_transactions_are_refused() {
         (
             Transaction(vec![Operation::Reorder {
                 id: f.rect,
-                index: 0,
+                index: 99,
             }]),
-            "reorder",
+            "a reorder past the end",
         ),
     ] {
         assert!(
@@ -662,26 +665,84 @@ fn values_the_commit_would_reject_are_refused() {
         "out-of-range opacity"
     );
 
-    // An artboard cannot be created inside a *group*, so its ghost must not be
-    // drawn either. (Inside another artboard it can — frames nest, §5.3.)
+    // A frame may be created inside a group (§15 D870) and never under a mask
+    // (§15 D876), so its ghost is drawn in the first and not in the second — as a
+    // create and as a paste. (Inside another artboard it can — frames nest, §5.3.)
+    // Flip run: `CreateNode`'s ancestor check disabled fails on "a frame under a
+    // mask", and `frame_barred` disabled on "a paste holding a frame, into a mask".
     let mut ids = IdSource::new(0xBAD);
+    let frame_in = |ids: &mut IdSource, parent| {
+        Transaction(vec![Operation::CreateNode {
+            id: ids.mint(),
+            parent,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(10.0, 10.0),
+            },
+            transform: None,
+            name: None,
+        }])
+    };
     assert!(
-        RenderOverrides::from_transaction(
-            &f.doc,
-            &res,
-            &Transaction(vec![Operation::CreateNode {
-                id: ids.mint(),
-                parent: f.group,
+        RenderOverrides::from_transaction(&f.doc, &res, &frame_in(&mut ids, f.group)).is_some(),
+        "a frame in a group"
+    );
+    let mut masked = f.doc.clone();
+    masked
+        .apply(&Transaction(vec![Operation::SetMask {
+            id: f.group,
+            mask: true,
+        }]))
+        .expect("the fixture's group can mask");
+    let masked_res = Resolved::rebuild(&masked);
+    assert!(
+        RenderOverrides::from_transaction(&masked, &masked_res, &frame_in(&mut ids, f.group))
+            .is_none(),
+        "a frame under a mask"
+    );
+    // The same as a paste: a group holding a frame, into the mask...
+    let (g, card) = (ids.mint(), ids.mint());
+    let mut holder = masked.clone();
+    holder
+        .apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: g,
+                parent: f.artboard,
+                index: 0,
+                kind: NodeKind::Group,
+                transform: None,
+                name: None,
+            },
+            Operation::CreateNode {
+                id: card,
+                parent: g,
                 index: 0,
                 kind: NodeKind::Artboard {
                     size: Size::new(10.0, 10.0),
                 },
                 transform: None,
                 name: None,
-            }])
-        )
-        .is_none(),
-        "a frame in a group"
+            },
+        ]))
+        .unwrap();
+    let mut remap = IdSource::new(0xBAE);
+    let (nodes, _) =
+        ondin_core::remap_subtree(&holder.capture_subtree(g).expect("a capture"), &mut remap)
+            .expect("a remap");
+    let paste = |parent| {
+        Transaction(vec![Operation::InsertSubtree {
+            nodes: nodes.clone(),
+            parent,
+            index: 0,
+        }])
+    };
+    assert!(
+        RenderOverrides::from_transaction(&masked, &masked_res, &paste(f.artboard)).is_some(),
+        "the control: the paste beside the mask"
+    );
+    assert!(
+        RenderOverrides::from_transaction(&masked, &masked_res, &paste(f.group)).is_none(),
+        "a paste holding a frame, into a mask"
     );
     // And the legal one *is* previewable, so the ghost the frame tool draws inside
     // a frame is not quietly suppressed along with it.
@@ -967,6 +1028,28 @@ fn boolean_fixture(op: ondin_core::BoolOp) -> (Document, NodeId, NodeId, NodeId)
     ]))
     .expect("build the boolean");
     (doc, b, a1, a2)
+}
+
+/// **Reordering a `Subtract`'s operands previews the other cut** (§15 D877) —
+/// two overlapping squares, the base moved on top, so the result is the *other*
+/// square's leftover.
+///
+/// The third reader of the preview's child order, which `arch-scribe` found
+/// missing from the first cut: the walk and the layout view read the new order
+/// and the operands did not, so the preview would have drawn the old cut.
+///
+/// **Flip run**, `operand_children` answering the committed order: fails on the
+/// differential, the predicted site. With the reordered parent dropped from
+/// `reevaluate_booleans`' seeds instead, it fails there too — nothing asked the
+/// boolean again.
+#[test]
+fn reordering_a_subtracts_operands_previews_the_other_cut() {
+    let (doc, _b, a1, _a2) = boolean_fixture(ondin_core::BoolOp::Subtract);
+    assert_preview_matches_commit(
+        &doc,
+        &Transaction(vec![Operation::Reorder { id: a1, index: 1 }]),
+        "the base moved on top",
+    );
 }
 
 /// **A boolean's operands never reach the canvas.** They are inputs consumed by the
@@ -1484,6 +1567,64 @@ fn a_ghost_draws_at_its_index_not_on_top() {
         order[1][4], 5.0,
         "the copy is drawn second — at index 1 — not last: {order:?}"
     );
+}
+
+/// **A reorder's preview paints in the order its commit does** (§15 D877) —
+/// three overlapping rects at x 0, 20 and 40, the bottom one moved to the top.
+///
+/// The paint order is the whole of what a reorder changes where nothing lays it
+/// out, so it is asserted directly — the fills' x offsets in draw order — as
+/// well as by the pixel differential.
+///
+/// **Flip run**, the scene walk's `children_of` dropped (the committed order
+/// read): fails on the differential, the predicted site, before the order
+/// assertion is reached — which is there to name the symptom when it is.
+#[test]
+fn a_reorder_changes_the_paint_order_it_commits() {
+    let mut ids = IdSource::new(0xE0E1);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let three: Vec<NodeId> = (0..3).map(|_| ids.mint()).collect();
+    let mut ops = Vec::new();
+    for (i, id) in three.iter().enumerate() {
+        ops.push(Operation::CreateNode {
+            id: *id,
+            parent: root,
+            index: i,
+            kind: NodeKind::Rect {
+                size: Size::new(100.0, 100.0),
+                corner_radii: RoundedRectRadii::default(),
+            },
+            transform: Some(Affine::translate((i as f64 * 20.0, 0.0))),
+            name: None,
+        });
+        ops.push(Operation::SetFills {
+            id: *id,
+            fills: vec![Fill {
+                brush: Brush::Solid(Color::from_rgba8(60 * i as u8 + 40, 0, 0, 255)),
+                visible: true,
+            }],
+        });
+    }
+    doc.apply(&Transaction(ops))
+        .expect("three overlapping rects");
+
+    let tx = Transaction(vec![Operation::Reorder {
+        id: three[0],
+        index: 2,
+    }]);
+    assert_preview_matches_commit(&doc, &tx, "the bottom rect raised to the top");
+
+    let res = Resolved::rebuild(&doc);
+    let ov = RenderOverrides::from_transaction(&doc, &res, &tx).expect("representable");
+    let xs: Vec<f64> = record(&doc, &res, &ov)
+        .iter()
+        .filter_map(|c| match c {
+            Call::Fill(t, _, _, _) => Some(t[4]),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(xs, vec![20.0, 40.0, 0.0], "drawn in the new order");
 }
 
 /// **A chrome ghost draws where its index says, and is not a preview** (§15
@@ -2440,5 +2581,268 @@ fn an_inset_edit_previews_as_its_commit() {
             insets: ondin_core::Insets::default(),
         }]),
         "un-pinned",
+    );
+}
+
+/// A frame laid out as a row holding three painted rects, a nested group laid
+/// out as a column with two more, and a text node that wraps. Returns the
+/// document, the frame, the first rect and the group.
+fn flex_fixture() -> (Document, NodeId, NodeId, NodeId) {
+    use ondin_core::container::{AlignItems, Display, Flex, FlexDirection};
+    let mut ids = IdSource::new(1);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let mut add = |doc: &mut Document, parent: NodeId, kind: NodeKind| {
+        let id = ids.mint();
+        let index = doc.get(parent).unwrap().children().len();
+        let painted = !matches!(kind, NodeKind::Text { .. } | NodeKind::Group);
+        let mut ops = vec![Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind,
+            transform: Some(Affine::translate((500.0, 500.0))),
+            name: None,
+        }];
+        if painted {
+            ops.push(Operation::SetFills {
+                id,
+                fills: vec![Fill {
+                    brush: Brush::Solid(Color::from_rgba8(60, 120, 200, 255)),
+                    visible: true,
+                }],
+            });
+        }
+        doc.apply(&Transaction(ops)).unwrap();
+        id
+    };
+    let rect = |w, h| NodeKind::Rect {
+        size: Size::new(w, h),
+        corner_radii: RoundedRectRadii::default(),
+    };
+    let frame = add(
+        &mut doc,
+        root,
+        NodeKind::Artboard {
+            size: Size::new(400.0, 200.0),
+        },
+    );
+    let first = add(&mut doc, frame, rect(40.0, 30.0));
+    add(&mut doc, frame, rect(60.0, 30.0));
+    let group = add(&mut doc, frame, NodeKind::Group);
+    add(&mut doc, group, rect(20.0, 20.0));
+    add(&mut doc, group, rect(30.0, 20.0));
+    add(
+        &mut doc,
+        frame,
+        NodeKind::Text {
+            content: "flex text that wraps".into(),
+            style: Box::new(TextStyle::default()),
+            spans: Default::default(),
+            para_spans: Default::default(),
+            paragraph: Default::default(),
+            block: Default::default(),
+            sizing: TextSizing::AutoHeight(90.0),
+            on_path: None,
+            on_path_flip: false,
+            on_path_offset: 0.0,
+        },
+    );
+    doc.apply(&Transaction(vec![
+        Operation::SetDisplay {
+            id: frame,
+            display: Some(Display::Flex(Flex {
+                column_gap: 10.0,
+                padding: [20.0; 4],
+                align_items: AlignItems::Start,
+                ..Default::default()
+            })),
+        },
+        Operation::SetDisplay {
+            id: group,
+            display: Some(Display::Flex(Flex {
+                direction: FlexDirection::Column,
+                row_gap: 5.0,
+                align_items: AlignItems::Start,
+                ..Default::default()
+            })),
+        },
+    ]))
+    .unwrap();
+    (doc, frame, first, group)
+}
+
+/// **A reorder previews as its commit** (§15 D877) — in a flex row, where it
+/// moves every item after it, and in the nested column, where it swaps two; and
+/// the reordered item's z-order is the commit's too, since the walk reads the
+/// same order the layout does.
+///
+/// **Flip run**, `PreviewView::children` answering the committed order: fails on
+/// *"the first item moved to the end of the row"* — the row's layout unchanged —
+/// the predicted site. With the scene walk's `children_of` dropped instead it
+/// fails there too, which was **not** the prediction: the prediction was that the
+/// row would pass, no item overlapping another — but the differential compares
+/// the recorded draw calls *in order*, not pixels, so a paint order the commit
+/// does not share diverges whether or not it shows.
+#[test]
+fn a_reorder_previews_as_its_commit() {
+    let (doc, _frame, first, group) = flex_fixture();
+    assert_preview_matches_commit(
+        &doc,
+        &Transaction(vec![Operation::Reorder {
+            id: first,
+            index: 3,
+        }]),
+        "the first item moved to the end of the row",
+    );
+    let bottom = doc.get(group).unwrap().children()[0];
+    assert_preview_matches_commit(
+        &doc,
+        &Transaction(vec![Operation::Reorder {
+            id: bottom,
+            index: 1,
+        }]),
+        "the column's two items swapped",
+    );
+}
+
+/// **A dragged flex item's landing is its slot in the reordered row, and only
+/// it has one** (§15 D877) — the fixture's first rect (40×30) carried off by a
+/// translation while a reorder puts it second, in a row at (500, 500) with
+/// padding 20 and a gap of 10 after the 60-wide second rect.
+///
+/// It lands at x 500 + 20 + 60 + 10 = 590, y 520, as its own 40×30 box — the
+/// insertion indicator's outline — while the translation is where it is drawn.
+///
+/// **Flip run**, the landing push in `flex_relayout` deleted: fails on *"one
+/// landing"* at 0, the predicted site.
+#[test]
+fn a_dragged_flex_item_lands_in_its_reordered_slot() {
+    let (doc, _frame, first, _) = flex_fixture();
+    let res = Resolved::rebuild(&doc);
+    let tx = Transaction(vec![
+        Operation::SetTransform {
+            id: first,
+            transform: Affine::translate((900.0, 900.0)),
+        },
+        Operation::Reorder {
+            id: first,
+            index: 1,
+        },
+    ]);
+    let ov = RenderOverrides::from_transaction(&doc, &res, &tx).expect("representable");
+    let landings = ov.landings();
+    assert_eq!(landings.len(), 1, "one landing");
+    let (id, world, bx) = landings[0];
+    assert_eq!(id, first);
+    assert_eq!(world.translation(), Vec2::new(590.0, 520.0), "its slot");
+    assert_eq!(bx.size(), Size::new(40.0, 30.0), "its own box");
+}
+
+/// **A left-handle resize of a flex item previews as its commit** (§15 D877's
+/// amendment) — the fixture's first rect widened from 40 to 60 with the
+/// `SetTransform` a held right edge writes beside it.
+///
+/// The layout places an in-flow item whatever its transform, so the commit draws
+/// it in its slot at the new size; the preview used to treat the `SetTransform` as
+/// a drag and draw it at the handle's box, off to the left of where it lands.
+///
+/// **Flip run**, `flex_relayout`'s `resized` exemption deleted: fails on the
+/// differential, the predicted site.
+#[test]
+fn a_left_handle_resize_of_a_flex_item_previews_as_its_commit() {
+    let (doc, _frame, first, _) = flex_fixture();
+    assert_preview_matches_commit(
+        &doc,
+        &Transaction(vec![
+            Operation::SetGeometry {
+                id: first,
+                geometry: GeometryPatch::Size(Size::new(60.0, 30.0)),
+            },
+            Operation::SetTransform {
+                id: first,
+                transform: Affine::translate((500.0, 520.0)),
+            },
+        ]),
+        "a left-handle resize",
+    );
+}
+
+/// **Resizing one flex item draws its siblings where the release will** — the
+/// preview running the flex engine on its own state (`flex_relayout`), where a
+/// field patch could only have moved the item and left the row overlapping.
+///
+/// **Flip:** returning early from `flex_relayout` fails the first case — the
+/// siblings stay where the committed row put them.
+#[test]
+fn resizing_a_flex_item_previews_the_row_it_commits() {
+    let (doc, frame, first, _) = flex_fixture();
+    for (what, tx) in [
+        (
+            "an item resized",
+            Transaction(vec![Operation::SetGeometry {
+                id: first,
+                geometry: GeometryPatch::Size(Size::new(110.0, 30.0)),
+            }]),
+        ),
+        (
+            "the frame resized",
+            Transaction(vec![Operation::SetGeometry {
+                id: frame,
+                geometry: GeometryPatch::Size(Size::new(300.0, 200.0)),
+            }]),
+        ),
+    ] {
+        assert_preview_matches_commit(&doc, &tx, what);
+    }
+}
+
+/// Layout and item edits preview as their commits: growing an item, switching a
+/// row to a column, and taking the frame's layout away altogether.
+///
+/// **Flip:** the same early return fails here at *"an item grown"*. ⚠️ **Taking a
+/// layout away failed on the first cut with `flex_relayout` running**: a container
+/// with no layout roots no pass, so its former items kept the committed flex
+/// placement until `flex_relayout` learned to put back what it no longer lays out.
+#[test]
+fn layout_and_item_edits_preview_as_their_commits() {
+    use ondin_core::container::{Display, Flex, FlexDirection};
+    let (doc, frame, first, group) = flex_fixture();
+    let mut grow = *doc.get(first).unwrap().item();
+    grow.grow = 1.0;
+    assert_preview_matches_commit(
+        &doc,
+        &Transaction(vec![Operation::SetFlexItem {
+            id: first,
+            item: grow,
+        }]),
+        "an item grown",
+    );
+    assert_preview_matches_commit(
+        &doc,
+        &Transaction(vec![Operation::SetDisplay {
+            id: frame,
+            display: Some(Display::Flex(Flex {
+                direction: FlexDirection::Column,
+                ..Default::default()
+            })),
+        }]),
+        "the row made a column",
+    );
+    assert_preview_matches_commit(
+        &doc,
+        &Transaction(vec![Operation::SetDisplay {
+            id: frame,
+            display: None,
+        }]),
+        "the layout taken away",
+    );
+    assert_preview_matches_commit(
+        &doc,
+        &Transaction(vec![Operation::SetDisplay {
+            id: group,
+            display: None,
+        }]),
+        "the nested group's layout taken away",
     );
 }

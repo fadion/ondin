@@ -246,8 +246,8 @@ fn validation_rejects_structural_violations() {
     .expect("frames nest");
     assert_eq!(doc.get(nested).unwrap().parent(), Some(ab));
 
-    // What a frame still may not do is hang off a group, which has no box of its own
-    // for a page to be clipped by.
+    // A frame inside a group is *allowed* too (§15 D870): a row of cards is a group
+    // whose cards are frames. It used to be `ArtboardPlacement`.
     let grp = ids.mint();
     doc.apply(&Transaction(vec![Operation::CreateNode {
         id: grp,
@@ -259,10 +259,35 @@ fn validation_rejects_structural_violations() {
     }]))
     .expect("a group under a frame");
     let in_group = ids.mint();
+    doc.apply(&Transaction(vec![Operation::CreateNode {
+        id: in_group,
+        parent: grp,
+        index: 0,
+        kind: artboard(),
+        transform: None,
+        name: None,
+    }]))
+    .expect("a frame in a group");
+
+    // What a frame still may not do is hang off a boolean — whose children are
+    // operands, outlines rather than pages (§15 D876). The ancestor half of that
+    // rule is `document.rs`'s own tests'.
+    let boolean = ids.mint();
+    doc.apply(&Transaction(vec![Operation::CreateNode {
+        id: boolean,
+        parent: ab,
+        index: 0,
+        kind: NodeKind::Boolean {
+            op: ondin_core::BoolOp::Union,
+        },
+        transform: None,
+        name: None,
+    }]))
+    .expect("a boolean under a frame");
     let err = doc
         .apply(&Transaction(vec![Operation::CreateNode {
-            id: in_group,
-            parent: grp,
+            id: ids.mint(),
+            parent: boolean,
             index: 0,
             kind: artboard(),
             transform: None,
@@ -340,7 +365,8 @@ fn validation_rejects_structural_violations() {
     assert!(matches!(err, OpError::BadOpacity));
 
     // Every *failure* left the document alone: what is here is the root, the
-    // artboard, and the three the relaxed rules legitimately allowed — a frame
-    // inside the frame, a group inside it, and one loose shape at the root.
-    assert_eq!(doc.len(), 5);
+    // artboard, and the five the relaxed rules legitimately allowed — a frame
+    // inside the frame, a group inside it, a frame inside that group, the boolean
+    // the refused frame was aimed at, and one loose shape at the root.
+    assert_eq!(doc.len(), 7);
 }

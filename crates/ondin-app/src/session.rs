@@ -618,6 +618,16 @@ impl EditorSession {
         })
     }
 
+    /// The box a group with a layout is drawn as (§15 D869), a live gesture's
+    /// included — the preview's own if it re-laid the group, else the committed
+    /// one. `None` for anything that is not such a group.
+    pub fn preview_frame(&self, id: NodeId) -> Option<ondin_core::kurbo::Size> {
+        self.overrides
+            .get(id)
+            .and_then(|o| o.frame)
+            .or_else(|| self.resolved.used_frame(id))
+    }
+
     /// World transform including any live gesture.
     pub fn preview_world_transform(&self, id: NodeId) -> Option<Affine> {
         self.overrides
@@ -676,6 +686,14 @@ impl EditorSession {
         let node = self.doc.get(id)?;
         let display = self.display_node(id)?;
         let world = self.preview_world_transform(id)?;
+        // A group with a layout is the box its layout made (§15 D869), not its
+        // children's union — `Resolved`'s bounds rule, through the preview.
+        if let Some(frame) = self.preview_frame(id) {
+            return Some(geometry::transform_rect(
+                world,
+                Rect::from_origin_size(Point::ZERO, frame),
+            ));
+        }
 
         let own = geometry::world_bounds_of_parts(
             display.kind(),
@@ -704,6 +722,9 @@ impl EditorSession {
         let display = self.display_node(id)?;
         if let Some(b) = geometry::local_bounds(display.kind(), self.preview_text_layout(id)) {
             return Some(b);
+        }
+        if let Some(frame) = self.preview_frame(id) {
+            return Some(Rect::from_origin_size(Point::ZERO, frame));
         }
         // A boolean's box is its *result's*, and mid-gesture the result is the one
         // the preview re-derived — so the selection outline and the dimensions badge
@@ -1023,9 +1044,13 @@ impl EditorSession {
         // conversion is also what recognises a pinned layer written back to where
         // it is already drawn as changing nothing.
         let tx = ondin_core::build::keep_insets(&self.doc, &self.resolved, tx);
-        // And it can empty a transaction outright — one pinned layer written back
-        // where it already is — which the test above has already let through and
-        // `changes_nothing` below does not answer `true` for.
+        // And a resized flex item keeps the size it was dragged to (§15 D875), and
+        // an in-flow item its stored translation (§15 D877).
+        let tx = ondin_core::build::keep_flex_sizes(&self.doc, &self.resolved, tx);
+        // And either can empty a transaction outright — `keep_insets` one pinned
+        // layer written back where it already is, `keep_flex_sizes` a translation
+        // alone on an in-flow item — which the test above has already let through
+        // and `changes_nothing` below does not answer `true` for.
         if tx.0.is_empty() {
             self.clear_gesture_preview();
             return Ok(());

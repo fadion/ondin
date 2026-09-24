@@ -847,13 +847,16 @@ fn ratio(before: f64, after: f64) -> f64 {
 ///
 /// - an **authored** `size` is replaced ([`resize_to_handle`]);
 /// - a **childless leaf** whose shape *is* its geometry has that scaled about the held
-///   corner ([`resize_geometry`]) — a `Path`, a `Line`;
+///   corner ([`resize_geometry`]) — a `Path`, a `Line` — and so does a **group with a
+///   layout**, children or not, since it is a box and `scale_geometry` sets the box
+///   (§15 D875);
 /// - anything else is a **container** and the scale recurses into its contents
-///   ([`resize_group`]) — a `Group`, a `Boolean`, a `Frame` with children.
+///   ([`resize_group`]) — a plain `Group`, a `Boolean`.
 ///
-/// The test between the last two is structural rather than a list of kinds: an empty
-/// group answers "childless" and gets the nothing it has always got, since
-/// `scale_geometry` recurses into contents it does not have.
+/// The test between the last two is structural rather than a list of kinds, with the
+/// one exception of the group with a layout: an empty group answers "childless" and
+/// gets the nothing it has always got, since `scale_geometry` recurses into contents
+/// it does not have. (A frame never reaches here: its `size` is authored.)
 pub fn resize_layer(
     doc: &Document,
     res: &Resolved,
@@ -871,7 +874,12 @@ pub fn resize_layer(
     let Some(local) = ondin_core::local_box(doc, res, id) else {
         return Transaction::default();
     };
-    if node.children().is_empty() {
+    // **A group with a layout takes the geometry path, children or not** (§15
+    // D875): it is a box, `local_box` answers the box its layout made, and
+    // `scale_geometry` sets that box — the held corner going into its transform
+    // like any other leaf's. `resize_group` would scale its children instead.
+    let laid_group = matches!(node.kind(), NodeKind::Group) && node.display().is_some();
+    if node.children().is_empty() || laid_group {
         resize_geometry(doc, res, id, local, handle, pointer_world, opts)
     } else {
         resize_group(doc, res, id, local, handle, pointer_world, opts)
@@ -1684,6 +1692,24 @@ fn scale_geometry(
                     },
                 });
             }
+            // **A group with a layout is a box, and a resize sets the box** (§15
+            // D869, D875) — its `width`/`height` in px, the only size it has.
+            // Scaling its children instead, as for a plain group, would hand the
+            // layout bigger items to lay out and leave the box hugging them, which
+            // is a different edit and one the next reflow partly undoes. The
+            // Scale tool takes the contents too, for the reason a frame in a
+            // scaled group does (§15 D876): it is a picture made bigger.
+            NodeKind::Group if node.display().is_some() => {
+                if let Some(now) = res.used_frame(id) {
+                    let size = Size::new((now.width * csx).max(1.0), (now.height * csy).max(1.0));
+                    if let Some(item) = ondin_core::build::sized_flex_item(doc, res, id, size) {
+                        ops.push(Operation::SetFlexItem { id, item });
+                    }
+                }
+                if scaling == Scaling::Photographic {
+                    scale_subtree(doc, res, id, Point::ZERO, csx, csy, scaling, ops);
+                }
+            }
             _ => scale_subtree(doc, res, id, Point::ZERO, csx, csy, scaling, ops),
         },
     }
@@ -1809,6 +1835,7 @@ fn scale_scalars(
     // right for all of it and was wrong for exactly this one item.
     if scaling == Scaling::Photographic {
         ops.extend(scaled_guides(doc, id, csx, csy));
+        ops.extend(scaled_flex(doc, id, csx, csy));
     }
 
     let Some(s) = scaling.scalar(csx, csy) else {
@@ -1963,6 +1990,27 @@ fn scaled_guides(doc: &Document, id: NodeId, csx: f64, csy: f64) -> Vec<Operatio
     ops
 }
 
+/// A flex container's **padding and gaps** under the Scale tool, each by its own
+/// axis's factor (§15 D875).
+///
+/// [`scaled_guides`]' argument, one property over: a resize leaves absolute
+/// lengths alone and the Scale tool takes them, and a padding or a gap is a length
+/// *along an axis* — left and right padding and the gap between columns by `csx`,
+/// top and bottom and the gap between rows by `csy` — so the mean would leave a
+/// card's insides out of proportion under any non-uniform scale.
+fn scaled_flex(doc: &Document, id: NodeId, csx: f64, csy: f64) -> Option<Operation> {
+    let ondin_core::container::Display::Flex(flex) = *doc.get(id)?.display()?;
+    let mut scaled = flex;
+    scaled.column_gap *= csx;
+    scaled.row_gap *= csy;
+    let [top, right, bottom, left] = flex.padding;
+    scaled.padding = [top * csy, right * csx, bottom * csy, left * csx];
+    (scaled != flex).then_some(Operation::SetDisplay {
+        id,
+        display: Some(ondin_core::container::Display::Flex(scaled)),
+    })
+}
+
 /// Below this a box has no extent to scale from and the factor is meaningless.
 const MIN_EXTENT: f64 = 1e-6;
 /// How far a scale factor has to be from 1 to be worth an operation.
@@ -2058,6 +2106,21 @@ fn scale_subtree(
             });
         }
         scale_geometry(doc, res, *child_id, csx, csy, scaling, ops);
+        // **A frame inside a scaled group is a box *and* a container, and the
+        // Scale tool scales both** (§15 D876, the maintainer's ruling).
+        // `scale_geometry` sets a frame's box and stops, which is right for a
+        // resize — the frame's children are pinned by their insets and laid out
+        // by it, exactly as when the frame itself is resized — and wrong for a
+        // *scale*, which is a picture of the whole row made bigger: a card
+        // scaled with its row whose text stayed 12px would be the Scale tool
+        // deciding the card was a resize. Here and not in `scale_geometry`, so a
+        // frame the user selected and scaled keeps the one behaviour it has
+        // whether it is selected alone (`resize_to_handle`) or beside others.
+        if scaling == Scaling::Photographic
+            && matches!(res.used_kind_of(child), NodeKind::Artboard { .. })
+        {
+            scale_subtree(doc, res, *child_id, Point::ZERO, csx, csy, scaling, ops);
+        }
     }
 }
 
@@ -8999,6 +9062,229 @@ mod tests {
             "the child's stroke stayed at {}",
             doc.get(rect).unwrap().paint().strokes[0].width
         );
+    }
+
+    /// **A frame inside a scaled group scales its contents under the Scale tool,
+    /// and only its box under a resize** (§15 D876) — Root → `Group` → a 100×50
+    /// card frame → a 20×10 rect at (10, 10) with a 2px stroke, the group dragged
+    /// to twice its size.
+    ///
+    /// Both tools are asserted, because the ruling is a difference between them:
+    /// under the Scale tool the card and everything in it is a picture made bigger
+    /// (rect 40×20 at (20, 20), stroke 4); under a resize the card's box doubles
+    /// and its contents stay pinned where they were, which is what resizing the
+    /// card itself does.
+    ///
+    /// **Flip run**, the `Scaling::Photographic` arm in `scale_subtree` deleted:
+    /// fails on the rect's size under the Scale tool at `20×10` — the predicted
+    /// site. With the `scaling ==` test dropped from it instead (every tool
+    /// recursing), the Scale half passes and the resize half fails at `40×20`.
+    #[test]
+    fn a_frame_in_a_scaled_group_takes_its_contents_with_it_and_a_resize_does_not() {
+        for (scaling, rect_size, rect_at, stroke) in [
+            (
+                Scaling::Photographic,
+                Size::new(40.0, 20.0),
+                Point::new(20.0, 20.0),
+                4.0,
+            ),
+            (
+                Scaling::Geometry,
+                Size::new(20.0, 10.0),
+                Point::new(10.0, 10.0),
+                2.0,
+            ),
+        ] {
+            let mut ids = IdSource::new(0xF4A);
+            let root = ids.mint();
+            let mut doc = Document::new(root);
+            let (group, card, rect) = (ids.mint(), ids.mint(), ids.mint());
+            doc.apply(&Transaction(vec![
+                Operation::CreateNode {
+                    id: group,
+                    parent: root,
+                    index: 0,
+                    kind: NodeKind::Group,
+                    transform: None,
+                    name: None,
+                },
+                Operation::CreateNode {
+                    id: card,
+                    parent: group,
+                    index: 0,
+                    kind: NodeKind::Artboard {
+                        size: Size::new(100.0, 50.0),
+                    },
+                    transform: None,
+                    name: None,
+                },
+                Operation::CreateNode {
+                    id: rect,
+                    parent: card,
+                    index: 0,
+                    kind: NodeKind::Rect {
+                        size: Size::new(20.0, 10.0),
+                        corner_radii: Default::default(),
+                    },
+                    transform: Some(Affine::translate((10.0, 10.0))),
+                    name: None,
+                },
+                Operation::SetStrokes {
+                    id: rect,
+                    strokes: vec![Stroke {
+                        width: 2.0,
+                        ..Default::default()
+                    }],
+                },
+            ]))
+            .expect("a frame may sit in a group");
+            let res = Resolved::rebuild(&doc);
+            let local = ondin_core::local_box(&doc, &res, group).expect("group box");
+            assert_eq!(local, Rect::new(0.0, 0.0, 100.0, 50.0), "the fixture");
+
+            doc.apply(&resize_group(
+                &doc,
+                &res,
+                group,
+                local,
+                Handle::BottomRight,
+                Point::new(200.0, 100.0),
+                Resize {
+                    scaling,
+                    ..Default::default()
+                },
+            ))
+            .unwrap();
+            let NodeKind::Artboard { size } = doc.get(card).unwrap().kind() else {
+                panic!("not a frame")
+            };
+            assert_eq!(
+                size,
+                &Size::new(200.0, 100.0),
+                "{scaling:?}: the card's box"
+            );
+            let NodeKind::Rect { size, .. } = doc.get(rect).unwrap().kind() else {
+                panic!("not a rect")
+            };
+            assert_eq!(size, &rect_size, "{scaling:?}: the rect inside the card");
+            assert_eq!(
+                doc.get(rect).unwrap().transform().translation(),
+                rect_at.to_vec2(),
+                "{scaling:?}: where the rect sits in the card"
+            );
+            assert_eq!(
+                doc.get(rect).unwrap().paint().strokes[0].width,
+                stroke,
+                "{scaling:?}: the rect's stroke"
+            );
+        }
+    }
+
+    /// **A group with a layout is resized by its box; the Scale tool takes its
+    /// contents, padding and gaps too** (§15 D875) — a flex row `Group` at (100,
+    /// 100) with 5px padding and a 10px gap, holding two 20×20 rects, so it hugs to
+    /// 60×30; its bottom-right corner dragged to twice that.
+    ///
+    /// A resize sets the box — `width`/`height` 120×60 px, the rects untouched —
+    /// and the top-left stays where it was, which is the held corner reaching the
+    /// transform. The Scale tool sets the same box and doubles the rects, the
+    /// padding and the gap.
+    ///
+    /// **Flip run**, `resize_layer`'s `laid_group` routing deleted (the group
+    /// going through `resize_group`, as before): fails on *"the box"* under the
+    /// resize at `(Auto, Auto)` — the group still hugging, its rects scaled
+    /// instead. The predicted site. With `scaled_flex` deleted instead, the Scale
+    /// half fails on *"the padding"* at `[5.0; 4]`.
+    #[test]
+    fn a_group_with_a_layout_is_resized_by_its_box() {
+        use ondin_core::container::{Dimension, Display, Flex};
+        for scaling in [Scaling::Geometry, Scaling::Photographic] {
+            let mut ids = IdSource::new(0xF1E);
+            let root = ids.mint();
+            let mut doc = Document::new(root);
+            let (row, a, b) = (ids.mint(), ids.mint(), ids.mint());
+            let square = |id, index| Operation::CreateNode {
+                id,
+                parent: row,
+                index,
+                kind: NodeKind::Rect {
+                    size: Size::new(20.0, 20.0),
+                    corner_radii: Default::default(),
+                },
+                transform: None,
+                name: None,
+            };
+            doc.apply(&Transaction(vec![
+                Operation::CreateNode {
+                    id: row,
+                    parent: root,
+                    index: 0,
+                    kind: NodeKind::Group,
+                    transform: Some(Affine::translate((100.0, 100.0))),
+                    name: None,
+                },
+                square(a, 0),
+                square(b, 1),
+                Operation::SetDisplay {
+                    id: row,
+                    display: Some(Display::Flex(Flex {
+                        column_gap: 10.0,
+                        padding: [5.0; 4],
+                        ..Default::default()
+                    })),
+                },
+            ]))
+            .expect("the row");
+            let res = Resolved::rebuild(&doc);
+            assert_eq!(
+                res.used_frame(row),
+                Some(Size::new(60.0, 30.0)),
+                "the fixture hugs"
+            );
+
+            doc.apply(&resize_layer(
+                &doc,
+                &res,
+                row,
+                Handle::BottomRight,
+                Point::new(220.0, 160.0),
+                Resize {
+                    scaling,
+                    ..Default::default()
+                },
+            ))
+            .unwrap();
+            let res = Resolved::rebuild(&doc);
+            let node = doc.get(row).unwrap();
+            assert_eq!(
+                (node.item().width, node.item().height),
+                (Dimension::Px(120.0), Dimension::Px(60.0)),
+                "{scaling:?}: the box"
+            );
+            assert_eq!(
+                res.used_frame(row),
+                Some(Size::new(120.0, 60.0)),
+                "{scaling:?}: laid out"
+            );
+            assert_eq!(
+                res.world_transform(row).map(|t| t.translation()),
+                Some(Vec2::new(100.0, 100.0)),
+                "{scaling:?}: the held corner stayed"
+            );
+            let (side, padding, gap) = match scaling {
+                Scaling::Geometry => (20.0, 5.0, 10.0),
+                Scaling::Photographic => (40.0, 10.0, 20.0),
+            };
+            let NodeKind::Rect { size, .. } = doc.get(a).unwrap().kind() else {
+                panic!("not a rect")
+            };
+            assert_eq!(size, &Size::new(side, side), "{scaling:?}: the rects");
+            let Some(Display::Flex(flex)) = node.display() else {
+                panic!("the layout went")
+            };
+            assert_eq!(flex.padding, [padding; 4], "{scaling:?}: the padding");
+            assert_eq!(flex.column_gap, gap, "{scaling:?}: the gap");
+        }
     }
 
     /// **Auto-sized text takes the font size but never a box.** The early return in

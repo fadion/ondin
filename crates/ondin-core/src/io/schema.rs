@@ -216,6 +216,16 @@ pub(crate) struct NodeDto {
     /// inert, for `grids`' reason.
     #[serde(default, skip_serializing_if = "crate::container::Insets::is_unset")]
     pub insets: crate::container::Insets,
+    /// The layer's layout (`crate::container::Display`), absent for a container
+    /// with none — additive on `insets`' terms, no version bump.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<crate::container::Display>,
+    /// The layer's flex-item properties, absent at CSS's defaults.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::container::FlexItem::is_default"
+    )]
+    pub item: crate::container::FlexItem,
 }
 
 /// What a file written before `clip` existed meant: frames clipped.
@@ -296,6 +306,8 @@ impl NodeDto {
             effects: n.effects().to_vec(),
             grids: n.grids().to_vec(),
             insets: *n.insets(),
+            display: n.display().copied(),
+            item: *n.item(),
         }
     }
 
@@ -380,6 +392,8 @@ impl NodeDto {
             effects: self.effects,
             grids: self.grids,
             insets: self.insets,
+            display: self.display,
+            item: self.item,
         })
     }
 }
@@ -645,7 +659,8 @@ fn parse_id(s: &str) -> Result<NodeId, IoError> {
 /// 4. no node is listed as a child more than once (anywhere in the document) —
 ///    a duplicate entry would make one node appear twice in a tree walk;
 /// 5. every node is reachable from the root by exactly one path;
-/// 6. no node is deeper than [`MAX_TREE_DEPTH`].
+/// 6. no node is deeper than [`MAX_TREE_DEPTH`];
+/// 7. no frame sits anywhere under a boolean or a mask (§15 D876).
 ///
 /// (4) + (5) together rule out cycles and orphan components. Without them a
 /// hand-edited file could satisfy parent/child consistency and still loop the
@@ -745,10 +760,15 @@ fn verify_integrity(nodes: &FxHashMap<NodeId, Node>, root: NodeId) -> Result<(),
     // only new state is a `u32` per stack entry. It is an explicit stack rather
     // than recursion, so *this* walk was never the one at risk — the walks it
     // certifies are.
+    //
+    // **And check (7) rides along the same way**: no frame under a boolean or a
+    // mask at any depth (§15 D876). It is an ancestor rule, so the pairwise
+    // `check_child_kind` above cannot see it, and the flag each stack entry
+    // carries is "something above here bars frames".
     let mut visited: FxHashSet<NodeId> = FxHashSet::default();
-    let mut stack = vec![(root, 0usize)];
+    let mut stack = vec![(root, 0usize, false)];
     visited.insert(root);
-    while let Some((id, depth)) = stack.pop() {
+    while let Some((id, depth, barred)) = stack.pop() {
         if depth > MAX_TREE_DEPTH {
             return Err(IoError::Integrity(format!(
                 "the tree is nested deeper than {MAX_TREE_DEPTH} (at {id:?}); \
@@ -756,9 +776,17 @@ fn verify_integrity(nodes: &FxHashMap<NodeId, Node>, root: NodeId) -> Result<(),
                  carry that"
             )));
         }
-        for child in nodes[&id].children() {
+        let node = &nodes[&id];
+        if barred && matches!(node.kind(), NodeKind::Artboard { .. }) {
+            return Err(IoError::Integrity(format!(
+                "frame {id:?} sits inside a boolean or a mask: {}",
+                crate::op::OpError::ArtboardPlacement
+            )));
+        }
+        let barred = barred || crate::document::bars_frames(node);
+        for child in node.children() {
             if visited.insert(*child) {
-                stack.push((*child, depth + 1));
+                stack.push((*child, depth + 1, barred));
             }
         }
     }

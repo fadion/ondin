@@ -2255,12 +2255,7 @@ impl OndinApp {
                         self.session.set_preview_escaping_ghosts(&tx, leaving);
                     }
                     None => {
-                        if let Ok(tx) = build::move_by_world(
-                            &self.session.doc,
-                            &self.session.resolved,
-                            self.session.selection.ids(),
-                            delta,
-                        ) {
+                        if let Some(tx) = self.move_preview_tx(delta) {
                             // Drawn unclipped only once the release would take it
                             // out of the frame, so the drawing is a promise about
                             // what dropping it does.
@@ -2695,26 +2690,20 @@ impl OndinApp {
         Transaction(ops)
     }
 
-    /// The transaction that finishes a move: the translation, plus any change
-    /// of frame the move implies.
+    /// Where `id` would land if the move committed now: `Some(parent)` when the
+    /// move changes its parent, `None` when it stays where it is.
     ///
-    /// **Frames are glorified groups**, so membership follows the artwork
-    /// rather than the other way round: a layer that ends up more than half
-    /// inside a frame belongs to it, and one dragged more than half out of the
-    /// frame it was in leaves for the canvas. Both directions fall out of the
-    /// same question — which frame, if any, covers most of the layer where it
-    /// has landed.
-    ///
-    /// One transaction, so a move-and-adopt is one undo step. It also has to be
-    /// built by hand rather than through `build::move_by_world`: the reparent
-    /// changes what "local" means, so the node's new transform is projected
-    /// through the *destination's* world transform, not its current parent's.
+    /// ⚠️ **[`Self::move_tx`]'s doc sat on top of this one until 2026-09-24** —
+    /// its summary and two paragraphs, then this function's own summary halfway
+    /// down the run, with `move_tx` left undocumented. Split out of it and
+    /// anchored on its `fn` line, by the look of it; found by reading the run
+    /// while editing the rule below.
     ///
     /// Only layers whose parent is the root or a frame can hop. Something
     /// inside a group was put there deliberately, and having it fall out of the
-    /// group because the group straddles a frame edge is nobody's intent.
-    /// Where `id` would land if the move committed now: `Some(parent)` when the
-    /// move changes its parent, `None` when it stays where it is.
+    /// group because the group straddles a frame edge is nobody's intent — which
+    /// is also why a layer in a frame *inside* a group hops only between that
+    /// group's frames (§15 D876).
     ///
     /// Split out of [`Self::move_tx`] so the insertion affordance
     /// ([`Self::draw_frame_drop_outline`]) asks the same question the commit
@@ -2743,6 +2732,25 @@ impl OndinApp {
             return None;
         }
         let landed = res.world_bounds(id)? + delta;
+        // **And a layer in a frame inside a group stays inside that group** (§15
+        // D876) — the rule above, one level further out. Frames can sit in groups
+        // now, so a parent that is a frame no longer means "not in a group": an
+        // icon on a card in a row may hop to the next card, which is the gesture
+        // that makes a row of cards editable, and may not fall out of the row onto
+        // the page. Out of every frame in its group, it stays where it is rather
+        // than landing on the root the group is not.
+        if let Some(fence) = group_fence(doc, id) {
+            let destination = self.with_frames(|i| {
+                let inside: Vec<(NodeId, KRect)> = i
+                    .boxes
+                    .iter()
+                    .filter(|(f, _)| ondin_core::is_within(doc, *f, fence))
+                    .copied()
+                    .collect();
+                frame_covering(landed, &inside)
+            })?;
+            return (Some(destination) != parent).then_some(destination);
+        }
         // A frame cannot land in itself or in anything it contains — a frame dragged
         // across its own box covers most of every frame inside it, and `Reparent`
         // would bounce that as a cycle *after* the drop outline had promised it.
@@ -2770,7 +2778,98 @@ impl OndinApp {
             .collect()
     }
 
+    /// Whether moving the selection by `delta` is a **reorder in a flex
+    /// container** rather than a move — and if so, which item and the `Reorder` it
+    /// asks for (`None` inside: it lands where it was) (§15 D877).
+    ///
+    /// One selected layer, in its container's flow, that the move does not take
+    /// out of its parent: an in-flow item's transform is not where it is drawn,
+    /// its place in the flow is, so a drag that stays in the container can only
+    /// mean *"put it there in the row"*. One leaving its frame moves as it always
+    /// has, landing placed by its transform in its new parent, out of the flow it
+    /// left; with several layers selected, an in-flow item keeps its slot
+    /// ([`Self::stays_in_flow`]) and the rest move.
+    fn flex_reorder_of(&self, delta: Vec2) -> Option<(NodeId, Option<Operation>)> {
+        let (doc, res) = (&self.session.doc, &self.session.resolved);
+        let [id] = build::outermost(doc, self.session.selection.ids())[..] else {
+            return None;
+        };
+        if !build::is_flex_item(doc, id) || self.move_destination(id, delta).is_some() {
+            return None;
+        }
+        Some((id, build::flex_reorder(doc, res, id, delta)))
+    }
+
+    /// The transaction a move of the selection by `delta` **previews** — what
+    /// [`Self::move_tx`] commits, drawn the way a drag has to be drawn.
+    ///
+    /// Not the same transaction, and for one reason: the dragged layer has to be
+    /// under the hand. So it is `build::move_by_world`'s translation for every
+    /// selected layer, and then:
+    ///
+    /// - **one in-flow flex item** keeps that translation — the preview's flex pass
+    ///   skips a layer the transaction drags — and gains the reorder its release
+    ///   commits, so its siblings open the slot it will drop into (§15 D877);
+    /// - **several layers** lose the translation of every in-flow item that stays
+    ///   in its flow ([`Self::stays_in_flow`]), which keeps its slot on release and
+    ///   so keeps it in the drag — it used to follow the pointer and snap back, with
+    ///   nothing saying it would (§15 D877's amendment).
+    fn move_preview_tx(&self, delta: Vec2) -> Option<Transaction> {
+        let mut tx = build::move_by_world(
+            &self.session.doc,
+            &self.session.resolved,
+            self.session.selection.ids(),
+            delta,
+        )
+        .ok()?;
+        match self.flex_reorder_of(delta) {
+            Some((_, Some(reorder))) => tx.0.push(reorder),
+            Some((_, None)) => {}
+            None => tx.0.retain(|op| match op {
+                Operation::SetTransform { id, .. } => !self.stays_in_flow(*id, delta),
+                _ => true,
+            }),
+        }
+        Some(tx)
+    }
+
+    /// Whether `id`, moved by `delta` as one of several, **keeps its slot in its
+    /// container's flow** — an in-flow flex item the move does not take out of its
+    /// parent (§15 D877).
+    ///
+    /// The one rule both halves of a multi-selection move ask: the commit stores no
+    /// translation for such an item, and the preview does not carry it — so the
+    /// drag shows it staying where the release leaves it, instead of following the
+    /// pointer and snapping back. (A single in-flow item is a reorder instead, and
+    /// never asks this: [`Self::flex_reorder_of`] answers first.)
+    fn stays_in_flow(&self, id: NodeId, delta: Vec2) -> bool {
+        build::is_flex_item(&self.session.doc, id) && self.move_destination(id, delta).is_none()
+    }
+
+    /// The transaction that finishes a move: the translation, plus any change
+    /// of frame the move implies.
+    ///
+    /// **Frames are glorified groups**, so membership follows the artwork
+    /// rather than the other way round: a layer that ends up more than half
+    /// inside a frame belongs to it, and one dragged more than half out of the
+    /// frame it was in leaves for the canvas. Both directions fall out of the
+    /// same question — which frame, if any, covers most of the layer where it
+    /// has landed — and [`Self::move_destination`] is where it is asked.
+    ///
+    /// One transaction, so a move-and-adopt is one undo step. It also has to be
+    /// built by hand rather than through `build::move_by_world`: the reparent
+    /// changes what "local" means, so the node's new transform is projected
+    /// through the *destination's* world transform, not its current parent's.
     fn move_tx(&self, delta: Vec2) -> Transaction {
+        // **A flex item's move commits its reorder and nothing else** (§15 D877).
+        // The translation that carried it under the pointer in the preview is not
+        // where it is drawn — its container is — so storing it would be a number
+        // no one sees until the layout is taken away, when the item would jump to
+        // wherever it happened to be dropped. A drop back into its own slot is an
+        // empty transaction, and so no undo step.
+        if let Some((_, reorder)) = self.flex_reorder_of(delta) {
+            return Transaction(reorder.into_iter().collect());
+        }
         let (doc, res) = (&self.session.doc, &self.session.resolved);
         let moved = Affine::translate(delta);
         // Net change to each parent's child count so far in this transaction.
@@ -2821,6 +2920,12 @@ impl OndinApp {
                         transform: to_world.inverse() * new_world,
                     });
                 }
+                // **An in-flow flex item in a multi-selection keeps its slot, and no
+                // translation is stored for it** (§15 D877) — the single-item arm's
+                // reason: its container places it, so the number would be drawn
+                // nowhere until the layout was taken away, and then it would jump.
+                // Reordering several at once is not built; they snap back.
+                None if self.stays_in_flow(id, delta) => {}
                 None => ops.push(Operation::SetTransform {
                     id,
                     transform: build::local_for_world(doc, res, id, new_world),
@@ -8016,26 +8121,22 @@ impl OndinApp {
         {
             return None;
         }
-        // The name above a frame is the frame, so hovering it outlines the
-        // frame — otherwise the one place a frame *can* be clicked is the one
-        // place that gives no sign of it.
-        // ⚠️ **The same three links as [`Self::pick_at_pointer`], in the same
-        // order** (§15 D839). This function's own contract is that the ring
-        // shows what a click would take, and `8ae40bf` added the edge link to
-        // the click chain and not to this one — so a frame's border was
-        // selectable with no hover ring and no measure overlay, the two
-        // functions disagreeing about a band four pixels wide. A chain that has
-        // to match another chain is the thing to check when either gains a link.
-        let target = match self.frame_label_at(ui, p, rect, ppp) {
-            Some(frame) => frame,
-            None => {
-                let world = self.to_world(p, rect, ppp);
-                match self.pick_leaf(world) {
-                    Some(leaf) => self.pick_preview(leaf, ui),
-                    None => self.frame_edge_at(world)?,
-                }
-            }
-        };
+        // The name above a frame is the frame, so hovering it outlines what a
+        // click on it takes — the frame, or the group it is a card in — otherwise
+        // the one place a frame *can* be clicked is the one place that gives no
+        // sign of it.
+        // ⚠️ **[`Self::pick_at_pointer`] itself, not a copy of its links**
+        // (§15 D839, D876). This function's own contract is that the ring shows
+        // what a click would take. It spelled the three links out again, and the
+        // copy drifted twice: `8ae40bf` added the edge link to the click chain and
+        // not to this one, so a frame's border was selectable with no hover ring;
+        // and the tag and edge answered the frame itself where the click runs all
+        // three through `pick_for_click`'s group chain — the same thing while no
+        // frame had a group above it, and not once a card in a row became a rung
+        // of the row's chain (§15 D876).
+        let world = self.to_world(p, rect, ppp);
+        let leaf = self.pick_at_pointer(ui, p, world, rect, ppp)?;
+        let target = self.pick_preview(leaf, ui);
         (!self.session.selection.contains(target)).then_some(target)
     }
 
@@ -9080,16 +9181,19 @@ impl OndinApp {
     /// way, and offers the same two exceptions — an **empty** frame is still
     /// directly clickable, because there is nothing inside it to prefer, and so
     /// is the **name** above it ([`Self::frame_label_at`]).
+    ///
+    /// **Not a frame inside a group, occupied or not** (§15 D876). A card in a
+    /// row is part of the row: a click on its background has to select the row,
+    /// the way a click anywhere on a group does, and pressing there has to drag
+    /// the row — where a skipped card would start a marquee over a group whose
+    /// contents a marquee does not select one by one anyway. Stepped into the
+    /// row, the same click selects the card; the chain says which.
     pub(crate) fn pick_leaf(&self, world: Point) -> Option<NodeId> {
-        hit_test(
-            &self.session.resolved,
-            &self.session.doc,
-            world,
-            self.pick_slop(),
-        )
-        .iter()
-        .copied()
-        .find(|id| !self.is_occupied_frame(*id))
+        let doc = &self.session.doc;
+        hit_test(&self.session.resolved, doc, world, self.pick_slop())
+            .iter()
+            .copied()
+            .find(|id| !self.is_occupied_frame(*id) || group_fence(doc, *id).is_some())
     }
 
     /// The picking allowance a hit test gets, in **world** units — [`PICK_SLOP_PX`] at
@@ -9608,8 +9712,57 @@ impl OndinApp {
         }
     }
 
-    /// A node's own box as four screen points, clockwise from its local
-    /// top-left. Works for any node, selected or not, and for containers.
+    /// **Where a dragged flex item will drop**, dashed (§15 D877) — the slot its
+    /// container gives it in the reordered flow, read off the preview
+    /// ([`ondin_render::RenderOverrides::landings`]) rather than worked out here,
+    /// so the outline and the release cannot disagree.
+    ///
+    /// The siblings opening a gap already show *that* it will reorder; this shows
+    /// the shape it lands as, which differs from the dragged layer's own when the
+    /// container stretches or sizes it.
+    fn draw_flex_landing(
+        &self,
+        ui: &egui::Ui,
+        painter: &egui::Painter,
+        rect: egui::Rect,
+        ppp: f32,
+        resp: &egui::Response,
+    ) {
+        let Drag::Move { anchor } = self.drag else {
+            return;
+        };
+        // **Only for the item the release will reorder** — the delta the release
+        // uses, snapping included, as `draw_frame_drop_outline` reads it. The
+        // preview records a slot for every in-flow item it drags, and an item on
+        // its way *out* of its frame is still laid out there in the preview; an
+        // outline on that slot would promise a drop the release does not make.
+        let Some(pointer) = resp.interact_pointer_pos() else {
+            return;
+        };
+        let shift = ui.input(|i| i.modifiers.shift);
+        let (delta, _) = self.snapped_move(self.to_world(pointer, rect, ppp) - anchor, shift);
+        let Some((reordered, _)) = self.flex_reorder_of(delta) else {
+            return;
+        };
+        let (_, _, ov) = self.session.render_inputs();
+        for (_, world, bx) in ov.landings().iter().filter(|(id, _, _)| *id == reordered) {
+            let corners = [
+                Point::new(bx.x0, bx.y0),
+                Point::new(bx.x1, bx.y0),
+                Point::new(bx.x1, bx.y1),
+                Point::new(bx.x0, bx.y1),
+                Point::new(bx.x0, bx.y0),
+            ]
+            .map(|c| self.to_screen(*world * c, rect, ppp));
+            painter.extend(egui::Shape::dashed_line(
+                &corners,
+                egui::Stroke::new(1.5, color::SELECT),
+                4.0,
+                3.0,
+            ));
+        }
+    }
+
     /// The selection outline for `id`, from the **preview** layer so it tracks a
     /// gesture.
     fn selection_quad(&self, id: NodeId, rect: egui::Rect, ppp: f32) -> Option<[egui::Pos2; 4]> {
@@ -9623,6 +9776,12 @@ impl OndinApp {
         self.quad_of(id, rect, ppp, false)
     }
 
+    /// A node's own box as four screen points, clockwise from its local
+    /// top-left. Works for any node, selected or not, and for containers.
+    ///
+    /// ⚠️ **These two lines sat on [`Self::selection_quad`] until 2026-09-24**, as
+    /// the head of its doc, with this function undocumented — an accumulated
+    /// theft, found while reading the neighbour of an insertion.
     fn quad_of(
         &self,
         id: NodeId,
@@ -10225,6 +10384,7 @@ impl OndinApp {
         // chrome, since it is about the destination rather than about what is
         // being dragged.
         self.draw_frame_drop_outline(ui, painter, rect, ppp, resp);
+        self.draw_flex_landing(ui, painter, rect, ppp, resp);
 
         // While Alt is held during a move, a dim outline of where each layer
         // sits *now* — the original, which is staying there.
@@ -12365,6 +12525,20 @@ fn pick_from_chain(ctrl: bool, alt: bool, chain: &[NodeId], leaf: NodeId) -> Nod
         (true, _) => leaf,
         (false, [outermost, ..]) => *outermost,
     }
+}
+
+/// The nearest group (or boolean) above `id`, if any — the container a move may
+/// not take `id` out of ([`OndinApp::move_destination`], §15 D876).
+fn group_fence(doc: &ondin_core::Document, id: NodeId) -> Option<NodeId> {
+    let mut up = doc.get(id)?.parent();
+    while let Some(p) = up {
+        let node = doc.get(p)?;
+        if matches!(node.kind(), NodeKind::Group | NodeKind::Boolean { .. }) {
+            return Some(p);
+        }
+        up = node.parent();
+    }
+    None
 }
 
 /// Which of `frames` owns a layer whose world bounds are `bounds`: the topmost
@@ -22418,5 +22592,284 @@ mod pointer_allowance_tests {
                 "and snapping's tolerance scale is the same conversion"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod group_fence_tests {
+    use super::*;
+    use crate::app::OndinApp;
+    use ondin_core::kurbo::Size;
+    use ondin_core::{Document, IdSource, Operation, Transaction};
+
+    /// **A layer on a card in a row hops between the row's cards and never out of
+    /// the row** (§15 D876) — a 1000-wide page, a row `Group` in it holding two
+    /// 100×100 card frames at x 0 and x 200, and a 10×10 icon on the first card.
+    ///
+    /// Three drops. To the second card: it moves there, which is the gesture that
+    /// makes a row of cards editable. Onto open page: it stays on its card, where
+    /// the rule before frames could sit in groups sent it to the page — out of
+    /// the row. And the control, a loose shape on the page dropped on the second
+    /// card: it goes in, since nothing fences a layer that is in no group.
+    ///
+    /// **Flip run**, the `group_fence` arm deleted from `move_destination`: fails
+    /// on *"onto open page it stays on its card"* at `Some(page)`, the predicted
+    /// site. The first drop passes either way, which is why the second exists.
+    #[test]
+    fn a_layer_on_a_card_hops_between_cards_and_never_out_of_the_row() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0xFE4CE);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let (page, row, a, b, icon, loose) = (
+            ids.mint(),
+            ids.mint(),
+            ids.mint(),
+            ids.mint(),
+            ids.mint(),
+            ids.mint(),
+        );
+        let create = |id, parent, kind, at: (f64, f64)| Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind,
+            transform: Some(Affine::translate(at)),
+            name: None,
+        };
+        let frame = |w, h| NodeKind::Artboard {
+            size: Size::new(w, h),
+        };
+        let square = || NodeKind::Rect {
+            size: Size::new(10.0, 10.0),
+            corner_radii: Default::default(),
+        };
+        doc.apply(&Transaction(vec![
+            create(page, root, frame(1000.0, 1000.0), (0.0, 0.0)),
+            create(row, page, NodeKind::Group, (0.0, 0.0)),
+            create(a, row, frame(100.0, 100.0), (0.0, 0.0)),
+            create(b, row, frame(100.0, 100.0), (200.0, 0.0)),
+            create(icon, a, square(), (10.0, 10.0)),
+            create(loose, page, square(), (600.0, 600.0)),
+        ]))
+        .expect("the tree");
+        app.session.adopt_document(doc, None);
+
+        assert_eq!(
+            app.move_destination(icon, Vec2::new(200.0, 0.0)),
+            Some(b),
+            "to the next card"
+        );
+        assert_eq!(
+            app.move_destination(icon, Vec2::new(500.0, 500.0)),
+            None,
+            "onto open page it stays on its card"
+        );
+        assert_eq!(
+            app.move_destination(loose, Vec2::new(-390.0, -590.0)),
+            Some(b),
+            "a loose shape goes into a card in a row"
+        );
+    }
+
+    /// **An occupied card in a row is a click target; an occupied page is not**
+    /// (§15 D876) — Root → a page holding a row `Group` → a 100×100 card holding a
+    /// 10×10 icon at (10, 10).
+    ///
+    /// The page is skipped so a marquee can start on its background (§15 D22);
+    /// the card is not, so a press on its background reaches the group chain and
+    /// selects the row.
+    ///
+    /// **Flip run**, the `group_fence` clause dropped from `pick_leaf`'s filter:
+    /// fails on *"the card's background"* at `None`, the predicted site.
+    #[test]
+    fn a_card_in_a_row_is_clickable_on_its_background_and_a_page_is_not() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0xBACC);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let (page, row, card, icon) = (ids.mint(), ids.mint(), ids.mint(), ids.mint());
+        let create = |id, parent, kind, at: (f64, f64)| Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind,
+            transform: Some(Affine::translate(at)),
+            name: None,
+        };
+        doc.apply(&Transaction(vec![
+            create(
+                page,
+                root,
+                NodeKind::Artboard {
+                    size: Size::new(1000.0, 1000.0),
+                },
+                (0.0, 0.0),
+            ),
+            create(row, page, NodeKind::Group, (0.0, 0.0)),
+            create(
+                card,
+                row,
+                NodeKind::Artboard {
+                    size: Size::new(100.0, 100.0),
+                },
+                (0.0, 0.0),
+            ),
+            create(
+                icon,
+                card,
+                NodeKind::Rect {
+                    size: Size::new(10.0, 10.0),
+                    corner_radii: Default::default(),
+                },
+                (10.0, 10.0),
+            ),
+        ]))
+        .expect("the tree");
+        app.session.adopt_document(doc, None);
+        app.session.camera.zoom = 1.0;
+
+        assert_eq!(
+            app.pick_leaf(Point::new(15.0, 15.0)),
+            Some(icon),
+            "the icon"
+        );
+        assert_eq!(
+            app.pick_leaf(Point::new(60.0, 60.0)),
+            Some(card),
+            "the card's background"
+        );
+        assert_eq!(
+            app.pick_leaf(Point::new(600.0, 600.0)),
+            None,
+            "the page's background is left to the marquee"
+        );
+    }
+}
+
+#[cfg(test)]
+mod flex_drag_tests {
+    use super::*;
+    use crate::app::OndinApp;
+    use ondin_core::container::{AlignItems, Display, Flex};
+    use ondin_core::kurbo::Size;
+    use ondin_core::{Document, IdSource, Operation, Transaction};
+
+    /// **Moving one flex item commits a reorder and nothing else** (§15 D877) — a
+    /// 400×200 frame laid out as a row (padding 20, gap 10) holding rects 40, 60
+    /// and 20 wide.
+    ///
+    /// Dragged past its neighbour's centre, the first item's release is one
+    /// `Reorder` — no `SetTransform`, since the translation that carried it under
+    /// the pointer is not where it is drawn. Dropped short of the neighbour it is
+    /// an empty transaction, so no undo step. Two items selected keep their slots —
+    /// reordering several is not built — and store no translation either. And one
+    /// dragged well below the frame leaves it, by the frame rule, which a reorder
+    /// must not swallow.
+    ///
+    /// **Flip run**, `move_tx`'s reorder arm deleted: fails on *"one reorder"*
+    /// with a `SetTransform` — the predicted site. The multi-item arm deleted
+    /// instead: fails on *"two items keep their slots"* with two. And
+    /// `move_preview_tx`'s `retain` deleted: fails on *"two items: they stay in
+    /// their slots in the drag"* with two `SetTransform`s.
+    #[test]
+    fn moving_a_flex_item_commits_a_reorder_and_nothing_else() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0xF1D);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let (frame, a, b, c) = (ids.mint(), ids.mint(), ids.mint(), ids.mint());
+        let create = |id, parent, index, kind| Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind,
+            transform: None,
+            name: None,
+        };
+        let rect = |w| NodeKind::Rect {
+            size: Size::new(w, 30.0),
+            corner_radii: Default::default(),
+        };
+        doc.apply(&Transaction(vec![
+            create(
+                frame,
+                root,
+                0,
+                NodeKind::Artboard {
+                    size: Size::new(400.0, 200.0),
+                },
+            ),
+            create(a, frame, 0, rect(40.0)),
+            create(b, frame, 1, rect(60.0)),
+            create(c, frame, 2, rect(20.0)),
+            Operation::SetDisplay {
+                id: frame,
+                display: Some(Display::Flex(Flex {
+                    column_gap: 10.0,
+                    padding: [20.0; 4],
+                    align_items: AlignItems::Start,
+                    ..Default::default()
+                })),
+            },
+        ]))
+        .expect("the row");
+        app.session.adopt_document(doc, None);
+
+        app.session.selection.set_one(a);
+        let tx = app.move_tx(Vec2::new(70.0, 0.0));
+        assert!(
+            matches!(tx.0.as_slice(), [Operation::Reorder { id, index: 1 }] if *id == a),
+            "one reorder: {tx:?}"
+        );
+        assert!(
+            app.move_tx(Vec2::new(20.0, 0.0)).0.is_empty(),
+            "short of the neighbour: nothing"
+        );
+
+        app.session.selection.set(vec![a, b]);
+        let tx = app.move_tx(Vec2::new(70.0, 0.0));
+        assert!(
+            tx.0.is_empty(),
+            "two items keep their slots, and no translation is stored: {tx:?}"
+        );
+
+        app.session.selection.set_one(a);
+        let tx = app.move_tx(Vec2::new(0.0, 400.0));
+        assert!(
+            tx.0.iter()
+                .any(|op| matches!(op, Operation::Reparent { id, .. } if *id == a)),
+            "dragged out of the frame, it leaves: {tx:?}"
+        );
+
+        // **And the preview draws what the release commits** (§15 D877's
+        // amendment): one item follows the pointer and carries its reorder; two
+        // items stay in their slots, no translation drawn for either.
+        app.session.selection.set_one(a);
+        let tx = app
+            .move_preview_tx(Vec2::new(70.0, 0.0))
+            .expect("a preview");
+        assert!(
+            tx.0.iter()
+                .any(|op| matches!(op, Operation::SetTransform { id, .. } if *id == a))
+                && tx
+                    .0
+                    .iter()
+                    .any(|op| matches!(op, Operation::Reorder { .. })),
+            "one item: under the hand, and its reorder: {tx:?}"
+        );
+        app.session.selection.set(vec![a, b]);
+        let tx = app
+            .move_preview_tx(Vec2::new(70.0, 0.0))
+            .expect("a preview");
+        assert!(
+            !tx.0
+                .iter()
+                .any(|op| matches!(op, Operation::SetTransform { .. })),
+            "two items: they stay in their slots in the drag as on release: {tx:?}"
+        );
     }
 }

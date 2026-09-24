@@ -248,6 +248,20 @@ pub enum Operation {
         id: NodeId,
         insets: crate::container::Insets,
     },
+    /// The layer's layout — CSS `display` with its properties, or `None` for a
+    /// container whose children are placed by their own transforms
+    /// (`crate::container::Display`, §15 D867). The whole value, `SetInsets`'
+    /// reason.
+    SetDisplay {
+        id: NodeId,
+        display: Option<crate::container::Display>,
+    },
+    /// The layer's properties as a flex item (`crate::container::FlexItem`) — the
+    /// whole set.
+    SetFlexItem {
+        id: NodeId,
+        item: crate::container::FlexItem,
+    },
     /// The ground behind and around the frames — the one operation with no node
     /// to name, because the ground belongs to the document rather than to
     /// anything in it (§15 D18). A solid colour, not a `Brush`: there is
@@ -370,7 +384,9 @@ impl Operation {
             | Operation::SetEffects { id, .. }
             | Operation::SetExports { id, .. }
             | Operation::SetLayoutGrids { id, .. }
-            | Operation::SetInsets { id, .. } => Some(*id),
+            | Operation::SetInsets { id, .. }
+            | Operation::SetDisplay { id, .. }
+            | Operation::SetFlexItem { id, .. } => Some(*id),
             Operation::CreateNode { .. }
             | Operation::DeleteNode { .. }
             | Operation::InsertSubtree { .. }
@@ -509,6 +525,10 @@ impl Operation {
             // drawing, and the answer depending on the parent would be a second
             // layout pass hidden in a predicate.
             | Operation::SetInsets { .. }
+            // A layout moves every child of the container it is set on, and an
+            // item's properties move it and its siblings.
+            | Operation::SetDisplay { .. }
+            | Operation::SetFlexItem { .. }
             | Operation::SetText { .. }
             | Operation::SetTextStyle { .. }
             | Operation::SetTextSpans { .. }
@@ -742,6 +762,10 @@ impl Operation {
             }
             Operation::SetLayoutGrids { id, grids } => node(id).is_some_and(|n| n.grids() == grids),
             Operation::SetInsets { id, insets } => node(id).is_some_and(|n| n.insets() == insets),
+            Operation::SetDisplay { id, display } => {
+                node(id).is_some_and(|n| n.display() == display.as_ref())
+            }
+            Operation::SetFlexItem { id, item } => node(id).is_some_and(|n| n.item() == item),
 
             Operation::SetCanvasBackground { background } => doc.canvas_background() == *background,
             Operation::SetGuidePosition { id, position } => {
@@ -1002,9 +1026,12 @@ pub enum OpError {
     #[error("operation not valid for this node kind")]
     WrongKindForOp,
     /// A frame asked to sit somewhere only a shape may go. Frames nest inside
-    /// frames (§5.3); what they cannot do is hang off a group, which has no box for
-    /// a page to be clipped by.
-    #[error("a frame belongs to the canvas or to another frame, not to a group")]
+    /// frames and groups (§5.3, §15 D870); what they cannot do is hang off a
+    /// shape, or sit anywhere inside a boolean or a mask — an operand is an
+    /// outline and a mask's outline is its contents, and a page is neither
+    /// (§15 D876). Also what turning a group that holds a frame into a mask
+    /// answers.
+    #[error("a frame cannot sit inside a boolean, a mask or a shape")]
     ArtboardPlacement,
     #[error("malformed subtree")]
     MalformedSubtree,

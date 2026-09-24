@@ -162,6 +162,11 @@ pub fn local_box(doc: &Document, res: &Resolved, id: NodeId) -> Option<Rect> {
     if let Some(b) = geometry::local_bounds(res.used_kind(doc, id)?, res.text_layout(id)) {
         return Some(b);
     }
+    // **A group with a layout is the box its layout made** (§15 D869), not the
+    // union of what it holds — padding included, which the union cannot see.
+    if let Some(s) = res.used_frame(id) {
+        return Some(Rect::from_origin_size(kurbo::Point::ZERO, s));
+    }
     // **A boolean's box is its result's, not its operands'.** Falling through to the
     // child union below would measure the shapes that were *consumed* — so a
     // subtraction reported a box reaching out to wherever the subtracted circle
@@ -278,14 +283,25 @@ pub fn pivot_world(doc: &Document, res: &Resolved, id: NodeId) -> Option<Point> 
     Some(res.world_transform(id)? * geometry::pivot_point(node.pivot(), local))
 }
 
-/// The unbroken run of `Group` ancestors above `id`, **outermost first**,
-/// stopping below `inside` when given.
+/// The unbroken run of group-like ancestors above `id` — groups, booleans and
+/// the frames between them — **outermost first**, stopping below `inside` when
+/// given.
 ///
 /// This is what "clicking a grouped layer selects the group" needs: the hit test
 /// finds a leaf, and the picker has to decide how far back up to hand the
-/// selection. The run stops at the first non-group — an artboard or the root —
+/// selection. The run stops at the root, and at a frame with no group above it,
 /// because a group is the only container the user assembled by hand, and it is
 /// the only one they expect to move as a unit.
+///
+/// **A frame inside a group is a rung, not a stop** (§15 D876, the maintainer's
+/// ruling). A card that is a frame, in a row that is a group, is part of the row:
+/// a click on the card's text selects the row, the way it would if the card were a
+/// group. So a frame is walked *through* and kept on the chain as a level of its
+/// own — double-clicking the row steps in and lands on the card, the next steps
+/// into the card, and `Ctrl+Alt`'s "one level in" means the card. Only frames
+/// *outside* the outermost group are dropped, which is what keeps a top-level
+/// frame's contents as directly clickable as they always were: the chain that
+/// ends in frames ends before them.
 ///
 /// `inside` is the group the user has stepped into (Figma's double-click
 /// isolation): groups at or above it are not candidates, so a click inside picks
@@ -294,21 +310,47 @@ pub fn pivot_world(doc: &Document, res: &Resolved, id: NodeId) -> Option<Point> 
 /// signal the caller needs to know the click landed outside and the isolation
 /// should end.
 pub fn group_chain(doc: &Document, id: NodeId, inside: Option<NodeId>) -> Vec<NodeId> {
+    // **Asked of the container the user stepped into, the answer is itself** —
+    // nothing above it is a candidate. Unreachable while `inside` was always a
+    // group, which a click never lands on; a frame stepped into is clicked on its
+    // background (§15 D876), and the walk from its parent would otherwise hand
+    // back the row it sits in.
+    if Some(id) == inside {
+        return Vec::new();
+    }
     let mut chain = Vec::new();
     let mut cursor = doc.get(id).and_then(|n| n.parent());
+    let mut reached_inside = false;
     while let Some(c) = cursor {
         if Some(c) == inside {
+            reached_inside = true;
             break;
         }
         let Some(node) = doc.get(c) else { break };
-        if !steps_into(node.kind()) {
+        if !steps_into(node.kind()) && !is_frame(node.kind()) {
             break;
         }
         chain.push(c);
         cursor = node.parent();
     }
+    // Frames above the outermost group are not rungs: nothing above them was
+    // assembled by hand, so the chain ends where the last group does. Not when
+    // the walk stopped at `inside`, though — everything below the group the user
+    // stepped into is inside a group, frames included.
+    while !reached_inside
+        && chain
+            .last()
+            .and_then(|c| doc.get(*c))
+            .is_some_and(|n| is_frame(n.kind()))
+    {
+        chain.pop();
+    }
     chain.reverse();
     chain
+}
+
+fn is_frame(kind: &crate::node::NodeKind) -> bool {
+    matches!(kind, crate::node::NodeKind::Artboard { .. })
 }
 
 /// The kinds [`group_chain`] walks *through* — the containers a click resolves
@@ -827,6 +869,64 @@ mod tests {
         assert!(
             group_chain(&n.doc, n.board, None).is_empty(),
             "and neither does the frame"
+        );
+    }
+
+    /// **A frame inside a group is a rung of the chain, and a frame outside every
+    /// group is not** (§15 D876) — Root → frame → row `Group` → card frame → text.
+    ///
+    /// Three readings, one per door that uses the chain: a plain click on the text
+    /// selects the row; `Ctrl+Alt`, one level in, is the card; and once stepped
+    /// into the row, the card is what is left — the next double-click enters it.
+    /// The top-level frame is on none of them, which is the half that keeps a
+    /// page's contents directly clickable.
+    ///
+    /// **Flip run**, the frame arm dropped from the walk's continue condition (the
+    /// chain as it was before D876): fails on the first assertion at `[]` against
+    /// `[row, card]` — the predicted site. With the trailing-frame trim removed
+    /// instead, it fails there too, at `[board, row, card]` — and so do the two
+    /// older chain tests beside it, every fixture here sitting on a page. ⚠️ **The second
+    /// assertion is the one the first draft failed**: trimming even when the walk
+    /// stopped at `inside` pops the card off `[card]` and leaves `[]`, so stepping
+    /// into the row went straight to the text — a level skipped, and a boundary
+    /// the other three assertions do not see. The last assertion's guard, the
+    /// early return for `id == inside`, flipped: fails there at `[row]`.
+    #[test]
+    fn a_frame_inside_a_group_is_a_rung_and_a_page_is_not() {
+        let mut ids = IdSource::new(0xCA4D);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let board = ids.mint();
+        let row = ids.mint();
+        let card = ids.mint();
+        let text = ids.mint();
+        create(&mut doc, board, root, frame());
+        create(&mut doc, row, board, NodeKind::Group);
+        create(&mut doc, card, row, frame());
+        create(&mut doc, text, card, leaf());
+
+        assert_eq!(
+            group_chain(&doc, text, None),
+            vec![row, card],
+            "the row, then the card; the page is not a rung"
+        );
+        assert_eq!(
+            group_chain(&doc, text, Some(row)),
+            vec![card],
+            "stepped into the row, the card is the next level"
+        );
+        assert!(
+            group_chain(&doc, text, Some(card)).is_empty(),
+            "stepped into the card, the click picks the text itself"
+        );
+        assert_eq!(
+            group_chain(&doc, card, None),
+            vec![row],
+            "and a click on the card's own body selects the row"
+        );
+        assert!(
+            group_chain(&doc, card, Some(card)).is_empty(),
+            "stepped into the card, a click on its body is the card"
         );
     }
 

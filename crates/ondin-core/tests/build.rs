@@ -251,18 +251,81 @@ fn group_rejects_members_from_different_parents() {
     ));
 }
 
+/// **A frame can be grouped; the root cannot** (§15 D870, D876). It asserted that
+/// a frame was refused too until frames could sit in groups — a row of cards is a
+/// group of frames, and grouping the cards is how one is made.
 #[test]
-fn group_rejects_artboards_and_the_root() {
+fn group_takes_frames_and_rejects_the_root() {
     let mut f = Fixture::new();
-    assert!(matches!(
-        build::group(&f.doc, &mut f.ids, &[f.artboard]),
-        Err(OpError::WrongKindForOp)
-    ));
+    let (tx, g) = build::group(&f.doc, &mut f.ids, &[f.artboard]).expect("a frame groups");
+    f.commit(tx);
+    assert_eq!(f.doc.get(f.artboard).unwrap().parent(), Some(g));
     assert!(matches!(
         build::group(&f.doc, &mut f.ids, &[f.root]),
         Err(OpError::WrongKindForOp)
     ));
     assert!(build::group(&f.doc, &mut f.ids, &[]).is_err());
+}
+
+/// **What a group holding a frame cannot become** (§15 D876): a boolean operand, a
+/// flattened union, or a mask — each refused with `ArtboardPlacement` before a
+/// transaction is planned. And the one case that must *not* be refused: a frame
+/// among the members of *Use as mask*, which is masked content rather than the
+/// mask, so `mask_target` passes over it for the shape above.
+///
+/// ⚠️ **`flatten` is the one that matters most**: it deletes its members, so the
+/// frame never reaches `apply`'s own refusal — without this check the card's box
+/// would become a rectangle in the union and its contents would be gone.
+///
+/// **Flip run**, `mask_target`'s `can_be_mask` filter deleted: fails on *"the
+/// card is masked content"* with `WrongKindForOp` — the frame, bottom-most and not
+/// a picture, chosen as the mask. With `flatten_union`'s `holds_a_frame` check
+/// deleted instead, fails on *"flatten"* at `Ok`. Both the predicted sites.
+#[test]
+fn a_group_holding_a_frame_is_no_operand_no_union_and_no_mask() {
+    let mut f = Fixture::new();
+    let card = f.add(f.artboard, artboard(), (0.0, 0.0));
+    let (tx, row) = build::group(&f.doc, &mut f.ids, &[card]).unwrap();
+    f.commit(tx);
+    let dot = f.add(f.artboard, rect(10.0, 10.0), (0.0, 0.0));
+
+    let refused = |got: Result<(Transaction, NodeId), OpError>, what: &str| {
+        assert!(
+            matches!(got, Err(OpError::ArtboardPlacement)),
+            "{what}: {:?}",
+            got.map(|(_, id)| id)
+        );
+    };
+    refused(
+        build::boolean(
+            &f.doc,
+            &mut f.ids,
+            &[row, dot],
+            ondin_core::BoolOp::Union,
+            None,
+        ),
+        "boolean",
+    );
+    let res = f.resolved();
+    refused(
+        build::flatten(&f.doc, &res, &mut f.ids, &[row, dot]),
+        "flatten",
+    );
+    refused(build::mask(&f.doc, &mut f.ids, &[row], None), "mask");
+    assert!(!build::can_be_mask(&f.doc, row));
+
+    // A frame as masked content: `card` lowest, the dot above it as the mask.
+    let card2 = f.add(f.artboard, artboard(), (0.0, 0.0));
+    let dot2 = f.add(f.artboard, rect(10.0, 10.0), (0.0, 0.0));
+    let (tx, g) =
+        build::mask(&f.doc, &mut f.ids, &[card2, dot2], None).expect("the card is masked content");
+    f.commit(tx);
+    assert_eq!(
+        f.children_of(g),
+        vec![dot2, card2],
+        "the dot moved under the card"
+    );
+    assert!(f.doc.get(dot2).unwrap().mask());
 }
 
 /// **A frame is sized to the union and nothing moves** (§15 D249). Two claims that
@@ -314,12 +377,17 @@ fn a_frame_is_the_union_of_its_members_and_moves_none_of_them() {
     );
 }
 
-/// §5.3: an `Artboard` hangs off the root or another `Artboard`. So a selection
-/// **inside a group** cannot be framed where it stands, and the refusal is the
-/// answer rather than quietly lifting the artwork out of its group to make room.
+/// §5.3: an `Artboard` hangs off the root, another `Artboard` or a group, and never
+/// sits under a boolean or a mask (§15 D870, D876). So a selection **inside a
+/// group** frames where it stands, and one **inside a mask** cannot — the refusal
+/// is the answer rather than quietly lifting the artwork out to make room.
 ///
-/// The mirror of it is the difference from `build::group` worth having a test
-/// for: **a frame may be a member**, where a group refuses one outright.
+/// The group half asserted the opposite until D870. The mask half is the one
+/// `can_parent` cannot see — a mask is a flag on a group, and group → frame is a
+/// legal pair — so it is `frame_may_sit_under` or nothing.
+///
+/// **Flip run**, `frame`'s `frame_may_sit_under` clause deleted: fails on *"inside
+/// a mask"* at `Ok`, the predicted site.
 #[test]
 fn framing_answers_the_placement_rule_in_both_directions() {
     let mut f = Fixture::new();
@@ -330,18 +398,27 @@ fn framing_answers_the_placement_rule_in_both_directions() {
     f.commit(tx);
     let inside = f.children_of(g);
     assert_eq!(inside.len(), 1, "the fixture put a layer inside a group");
-    assert!(matches!(
-        build::frame(&f.doc, &f.resolved(), &mut f.ids, &inside),
-        Err(OpError::ArtboardPlacement)
-    ));
+    let (tx, fr) = build::frame(&f.doc, &f.resolved(), &mut f.ids, &inside)
+        .expect("a selection inside a group frames where it stands");
+    f.commit(tx);
+    assert_eq!(f.doc.get(fr).unwrap().parent(), Some(g));
 
-    // A frame inside the artboard frames fine — frames nest, so this is the case
-    // `group` has no honest answer for and refuses.
+    let m = f.add(f.artboard, NodeKind::Group, (0.0, 0.0));
+    let shape = f.add(m, rect(10.0, 10.0), (0.0, 0.0));
+    f.commit(Transaction(vec![Operation::SetMask { id: m, mask: true }]));
+    let got = build::frame(&f.doc, &f.resolved(), &mut f.ids, &[shape]);
+    assert!(
+        matches!(got, Err(OpError::ArtboardPlacement)),
+        "inside a mask: {:?}",
+        got.map(|(_, id)| id)
+    );
+    assert!(
+        !build::can_frame(&f.doc, &[shape]),
+        "and the menu's question agrees"
+    );
+
+    // A frame inside the artboard frames fine — frames nest.
     let nested = f.add(f.artboard, artboard(), (10.0, 10.0));
-    assert!(matches!(
-        build::group(&f.doc, &mut f.ids, &[nested]),
-        Err(OpError::WrongKindForOp)
-    ));
     let (tx, fr) = build::frame(&f.doc, &f.resolved(), &mut f.ids, &[nested]).unwrap();
     f.commit(tx);
     assert_eq!(f.doc.get(nested).unwrap().parent(), Some(fr));
@@ -4086,7 +4163,8 @@ fn a_boolean_operand_is_neither_offered_as_a_rail_nor_accepted_as_one() {
 /// `[S3.1-L2-03]`, the other half of §15 D453 — filed as closed by the same
 /// builder refusal and **not**: `arch-scribe` found it reading D453's brief
 /// against the code. The guard that shipped tests the *parent's* kind, and a
-/// frame's parent is a frame or the root, so a frame walks straight through it.
+/// frame's parent is never a boolean (§15 D876), so a frame walks straight
+/// through it.
 ///
 /// ⚠️ **The damage is a file that never opens again, and that is what this
 /// asserts first.** `geometry::local_path` answers `Some` for an `Artboard`
@@ -4202,6 +4280,12 @@ fn can_frame_answers_what_frame_would_do() {
     let (tx, group) = build::group(&f.doc, &mut f.ids, &[b]).unwrap();
     f.commit(tx);
     let in_group = f.children_of(group);
+    let masked = f.add(f.artboard, NodeKind::Group, (60.0, 0.0));
+    let in_mask = f.add(masked, rect(10.0, 10.0), (0.0, 0.0));
+    f.commit(Transaction(vec![Operation::SetMask {
+        id: masked,
+        mask: true,
+    }]));
     let root = f.root;
 
     // Every case the builder can refuse for a reason a user can act on, plus the
@@ -4212,7 +4296,10 @@ fn can_frame_answers_what_frame_would_do() {
         ("nothing selected", vec![], false),
         ("the root itself", vec![root], false),
         ("two different parents", vec![a, in_group[0]], false),
-        ("a selection inside a group", in_group.clone(), false),
+        // Refused until frames could sit in groups (§15 D870).
+        ("a selection inside a group", in_group.clone(), true),
+        // §15 D876: a mask above bars a frame at any depth.
+        ("a selection inside a mask", vec![in_mask], false),
         ("an ordinary pair", vec![a, group], true),
         ("a frame among the members", vec![a, nested_frame], true),
     ] {

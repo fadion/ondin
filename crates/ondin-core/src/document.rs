@@ -100,6 +100,8 @@ impl Document {
             effects: Vec::new(),
             grids: Vec::new(),
             insets: Default::default(),
+            display: None,
+            item: Default::default(),
         };
         let mut nodes = FxHashMap::default();
         nodes.insert(root_id, root);
@@ -469,6 +471,8 @@ impl Document {
             Operation::SetExports { id, exports } => self.op_set_exports(*id, exports, dirty),
             Operation::SetLayoutGrids { id, grids } => self.op_set_grids(*id, grids, dirty),
             Operation::SetInsets { id, insets } => self.op_set_insets(*id, insets, dirty),
+            Operation::SetDisplay { id, display } => self.op_set_display(*id, display, dirty),
+            Operation::SetFlexItem { id, item } => self.op_set_flex_item(*id, item, dirty),
             Operation::SetCanvasBackground { background } => {
                 Ok(self.op_set_canvas_background(*background))
             }
@@ -519,6 +523,9 @@ impl Document {
             return Err(OpError::IndexOutOfRange);
         }
         check_child_kind(&parent_node.kind, kind)?;
+        if matches!(kind, NodeKind::Artboard { .. }) && !self.frame_may_sit_under(parent) {
+            return Err(OpError::ArtboardPlacement);
+        }
 
         // **`None` means "number me among my new siblings"**, and it is resolved
         // here rather than at the eleven of fifteen production create sites that
@@ -573,6 +580,8 @@ impl Document {
             // Nor insets: a new layer is placed by its transform until it is
             // pinned (`crate::container`).
             insets: Default::default(),
+            display: None,
+            item: Default::default(),
         };
         self.nodes.insert(id, node);
         self.nodes
@@ -808,6 +817,20 @@ impl Document {
 
         check_child_kind(&parent_kind, &root.kind)?;
 
+        // No frame under a boolean or a mask, inside the subtree or above it
+        // (§15 D876) — carried down the walk as one flag, seeded from the chain
+        // the subtree lands in. The pasted text is a template from outside the
+        // process (`io::clip`), so its own inside is not vouched for either.
+        let mut stack = vec![(root_id, !self.frame_may_sit_under(parent))];
+        while let Some((id, barred)) = stack.pop() {
+            let n = by_id[&id];
+            if barred && matches!(n.kind, NodeKind::Artboard { .. }) {
+                return Err(OpError::ArtboardPlacement);
+            }
+            let barred = barred || bars_frames(n);
+            stack.extend(n.children.iter().map(|c| (*c, barred)));
+        }
+
         for n in nodes {
             self.nodes.insert(n.id, n.clone());
             dirty.0.insert(n.id);
@@ -891,6 +914,11 @@ impl Document {
         let child_kind = self.nodes[&id].kind.clone();
         let new_parent_kind = self.nodes[&new_parent].kind.clone();
         check_child_kind(&new_parent_kind, &child_kind)?;
+        // The subtree already obeys the frame rule inside itself; what can break
+        // it is the chain it is moving under (§15 D876).
+        if !self.frame_may_sit_under(new_parent) && self.holds_a_frame(id) {
+            return Err(OpError::ArtboardPlacement);
+        }
 
         let old_index = self.nodes[&old_parent]
             .children
@@ -1325,6 +1353,51 @@ impl Document {
         Ok(Operation::SetInsets { id, insets: old })
     }
 
+    /// Replace a layer's layout (`crate::container::Display`, §15 D867).
+    ///
+    /// Refused when a number in it is not finite, `op_set_insets`' rule. No kind
+    /// gate: stored on any layer and read on a frame or a group. The node is
+    /// dirtied; its subtree follows through `Resolved::update`'s expansion, which
+    /// is every child the layout moves.
+    fn op_set_display(
+        &mut self,
+        id: NodeId,
+        display: &Option<crate::container::Display>,
+        dirty: &mut DirtySet,
+    ) -> Result<Operation, OpError> {
+        if display.as_ref().is_some_and(|d| !d.is_finite()) {
+            return Err(OpError::NonFinite);
+        }
+        let node = self.nodes.get_mut(&id).ok_or(OpError::NoSuchNode(id))?;
+        let old = std::mem::replace(&mut node.display, *display);
+        dirty.0.insert(id);
+        Ok(Operation::SetDisplay { id, display: old })
+    }
+
+    /// Replace a layer's flex-item properties (`crate::container::FlexItem`).
+    ///
+    /// Refused when a number is not finite. The node is dirtied, and **its parent
+    /// with it**: an item's properties move its siblings too, and `Resolved`'s
+    /// expansion descends from the parent to reach them.
+    fn op_set_flex_item(
+        &mut self,
+        id: NodeId,
+        item: &crate::container::FlexItem,
+        dirty: &mut DirtySet,
+    ) -> Result<Operation, OpError> {
+        if !item.is_finite() {
+            return Err(OpError::NonFinite);
+        }
+        let node = self.nodes.get_mut(&id).ok_or(OpError::NoSuchNode(id))?;
+        let old = std::mem::replace(&mut node.item, *item);
+        let parent = node.parent;
+        dirty.0.insert(id);
+        if let Some(p) = parent {
+            dirty.0.insert(p);
+        }
+        Ok(Operation::SetFlexItem { id, item: old })
+    }
+
     /// The ground is not a node, so this dirties nothing: `Resolved` holds
     /// transforms and bounds, and neither depends on what colour is behind the
     /// frames. Infallible for the same reason — there is no id to miss and no
@@ -1615,10 +1688,17 @@ impl Document {
         mask: bool,
         dirty: &mut DirtySet,
     ) -> Result<Operation, OpError> {
-        let node = self.nodes.get_mut(&id).ok_or(OpError::NoSuchNode(id))?;
-        if mask && !node.kind.can_mask() {
+        let kind = &self.nodes.get(&id).ok_or(OpError::NoSuchNode(id))?.kind;
+        if mask && !kind.can_mask() {
             return Err(OpError::WrongKindForOp);
         }
+        // A group holding a frame cannot become a mask: its outline would be a
+        // union with a page in it (§15 D876). `can_mask` already keeps a frame
+        // itself off, so this is only ever about what is inside.
+        if mask && self.holds_a_frame(id) {
+            return Err(OpError::ArtboardPlacement);
+        }
+        let node = self.nodes.get_mut(&id).expect("looked up above");
         let old = node.mask;
         node.mask = mask;
         for d in self.subtree_ids(id) {
@@ -1706,6 +1786,39 @@ impl Document {
             }
         }
         out
+    }
+
+    /// Whether a frame may sit anywhere under `parent` — nothing from `parent`
+    /// up to the root [`bars_frames`] (§15 D876).
+    ///
+    /// Terminates on any tree `apply` or the loader produced, both of which refuse
+    /// a cycle; the walk is upward, so it is at most the tree's depth.
+    ///
+    /// Public because every place that says in advance what `apply` will accept
+    /// has to ask it too — a menu row, a layers-panel drop, a render preview — or
+    /// it offers what the commit refuses.
+    pub fn frame_may_sit_under(&self, parent: NodeId) -> bool {
+        let mut up = Some(parent);
+        while let Some(id) = up {
+            let Some(node) = self.nodes.get(&id) else {
+                return true;
+            };
+            if bars_frames(node) {
+                return false;
+            }
+            up = node.parent;
+        }
+        true
+    }
+
+    /// Whether `id`'s subtree holds a frame, `id` itself included — what a move
+    /// under [`Self::frame_may_sit_under`]'s `false` refuses (§15 D876).
+    pub fn holds_a_frame(&self, id: NodeId) -> bool {
+        self.subtree_ids(id).iter().any(|d| {
+            self.nodes
+                .get(d)
+                .is_some_and(|n| matches!(n.kind, NodeKind::Artboard { .. }))
+        })
     }
 }
 
@@ -1806,13 +1919,36 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
             // `build::keep_insets`, so what carries over is *which* edges are
             // pinned and in what unit.
             insets: n.insets,
+            // A copy lays out its children the way the original does, and sits in
+            // a flex row the way it did.
+            display: n.display,
+            item: n.item,
         });
     }
     Some((out, new_root?))
 }
 
+/// Whether `node` bars a frame from sitting anywhere beneath it: a boolean or a
+/// mask (§15 D876, the maintainer's ruling).
+///
+/// **An ancestor rule, which is why it is not [`crate::build::can_parent`]'s.**
+/// Once a frame may sit in a group (§15 D870), a group can carry one into a
+/// boolean operand or a mask at any depth — and neither can use it. A boolean's
+/// operands are outlines, and a frame is a clipping page whose box is not its
+/// outline; a mask's outline is its contents unioned, and a page inside that
+/// union would make every page it holds part of somebody else's clip. So the
+/// rule is about the whole chain above a frame, and every door into the tree
+/// asks it: `op_create_node`, `op_insert_subtree`, `op_reparent`, `op_set_mask`
+/// and the loader's `verify_integrity`.
+pub(crate) fn bars_frames(node: &Node) -> bool {
+    matches!(node.kind, NodeKind::Boolean { .. }) || node.mask
+}
+
 /// Enforce the Root/Artboard structural rules (§5.3): an Artboard hangs off the
-/// root or off another Artboard, and nothing may parent a second Root.
+/// root, another Artboard or a group, and nothing may parent a second Root.
+///
+/// ⚠️ **A parent rule only.** Whether a frame may sit under a boolean or a mask
+/// further up is [`bars_frames`]'s question, asked over the chain.
 ///
 /// Shared with `io::schema` so a loaded file is held to exactly the same
 /// structural rules as one built through operations.
@@ -1999,6 +2135,8 @@ mod tests {
             effects: Vec::new(),
             grids: Vec::new(),
             insets: Default::default(),
+            display: None,
+            item: Default::default(),
         }
     }
 
@@ -2016,29 +2154,173 @@ mod tests {
         .map(|_| ())
     }
 
-    /// A frame may sit in a frame, but never in a group — and the check has to reach
-    /// *inside* an inserted subtree to see it, not just look at the root being
-    /// attached (which here is a perfectly legal group).
+    fn card(id: NodeId, parent: NodeId) -> Node {
+        node(
+            id,
+            Some(parent),
+            vec![],
+            NodeKind::Artboard {
+                size: Size::new(10.0, 10.0),
+            },
+        )
+    }
+
+    /// **A frame may sit in a group, and never under a boolean or a mask — and the
+    /// check has to reach *inside* an inserted subtree, and *above* it** (§15
+    /// D870, D876). Every parent–child pair in the refused cases is legal on its
+    /// own (boolean → group, group → frame), so a pairwise check passes all three;
+    /// only the chain says no.
+    ///
+    /// It asserted the opposite half until D870: a group → frame subtree refused.
+    /// That case is now the control, and the first assertion.
+    ///
+    /// **Flip run**, the `barred` seed forced to `false` (the chain above the
+    /// subtree unasked): fails on the third assertion, the one whose barrier is
+    /// above the paste — the predicted site. With `bars_frames` not carried down
+    /// the walk instead, fails on the second.
     #[test]
-    fn rejects_an_artboard_under_a_group_inside_the_subtree() {
+    fn a_frame_in_an_inserted_subtree_is_refused_under_a_boolean_or_a_mask_only() {
         let (mut doc, _root, ab) = base();
         let mut ids = IdSource::new(0xAA);
+
         let (g, inner) = (ids.mint(), ids.mint());
+        insert(
+            &mut doc,
+            vec![group(g, None, vec![inner]), card(inner, g)],
+            ab,
+        )
+        .expect("a card in a group is a row of cards");
+
+        let (b, g, inner) = (ids.mint(), ids.mint(), ids.mint());
         let nodes = vec![
-            group(g, None, vec![inner]),
             node(
-                inner,
-                Some(g),
-                vec![],
-                NodeKind::Artboard {
-                    size: Size::new(10.0, 10.0),
+                b,
+                None,
+                vec![g],
+                NodeKind::Boolean {
+                    op: crate::node::BoolOp::Union,
                 },
             ),
+            group(g, Some(b), vec![inner]),
+            card(inner, g),
         ];
-        assert!(matches!(
-            insert(&mut doc, nodes, ab),
-            Err(OpError::ArtboardPlacement)
-        ));
+        let got = insert(&mut doc, nodes, ab);
+        assert!(
+            matches!(got, Err(OpError::ArtboardPlacement)),
+            "a boolean inside the paste: {got:?}"
+        );
+
+        let masked = ids.mint();
+        let mut m = group(masked, None, vec![]);
+        m.mask = true;
+        insert(&mut doc, vec![m], ab).expect("an empty mask group");
+        let (g, inner) = (ids.mint(), ids.mint());
+        let got = insert(
+            &mut doc,
+            vec![group(g, None, vec![inner]), card(inner, g)],
+            masked,
+        );
+        assert!(
+            matches!(got, Err(OpError::ArtboardPlacement)),
+            "a mask above the paste: {got:?}"
+        );
+    }
+
+    /// **The other three doors hold the same rule** (§15 D876): creating a frame
+    /// under a mask, reparenting a group that holds a frame into a boolean, and
+    /// turning a group that holds a frame into a mask. The controls beside each —
+    /// the same frame created in a plain group, a frame-free group reparented into
+    /// the boolean — are what say the refusals are about the frame.
+    ///
+    /// **Flip run**, all three doors' new checks disabled and then restored one at
+    /// a time, so each assertion is reached with only its own door open:
+    /// `op_create_node`'s fails on *"create under a mask"*, `op_reparent`'s on
+    /// *"reparent into a boolean"* and `op_set_mask`'s on *"mask a group with a
+    /// card in it"* — each at `Ok`, the predicted sites.
+    #[test]
+    fn create_reparent_and_set_mask_refuse_a_frame_under_a_boolean_or_a_mask() {
+        let (mut doc, _root, ab) = base();
+        let mut ids = IdSource::new(0xAB);
+        let (plain, masked, boolean, a, b) =
+            (ids.mint(), ids.mint(), ids.mint(), ids.mint(), ids.mint());
+        let create = |id, parent, kind| Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind,
+            transform: None,
+            name: None,
+        };
+        let rect = || NodeKind::Rect {
+            size: Size::new(5.0, 5.0),
+            corner_radii: Default::default(),
+        };
+        let frame = || NodeKind::Artboard {
+            size: Size::new(5.0, 5.0),
+        };
+        doc.apply(&Transaction(vec![
+            create(plain, ab, NodeKind::Group),
+            create(masked, ab, NodeKind::Group),
+            create(a, masked, rect()),
+            Operation::SetMask {
+                id: masked,
+                mask: true,
+            },
+            create(
+                boolean,
+                ab,
+                NodeKind::Boolean {
+                    op: crate::node::BoolOp::Union,
+                },
+            ),
+            create(b, boolean, rect()),
+        ]))
+        .expect("the fixture");
+
+        let (in_plain, in_masked) = (ids.mint(), ids.mint());
+        assert!(
+            doc.apply(&Transaction(vec![create(in_plain, plain, frame())]))
+                .is_ok(),
+            "the control: a frame in a plain group"
+        );
+        let got = doc.apply(&Transaction(vec![create(in_masked, masked, frame())]));
+        assert!(
+            matches!(got, Err(OpError::ArtboardPlacement)),
+            "create under a mask: {got:?}"
+        );
+
+        let bare = ids.mint();
+        doc.apply(&Transaction(vec![create(bare, ab, NodeKind::Group)]))
+            .unwrap();
+        doc.apply(&Transaction(vec![create(ids.mint(), bare, rect())]))
+            .unwrap();
+        assert!(
+            doc.apply(&Transaction(vec![Operation::Reparent {
+                id: bare,
+                new_parent: boolean,
+                index: 0,
+            }]))
+            .is_ok(),
+            "the control: a group with no frame becomes an operand"
+        );
+        let got = doc.apply(&Transaction(vec![Operation::Reparent {
+            id: plain,
+            new_parent: boolean,
+            index: 0,
+        }]));
+        assert!(
+            matches!(got, Err(OpError::ArtboardPlacement)),
+            "reparent into a boolean: {got:?}"
+        );
+
+        let got = doc.apply(&Transaction(vec![Operation::SetMask {
+            id: plain,
+            mask: true,
+        }]));
+        assert!(
+            matches!(got, Err(OpError::ArtboardPlacement)),
+            "mask a group with a card in it: {got:?}"
+        );
     }
 
     #[test]

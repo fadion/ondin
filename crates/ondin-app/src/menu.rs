@@ -298,8 +298,9 @@ pub enum Item {
     /// §15 D249).
     ///
     /// [`Self::Group`]'s sibling, in the slot `context-menus.md` §4 gives it —
-    /// directly after it, before *Ungroup*. Where *Group selection* is absent
-    /// because a frame cannot be grouped, this one is present: frames nest.
+    /// directly after it, before *Ungroup*. The two were offered on different
+    /// selections until frames could be grouped (§15 D870); now they differ only
+    /// in what they make.
     FrameSelection,
     Ungroup,
     /// *Use as mask* — the layer clips the ones above it (`build::mask`, §15
@@ -1285,11 +1286,21 @@ pub struct Context<'a> {
     ///
     /// **The builder's own predicate rather than a rule restated here**, which is
     /// what stops the row offering something *Frame selection* would then refuse.
-    /// The case it dims is a selection inside a `Group`: an `Artboard` may only hang
-    /// off the root or another `Artboard`, so there is nowhere for the frame to go
-    /// without first lifting the artwork out of its group — a second edit nobody
-    /// asked for.
+    /// The case it dims is a selection among a boolean's operands or under a mask:
+    /// an `Artboard` may sit under neither (§15 D876), so there is nowhere for the
+    /// frame to go without first lifting the artwork out — a second edit nobody
+    /// asked for. A selection inside a plain group frames where it stands (§15
+    /// D870); it dimmed until then.
     pub can_frame: bool,
+    /// Why *Use as mask* would refuse the selection, when it would — the
+    /// inspector's own sentence (`OndinApp::mask_refusal`), so the row dims where
+    /// the click would fail and says what the control one panel over says.
+    ///
+    /// **Asked of the verb rather than restated** (§15 D876): a lone group
+    /// holding a frame was offered live and refused after the click, because the
+    /// row's presence test knew only kinds. Every other refusal `mask_action` makes
+    /// dims the row the same way.
+    pub mask_refused: Option<&'static str>,
 }
 
 /// The parts of the layer under the pointer that decide a row's label or its
@@ -1626,21 +1637,23 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
     // Every row here is kind-gated, and the gates are the code's rather than this
     // file's: `build::ungroup` takes a Group or a Boolean and nothing else, and
     // `build::boolean` wants two or more members.
-    if !cx.kinds.contains(&Kind::Frame) {
-        // A frame cannot be a member of a group (`build::group` refuses one), so
-        // the row is absent rather than present-and-failing.
-        rows.push(Row::new(Item::Group).dim_if(locked, why));
-    }
-    // **Present exactly where *Group selection* is not, as well as everywhere it
-    // is**, and that is the difference between the two verbs rather than an
-    // inconsistency: a frame nests in a frame (§5.3), so a selection of frames has
-    // an honest answer here and none above. Dimmed rather than absent where the
-    // *parent* cannot hold a frame — a selection inside a group — because that is
-    // about where the layers happen to sit and is fixable by moving them, which is
-    // exactly what §3 wants a sentence for.
+    // Frames among the members too, since a frame may sit in a group (§15 D870,
+    // D876): a row of cards is a group of frames. The row was absent on a frame
+    // until then, when `build::group` refused one.
+    rows.push(Row::new(Item::Group).dim_if(locked, why));
+    // **Beside *Group selection* everywhere.** It used to be the one of the pair
+    // present on a selection of frames, when *Group selection* was not; frames group
+    // now, so the two differ only in what they make. Dimmed rather than absent
+    // where the *parent chain* cannot hold a frame — a selection among a boolean's
+    // operands or anywhere under a mask (§15 D876) — because that is about where
+    // the layers happen to sit and is fixable by moving them, which is exactly what
+    // §3 wants a sentence for.
     rows.push(
         Row::new(Item::FrameSelection)
-            .dim_if(!cx.can_frame, "A frame cannot go inside a group")
+            .dim_if(
+                !cx.can_frame,
+                "A frame cannot go inside a boolean or a mask",
+            )
             .dim_if(locked, why),
     );
     // *Ungroup* and *Flatten* on a group or boolean are **promoted into the
@@ -1660,17 +1673,19 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
     // nothing in the model expressed one (§15 D286 reverses that).
     //
     // **Absent where the verb has no answer, dim where it merely refuses.** A
-    // selection containing a frame has nothing to offer — a frame can neither be a
-    // mask nor be grouped, which is the same pair of reasons *Group selection*
-    // above is absent for — and inside a boolean the operands are combined rather
-    // than drawn, so a mask there would take and do nothing.
+    // selection of nothing but frames has nothing to offer — a frame cannot be a
+    // mask, so no member could be one — and inside a boolean the operands are
+    // combined rather than drawn, so a mask there would take and do nothing. A
+    // frame *beside* a shape is masked content, which frames can be since they
+    // group (§15 D876): `build::mask_target` passes over the frame for the shape.
     //
     // Ticked like *Clip content* rather than like the booleans beside it: this is
     // a toggle whose off-state is worth showing, not one of four alternatives.
-    if !cx.kinds.contains(&Kind::Frame) && !st.in_boolean {
+    if !cx.kinds.iter().all(|k| *k == Kind::Frame) && !st.in_boolean {
         rows.push(
             Row::new(Item::Mask)
                 .checked(one && st.masked)
+                .dim_if(cx.mask_refused.is_some(), cx.mask_refused.unwrap_or(""))
                 .dim_if(locked, why),
         );
     }
@@ -2549,6 +2564,7 @@ impl OndinApp {
                 .as_ref()
                 .is_some_and(|s| s.editor.content().is_empty()),
             can_frame: build::can_frame(&self.session.doc, self.session.selection.ids()),
+            mask_refused: self.mask_refusal(),
             // A walk of the tree per frame the menu is up, which is the same shape
             // `any_guides` above has and cheaper than it looks: it stops at the
             // first layer with a spec on it in every document that has one.
@@ -3072,6 +3088,9 @@ mod tests {
             text_selection: false,
             text_empty: true,
             can_frame: true,
+            // `None`, for `can_frame`'s reason: a refusal by default would dim the
+            // row in every fixture and make the test that cares pass by accident.
+            mask_refused: None,
             // **True**, for `can_frame`'s reason: the page menu's fixtures are not
             // about the export row, and a `false` default would leave it dim in all
             // of them and make a test that cares pass by accident.
@@ -4576,24 +4595,25 @@ mod tests {
         );
     }
 
-    /// ***Frame selection* is offered wherever *Group selection* is, and in one place
-    /// it is not** (§4, §15 D249).
+    /// ***Frame selection* and *Group selection* are both offered on frames, and
+    /// *Frame selection* dims where the parent chain bars a frame** (§4, §15 D249,
+    /// D870, D876).
     ///
-    /// The interesting half is the frame: `build::group` refuses one outright, so the
-    /// *Group selection* row is **absent** on a selection of frames — and framing is
-    /// the verb that does have an answer there, because frames nest (§5.3). A pair of
-    /// rows that agreed about every kind would be one row.
+    /// The frame half asserted the opposite until D870: `build::group` refused a
+    /// frame, so *Group selection* was **absent** on a selection of frames, and that
+    /// was the whole difference between the pair. Frames group now — a row of cards
+    /// is a group of frames — so both rows are there.
     ///
     /// The other half is the dimming, which is about *where the layers sit* rather
-    /// than what they are: an `Artboard` cannot go inside a `Group`, so a selection
-    /// in one is dim with a sentence rather than absent — §3's rule, and it is the
-    /// difference between a row you can learn from and one that fails afterwards.
+    /// than what they are: an `Artboard` cannot go under a boolean or a mask, so a
+    /// selection there is dim with a sentence rather than absent — §3's rule, and it
+    /// is the difference between a row you can learn from and one that fails
+    /// afterwards.
     ///
-    /// ⚠️ Flipped by pushing the row inside the `!cx.kinds.contains(&Kind::Frame)`
-    /// arm above it — which is the spelling somebody arrives at by copying the line
-    /// for *Group selection*, and it is wrong in exactly the case that makes this
-    /// verb worth having. Also flipped by dropping the `can_frame` dim, where the row
-    /// is live inside a group and answers with `Cannot frame: …` after the click.
+    /// ⚠️ Flipped by dropping the `can_frame` dim, where the row is live under a mask
+    /// and answers with `Cannot frame: …` after the click. And by restoring the old
+    /// `!cx.kinds.contains(&Kind::Frame)` gate around *Group selection*: fails on
+    /// *"a frame groups"*, the predicted site.
     #[test]
     fn frame_selection_is_offered_where_group_is_and_on_the_frames_group_refuses() {
         let two = [id(1), id(2)];
@@ -4622,17 +4642,54 @@ mod tests {
         assert_eq!(row(&m, Item::FrameSelection), Some((true, None)));
         assert!(row(&m, Item::Group).is_some(), "the fixture: Group is here");
 
-        // On a frame, *Group selection* is gone and this one is not. That is the
-        // whole reason it is a second row rather than a rename.
+        // On a frame, both (§15 D870).
         let m = menu(&[Kind::Frame], true);
-        assert_eq!(row(&m, Item::Group), None, "a frame cannot be grouped");
+        assert_eq!(row(&m, Item::Group), Some((true, None)), "a frame groups");
         assert_eq!(row(&m, Item::FrameSelection), Some((true, None)));
 
-        // Inside a group: present, dim, and saying why.
+        // Under a boolean or a mask: present, dim, and saying why.
         let m = menu(&[Kind::Shape], false);
         assert_eq!(
             row(&m, Item::FrameSelection),
-            Some((false, Some("A frame cannot go inside a group")))
+            Some((false, Some("A frame cannot go inside a boolean or a mask")))
+        );
+    }
+
+    /// ***Use as mask* dims with the inspector's sentence wherever the verb would
+    /// refuse** (§15 D876) — the case that motivated it being a lone group holding
+    /// a frame, which was offered live and refused after the click.
+    ///
+    /// The sentence itself is `mask_action`'s and is pinned by the inspector's
+    /// `every_mask_refusal_says_which_thing_to_fix`; this pins that the row carries
+    /// it, and that no refusal leaves the row live.
+    ///
+    /// **Flip run**, the `mask_refused` dim deleted from the row: fails on *"dim,
+    /// with the sentence"* at `(true, None)` — the predicted site.
+    #[test]
+    fn use_as_mask_dims_with_the_sentence_the_inspector_gives() {
+        const WHY: &str = "A group holding a frame cannot be a mask; use a shape above it instead";
+        let one = [id(1)];
+        let mask_row = |refused: Option<&'static str>| {
+            let mut cx = open(
+                Target::Layer {
+                    id: id(1),
+                    door: Door::Canvas,
+                },
+                &one,
+                &[Kind::Group],
+            );
+            cx.mask_refused = refused;
+            build(&cx)
+                .iter()
+                .flatten()
+                .find(|r| r.item == Item::Mask)
+                .map(|r| (r.enabled, r.why))
+        };
+        assert_eq!(mask_row(None), Some((true, None)), "the control: live");
+        assert_eq!(
+            mask_row(Some(WHY)),
+            Some((false, Some(WHY))),
+            "dim, with the sentence"
         );
     }
 

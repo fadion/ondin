@@ -2255,3 +2255,190 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
         );
     }
 }
+
+/// A 300×200 frame holding four pinned layers — right-pinned, stretched, a
+/// stretched text node and a stretched nested frame with a right-pinned child of
+/// its own — and one that is not pinned at all. Returns the document, the frame
+/// and the unpinned rect.
+fn pinned_fixture() -> (Document, NodeId, NodeId) {
+    let mut ids = IdSource::new(1);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    // **Every shape is painted**, or it draws nothing and the differential has
+    // nothing to compare: the first cut of this fixture left them unfilled, and
+    // the inset-edit test passed with `relayout` switched off entirely.
+    let mut add = |doc: &mut Document, parent: NodeId, kind: NodeKind, at: (f64, f64)| {
+        let id = ids.mint();
+        let index = doc.get(parent).unwrap().children().len();
+        let painted = !matches!(kind, NodeKind::Text { .. });
+        let mut ops = vec![Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind,
+            transform: Some(Affine::translate(at)),
+            name: None,
+        }];
+        if painted {
+            ops.push(Operation::SetFills {
+                id,
+                fills: vec![Fill {
+                    brush: Brush::Solid(Color::from_rgba8(200, 60, 60, 255)),
+                    visible: true,
+                }],
+            });
+        }
+        doc.apply(&Transaction(ops)).unwrap();
+        id
+    };
+    let rect = |w, h| NodeKind::Rect {
+        size: Size::new(w, h),
+        corner_radii: RoundedRectRadii::default(),
+    };
+    let frame = add(
+        &mut doc,
+        root,
+        NodeKind::Artboard {
+            size: Size::new(300.0, 200.0),
+        },
+        (0.0, 0.0),
+    );
+    let right = add(&mut doc, frame, rect(100.0, 40.0), (10.0, 10.0));
+    let wide = add(&mut doc, frame, rect(100.0, 40.0), (10.0, 60.0));
+    let words = add(
+        &mut doc,
+        frame,
+        NodeKind::Text {
+            content: "pinned text that wraps when its frame narrows".into(),
+            style: Box::new(TextStyle::default()),
+            spans: Default::default(),
+            para_spans: Default::default(),
+            paragraph: Default::default(),
+            block: Default::default(),
+            sizing: TextSizing::Auto,
+            on_path: None,
+            on_path_flip: false,
+            on_path_offset: 0.0,
+        },
+        (10.0, 110.0),
+    );
+    let nested = add(
+        &mut doc,
+        frame,
+        NodeKind::Artboard {
+            size: Size::new(80.0, 40.0),
+        },
+        (10.0, 150.0),
+    );
+    let grandchild = add(&mut doc, nested, rect(20.0, 20.0), (0.0, 0.0));
+    let free = add(&mut doc, frame, rect(30.0, 30.0), (200.0, 150.0));
+    let px = |v| Some(ondin_core::LengthPct::Px(v));
+    let both = ondin_core::Insets {
+        left: px(10.0),
+        right: px(10.0),
+        ..Default::default()
+    };
+    for (id, insets) in [
+        (
+            right,
+            ondin_core::Insets {
+                right: px(10.0),
+                ..Default::default()
+            },
+        ),
+        (wide, both),
+        (words, both),
+        (nested, both),
+        (
+            grandchild,
+            ondin_core::Insets {
+                right: px(0.0),
+                ..Default::default()
+            },
+        ),
+    ] {
+        doc.apply(&Transaction(vec![Operation::SetInsets { id, insets }]))
+            .unwrap();
+    }
+    (doc, frame, free)
+}
+
+/// **Dragging a frame's edge draws its pinned children where the release will**
+/// (§15 D871) — `RenderOverrides::relayout` re-placing them against the preview's
+/// frame size, the stretched text re-shaped at its new wrap width and the nested
+/// frame's own pinned child following a frame that only moved because its parent
+/// did. Narrower and wider, because the text's line count moves in only one of
+/// them.
+///
+/// **Flip:** returning early from `relayout` fails the first case — the preview
+/// leaves every pinned child where the committed frame put it, which is the snap
+/// on release this exists to remove.
+#[test]
+fn a_frame_resize_previews_its_pinned_children_where_the_commit_puts_them() {
+    let (doc, frame, _) = pinned_fixture();
+    for w in [180.0, 420.0] {
+        let tx = Transaction(vec![Operation::SetGeometry {
+            id: frame,
+            geometry: GeometryPatch::Size(Size::new(w, 200.0)),
+        }]);
+        assert_preview_matches_commit(&doc, &tx, &format!("frame resized to {w}"));
+    }
+}
+
+/// Setting, changing and clearing a layer's insets previews as its commit —
+/// the inspector's scrub over an inset field is this.
+///
+/// **Flip:** returning early from `relayout` fails *"pinned and stretched"*.
+/// ⚠️ **It did not, on the fixture's first cut** — the shapes were unfilled and
+/// drew nothing, so both streams were empty and equal; the resize test above only
+/// failed because its text draws. Painting every shape is what gave this one
+/// teeth.
+#[test]
+fn an_inset_edit_previews_as_its_commit() {
+    let (doc, _, free) = pinned_fixture();
+    let px = |v| Some(ondin_core::LengthPct::Px(v));
+    let pin = |insets| Transaction(vec![Operation::SetInsets { id: free, insets }]);
+    assert_preview_matches_commit(
+        &doc,
+        &pin(ondin_core::Insets {
+            left: px(5.0),
+            right: px(5.0),
+            bottom: Some(ondin_core::LengthPct::Percent(10.0)),
+            ..Default::default()
+        }),
+        "pinned and stretched",
+    );
+    // Rounding a *stretched* layer's corners: the patch lands on a kind at its
+    // stored size, and the preview must still draw it stretched.
+    let stretched = doc
+        .get(free)
+        .unwrap()
+        .parent()
+        .and_then(|f| doc.get(f))
+        .unwrap()
+        .children()[1];
+    assert_preview_matches_commit(
+        &doc,
+        &Transaction(vec![Operation::SetGeometry {
+            id: stretched,
+            geometry: GeometryPatch::CornerRadius(6.0),
+        }]),
+        "a stretched layer's corners rounded",
+    );
+    // And un-pinning a pinned layer, which has to take it back to its transform.
+    let pinned = doc
+        .get(free)
+        .unwrap()
+        .parent()
+        .and_then(|f| doc.get(f))
+        .unwrap()
+        .children()[0];
+    assert_preview_matches_commit(
+        &doc,
+        &Transaction(vec![Operation::SetInsets {
+            id: pinned,
+            insets: ondin_core::Insets::default(),
+        }]),
+        "un-pinned",
+    );
+}

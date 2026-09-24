@@ -51,6 +51,10 @@ pub struct NodeOverride {
     pub visible: Option<bool>,
     /// Re-shaped layout, when the kind change affected text.
     pub text: Option<TextLayout>,
+    /// Replacement insets (`ondin_core::container`, §15 D871) — read only by
+    /// [`RenderOverrides::relayout`], which turns them into the transform and kind
+    /// above. Nothing draws from this field directly.
+    pub insets: Option<ondin_core::Insets>,
 }
 
 /// Artwork that does not exist in the document yet, drawn among `parent`'s children at
@@ -518,8 +522,117 @@ impl RenderOverrides {
         }
         // Cleared before anything can observe it — see the field.
         out.prepared_text = None;
+        // Before the booleans, which read the transforms this can change.
+        out.relayout(doc, res, tx);
         out.reevaluate_booleans(doc, res);
         Some(out)
+    }
+
+    /// Re-place, under this preview, every pinned child whose placement it changes
+    /// — the children of a frame it resizes, and any layer whose insets it sets
+    /// (§15 D871).
+    ///
+    /// **The preview's answer to a reflow, for insets.** `absorb` patches fields
+    /// and cannot re-run layout, so without this a frame being dragged wider would
+    /// leave its right-pinned children where they were and snap them over on
+    /// release — the exact report `reevaluate_booleans` exists for, one feature
+    /// over. It runs `ondin_core::container::place`, the function `Resolved` runs,
+    /// against the preview's frame size and insets, and writes the result as
+    /// ordinary transform and kind overrides; a frame stretched this way hands its
+    /// own children the stretched size, so the walk is parents first.
+    ///
+    /// ⚠️ **A layer the transaction places itself is skipped**: its own
+    /// `SetTransform` or `SetGeometry` already says where to draw it — that is how
+    /// a tool previews dragging a pinned child — and re-placing it by its old
+    /// insets would draw the drag somewhere the pointer is not. Flex and grid will
+    /// need a wider answer than this (§15 D868's preview question); for absolute
+    /// insets a child's placement depends on its frame and itself alone, and that
+    /// is the whole of what this reads.
+    fn relayout(&mut self, doc: &Document, res: &Resolved, tx: &Transaction) {
+        // Placed by the transaction: a transform, or a patch that changes the box.
+        // A corner radius or a side count does not place anything — it reshapes a
+        // kind still at its *stored* size — so a pinned layer given one is re-placed
+        // below, or a stretched layer would preview un-stretched (§15 D874).
+        let placed: FxHashSet<NodeId> =
+            tx.0.iter()
+                .filter_map(|op| match op {
+                    Operation::SetTransform { id, .. } => Some(*id),
+                    Operation::SetGeometry { id, geometry } if geometry.resizes() => Some(*id),
+                    _ => None,
+                })
+                .collect();
+        let mut queue: std::collections::VecDeque<NodeId> = std::collections::VecDeque::new();
+        for (id, over) in &self.nodes {
+            // Its insets changed, or its kind did without its box (the case above).
+            if over.insets.is_some() || over.kind.is_some() {
+                queue.push_back(*id);
+            }
+            if matches!(over.kind, Some(NodeKind::Artboard { .. }))
+                && let Some(n) = doc.get(*id)
+            {
+                queue.extend(n.children().iter().copied());
+            }
+        }
+        let mut seen: FxHashSet<NodeId> = FxHashSet::default();
+        while let Some(id) = queue.pop_front() {
+            if placed.contains(&id) || !seen.insert(id) {
+                continue;
+            }
+            let Some(node) = doc.get(id) else { continue };
+            let Some(parent) = node.parent() else {
+                continue;
+            };
+            let frame = match self.get(parent).and_then(|o| o.kind.as_ref()) {
+                Some(k) => k.clone(),
+                None => match res.used_kind(doc, parent) {
+                    Some(k) => k.clone(),
+                    None => continue,
+                },
+            };
+            let NodeKind::Artboard { size } = frame else {
+                continue;
+            };
+            let insets = self
+                .get(id)
+                .and_then(|o| o.insets)
+                .unwrap_or(*node.insets());
+            // The kind this preview has given it — a new corner radius, say — else
+            // the document's; either way at its specified size, which `place`
+            // stretches from.
+            let base = self
+                .get(id)
+                .and_then(|o| o.kind.clone())
+                .unwrap_or_else(|| node.kind().clone());
+            // A layer with no insets whose kind this preview changed is not this
+            // pass's business: it is drawn with that kind where it is.
+            if !insets.is_authored() && self.get(id).is_some_and(|o| o.insets.is_none()) {
+                continue;
+            }
+            let (local, kind) =
+                match ondin_core::container::place(&insets, size, node.transform(), &base) {
+                    Some((local, kind)) => (local, kind.unwrap_or_else(|| base.clone())),
+                    // Unpinned by this preview: back to where the document puts it.
+                    None => (node.transform(), base.clone()),
+                };
+            // Against what would be drawn now — this preview's kind if it has one,
+            // else the committed used kind — so an absorbed kind at the stored size
+            // is always replaced by the placed one, even where the placed one
+            // happens to equal what was committed.
+            let now = self
+                .get(id)
+                .and_then(|o| o.kind.clone())
+                .or_else(|| res.used_kind(doc, id).cloned());
+            let resized = now.as_ref() != Some(&kind);
+            self.entry(id).transform = Some(local);
+            if resized {
+                self.set_kind(doc, res, id, kind.clone());
+            }
+            self.mark_moved(doc, id);
+            // A frame this re-sized re-places its own pinned children.
+            if resized && matches!(kind, NodeKind::Artboard { .. }) {
+                queue.extend(node.children().iter().copied());
+            }
+        }
     }
 
     /// Re-derive the outline of every boolean above something this preview moves.
@@ -689,6 +802,16 @@ impl RenderOverrides {
                 // A geometry change can move the node's own painted area but
                 // not its children's frame of reference, so only it is dirty.
                 self.moved.insert(*id);
+            }
+            // Recorded, not drawn: `relayout` turns the insets into a transform
+            // and a kind once every op is in. A ghost carries no insets — a copy
+            // is pinned at commit, by `build::keep_insets` — so there is nothing
+            // to record on one.
+            Operation::SetInsets { id, insets } => {
+                if self.ghost(*id).is_none() {
+                    self.entry(*id).insets = Some(*insets);
+                    self.mark_moved(doc, *id);
+                }
             }
             // The six text ops are one shape — patch a field of the node's
             // `Text` kind and re-measure — so they share one helper rather than

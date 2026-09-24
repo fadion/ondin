@@ -209,6 +209,13 @@ pub(crate) struct NodeDto {
     /// something a later version might have a use for.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub grids: Vec<crate::layout::LayoutGrid>,
+    /// The layer's CSS insets inside its frame (`crate::container`), absent when
+    /// none is set — additive on `grids`' terms, no version bump and no existing
+    /// file's bytes changed (§5.11, §15 D868: the default is exactly what every
+    /// earlier file means). Kept, not normalized away, on a layer where they are
+    /// inert, for `grids`' reason.
+    #[serde(default, skip_serializing_if = "crate::container::Insets::is_unset")]
+    pub insets: crate::container::Insets,
 }
 
 /// What a file written before `clip` existed meant: frames clipped.
@@ -288,6 +295,7 @@ impl NodeDto {
             exports: n.exports().to_vec(),
             effects: n.effects().to_vec(),
             grids: n.grids().to_vec(),
+            insets: *n.insets(),
         }
     }
 
@@ -371,6 +379,7 @@ impl NodeDto {
                 .collect(),
             effects: self.effects,
             grids: self.grids,
+            insets: self.insets,
         })
     }
 }

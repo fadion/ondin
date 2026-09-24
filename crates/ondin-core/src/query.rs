@@ -155,10 +155,10 @@ pub fn local_box(doc: &Document, res: &Resolved, id: NodeId) -> Option<Rect> {
     let node = doc.get(id)?;
     // The **used** kind and, below, each child's **used** local (§15 D868): this
     // is the box the handles and the W/H are drawn from, so it is the box that is
-    // drawn, not the one the user typed. ⚠️ It is also the box the resize tools
-    // edit *from*, and those will want the specified box once the two differ —
-    // equal until layout places something, so the step that makes them differ owes
-    // that split.
+    // drawn, not the one the user typed. It is also the box the resize tools edit
+    // *from*, and that is right (§15 D874): tools compute from where a layer is
+    // drawn, and `build::keep_insets` turns the result into insets for a pinned
+    // one. Step 1 read this as a split owed; step 2 decided there is none.
     if let Some(b) = geometry::local_bounds(res.used_kind(doc, id)?, res.text_layout(id)) {
         return Some(b);
     }

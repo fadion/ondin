@@ -1553,6 +1553,7 @@ mod tests {
             exports: Vec::new(),
             effects: Vec::new(),
             grids: Vec::new(),
+            insets: Default::default(),
         }
     }
 

@@ -142,24 +142,36 @@ struct Used {
 
 /// The used geometry of `id`, or `None` where it is the specified geometry.
 ///
-/// 🚨 **The identity pass, and it is identity on purpose** (§15 D867's build step
-/// 1). Every consumer of geometry is routed through [`Used`] *before* anything can
-/// make it differ, so that the refactor is proved by the goldens staying
-/// byte-identical and the layout that follows lands on plumbing that already
-/// carries it. Nothing can be laid out yet — there is no `display` and no inset to
-/// author — so this answers `None` for every node, and step 2 (absolute insets on
-/// frames) is the first thing that answers anything else.
+/// **Absolute insets on frames** (§15 D871, D867's build step 2): a child of a
+/// frame with any inset set is placed by [`crate::container::place`] against the
+/// frame's **used** size — read out of `used`, which the caller fills parents
+/// first, so a frame another frame has stretched hands its children the stretched
+/// size. Everything else answers `None` and is drawn where the document says.
+///
+/// Until step 2 this answered `None` for every node, on purpose: step 1 routed
+/// every consumer through [`Used`] behind that identity pass so that the refactor
+/// was proved by the goldens staying byte-identical, and a document with no insets
+/// in it still takes exactly that path.
 ///
 /// Under `cfg(test)` a probe can answer instead (`probe::set`), which is how this
-/// module's tests drive a non-identity used geometry through the plumbing that a
-/// real one will take.
-fn used_geometry(doc: &Document, id: NodeId) -> Option<Used> {
+/// module's tests drive arbitrary used geometry through the plumbing; a probe
+/// answering `None` falls through to the real layout.
+fn used_geometry(doc: &Document, used: &FxHashMap<NodeId, Used>, id: NodeId) -> Option<Used> {
     #[cfg(test)]
-    if let Some(used) = probe::used(doc, id) {
-        return Some(used);
+    if let Some(u) = probe::used(doc, id) {
+        return Some(u);
     }
-    let _ = (doc, id);
-    None
+    let node = doc.get(id)?;
+    let parent = doc.get(node.parent()?)?;
+    let NodeKind::Artboard { size } = kind_in(used, parent) else {
+        return None;
+    };
+    let (local, kind) =
+        crate::container::place(node.insets(), *size, node.transform(), node.kind())?;
+    Some(Used {
+        local: Some(local),
+        kind,
+    })
 }
 
 /// `node`'s used local transform: the entry's where layout moved it, the
@@ -289,10 +301,14 @@ impl Resolved {
     pub fn rebuild(doc: &Document) -> Self {
         // Used geometry before anything else, since the walk below shapes text at
         // its used kind and composes world transforms from used locals.
-        let used: FxHashMap<NodeId, Used> = crate::subtree_nodes(doc, &[doc.root()])
-            .into_iter()
-            .filter_map(|id| used_geometry(doc, id).map(|u| (id, u)))
-            .collect();
+        // Pre-order, so a frame's entry is in the map before its children are
+        // placed against it.
+        let mut used: FxHashMap<NodeId, Used> = FxHashMap::default();
+        for id in crate::subtree_nodes(doc, &[doc.root()]) {
+            if let Some(u) = used_geometry(doc, &used, id) {
+                used.insert(id, u);
+            }
+        }
         let mut world = FxHashMap::default();
         let mut world_bounds = FxHashMap::default();
         let mut ink_bounds = FxHashMap::default();
@@ -386,6 +402,45 @@ impl Resolved {
         }
         let mut ordered: Vec<NodeId> = affected.keys().copied().collect();
 
+        // Parents before children — for the used-geometry pass below, where a
+        // child is placed against its frame's *used* size (§15 D871), and for the
+        // world transforms after it.
+        //
+        // 🚨 **`sort_by_cached_key`, and the word is worth 47×** (§15 D594,
+        // `[S4.1-L4-03]`). `sort_by_key` is documented to call its key function on
+        // **every comparison**, and `depth` walks the parent chain to the root —
+        // so this was Θ(n log n) walks of O(d) each, per commit. `ordered` is
+        // collected from an `FxHashSet`, so it arrives scrambled and the adaptive
+        // sort gets no help from a nearly-ordered input.
+        //
+        // Measured in release with the node count held near constant and depth
+        // varied — `update` against the full `rebuild` it exists to avoid:
+        //
+        // ```text
+        // depth × per-level   nodes | update | rebuild | this line
+        //   200 ×   1           402 |  5.819 |  0.122  | 5.431  (93% of update)
+        //    20 ×  10           222 |  0.357 |  0.075  | 0.357  (100%)
+        //     4 ×  50           206 |  0.098 |  0.066  | 0.045  (46%)
+        //     1 × 200           203 |  0.063 |  0.060  | 0.010  (16%)     (ms)
+        // ```
+        //
+        // At depth 20 — ordinary for imported SVG — the incremental path was
+        // **4.8×** the full reconstruction; at depth 200, **47×**. `rebuild` needs
+        // no sort at all, its recursion putting parents before children
+        // structurally, which is why it wins outright the moment depth costs
+        // anything.
+        //
+        // ⚠️ **The quantity is depth, and `[A4-MAP]`'s cost model has no depth
+        // axis** — it denominates this path in node count, and 402 nodes at depth
+        // 200 cost more here than 4,000 flat ones.
+        //
+        // The key is a lookup rather than a walk because `collect_subtree`
+        // recorded it on the way down; `sort_by_cached_key` then asks once per
+        // element rather than once per comparison. `sort_by_key` with the *walk*
+        // measured 42× the full `rebuild` on a 200-deep chain in debug, the walk
+        // with `sort_by_cached_key` 3.2×, and this 1.2×.
+        ordered.sort_by_cached_key(|id| affected.get(id).copied().unwrap_or(0));
+
         // Used geometry before text and before transforms (§15 D868), since both
         // read it. Over `affected` rather than `existing`: whether layout moves a
         // node is a question about its container, so a dirty ancestor is exactly
@@ -400,7 +455,7 @@ impl Resolved {
         // the widening.
         let mut relaid: Vec<NodeId> = Vec::new();
         for id in &ordered {
-            let fresh = used_geometry(doc, *id);
+            let fresh = used_geometry(doc, &self.used, *id);
             let changed = match fresh {
                 Some(u) => self.used.insert(*id, u.clone()).as_ref() != Some(&u),
                 None => self.used.remove(id).is_some(),
@@ -447,42 +502,9 @@ impl Resolved {
             self.reshape_text(doc, *id);
         }
 
-        // Transforms: parents before children.
-        //
-        // 🚨 **`sort_by_cached_key`, and the word is worth 47×** (§15 D594,
-        // `[S4.1-L4-03]`). `sort_by_key` is documented to call its key function on
-        // **every comparison**, and `depth` walks the parent chain to the root —
-        // so this was Θ(n log n) walks of O(d) each, per commit. `ordered` is
-        // collected from an `FxHashSet`, so it arrives scrambled and the adaptive
-        // sort gets no help from a nearly-ordered input.
-        //
-        // Measured in release with the node count held near constant and depth
-        // varied — `update` against the full `rebuild` it exists to avoid:
-        //
-        // ```text
-        // depth × per-level   nodes | update | rebuild | this line
-        //   200 ×   1           402 |  5.819 |  0.122  | 5.431  (93% of update)
-        //    20 ×  10           222 |  0.357 |  0.075  | 0.357  (100%)
-        //     4 ×  50           206 |  0.098 |  0.066  | 0.045  (46%)
-        //     1 × 200           203 |  0.063 |  0.060  | 0.010  (16%)     (ms)
-        // ```
-        //
-        // At depth 20 — ordinary for imported SVG — the incremental path was
-        // **4.8×** the full reconstruction; at depth 200, **47×**. `rebuild` needs
-        // no sort at all, its recursion putting parents before children
-        // structurally, which is why it wins outright the moment depth costs
-        // anything.
-        //
-        // ⚠️ **The quantity is depth, and `[A4-MAP]`'s cost model has no depth
-        // axis** — it denominates this path in node count, and 402 nodes at depth
-        // 200 cost more here than 4,000 flat ones.
-        //
-        // The key is a lookup rather than a walk because `collect_subtree`
-        // recorded it on the way down; `sort_by_cached_key` then asks once per
-        // element rather than once per comparison. `sort_by_key` with the *walk*
-        // measured 42× the full `rebuild` on a 200-deep chain in debug, the walk
-        // with `sort_by_cached_key` 3.2×, and this 1.2×.
-        ordered.sort_by_cached_key(|id| affected.get(id).copied().unwrap_or(0));
+        // Transforms: parents before children, which `ordered` already is — it
+        // was sorted above, before the used-geometry pass that needs the same
+        // order.
         for id in &ordered {
             let node = doc.get(*id).expect("in document");
             let local = local_in(&self.used, node);
@@ -532,11 +554,15 @@ impl Resolved {
     /// node, the document's everywhere else (§15 D868). `None` for a node the
     /// document does not hold.
     ///
-    /// **Ask this to draw, measure or hit-test; read [`Node::transform`] to edit.**
-    /// The two are equal until container layout places something, and they part
-    /// exactly where the difference matters: a tool computing a new transform has
-    /// to start from what the user set, and everything that shows the node has to
-    /// start from where it is.
+    /// **Ask this to draw, measure or hit-test — and to edit** (§15 D874). The two
+    /// are equal until container layout places something, and where they part a
+    /// tool computes from where the node *is drawn*, which is what the user sees and
+    /// drags, and writes the placement it wants as an ordinary `SetTransform`;
+    /// `crate::build::keep_insets` turns that into new insets for a pinned layer, at
+    /// the one place commits enter. Step 1 read *"read [`Node::transform`] to edit"*
+    /// here, and step 2 reversed it: a pinned layer's stored transform is not where
+    /// it is, so a tool starting from it would compose an edit against a place the
+    /// layer has left.
     pub fn used_local(&self, doc: &Document, id: NodeId) -> Option<Affine> {
         doc.get(id).map(|n| local_in(&self.used, n))
     }
@@ -547,8 +573,10 @@ impl Resolved {
     ///
     /// Always the same variant as [`Node::kind`] (see `Used::kind`), so a question
     /// about *what sort* of node this is can ask either; a question about its
-    /// geometry asks this. The same split as [`Self::used_local`]: edit from the
-    /// document, draw from here.
+    /// geometry asks this — to draw and to edit, under [`Self::used_local`]'s rule
+    /// (§15 D874). ⚠️ **What an operation is *applied to* is still the document's
+    /// kind**: a `GeometryPatch` that is not a whole size — a corner radius, a side
+    /// count — patches the stored kind, so it carries the stored size with it.
     pub fn used_kind<'a>(&'a self, doc: &'a Document, id: NodeId) -> Option<&'a NodeKind> {
         doc.get(id).map(|n| kind_in(&self.used, n))
     }

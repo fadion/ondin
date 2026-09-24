@@ -99,6 +99,7 @@ impl Document {
             exports: Vec::new(),
             effects: Vec::new(),
             grids: Vec::new(),
+            insets: Default::default(),
         };
         let mut nodes = FxHashMap::default();
         nodes.insert(root_id, root);
@@ -467,6 +468,7 @@ impl Document {
             Operation::SetEffects { id, effects } => self.op_set_effects(*id, effects, dirty),
             Operation::SetExports { id, exports } => self.op_set_exports(*id, exports, dirty),
             Operation::SetLayoutGrids { id, grids } => self.op_set_grids(*id, grids, dirty),
+            Operation::SetInsets { id, insets } => self.op_set_insets(*id, insets, dirty),
             Operation::SetCanvasBackground { background } => {
                 Ok(self.op_set_canvas_background(*background))
             }
@@ -568,6 +570,9 @@ impl Document {
             // Nor a layout grid, which a frame gets only when a designer asks
             // for one (`crate::layout`).
             grids: Vec::new(),
+            // Nor insets: a new layer is placed by its transform until it is
+            // pinned (`crate::container`).
+            insets: Default::default(),
         };
         self.nodes.insert(id, node);
         self.nodes
@@ -1294,6 +1299,32 @@ impl Document {
         Ok(Operation::SetLayoutGrids { id, grids: old })
     }
 
+    /// Replace a layer's insets (`crate::container`, §15 D871).
+    ///
+    /// **Refused when any length is not finite**, [`OpError::NonFinite`] as
+    /// `SetTransform` refuses a non-finite matrix: an inset is a position, and a
+    /// `NaN` one would put the layer — and its world box, and the spatial index's
+    /// entry — nowhere.
+    ///
+    /// ⚠️ **No kind or parent gate**, on `op_set_grids`' terms: the insets are
+    /// stored on any layer and the layout pass decides whether they place it. The
+    /// node is dirtied, and its subtree follows through `Resolved::update`'s
+    /// expansion, so a stretched frame's own children are re-placed too.
+    fn op_set_insets(
+        &mut self,
+        id: NodeId,
+        insets: &crate::container::Insets,
+        dirty: &mut DirtySet,
+    ) -> Result<Operation, OpError> {
+        if !insets.is_finite() {
+            return Err(OpError::NonFinite);
+        }
+        let node = self.nodes.get_mut(&id).ok_or(OpError::NoSuchNode(id))?;
+        let old = std::mem::replace(&mut node.insets, *insets);
+        dirty.0.insert(id);
+        Ok(Operation::SetInsets { id, insets: old })
+    }
+
     /// The ground is not a node, so this dirties nothing: `Resolved` holds
     /// transforms and bounds, and neither depends on what colour is behind the
     /// frames. Infallible for the same reason — there is no id to miss and no
@@ -1770,6 +1801,11 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
             // resized re-flows its own tracks and does not inherit the original's
             // (`crate::layout::tracks` takes the size and stores nothing).
             grids: n.grids.clone(),
+            // And pinned the same way. A copy placed somewhere else is re-pinned
+            // there by the `SetTransform` that places it, through
+            // `build::keep_insets`, so what carries over is *which* edges are
+            // pinned and in what unit.
+            insets: n.insets,
         });
     }
     Some((out, new_root?))
@@ -1962,6 +1998,7 @@ mod tests {
             exports: Vec::new(),
             effects: Vec::new(),
             grids: Vec::new(),
+            insets: Default::default(),
         }
     }
 

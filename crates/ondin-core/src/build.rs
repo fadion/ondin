@@ -3602,3 +3602,144 @@ fn push_offset(doc: &Document, res: &Resolved, id: NodeId, delta: Vec2, ops: &mu
         transform: local_for_world(doc, res, id, Affine::translate(delta) * world),
     });
 }
+
+/// `tx` with the insets of every **pinned** layer it moves or resizes rewritten,
+/// so the layer stays where the edit put it (§15 D871, D874).
+///
+/// **The one place an edit to a pinned layer becomes an edit of its insets.**
+/// Tools compute in *used* geometry — where a layer is drawn, which is what the
+/// user sees and drags (§15 D868) — and write the placement they want as ordinary
+/// `SetTransform` and `SetGeometry`. For a layer placed by insets that is not
+/// enough: its insets, not its transform, decide where it is drawn, so this reads
+/// each such write as *"draw it here"* and appends the `SetInsets` that does, each
+/// inset kept in its own unit (`container::inverse`). The tool's own ops stay, so
+/// the stored transform and size become the placement too, and a layer later
+/// un-pinned stays where it was. Every other layer passes through untouched, which
+/// is what keeps this a no-op on a document with no insets in it.
+///
+/// **Run where commits enter**, once, rather than at the ~110 sites that write
+/// placements — the alternative was every tool learning what an inset is.
+/// Previews do not need it: a tool's own transaction already says where to draw.
+///
+/// ⚠️ **What the layer is placed against is judged after the transaction**: a
+/// `Reparent` into a frame in the same edit pins the layer against its new frame,
+/// and a copy an `InsertSubtree` brings in is re-pinned wherever the edit placed
+/// it. The frame's size is its *used* size when the edit leaves it alone, and its
+/// size after the edit when the edit resizes it too — the Scale tool's case.
+///
+/// A layer whose insets the transaction sets itself is left to it.
+pub fn keep_insets(doc: &Document, res: &Resolved, tx: Transaction) -> Transaction {
+    // The placement each node is given, if a `SetTransform` gives one, and
+    // whether it was resized; and the nodes whose insets are set outright.
+    let mut placed: FxHashMap<NodeId, (Option<Affine>, bool)> = FxHashMap::default();
+    let mut explicit: FxHashSet<NodeId> = FxHashSet::default();
+    for op in &tx.0 {
+        match op {
+            Operation::SetTransform { id, transform } => {
+                placed.entry(*id).or_insert((None, false)).0 = Some(*transform);
+            }
+            // Only a patch that changes the box is a resize: a corner radius is
+            // applied to a kind still carrying the *stored* size, and reading it
+            // as a resize would re-pin a stretched layer at that size
+            // (`GeometryPatch::resizes`).
+            Operation::SetGeometry { id, geometry } if geometry.resizes() => {
+                placed.entry(*id).or_insert((None, false)).1 = true;
+            }
+            Operation::SetInsets { id, .. } => {
+                explicit.insert(*id);
+            }
+            _ => {}
+        }
+    }
+    // The cheap refusal first: nothing this edit places carries an inset, in the
+    // document or in a subtree it inserts. Every commit on a document with no
+    // insets ends here, without the scratch copy below.
+    let carries = |id: NodeId| {
+        doc.get(id).is_some_and(|n| n.insets().is_authored())
+            || tx.0.iter().any(|op| match op {
+                Operation::InsertSubtree { nodes, .. } => nodes
+                    .iter()
+                    .any(|n| n.id() == id && n.insets().is_authored()),
+                _ => false,
+            })
+    };
+    if !placed
+        .keys()
+        .any(|id| !explicit.contains(id) && carries(*id))
+    {
+        return tx;
+    }
+    // The document as the edit leaves it — parents, insets and sizes all read
+    // from here. A transaction the model refuses is returned as it came, for the
+    // commit to refuse on its own terms.
+    let mut after = doc.clone();
+    if after.apply(&tx).is_err() {
+        return tx;
+    }
+    let mut ids: Vec<(NodeId, (Option<Affine>, bool))> = placed.into_iter().collect();
+    ids.sort_by_key(|(id, _)| *id);
+    let resized: FxHashSet<NodeId> = ids.iter().filter(|(_, p)| p.1).map(|(id, _)| *id).collect();
+    // Pinned layers written back to exactly where they are drawn, whose
+    // `SetTransform` is dropped below.
+    let mut unmoved: FxHashSet<NodeId> = FxHashSet::default();
+    let mut out = tx;
+    for (id, (to, geometry_changed)) in ids {
+        if explicit.contains(&id) {
+            continue;
+        }
+        let Some(node) = after.get(id) else { continue };
+        if !node.insets().is_authored() || !crate::container::takes_insets(node.kind()) {
+            continue;
+        }
+        let Some(parent) = node.parent().and_then(|p| after.get(p)) else {
+            continue;
+        };
+        // The frame's used size where the edit leaves the frame alone; its new
+        // size where the edit resizes it too.
+        let parent_kind = if resized.contains(&parent.id()) {
+            parent.kind()
+        } else {
+            res.used_kind(doc, parent.id()).unwrap_or(parent.kind())
+        };
+        let NodeKind::Artboard { size: frame } = parent_kind else {
+            continue;
+        };
+        // Where the edit wants it drawn: the transform it wrote, else where it is
+        // drawn now. At what size: the size it wrote, else the size drawn now.
+        let local = to
+            .or_else(|| res.used_local(doc, id))
+            .unwrap_or(node.transform());
+        let kind = if geometry_changed {
+            node.kind().clone()
+        } else {
+            res.used_kind(doc, id)
+                .cloned()
+                .unwrap_or_else(|| node.kind().clone())
+        };
+        let Some(bx) = crate::geometry::local_bounds(&kind, None) else {
+            continue;
+        };
+        let insets = crate::container::inverse(node.insets(), *frame, local, bx, &kind);
+        if insets != *node.insets() {
+            out.0.push(Operation::SetInsets { id, insets });
+        } else if !geometry_changed
+            && let (Some(to), Some(now)) = (to, res.used_local(doc, id))
+            && to
+                .as_coeffs()
+                .iter()
+                .zip(now.as_coeffs())
+                .all(|(a, b)| (a - b).abs() < 1e-9)
+        {
+            // **Written back to where it is drawn**: a handle pressed and let go
+            // without moving writes the *used* placement, which for a pinned layer
+            // is not its stored transform — so without this the no-op test
+            // (§15 D428) would see a change and commit an invisible undo step.
+            unmoved.insert(id);
+        }
+    }
+    if !unmoved.is_empty() {
+        out.0
+            .retain(|op| !matches!(op, Operation::SetTransform { id, .. } if unmoved.contains(id)));
+    }
+    out
+}

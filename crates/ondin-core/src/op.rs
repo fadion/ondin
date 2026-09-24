@@ -235,6 +235,19 @@ pub enum Operation {
         id: NodeId,
         grids: Vec<crate::layout::LayoutGrid>,
     },
+    /// The layer's CSS insets and auto margins inside its frame
+    /// (`crate::container`, §15 D871) — the whole set, for
+    /// [`Operation::SetStrokes`]' reason: four insets and four margins are one
+    /// property to the user, and an inverse that restores one field of eight is a
+    /// half-undo.
+    ///
+    /// **Ink, unlike a grid**: an inset moves the layer, so it answers `true` to
+    /// [`Self::changes_ink`]. Written by the inspector's inset card, and by
+    /// `build::keep_insets` when an edit moves a pinned layer.
+    SetInsets {
+        id: NodeId,
+        insets: crate::container::Insets,
+    },
     /// The ground behind and around the frames — the one operation with no node
     /// to name, because the ground belongs to the document rather than to
     /// anything in it (§15 D18). A solid colour, not a `Brush`: there is
@@ -356,7 +369,8 @@ impl Operation {
             | Operation::SetStrokes { id, .. }
             | Operation::SetEffects { id, .. }
             | Operation::SetExports { id, .. }
-            | Operation::SetLayoutGrids { id, .. } => Some(*id),
+            | Operation::SetLayoutGrids { id, .. }
+            | Operation::SetInsets { id, .. } => Some(*id),
             Operation::CreateNode { .. }
             | Operation::DeleteNode { .. }
             | Operation::InsertSubtree { .. }
@@ -381,9 +395,9 @@ impl Operation {
     /// `History::commit_into_run` may keep the older inverse and drop the newer
     /// one only when the second edit overwrote *exactly* the fields the first one
     /// did. [`Self::overwrites`] answers a subject and the operation's discriminant
-    /// answers the variant, and for 22 of the 23 overwriting operations that pair
+    /// answers the variant, and for every overwriting operation but one that pair
     /// **is** the field set — each writes a fixed group of fields. Checked variant
-    /// by variant.
+    /// by variant (23 of 24 since `SetInsets`, which writes its whole set).
     ///
     /// ⚠️ **`SetGeometry` is the one exception, and it is the reason this function
     /// exists** (`[S2.2-L2-02]`). Its payload is itself a field selector:
@@ -489,6 +503,12 @@ impl Operation {
             | Operation::Reorder { .. }
             | Operation::SetTransform { .. }
             | Operation::SetGeometry { .. }
+            // An inset moves the layer it is set on (and stretches it, with two on
+            // one axis) — true even where it is inert, `SetMaskMode`'s reasoning
+            // below: the question is whether this *kind* of edit changes the
+            // drawing, and the answer depending on the parent would be a second
+            // layout pass hidden in a predicate.
+            | Operation::SetInsets { .. }
             | Operation::SetText { .. }
             | Operation::SetTextStyle { .. }
             | Operation::SetTextSpans { .. }
@@ -721,6 +741,7 @@ impl Operation {
                 node(id).is_some_and(|n| n.exports() == exports)
             }
             Operation::SetLayoutGrids { id, grids } => node(id).is_some_and(|n| n.grids() == grids),
+            Operation::SetInsets { id, insets } => node(id).is_some_and(|n| n.insets() == insets),
 
             Operation::SetCanvasBackground { background } => doc.canvas_background() == *background,
             Operation::SetGuidePosition { id, position } => {
@@ -860,6 +881,37 @@ pub enum GeometryPatch {
 }
 
 impl GeometryPatch {
+    /// Whether this patch can change the layer's **box** — its size, or where its
+    /// outline reaches — rather than only its shape inside the box.
+    ///
+    /// **The question insets ask** (§15 D874): a pinned layer stretched by its
+    /// insets draws at a size the document does not hold, so an edit that resizes
+    /// it is re-pinned around the new size, while a corner radius, a side count or
+    /// an inner ratio is applied to a kind still carrying the *stored* size and must
+    /// not be read as a resize to it. Treating every `SetGeometry` as a resize is
+    /// what un-stretched a stretched rect the moment its corners were rounded.
+    ///
+    /// No wildcard, so a new patch has to be classified.
+    pub fn resizes(&self) -> bool {
+        match self {
+            GeometryPatch::Size(_)
+            | GeometryPatch::LineEnd(_)
+            | GeometryPatch::Path { .. }
+            | GeometryPatch::TextSizing(_)
+            // A rail changes the whole box a text node is measured in, and flipping
+            // or sliding the type along one moves where its glyphs — its box — land.
+            | GeometryPatch::TextPath(_)
+            | GeometryPatch::TextPathFlip(_)
+            | GeometryPatch::TextPathOffset(_)
+            // A boolean's box is its result's, which the operator decides.
+            | GeometryPatch::BoolOp(_) => true,
+            GeometryPatch::CornerRadius(_)
+            | GeometryPatch::CornerRadii(_)
+            | GeometryPatch::Sides(_)
+            | GeometryPatch::InnerRatio(_) => false,
+        }
+    }
+
     /// A copy of `kind` with this patch applied, or `None` if the patch does
     /// not match the kind.
     ///

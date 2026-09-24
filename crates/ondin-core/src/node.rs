@@ -158,6 +158,14 @@ pub struct Node {
     /// `NodeKind::Artboard` has one, and a group's box is derived from its
     /// contents, so a grid on a group would move whenever a child did.
     pub(crate) grids: Vec<crate::layout::LayoutGrid>,
+    /// This layer's CSS insets and auto margins inside its frame (`crate::container`,
+    /// §15 D871) — unset on every layer until somebody pins one.
+    ///
+    /// **Specified, never used**: the insets are what the user set, and where the
+    /// layer is drawn is derived from them in [`crate::Resolved`] (§15 D868). Inert
+    /// outside a frame and on a kind that takes no insets, on `grids`' terms: the
+    /// model stores it and the layout pass asks the parent and the kind first.
+    pub(crate) insets: crate::container::Insets,
 }
 
 impl Node {
@@ -256,6 +264,11 @@ impl Node {
     /// them (`crate::layout`).
     pub fn grids(&self) -> &[crate::layout::LayoutGrid] {
         &self.grids
+    }
+    /// This layer's insets inside its frame (`crate::container`) — the specified
+    /// values; where they put it is [`crate::Resolved::used_local`]'s answer.
+    pub fn insets(&self) -> &crate::container::Insets {
+        &self.insets
     }
 }
 

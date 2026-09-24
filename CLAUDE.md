@@ -8,7 +8,7 @@ documents, and is untracked.
 | --- | --- |
 | `docs/architecture.md` | The design and the invariants. **Source of truth.** ~12,000 lines. |
 | `docs/decisions.md` | **§15** — every deviation from that design, **D1–D830** with no gaps, each with a verdict. ~47,700 lines. |
-| `docs/roadmap.md` | Open work, decided non-goals, parked decisions, post-v1. **Every `Now` section is clear as of 2026-09-23** — *Files, library and storage* reopened and closed that day (the cover cache's lifecycle, §15 D863–D864); what is left is *Later* and §0. **`Next · Container layout`** (flexbox, CSS grid and insets — `architecture.md` §5.3c, §15 D867–D873) is designed and unbuilt. |
+| `docs/roadmap.md` | Open work, decided non-goals, parked decisions, post-v1. **Every `Now` section is clear as of 2026-09-23** — *Files, library and storage* reopened and closed that day (the cover cache's lifecycle, §15 D863–D864); what is left is *Later* and §0. **`Next · Container layout`** (flexbox, CSS grid and insets — `architecture.md` §5.3c, §15 D867–D877): steps 1–2 built and committed; **step 3 (flex) committed except its inspector cards**, which wait on a design — its marker says what is left. |
 | `docs/shortcuts.md` | The whole keymap — bound, unbound and agreed. |
 | `docs/context-menus.md` | The context-menu spec and its own deviation ledger. |
 | `docs/vm.md` | The language behind Command Mode. Nothing here is built. |
@@ -67,16 +67,18 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 874 index rows, 874 body headings, next free
-D875** — but trust the procedure over any number written down here, including that one.
-⚠️ **D867–D874 are spent** (session 33: container layout's design ahead of its code, then build
-steps 1 and 2 — step 1 as amendments to D868, step 2 as D874 and its amendments). **D867, D868,
-D871, D872 and D874 are cited from `crates/`; D869, D870 and D873 are not yet** (groups taking
-`display`, frames under groups, and the 1/64-px quantization — all later steps), so check 3's
-per-number `grep -rl` finds only `docs/` for those three. **D875–D881 is reserved and unspent**
-(negative grep clean at the close of step 2) — confirm it with the negative grep anyway; a
-reservation recorded here is a claim about the moment it was written, which is the whole subject
-of this section.
+anywhere cited either. **The live figures: 877 index rows, 877 body headings, next free
+D878** (measured at the close of session 34) — but trust the procedure over any number written
+down here, including that one.
+⚠️ **D867–D877 are spent, and every one of them is now cited from `crates/`** (session 33:
+container layout's design, then build steps 1 and 2; session 34: step 3's rulings as D875, frames
+under groups as D876, drag-to-reorder as D877 — D869, D870 and D873, uncited at session 33's
+close, arrived with step 3). **D878–D881 are reserved and unspent** — session 34 reserved
+D875–D881 for step 3 and spent three; the closing negative grep over D878–D881 found zero code
+sites. ⚠️ **Container layout's step 3 is committed except item 5** (session 34's close: the
+inspector cards, waiting on a design the maintainer is preparing); the handoff marker in
+`docs/roadmap.md`'s *Next · Container layout* step 3 is the state. Confirm with the negative grep anyway; a reservation recorded here is a claim about the
+moment it was written, which is the whole subject of this section.
 ⚠️ **Session 31 overran its block the ordinary way, and caught it the ordinary way**: it reserved
 D845–D856, reserved D857–D866 before the first ran out, and spent sixteen. Every number was typed
 into code only after its block was reserved and grep-checked, and the closing re-grep over the
@@ -136,12 +138,14 @@ nothing. Put the number on the doc of whatever a reader meets the question at.
 grep -rhoE 'D[0-9]{1,3}\b' crates/ --include=*.rs | sort -u
 ```
 
-761 distinct numbers at the close of session 32 — **six arrivals (D861–D866) and no
-departures** against `edef605` (755 there, session 31's figure), measured as a set-difference,
+772 distinct numbers at the close of session 34 (its commits) — **six arrivals (D869, D870,
+D873, D875, D876, D877) and no departures** against `9da640d` (766 there: session 32's 761 plus
+session 33's five). Before that: 761 at the close of session 32 — six arrivals (D861–D866) and no
+departures against `edef605` (755 there, session 31's figure), measured as a set-difference,
 which is the only reading that
 says anything; the 744 this line carried was already not a reading of any recent commit, the
 same way the census figures below go stale — and **every one of them resolves** (measured at the
-close of session 32; the unresolved half has been reachable at zero only since D476 and D477 were
+close of session 34; the unresolved half has been reachable at zero only since D476 and D477 were
 reconstructed from their citation sites on 2026-09-19 — §15 D806's neighbours; both entries say in
 their first line that they are reconstructions).
 🚨 **A hex seed is a false positive of this sieve and one was manufactured in our own source**
@@ -332,6 +336,10 @@ every time.*
 line of the growth is the cover worker's new tests and the prose recording why they exist — a
 module joins by having a *repair* finished in it as often as a feature. `canvas.rs` is 22,416,
 `app.rs` 19,000, `inspector.rs` 24,927.
+⚠️ **Sessions 33–34 moved it to 44**: `container.rs` 781 → 1,985 (the flex engine
+and its tests) and `query.rs` 911 → 1,011 (the frame-rung chain and its test), measured against
+`9da640d`. `canvas.rs` is 22,813, `inspector.rs` 25,665, `app.rs` still 19,000;
+`decisions.md` 51,598 and `architecture.md` 12,779.
 
 ⚠️ **On Windows a scripted rewrite also re-decides the line endings.** A three-line Python
 `read()`/`replace()`/`write()` used for a *flip-check* — the most tempting case, because
@@ -357,7 +365,18 @@ exactly as it found it only holds if the probe comes back out the way it went in
 and its doc comment — and the result compiles, tests, lints, formats and passes
 `cargo doc`, while paragraphs of reasoning now describe the wrong thing.
 
-**There are twenty-nine recorded instances.** ⚠️ **The twenty-ninth (§15 D868's 2026-09-24
+**There are thirty-three recorded instances.** 🚨 **Session 34 added four, and three of them
+were already sitting in the tree** (§15 D876, D877): `renderer::flex_relayout` had taken
+`relayout`'s whole doc (session 33's uncommitted code, anchored on `fn relayout`; found by
+`arch-scribe` reading the file); `canvas::move_tx`'s summary and two paragraphs sat on
+`move_destination`, leaving `move_tx` undocumented; and `canvas::quad_of`'s two-line summary sat
+at the head of `selection_quad`'s doc. The last two are accumulated, of unknown age, and were found
+the same way — **by reading the doc run beside an insertion while making it**, which is habit 3
+paying out on the *neighbour* rather than on the new item. The fourth was the session's own:
+`group_fence`, anchored on `fn frame_covering`, landed between that function and its doc, and
+habit 2 run as a routine caught it inside a minute. ⚠️ **None of the four was long enough for
+the length ranking** (its floor is 59).
+⚠️ **The twenty-ninth (§15 D868's 2026-09-24
 amendment) is an accumulated one, found by reading the function beside the one being edited**:
 `resolve_subtree`'s two summary lines sat at the head of `struct Caches`' doc, above a count that
 was wrong as well (*"The four maps"* over five fields), and the function itself had no doc at all.
@@ -1114,8 +1133,11 @@ The real census cannot be scoped to its own answer:
 grep -rhoE 'cfg\(([a-z_]+)' crates/ --include=*.rs | sort | uniq -c
 ```
 
-Last run (2026-09-23, close of session 32): **370 `test`, 7 `windows`, 3 `unix`, 3 `panic`,
-3 `not`, 3 `debug_assertions`, 2 `target_os`, 2 `all`, 1 `debug`.** The tail did not move. `test`
+Last run (2026-09-24, close of session 34, over its commits): **379 `test`, 7 `windows`, 3
+`unix`, 3 `panic`, 3 `not`, 3 `debug_assertions`, 2 `target_os`, 2 `all`, 1 `debug`.** The tail did
+not move across sessions 33–34; `test` rose by 9 over the two, test modules for flex, frames under
+groups and the drag (not itemised — a count, not a set). Before that (2026-09-23, close of session
+32): 370 `test`, the same tail. `test`
 rose by 2 over session 32 and only **one** of those is an attribute (`Covers::asked_for`); the other is
 that item's doc saying *"this item is `cfg(test)`"* — **prose is source to this sieve**, the same
 reason the `1 debug` row below exists. (Session 31's reading was 368, a rise of 21 over test

@@ -67,15 +67,16 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 873 index rows, 873 body headings, next free
-D874** — but trust the procedure over any number written down here, including that one.
-⚠️ **D867–D873 are spent** (session 33: container layout's design, written ahead of its code).
-**D867 and D868 are cited from `crates/` since build step 1 landed; D869–D873 are not yet**, so
-check 3's per-number `grep -rl` finds only `docs/` for those five until the steps that build them
-plant a citation. **D874–D881 is reserved and unspent** (negative grep clean in session 33; step 1
-was recorded as amendments to D868 rather than new entries) — confirm it with the negative grep
-anyway; a reservation recorded here is a claim about the moment it was written, which is the whole
-subject of this section.
+anywhere cited either. **The live figures: 874 index rows, 874 body headings, next free
+D875** — but trust the procedure over any number written down here, including that one.
+⚠️ **D867–D874 are spent** (session 33: container layout's design ahead of its code, then build
+steps 1 and 2 — step 1 as amendments to D868, step 2 as D874 and its amendments). **D867, D868,
+D871, D872 and D874 are cited from `crates/`; D869, D870 and D873 are not yet** (groups taking
+`display`, frames under groups, and the 1/64-px quantization — all later steps), so check 3's
+per-number `grep -rl` finds only `docs/` for those three. **D875–D881 is reserved and unspent**
+(negative grep clean at the close of step 2) — confirm it with the negative grep anyway; a
+reservation recorded here is a claim about the moment it was written, which is the whole subject
+of this section.
 ⚠️ **Session 31 overran its block the ordinary way, and caught it the ordinary way**: it reserved
 D845–D856, reserved D857–D866 before the first ran out, and spent sixteen. Every number was typed
 into code only after its block was reserved and grep-checked, and the closing re-grep over the

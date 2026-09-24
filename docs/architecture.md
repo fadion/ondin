@@ -84,7 +84,9 @@
 - Components/instances/variants — **sequenced after layout**, on the same derive-from-specified
   pipeline (§5.3c, §15 D867). ~~Auto-layout/constraints~~ **left this list on 2026-09-23 and are
   designed**: CSS flexbox, CSS grid and absolute insets (§5.3c, §15 D867, D871) — insets on frames
-  built 2026-09-24, inspector card included (§15 D874), flex and grid not built. "v1" in
+  built 2026-09-24, inspector card included (§15 D874); flex in progress the same day — its model,
+  engine and preview built, an item's reorder by drag and a laid group's resize too, and no control
+  that gives a container a layout (§15 D875, D877); grid not built. "v1" in
   this document names the phase in which the basic editing tools were finished, not a release tag,
   and that phase is over. *Persistent* constraints in §13's sense — live relationships between
   arbitrary properties, a dependency graph — are not that feature and stay on this list.
@@ -128,6 +130,7 @@ crates exactly (`=x.y.z`). Known-current as of 2026-07 (verify at scaffold time)
 | Geometry | `kurbo` | `BezPath`, `Affine`, `Rect`, `Point`, `Size` |
 | Paint | `peniko` | `Brush`, `Color`, `Gradient`; reuse the `color` crate types it re-exports |
 | Text layout & editing | `parley` 0.11 (bundles `fontique`) | CPU-only. Layout, shaping, and the `Cursor`/`Selection` cursor model behind `core::text::TextEdit`. `system` feature OFF — core never scans OS fonts |
+| Container layout | `taffy` (`=0.14.0`, core only) | CSS flexbox — grid when §5.3c's step 4 enables it. `default-features = false`, `std` + `flexbox`; used through its low-level traits over Ondin's own nodes, not its `TaffyTree` (§15 D867, D875). Computes in `f32`; results quantized to 1/64 px (§15 D873) |
 | Spatial index | `rstar` | R-tree |
 | Maps | `rustc-hash` | `FxHashMap` |
 | Serialization | `serde` + `serde_json` | native format = versioned JSON (§5.11); binary later behind same API |
@@ -202,15 +205,17 @@ permission.
   `rustc-hash`, `thiserror`, `base64` (the image table's embedded bytes, §5.5a — zero dependencies of
   its own, and already in the workspace lock through `ureq`), `roxmltree` (the XML half of SVG import,
   §15 D394), `skrifa` and `read-fonts` (the font tables `text.rs` reads directly — OpenType
-  feature and name records, metrics and glyph outlines), and `flo_curves` (the boolean solver,
-  §15 D91). (`parley` is CPU-only text layout — headless-safe, and core needs it
+  feature and name records, metrics and glyph outlines), `flo_curves` (the boolean solver,
+  §15 D91), and `taffy` (container layout, §5.3c — `=`-pinned, `std` + `flexbox`, §15 D867, D875).
+  (`parley` is CPU-only text layout — headless-safe, and core needs it
   for text bounds, hit-testing, and the editing cursor model.) Core must build and pass all tests
   with no graphics context. ⚠️ **This list is load-bearing beyond tidiness, and it omitted the last
   four until 2026-09-06** (§15 D427): the enforcement below is a *denylist* of prefixes, and inverting
   it into the allowlist it should be is blocked on this enumeration being right, since baking a wrong
   allowlist in is worse than the denylist it replaces. **Read against `ondin-core/Cargo.toml` entry by
   entry on 2026-09-07 and exact in both directions** — thirteen names here, the same thirteen declared
-  there, nothing extra on either side. That is the check the inversion needs, and it is *set equality*
+  there, nothing extra on either side; `taffy` made it **fourteen and fourteen** on 2026-09-24, read
+  against the manifest again when it joined. That is the check the inversion needs, and it is *set equality*
   rather than "everything declared is listed": a name here that the manifest has dropped would bake a
   permission for a crate nobody depends on, which is harmless today and is how an allowlist stops
   meaning anything.
@@ -573,6 +578,10 @@ pub struct Node {
     insets: Insets,            // CSS top/right/bottom/left + auto margins inside its frame — §5.3c,
                                // §15 D874; SPECIFIED, unset and skipped until pinned, inert
                                // outside a frame and on a Group or Boolean
+    display: Option<Display>,  // CSS `display` — `Flex(..)`; None = no layout, NOT CSS's
+                               // `display: none`. Read on a frame or a group — §5.3c, §15 D875
+    item: FlexItem,            // flex-grow/-shrink/-basis, align-self, width/height and limits;
+                               // read only where the parent has a layout; skipped at CSS's defaults
 }
 
 pub enum NodeKind {
@@ -634,15 +643,21 @@ pub enum DashStyle { Solid, Dotted, Dashed, Custom }  // presentation only: clas
   scene walk (§6.2), `core::boolean`, the SVG writer (§7) and the save format (§5.11). Nothing in the
   roadmap needs a network and there is no half-step to one. §15 D114 records it so the codebase does
   not drift into one a feature at a time.
-- An `Artboard` hangs off the `Root` or off another `Artboard`; what it may never hang off is a
-  `Group`. Enforced in validation (`build::can_parent`, the single statement of the rule), and
+- An `Artboard` hangs off the `Root`, another `Artboard` or a `Group`, and **never sits anywhere
+  under a `Boolean` or a mask**. Two rules, because they are two kinds of question:
+  `build::can_parent` is the single statement of the *parent* rule — those three kinds and no other —
+  and `Document::frame_may_sit_under` the *ancestor* one, walking to the root for a boolean or a node
+  whose `mask` flag is set (`document::bars_frames`), since a group can carry a frame into an operand
+  or a mask at any depth with every pair on the way legal. Both are enforced in validation — create,
+  insert, reparent, `SetMask` on a node whose subtree holds a frame, and the loader — and
   `OpError::ArtboardPlacement` is what a violation reads as. **Frames nest** (§15 D62): a frame is a
-  page, and a page inside a page is how a card, a component or a state is expressed. A group is the
-  exception because it has no box of its own — a clipping page inside one would be clipped by
-  something with no edges — and because §5.7a's `paint_targets` relies on no frame being reachable
-  through a group. ⚠️ **Designed to change, not yet in effect** (§5.3c, §15 D870): container layout
-  needs a frame inside a group, so the rule is to admit a frame under *any* group. D870 weighs the
-  two reasons given here and names the audit owed when it lands.
+  page, and a page inside a page is how a card, a component or a state is expressed. **And they sit in
+  groups** (§5.3c, §15 D870, D876): a flex row of cards is a group whose cards are frames. A group was
+  refused until 2026-09-24 on two reasons D870 weighed — *"a clipping page inside one would be clipped
+  by something with no edges"*, never true, since a group does not clip, and §5.7a's `paint_targets`,
+  which already stops at a frame. A boolean's operands are outlines and a mask's outline is its
+  contents unioned, and a page is neither; a frame as *masked content*, a sibling above a mask, is
+  allowed.
 - **`Artboard` is the type's name; "frame" is the user's.** Every string a designer reads says frame
   — the tool, the default layer name, the nesting error — while the variant, the serde tag and the
   MCP snapshot's `"artboard"` keep the older word. This document uses both for the same reason;
@@ -659,7 +674,8 @@ pub enum DashStyle { Solid, Dotted, Dashed, Custom }  // presentation only: clas
   well: a shape drawn outside every frame is created at the root rather than adopted by one it is
   nowhere near (§9.4, §15 D25). **Frames now follow the same rule as shapes** in both directions —
   one drawn inside a frame becomes its child, one dragged into a frame joins it, and one dragged out
-  lands at the root (§15 D62).
+  lands at the root (§15 D62) — unless a group is above it, when it stays inside that group (§9.4,
+  §15 D876).
 - **`clip` is node-level, not a field of `NodeKind::Artboard`.** It is a property of the *layer*,
   like `visible`/`locked`/`opacity`, and the one container that honours it today is not obviously
   the last one that will — a clipping group is the same switch. `NodeKind::clips_children()` is
@@ -1083,12 +1099,15 @@ pub fn next_grid_color(existing: &[LayoutGrid]) -> Color;    // the first of GRI
   `+` steps: `LayoutGrid::new` carries the plain default, which is what a loaded file or a fixture
   should get.
 
-### 5.3c Container layout — flexbox, grid and insets (steps 1–2 built; §15 D867–D874)
+### 5.3c Container layout — flexbox, grid and insets (steps 1–2 built, step 3 in progress; §15 D867–D877)
 
 > **Mostly design ahead of code**, in the sense §12 and §13 are, and it sits here rather than at the
 > end because what it changes is the node model. **Built as of 2026-09-24**: the used-geometry
 > routing (step 1, §15 D868) and absolute insets on frames with their inspector card (step 2, §15
-> D874) — the paragraphs on those say so in the present tense. Flex, grid and components are not.
+> D874) — the paragraphs on those say so in the present tense. **Flex is in progress** (step 3, §15
+> D875): its model, engine, layout pass and preview are built, and a laid group's resize and an
+> item's reorder by drag (§15 D877), but no control in the app gives a container a layout yet;
+> frames sit inside groups since the same day (§15 D876). Grid and components are not built.
 > Every other passage of this document still describes `HEAD`; where one states a rule this design
 > will change,
 > it carries a forward pointer here instead of being rewritten. **When a step below lands, this
@@ -1096,8 +1115,8 @@ pub fn next_grid_color(existing: &[LayoutGrid]) -> Color;    // the first of GRI
 >
 > ⚠️ **"Grid" names two unrelated things in this document.** §5.3b's *layout grids* are chrome —
 > columns and rows drawn over a frame, in no export — and `ondin-core/src/layout.rs` is theirs. The
-> *grid* here is the CSS grid **container**, which places a node's children. The engine's module
-> needs a name that does not collide with `layout.rs`, or that file is renamed; which is open.
+> *grid* here is the CSS grid **container**, which places a node's children. The engine lives in
+> `ondin-core/src/container.rs`, beside the insets arithmetic, so `layout.rs` kept its name (§15 D875).
 
 **The model is CSS, under CSS's names** (§15 D867) — `display: flex` and `display: grid` and the
 properties CSS spells them with, explicitly not Figma's auto layout. It is behaviour designers
@@ -1127,10 +1146,20 @@ of its children; resizing it sets `width`/`height` and reflows, instead of scali
 behaves exactly as it does today.** A `Boolean` ignores `display` — its children are operands, not
 items. The root is not a container: the canvas is unbounded. A mask layer is out of flow, as though
 `position: absolute`. **Paint and clip stay frame-only**, so §5.7a's *a group is organisation, a
-frame is a thing* stands; D869 has why, and the CSS each kind would export as.
+frame is a thing* stands; D869 has why, and the CSS each kind would export as. **Built 2026-09-24
+in core and the preview** (§15 D875): `container::is_container` answers for `Artboard` and `Group`,
+and a group with a layout's box is `Resolved::used_frame`, which its bounds and `local_box` read.
+**Resizing such a group writes its box** (§15 D875's amendment): `tools::resize_layer` routes it to
+`resize_geometry`, the held corner going into its transform, and `scale_geometry` writes its
+`FlexItem.width`/`height` in px through `build::sized_flex_item`, which also stops its growth, since
+`keep_flex_sizes` leaves a transaction's own `SetFlexItem` alone. Under the Scale tool its contents
+scale too (§5.6). ⚠️ No inspector control sets `display` yet.
 
-**A frame may sit inside any group** (§15 D870), where §5.3's `can_parent` refuses every group
-today — the case is a flex row of cards, each card a frame for its fill and clip, the row a group.
+**A frame may sit inside any group** (§15 D870) — the case is a flex row of cards, each card a frame
+for its fill and clip, the row a group. **Built 2026-09-24** (§15 D876), with the maintainer's three
+rulings: a frame under a boolean or a mask, at any depth, is refused at the model level (§5.3); a card
+in a row is a rung of the row's `group_chain` (§5.10); and the Scale tool on a group scales a nested
+frame's contents (§5.6).
 
 **Constraints are `position: absolute` with insets** (§15 D871). In a box — a frame, or a group
 with `display` — a child's authored `top`/`right`/`bottom`/`left` (px or %) are the constraints:
@@ -1141,8 +1170,9 @@ document is unchanged and a frame resize still leaves children pinned top-left. 
 it is a fixed algorithm re-run from specified values, and nobody authors a relationship between two
 properties.
 
-**Built 2026-09-24 in frames, inspector card included** (§15 D874) — the group-with-`display` half
-waits on D869. `ondin-core/src/container.rs` holds the arithmetic: `LengthPct` (`Px`, or `Percent`
+**Built 2026-09-24 in frames, inspector card included** (§15 D874). The group-with-`display` half
+is placed by core and the preview since step 3 — `resolve::frame_box` answers a group's laid-out box
+— but is untested, and the card still offers only a frame's children (§15 D869's amendment). `ondin-core/src/container.rs` holds the arithmetic: `LengthPct` (`Px`, or `Percent`
 stored as typed, horizontal insets against the frame's width and vertical against its height),
 `AutoMargins`, `Insets`, and `place`/`inverse`, CSS's absolute-positioning rule for one axis and
 its reverse. `Node::insets` is the specified property, saved as an additive `NodeDto` field skipped
@@ -1183,8 +1213,13 @@ geometry (bounds for a path, a line and a boolean), with `width`/`height` defaul
 CSS's behaviour for `<img>`, and what stops CSS's default `flex-shrink: 1` squeezing a 40-unit
 rectangle to 30.643 — except between two absolute insets, which stretch a sized shape (§15 D874).
 A group without `display`, placed as an item, is atomic the same way, its
-intrinsic size its children's union bounds. Text is measured through `core::text`, which owes two
-things first: a min-content query and a memo keyed by wrap width. ⚠️ CSS's default
+intrinsic size its children's union bounds — ⚠️ through their **specified** geometry, so layout
+nested inside such a group is not reflected (`container::atomic_box`, a known simplification, §15
+D875). **Text keeps each sizing mode's meaning** (§15 D875, the maintainer's ruling): auto width
+never wraps (`white-space: nowrap`), auto height wraps at the width it is given — its stored width
+the preferred one, never below its widest word — and fixed is fixed; `container::flexed_text` turns
+the size a container gives back into a kind. Min-content is `text::content_widths`, and taffy's
+repeated questions share a per-pass memo keyed by node and width. ⚠️ CSS's default
 `align-items: stretch` stretches a replaced element's cross size too, and that is kept; a UI that
 wants otherwise creates containers with an explicit alignment, which is a default and not a
 deviation.
@@ -1196,9 +1231,10 @@ read through `used_local` and `used_kind` (§5.9). Layout runs in `Resolved` bef
 transforms, composing used locals → bounds → reindex. This design first read *re-shape text → lay out
 dirty containers*; the built order puts the map ahead because the cached layout is shaped *at* the
 used kind, and a text leaf measured *for* layout goes through §15 D872's measure function rather than
-that cache — whether flex keeps the order is step 3's question (§15 D868). Edits to specified
-properties are ordinary operations — for insets a new `Operation`, `SetInsets`; for flex and grid
-undecided — so undo needs nothing of its own. They save as additive `#[serde(default)]` fields with no schema
+that cache — and flex keeps the order, its text items measured by the engine's own measure (§15
+D868, D875). Edits to specified properties are ordinary operations — `SetInsets` for insets,
+`SetDisplay` and `SetFlexItem` for flex, the latter dirtying the parent too; for grid undecided — so
+undo needs nothing of its own. They save as additive `#[serde(default)]` fields with no schema
 bump (§5.11), because the default — no `display`, no insets — is exactly what every existing file means. ⚠️ **The cost is the risk.** Every consumer of
 geometry must read used geometry, and **every one that draws, measures or hit-tests now does**
 (2026-09-24, §15 D868): in core, `Resolved`'s world transforms, text, both bounds passes,
@@ -1216,28 +1252,69 @@ which patches the stored kind — plus `EditorSession::committed_node`, which re
 commit overwrites, and pen and path point editing, since a path does not stretch. And
 `RenderOverrides` (§6.2) patches the walk without re-resolving, so it cannot express a reflow in
 general; **for insets it re-runs `container::place`** in its `relayout` pass, since a pinned child's
-placement depends on its frame and itself alone, and how a flex or grid preview reflows is open.
+placement depends on its frame and itself alone, and **for flex it runs the engine itself** —
+`flex_relayout`, before `relayout`, over the preview's own state (§6.2, §15 D875). How a grid preview
+reflows is open.
 
-**Engine: taffy 0.14.0**, f32, MIT (§15 D867), chosen on a measured spike; used values come back
-through a *proposed* **1/64-px** quantization (§15 D873), so that f32's noise digits never reach a
-field or a file.
+**Engine: taffy 0.14.0**, f32, MIT (§15 D867), chosen on a measured spike, declared `=0.14.0` in
+core's manifest with `std` and `flexbox` only (§2, §3); used values come back quantized to **1/64
+px** (`container::quantize`, §15 D873, decided), so that f32's noise digits never reach a field or a
+file. **No mirror tree**: `container::FlexTree` implements taffy's low-level traits over Ondin's own
+nodes, read through `container::LayoutView` — `resolve::DocView` for the committed document,
+`RenderOverrides`' `PreviewView` for a preview, one engine for both — and is built for one pass and
+dropped, its `taffy::Cache`s with it; the incremental part is `Resolved`'s choice of which layout
+roots to re-lay (§15 D875).
+
+**Flex, as built** (§15 D875). `place_node` runs `container::lay_out` at each **layout root** — a
+container with a layout that is not itself an in-flow item of one — as the parents-first walk
+reaches it, a whole chain of nested flex containers in one pass; items take their slot and size
+(`item_placed`), a root its size (`root_sized`: a frame asked to hug grows its kind, a group takes the
+box). `update` collects `affected` from each dirty node's **`chain_root`**, so a change to one item
+re-lays its siblings — 🚨 the first hop counting for a child that has just *left* the flow. **Out of
+flow**: a hidden layer (`display: none`'s reading, the session's default and not a ruling), a mask,
+and a child with any inset (`container::in_flow`). **An in-flow item turns about its box centre and
+its stored translation is ignored while in flow** — the session's reading in code, unruled, and where
+a rotated one is drawn untested. **A resize sticks**: `build::keep_flex_sizes`, beside `keep_insets` in
+`commit_inner`, writes `flex-grow`/`flex-shrink` 0 for a main-axis resize and `align-self: start` for
+a cross resize of a stretched item (the maintainer's ruling) — spelled once as `build::held`, which
+`sized_flex_item` calls too for a laid group's resize. **And the stored translation is kept**: before
+that, `keep_flex_sizes` runs `build::kept_flow_translations`, so every `SetTransform` on an in-flow item
+— a left- or top-handle resize's shift, a rotation's — keeps its linear part and the stored
+translation, and one left unchanged is dropped; not where the same edit takes the item out of the flow
+(§15 D877's second amendment). A resize builds its shift on the used transform, which for an in-flow
+item is its slot, and that slot is the number this stops being stored. Padding and gap are px only, and the Scale tool
+scales them per axis, as it does a frame's guides (`tools::scaled_flex`, §5.6).
+
+**A drag inside a flex container is a reorder** (§15 D877, the session's defaults). An in-flow item's
+stored translation is drawn nowhere, so a move of one in-flow layer that stays in its parent commits
+a `Reorder` and no `SetTransform`: `build::flex_reorder` counts the dragged box's centre against every
+other in-flow sibling's used box in reading order — on its line by main-axis centre, reversed for
+`row-reverse`/`column-reverse`; on another line by cross centre — and out-of-flow siblings keep their
+place. Child order being flow order and paint order, the item's z-order moves with it. ⚠️
+`wrap-reverse` is read as `wrap`. One layer leaving its frame moves by its transform as before;
+several move by their transforms except an in-flow item, which stores no translation and keeps its
+slot, in the drag as on release (`canvas::stays_in_flow`) — reordering several at once is not built.
+The preview represents the reorder as a per-parent child order and outlines the slot the item will
+land in (§6.2, §9.4).
 
 **Build order**: (1) route rendering, export, hit-testing, snapping and the inspector through used
 geometry with an **identity** layout pass — a pure refactor, the goldens staying byte-identical its
 proof, and the riskiest step, **built 2026-09-24** (§15 D868); (2) absolute insets on
 frames — the smallest visible feature that exercises the whole pipeline, and the first test that a
 used geometry reaches anything outside core — **built 2026-09-24**, inspector card included (§15
-D874), `ondin-export/tests/insets.rs` proving the SVG, PNG and snapshot writers draw it; (3) flex, with live reflow during gestures and reorder by drag;
+D874), `ondin-export/tests/insets.rs` proving the SVG, PNG and snapshot writers draw it; (3) flex, with live reflow during gestures and reorder by drag —
+**in progress** (§15 D875): the engine, the layout pass, live reflow, resize — a laid group's
+included — and reorder by drag (§15 D877) are built, the inspector cards are not;
 (4) grid, with the track editor; (5) components and overrides, on the same pipeline.
 
-**Open, not decided**: the rotation origin of an item in flow (CSS's `transform-origin` defaults to
-the centre; Ondin's transform has its own origin and `Pivot`, §5.3 — an absolutely positioned child
-turns about its box centre, §15 D874); how `TextSizing`'s three states map onto
-`width`/`height`/`white-space` inside a flex or grid layout (the wrapping is decided, the mapping is
-not; between two insets it is D874's); how flex and grid previews reflow; a `TaffyTree` mirrored inside `Resolved` against taffy's low-level traits
-implemented over Ondin's own nodes with a per-node cache (leaning to the second); the module's name;
-whether resizing a laid-out item writes `width`/`height` in px and what that does to its
-`flex-grow`; and how taffy is declared. D867 and D868 carry the detail of each.
+**Open, not decided**: how grid previews reflow, how `TextSizing`'s three states map onto a grid
+layout, and what resizing a grid item writes — flex's answers (§15 D875) are not assumed to carry
+over; and whether the maintainer
+confirms the session's reading of an **in-flow item's rotation origin and stored translation** —
+its box centre, and ignored while in flow (§15 D875), which `container::item_placed` implements and
+nothing rules. ⚠️ A rotation of an in-flow item about any other pivot previews at the tool's transform
+and is laid out on release about its box centre — open and unmeasured (§15 D877's second amendment).
+D867, D868 and D875 carry the detail of each.
 
 ### 5.4 Text node
 
@@ -2530,7 +2607,8 @@ end of one JSON file keep both, which is the whole reason the table sits where i
   nowhere else to put a lean. ⚠️ **Amended by container layout** (§5.3c, §15 D868): the one number
   becomes one *specified* number and one *used* one, CSS's pair, with the used one derived in
   `Resolved` and never saved — **in effect since 2026-09-24 for a layer two insets stretch** (§15
-  D874), where the drawn size is not the stored one. Scale stays out of the transform either way.
+  D874), where the drawn size is not the stored one, and for a flex item its container grows,
+  shrinks or stretches (§15 D875). Scale stays out of the transform either way.
 - Interactive resize edits *geometry* (`SetGeometry`: rect/ellipse size, path points scaled, text
   box size) — stroke widths and children are unaffected, matching Figma.
 - A resize moves the text **box**, never the text size — and **a scale may not change which of
@@ -2616,8 +2694,19 @@ end of one JSON file keep both, which is the whole reason the table sits where i
   D481). The same mechanism serves a multi-selection resize
   (`tools::resize_selection`, §9.4), which is where it matters most: a *selection* is exactly where
   unrelated, differently-turned layers end up together. §15 D50 has what this replaced.
-  ⚠️ **Designed, not built** (§5.3c, §15 D869): a group with `display` set will not take this path —
-  resizing it writes its `width`/`height` and reflows. A group without `display` is unchanged.
+  **A group with `display` set does not take this path** (§5.3c, §15 D869, D875's amendment):
+  `tools::resize_layer` sends it to `resize_geometry` whatever it holds, and `scale_geometry`'s arm
+  for it writes its box — `FlexItem.width`/`height` in px through `build::sized_flex_item`, which also
+  stops its growth — and reflows, where scaling its items would hand the layout bigger items and leave
+  the box hugging them. Under the Scale tool the arm recurses into the contents as well, the session
+  reading D876's ruling for a nested frame across to a laid group. A group without `display` is
+  unchanged.
+  **A frame inside a resized group is a box and a container, and the two tools part over it** (§15
+  D876). A resize sets the frame's box and leaves its contents pinned, as resizing the frame itself
+  does; the Scale tool scales the contents too — the maintainer's ruling, a scale being a picture of
+  the whole group made bigger. The recursion is `tools::scale_subtree`'s, over *descendants* only,
+  and not `scale_geometry`'s, so a frame the user selects and scales directly takes its box alone
+  whether it is selected by itself or beside others — the session's reading, not the ruling's.
 - **A leaf whose geometry *is* its shape scales that geometry** (`tools::resize_geometry`): a `Line`
   or a `Path` has no authored `size` and no children, so it belongs to neither of the two paths above
   and used to fall through to `resize_group`, whose body iterates *children* and therefore produced
@@ -2627,8 +2716,9 @@ end of one JSON file keep both, which is the whole reason the table sits where i
   `split_geometry_scale` exactly as group resize splits its own, which is what keeps a mirror through
   a handle in the transform as a flip rather than in the geometry as a negative size. The routing is
   **structural** rather than a fourth list of kinds — no authored size *and* no children — so an
-  empty group answers it too and gets the same nothing it always did. It is spelled once, in
-  `tools::resize_layer`, which `canvas::resize_tx` and the inspector's W/H fields both call (§9.4), so
+  empty group answers it too and gets the same nothing it always did; the one exception is a group
+  with `display`, which comes here with its children, being a box (above, §15 D875). It is spelled
+  once, in `tools::resize_layer`, which `canvas::resize_tx` and the inspector's W/H fields both call (§9.4), so
   a typed number and a dragged handle cannot come to mean two different things about the same shape.
   The kind that actually arrives here is a `Path`: a lone `Line` has endpoint handles rather than a box
   (§9.4, §15 D99) *and* no W/H fields — its own field is an `L` writing through `move_line_end` instead
@@ -2688,6 +2778,11 @@ end of one JSON file keep both, which is the whole reason the table sits where i
   therefore scaled a 400 × 200 frame to 800 × 100 and left its centre guide at 200. Everything else in
   `scale_scalars` genuinely does not move at mean 1, so the early return is right for the rest of the
   list and was wrong for exactly this member of it.
+  **A flex container's padding and gaps are scaled the same way** (§15 D875's amendment, the
+  session's default): `tools::scaled_flex`, beside `scaled_guides` behind the same fork, takes left
+  and right padding and the column gap by the x factor and top and bottom padding and the row gap by
+  the y, for a frame as well as a group — each is a length along a named axis, and the mean would
+  leave a card's insides out of proportion.
 
 ### 5.7 Operations
 
@@ -2722,7 +2817,9 @@ pub enum Operation {
                                                       // a plain SetMask back. Refused with
                                                       // WrongKindForOp on a kind that cannot be one —
                                                       // §15 D282 for why this one is refused where
-                                                      // SetClip lets an inert flag sit.
+                                                      // SetClip lets an inert flag sit. Setting it
+                                                      // on a node whose subtree holds a frame is
+                                                      // ArtboardPlacement — §15 D876.
     SetMaskMode { id: NodeId, mode: MaskMode },       // §5.3. NOT an argument of SetMask: the mode is
                                                       // remembered while the flag is off, so it is
                                                       // writable on a layer that is not a mask, and
@@ -2757,6 +2854,12 @@ pub enum Operation {
     SetInsets   { id: NodeId, insets: Insets },       // the whole set — §5.3c, §15 D874. No kind or
                                                       // parent gate; refused NonFinite; `changes_ink`
                                                       // is true, since an inset moves the layer
+    SetDisplay  { id: NodeId, display: Option<Display> }, // the whole layout — §5.3c, §15 D875.
+                                                          // No kind gate; refused NonFinite;
+                                                          // `changes_ink` true
+    SetFlexItem { id: NodeId, item: FlexItem },       // the whole set; SetDisplay's terms, and it
+                                                      // dirties the PARENT too — an item's
+                                                      // properties move its siblings
     // the ops with no node to name — the ground and the guides belong to the document (§5.5):
     SetCanvasBackground { background: peniko::Color },
     AddGuide    { guide: Guide },
@@ -2908,12 +3011,15 @@ pub enum OpError {
   non-finite operation reaching `NonFinite` (§15 D421). An **empty** transaction answers `false` — that
   is the committer's separate question (§9.3). The caller is `EditorSession::commit_inner`.
 - Grouping/ungrouping are composite transactions (§5.7a), not dedicated ops.
-- Validation rejects: cycles, a frame parented by a group, out-of-range indices, unknown ids, duplicate ids,
+- Validation rejects: cycles, a frame parented by a shape or with a boolean or a mask anywhere above
+  it (§5.3, §15 D876), out-of-range indices, unknown ids, duplicate ids,
   malformed subtrees, opacity out of range, ops applied to an unsupporting `NodeKind`.
 - `InsertSubtree` validates the *whole* subtree, not just its root: every internal parent/child
   pair goes through the same kind rules as `CreateNode`, no node may be a second `Root`, no node
   may be listed as a child twice, **every node must be reachable from the subtree's root**, the
-  result must not nest past `io::MAX_TREE_DEPTH` once attached (`OpError::TooDeep`), and opacities
+  result must not nest past `io::MAX_TREE_DEPTH` once attached (`OpError::TooDeep`), **no frame may
+  sit under a boolean or a mask, whether the barrier is above the subtree or inside it** — a top-down
+  walk seeded from the destination's chain (§15 D876) — and opacities
   must be in range. It is the op paste, undo-of-
   delete, import and (later) MCP write tools all funnel through, so anything it lets past becomes
   a corrupt document that the tree walks then have to survive.
@@ -3090,12 +3196,14 @@ right for the census: "what colours are in here" does mean everything inside a f
 these" does not. ⚠️ **That is a statement about the walk and not about the Group Colors panel's
 scope, and the two were confused in the code until 2026-09-01**: `subtree_nodes` from a frame does
 reach everything inside it, and what changed is that the panel no longer starts the walk *at* the
-selected frame (§9.4, §15 D401). The census function is unchanged. Frames cannot sit inside groups
-(`can_parent`), so no frame is ever reached by
-passing through one — and a frame *inside a frame* is not reached either, because the walk stops at
-the outer one (§15 D62). ⚠️ **§15 D870 designs that first clause away** (not built): a frame will be
-allowed under any group. Checked against the walk, not assumed — its `takes_paint` arm already takes
-a frame as the target and does not descend, so the answer would not change.
+selected frame (§9.4, §15 D401). The census function is unchanged. **A frame reached by passing
+through a group is the target, and the walk stops there** — frames sit inside groups since
+2026-09-24 (§15 D870, D876), and the walk's `takes_paint` arm takes a frame and does not descend,
+which is what it did for a selected frame all along; a paint edit over a row of cards colours the
+cards, not their contents. This sentence read *"no frame is ever reached by passing through one"*
+until then, true only because `can_parent` refused the case — D870 checked the walk rather than
+assuming it, and its answer did not change. A frame *inside a frame* is not reached either, because
+the walk stops at the outer one (§15 D62).
 
 **One layer's appearance is liftable, and `Properties` is the three fields that means.** Fills,
 strokes and opacity — the payload behind *Copy properties* / *Paste properties* (`shortcuts.md` §7,
@@ -3297,7 +3405,7 @@ pub struct History { undo: Vec<Transaction>, redo: Vec<Transaction>, run: Option
   inside it where the payload names one, and the subject. A merge is refused unless the shapes are
   equal, because keeping the older inverse only restores both edits if the second overwrote exactly what
   the first did. ⚠️ **The field is part of the key and has to be** (§15 D482): a discriminant names the
-  variant, which is the field set for 23 of the 24 overwriting operations and is not for `SetGeometry`,
+  variant, which is the field set for 25 of the 26 overwriting operations and is not for `SetGeometry`,
   whose payload is itself a field selector — a size edit and a corner-radius edit on one node merged, and
   one undo restored the size and stranded the radius with an empty stack. **And `shape_key` is not
   `Operation::overwrites`**, which answers *"which node does this operation write"* for two app callers
@@ -3341,6 +3449,7 @@ impl Resolved {
     pub fn used_kind<'a>(&'a self, doc: &'a Document, id: NodeId) -> Option<&'a NodeKind>; // likewise
     pub fn used_local_of(&self, node: &Node) -> Affine;           // node in hand: MUST be doc's own
     pub fn used_kind_of<'a>(&'a self, node: &'a Node) -> &'a NodeKind;   // likewise
+    pub fn used_frame(&self, id: NodeId) -> Option<Size>;  // a group WITH a layout's box — §15 D875
     pub fn ink_bounds(&self, id: NodeId) -> Option<Rect>;
     pub fn text_layout(&self, id: NodeId) -> Option<&TextLayout>;
     pub fn invalidate_text(&mut self, doc: &Document);
@@ -3385,10 +3494,13 @@ impl Resolved {
   as the document's, so a `match` asking *what sort* of node this is may read either.
   **`resolve::used_geometry` places a child of an `Artboard` with authored insets** by
   `container::place`, against the frame's **used** size read out of the map being filled — so a
-  frame another frame has stretched hands its children the stretched size — and answers `None` for
-  everything else, which is still the identity pass step 1 was proved behind: a document with no
-  insets holds nothing in `used`, and the goldens staying byte-identical are still the check of
-  that. A `cfg(test)` probe in `resolve.rs` answers first when it answers `Some`, and D868 has what
+  frame another frame has stretched hands its children the stretched size. **Since step 3 it also
+  places flex items** (§5.3c, §15 D875): `place_node` runs `container::lay_out` at each layout root
+  the parents-first walk reaches, and each in-flow item takes its slot and size from that pass; a
+  group with a layout keeps its box in `Used::frame`, read through `used_frame`. Everything else
+  answers `None`, which is still the identity pass step 1 was proved behind: a document with no
+  insets and no layout holds nothing in `used`, and the goldens staying byte-identical are still the
+  check of that. A `cfg(test)` probe in `resolve.rs` answers first when it answers `Some`, and D868 has what
   it covers. What
   proves a used geometry reaches render and export is `ondin-export/tests/insets.rs`, a pinned
   document written byte for byte as its baked twin. ⚠️ **The app side has only the Position card's**
@@ -3416,9 +3528,10 @@ impl Resolved {
   is shaped at its **used** kind, so a text node's layout can move without its own kind changing.
   `update` therefore records which used entries actually *changed* and re-shapes the text among them
   the dirty set did not already cover — **the one door past this rule, only as wide as the entries
-  that changed**, so a translate still re-shapes nothing. 🚨 **Siblings are not in the expansion**:
-  under flex an item moves when its neighbour grows, nothing dirties the neighbour today, and the step
-  that makes one box depend on another owes the widening.
+  that changed**, so a translate still re-shapes nothing. 🚨 **The expansion starts from each dirty
+  node's `container::chain_root`** (§15 D875), not the node: under flex an item moves when its
+  neighbour grows, so a change re-lays its whole chain from the topmost container above it — and the
+  first hop counts for a child that has just left the flow, whose siblings close up behind it.
 - ⚠️ **The affected set carries each node's depth, and the parents-first sort caches its key** (§15
   D594). `collect_subtree` records depth as it descends — a child's is its parent's plus one, free
   there — into an `FxHashMap<NodeId, usize>`, and the sort is `sort_by_cached_key` over a lookup.
@@ -3528,6 +3641,13 @@ impl Resolved {
   **the box is also the buffer** (`grow_to_escape` ends `device_ink.intersect(grown)`), so the shadow
   was not merely mis-culled but drawn with a ruled edge across it at 38/255. The escape is taken per
   §6.4 stage now (§5.3a).
+  **Which containers start from their children's ink**: a group and the root always, and a frame
+  only when it does not clip — its box ∪ its children's ink, where a clipping frame keeps its box,
+  nothing of its children being painted outside it (§15 D876). ⚠️ **Every frame was its box alone
+  until 2026-09-24**, on the reading that its children are clipped to it or walked on their own terms
+  — true of the walk, which descends into a frame whatever its ink, and false of an ancestor culled on
+  the union: a group holding a non-clipping card culled the card's overflow whenever the card's box
+  was off screen. Both passes carry the arm, `recompute_bounds` and `resolve_subtree`.
   ⚠️ **A non-finite escape is *swallowed* here rather than propagated, and the guard for it is at the
   operation** (§15 D641). `effect::escaped` splits the insets back into an offset and a radius, so an
   infinite escape gives `inf − inf` — `NaN` — and `f64::min` answers the non-`NaN` operand, so every
@@ -3558,7 +3678,10 @@ impl Resolved {
   **and text layouts**, over randomized op sequences including text creation and restyling — and
   including `SetMask`, which is the one op in that mix whose effect on a box travels **sideways**, so
   the two passes reach the same container union by different routes, and `SetEffects`, which is the
-  one that travels **outwards** and has a second map to agree about. ⚠️ **What it cannot say is whether
+  one that travels **outwards** and has a second map to agree about. **Since 2026-09-24 it also
+  creates card frames, clipping or not, under groups one time in three** (§15 D876), a third route by
+  which a box travels up the tree: the frame-ink arm deleted from `recompute_bounds` alone fails it at
+  seed 1. ⚠️ **What it cannot say is whether
   the rule those routes agree about is right**: both passes narrowed by the mask's own box instead of
   the box it clips with, identically, and this property held throughout (§15 D460). A differential
   between two implementations of one rule guards a change to either and is silent about the rule.
@@ -3643,8 +3766,10 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   *used* box** (§15 D868) — measured from the used kind, children placed by their used locals —
   because the handles and the W/H are drawn from it; and it is also the box the resize tools edit
   *from*, which is right — tools compute from where a layer is drawn and `build::keep_insets`
-  converts for a pinned one (§15 D874), so the split step 1 thought owed is not.
-  `local_box` also covers containers, by unioning children through their transforms — each masked
+  converts for a pinned one (§15 D874), so the split step 1 thought owed is not. **A group with a
+  layout is its box** (`Resolved::used_frame`, §15 D869, D875), padding included, which no union of
+  its children could see. Any other container
+  `local_box` covers by unioning children through their transforms — each masked
   child clipped to
   what its governing mask *clips with*, exactly as `Resolved`'s world box does it (§5.9, §15 D283,
   D460), through `query::mask_extent_local` rather than the shared helper because this function works
@@ -3678,10 +3803,15 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   point from the one the canvas marker is drawn on.
 - `hit_test` always returns a **leaf**: groups are not indexed (§5.9) and have no outline of their
   own. Turning that leaf into the node a click should *select* is a separate step, and `group_chain`
-  is the tree walk it needs — the unbroken run of `Group` ancestors, outermost first. The policy on
+  is the tree walk it needs — the unbroken run of group-like ancestors, outermost first. The policy on
   top of it is the app's (§9.4), but the walk is not, because MCP's future `select` needs the same
-  answer. The app also *subtracts* from the list before it walks up: `canvas::pick_leaf` drops any
-  frame that has children (§9.4, §15 D22). That is a picking policy, not a hit test — `hit_test`
+  answer. **A frame between groups is a rung of that run** (§15 D876, the maintainer's ruling): a card
+  in a row is part of the row, so it is walked through and kept as a level of its own. Frames above
+  the outermost group are trimmed — which keeps a top-level frame's contents directly clickable —
+  unless the walk stopped at `inside`, below which everything is inside a group; and asked of `inside`
+  itself the answer is `[]`, a stepped-into frame being clicked on its background. The app also
+  *subtracts* from the list before it walks up: `canvas::pick_leaf` drops any frame that has children
+  and no group above it (§9.4, §15 D22, D876). That is a picking policy, not a hit test — `hit_test`
   still reports the frame, because a query asking what covers a point must answer honestly.
 
 ### 5.11 IO
@@ -3733,8 +3863,10 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   produced by `apply` cannot contain a cycle. That makes the loader the place where that guarantee
   is established, so it checks: root exists / is `Root` / has no parent; every non-root parent
   resolves; every listed child points back; **no node is listed as a child twice**; **every node is
-  reachable from the root**; **no node is deeper than `io::MAX_TREE_DEPTH` (256)**; and every
-  parent/child pair obeys the same kind rules operations do.
+  reachable from the root**; **no node is deeper than `io::MAX_TREE_DEPTH` (256)**; every
+  parent/child pair obeys the same kind rules operations do; and **no frame sits anywhere under a
+  boolean or a mask** (§5.3, §15 D876) — the ancestor rule the pairwise check cannot see, riding the
+  reachability walk as a flag per stack entry, as the depth does.
   Reachability and the duplicate check are what make cycles and orphan components impossible — without
   them a hand-edited file can satisfy parent/child consistency and hang the app.
 - ⚠️ **The depth bound is the one check that is about the *stack* rather than about the tree, and it
@@ -4216,7 +4348,9 @@ pub trait ScenePainter {
   `canvas_background: Option<Color>`, absorbed from `SetCanvasBackground` so a drag in the picker
   previews the ground live (§15 D28). It is not part of the scene walk: the backdrop is the clear
   colour, handed to the renderer separately, so the override rides here only to reach that caller.
-  It counts towards `is_empty`.
+  It counts towards `is_empty`. **And, since flex, a per-parent child order** (§15 D877): a parent a
+  `Reorder` reorders, with its whole new order, read through `children_of` — counted by `is_empty` as
+  well.
 
   **A ghost is a subtree, not a leaf.** `Ghost { parent, index, node }` separates the attachment point
   from the artwork, and `GhostNode` carries everything the walk reads off a `Node` — transform, kind,
@@ -4255,7 +4389,23 @@ pub trait ScenePainter {
   and a rounded stretched rect previews stretched; a layer with no insets that the preview only gave a
   new kind is left alone. *"Did the kind change"* is judged against what would be drawn now — the
   override kind, else the committed used kind — so an absorbed stored-size kind is always replaced by
-  the placed one (§15 D874). Flex and grid will need more than this.
+  the placed one (§15 D874). **Before it, `flex_relayout` runs the flex engine on the preview**
+  (§15 D875): `absorb` records `SetDisplay` and `SetFlexItem` as `NodeOverride::display` and `item`,
+  and every layout root a touched node chains to is laid out over a `PreviewView` — the same
+  `container::lay_out` `Resolved` runs, reading the specified values the transaction leaves — its
+  results written as transform and kind overrides and `NodeOverride::frame`, a group's box, so a
+  pinned child is then placed against the box its container has just been given. ⚠️ **It skips only
+  a layer the transaction drags with `SetTransform`**: a resized item is re-laid like its siblings,
+  since its container can move it as its size changes — **even when the resize carries a
+  `SetTransform`**, as a left- or top-handle one does to hold the opposite edge: a layer the same
+  transaction resizes (`SetGeometry` whose patch `resizes()`) is not counted as dragged, since the
+  commit keeps its stored translation and lays it in its slot (§15 D877's second amendment). **A skipped item's slot is kept, not thrown
+  away** (§15 D877): `RenderOverrides::landings` records where the layout puts each dragged item —
+  its world transform there and its own box — and the canvas outlines, as the insertion indicator,
+  only the one item the release will reorder (§9.4). ⚠️ **A layout the preview takes away puts its
+  items back** at their stored transforms — a container with no layout roots no pass — which the
+  preview/commit differential found. Ghosts are not in the view's tree, so a copy dragged into a flex
+  row is laid out on release. Grid will need its own answer.
   **`InsertSubtree`'s `index` is
   honoured**, and `scene::paint_node` interleaves ghosts among their parent's real children by it
   rather than drawing them last. Drawing last was the same z-order only while every caller appended;
@@ -4276,22 +4426,28 @@ pub trait ScenePainter {
   2. **It refuses what it cannot represent.** The line runs *through* the structural ops rather
      than around them: one that only **adds** artwork is a ghost (`CreateNode`, `InsertSubtree`),
      because nothing in the committed tree changes and there is no node whose absence the walk has
-     to fake. One that **moves or removes** an existing node — delete, reparent, reorder — is not
+     to fake. One that **moves or removes** an existing node — delete, reparent — is not
      representable at all, because a patch cannot say "somewhere else" or "not there". Those, and
      values `apply` would reject, return `None`, and the caller shows no preview at
-     all. A missing preview is recoverable; a lying one is not. **`SetClip`, `SetMask` and
+     all. **A reorder stood in that list until §15 D877** and is representable: the node stays in its
+     parent, so what changes is one parent's child order, a patch on that parent that all three of
+     its readers take (`RenderOverrides::children_of`) — the scene walk's paint order, the flex
+     engine's `PreviewView`, and the boolean evaluator's `operand_children`, a `Subtract`'s base being
+     its first operand, with `reevaluate_booleans` seeding from every reordered parent — and an index
+     `apply` would refuse is still refused. A missing preview is recoverable; a lying one is not. **`SetClip`, `SetMask` and
      `SetMaskMode` refuse for a
      third reason**, structural in the sense that matters here: each changes which *other* nodes the
      walk clips, where an override is a patch on one node. Nothing sets any of them mid-gesture — all
      three are a click on a panel — so refusing costs a preview nobody asks for (§15 D282, D288).
-     **`SetFillRule` is the seventh refusal and the only one refused for neither reason** (§15 D239):
+     **`SetFillRule` is the sixth refusal and the only one refused for neither reason** (§15 D239):
      it patches one node and nothing else, so it is not structural, but there is no `NodeOverride`
      field for the rule and adding one would buy a live preview of a control that is a click. It is
      also emitted by `build::boolean` when that makes an `Exclude`, and a boolean is committed rather
      than dragged out. *If anything ever scrubs the rule, the fix is a field here rather than a change
-     of category* — and the seventh is why this list must not be collapsed into "the structural ops":
-     six of the seven refusals are about structure in one sense or the other and one is about a
-     missing field, so `absorb`'s arms are the record of which is which.
+     of category* — and the sixth is why this list must not be collapsed into "the structural ops":
+     five of the six refusals are about structure in one sense or the other and one is about a
+     missing field, so `absorb`'s arms are the record of which is which. (It was the seventh of seven
+     until a reorder became representable, §15 D877.)
 
   **`SetEffects` is patchable, and its arm also marks the node moved** (§15 D333). The patch is the
   whole stack, as the op is; the *moved* mark is the part that is not obvious, and it is there because
@@ -6944,7 +7100,12 @@ input event (winit/egui)
   snap back to the committed value every frame. Its `kind()` is override → **used** → document
   (§15 D868), and every `preview_*` helper falls back to used geometry the same way; ⚠️ **so a control
   computing an edit *from* it computes from where layout put the node**, which is the rule since step
-  2 (§15 D874): `build::keep_insets` turns the placement written for a pinned layer into its insets.
+  2 (§15 D874): `build::keep_insets` turns the placement written for a pinned layer into its insets,
+  and `build::keep_flex_sizes`, straight after it, turns a resize of an in-flow flex item into
+  `flex-grow`/`flex-shrink` 0 or `align-self: start` so the size holds (§15 D875), and keeps the
+  item's stored translation under a `SetTransform` written while it stays in the flow — the slot a
+  control computed from being where its container puts it, not a place of its own (§15 D877's second
+  amendment).
   What is written back is still the used value, so a stretched auto-width text node resized stores
   `AutoHeight(w)`. `committed_node` has no
   used kind at all: it reports the value a commit is about to overwrite, which is the specified one.
@@ -7703,6 +7864,17 @@ same snapped delta — so the outline cannot promise a frame the release does no
 are outlined: leaving one for the root is equally a reparent, but the canvas is not a box that can be
 outlined, and a layer coming *out* of a frame already reads as leaving the box it is visibly
 departing.
+
+**A flex item's move outlines the slot it will land in**, dashed, at 1.5px `color::SELECT`
+(`canvas::draw_flex_landing`, §15 D877). The siblings opening a gap already show *that* the release
+reorders; the outline shows the shape it lands as, which differs from the dragged layer's own where
+the container stretches or sizes it. It is read off the preview (`RenderOverrides::landings`, §6.2)
+rather than worked out on the canvas, the drop outline's rule above. **Only the item the release will
+reorder is outlined**: a landing is recorded for every dragged in-flow item, so the canvas asks
+`flex_reorder_of` with the drag's snapped delta, as the drop outline asks `move_destination`, and draws
+that item's landing alone. An item the move is taking out of its frame would otherwise be outlined in
+the slot it is leaving, a promise the release does not keep; a multi-selection gets no outline either
+(§15 D877's amendment). ⚠️ **Read, not tested**: no test reaches the canvas's drawing.
 
 **The artboard list the drop rule reads is memoized, and the key is `EditorSession::revision`** (§15
 D616). `OndinApp::artboards` was a full-document walk answering a question about four nodes, asked
@@ -9535,20 +9707,25 @@ inside a boolean parents the copy to the boolean itself (`canvas::ClonedSubtree`
 source), so on release it joins the operation — and a preview that ignored it showed the pre-drag outline
 and jumped at the drop. `RenderOverrides::reevaluate_booleans` seeds its walk from **two** places for that
 reason: a *moved* node reshapes every boolean above it, so the seed is its parent's chain, while a *ghost*
-reshapes the boolean it is parented **to**, so the seed is that parent itself. The lookups grew the matching
-branches — `operand_children` appends the ghosts parented to a node to its committed children,
-`operand_visible` answers a ghost's own flag, and `nested` falls back to a ghost's `GhostNode::path` before
-the committed cache. It **appends** the ghost, and the reason that used to be right twice over has been
-overtaken on both counts: ghosts no longer draw after their parent's real children (§6.2), and a copy
-staying among its siblings now names an index rather than appending (§15 D42). What keeps it sound is the
-*operation* rather than the order: `boolean::evaluate` is a left fold in which only the **first** operand
-is order-sensitive — Subtract's tail is a union and the other three are commutative — and a copy lands at
-its source's index *plus one*, so it can never take slot 0. *Recheck that if anything is ever able to
-insert an operand at index 0: `a_ghost_operand_widens_the_boolean_it_is_dropped_into` appends, so nothing
-yet compares a preview against a commit that puts an operand mid-list.* The consequence below is worth
+reshapes the boolean it is parented **to**, so the seed is that parent itself. (A third seed arrived with
+reorder, §15 D877's amendment: a parent the preview reorders, since a `Subtract`'s operands in a new order
+are a new shape.) The lookups grew the matching
+branches — `operand_children` inserts the ghosts parented to a node among its children, each at its
+own `Ghost::index` (ascending, clamped to the end), `operand_visible` answers a ghost's own flag, and
+`nested` falls back to a ghost's `GhostNode::path` before the committed cache. **At its index, which is
+what the commit does** — the fold order is simply the commit's. ⚠️ This passage said until 2026-09-24
+that it **appends** the ghost and that appending was sound because only a fold's *first* operand is
+order-sensitive; that argument was measured false on 2026-08-31 (§15 D239's amendment — moving one
+operand of a twenty-circle `Exclude` to the end of the fold changes its area by about 3%), the code has
+inserted at the index since, and `operand_children`'s own doc says so. The prose lagged the code by
+three weeks. The consequence below is worth
 stating plainly, because it narrows a rule stated above: a preview
-**can** add artwork a boolean consumes, even though it still cannot reparent, reorder or delete — so
-`children_of` is no longer "the document's answer and only the document's" (§15 D94).
+**can** add artwork a boolean consumes, even though it still cannot reparent or delete — so
+`children_of` is no longer "the document's answer and only the document's" (§15 D94). **A preview
+can reorder since §15 D877, and this lookup reads it**: `operand_children` starts from
+`RenderOverrides::children_of` where the preview reorders the parent and from the document's order
+elsewhere (§6.2). Nothing in the app previews an operand reorder yet; this was closed ahead of its first
+caller, pinned by `reordering_a_subtracts_operands_previews_the_other_cut` (§15 D877's amendment).
 
 **All five lookups matter, and the kind is the one that is easy to forget.** A resize expresses itself
 as new *geometry* as well as a new transform, so an evaluator that overrides only transforms moves a
@@ -9720,12 +9897,16 @@ or `Release(id)` — so what the button *looks* like and what it *does* cannot d
 goes through `build::mask`**, which wraps two or more layers in a group (§15 D286); a lone layer is
 flagged where it stands. Which layer becomes the mask is **`build::mask_target`'s** answer and nothing
 else's — the key if one is designated among the members, else the bottom-most member that is **not a
-picture**, else the bottom-most (§5.5a, §15 D287). The control asks that function only to decide
+picture**, else the bottom-most (§5.5a, §15 D287) — chosen among the members `build::can_be_mask`
+accepts whenever any does, so a frame beside a circle is the circle's masked content rather than a
+refused mask (§15 D876). The control asks that function only to decide
 whether it can be live; the builder asks it again rather than being told, so the two cannot disagree
 about which layer they are talking about. **The builder gets the last word** besides: `mask_action`
 dry-runs `build::mask` on a throwaway `IdSource`, the way the boolean dropdown does, so a refusal
-`build::group` owns — a selection with a frame in it — dims the control instead of failing after the
-click. **Release is read from either end**:
+none of `mask_action`'s own checks names dims the control instead of failing after the click. The one it
+was written for — a selection with a frame in it, which `build::group` refused — is gone, frames
+grouping since 2026-09-24, and no case is known to reach it; a group holding a frame, which cannot be
+the mask, has its own sentence first. **Release is read from either end**:
 one selected layer that is a mask, or one
 selected container holding one — the second arm being what makes the operation undoable from the
 selection the first arm leaves behind, at the cost that a selected mask-group answers *Release* and so
@@ -9740,7 +9921,9 @@ D625) by disabling that refusal, which does not reach `Ok`: the dry run above st
 **message**, which is what the `Result` exists for, and a test asserting `is_err()` cannot tell it
 from a dead guard.
 The keyboard reaches the same verb on **`Ctrl+Alt+M`** (`shortcuts.md`, §15 D286), and so does the
-context menu's *Use as mask*. Group and Ungroup (`ph-selection-plus`,
+context menu's *Use as mask* — which dims with `mask_action`'s own sentence wherever it would refuse,
+read through `OndinApp::mask_refusal` into `menu::Context::mask_refused`, rather than being offered live
+and refused after the click (§15 D876's amendment). Group and Ungroup (`ph-selection-plus`,
 `ph-selection-slash`) call the same `group_selected_from_panel` / `ungroup_selected_from_panel` as
 before; only the presentation and the gating are new. They used to be a pair of default-styled text
 buttons above the count in `inspector_multi`, the one visibly unstyled control pair left in the
@@ -10651,7 +10834,10 @@ in from the left edge, 5px between the bottom of the text and the top edge, 11pt
 or `color::SELECT` when that frame is selected, drawn under every other overlay bar the pixel grid.
 That tag exists
 because a frame with anything in it is no longer directly clickable: `canvas::pick_leaf` skips it so
-its background passes the press through to the marquee (§5.10, §15 D22). An **empty** frame is still
+its background passes the press through to the marquee (§5.10, §15 D22). **Not a frame with a group
+above it** (§15 D876): a card in a row is part of the row, so a click on its background selects the
+row and a press there drags it, the group chain deciding which level — which gives up the marquee
+from a card's background inside a row, even stepped into the card. An **empty** frame is still
 clickable anywhere, and a frame that is *already* the selection stays draggable from anywhere inside
 it (`selected_frame_at`), so picking one by its name and then reaching for the middle of it does not
 rubber-band the selection away.
@@ -10668,7 +10854,10 @@ chain, so the same pixel selected the frame on a click and started a **marquee**
 clearing `entered_group` with it — and `canvas::hover_target`, whose contract is that the ring shows
 what a click would take, left the border selectable with no hover ring and no measure overlay. All
 four now carry it. *A chain whose job is to agree with another chain is the thing to check whenever
-either gains a link.*
+either gains a link.* 🚨 **`hover_target`'s copy drifted again and is gone** (§15 D839's amendment,
+D876): its tag and edge links answered the frame where the click ran all three through the group
+chain, a difference invisible until a card in a row became a rung. It calls `pick_at_pointer` and
+`pick_preview` now, so there is one chain rather than two kept in step.
 
 ⚠️ **And where two tags coincide, the one a click picks is the one the user can read** (§15 D554).
 `OndinApp::artboards` is depth-first in child order — paint order — so every reader of it takes the
@@ -10682,12 +10871,33 @@ Siblings do it too: a long name on the left reaches over its neighbour's tag.
 **Frame membership follows the artwork.** Dragging a layer more than half out of its frame moves it
 onto the canvas, belonging to no frame; dragging it more than half into one attaches it. A frame is
 a glorified group, so this is the same rule read in both directions — see §15 D20 for the area
-test, the limits on which layers hop, and why it commits as one transaction with the move.
+test, the limits on which layers hop, and why it commits as one transaction with the move. **A layer
+with a group above it hops only between the frames inside that group** (`canvas::group_fence`, §15
+D876): an icon on a card in a row may move to the next card, and dragged out of every card it stays
+where it is rather than falling out of the row onto the page. A loose layer may still drop into a
+card in a group.
 
 Creation reads the same way. `canvas::draw_target` gives a new layer the topmost frame that actually
 **contains** the press and the document root when no frame does, so a shape, a text node or a path
 started in open space is standalone rather than adopted by a frame it is nowhere near (§15 D25).
-Frames themselves always land at the root, wherever they are drawn, because they may not nest.
+A frame drawn with the frame tool lands the same way — in the frame under the press, or the root —
+since frames nest (§15 D62); this sentence said they always land at the root *"because they may not
+nest"* until 2026-09-24, which had been false since D62.
+
+**Inside a flex container a move of one layer is a reorder** (§5.3c, §15 D877, the session's
+defaults). When exactly one layer is selected, in its container's flow, and `move_destination` keeps
+it in its parent, `canvas::flex_reorder_of` answers the `Reorder` `build::flex_reorder` asks for. The
+preview is the translation plus that reorder — the item under the pointer, its siblings laid out
+around the gap — and the release commits **the `Reorder` alone**: an in-flow item's stored
+translation is drawn nowhere and would surface only when the layout is removed. A drop back into its
+own slot is an empty transaction and no undo step. One layer leaving its frame moves by its transform
+as before, and so do several — except that an in-flow item in a multi-selection that stays in its
+parent gets no `SetTransform` and keeps its slot, the translation being one the layout ignores. One
+predicate answers both halves, `canvas::stays_in_flow`: `move_tx`'s multi-selection arm stores
+nothing for such an item, and `canvas::move_preview_tx` — the preview's transaction, lifted out of
+`update_drag` — drops its `SetTransform`, so it stays in its slot during the drag as on release
+rather than following the pointer and snapping back (§15 D877's second amendment). Reordering several
+at once is not built. An Alt-drag is unchanged.
 
 **`Ctrl`+`D` remembers.** A duplicate lands in place; move it and duplicate again and the new copy
 repeats that movement, as does every press after it — `CloneChain` holds the last clone, where it
@@ -10790,7 +11000,9 @@ third value on one.
 
 **Selection is group-first** (Figma semantics). A click selects the outermost `Group` above whatever
 the hit test found — that is the point of grouping, and it is what makes a group draggable as a
-unit. `Ctrl` reaches straight through to the leaf however deep it sits; `Ctrl`+`Alt` picks the
+unit. **A frame between groups is one of the levels** (§5.10, §15 D876): a click on the text in a
+card in a row selects the row, a double-click steps in to the card, the next to the text, and
+`Ctrl`+`Alt` is the card. `Ctrl` reaches straight through to the leaf however deep it sits; `Ctrl`+`Alt` picks the
 immediate child of the outermost group, one level in rather than all the way. Over a selection
 handle band the key means a skew instead — handle bands are dispatched before deep-select, which is
 what left `Ctrl` free for that gesture (above). **Both also enter the

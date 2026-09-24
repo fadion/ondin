@@ -1558,6 +1558,9 @@ impl OndinApp {
         self.inspector_layout_grids(ui);
         self.inspector_align(ui);
         self.inspector_multi_transform(ui);
+        // Where the single-layer inspector has it, under Transform: a pin applies
+        // to every pinnable layer in the selection, each at its own distances.
+        self.inspector_insets(ui);
         self.inspector_multi_appearance(ui);
         let fresh = self.paint_subject_changed();
         self.inspector_paint_panels(ui, PaintScope::Selection, fresh);
@@ -1692,6 +1695,10 @@ impl OndinApp {
         self.inspector_layout_grids(ui);
         self.inspector_align(ui);
         self.inspector_transform(ui, id, world, size0);
+        // Straight under the numbers it changes the meaning of: a pinned layer's X
+        // and W are where its insets put it (§15 D871). Draws nothing for a layer
+        // no frame can pin (`inset_subjects`).
+        self.inspector_insets(ui);
         // **A selected path gets the corner radius too, without entering point
         // editing** — asked for, and right: "round the corners of this shape" is
         // a thing you want of the whole layer, exactly as it is on a rect, and
@@ -4391,7 +4398,8 @@ impl OndinApp {
                 let unchanged = matches!(
                     (&op, self.session.doc.get(*id)),
                     (Operation::SetTransform { transform, .. }, Some(node))
-                        if transform.as_coeffs() == node.transform().as_coeffs()
+                        if transform.as_coeffs()
+                            == self.session.resolved.used_local_of(node).as_coeffs()
                 );
                 if !unchanged {
                     ops.push(op);
@@ -7141,6 +7149,341 @@ impl OndinApp {
             // that does nothing.
             self.open_paint_panel("Layout grid");
         }
+    }
+
+    /// Where the selected layers are pinned inside their frames — CSS insets and
+    /// `margin: auto` (`ondin_core::container`, §15 D871, D874).
+    ///
+    /// **A pin diagram and four fields**, the maintainer's choice of the options
+    /// offered: the diagram is the quick way to say *which* edges hold, the fields
+    /// keep CSS's names and numbers in view. Clicking a strut pins that edge at the
+    /// distance it is at now (`container::with_edge`), so a pin never moves anything;
+    /// the two buttons beside it centre on an axis the CSS way — both insets and
+    /// auto margins. The fields show a pinned inset in its own unit, and an unpinned
+    /// edge's current distance marked `auto`; typing into one pins it, and the unit
+    /// suffix switches a pinned inset between px and % of the frame without moving
+    /// the layer.
+    ///
+    /// **Titled *Position*, CSS's name for the property these belong to** — not
+    /// *Constraints*, which is the design-tool word for the same idea and the one
+    /// the maintainer asked not to borrow.
+    ///
+    /// Drawn for any selection with a layer in it that a frame can pin
+    /// ([`Self::inset_subjects`]); a pin or a unit edits every one of them, each at
+    /// its own distances, and a typed value writes the same number to each.
+    fn inspector_insets(&mut self, ui: &mut egui::Ui) {
+        use ondin_core::container::Edge as Pin;
+        let subjects = self.inset_subjects();
+        let Some(&anchor) = subjects.first() else {
+            return;
+        };
+        let Some(place) = self.inset_placement(anchor) else {
+            return;
+        };
+        let insets = self
+            .session
+            .display_node(anchor)
+            .map(|n| n.insets())
+            .unwrap_or_default();
+        let mixed = subjects
+            .iter()
+            .any(|id| self.session.display_node(*id).map(|n| n.insets()) != Some(insets));
+        self.panel(ui, "Position", None, |app, ui| {
+            if mixed {
+                ui.label(
+                    egui::RichText::new("Pinned differently. A pin applies to every layer.")
+                        .size(11.0)
+                        .color(theme::text::FAINT),
+                );
+            }
+            let full = ui.available_width();
+            let gap = ui::CARD_COL_GAP;
+            let side = ui::CONTROL_H;
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                let diagram = egui::vec2(full - side - gap, 2.0 * side + ui::CARD_ROW_GAP);
+                if let Some(edge) = inset_diagram(ui, diagram, &insets) {
+                    app.toggle_pin(&subjects, edge, inset_of(&insets, edge).is_none());
+                }
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = ui::CARD_ROW_GAP;
+                    for horizontal in [true, false] {
+                        let on = if horizontal {
+                            insets.margin_auto.left && insets.margin_auto.right
+                        } else {
+                            insets.margin_auto.top && insets.margin_auto.bottom
+                        };
+                        let (glyph, tip) = match (horizontal, on) {
+                            (true, false) => (
+                                icon::ALIGN_CENTER_VERTICAL,
+                                "Centre in the frame horizontally",
+                            ),
+                            (true, true) => {
+                                (icon::ALIGN_CENTER_VERTICAL, "Stop centring horizontally")
+                            }
+                            (false, false) => (
+                                icon::ALIGN_CENTER_HORIZONTAL,
+                                "Centre in the frame vertically",
+                            ),
+                            (false, true) => {
+                                (icon::ALIGN_CENTER_HORIZONTAL, "Stop centring vertically")
+                            }
+                        };
+                        let state = if on {
+                            ui::FieldButton::On
+                        } else {
+                            ui::FieldButton::Off
+                        };
+                        if ui::field_button(ui, glyph, side, 15.0, state)
+                            .on_hover_text(tip)
+                            .clicked()
+                        {
+                            app.toggle_centre(&subjects, horizontal, !on);
+                        }
+                    }
+                });
+            });
+            let half = egui::vec2((full - gap) / 2.0, side);
+            for pair in [[Pin::Left, Pin::Right], [Pin::Top, Pin::Bottom]] {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = gap;
+                    for edge in pair {
+                        app.inset_field(ui, &subjects, edge, half, &insets, &place);
+                    }
+                });
+            }
+        });
+    }
+
+    /// The selected layers a frame can pin: every one whose parent is a frame and
+    /// whose kind takes insets (`container::takes_insets` — not a group or a
+    /// boolean, whose box is its children's). Filtered rather than
+    /// all-or-nothing, `frame_subjects`' rule.
+    fn inset_subjects(&self) -> Vec<NodeId> {
+        let doc = &self.session.doc;
+        self.session
+            .selection
+            .ids()
+            .iter()
+            .copied()
+            .filter(|id| {
+                doc.get(*id).is_some_and(|n| {
+                    ondin_core::container::takes_insets(n.kind())
+                        && n.parent()
+                            .and_then(|p| doc.get(p))
+                            .is_some_and(|p| matches!(p.kind(), NodeKind::Artboard { .. }))
+                })
+            })
+            .collect()
+    }
+
+    /// Where `id` is drawn inside its frame, as the card measures it: the frame's
+    /// shown size, the layer's shown local transform and its box — all through the
+    /// preview, so the distances follow a drag in flight.
+    fn inset_placement(&self, id: NodeId) -> Option<InsetPlacement> {
+        let parent = self.session.doc.get(id)?.parent()?;
+        let NodeKind::Artboard { size: frame } = *self.session.display_node(parent)?.kind() else {
+            return None;
+        };
+        let local = self.session.preview_local_transform(id)?;
+        let kind = self.session.display_node(id)?.kind().clone();
+        let bx = ondin_core::geometry::local_bounds(&kind, self.session.preview_text_layout(id))?;
+        Some(InsetPlacement {
+            frame,
+            local,
+            bx,
+            kind,
+        })
+    }
+
+    /// Pin or unpin `edge` on every subject, each at its own current distance, as
+    /// one commit.
+    fn toggle_pin(&mut self, subjects: &[NodeId], edge: ondin_core::container::Edge, pin: bool) {
+        let ops = subjects
+            .iter()
+            .filter_map(|id| {
+                let p = self.inset_placement(*id)?;
+                let was = *self.session.doc.get(*id)?.insets();
+                let insets = ondin_core::container::with_edge(
+                    &was, edge, pin, p.frame, p.local, p.bx, &p.kind,
+                );
+                let mut ops = self.baked_placement(*id, &p);
+                ops.push(Operation::SetInsets { id: *id, insets });
+                Some(ops)
+            })
+            .flatten()
+            .collect();
+        self.commit_edit(Transaction(ops));
+    }
+
+    /// The ops that write where `id` is drawn now into its stored transform and
+    /// size — so a pin change never moves it.
+    ///
+    /// 🚨 **This is what makes unpinning safe** (`arch-scribe`'s finding against the
+    /// first cut): an axis that loses its insets is placed by the stored transform
+    /// again, and a frame resize since the pin was set leaves that transform
+    /// wherever it was — so unpinning snapped the layer back to a place it had not
+    /// been drawn for. And a layer stretched by two insets keeps the size it is
+    /// drawn at when one goes, which is what un-pinning one side of a stretch
+    /// means. Written alongside an explicit `SetInsets`, which `build::keep_insets`
+    /// leaves to the edit rather than re-reading as a move.
+    fn baked_placement(&self, id: NodeId, p: &InsetPlacement) -> Vec<Operation> {
+        let Some(node) = self.session.doc.get(id) else {
+            return Vec::new();
+        };
+        let mut ops = Vec::new();
+        if node.transform() != p.local {
+            ops.push(Operation::SetTransform {
+                id,
+                transform: p.local,
+            });
+        }
+        if p.kind != *node.kind() {
+            let geometry = match &p.kind {
+                NodeKind::Rect { size, .. }
+                | NodeKind::Ellipse { size }
+                | NodeKind::Polygon { size, .. }
+                | NodeKind::Star { size, .. }
+                | NodeKind::Artboard { size } => Some(GeometryPatch::Size(*size)),
+                NodeKind::Text { sizing, .. } => Some(GeometryPatch::TextSizing(*sizing)),
+                _ => None,
+            };
+            if let Some(geometry) = geometry {
+                ops.push(Operation::SetGeometry { id, geometry });
+            }
+        }
+        ops
+    }
+
+    /// Centre every subject on an axis the CSS way — both insets, each at its
+    /// current distance, and auto margins between them — or stop, which unpins
+    /// the axis's end edge (and with it the margins, `with_edge`'s rule). Neither
+    /// moves anything: centring between the distances a layer already has keeps it
+    /// where it is, and follows the frame from there.
+    fn toggle_centre(&mut self, subjects: &[NodeId], horizontal: bool, on: bool) {
+        use ondin_core::container::Edge as Pin;
+        let (start, end) = match horizontal {
+            true => (Pin::Left, Pin::Right),
+            false => (Pin::Top, Pin::Bottom),
+        };
+        let ops = subjects
+            .iter()
+            .filter_map(|id| {
+                let p = self.inset_placement(*id)?;
+                let was = *self.session.doc.get(*id)?.insets();
+                let with = |i: &ondin_core::Insets, e, pin| {
+                    ondin_core::container::with_edge(i, e, pin, p.frame, p.local, p.bx, &p.kind)
+                };
+                let insets = if on {
+                    let mut i = with(&with(&was, start, true), end, true);
+                    if horizontal {
+                        i.margin_auto.left = true;
+                        i.margin_auto.right = true;
+                    } else {
+                        i.margin_auto.top = true;
+                        i.margin_auto.bottom = true;
+                    }
+                    i
+                } else {
+                    with(&was, end, false)
+                };
+                let mut ops = self.baked_placement(*id, &p);
+                ops.push(Operation::SetInsets { id: *id, insets });
+                Some(ops)
+            })
+            .flatten()
+            .collect();
+        self.commit_edit(Transaction(ops));
+    }
+
+    /// One inset's field: its value in its own unit when pinned, the edge's current
+    /// distance marked `auto` when not.
+    ///
+    /// **An unpinned field that is only clicked through pins nothing**: the edit it
+    /// hands the valve is empty until the number differs from the distance it was
+    /// showing, so a click in and out cannot pin an edge by accident. A typed or
+    /// dragged number pins it in px. The unit suffix is committed directly rather
+    /// than through the valve, `ui::value_field_suffixed`'s rule for a conversion.
+    fn inset_field(
+        &mut self,
+        ui: &mut egui::Ui,
+        subjects: &[NodeId],
+        edge: ondin_core::container::Edge,
+        size: egui::Vec2,
+        insets: &ondin_core::Insets,
+        place: &InsetPlacement,
+    ) {
+        use ondin_core::LengthPct;
+        let set = inset_of(insets, edge);
+        let distance = place.distance(edge);
+        let extent = place.extent(edge);
+        let shown = match set {
+            Some(LengthPct::Px(v)) | Some(LengthPct::Percent(v)) => v,
+            None => distance,
+        };
+        let mut v = shown;
+        let (unit, tip) = match set {
+            Some(LengthPct::Px(_)) => ("px", "Switch to a percentage of the frame"),
+            Some(LengthPct::Percent(_)) => ("%", "Switch to px"),
+            None => (
+                "auto",
+                "Not pinned: type a value or click the diagram to pin",
+            ),
+        };
+        let percent = matches!(set, Some(LengthPct::Percent(_)));
+        let (resp, flip) = ui::value_field_suffixed(
+            ui,
+            size,
+            ui::Prefix::Text(inset_label(edge)),
+            Some(ui::Suffix {
+                text: unit,
+                clickable: set.is_some(),
+                tooltip: tip,
+            }),
+            &mut v,
+            if percent {
+                ui::Scrub::fine(0.25, 1)
+            } else {
+                ui::Scrub::whole(0.5)
+            },
+            |d| d.custom_formatter(ui::number(usize::from(percent))),
+        );
+        if flip && let Some(was) = set {
+            // Converted, not re-valued: the same distance in the other unit.
+            let px = was.resolve(extent);
+            let to = match was {
+                LengthPct::Px(_) => LengthPct::Percent(0.0).rewritten(px, extent),
+                LengthPct::Percent(_) => LengthPct::Px(px),
+            };
+            let ops = subjects
+                .iter()
+                .filter_map(|id| {
+                    let mut i = *self.session.doc.get(*id)?.insets();
+                    *inset_mut(&mut i, edge) = Some(to);
+                    Some(Operation::SetInsets { id: *id, insets: i })
+                })
+                .collect();
+            self.commit_edit(Transaction(ops));
+            return;
+        }
+        let ops = if set.is_none() && v == shown {
+            Vec::new()
+        } else {
+            let value = if percent {
+                LengthPct::Percent(v)
+            } else {
+                LengthPct::Px(v)
+            };
+            subjects
+                .iter()
+                .filter_map(|id| {
+                    let mut i = self.session.display_node(*id)?.insets();
+                    *inset_mut(&mut i, edge) = Some(value);
+                    Some(Operation::SetInsets { id: *id, insets: i })
+                })
+                .collect()
+        };
+        self.edit_valve(&resp, Transaction(ops));
     }
 
     /// The frames a frame panel is acting on: the selected **artboards**, in
@@ -11667,6 +12010,197 @@ const GRID_CELL: f32 = 28.0;
 /// between two lists doing the same job, which is the drift `CARD_ROW_GAP`'s own
 /// note is about. Spelled as the constant, it cannot drift again.
 const GRID_ROW_GAP: f32 = ui::CARD_ROW_GAP;
+
+/// Where a layer is drawn inside its frame, as the Position card measures it
+/// (`OndinApp::inset_placement`): the frame's size, the layer's local transform
+/// and its box, and the kind that box was measured from — everything
+/// `container::with_edge` needs to pin an edge without moving anything.
+struct InsetPlacement {
+    frame: Size,
+    local: Affine,
+    bx: Rect,
+    kind: NodeKind,
+}
+
+impl InsetPlacement {
+    /// How far `edge` sits from the frame's matching edge, in the frame's own
+    /// local units (the space its insets are in) — what an unpinned field shows,
+    /// marked `auto`.
+    fn distance(&self, edge: ondin_core::container::Edge) -> f64 {
+        use ondin_core::container::Edge as Pin;
+        let slot = ondin_core::container::slot_of(self.local, self.bx);
+        match edge {
+            Pin::Left => slot.x,
+            Pin::Top => slot.y,
+            Pin::Right => self.frame.width - slot.x - self.bx.width(),
+            Pin::Bottom => self.frame.height - slot.y - self.bx.height(),
+        }
+    }
+
+    /// The frame dimension `edge`'s percentage is a share of: its width for left
+    /// and right, its height for top and bottom — CSS's rule.
+    fn extent(&self, edge: ondin_core::container::Edge) -> f64 {
+        use ondin_core::container::Edge as Pin;
+        match edge {
+            Pin::Left | Pin::Right => self.frame.width,
+            Pin::Top | Pin::Bottom => self.frame.height,
+        }
+    }
+}
+
+/// The inset `insets` holds for `edge`.
+fn inset_of(
+    insets: &ondin_core::Insets,
+    edge: ondin_core::container::Edge,
+) -> Option<ondin_core::LengthPct> {
+    use ondin_core::container::Edge as Pin;
+    match edge {
+        Pin::Top => insets.top,
+        Pin::Right => insets.right,
+        Pin::Bottom => insets.bottom,
+        Pin::Left => insets.left,
+    }
+}
+
+/// The slot in `insets` that holds `edge`.
+fn inset_mut(
+    insets: &mut ondin_core::Insets,
+    edge: ondin_core::container::Edge,
+) -> &mut Option<ondin_core::LengthPct> {
+    use ondin_core::container::Edge as Pin;
+    match edge {
+        Pin::Top => &mut insets.top,
+        Pin::Right => &mut insets.right,
+        Pin::Bottom => &mut insets.bottom,
+        Pin::Left => &mut insets.left,
+    }
+}
+
+/// A Position field's prefix: CSS's own initial for the inset it edits.
+fn inset_label(edge: ondin_core::container::Edge) -> &'static str {
+    use ondin_core::container::Edge as Pin;
+    match edge {
+        Pin::Top => "T",
+        Pin::Right => "R",
+        Pin::Bottom => "B",
+        Pin::Left => "L",
+    }
+}
+
+/// The Position card's pin diagram: a frame, a layer in the middle of it, and a
+/// strut from each of the layer's edges to the frame's — solid accent where that
+/// edge is pinned, faint where it is not. Clicking a strut answers its edge.
+///
+/// **Drawn, not a widget per strut**: four `interact` rects over one painted
+/// picture, each the band between the layer's edge and the frame's, so the target
+/// is the whole gap and not a one-point line. A strut between two auto margins
+/// is drawn dashed, which is the centring the buttons beside it switch.
+fn inset_diagram(
+    ui: &mut egui::Ui,
+    size: egui::Vec2,
+    insets: &ondin_core::Insets,
+) -> Option<ondin_core::container::Edge> {
+    use ondin_core::container::Edge as Pin;
+    let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect, 4.0, color::FIELD);
+    let frame = rect.shrink(7.0);
+    painter.rect_stroke(
+        frame,
+        2.0,
+        egui::Stroke::new(1.0, theme::text::FAINT),
+        egui::StrokeKind::Inside,
+    );
+    let layer = egui::Rect::from_center_size(
+        frame.center(),
+        egui::vec2(frame.width() * 0.34, frame.height() * 0.4),
+    );
+    painter.rect_filled(layer, 2.0, color::HOVER);
+    painter.rect_stroke(
+        layer,
+        2.0,
+        egui::Stroke::new(1.0, theme::text::DIM),
+        egui::StrokeKind::Inside,
+    );
+    let mid = layer.center();
+    let struts = [
+        (
+            Pin::Left,
+            egui::pos2(frame.left(), mid.y),
+            egui::pos2(layer.left(), mid.y),
+            egui::Rect::from_min_max(
+                egui::pos2(frame.left(), layer.top()),
+                egui::pos2(layer.left(), layer.bottom()),
+            ),
+        ),
+        (
+            Pin::Right,
+            egui::pos2(layer.right(), mid.y),
+            egui::pos2(frame.right(), mid.y),
+            egui::Rect::from_min_max(
+                egui::pos2(layer.right(), layer.top()),
+                egui::pos2(frame.right(), layer.bottom()),
+            ),
+        ),
+        (
+            Pin::Top,
+            egui::pos2(mid.x, frame.top()),
+            egui::pos2(mid.x, layer.top()),
+            egui::Rect::from_min_max(
+                egui::pos2(layer.left(), frame.top()),
+                egui::pos2(layer.right(), layer.top()),
+            ),
+        ),
+        (
+            Pin::Bottom,
+            egui::pos2(mid.x, layer.bottom()),
+            egui::pos2(mid.x, frame.bottom()),
+            egui::Rect::from_min_max(
+                egui::pos2(layer.left(), layer.bottom()),
+                egui::pos2(layer.right(), frame.bottom()),
+            ),
+        ),
+    ];
+    let centred_h = insets.margin_auto.left && insets.margin_auto.right;
+    let centred_v = insets.margin_auto.top && insets.margin_auto.bottom;
+    let mut clicked = None;
+    for (edge, a, b, hit) in struts {
+        let id = ui.id().with(("inset-strut", inset_label(edge)));
+        let resp = ui.interact(hit, id, egui::Sense::click());
+        let pinned = inset_of(insets, edge).is_some();
+        let centred = match edge {
+            Pin::Left | Pin::Right => centred_h,
+            Pin::Top | Pin::Bottom => centred_v,
+        };
+        let colour = if pinned {
+            color::ACCENT
+        } else if resp.hovered() {
+            theme::text::MUTED
+        } else {
+            theme::text::FAINT
+        };
+        let stroke = egui::Stroke::new(if pinned { 2.0 } else { 1.0 }, colour);
+        if pinned && centred {
+            painter.add(egui::Shape::dashed_line(&[a, b], stroke, 3.0, 2.0));
+        } else {
+            painter.line_segment([a, b], stroke);
+        }
+        let tip = match (pinned, edge) {
+            (false, Pin::Left) => "Pin the left edge",
+            (false, Pin::Right) => "Pin the right edge",
+            (false, Pin::Top) => "Pin the top edge",
+            (false, Pin::Bottom) => "Pin the bottom edge",
+            (true, Pin::Left) => "Unpin the left edge",
+            (true, Pin::Right) => "Unpin the right edge",
+            (true, Pin::Top) => "Unpin the top edge",
+            (true, Pin::Bottom) => "Unpin the bottom edge",
+        };
+        if resp.on_hover_text(tip).clicked() {
+            clicked = Some(edge);
+        }
+    }
+    clicked
+}
 
 /// What the Layout grid panel's `+` does to the frames it is over.
 ///
@@ -24923,5 +25457,181 @@ mod select_by_color_lock_tests {
             "and the two the reticle did select are gone, which is the control — \
              without it this passes against a Delete that did nothing at all"
         );
+    }
+}
+
+/// The Position card (§15 D871, D874), driven through the app's own methods on a
+/// headless app — so every edit takes the real commit path, `keep_insets`
+/// included.
+///
+/// The fixture is one 300×200 frame holding a 100×50 rect at (40, 30), and every
+/// assertion is about where the rect is **drawn** (`world_bounds`), because the
+/// card's promise is about what the user sees: a pin never moves anything, and a
+/// pin holds when the frame changes.
+#[cfg(test)]
+mod inset_card_tests {
+    use super::*;
+    use ondin_core::container::Edge as Pin;
+    use ondin_core::kurbo::Rect as KRect;
+
+    fn app_with_pinnable() -> (OndinApp, NodeId, NodeId) {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = ondin_core::IdSource::new(7);
+        let root = ids.mint();
+        let (frame, rect) = (ids.mint(), ids.mint());
+        let mut doc = ondin_core::Document::new(root);
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: frame,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(300.0, 200.0),
+                },
+                transform: Some(Affine::IDENTITY),
+                name: None,
+            },
+            Operation::CreateNode {
+                id: rect,
+                parent: frame,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(100.0, 50.0),
+                    corner_radii: RoundedRectRadii::default(),
+                },
+                transform: Some(Affine::translate((40.0, 30.0))),
+                name: None,
+            },
+        ]))
+        .unwrap();
+        app.session.adopt_document(doc, None);
+        app.session.selection.set(vec![rect]);
+        (app, frame, rect)
+    }
+
+    fn drawn(app: &OndinApp, id: NodeId) -> KRect {
+        app.session.resolved.world_bounds(id).expect("measured")
+    }
+
+    fn resize_frame(app: &mut OndinApp, frame: NodeId, w: f64) {
+        app.session.commit(Transaction(vec![Operation::SetGeometry {
+            id: frame,
+            geometry: GeometryPatch::Size(Size::new(w, 200.0)),
+        }]));
+    }
+
+    /// A pin from the diagram keeps the layer exactly where it is, and then holds
+    /// it to its edge when the frame is resized.
+    #[test]
+    fn a_pin_never_moves_the_layer_and_holds_it_through_a_frame_resize() {
+        let (mut app, frame, rect) = app_with_pinnable();
+        let before = drawn(&app, rect);
+        app.toggle_pin(&[rect], Pin::Right, true);
+        assert_eq!(drawn(&app, rect), before, "pinning moved it");
+        assert_eq!(
+            app.session.doc.get(rect).unwrap().insets().right,
+            Some(ondin_core::LengthPct::Px(160.0)),
+            "300 - 40 - 100"
+        );
+        resize_frame(&mut app, frame, 500.0);
+        assert_eq!(
+            drawn(&app, rect).x0,
+            240.0,
+            "and it followed the right edge"
+        );
+    }
+
+    /// Unpinning after the frame has moved a pinned layer leaves it where it is
+    /// drawn — `arch-scribe`'s finding against the first cut, where the unpinned
+    /// axis fell back to a stored transform the resize had left at x 40.
+    ///
+    /// **Flip:** dropping `baked_placement` from `toggle_pin` fails the first
+    /// assertion, the layer back at 40 against 240.
+    #[test]
+    fn unpinning_after_a_frame_resize_leaves_the_layer_where_it_is_drawn() {
+        let (mut app, frame, rect) = app_with_pinnable();
+        app.toggle_pin(&[rect], Pin::Right, true);
+        resize_frame(&mut app, frame, 500.0);
+        let pinned_at = drawn(&app, rect);
+        app.toggle_pin(&[rect], Pin::Right, false);
+        assert_eq!(drawn(&app, rect), pinned_at, "unpinning moved it");
+        assert!(app.session.doc.get(rect).unwrap().insets().is_unset());
+        app.session.undo();
+        assert_eq!(
+            app.session.doc.get(rect).unwrap().insets().right,
+            Some(ondin_core::LengthPct::Px(160.0)),
+            "and one undo brings the pin back"
+        );
+    }
+
+    /// Unpinning one side of a stretch keeps the size the layer is drawn at.
+    ///
+    /// **Flip:** the same removal of `baked_placement` fails here too, 100 wide
+    /// against 300 — the stretch let go back to the stored size.
+    #[test]
+    fn unpinning_one_side_of_a_stretch_keeps_the_stretched_size() {
+        let (mut app, frame, rect) = app_with_pinnable();
+        app.toggle_pin(&[rect], Pin::Left, true);
+        app.toggle_pin(&[rect], Pin::Right, true);
+        resize_frame(&mut app, frame, 500.0);
+        assert_eq!(drawn(&app, rect).width(), 300.0, "stretched by the frame");
+        app.toggle_pin(&[rect], Pin::Right, false);
+        assert_eq!(
+            drawn(&app, rect).width(),
+            300.0,
+            "and still 300 wide with one side let go"
+        );
+    }
+
+    /// Centring keeps the layer where it is and then follows the frame by half
+    /// of every change — the CSS `margin: auto` idiom between the distances the
+    /// layer already had.
+    #[test]
+    fn centring_keeps_the_layer_put_and_follows_the_frame_by_half() {
+        let (mut app, frame, rect) = app_with_pinnable();
+        let before = drawn(&app, rect);
+        app.toggle_centre(&[rect], true, true);
+        assert_eq!(drawn(&app, rect), before, "centring moved it");
+        let insets = *app.session.doc.get(rect).unwrap().insets();
+        assert!(insets.margin_auto.left && insets.margin_auto.right);
+        resize_frame(&mut app, frame, 500.0);
+        assert_eq!(drawn(&app, rect).x0, 140.0, "40 plus half of 200");
+        app.toggle_centre(&[rect], true, false);
+        assert!(
+            app.session
+                .doc
+                .get(rect)
+                .unwrap()
+                .insets()
+                .margin_auto
+                .is_none(),
+            "and switching it off takes the margins away"
+        );
+    }
+
+    /// The card offers itself for a frame's own layer and not for a top-level
+    /// frame, which sits in no frame to be pinned against — and draws a frame
+    /// without panicking. (Groups and booleans are refused by
+    /// `container::takes_insets`, which `container`'s own tests cover; this test
+    /// does not build one.)
+    #[test]
+    fn the_card_is_offered_to_a_frames_own_layers_only() {
+        let (mut app, frame, rect) = app_with_pinnable();
+        assert_eq!(app.inset_subjects(), vec![rect]);
+        app.session.selection.set(vec![frame]);
+        assert!(
+            app.inset_subjects().is_empty(),
+            "a top-level frame is not inside one"
+        );
+
+        app.session.selection.set(vec![rect]);
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            ui.set_max_width(240.0);
+            app.inspector_insets(ui);
+        });
     }
 }

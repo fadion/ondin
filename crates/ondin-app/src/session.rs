@@ -357,9 +357,12 @@ impl<'a> DisplayNode<'a> {
     /// The override's kind, then the used one, then the document's.
     ///
     /// ⚠️ **Shown, not typed**: a control that computes an edit *from* this is
-    /// computing it from where layout put the node. Equal to what the user set
-    /// until container layout sizes something; the step that makes them differ
-    /// owes every such caller a decision.
+    /// computing it from where layout put the node — which is the rule now, not a
+    /// debt (§15 D874): tools and controls compute from used geometry, and
+    /// `build::keep_insets`, at the top of `commit_inner`, turns a placement written
+    /// for a pinned layer into its insets. What survives of the old warning is the
+    /// value written back: a stretched auto-width text node's used kind is
+    /// `AutoHeight(w)`, so an edit built from this stores that mode.
     pub fn kind(&self) -> &'a NodeKind {
         self.over
             .and_then(|o| o.kind.as_ref())
@@ -380,6 +383,14 @@ impl<'a> DisplayNode<'a> {
         self.over
             .and_then(|o| o.visible)
             .unwrap_or_else(|| self.node.visible())
+    }
+    /// The layer's insets inside its frame (§15 D871), a live inset scrub's
+    /// included — **with an override behind it**, so a field being dragged reads the
+    /// value it is dragging and accumulates rather than snapping back each frame.
+    pub fn insets(&self) -> ondin_core::Insets {
+        self.over
+            .and_then(|o| o.insets)
+            .unwrap_or_else(|| *self.node.insets())
     }
     /// The layer's effect stack (§5.3a).
     ///
@@ -1003,6 +1014,20 @@ impl EditorSession {
     /// the step before it.
     fn commit_inner(&mut self, tx: Transaction, run: bool) -> Result<(), OpError> {
         if tx.0.is_empty() {
+            return Ok(());
+        }
+        // **Every placement a tool writes is where it wants the layer drawn**
+        // (§15 D874), and for a layer pinned by insets that has to become new
+        // insets — here, once, rather than in every tool. A no-op on any edit that
+        // places nothing pinned. Before the no-op test below, because the
+        // conversion is also what recognises a pinned layer written back to where
+        // it is already drawn as changing nothing.
+        let tx = ondin_core::build::keep_insets(&self.doc, &self.resolved, tx);
+        // And it can empty a transaction outright — one pinned layer written back
+        // where it already is — which the test above has already let through and
+        // `changes_nothing` below does not answer `true` for.
+        if tx.0.is_empty() {
+            self.clear_gesture_preview();
             return Ok(());
         }
         // **A completed interaction that changed nothing is not an undo step**

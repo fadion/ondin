@@ -567,7 +567,7 @@ pub fn resize_to_handle(
     let Some(node) = doc.get(id) else {
         return Transaction(vec![]);
     };
-    let Some(drawn) = anchored_box(node.kind(), res.text_layout(id)) else {
+    let Some(drawn) = anchored_box(res.used_kind_of(node), res.text_layout(id)) else {
         return Transaction(vec![]);
     };
     let Some(world) = res.world_transform(id) else {
@@ -592,7 +592,7 @@ pub fn resize_to_handle(
         opts.symmetric,
     );
 
-    let geometry = match node.kind() {
+    let geometry = match res.used_kind_of(node) {
         // A dragged text box wraps at the width the gesture gave it. Whether its
         // **height** also becomes the user's is the *handle's* business, not the
         // gesture's: a side handle owns one axis and says nothing about `y`
@@ -632,13 +632,13 @@ pub fn resize_to_handle(
             ..
         } => {
             let solve_against = kind_to_solve_against(
-                node.kind(),
+                res.used_kind_of(node),
                 opts.scaling,
                 ratio(size.width, new_size.width),
                 ratio(size.height, new_size.height),
             );
             GeometryPatch::TextPath(Some(railed_resize(
-                solve_against.as_ref().unwrap_or(node.kind()),
+                solve_against.as_ref().unwrap_or(res.used_kind_of(node)),
                 rail,
                 Rect::from_origin_size(inset.to_point(), size),
                 Rect::from_origin_size(inset.to_point() + origin.to_vec2(), new_size),
@@ -701,7 +701,7 @@ pub fn resize_to_handle(
     if !geometry_moved_itself && (moved || flip != Affine::IDENTITY) {
         ops.push(Operation::SetTransform {
             id,
-            transform: node.transform() * Affine::translate(shift) * flip,
+            transform: res.used_local_of(node) * Affine::translate(shift) * flip,
         });
     }
     // The box came from the node's own extent, so the factors the scalars take are
@@ -987,7 +987,7 @@ pub fn move_line_end(
     let Some(node) = doc.get(id) else {
         return Transaction::default();
     };
-    let NodeKind::Line { end } = *node.kind() else {
+    let NodeKind::Line { end } = *res.used_kind_of(node) else {
         return Transaction::default();
     };
     let Some(world) = res.world_transform(id) else {
@@ -1007,7 +1007,7 @@ pub fn move_line_end(
             let local = parent_world.inverse() * target;
             // The basis kept, the translation replaced: a local transform's last two
             // coefficients *are* the node's origin in its parent's space.
-            let [a, b, c, d, _, _] = node.transform().as_coeffs();
+            let [a, b, c, d, _, _] = res.used_local_of(node).as_coeffs();
             let transform = Affine::new([a, b, c, d, local.x, local.y]);
             Transaction(vec![
                 Operation::SetTransform { id, transform },
@@ -1029,7 +1029,7 @@ pub fn move_line_end(
 /// it is a second place to get the rotated case wrong.
 pub fn line_ends_world(doc: &Document, res: &Resolved, id: NodeId) -> Option<(Point, Point)> {
     let node = doc.get(id)?;
-    let NodeKind::Line { end } = *node.kind() else {
+    let NodeKind::Line { end } = *res.used_kind_of(node) else {
         return None;
     };
     let world = res.world_transform(id)?;
@@ -1096,12 +1096,12 @@ pub fn resize_geometry(
         return Transaction(Vec::new());
     };
     let mut ops = Vec::new();
-    let before = node.transform();
+    let before = res.used_local_of(node);
     let transform = before * rest;
     if transform.as_coeffs() != before.as_coeffs() {
         ops.push(Operation::SetTransform { id, transform });
     }
-    scale_geometry(doc, id, csx, csy, opts.scaling, &mut ops);
+    scale_geometry(doc, res, id, csx, csy, opts.scaling, &mut ops);
     Transaction(ops)
 }
 
@@ -1140,7 +1140,7 @@ pub fn resize_group(
         opts.symmetric,
     );
     let mut ops = Vec::new();
-    scale_subtree(doc, id, anchor, sx, sy, opts.scaling, &mut ops);
+    scale_subtree(doc, res, id, anchor, sx, sy, opts.scaling, &mut ops);
     Transaction(ops)
 }
 
@@ -1398,10 +1398,10 @@ pub fn resize_selection(
         else {
             continue;
         };
-        if transform.as_coeffs() != node.transform().as_coeffs() {
+        if transform.as_coeffs() != res.used_local_of(node).as_coeffs() {
             ops.push(Operation::SetTransform { id: *id, transform });
         }
-        scale_geometry(doc, *id, csx, csy, opts.scaling, &mut ops);
+        scale_geometry(doc, res, *id, csx, csy, opts.scaling, &mut ops);
     }
     Transaction(ops)
 }
@@ -1582,6 +1582,7 @@ fn scaled_text_sizing(sizing: TextSizing, csx: f64, csy: f64) -> Option<TextSizi
 /// edit is the caller's and happens regardless.
 fn scale_geometry(
     doc: &Document,
+    res: &Resolved,
     id: NodeId,
     csx: f64,
     csy: f64,
@@ -1605,16 +1606,17 @@ fn scale_geometry(
     // came out 171.88 wide against 323.76 asked — **47% short of the drag**, on
     // the first frame, with no error and no report.
     //
-    // **The two boxes come from the rail rather than from `Resolved`**, which is
-    // what makes this reachable from here: `scale_geometry` has no `Resolved`, and
-    // [`railed_box`] measures the current rail through the same layout the canvas
-    // draws. `want` is that box scaled by the residual factors about its own
+    // **The two boxes come from the rail rather than from `Resolved`'s cached
+    // box**: [`railed_box`] measures the current rail through the same layout the
+    // canvas draws. (`scale_geometry` did not have a `Resolved` when this was
+    // written; it has one now for the used kind, §15 D874, and the reason to
+    // measure the rail directly stands.) `want` is that box scaled by the residual factors about its own
     // origin, which is exactly what `scale_subtree` means by handing them down.
     if let NodeKind::Text {
         on_path: Some(rail),
         ..
-    } = node.kind()
-        && let Some(drawn) = railed_box(node.kind(), rail)
+    } = res.used_kind_of(node)
+        && let Some(drawn) = railed_box(res.used_kind_of(node), rail)
     {
         let want = Rect::from_origin_size(
             drawn.origin(),
@@ -1626,11 +1628,11 @@ fn scale_geometry(
         // ⚠️ **`drawn` stays the *unscaled* box** — it is where the node is now,
         // and `want` is the target derived from it. Only the kind the solve
         // *measures* moves.
-        let solve_against = kind_to_solve_against(node.kind(), scaling, csx, csy);
+        let solve_against = kind_to_solve_against(res.used_kind_of(node), scaling, csx, csy);
         ops.push(Operation::SetGeometry {
             id,
             geometry: GeometryPatch::TextPath(Some(railed_resize(
-                solve_against.as_ref().unwrap_or(node.kind()),
+                solve_against.as_ref().unwrap_or(res.used_kind_of(node)),
                 rail,
                 drawn,
                 want,
@@ -1644,7 +1646,7 @@ fn scale_geometry(
         });
         return;
     }
-    if let NodeKind::Text { sizing, .. } = node.kind() {
+    if let NodeKind::Text { sizing, .. } = res.used_kind_of(node) {
         if let Some(sizing) = scaled_text_sizing(*sizing, csx, csy) {
             ops.push(Operation::SetGeometry {
                 id,
@@ -1653,7 +1655,7 @@ fn scale_geometry(
         }
         return;
     }
-    match resizable_size(node.kind()) {
+    match resizable_size(res.used_kind_of(node)) {
         Some(size) => {
             let new = Size::new((size.width * csx).max(1.0), (size.height * csy).max(1.0));
             ops.push(Operation::SetGeometry {
@@ -1661,7 +1663,7 @@ fn scale_geometry(
                 geometry: GeometryPatch::Size(new),
             });
         }
-        None => match node.kind() {
+        None => match res.used_kind_of(node) {
             NodeKind::Line { end } => ops.push(Operation::SetGeometry {
                 id,
                 geometry: GeometryPatch::LineEnd(Point::new(end.x * csx, end.y * csy)),
@@ -1682,7 +1684,7 @@ fn scale_geometry(
                     },
                 });
             }
-            _ => scale_subtree(doc, id, Point::ZERO, csx, csy, scaling, ops),
+            _ => scale_subtree(doc, res, id, Point::ZERO, csx, csy, scaling, ops),
         },
     }
 }
@@ -2006,8 +2008,14 @@ fn scale_along(current: f64, wanted: f64) -> f64 {
 
 /// Scale everything under `id` by `(sx, sy)` about `anchor`, expressed in the
 /// space `id`'s children live in.
+///
+/// Eight arguments since `res` joined them (each child's base is its **used**
+/// transform, §15 D874), and allowed the way `create_polygon` is — §15 D41's
+/// rule is a parts struct before the ninth.
+#[allow(clippy::too_many_arguments)]
 fn scale_subtree(
     doc: &Document,
+    res: &Resolved,
     id: NodeId,
     anchor: Point,
     sx: f64,
@@ -2020,7 +2028,7 @@ fn scale_subtree(
         let Some(child) = doc.get(*child_id) else {
             continue;
         };
-        let t = child.transform();
+        let t = res.used_local_of(child);
 
         // The child scaled bodily — origin and basis both — and then split back
         // into what it may store and what its geometry has to take.
@@ -2049,7 +2057,7 @@ fn scale_subtree(
                 transform,
             });
         }
-        scale_geometry(doc, *child_id, csx, csy, scaling, ops);
+        scale_geometry(doc, res, *child_id, csx, csy, scaling, ops);
     }
 }
 
@@ -2104,11 +2112,11 @@ pub fn rotate_node(
         return Transaction(vec![]);
     };
     let mut ops = Vec::new();
-    if transform.as_coeffs() != node.transform().as_coeffs() {
+    if transform.as_coeffs() != res.used_local_of(node).as_coeffs() {
         ops.push(Operation::SetTransform { id, transform });
     }
     if (gx - 1.0).abs() > SCALE_NOOP || (gy - 1.0).abs() > SCALE_NOOP {
-        scale_geometry(doc, id, gx, gy, Scaling::Geometry, &mut ops);
+        scale_geometry(doc, res, id, gx, gy, Scaling::Geometry, &mut ops);
     }
     Transaction(ops)
 }
@@ -2261,15 +2269,15 @@ pub fn skew_to_handle(
     let Some(shear) = side_shear(box_, handle, drag.mapped(world.inverse()), snap_to_steps) else {
         return Transaction(vec![]);
     };
-    let Some((transform, gx, gy)) = split_geometry_scale(node.transform() * shear) else {
+    let Some((transform, gx, gy)) = split_geometry_scale(res.used_local_of(node) * shear) else {
         return Transaction(vec![]);
     };
     let mut ops = Vec::new();
-    if transform.as_coeffs() != node.transform().as_coeffs() {
+    if transform.as_coeffs() != res.used_local_of(node).as_coeffs() {
         ops.push(Operation::SetTransform { id, transform });
     }
     if (gx - 1.0).abs() > SCALE_NOOP || (gy - 1.0).abs() > SCALE_NOOP {
-        scale_geometry(doc, id, gx, gy, Scaling::Geometry, &mut ops);
+        scale_geometry(doc, res, id, gx, gy, Scaling::Geometry, &mut ops);
     }
     Transaction(ops)
 }
@@ -2312,11 +2320,11 @@ pub fn skew_selection(
         else {
             continue;
         };
-        if transform.as_coeffs() != node.transform().as_coeffs() {
+        if transform.as_coeffs() != res.used_local_of(node).as_coeffs() {
             ops.push(Operation::SetTransform { id: *id, transform });
         }
         if (gx - 1.0).abs() > SCALE_NOOP || (gy - 1.0).abs() > SCALE_NOOP {
-            scale_geometry(doc, *id, gx, gy, Scaling::Geometry, &mut ops);
+            scale_geometry(doc, res, *id, gx, gy, Scaling::Geometry, &mut ops);
         }
     }
     Transaction(ops)

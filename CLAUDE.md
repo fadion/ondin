@@ -8,7 +8,7 @@ documents, and is untracked.
 | --- | --- |
 | `docs/architecture.md` | The design and the invariants. **Source of truth.** ~12,000 lines. |
 | `docs/decisions.md` | **§15** — every deviation from that design, **D1–D830** with no gaps, each with a verdict. ~47,700 lines. |
-| `docs/roadmap.md` | Open work, decided non-goals, parked decisions, post-v1. **Every `Now` section is clear as of 2026-09-23** — *Files, library and storage* reopened and closed that day (the cover cache's lifecycle, §15 D863–D864); what is left is *Later* and §0. **`Next · Container layout`** (flexbox, CSS grid and insets — `architecture.md` §5.3c, §15 D867–D877): steps 1–2 built and committed; **step 3 (flex) committed except its inspector cards**, which wait on a design — its marker says what is left. |
+| `docs/roadmap.md` | Open work, decided non-goals, parked decisions, post-v1. **Every `Now` section is clear as of 2026-09-23** — *Files, library and storage* reopened and closed that day (the cover cache's lifecycle, §15 D863–D864); what is left is *Later* and §0. **`Next · Container layout`** (flexbox, CSS grid and insets — `architecture.md` §5.3c, §15 D867–D883): steps 1–3 built; **step 3's inspector cards (D878–D883) built in session 35, and the maintainer's first-look fixes to them (D884–D891) in session 36, all awaiting their commit** — its marker says what is left. |
 | `docs/shortcuts.md` | The whole keymap — bound, unbound and agreed. |
 | `docs/context-menus.md` | The context-menu spec and its own deviation ledger. |
 | `docs/vm.md` | The language behind Command Mode. Nothing here is built. |
@@ -67,16 +67,27 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 877 index rows, 877 body headings, next free
-D878** (measured at the close of session 34) — but trust the procedure over any number written
-down here, including that one.
+anywhere cited either. **The live figures: 891 index rows, 891 body headings, next free
+D892** (measured at the close of session 36) — but trust the procedure over any number written
+down here, including that one. **No block is reserved**: the next session reserves its own.
+⚠️ **Session 36 reserved D884–D891 and spent all eight** — D884–D889, the maintainer's first look
+at the layout cards (sentence-case labels, the fields that committed nothing, cell tooltips,
+Position for a laid group's children, the square pin diagram, the out-of-flow wording), then **D890
+and D891 the next day**, the Position card redrawn as the mockup and then refined. This paragraph
+was written as "six", then "seven", before it was right — the warning below, arriving twice in one
+session. The census read 791 distinct numbers cited from `crates/`, none unresolved — a count, not
+a set-difference against a commit.
+⚠️ **Session 35 reserved D878–D887 and spent six** — D878–D883, container layout's inspector cards
+and the three rulings the maintainer accepted with them — each typed into code only after the block
+was grep-checked; the closing negative grep over **D884–D887 found zero code sites**, so they are
+reserved and unspent. ⚠️ **It also amended D616 without a number** (`arch-scribe` had no block
+left): undo and redo do not bump the session's revision, which D616 said they did.
 ⚠️ **D867–D877 are spent, and every one of them is now cited from `crates/`** (session 33:
 container layout's design, then build steps 1 and 2; session 34: step 3's rulings as D875, frames
 under groups as D876, drag-to-reorder as D877 — D869, D870 and D873, uncited at session 33's
-close, arrived with step 3). **D878–D881 are reserved and unspent** — session 34 reserved
-D875–D881 for step 3 and spent three; the closing negative grep over D878–D881 found zero code
-sites. ⚠️ **Container layout's step 3 is committed except item 5** (session 34's close: the
-inspector cards, waiting on a design the maintainer is preparing); the handoff marker in
+close, arrived with step 3). Session 34 reserved D875–D881 and spent three; **session 35 spent
+D878–D883 from that tail and its own block**, as above. ⚠️ **Container layout's step 3 is built;
+item 5 (the inspector cards) is uncommitted at session 35's close**; the handoff marker in
 `docs/roadmap.md`'s *Next · Container layout* step 3 is the state. Confirm with the negative grep anyway; a reservation recorded here is a claim about the
 moment it was written, which is the whole subject of this section.
 ⚠️ **Session 31 overran its block the ordinary way, and caught it the ordinary way**: it reserved

@@ -7507,7 +7507,93 @@ impl OndinApp {
             })
             .flatten()
             .collect();
+        let ops = self.kept_in_place(ops, subjects);
         self.commit_edit(Transaction(ops));
+    }
+
+    /// `ops` — a pin or a centre from the card — with every subject it takes
+    /// **out of its container's flow** re-pinned where it is drawn *after* the
+    /// container has re-laid without it (§15 D894, the maintainer's ruling: a pin
+    /// never moves anything, in a container that hugs as everywhere else).
+    ///
+    /// The distances [`Self::toggle_pin`] measures are against the container as it
+    /// is; pinning an in-flow item takes it out of the flow, so a group that hugs,
+    /// or a `fit-content` frame, re-lays without it and shrinks — and a right or
+    /// bottom inset measured against the old box put the layer somewhere else.
+    /// Figma's *Ignore auto layout* leaves the layer exactly where it was, which is
+    /// this. So the edit is applied to a scratch copy, resolved, and each such
+    /// layer's insets re-derived (`container::inverse`, each in its own unit) from
+    /// where it is drawn now against where its container is drawn and how big it
+    /// is then; its stored transform follows. **One pass is exact**: a layer out of
+    /// the flow does not size its container, so the new insets cannot change the
+    /// box they were measured against. Negative distances are CSS's own and fine.
+    ///
+    /// ⚠️ **A full resolve of the document per click** — the cost `keep_insets`
+    /// takes pains to avoid on every commit; tolerable here because it is paid
+    /// only by a pin that moves a layer out of a flow, on a click.
+    fn kept_in_place(&self, mut ops: Vec<Operation>, subjects: &[NodeId]) -> Vec<Operation> {
+        let doc = &self.session.doc;
+        let res = &self.session.resolved;
+        let leaving: Vec<NodeId> = subjects
+            .iter()
+            .copied()
+            .filter(|id| ondin_core::build::is_flex_item(doc, *id))
+            .collect();
+        if leaving.is_empty() {
+            return ops;
+        }
+        let mut after = doc.clone();
+        if after.apply(&Transaction(ops.clone())).is_err() {
+            return ops;
+        }
+        let res_after = ondin_core::Resolved::rebuild(&after);
+        for id in leaving {
+            let Some(node) = after.get(id) else { continue };
+            if !node.insets().is_authored() {
+                continue;
+            }
+            let Some(parent) = node.parent() else {
+                continue;
+            };
+            let frame = match res_after.used_kind(&after, parent) {
+                Some(NodeKind::Artboard { size }) => *size,
+                Some(NodeKind::Group) => match res_after.used_frame(parent) {
+                    Some(size) => size,
+                    None => continue,
+                },
+                _ => continue,
+            };
+            let (Some(world), Some(parent_world), Some(kind)) = (
+                res.world_transform(id),
+                res_after.world_transform(parent),
+                res.used_kind(doc, id).cloned(),
+            ) else {
+                continue;
+            };
+            let Some(bx) = ondin_core::geometry::local_bounds(&kind, None) else {
+                continue;
+            };
+            let local = parent_world.inverse() * world;
+            let insets = ondin_core::container::inverse(node.insets(), frame, local, bx, &kind);
+            let mut placed = false;
+            for op in ops.iter_mut() {
+                match op {
+                    Operation::SetInsets { id: i, insets: to } if *i == id => *to = insets,
+                    Operation::SetTransform { id: i, transform } if *i == id => {
+                        *transform = local;
+                        placed = true;
+                    }
+                    _ => {}
+                }
+            }
+            if !placed {
+                ops.push(Operation::SetTransform {
+                    id,
+                    transform: local,
+                });
+            }
+        }
+        ops
     }
 
     /// The ops that write where `id` is drawn now into its stored transform and
@@ -7566,6 +7652,7 @@ impl OndinApp {
             })
             .flatten()
             .collect();
+        let ops = self.kept_in_place(ops, subjects);
         self.commit_edit(Transaction(ops));
     }
 
@@ -26069,6 +26156,75 @@ mod inset_card_tests {
                 egui::epaint::Shape::Text(t) if t.galley.text() == "Absolute"
             )),
             "the badge, in a container with a layout"
+        );
+    }
+
+    /// **Pinning an item out of a hugging container never moves it** (§15 D894,
+    /// `OndinApp::kept_in_place`). A group at (50, 50) hugs a row of a 60 × 30 and
+    /// a 40 × 30 — 140 wide with its padding of 20 — so the second item is drawn
+    /// at x 130. Pinning its right edge takes it out of the row; the group shrinks
+    /// to 100, and a right inset measured against the old 140 (20) would put it at
+    /// x 90. Measured against the box the group will have, the inset is −20 and
+    /// the item stays at 130.
+    ///
+    /// **Flip run**, `toggle_pin` committing its ops without `kept_in_place`: fails
+    /// on *"pinning moved it"*, x 90 against 130 — the predicted site.
+    #[test]
+    fn pinning_out_of_a_hugging_container_leaves_the_item_where_it_is() {
+        use ondin_core::container::{Display, Flex};
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = ondin_core::IdSource::new(0xAD);
+        let root = ids.mint();
+        let (group, first, second) = (ids.mint(), ids.mint(), ids.mint());
+        let rect = |id, index, w| Operation::CreateNode {
+            id,
+            parent: group,
+            index,
+            kind: NodeKind::Rect {
+                size: Size::new(w, 30.0),
+                corner_radii: RoundedRectRadii::default(),
+            },
+            transform: Some(Affine::IDENTITY),
+            name: None,
+        };
+        let mut doc = ondin_core::Document::new(root);
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: group,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Group,
+                transform: Some(Affine::translate((50.0, 50.0))),
+                name: None,
+            },
+            rect(first, 0, 60.0),
+            rect(second, 1, 40.0),
+            Operation::SetDisplay {
+                id: group,
+                display: Some(Display::Flex(Flex {
+                    padding: [20.0; 4],
+                    ..Default::default()
+                })),
+            },
+        ]))
+        .unwrap();
+        app.session.adopt_document(doc, None);
+        assert_eq!(drawn(&app, group).width(), 140.0, "the fixture hugs");
+        let before = drawn(&app, second);
+        assert_eq!(before.x0, 130.0, "and lays the second item at 50 + 20 + 60");
+
+        app.toggle_pin(&[second], Pin::Right, true);
+        assert_eq!(
+            drawn(&app, group).width(),
+            100.0,
+            "the group shrank without it"
+        );
+        assert_eq!(drawn(&app, second), before, "pinning moved it");
+        assert_eq!(
+            app.session.doc.get(second).unwrap().insets().right,
+            Some(ondin_core::LengthPct::Px(-20.0)),
+            "measured against the box the group has now"
         );
     }
 

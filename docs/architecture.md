@@ -84,9 +84,9 @@
 - Components/instances/variants — **sequenced after layout**, on the same derive-from-specified
   pipeline (§5.3c, §15 D867). ~~Auto-layout/constraints~~ **left this list on 2026-09-23 and are
   designed**: CSS flexbox, CSS grid and absolute insets (§5.3c, §15 D867, D871) — insets on frames
-  built 2026-09-24, inspector card included (§15 D874); flex in progress the same day — its model,
-  engine and preview built, an item's reorder by drag and a laid group's resize too, and no control
-  that gives a container a layout (§15 D875, D877); grid not built. "v1" in
+  built 2026-09-24, inspector card included (§15 D874); flex built the same day — its model, engine
+  and preview, an item's reorder by drag, a laid group's resize, and the Container and Item cards
+  (§15 D875, D877, D878); grid not built. "v1" in
   this document names the phase in which the basic editing tools were finished, not a release tag,
   and that phase is over. *Persistent* constraints in §13's sense — live relationships between
   arbitrary properties, a dependency graph — are not that feature and stay on this list.
@@ -1099,15 +1099,15 @@ pub fn next_grid_color(existing: &[LayoutGrid]) -> Color;    // the first of GRI
   `+` steps: `LayoutGrid::new` carries the plain default, which is what a loaded file or a fixture
   should get.
 
-### 5.3c Container layout — flexbox, grid and insets (steps 1–2 built, step 3 in progress; §15 D867–D877)
+### 5.3c Container layout — flexbox, grid and insets (steps 1–3 built; §15 D867–D889)
 
 > **Mostly design ahead of code**, in the sense §12 and §13 are, and it sits here rather than at the
 > end because what it changes is the node model. **Built as of 2026-09-24**: the used-geometry
 > routing (step 1, §15 D868) and absolute insets on frames with their inspector card (step 2, §15
-> D874) — the paragraphs on those say so in the present tense. **Flex is in progress** (step 3, §15
-> D875): its model, engine, layout pass and preview are built, and a laid group's resize and an
-> item's reorder by drag (§15 D877), but no control in the app gives a container a layout yet;
-> frames sit inside groups since the same day (§15 D876). Grid and components are not built.
+> D874) — the paragraphs on those say so in the present tense. **Flex is built too** (step 3, §15
+> D875): its model, engine, layout pass and preview, a laid group's resize, an item's reorder by drag
+> (§15 D877), and the inspector's Container and Item cards (§15 D878–D889); frames sit inside groups
+> since the same day (§15 D876). Grid and components are not built.
 > Every other passage of this document still describes `HEAD`; where one states a rule this design
 > will change,
 > it carries a forward pointer here instead of being rewritten. **When a step below lands, this
@@ -1120,8 +1120,10 @@ pub fn next_grid_color(existing: &[LayoutGrid]) -> Color;    // the first of GRI
 
 **The model is CSS, under CSS's names** (§15 D867) — `display: flex` and `display: grid` and the
 properties CSS spells them with, explicitly not Figma's auto layout. It is behaviour designers
-already know, and it is what a future HTML/CSS export writes without translating. **Where CSS and
-design-tool convention disagree, CSS wins**, and four cases are decided:
+already know, and it is what a future HTML/CSS export writes without translating. The chrome writes
+those names in sentence case — *Justify content*, *Flex start* — and the model, the file and the
+snapshot keep CSS's spelling (§15 D884). **Where CSS and design-tool convention disagree, CSS wins**,
+and four cases are decided:
 
 - **Transforms do not affect layout.** A rotated item keeps its unrotated slot and may overlap its
   neighbours.
@@ -1153,7 +1155,8 @@ and a group with a layout's box is `Resolved::used_frame`, which its bounds and 
 `resize_geometry`, the held corner going into its transform, and `scale_geometry` writes its
 `FlexItem.width`/`height` in px through `build::sized_flex_item`, which also stops its growth, since
 `keep_flex_sizes` leaves a transaction's own `SetFlexItem` alone. Under the Scale tool its contents
-scale too (§5.6). ⚠️ No inspector control sets `display` yet.
+scale too (§5.6). The Container card sets `display` (§15 D878), and a laid group's typed W and H
+take the handles' path to `sized_flex_item` (§15 D879).
 
 **A frame may sit inside any group** (§15 D870) — the case is a flex row of cards, each card a frame
 for its fill and clip, the row a group. **Built 2026-09-24** (§15 D876), with the maintainer's three
@@ -1165,14 +1168,19 @@ frame's contents (§5.6).
 with `display` — a child's authored `top`/`right`/`bottom`/`left` (px or %) are the constraints:
 pin left is a left inset, pin right a right inset, stretch is both, scale is percentages. **A child
 with no authored insets keeps its stored position** (the implicit left/top), so every existing
-document is unchanged and a frame resize still leaves children pinned top-left. A group without
+document is unchanged and a frame resize still leaves children pinned top-left — which the Position
+card shows as a held top and left outside a layout, writing nothing (§15 D891). A group without
 `display` has no edges, so insets do not apply there. This is **not** §13's persistent constraints:
 it is a fixed algorithm re-run from specified values, and nobody authors a relationship between two
 properties.
 
 **Built 2026-09-24 in frames, inspector card included** (§15 D874). The group-with-`display` half
 is placed by core and the preview since step 3 — `resolve::frame_box` answers a group's laid-out box
-— but is untested, and the card still offers only a frame's children (§15 D869's amendment). `ondin-core/src/container.rs` holds the arithmetic: `LengthPct` (`Px`, or `Percent`
+— and since 2026-09-26 the card offers a laid group's children too and `build::keep_insets` pins them
+against that box (§15 D887), tested in core and the app and not in the preview. ⚠️ The box
+`keep_insets` reads is the **committed** one, so an edit that re-lays the group and moves a pinned
+child at once — the Scale tool's `tools::scaled_flex` — pins against the size the group had;
+unmeasured. `ondin-core/src/container.rs` holds the arithmetic: `LengthPct` (`Px`, or `Percent`
 stored as typed, horizontal insets against the frame's width and vertical against its height),
 `AutoMargins`, `Insets`, and `place`/`inverse`, CSS's absolute-positioning rule for one axis and
 its reverse. `Node::insets` is the specified property, saved as an additive `NodeDto` field skipped
@@ -1191,7 +1199,9 @@ rulings, the maintainer's:
   card (§9.4), whose title is the session's choice and not part of the ruling. `container::with_edge`
   is the diagram's click, and pinning through it never moves the layer; an unpin never moves it
   either, because the card writes the drawn placement into the stored transform and size in the same
-  commit (`inspector::baked_placement`).
+  commit (`inspector::baked_placement`). ⚠️ **Unmeasured in a hugging container**: pinning an in-flow
+  item takes it out of the flow, so a laid group that hugs, or a `fit-content` frame, re-lays without
+  it and shrinks — where *"never moves"* can fail (§15 D887, an open question).
 
 **What stretches** is a kind whose size is a field — `Rect`, `Ellipse`, `Polygon`, `Star`,
 `Artboard`, and `Text`, whose stretched width is a wrap width (`AutoHeight(w)`, a `Fixed` box keeping
@@ -1271,13 +1281,17 @@ reaches it, a whole chain of nested flex containers in one pass; items take thei
 (`item_placed`), a root its size (`root_sized`: a frame asked to hug grows its kind, a group takes the
 box). `update` collects `affected` from each dirty node's **`chain_root`**, so a change to one item
 re-lays its siblings — 🚨 the first hop counting for a child that has just *left* the flow. **Out of
-flow**: a hidden layer (`display: none`'s reading, the session's default and not a ruling), a mask,
+flow**: a hidden layer (`display: none`'s reading, the maintainer's ruling — §15 D881), a mask,
 and a child with any inset (`container::in_flow`). **An in-flow item turns about its box centre and
 its stored translation is ignored while in flow** — the session's reading in code, unruled, and where
 a rotated one is drawn untested. **A resize sticks**: `build::keep_flex_sizes`, beside `keep_insets` in
 `commit_inner`, writes `flex-grow`/`flex-shrink` 0 for a main-axis resize and `align-self: start` for
 a cross resize of a stretched item (the maintainer's ruling) — spelled once as `build::held`, which
-`sized_flex_item` calls too for a laid group's resize. **And the stored translation is kept**: before
+`sized_flex_item` calls too for a laid group's resize. The Item card names those flips, with an Undo
+that takes the whole step back (§15 D880). **And a resize writes px over a size keyword**:
+`keep_flex_sizes` sets a `%` or `fit-content` width or height back to `auto` on each axis a resizing
+`SetGeometry` changed, whatever the parent — `auto` being the stored size the resize has just written
+(`build::sized_in_px`, §15 D879). **And the stored translation is kept**: before
 that, `keep_flex_sizes` runs `build::kept_flow_translations`, so every `SetTransform` on an in-flow item
 — a left- or top-handle resize's shift, a rotation's — keeps its linear part and the stored
 translation, and one left unchanged is dropped; not where the same edit takes the item out of the flow
@@ -1290,12 +1304,22 @@ stored translation is drawn nowhere, so a move of one in-flow layer that stays i
 a `Reorder` and no `SetTransform`: `build::flex_reorder` counts the dragged box's centre against every
 other in-flow sibling's used box in reading order — on its line by main-axis centre, reversed for
 `row-reverse`/`column-reverse`; on another line by cross centre — and out-of-flow siblings keep their
-place. Child order being flow order and paint order, the item's z-order moves with it. ⚠️
-`wrap-reverse` is read as `wrap`. One layer leaving its frame moves by its transform as before;
+place. Child order being flow order and paint order, the item's z-order moves with it. Under
+`wrap-reverse` the first line is the bottom one of a row, so a lower line comes first (§15 D883). One
+layer leaving its frame moves by its transform as before;
 several move by their transforms except an in-flow item, which stores no translation and keeps its
 slot, in the drag as on release (`canvas::stays_in_flow`) — reordering several at once is not built.
 The preview represents the reorder as a per-parent child order and outlines the slot the item will
 land in (§6.2, §9.4).
+
+**The inspector's layout cards** (§15 D878, §9.4). *Container* sets `display` and, under `flex`,
+every container property in the table above but grid's; *Item* sets an in-flow item's grow, shrink,
+basis, `align-self` and limits, or says why a layer is out of the flow and puts it back. A layout
+taken away with `display: none` from the Container card leaves every child where it is drawn and a
+hugging frame the size it hugged to, the Position card's unpin rule. The Transform card's W and H
+offer the sizing modes that differ for the layer (§15 D879), and an in-flow item's X and Y are inert
+(§15 D882). ⚠️ **One CSS rule is not modelled**: taffy is handed `auto` for `fit-content`, so a
+fit-content frame in a stretching parent stretches (§15 D879).
 
 **Build order**: (1) route rendering, export, hit-testing, snapping and the inspector through used
 geometry with an **identity** layout pass — a pure refactor, the goldens staying byte-identical its
@@ -1303,8 +1327,9 @@ proof, and the riskiest step, **built 2026-09-24** (§15 D868); (2) absolute ins
 frames — the smallest visible feature that exercises the whole pipeline, and the first test that a
 used geometry reaches anything outside core — **built 2026-09-24**, inspector card included (§15
 D874), `ondin-export/tests/insets.rs` proving the SVG, PNG and snapshot writers draw it; (3) flex, with live reflow during gestures and reorder by drag —
-**in progress** (§15 D875): the engine, the layout pass, live reflow, resize — a laid group's
-included — and reorder by drag (§15 D877) are built, the inspector cards are not;
+**built 2026-09-24** (§15 D875): the engine, the layout pass, live reflow, resize — a laid group's
+included — reorder by drag (§15 D877) and the inspector cards (§15 D878), none of the app side yet
+looked at on screen;
 (4) grid, with the track editor; (5) components and overrides, on the same pipeline.
 
 **Open, not decided**: how grid previews reflow, how `TextSizing`'s three states map onto a grid
@@ -3494,7 +3519,9 @@ impl Resolved {
   as the document's, so a `match` asking *what sort* of node this is may read either.
   **`resolve::used_geometry` places a child of an `Artboard` with authored insets** by
   `container::place`, against the frame's **used** size read out of the map being filled — so a
-  frame another frame has stretched hands its children the stretched size. **Since step 3 it also
+  frame another frame has stretched hands its children the stretched size. ⚠️ **And, since step 3,
+  a child of a group with a layout**, against the group's laid box (`resolve::frame_box`); this
+  sentence named only the frame from then until 2026-09-26 (§15 D887). **Since step 3 it also
   places flex items** (§5.3c, §15 D875): `place_node` runs `container::lay_out` at each layout root
   the parents-first walk reaches, and each in-flow item takes its slot and size from that pass; a
   group with a layout keeps its box in `Used::frame`, read through `used_frame`. Everything else
@@ -6620,7 +6647,10 @@ keyboard stop swallowing Return and Space and offering neither the click nor the
 `Sense::click()` is `CLICK | FOCUSABLE` (§15 D290 is the same fact read for the value field's strip).
 The rect stays claimed, so the cell still reports hover for its ground; `Sense::hover()` *is*
 `Sense::empty()` (§15 D688). **If the tooltip is ever wanted, `paint` gains the response** — widening
-the signature is the honest way to offer it, and a sense nobody can read is not.
+the signature is the honest way to offer it, and a sense nobody can read is not. It was wanted, and
+the signature widened by a `tip` per cell instead: `ui::segmented_tipped`, of which
+`segmented_enabled` is the untipped form, and whose disabled cells hang their tooltip from that hover
+— the Container card's `grid` saying why it cannot be picked (§15 D886).
 
 **Chrome never sets `CursorIcon::PointingHand`.** A web page uses the hand to mean "this is a link"; a
 design tool's panels are all controls, so a cursor that changed on every header, icon button, swatch and
@@ -7109,6 +7139,16 @@ input event (winit/egui)
   What is written back is still the used value, so a stretched auto-width text node resized stores
   `AutoHeight(w)`. `committed_node` has no
   used kind at all: it reports the value a commit is about to overwrite, which is the specified one.
+  `keep_flex_sizes` also turns a resize of any layer into px on each axis it changed, a `%` or
+  `fit-content` width or height going back to `auto` (§15 D879). And `DisplayNode::display` and `item`
+  have overrides behind them, as `insets` does, so a Container- or Item-card scrub accumulates (§15
+  D878). 🚨 **And a field reading through the preview cannot tell "edited" from "moved this frame".**
+  On the release frame — the one `edit_valve` commits on — nothing moves and the field shows the value
+  its own preview installed, so a field that builds its edit only when the number changed that frame
+  hands the valve an empty transaction and loses the whole scrub. Every number field in the layout
+  cards did (§15 D885); `layout::edited` latches "moved since engaged" through the engagement's last
+  frame. Building the edit unconditionally, as the Position card's pinned insets do, is not the
+  general fix: a field only clicked through would write the value it shows to every subject.
 - **A multi-selection Transform field carries its own drag total, and that is a real difference from
   the single-layer path.** The single-layer fields need no such state: they read their number back
   through the render override, so the preview *is* the running total and each frame's edit is an
@@ -7593,7 +7633,7 @@ missing: a valve is asked every frame with a transaction built every frame, so `
 response beside the transaction — without it the resting X field renewed the hold for ever and the box
 vanished whenever the hand stopped. §15 D128.
 ⚠️ **The rule is enforced by a test rather than by a habit since 2026-09-09** (§15 D679):
-`only_the_layers_panel_commits_without_the_committer` reads the seven sources under `panels/` through
+`only_the_layers_panel_commits_without_the_committer` reads the eight sources under `panels/` through
 `include_str!` and demands that the set spelling `self.session.commit` is exactly `["layers.rs"]`. It
 had been **false** — the guide card's Trash button (`inspector::remove_selected_guides`) committed
 directly, which nothing anywhere could have said. ⚠️ **What the test cannot see is the two exceptions
@@ -7881,8 +7921,11 @@ D616). `OndinApp::artboards` was a full-document walk answering a question about
 once per selected root per call, so a twenty-layer move spent 6.07 ms of a 16.7 ms frame before
 anything was drawn. `OndinApp::with_frames` fills `FrameIndex` — the frames, their world boxes and a
 walk counter — whenever the revision has moved. **The rule that keeps it correct is that nothing may
-add, remove or move an artboard without a commit**: `revision` is bumped by `commit_inner`, which
-undo and redo go through, and by `adopt_document`, and by nothing else. A gesture in flight
+add, remove or move an artboard without a commit**: `revision` is bumped by `commit_inner` and by
+`adopt_document`, and by nothing else. 🚨 **Undo and redo do not go through `commit_inner` and do not
+bump it** — this sentence said they did — so an undo or a redo that moves a frame leaves the memo
+stale until the next commit, which breaks the rule from inside (§15 D616's amendment, *Fix*, not
+repaired). A gesture in flight
 deliberately does not bump it — these are the *committed* world bounds, which is what the drop rule
 has always been defined against.
 
@@ -8105,6 +8148,22 @@ the one expression all three numeric doors compute before the resize, rather tha
 flag, which takes the larger of two factors and so would refuse to shrink a box only one of whose axes
 is being driven.
 
+**W's and H's unit is a menu of sizing modes wherever a layer has more than one that means something
+different** (§15 D879): `px` always, `fit-content` for a frame with a layout, `auto` for a group with
+one, and `%` for any kind in its parent's flow that layout can resize — `layout::size_modes`, which
+offers fewer than CSS's four because `container::style_of` merges a different two per kind. A keyword
+side shows the size it resolved to, the keyword where the unit goes — ⚠️ where the Position card,
+since §15 D890, puts `auto` in the digits' place instead, and which of the two wins is open; picking
+a mode moves nothing
+(`layout::size_mode_tx`); typing writes px, or `%` while the mode is `%`. **The proportion lock is
+disabled while either side is a keyword or `%`**, with the reason on hover. A laid group's typed W and
+H take `tools::resize_box_to`, as any box without an authored `size` does (above), and so reach
+`build::sized_flex_item`. The menu is the single card's only; the multi card's W and H are plain.
+**And an in-flow item's X and Y are disabled** (§15 D882): its container places it, and
+`keep_flex_sizes` drops a typed translation at the commit door, so a live field would take a number
+and commit nothing. The reason is on hover beside the disabled row. ⚠️ **The multi card's X and Y are
+not disabled**, and in-flow members of a set silently keep their slots.
+
 **Directly under W and H, while the Scale tool is held, is a Scale field — one percentage in W's slot,
 with `0.5x` and `2x` filling the rest of the row** (§15 D311, D313). It is the Scale tool's verb
 rather than a second spelling of W: every W/H path in the panel passes `Resize::geometry`, where a 1px
@@ -8212,37 +8271,81 @@ every panel
 backed by §5.7a's bulk builders, so the app, MCP writes and the command line cannot disagree about
 what "set the fill of these" means. §15 D53 has the reasoning, of which the load-bearing part is that
 **"Mixed" is a panel rather than a label**. A selection with **frames** in it also gets *Frame
-templates* and *Layout grid*, second and third, directly under the identity card and in the same order
+templates*, directly under the identity card, and *Layout grid*, under Container, in the same order
 as on a single frame — the two frame panels that are not a single layer's (§15 D389, D390, below).
-A selection holding a layer a frame can pin gets **Position** under Transform, as a single one does
-(below).
+A selection holding a layer a container can pin gets **Position** under Transform, and one holding a
+frame or a group, or a child of a laid container, gets **Container** and **Item** below it, as a
+single one does (below).
 
-**A layer inside a frame gets a *Position* card, directly under Transform** (§5.3c, §15 D871, D874) —
+**A layer inside a frame, or inside a group with a layout, gets a *Position* card, directly under
+Transform** (§5.3c, §15 D871, D874, D887) —
 under the numbers it changes the meaning of, since a pinned layer's X and W are where its insets put
 it. *Position* is CSS's name for the property; *Constraints*, the design-tool word, is the one the
 maintainer asked not to borrow, and the title itself is the session's choice. It is offered for any
-selection with a layer in it whose parent is an `Artboard` and whose kind takes insets
-(`inset_subjects`, filtered rather than all-or-nothing on `frame_subjects`' rule), and every edit
-applies to each of those layers at its own distances. **A pin diagram** — a frame, a layer in its
-middle, four struts, solid accent where an edge is pinned, faint where not, dashed where it is pinned
-between two auto margins — takes a click anywhere in the band between the layer's edge and the
-frame's, and pins or unpins that edge where it is (`container::with_edge`). **Two buttons** beside it
-centre an axis: both insets at their current distances plus `margin: auto`, so nothing jumps and the
-layer then follows the frame by half; off unpins the axis's end edge, margins with it. **Four
-fields**, L/R over T/B: a pinned inset in its own unit with a clickable `px`/`%` suffix that converts
-without moving anything, committed directly; an unpinned edge's current distance beside an inert
-`auto`, which typing or dragging pins in px through the valve. ⚠️ **A field only clicked through pins
-nothing** — the edit it hands the valve is empty until the number differs from the one shown. 🚨
+selection with a layer in it whose parent is an `Artboard`, or a `Group` with `display`, and whose
+kind takes insets (`inset_subjects`, filtered rather than all-or-nothing on `frame_subjects`' rule);
+a laid group's child is measured against the group's laid box (`inset_placement`, through
+`preview_frame`). Every edit applies to each of those layers at its own distances. The card is laid
+out as the maintainer's mockup's screen 07 (§15 D890). **A pin diagram** at the left —
+`INSET_DIAGRAM_W` wide, the mockup's 74, and two field rows and their gap tall — is a field-coloured
+well with a layer at its centre and four struts, and **no container outline**: solid accent where an
+edge is pinned, dashed and faint where not, and solid in the canvas's measure red (`color::MEASURE`,
+§15 D891) where it is pinned between two auto margins — dashed accent, as it was, read as the unpinned
+struts. It takes a click anywhere in the band between the layer's edge and the well's, and pins or
+unpins that edge where it is (`container::with_edge`). **Four fields** beside it, L/R over T/B: a
+pinned inset in its own unit, with an accent edge and a clickable `px`/`%` suffix that converts
+without moving anything, committed directly; an unpinned edge reads `auto` where its number would be,
+its current distance still the value underneath — so a scrub starts where the edge is — and typing or
+dragging pins it in px through the valve. **Outside a layout the top and left are held by default**
+(§15 D871, D891): an axis with neither inset keeps its offset from the container's top-left through a
+resize, as a pin at that distance would, so the card shows it as held — the strut solid accent, the
+field the distance with no unit and no accent edge, the layer accent — without writing an inset.
+Clicking a held strut pins it; pinning the opposite edge ends the default on that axis. An authored
+top and left would take the layer out of the flow the day its container got a layout; the held
+display simply stops applying there. **Two buttons** share a row under both, and centre an axis:
+both insets at their current distances plus `margin: auto`, so nothing jumps and the layer then
+follows its container by half; off unpins the axis's end edge, margins with it. The header carries an
+*Absolute* badge while the layer is pinned, **only inside a container with a layout** — in a plain
+frame every child is absolute (`ui::section_head_badged`, §15 D891). ⚠️ **A field only clicked
+through pins nothing** — the edit it hands the valve is empty until the number differs from the
+distance under its `auto`. 🚨
 **Every pin, unpin and centre commit also writes where the layer is drawn into its stored transform
 and, for a stretched layer, its stored size** (`baked_placement`): an axis that loses its insets is
 placed by the stored values again, and without this a frame resize since the pin would make unpinning
 jump the layer back. The fields read `DisplayNode::insets`, which has an override behind it, for the
 accumulating-control reason §9.3 gives.
 
+**A layer in a laid container gets an *Item* card, and a frame or a group a *Container* card, in that
+order under Position** (§5.3c, §15 D878) — so the cards run Transform, Position, Item, Container,
+Layout grid: from the layer in its parent to its children, the order of the maintainer's mockup, and
+a frame that is both an item and a container gets both. Each finds its own subjects
+(`item_subjects`, `container_subjects`) on `frame_subjects`' rule, so one call serves this and
+`inspector_multi`. *Container* opens with `display` as a segmented row — `none` and `flex`, and `grid`
+a disabled cell until step 4 — and under `flex` has direction and wrap, each cell of the three rows
+carrying a tooltip, `grid`'s saying why it cannot be picked (`ui::segmented_tipped`, §15 D886); three
+dropdowns whose layout
+pictures turn with the container (`layout::Orient`, a transpose and a mirror, never a rotation), the
+two gaps, and padding as two paired fields that open to four. *Item* has grow and shrink, basis,
+`align-self` — *Auto · \<inherited\>* while unset — and four limits behind a *Min / max* disclosure;
+for a layer the flow skips it says why instead, in words — *Absolutely positioned* and which edges
+hold it, *Hidden*, or a mask (§15 D889) — with one button that puts back every subject out for that
+reason. Labels and values are CSS's names, written in sentence case — *Justify content*, *Flex start*
+— with a unit beside a number left lower case (§15 D867, D884). 🚨 **`display: none`
+from the card writes every in-flow child's drawn transform and size into its stored values, and a
+hugging frame's hugged size into its own** (`inspector::baked_ops`), so nothing moves: the Position
+card's unpin rule, for the same reason, and *Unpin and return to the layout* does the same. **A resize's flips come with
+a receipt** (§15 D880): the grow, shrink or `align-self` a resize changed on the user's behalf is
+outlined and named, with an Undo that takes the whole step back. The fields read `DisplayNode::display`
+and `item`, which have overrides behind them, and commit through `layout::edited`'s latch (§9.3, §15
+D885). §15 D878 has each place the cards depart from the mockup
+— ⚠️ one of them the mixed number's dash, below.
+
 **A frame gets two cards of its own, *Frame templates* and *Layout grid*, and the ordinary Fill and
-Stroke panels for its paint** (§5.3b, §15 D385, D387). The two sit **second and third,
-above Align and Transform** — under the identity and mask cards, because they say what kind of page
-this is and what it is divided into, and everything below them is about a layer among layers.
+Stroke panels for its paint** (§5.3b, §15 D385, D387). *Frame templates* sits **second, above Align
+and Transform** — under the identity and mask cards, because it says what kind of page this is, and
+everything below it is about a layer among layers. ⚠️ ***Layout grid* sat third, beside it, until the
+layout cards** (§15 D878): it sits under *Container* now, the grid dividing what the container lays
+out.
 **There is no third card for its ground.** A frame is `PaintScope::Node` like any other layer and gets
 the shared panels — the `+`, the per-row eye, the reorder grip, the ✕, the mixed-selection row, the
 whole list (§15 D400). It had a one-row card of its own until 2026-09-01, headed *Frame background*
@@ -9173,7 +9276,12 @@ card, so the departure is the numeric fields' and not the panel's).
 height field carries its own copy of the same formatter, while the inspector's numeric fields spell
 the word. Whether a 74pt field behind a two-letter prefix is *"too small to hold five letters"* is
 the size question D130 leaves to be asked; it has not been asked, and D636 widened the population by
-one without answering it. **The rule stands as written until it is.**
+one without answering it. **The rule stands as written until it is.** 🚨 **And since §15 D878 the
+inspector's layout cards do not keep it either**, so *"the inspector's numeric fields spell the
+word"* holds for the older cards only: `layout::dash_if` is a copy of `mixed_text` citing it as the
+convention, a sizing field's unit reads `–` for a mixed mode, and a mixed segmented row raises no cell
+and draws no dash — against D636's *"not a precedent"* and against the mockup, which has *"Mixed"*.
+*Fix*, by the same size question.
 
 **Three states on one field, twice.** Line height's suffix cycles `auto → % → px`, and a decoration's
 thickness and offset cycle `Font → px → %` — because in both cases the third state is a *value* ("the

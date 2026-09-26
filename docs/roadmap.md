@@ -41,7 +41,7 @@ which is this file's own §9.5 lesson: **check the section before believing the 
 | *Now · Path editing* | **Nothing open as of 2026-09-22.** The one item — whole-path geometry patches — **moved to *Later · Parked decisions*** that day: it is non-blocking with a stated trigger (revisited *with* MCP, which is parked), which is what *Later* is for by this file's own table above. ⚠️ **That honours §15 D123's closing note rather than breaking it** — the note asks for it to stay *"in the todo as a decision rather than a gap"*, and it stays in this file; what changes is that it stops sitting under a heading meaning *open work on live code*. ⚠️ **The `retain_valid`/`subpath_lengths` pair left this row on 2026-09-19**, ruled to the narrow `#[allow(dead_code)]` with the no-effect call removed (§15 D637, *Resolved*) — it had been here since 2026-09-09. |
 | *Now · Files, library and storage* | **Nothing open as of 2026-09-23** — the cover cache's lifecycle, opened that day while closing §15 D862, closed the same day: `Covers::pass` drains once a dashboard pass and the project mosaic asks only on screen (§15 D863), and textures past a cap of 128 go least recently asked-for first (§15 D864). *The text below is the row as it stood that morning.* **One item as of 2026-09-23**: the cover cache's lifecycle — no texture is ever evicted, `drain` runs only when a card asks, and the project mosaic is ungated. Found while closing §15 D862; no behaviour is wrong, it is memory and wasted repaints. *The text below is the row as it stood before.* **Nothing open as of 2026-09-19** — the last two closed that day: the cover render moved onto **a worker of its own** rather than onto `Writer`'s FIFO queue, `FRAME_BUDGET` deleted with what it bounded (§15 D820), and **rollback was refused outright** and is a §0 non-goal, the retry being the recovery (§15 D814). 🚨 **The threading then flaked a *dashboard* test 2 runs in 20**, found by running the filter twenty times after six clean runs had said nothing. *The text below is the row as it stood that morning.* **Two**, as of 2026-09-19: a dashboard cover rendered synchronously on the UI thread, which needs a thread, and **rollback** after a partly-failed migration, which needs a ruling. **Three left this row that day.** The non-Unicode filename was **reproduced** — a lone UTF-16 surrogate, which NTFS accepts and `to_str` refuses — and the migration now carries such a file by its `OsStr` name (§15 D809); the per-machine index has an injection point, and it is a `cfg!` rather than any of the four answers the bullet proposed (§15 D807); and the partly-failed migration got its list in the modal and a *Try again* button, leaving only the third of its three asks (§15 D810). ⚠️ **This row said *"Three, all from the codebase review"* while the section held four**, the migration bullet never having been named in it — so it was short by one from the day it was written and the arithmetic in it was never a count of anything. ⚠️ **This row did not exist until 2026-09-09** and the section had held open work since 2026-09-06; the *"nothing open"* line below was the half that got corrected first, and a missing row is the same failure with nothing to contradict. |
 | *Now · Text alignment* | **Nothing open as of 2026-09-22.** Side bearings / optical margin alignment moved to *Later · Parked decisions*, undecided — it had been filed `Later:` inside a `Now` section since the section was written, which is the prefix table broken from the inside — **and was built hours later the same day** (§15 D830): both edges, `ParagraphStyle::optical_margins`, off by default, one adjustment to the line's geometry that no arm of reads `align`. ⚠️ **The bullet's own example was backwards the whole time it stood** — it blamed `H` for having *almost no* left bearing, and `H` has the largest of the capitals measured. ⚠️ *This row said "Side bearings / optical margin alignment, marked **Later**" and was perfectly accurate for weeks — it described the bullet exactly, including the contradiction, and that is why nobody acted on it.* What is left in the section is one standing rule: don't use ink bounds for alignment — **which D830 does not break, and which now says it is about the *datum***. |
-| *Next · Container layout* | **Opened 2026-09-23 and designed** (§15 D867–D873): five steps — used geometry behind an identity pass, absolute insets, flex, grid, then components — plus the decisions still open. **Steps 1 and 2 are built** (2026-09-24, §15 D868, D874) — step 2 with its inspector card, so pinning shipped; flex is next, in progress (§15 D875), and frames under groups are built (§15 D876). The only `Next` section in the file, and not a `Now`, because what is left in it is steps 3–5 and nothing of those has shipped. |
+| *Next · Container layout* | **Opened 2026-09-23 and designed** (§15 D867–D873): five steps — used geometry behind an identity pass, absolute insets, flex, grid, then components — plus the decisions still open. **Steps 1 and 2 are built** (2026-09-24, §15 D868, D874) — step 2 with its inspector card, so pinning shipped; **step 3, flex, is built** the same day (§15 D875–D877), its inspector cards last (§15 D878–D883), and frames under groups with it (§15 D876) — and the maintainer's first look at the cards came back with seven findings, answered in session 36 (2026-09-26, §15 D884–D889), and the Position card then laid out as the mockup (2026-09-27, §15 D890). The commit of the cards and of those answers, and a look at the answers on screen, are what it still owes. The only `Next` section in the file, and not a `Now`, because what is left in it is that and steps 4–5. |
 | *Later* | The command palette and cheatsheet; the parked decisions; post-v1 (MCP, Command Mode, multiplayer). |
 
 **Sections with nothing open**: *Doc drift*, *Now · Images*, *Now · Inspector*, *Now · Keyboard*,
@@ -1439,8 +1439,8 @@ snapping with its labels, §15 D198, D200.)
 
 ## Next · Container layout (flexbox, grid, absolute insets)
 
-**Designed 2026-09-23; steps 1 and 2 built 2026-09-24** (§15 D868 and D874 have what, and are
-their record now).
+**Designed 2026-09-23; steps 1, 2 and 3 built 2026-09-24** (§15 D868, D874 and D875–D883 have
+what, and are their record now).
 `architecture.md` §5.3c is the design and §15 **D867–D873** its decisions — CSS semantics under
 CSS's names, taffy as the engine, layout derived in `Resolved` and never saved, groups taking
 `display`, a frame allowed under any group, constraints as absolute insets, shapes as replaced
@@ -1452,22 +1452,37 @@ are chrome.
    2026-09-24**; §15 D868 is the record.
 2. ~~Absolute insets on frames — constraints, with the inspector card.~~ **Built 2026-09-24**; §15
    D874 is the record.
-3. **Flex**, with live reflow during gestures and reorder by drag. **🚧 IN PROGRESS — handoff
-   marker, written at the close of session 34 (2026-09-24) for the next session.** Read this block
-   first.
+3. **Flex**, with live reflow during gestures and reorder by drag. **🚧 BUILT, COMMIT OWED —
+   handoff marker, rewritten in session 35 (2026-09-24), extended in session 36 (2026-09-26).** Read
+   this block first.
 
    **Items 1–4 below are built, tested and committed** (session 34 — the code as one commit, since
    its parts interleave in the same files, then the record; `git log` has them), and **item 5, the
-   inspector cards, is the one thing left in step 3.** The
+   inspector cards, is built and tested in the working tree** (session 35), so step 3 is built. The
    record is §15 **D875** (engine, model, preview, the maintainer's step-3 rulings, a laid group's
-   resize), **D876** (frames under groups) and **D877** (reorder by drag, and its two amendments), and
-   `architecture.md` §5.3c; this block restates none of it. **The full gate bar ran green over the
-   code as committed**: fmt, `cargo test --workspace` and `--release` (2514 passed each), clippy
-   `--workspace` and per package, `check --release`, the doc gate, and the 28 GPU `--ignored` tests
-   on the RTX 4070 Ti.
+   resize), **D876** (frames under groups), **D877** (reorder by drag, and its two amendments),
+   **D878–D883** (the cards, the sizing modes, and the maintainer's three rulings of session 35), and
+   `architecture.md` §5.3c; this block restates none of it. Session 34's full gate bar ran green over
+   items 1–4 as committed, the release test run and the 28 GPU `--ignored` tests included; **over
+   item 5 the gates reported green are fmt, `cargo test --workspace`, clippy `--workspace` and per
+   package, `check --release` and the doc gate** — not the release test run, not the GPU tests.
    **Not verified in the GUI**: none of step 3's app behaviour — frames in groups, reorder by drag,
-   group resize — has been looked at on screen. D878–D881 are reserved and unspent; **re-grep the
-   block before spending.**
+   group resize, the two cards — has been looked at on screen. D878–D883 are spent.
+
+   **Session 36 (2026-09-26) answered the maintainer's first look at the cards** — seven findings in
+   six entries, §15 **D884–D889**: labels in sentence case (D884); every number field in both cards
+   committing nothing, fixed (D885); tooltips on the direction and wrap cells, and on the `display`
+   cells, `grid`'s saying why it cannot be picked (D886); the Position
+   card for a laid group's children, and `keep_insets` pinning against the group's box (D887); a
+   square pin diagram (D888); the out-of-flow block in words (D889). Then, on 2026-09-27, the
+   maintainer saw D888's square and asked for the mockup's screen 07 instead: the Position card is
+   laid out as the design, its diagram without a container outline, an unpinned field reading `auto`,
+   and an *Absolute* header badge (D890, superseding D888 in part); and, the same day, three asks
+   after seeing it — the badge only inside a container with a layout, a plain frame's top and left
+   shown as held by default without an inset written, a centred axis solid in the measure red (D891).
+   **Built and tested in the working tree, uncommitted, and not verified in the GUI** by anyone.
+   **D884–D891 are all spent**: session 36's reserved block is exhausted, and a further entry needs a
+   new reservation.
 
    **Still to do, in this order:**
    1. ~~**Write D875**~~ — done in session 34, and CLAUDE.md's D-number paragraph brought up to date
@@ -1475,15 +1490,11 @@ are chrome.
    2. ~~**Frames under groups (D870)**~~ — §15 **D876**.
    3. ~~**Resizing a group with a layout**~~ — §15 D875's amendment.
    4. ~~**Drag-to-reorder**, with an insertion indicator~~ — §15 **D877**.
-   5. **Inspector cards — the next session's work.** ⏸ **The maintainer is preparing the design, a
-      mockup in `design/`, for the next session**: read it first — session 34 stopped here rather than
-      invent one. A **container card**: display (none/flex), direction, wrap, justify, align,
-      align-content, gaps, padding. An **item card**: grow, shrink, basis, align-self, width/height
-      including fit-content. CSS's names throughout (§15 D867). A laid group's W and H fields should
-      route through `build::sized_flex_item`, which the resize tool already calls for it (§15 D875's
-      amendment), so a typed size and a dragged one write the same thing.
-   6. ~~The full gate bar, `arch-scribe`, the commits~~ — done for items 1–4 at session 34's close;
-      owed again after item 5.
+   5. ~~**Inspector cards**~~ — §15 **D878–D883**.
+   6. **The commit** of item 5 and of session 36's answers, and a look at those answers on screen. The
+      gates and `arch-scribe` are done for item 5 (session 35); for session 36's work the record is
+      written (D884–D891) — D884–D889 while the gates were running, D890 and D891 after they were
+      reported green.
 4. **Grid**, with the track editor.
 5. **Components and overrides**, on the same pipeline. **Not designed** — sequenced here because
    derived instances are meant to share layout's derive-from-specified path (§15 D868), and nothing
@@ -1500,8 +1511,11 @@ geometry and the Position card's `inset_card_tests` drive the card through the r
 nothing proves hit-testing in the app, snapping or the rulers read it (§15 D874), and the app's flex
 tests stop at the transaction — `move_tx`'s reorder, `move_preview_tx`'s, and a laid group's resize
 (§15 D875's amendment, D877) — with nothing driving `update_drag`, what the canvas draws from its
-preview, or a flex container's hit-testing; a test of a pinned child of a **group** with a layout,
-which core and the preview place and nothing checks (§15 D869's amendment); and a measurement of the
+preview, or a flex container's hit-testing; a **preview** test of a pinned child of a group with a
+layout — core and the app are checked since §15 D887, and `RenderOverrides::relayout`'s placement of
+one is not; a measurement of what the **Scale tool on a laid group** does to a pinned child —
+`tools::scaled_flex` re-sizes the group and moves its children in one edit, while `keep_insets` pins
+against the group's committed box (§15 D887); and a measurement of the
 **rotation preview's residue** — an in-flow item rotated about a pivot other than its centre previews
 at the tool's transform, its `SetTransform` counted as a drag, and is laid out on release about its
 box centre (§15 D877's second amendment). Open and unmeasured.
@@ -1515,7 +1529,15 @@ session's reading of an **in-flow item's rotation origin and stored translation*
 centre with its stored linear part and ignoring its stored translation while it is in flow (§15
 D875). That is answered in code and **not ruled**; `tests/flex.rs` commits a rotation of an in-flow
 item and checks only what is stored — its turn kept, its shift dropped (§15 D877's second amendment) —
-and no test checks where a rotated in-flow item is drawn.
+and no test checks where a rotated in-flow item is drawn. And **what a pin does in a hugging
+container**: pinning an in-flow item takes it out of the flow, so a laid group that hugs, or a
+`fit-content` frame, re-lays without it and shrinks, and *"a pin never moves anything"* can fail
+there. Noticed in session 36 (§15 D887), not measured, and nothing decided about it. And **how a
+keyword reads in a sizing field**: the Position card puts an unpinned inset's `auto` in the digits'
+place, its distance underneath (§15 D890), while `layout::size_field` — the Item card's basis and
+limits, the Transform card's W and H — still shows a keyword's resolved number beside the keyword
+unit, which cited the Position card's old convention as its precedent (§15 D878's item 6). The two
+now disagree, and which wins in the sizing fields is not decided.
 
 ## Later · Command palette (`Ctrl+K`, with `Ctrl+/` as an alias — `shortcuts.md` §8)
 

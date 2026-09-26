@@ -991,7 +991,7 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D613** — **The corruption mark is drawn, and it is made to mean something.** `library::scan::Entry::unread` was computed on every scan and had **no reader outside `library/`** — `panels/dashboard.rs`, 7,600 lines and the only consumer of `Entry`, did not contain the string once. A `.ondin` this build cannot parse got a card with a de-slugged filename, a created date, a hover menu and *Open*, identical in every pixel to a healthy document, and the only feedback was the status line's *"Load error: …"* after the click. `Entry` derives `PartialEq`, which is the measured mechanism for `dead_code` staying silent on a written-never-read field, and `scan.rs` had a test asserting it — so the suite read as covering a feature that did not exist. *(Fixed and tested 2026-09-09; Fix. Closes `[S1.3-L3-05]`. `conflict_chip`/`conflict_chip_size` become `mark_chip`/`mark_chip_size` over a new `Mark { Unreadable, Conflict }`, at both call sites. **Red rather than amber, and `theme::color::WARN`'s own words are the argument**: *"the usual cause is a file that moved, which is a thing to fix rather than a mistake in the document"* — true of a conflict copy, not of a document that will not open — and the objection that kept red off the conflict mark, *"red would read as `this click removes it`"*, does not apply, because the thing it warns about **is** the click. `mark_chip_size` measures per mark (`UNREADABLE` is four characters longer) and the list view takes that width out of the *Name* column before eliding. **One mark, most severe first**, rather than two chips sharing one corner. 🚨 **The finding's account of the gap does not survive reading `read_meta` and the real one is worse**: a truncation lands on `MetaProbe::Inconclusive`, the one arm that already reads the whole file and runs `io::load` (**D485**'s arm), so truncation was caught; what is not caught is well-formed JSON `io::load` refuses — **a file written by a newer build**, structurally perfect and refused by `migrate`'s `version > CURRENT_SCHEMA_VERSION` guard, which a synced library is exactly where you meet. The answer was already being computed and thrown away: `Cover::Failed` conflated *will not load* with *empty document* and splits into `Cover::Unreadable`/`Cover::Blank` behind a private `NoCover`, with `Covers::unreadable` a map lookup on the key `get` already built. `mark_of` reads `entry.unread || covers.unreadable(entry)` and **neither alone is sufficient** — the cover cache is lazy and per-pass budgeted, so the flag carries the early passes. Two tests, and neither is the other: `cover::a_document_the_loader_refuses_is_unreadable_where_an_empty_one_is_merely_blank` for the fact, on a version bump rather than a cut, and `dashboard::a_document_this_build_cannot_open_wears_the_mark_and_a_healthy_one_does_not` for the drawing, both views, a healthy document as the control and two passes pumped. `an_empty_document_has_no_cover` strengthened from `is_none()` to `Some(NoCover::Blank)` — **it could not have told the two failures apart**, which is why an empty document used to get a corrupt one's answer. ⚠️ **Left undone deliberately**: a disabled or warning-styled *Open* is a behaviour decision, the mark and the status line already say it, and it is the maintainer's call. §9.5 amended and `roadmap.md`'s entry struck)*
 - **D614** — **A union is folded as a balanced tree.** A group used as a shape mask unions all its members with no cache anywhere on the path — `scene::mask_geometry` per repaint, `resolve::mask_path` per pointer move — and `boolean::fold_operands` folded **left**, handing flo_curves an accumulator of *i* subpaths at step *i* for Θ(N²) overall, worse in practice since `path_add` is superlinear itself. Measured in release on N disjoint 20×20 rects, which is a group of icons and is both the common case and the expensive one: **0.56 ms at 16, 1.39 at 32, 5.94 at 64, 26.7 at 128, 103 at 256, 471 at 512** — at 128 a single mask is more than a whole 16.7 ms frame. ⚠️ **§15 D239's cost table measured the wrong shape and said so honestly**: it timed an overlapping **ring**, whose union collapses to a handful of subpaths however many operands go in, which is why *"under 4 ms at sixty-four overlapping operands"* was true and was not the case that grows. *(Fixed and tested 2026-09-09; Fix. Closes `[S10.1-L4-04]`. Merge adjacent pairs, then pairs of pairs: log N levels of N subpaths each. **After: 0.13 ms at 16, 2.1 at 128, 6.4 at 256, 20.3 at 512** — 24× at the top. **Union and intersection are associative and `Subtract` is not**: `a − b − c − d` is `((a−b)−c)−d`, a tree computes `(a−b)−(c−d)`, and everything `d` takes out of `c` comes back — so the left fold is kept for `Subtract` alone. ⚠️ **That is associativity and not the commutativity §9.4 already states**; the two are different properties and only one licenses a tree. The intersection's early exit is preserved per level, and at odd counts the leftover rides up untouched, which is what keeps the tree balanced. Two tests. `a_union_folded_as_a_tree_is_the_shape_the_left_fold_gives` computes the left fold by hand, **because reassociating is a pure optimisation and no assertion about the shape can bite the change** — what it pins is the *premise*, that `combine` is associative here to within `ACCURACY`. ⚠️ The delta is exactly `0.0` at every count tried and that is deliberately **not** asserted: two bracketings of a floating-point boolean are entitled to differ and a test demanding otherwise pins luck. `a_subtraction_is_still_bracketed_from_the_left` guards the arm that did not change and **needs four operands** — with three the tree carries the odd one up and computes the left fold exactly, staying green under the flip. Flip, run: deleting the `Subtract` arm fails there at **1000 against 800**, the predicted site and the predicted gap of 200, at numbers 600 lower than the write-up said. 🚨 **The measurement contradicted the finding's own sketch**, which proposed hoisting `Shape::area` out of `from_flo`'s O(subpaths²) nesting loop: timed apart at N = 256 the fold is **96.2 ms** and `from_flo` **2.8 ms**, so that fix removes 3% of a 103 ms cost — and the finding states outright that its attribution was reasoned rather than measured. **The finding's second recommendation, a cache slot in `Resolved` beside `boolean`, is not built and is not needed**: what is left is N log N and the invalidation rule stays unspent. §9.4's Booleans subsection amended)*
 - **D615** — **A shadow's spread is bounded by the buffer it runs in.** **G10.** `n`, the box dilation's half-width, is in **device pixels** — `effects::shadow_layer` passes `sh.spread × scale`, so the authored number is multiplied by the zoom — and the only bound anywhere was `panels::inspector::MAX_OFFSET = 10_000`, whose doc calls it *"the reach of an offset or a spread, in both directions"* and which the panel applies to the **Offset** fields as well. An offset costs nothing, being a shifted texture read, O(1) per pixel; a spread is Θ(n) per pixel. Two fields sharing one range is exactly the G10 shape — *the cap measures how far the shadow goes and what grows is how many samples each pixel takes*. Measured in release on a real adapter, one shadow with `blur: 0`: **23.8 ms** at `spread: 200` zoom 256, **117.1 ms** at 1 000, **277.9 ms** at 10 000 zoom 64, **1 092.7 ms** at 10 000 zoom 256. ⚠️ **D403 does not cover it and could not**: `spread_alpha` runs at full resolution *before* `blur_coarse` coarsens, so the one term the design bounded is the blur and the term beside it grew with the zoom untouched. *(Fixed and tested 2026-09-09; Fix. Closes `[S10.2-L4-04]`. `effects::spread_steps(r, w, h)` caps each axis at `extent − 1`, and **the cap is exactly lossless, which is what makes it a fix and not a clamp**: both loops read outside the buffer as **empty** — `spread_alpha`'s `t < 0 || t >= inner_len` arm and `fx.wgsl`'s `inside()` — so once the window covers the line a dilation can find nothing further and an erosion has already met a zero. No picture changes, including the ones that render today. `extent − 1` and not `extent`, the window being `[i − n, i + n]`. **One helper, both backends**: `fx_gpu::run` calls it, which is the mistake **D601** records at this very pair of sites — both backends computed the radius from `scale.0.max(scale.1)`, both were wrong the same way, and every fixture in `tests/fx_gpu.rs` is at `SCALE = (1.0, 1.0)`, so the comparison harness agreed with itself and stayed green. Two tests. `a_spread_wider_than_the_buffer_is_capped_without_changing_the_picture` asserts the picture is byte-identical at spread 200 and 200 000 on a 120-wide buffer **and** that the work stops, the second being needed or the first is satisfied by doing nothing; the timing bound is a deliberately loose 20× ratio, ⚠️ flip-checked uncapped at **12.3 ms against 9.24 s**, a ratio of ~754, so the margin is nearly two orders of magnitude and nothing here is close to a clock — **and the flip leaves the picture assertion green**, which is the whole claim. `a_spreads_reach_is_capped_at_the_axis_it_runs_along` pins the arithmetic under / at / over the boundary, per axis, for a negative radius and for a zero-width buffer. 🚨 **What this does not do**: the cost is still Θ(w·h·n) for `n` up to the buffer's own size — the finding's **1 026.9 ms at 960×540, n = 500** on the CPU export and cover path. Bounding that means running the dilation on `shadow_downscale`'s coarse grid the way `blur_coarse` does, a real approximation guarded by `fx_gpu::a_resampled_shadow_with_a_spread_matches_the_reference`, and **a separate decision left open**. This removes the *unboundedness*; the remaining growth is bounded by the viewport. ⚠️ **The panel's *Spread* field still borrows the offset's range and that is not done** — a UI nicety now rather than a correctness bound. §6.4 amended)*
-- **D616** — **The artboard index is memoized on the document revision.** `OndinApp::artboards` was a full-document walk — `subtree_nodes` over the whole tree, a `Vec<NodeId>` of *every* node — to answer a question about four, asked **per node, per call** through `move_destination` → `frame_covering`. Measured in release at 16,000 nodes over 200 iterations: `artboards()` alone **0.157 ms**, `leaving_their_frames` **0.156** at one root and **3.037** at twenty, so a twenty-layer move was **6.07 ms a frame** and **9.11 with Alt** against a 16.7 ms budget, before anything is drawn. ⚠️ **The one-root figure against the bare call says the whole cost is the walk** — it scales with the *document*, not with the artboard count. *(Fixed and tested 2026-09-09; Fix. Closes `[S12.2-L4-04]`. `FrameIndex` behind a `RefCell`, filled by `with_frames`, which takes a **closure rather than returning a `Ref`** so no caller can hold the borrow across something that wants the memo again. 🚨 **Keyed on `EditorSession::revision`, an existing invalidation rule rather than a new one** — bumped in exactly two places, `commit_inner` (undo and redo included) and `adopt_document`, which are the events that can add, remove or move an artboard; ⚠️ a gesture in flight does not bump it and **must not**, these being the *committed* bounds the drop rule is defined against. `canvas::a_move_drag_walks_the_document_once_however_many_layers_are_selected` — **a counter and not a clock**, the finding's own suggestion and the more durable of the two; `frame_walks` is `#[cfg(test)]` on the *accessor* and not on the counter, so the production and tested builds do not differ where this could go wrong. ⚠️ Both flips bite at their predicted sites — 20 against 0, then 0 against 1 on the second — and **the written prediction had the numbers wrong**, reading two delta assertions as absolute. §9.4 amended)*
+- **D616** — **The artboard index is memoized on the document revision.** `OndinApp::artboards` was a full-document walk — `subtree_nodes` over the whole tree, a `Vec<NodeId>` of *every* node — to answer a question about four, asked **per node, per call** through `move_destination` → `frame_covering`. Measured in release at 16,000 nodes over 200 iterations: `artboards()` alone **0.157 ms**, `leaving_their_frames` **0.156** at one root and **3.037** at twenty, so a twenty-layer move was **6.07 ms a frame** and **9.11 with Alt** against a 16.7 ms budget, before anything is drawn. ⚠️ **The one-root figure against the bare call says the whole cost is the walk** — it scales with the *document*, not with the artboard count. *(Fixed and tested 2026-09-09; Fix. Closes `[S12.2-L4-04]`. `FrameIndex` behind a `RefCell`, filled by `with_frames`, which takes a **closure rather than returning a `Ref`** so no caller can hold the borrow across something that wants the memo again. 🚨 **Keyed on `EditorSession::revision`, an existing invalidation rule rather than a new one** — bumped in exactly two places, `commit_inner` (undo and redo included) and `adopt_document`, which are the events that can add, remove or move an artboard; 🚨 **amended 2026-09-24: *"undo and redo included"* is false** — neither goes through `commit_inner` or bumps the counter, so this memo, the Export preview, the recovery gate and `finish_save` are all blind to one; *Fix*, reported to the maintainer, found recording D880; ⚠️ a gesture in flight does not bump it and **must not**, these being the *committed* bounds the drop rule is defined against. `canvas::a_move_drag_walks_the_document_once_however_many_layers_are_selected` — **a counter and not a clock**, the finding's own suggestion and the more durable of the two; `frame_walks` is `#[cfg(test)]` on the *accessor* and not on the counter, so the production and tested builds do not differ where this could go wrong. ⚠️ Both flips bite at their predicted sites — 20 against 0, then 0 against 1 on the second — and **the written prediction had the numbers wrong**, reading two delta assertions as absolute. §9.4 amended)*
 - **D617** — **Three `tools` verbs that nothing called.** **G9**, and two findings under one entry because they are one gap in one module. Half of `side_shear` was executed by nothing: the four skew call sites pass `Handle::Top` three times and `Handle::Right` once and **all four pass `snap_to_steps: false`**, so `Handle::Bottom`'s span sign, `Handle::Left`'s held edge, `SKEW_SNAP` and `MAX_SKEW` had no caller anywhere — **D322** exists because this function got its origin wrong and it pinned `Handle::Top` alone. `rotate_points` and `space_points` have one production call site each and had zero test callers; `rotate_about_pivot_moves_points_correctly` is *named* for the first and exercises `turn_about` instead. *(Fixed and tested 2026-09-09; Fix. Closes `[S13.1-L6-05]` and `[S13.2-L6-05]`. `side_shear_tests`, three: the four arms asserted as **the bargain the doc promises** — the side facing the grabbed one does not move, the grabbed one moves by the drag — which is one sentence for all four and is what a sign error breaks. ⚠️ **Probe points are corners of the held side, not its midpoint**, a midpoint being fixed under a shear about the box's *centre* too; every case presses at the middle of its own side, D322 measuring the offset from the press. The snap test needs a **third** case, a drag far past the clamp, because only that tells "snap then clamp" from "clamp then snap"; its first case asserts the fixture's own raw 18.43° so that "snapped to 15" means something moved. 🚨 **The lean is signed and the sign is asserted rather than taken away with an `abs()`** — asserting the magnitude would pass for the arm that leans the wrong way. ⚠️ **The interesting flip result is a wrong *correction* rather than a wrong prediction**: `Bottom`'s reversed span was predicted to fail the grabbed-side assertion, "corrected" to the held-side one, and the original was right — the held edge is pinned by the `Vec2` beside the span and is untouched by its sign. ⚠️ **D243's verdict reads *"Built and tested"* and the point arm had no test at all**, which is drift and is corrected here; D123's half is weaker and distinguished in the body — it *states* the handle rule truly and nothing checked it, and **a true sentence nothing checks is not the same failure as a verdict claiming a test that does not exist**. Two recorded values were wrong and the runs fixed them — `leaving()` is `(10, 25)`, and the reversed-order flip gives `[50, 45, 40, 90]` and not `[30, 35, 40]`. `architecture.md` unchanged — §5.6 and §9.4 were exact, the coverage was the gap — and **D243's own paragraph carries the correction**)*
 - **D618** — **Two of the library's destructive modals, on screen for the first time.** `dash.deleting` and `dash.deleting_project` are **never assigned in any test module in the workspace**, while `new_project`, `edit_project` and `library_settings` all are — so the cards that *destroy* something were the ones nothing had ever drawn. Five simultaneous flips of five documented decisions left the whole `ondin-app` suite green at 977. *(Fixed and tested 2026-09-09; Fix. Closes `[S20.3-L6-04]`, taking the two that matter most. `delete_modal`'s `nav == Nav::Trash` flipped to `!=` makes **every *Delete file* card in the library read "cannot be undone" and every card in the Trash read "moves to Trash"** — the sentence that function's own ⚠️ calls *"the worst sentence on the screen"*. **Both navs asserted**, one of the two being satisfied by a build that shows that sentence everywhere, and the **title with the body**, a card contradicting itself being the same failure. ⚠️ `nav` is set directly rather than reached by clicking: the route in is `dashboard_keys`' Delete, `[S20.3-L1-02]`'s still-open ruling, and what this pins is the card. `delete_project_modal`'s switch reads `!dp.keep_files`, the inverse of the field it writes, on **the one destructive card with no trash behind it**; asserted through `ui::switch_row_ink`, the label's colour, because that is what the eye reads and the field was never in doubt, with the count in the label asserted too (`if count > 0` draws no row at all for an empty project). 🚨 **`CLAUDE.md`'s `Area`-fade trap, hit and recorded**: at four passes the label reads `#7C7C7D88` against a `MUTED` of `#909092 9E`, a uniform 0.86 — `galleys` can afford four because a *string* does not fade, a **colour** must be read after the animation settles, so this reads at thirty. Both flips bite at their predicted sites. Neither document changed: §9.5 already describes both cards as they behave)*
 - **D619** — **_Recent searches_ is a persisted, disk-writing feature with no assertions at all.** Six hits for `recent_searches\|remember_search` across `crates/` and **none in a test**. All four decisions live in five lines: the blank-query refusal, the `retain` that dedupes and promotes, `truncate(SEARCH_RECENTS)` — a cap of five — and `save()`. ⚠️ **It was *executed* and unasserted**, which is what hides a gap like this from a coverage number: the search-arrows test drives it through the `nav_to` arm and looks at none of it (`[A5-L6-02]` draws the same line for `grid.rs`). And the display half had never been laid out, `recents` being non-empty only when the needle is empty. *(Fixed and tested 2026-09-09; Fix, with one side effect recorded rather than fixed. Closes `[S20.1-L6-05]`. `a_remembered_search_is_deduped_promoted_capped_and_shown` asserts all four decisions, the persistence and the rows on screen. 🚨 **The suite writes to the user's real cache directory**: `LocalIndex::save` goes to `dirs::cache_dir()/ondin/library.json` with no injection point and `Library::open` loads from there, so `app()` redirects the base folder and cannot redirect this — **the first run of this test found its fixture already populated from a previous run**. The test clears the list, says why, and asserts persistence through `save_to`/`load_from` against a temp path. ⚠️ **D370's pair is the right answer and nothing routes the app through it**, so running the tests edits the person's own *Recent searches*; that wants an injection point, is real work rather than a ruling, and is a `roadmap.md` bullet under *Now · Files, library and storage*. ⚠️ All four flips bite and two land earlier than predicted — `insert(0, ..)` → `push` was filed under promote and fails **"newest first"** two assertions earlier, because **an order flip bites at the first assertion that reads an order, which is rarely the one the claim is filed under**. §9.5 amended)*
@@ -1097,7 +1097,7 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D719** — **An unedited *Edit project* card rewrote `projects.json` and rescanned the whole library.** `EditProject::of` seeds the card from the project, so opening *Edit project* and clicking **Save changes** — or pressing Enter — reached `save_project` with every field equal to what was stored, and it ran anyway: `save_projects()` rewrote the file, `reload_projects()` re-read it and `refresh()` rescanned the library, a price `refresh`'s own comment accepts on the assumption that something moved. ⚠️ **The failure is the message, not the wasted work.** If that write fails — and `may_write_projects` cannot prevent it, having passed a moment earlier, so a sync client holding the file is enough — the user is told *"Could not write projects.json"* about a change they did not make. *(Fixed and tested 2026-09-10; Keep — folding both project cards onto `settings::modal_footer` is the remaining half. Closes `[S20.3-L3-06]`. New `EditProject::differs_from`, written directly under `of` as its mirror, with `name` compared **trimmed** because `save_project` stores `ep.name.trim()` and a trailing space is therefore not an edit. **Two askers, one statement**: `save_project` refuses the write however the card was dismissed, and the footer dims the button — which is `set_archived`'s `if p.archived == archived { return; }` asked of the whole card. 🚨 **The alarm reaches the user *because* `[S20.1-L1-01]` was fixed, which is the opposite of how the finding frames it.** That finding was that the dashboard painted none of its 22 status messages; §15 D426 gave the screen a status line, so this write's failure is now visible — a spurious *"Could not write projects.json"* on a screen that would once have swallowed it. **A citation to a *fixed* finding still resolves and reads as though the old state held.** 🚨 **A false doc claim corrected in the same pass:** `library_settings_modal`'s doc says the two cards *"are now the same card: … same footer with the commit lit only when the draft differs from what is saved"* (§15 D368) — *"the two"* is Settings and Settings, and `new_project_modal` and `edit_project_modal` each hand-roll their footer rather than calling `settings::modal_footer`, so *"same footer"* was never true of them. **The same control written three times is how the rule that matters came to be in only one of them**; the two now agree about the rule and still not about the footer. *Fix by folding both project cards onto `modal_footer`* — a layout change rather than a behavioural one, and unfixed. **Test** `a_card_with_nothing_edited_neither_writes_nor_rescans`, with **`projects.json`'s mtime as the witness**, which is what the finding asked for: the record is identical either way, so an assertion on the projects list is green through the bug. ⚠️ The fixture assertion caught a wrong premise of the brief's — `seed` pushes into memory and writes nothing, so the test has to `save_projects()` once before there is a file to watch. Flip disabling the guard in `save_project` is red at the first mtime assertion. §9.5's *Edit project* paragraph amended; nothing struck from `roadmap.md`)*
 - **D720** — **Turning web fonts off did not reach the fetch that was already out.** §15 D330 promises *"off means no request leaves the machine"*, and `spawn_catalog`'s thread captured nothing cancellable — so a user who turned the switch off while it was inside `fetch_catalog` still had **two** calls go to `api.fontsource.org`, still had `catalog.json` written to their disk, and still had the entries merged into `self.catalog`, all after they had said no. New `FontService::catalog_live: Arc<AtomicBool>`, checked immediately before `fetch_catalog` and **again before `write_catalog`**. *(Fixed and tested 2026-09-10; Keep — the queued warm is the standing residual. Closes `[S21-L5-06]`. **The second check is the half that matters**: `fetch_catalog` blocks, and the whole window this closes is the one where the user says no *while it is out*. 🚨 **One flag per spawn, not one on the service, and the first version of the fix got this wrong in the direction that looks obviously right.** `self.catalog_live.store(on, …)` — one line — writes `true` back into the flag the **cancelled** thread is still holding, so a thread blocked across an off-then-on returns, reads `true` and writes the response the user cancelled. Each thread now holds a flag that only ever goes `false`; `set_web_fonts` cancels on the off path and allocates a **fresh** flag when it spawns. **The test's third assertion caught it** — the one that holds the *old* handle after the service's field has legitimately moved on. *A guard that is correct in the direction you were thinking about is not a guard.* ⚠️ **It does not interrupt a `ureq` call in flight and nothing here can**; what it guarantees is that the result is dropped rather than written or merged, and that the second of the two calls is never made. One already-open socket is the residual, bounded by one request. 🚨 **A false comment corrected, and it is this round's *count in prose* shape:** `prefetch_popular`'s doc called the queued warm *"the one hole"* in D330's promise, and the catalog thread was a second — the more visible one, talking to `api.fontsource.org` rather than to the CDN and **writing to the user's disk**. It is stated as a **rule** now — the hole is *requests already queued or already in flight when the switch is turned off* — with `grep -n 'agent' crates/ondin-app/src/fonts/mod.rs` as the enumeration instead of a number, because a number would go wrong again the next time somebody adds a caller. **D330 and D352 are amended for the same sentence.** ⚠️ **The queued warm stays open deliberately**: `set_web_fonts` does not drain the queue and the fix wants `queue` to grow an operation nothing else needs. **Test** `turning_web_fonts_off_cancels_a_catalog_fetch_that_is_already_out`. ⚠️ **The finding rated it *"hard to write honestly without a network seam"* and proposed saying so rather than asserting — the cancel flag *is* the seam**; the test asserts what `spawn_catalog` actually reads, not that a socket was opened, and starts no thread at all. §5.4a's switch bullet and prefetch bullet amended; nothing struck from `roadmap.md`)*
 - **D721** — **A group separator was one *device* pixel where every other hairline in the chrome is one *point*.** `ui::menu_sep` painted `1.0 / ppp` **points** where its own doc says *"**1pt** of `text_a(20)`"* and, two paragraphs down, *"the rule stays 1pt and only the air moved"*, `ui::MENU_SEP_H` allocates `1.0 + SEP_AIR * 2.0`, and §9.4 carried the same pair of sentences. Measured out of `FullOutput::shapes`: **1.0 pt at ppp 1.0, 0.667 at 1.5, 0.5 at 2.0** — true at 100% and at no other scale. 🚨 **The cost is a comparison inside one card**: `ui::MENU_BORDER` is a 1-*point* stroke round the very frame it sits in, five points away, and so are `ui::field_frame`'s, `ui::button_face`'s, `ui::SEGMENT_BORDER` and `inspector::popup_rule` — all five verified rather than taken from the finding — so at 200% a group rule was **half** the weight of its own card's border. *(Fixed and tested 2026-09-10; Keep — the alternative is named and overruling it is one constant. Closes `[S18.1-L3-04]`. ⚠️ **It was the only *chrome* hairline in device pixels and the qualifier is load-bearing**: `grid::draw_pixel_grid`'s line is `1.0 / ppp` on purpose, one device pixel *being* its subject, and `picker`'s two are **insets** rather than weights. ⚠️ **The snapping was never the defect and is kept** — the doc argues for it, and the rule is now `round(ppp).max(1.0)` device pixels, a *nominal* point snapped, which is what the two sentences mean together; `layers::snap_across` computes the drop line's width as `(width * ppp).round().max(1.0) / ppp`, the same expression with the nominal passed in, so this is the separator joining a form the app already had. 🚨 **At ppp 1.5 that is 1.333pt and the finding's own suggested assertion would fail on it — this is a choice, not the finding's**: painting exactly 1.0pt covers 1.5 device rows, the smear the doc exists to avoid, and *a third of a point heavy and crisp beats exact and smeared*. *Overrule with a bare `1.0` if the extra weight at 150% ever reads wrong on screen.* ⚠️ **`MENU_SEP_H` does not move and must not** — `menu::height` sums it before the menu is on screen so `menu_place` can flip and clamp — and `the_rule_still_fits_the_height_the_menu_reserved_for_it` says so. **Flipped in both directions and each bites a different assertion**: `1.0 / ppp` fails the nominal-point one, a bare `1.0` fails the whole-device-pixels one at `1.4999996`. §9.4's `menu_sep` passage amended; `roadmap.md`'s *"Two chrome hairlines"* entry **edited down rather than struck**, the `rulers::snap_across_axis` base half being untouched and still open)*
-- **D722** — **A disabled cell was a keyboard tab stop that could not be activated, on the argument that it might carry a tooltip nothing can hang.** `ui::segmented_enabled` registered **every** cell with `Sense::click()`, disabled ones included, and the only reason its comment gave was *"so the cell can carry a tooltip explaining why it is unavailable"*. **No caller can carry that tooltip**: the function returns `Option<usize>`, the per-cell `Response` never escapes, and `paint` is handed a `&Painter`. One production caller has disabled cells (`picker::picker_body`) and hangs none; `ui::segmented` passes `|_| true` and has none at all. 🚨 **What it bought instead is a stop that swallows Return and Space and offers neither the click nor the explanation** — `Sense::click()` is `CLICK | FOCUSABLE`, which `ui::focus_ring`'s own ⚠️ states from the other side and which §9.4 records again at §15 D290 for the value field's strip and unit: **the same egui fact read a third time, the first two readings both being about not creating a stop by accident.** *(Fixed and tested 2026-09-10; Keep. Closes `[S18.2-L3-04]`. A disabled cell senses `Sense::hover()`, which **is** `Sense::empty()` (§15 D688) — still registered, so the cell reports hover for the ground and for any future tooltip, and takes neither focus nor click. **If the tooltip is ever wanted the change is to hand `paint` the response**: widening the signature is the honest way to offer it, and a sense nobody can read is not. ⚠️ **The bargain the doc describes is otherwise unchanged and is cited correctly elsewhere** — §9.4 records it at §15 D134, and the inspector's layout-grid row cites *"`ui::segmented_enabled`'s bargain"* for its dimmed margin and gutter fields, quoting only the visible-but-unavailable half, which was true and stays true. **Test** `ui::segmented_disabled_tests`, counting **tab stops** rather than naming cell 1, since naming it would copy the id formula into the test and go vacuous the day the formula changes. ⚠️ **Flipped twice and the *control* earned its place**: `Sense::click()` for both is red at the second assertion (3 against 2), `Sense::hover()` for **both** — the over-broad reading — is red at the *first* (0 against 3), and without that fixture line the second flip is green. §9.4's `segmented_enabled` passage amended; nothing struck from `roadmap.md`)*
+- **D722** — **A disabled cell was a keyboard tab stop that could not be activated, on the argument that it might carry a tooltip nothing can hang.** `ui::segmented_enabled` registered **every** cell with `Sense::click()`, disabled ones included, and the only reason its comment gave was *"so the cell can carry a tooltip explaining why it is unavailable"*. **No caller can carry that tooltip**: the function returns `Option<usize>`, the per-cell `Response` never escapes, and `paint` is handed a `&Painter`. One production caller has disabled cells (`picker::picker_body`) and hangs none; `ui::segmented` passes `|_| true` and has none at all. 🚨 **What it bought instead is a stop that swallows Return and Space and offers neither the click nor the explanation** — `Sense::click()` is `CLICK | FOCUSABLE`, which `ui::focus_ring`'s own ⚠️ states from the other side and which §9.4 records again at §15 D290 for the value field's strip and unit: **the same egui fact read a third time, the first two readings both being about not creating a stop by accident.** *(Fixed and tested 2026-09-10; Keep. Closes `[S18.2-L3-04]`. A disabled cell senses `Sense::hover()`, which **is** `Sense::empty()` (§15 D688) — still registered, so the cell reports hover for the ground and for any future tooltip, and takes neither focus nor click. **If the tooltip is ever wanted the change is to hand `paint` the response**: widening the signature is the honest way to offer it, and a sense nobody can read is not — wanted 2026-09-26 and widened by a `tip` per cell instead, `ui::segmented_tipped` (D886). ⚠️ **The bargain the doc describes is otherwise unchanged and is cited correctly elsewhere** — §9.4 records it at §15 D134, and the inspector's layout-grid row cites *"`ui::segmented_enabled`'s bargain"* for its dimmed margin and gutter fields, quoting only the visible-but-unavailable half, which was true and stays true. **Test** `ui::segmented_disabled_tests`, counting **tab stops** rather than naming cell 1, since naming it would copy the id formula into the test and go vacuous the day the formula changes. ⚠️ **Flipped twice and the *control* earned its place**: `Sense::click()` for both is red at the second assertion (3 against 2), `Sense::hover()` for **both** — the over-broad reading — is red at the *first* (0 against 3), and without that fixture line the second flip is green. §9.4's `segmented_enabled` passage amended; nothing struck from `roadmap.md`)*
 - **D723** — **Three copies of one `DragValue` chrome strip, and one of them overrode a default with the default.** `ui::value_field_f64`, `ui::badge_field` and `ui::bare_drag_value` each held a verbatim eight-line sequence and its own paragraph restating the same two egui facts. New `ui::strip_drag_value_chrome` states them once: a `DragValue` has **two faces and both ground themselves** (a `Button` from `bg_fill`/`weak_bg_fill`/`bg_stroke`, a `TextEdit` from `extreme_bg_color` and `selection.stroke`); and 🚨 **the width goes and the colour stays, which is a reported bug** — `selection.stroke` is *also* the colour `paint_text_selection` writes into the galley's vertices, so `Stroke::NONE` turned every selected digit invisible and left an opaque selection block with nothing in it. 🚨 **The "parser precedence divergence" the finding names is the signature and not two decisions**: the first two build the `DragValue` so they can set a parser the caller's `build` may replace, and the third is handed a **finished** one with nowhere earlier to put it. **The rule is the same in all three and only there is it unofferable** — both docs said it as though each were the only copy, one calling it a feature and the other a limitation. *(Fixed and tested 2026-09-10; Keep. Closes `[S18.1-L3-06]`. ⚠️ **`badge_field`'s `.update_while_editing(true)` is removed** — measured against the vendored `egui-0.35.0/src/widgets/drag_value.rs:81`, where `update_while_editing: true` is the default — so it did nothing, and it sat *after* `build`, so it would silently have overridden a caller asking for `false`. *An override that is a no-op is the worst kind: nothing tests it and nothing announces it.* ⚠️ **The behaviour is load-bearing elsewhere and comes from the default, not from any call site**: `inspector::escaping_the_field_abandons_the_edit`'s doc credited it to *"`ui::value_field` builds every field with `update_while_editing(true)`"*, which `value_field_f64` has never done — corrected there, with its conclusion (that `edit_valve`'s `Escape` guard is load-bearing and looks redundant, §15 D315/D316) unchanged. ⚠️ **`selected_digits_are_never_painted_transparent` covers all three now**; `badge_field` was the third and had never been in that table, which is that test's own doc argument happening again to the test written to stop it happening. The per-helper arm is kept anyway: what it pins is that each helper is still *wired* to the rule. **Flip**: `Stroke::NONE` in the extracted helper is red. §9.4's numeric-field family gains a paragraph; nothing struck from `roadmap.md`)*
 - **D724** — **A tool switch cleared five pieces of gesture state by name and not the drag.** `OndinApp::choose_tool` cleared the text session, the pen, `pen_bias`, `points` and `pending_images`, each with a sentence saying why, and never touched `self.drag`. Pressing any tool key or a rail button mid-crop-drag left a live `Drag::CropResize` **and last frame's crop preview installed**, while `edited_image()` went `None` and brought the layer's selection box and handles back — a crop preview of a layer no longer in crop mode, under transform chrome answering a gesture that is not the one in hand. Measured headless: `drag live = true, gesture preview = true` after `choose_tool(Select)`. §9.4 names picking another tool as one of the three ways out of image editing (§15 D268, D270), and it was the one that did not finish the gesture. ⚠️ **`Escape` was already clean by ordering rather than by design** — its ladder reaches `cancel_gesture` before its `choose_tool(Tool::Select)` rung, and that gate is `self.drag.is_none()`, kind-agnostic — so **the one door anybody would test was the one door that worked**. *(Fixed and tested 2026-09-10; Keep — `cancel_gesture` deliberately not reused. Closes `[S12.4-L1-07]`. Three lines at the top of `choose_tool`: `self.drag = Drag::None`, `self.alt_clone = None`, `self.session.clear_gesture_preview()`. **`clear_gesture_preview`, not `clear_preview`** (§15 D109) — the two share one override set and only one belongs to the drag, and `[A1-L2-04]` is that mistake made once already. **`alt_clone` because the release will not clear it**: `finish_drag` drops it on its no-pointer arm and at the end of `Drag::Move`, and with `self.drag` already `None` and a pointer position in hand the match falls through `Drag::None => {}` and neither runs. 🚨 **Not routed through `cancel_gesture`, though the finding's sketch prefers it**: that takes a `&egui::Context` this function has not got across **seventeen** call sites, and its gate answers for inspector field scrubs, a Settings nudge, an export-quality scrub and a guide-position drag — states a tool switch cannot be in the middle of, the keyboard belonging to the field. What the two share is the **list**, not the funnel. `[A2-L7-02]` is the architectural cause and is **not** closed: with 101 fields and one privacy scope, *"is a gesture in flight?"* is a hand-written list at every site that needs one, and this adds a fourth rather than removing one. **Test** `canvas::tool_switch_drops_the_drag_tests`, with the `Drag::CropResize` **built by hand rather than driven** — what `choose_tool` owes is an answer to *any* live `Drag`, and driving the crop mechanics would make it fail for unrelated reasons — and the fixture asserted live first. Flip-checked; **all 1,242 app tests pass**, which is the real check with seventeen call sites gaining a clear. ⚠️ **`Escape` is the control this entry claims and is *not* asserted anywhere**; the test's doc said *"asserting it here"* and was corrected in the same pass. *Fix by adding the Escape arm if the ladder is ever touched.* §9.4's *"arming a tool whose verb is create clears the selection"* paragraph amended; nothing struck from `roadmap.md`)*
 - **D725** — **The Transform card's numbers changed shape when a second layer was selected, and its corner radius reported one the document does not hold.** §9.4 states the rule once — *"Every scrubbable field therefore pins its own: `ui::number(n)` as a `custom_formatter` where trailing zeros should be trimmed"* (§15 D66) — and the multi-selection card pinned a formatter without pinning **that** one. `inspector::multi_number` handed `custom_formatter` a raw `format!("{v:.2}")`, which does not trim, so `20` became `20.00` beside a single-layer field still reading `20`; `spacing_row` carried the same. 🚨 **And `inspector_multi_appearance`'s corner radius printed at *zero* decimals** where its single-layer twin prints two, so a shared **4.5 read `4`** and 5.5 read `6` — the panel reporting a radius the document does not hold, which is a different and worse failure from a cosmetic one. **Half-integers are what the control beside it produces**: `Scrub::whole(0.5)` steps by half units and photographic scaling carries corner radii, so 5 becomes 4.5 at 90%. *(Fixed and tested 2026-09-10; Keep. Closes `[S14.2-L3-07]`. ⚠️ **The card claims this parity in its own comment**, three hundred lines above the formatter that broke it — *"the single-layer panel's arithmetic, to the pixel — walking from one layer to two shifted the numbers sideways, which is what makes a panel feel cheap"* — written about the **widths**, which were fixed. *A parity claim scoped to one axis reads as a claim about the control.* ⚠️ **Bounded to the readout**, which is what separates this from `[S14.2-L1-02]`: a `custom_formatter` commits nothing, and what stops a click, Enter or Tab out of the multi radius field writing is `edit_valve`'s engagement latch (§15 D316, D519), pinned by `a_bare_click_through_a_mixed_corner_radius_field_writes_nothing`. ⚠️ **`interacting` is not that guard and reads as one** — it answers `dragged() || drag_stopped() || lost_focus() || changed()`, so it is **true** on the frame the field is tabbed away from, and its own comment says it decides whether to *build* a transaction while *"the valves ask their own latch"*. **Test** `a_number_reads_the_same_with_one_layer_selected_and_with_two`, asserting on the **galleys of both cards over one document** rather than on the formatters, since a test of `ui::number` would pass while the card called something else — which is what had happened. **Flipped separately, one per assertion**, the messages printing the whole card. ⚠️ **The multi opacity field's `{v:.0}%` is deliberately left and is not a fourth instance**: its single-layer twins spell the same thing as `.suffix("%").max_decimals(0)`. §9.4's D66 paragraph amended; nothing struck from `roadmap.md`)*
@@ -1242,17 +1242,31 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D864** — **Past 128 resident covers the least recently asked-for texture is let go, and one asked for on this pass or the last never is.** Not a finding: found closing **D862**, which bounded a first visit and not a long one — nothing evicted short of `Covers::clear`, so scrolling a whole library left every cover resident, ~640 MB at 1,000 large covers by arithmetic on `COVER_MAX_PX`. `Cover::Ready` carries a stamp, the `Covers::pass` count it arrived on or was last returned by `get` on — `Covers`' own count, not egui's pass number, since what ages a cover is the *dashboard* drawing without asking for it. `evict` sorts the `Ready` covers by (stamp, key) and removes the oldest down to `MAX_RESIDENT_COVERS`, **breaking at the first stamped this pass or the one before**, so a card on screen cannot lose its picture and a screen holding more than the cap exceeds it rather than churning. Only `Ready` goes — `Unreadable` is the red mark's fact, `Blank` holds nothing — and an evicted cover is not queued, so the next `get` asks the worker, which reads the disk cache. *(Fixed and tested 2026-09-23; **Keep.** ⚠️ **128 is chosen, not measured**: ~80 MB at the 400² × 4-byte worst case, and more than twice a 2,160 pt window's 48 file cards. 🚨 **Not twice a screen of project cards** — five covers a mosaic, twenty a row, so seven rows of *Recent* pass it, and `MAX_RESIDENT_COVERS`' doc said *"any screen"* until corrected the day it was written; the recency guard is what holds there. **Test** `past_the_cap_the_least_recently_asked_cover_goes_and_a_recent_one_never_does`, three flips run: the sort deleted fails at *"back to the cap"* with 135 left, **not** the predicted named-ten assertion — unsorted, a protected cover comes up within a few and the `break` ends the loop, so it mostly evicts nothing; the recency guard disabled, and `get`'s `*seen = now` dropped, each fail where predicted. §9.5 amended; D862 amended in body and index; `MAX_RESIDENT_COVERS`' doc and `file_card`'s gate comment corrected; struck from `roadmap.md` with D863)*
 - **D865** — **The Type panel's two chords and its line-height field read their `Bounds`, where they had spelled the same numbers from the constants.** Not a finding: noticed closing **D861**. §15 **D817**'s *a held key stops where the field stops* was honoured by value — the tracking arm bounded its em step by `MIN_TRACKING_PCT / 100.0 ..= MAX_TRACKING_PCT / 100.0` and its px step by `px_range_for` over the same constants, both by hand, beside a field reading `Bounds::TRACKING` — D861's shape one function over. Line height had no `Bounds` at all, and the `Leading` arm (§15 **D840**) and `type_line_height_field` each spelled `MIN_LINE_HEIGHT_PCT..=MAX_LINE_HEIGHT_PCT`. `Bounds::LINE_HEIGHT` (the field's existing `0..=1000%`) and `Bounds::em()`, the `%` range over a hundred — the scale a `Length::Em` holds; both arms and the field read their faces off a `Bounds` now. *(Fixed and tested 2026-09-23; **Resolved** — no range moved, `stepped_into` untouched. ⚠️ **`em()` is the chords' face and not the field's**: the field shows an em ×100 and bounds on `.pct`, and handing it `.em()` would cap line height at 10%. `both_ends_of_every_length_field_bound_the_same_quantity` derives `LINE_HEIGHT` with the rest and asserts every `em()` is its `%` face ÷100; flip run, `em()` undivided, red there at `TRACKING` — predicted — and in two tracking-chord tests. ⚠️ **No leading-chord test failed**: the one there was pinned line height's floor, 0 in either scale — **closed the same day**, that test now driving both ceilings and red under the same flip at `Em(21.0)`. D425's scope sentence amended and the test's own copy corrected; D817 and D861 carry a line; `architecture.md` unchanged; nothing struck from `roadmap.md`)*
 - **D866** — **The deep-resample GPU test bounds a ratio to the ordinary path, not a wall clock, after one unexplained 54 ms on a healthy tree — which is D593's shape, taken with far more margin, and still a clock.** `fx_gpu.rs · a_deeply_resampled_shadow_costs_the_buffer_and_not_the_block` is **D743**'s test of the `coarsen` loop bound (D403's promise) and asserted *best of three under 50 ms* against 0.45 ms healthy and 116.3 ms broken. The release bar for v0.2.0 read **54.4 ms** with the code under test unchanged since v0.1.0, then passed 21 runs running; the reading was never recreated and its cause is unknown. The degenerate shadow is timed now **interleaved** with a control — `k = 3`, blur 120, the shadow `a_resampled_drop_shadow_matches_the_reference` checks — one warm-up each, best of five each, and `deep / ordinary < 20` is asserted: **1.73–1.85×** healthy, **1.29–2.01×** with two other GPU suites looping in a second process, **176–208×** with the loop unbounded. *(Changed and measured 2026-09-23; **Keep** — test-only. 🚨 **Not a way out of D854**: D593's test was a ratio of two clocks too, chosen so as not to measure the machine, and failed 13 in 60 under load after two re-samplings; what differs is margin — about ten times each side here, against D829's 46% and 31% — and a load that lands on one arm alone still counterfeits a regression, which the interleave is meant to prevent and was not shown to against the unknown cause. **Counting**, CLAUDE.md's first question of a timing flake, needs an atomic counter compiled into the shader and was judged too invasive for a test. *Revisit if it goes red on a healthy tree* — with the count, not more samples or a wider bound. Flip run with `fx.wgsl` reverted and its diff against `HEAD` confirmed empty. D743 amended in body and index; `architecture.md` unchanged; nothing struck from `roadmap.md`)*
-- **D867** — **Container layout is being built, as CSS flexbox and CSS grid under CSS's names, on taffy — and §1's deferral of it is reversed.** "v1" in these documents names the phase in which the basic editing tools were finished, not a release tag; that phase is over, so layout starts and components follow it. **Where CSS and design-tool convention disagree, CSS wins** — transforms do not affect layout, child order is flow and paint order, text wraps at the available width, specified and used values are kept apart. **Not §13's constraint engine**: a fixed algorithm re-run from specified values. taffy 0.14.0, MIT, f32, measured on a spike: 1,000 rects in a wrapping flex frame **0.558 ms**, a 900-cell grid **1.087 ms**, 100 text cards **29.2 ms** full and **0.302 ms** after one text edit — shaping, not taffy, is the bill. *(Decided 2026-09-23 by the maintainer; **step 1 built 2026-09-24** — core's half, then render, export and the app the same day (D868), cited from `resolve.rs`; **step 2** the same day (D874), model half then inspector card; **step 3 in progress** the same day (D875), steps 4–5 not built. It read *not built — no line of `crates/` changed and no code cites it* until then. ⚠️ **No verdict word existed for a decision taken ahead of its code**; *Decided; not built* is proposed for D867–D872, to become *Built and tested* per step. Build order recorded; its three open questions — mirror tree against trait implementation, how taffy is declared, the module's name — answered by D875's build: low-level traits and no mirror, `=0.14.0` with `std` + `flexbox` only, `container.rs`. `architecture.md` §5.3c written, §1 and §13 amended; `roadmap.md` §0 loses auto layout, constraints and components and gains *Next · Container layout*; `context-menus.md` §7 corrected)*
+- **D867** — **Container layout is being built, as CSS flexbox and CSS grid under CSS's names, on taffy — and §1's deferral of it is reversed.** "v1" in these documents names the phase in which the basic editing tools were finished, not a release tag; that phase is over, so layout starts and components follow it. **Where CSS and design-tool convention disagree, CSS wins** — transforms do not affect layout, child order is flow and paint order, text wraps at the available width, specified and used values are kept apart. **Not §13's constraint engine**: a fixed algorithm re-run from specified values. taffy 0.14.0, MIT, f32, measured on a spike: 1,000 rects in a wrapping flex frame **0.558 ms**, a 900-cell grid **1.087 ms**, 100 text cards **29.2 ms** full and **0.302 ms** after one text edit — shaping, not taffy, is the bill. *(Decided 2026-09-23 by the maintainer; **step 1 built 2026-09-24** — core's half, then render, export and the app the same day (D868), cited from `resolve.rs`; **step 2** the same day (D874), model half then inspector card; **step 3** the same day (D875–D877, its inspector cards D878–D883), steps 4–5 not built. It read *not built — no line of `crates/` changed and no code cites it* until then. ⚠️ **No verdict word existed for a decision taken ahead of its code**; *Decided; not built* is proposed for D867–D872, to become *Built and tested* per step. Build order recorded; its three open questions — mirror tree against trait implementation, how taffy is declared, the module's name — answered by D875's build: low-level traits and no mirror, `=0.14.0` with `std` + `flexbox` only, `container.rs`. `architecture.md` §5.3c written, §1 and §13 amended; `roadmap.md` §0 loses auto layout, constraints and components and gains *Next · Container layout*; `context-menus.md` §7 corrected. The chrome spells CSS's names in sentence case since D884; the model and the file keep CSS's)*
 - **D868** — **What the user sets and what is drawn become two numbers, and the drawn one is never saved.** Amends §5.6's *"one number in one place"* into a specified number and a used one; the used boxes are derived in `Resolved` from specified properties plus the registered fonts, for three reasons — CSS keeps the two apart, components will derive instances on the same pipeline, and a font arriving just re-resolves. 🚨 **The cost is the risk**: rendering, export, hit-testing, snapping and the inspector all read `Node::transform` and the kind's size when this was decided, and `RenderOverrides` cannot express a reflow. ⚠️ **It breaks two arguments true at `HEAD`**: D590's text pass skipping the subtree expansion, and D778's decline of a seventh map on `Resolved` — whose grounds do not transfer and whose cost does. *(Decided 2026-09-23 by the maintainer; **D867's step 1 built and tested 2026-09-24**, step 2's model half the same day (**D874**), which 🚨 **reverses the editing rule below** — tools compute from used geometry and `build::keep_insets` converts — and pays both step-1 debts, the cross-crate one for render and export only. Core's half: a sparse seventh map `used` on `Resolved`, read through `used_local`/`used_kind` — *draw, measure and hit-test from these; edit from the node* — behind an identity pass proved by byte-identical goldens and, because that proof cannot see a consumer still reading the document, by a `cfg(test)` probe; `update` recomputes it over `affected` and re-shapes text whose used kind changed, the one door past D590, while ⚠️ siblings were not dirtied until step 3 collected `affected` from each dirty node's `chain_root` (D875); the guard compares it, five of seven maps; `geometry::world_bounds_of` deleted. Then render, export and the app, the same day: `scene::paint_node` and `mask_geometry`, `RenderOverrides::transform_of` and a new `drawn_kind` fall back to used geometry while 🚨 `current_kind` stays on the document, because it is what a preview op is *applied to*; the SVG writer through `used_local_of`/`used_kind_of`; the snapshot's `local_transform` and `geometry` report **used** values — ⚠️ the session's default, not ruled on by the maintainer; `DisplayNode::kind` and every `preview_*` helper fall back to used, `committed_node` deliberately not. 🚨 **Owed to step 2**: the edit sites that mix a used world with a stored local (`rotate_node` and five more), each owed a decision; and the only non-identity routing test is core's, so nothing outside core proves a used geometry arrives — step 2's right-pinned-child fixture is to. 🚨 A doc-comment theft on `resolve_subtree` found by reading and repaired. Open: how previews reflow, what a resize writes, the rotation origin, `TextSizing`'s mapping, and — unstated by the design — what an in-flow item's stored translation means; the first, third and fourth answered **for absolute insets only** by D874, and all five **for flex** by D875 — the rotation origin and the stored translation as the session's reading in code, not ruled. §5.6 carries a pointer; §5.3c, §5.9 and §5.10 amended 2026-09-24, and §5.3c, §5.9, §6.2, §7, §9.3 and §9.4's booleans again for the second half, and again for D874)*
-- **D869** — **A group with `display` has a box; a group without one is exactly today's group.** Setting `display` makes a group's bounds its layout box, padding included, and a resize writes `width`/`height` and reflows instead of `tools::resize_group`'s scale. **Paint and clip stay frame-only**: pass-through paint and scale-on-resize are design-tool behaviours with no CSS equivalent, and merging the kinds would lose them. `Boolean` ignores `display`; the root is no container; a mask is out of flow. *(Decided 2026-09-23 by the maintainer; **built in core and the preview 2026-09-24** (D875), committed 2026-09-24 (session 34) — a group's box, bounds and `local_box`; a resize writes the box since the same day (D875's amendment); ⚠️ no inspector control sets `display`. *Revisit when components land.* ⚠️ Four passages argue from *"a group has no box"* and become conditional on `display` — listed in the body, not decided by it. §5.6's group-resize bullet carries a pointer)*
+- **D869** — **A group with `display` has a box; a group without one is exactly today's group.** Setting `display` makes a group's bounds its layout box, padding included, and a resize writes `width`/`height` and reflows instead of `tools::resize_group`'s scale. **Paint and clip stay frame-only**: pass-through paint and scale-on-resize are design-tool behaviours with no CSS equivalent, and merging the kinds would lose them. `Boolean` ignores `display`; the root is no container; a mask is out of flow. *(Decided 2026-09-23 by the maintainer; **built in core and the preview 2026-09-24** (D875), committed 2026-09-24 (session 34) — a group's box, bounds and `local_box`; a resize writes the box since the same day (D875's amendment); the Container card sets `display` since the same day too (D878). *Revisit when components land.* ⚠️ Four passages argue from *"a group has no box"* and become conditional on `display` — listed in the body, not decided by it. §5.6's group-resize bullet carries a pointer)*
 - **D870** — **A frame may sit inside any group, and `paint_targets` already stops at one.** A flex row of frame-cards in a group is illegal under `can_parent` today. Relaxed for *any* group, since legality hanging on `display` would refuse removing `display` from a group holding a frame. Of the two reasons `can_parent`'s doc gives, *"clipped by something with no edges"* is weak — groups do not clip — and the `paint_targets` one was **checked**: its `takes_paint` arm takes a frame and does not descend. *(Decided 2026-09-23 by the maintainer; **built and tested 2026-09-24** (D876), committed 2026-09-24 (session 34) — `can_parent` admits a `Group` parent. 🚨 **Not one match arm after all**: the relaxation let a group carry a frame into a boolean or a mask at any depth, so an ancestor rule, `Document::frame_may_sit_under`, now sits beside `can_parent` at every door, and the audit owed here is D876's list. `paint_targets` unchanged, as predicted. §5.3 and §5.7a amended; D62 carries a line)*
-- **D871** — **Constraints are `position: absolute` with insets, and a child with none stays where it is.** Pin left, pin right, stretch and scale are a left inset, a right inset, both, and percentages — in a frame or a group with `display`, and not in a group without, which has no edges. No authored inset means the stored position stands, so no existing document moves. Spike, frame 300 → 500: pin-left stays at 10, pin-right 240 → 440, stretch 280 → 480, 25%/25% 75/150 → 125/250. *(Decided 2026-09-23 by the maintainer; **built and tested 2026-09-24** (D874) — frames only, the model and then the inspector's *Position* card. Not §13's persistent constraints)*
+- **D871** — **Constraints are `position: absolute` with insets, and a child with none stays where it is.** Pin left, pin right, stretch and scale are a left inset, a right inset, both, and percentages — in a frame or a group with `display`, and not in a group without, which has no edges. No authored inset means the stored position stands, so no existing document moves. Spike, frame 300 → 500: pin-left stays at 10, pin-right 240 → 440, stretch 280 → 480, 25%/25% 75/150 → 125/250. *(Decided 2026-09-23 by the maintainer; **built and tested 2026-09-24** (D874) — frames only, the model and then the inspector's *Position* card; a group with `display` placed since D875 and given the card and the commit-seam conversion by D887, 2026-09-26; the card shows the implicit left/top as held outside a layout since D891. Not §13's persistent constraints)*
 - **D872** — **Every leaf is measured, and shapes are replaced elements.** As an empty `width: 40px` box a rectangle shrank to **30.643** under `flex-shrink: 1`; as a measured leaf it held **40**. Rect, Ellipse, Polygon, Star, Path, Line and Boolean take their stored geometry as intrinsic size, `width`/`height` `auto`; a group without `display` is atomic likewise. ⚠️ `align-items: stretch` still stretches them — CSS-faithful, kept. **Text has two gaps in core**: no min-content query (`AutoHeight(1.0)` reports 1.000 wide where the widest word is 45.148), and 16 `measure` calls per leaf per compute with no memo by width. *(Decided 2026-09-23 by the maintainer; **built 2026-09-24** (D875), committed 2026-09-24 (session 34) — `text::content_widths` for min-content, a per-pass memo keyed by node and width; ⚠️ `content_widths` itself is not memoised. Measured in D867's spike. §5.3c. ⚠️ **Gives way between two insets**, which stretch a shape — D874's first ruling)*
 - **D873** — **Used values come back from taffy's f32 quantized to 1/64 px — proposed 2026-09-23, decided 2026-09-24.** f32 is accurate enough — worst error 0.000005 at 400 wide, 0.0047 at 100,000, always under an ulp, and parent-relative so canvas coordinates never enter — but `7.3f32 as f64` is `7.300000190734863`, and that would reach fields and exports. 1/64 is Chromium's `LayoutUnit`. ⚠️ **At 1,000,000 wide the error is 0.044, nearly three units**, so quantizing hides f32 noise and not f32 error. *(Proposed 2026-09-23 in the spike's write-up; **decided by the maintainer 2026-09-24 and built** (D875), committed 2026-09-24 (session 34) — `container::quantize` on every location and size taffy returns. ⚠️ The million-unit warning is not answered by the decision)*
-- **D874** — **A pinned layer is placed by its CSS insets against its frame's used size, and every tool edits from where a layer is drawn, with one core function turning that into insets.** D867's step 2, model half and then the inspector card. **The maintainer's four rulings**: both insets on an axis **stretch** a layer with a size — 🚨 departing from CSS's replaced elements and so from D872 — and over-constrain one without; rotation, skew and flip turn about the **box centre**; centring is **`margin: auto`**, the only margin value; the inspector shows a **pin diagram** plus four px/% fields. **The session's**: 🚨 step 1's *edit from the document* (D868) is **reversed** — tools compute from used geometry and `build::keep_insets`, once at the top of `commit_inner`, appends the `SetInsets` that draws each pinned layer where the edit put it, dropping a write-back to where it already is, with `commit_inner` re-checking for empty because `changes_nothing` answers `false` there. `container.rs`, `Node::insets`, an additive `NodeDto` field with no schema bump, `Operation::SetInsets`; `resolve::used_geometry` places against the frame's **used** size, `update` sorting parents first before the used pass; `RenderOverrides::relayout` answers D868's preview question for insets alone. Stretch on sized kinds and `Text`; `Path`, `Line`, `Boolean` positioned only; `Group` and `Boolean` take none. **The card**, titled ***Position*** — the session's title, the maintainer having ruled out only *Constraints* — sits under Transform: a pin diagram whose struts pin an edge where it is, two `margin: auto` centre buttons, and four fields showing a pinned inset in its unit (a `px`/`%` suffix converting) or an unpinned edge's distance as `auto`, a field only clicked through pinning nothing. 🚨 Every pin, unpin and centre commit writes the drawn transform and, for a stretched layer, its drawn size into the stored values (`baked_placement`), so an unpinned axis stays where it is drawn. *(Built and tested 2026-09-24: the model half, then the card the same day. `ondin-export/tests/insets.rs` — pinned against baked, SVG, PNG and snapshot, each writer's flip failing only its own test — pays step 1's cross-crate debt for render and export; the model half added no app test; the card's `mod inset_card_tests`, five on a headless app through the real commit path, is the first app test of insets. **Two defects found by reading the model half, both fixed before the card shipped**: a non-size geometry patch — a corner radius — un-stretched a stretched layer, now `GeometryPatch::resizes`, wildcard-free, read by `keep_insets` and `relayout` (flip: `true` for `CornerRadius` rewrites `right` to 190); and `with_edge`'s unpin moved a layer whose stored placement was stale, now `baked_placement` (flip: removing it puts the layer at 40 against 240 and shrinks a half-unpinned stretch to 100 wide against 300). ⚠️ **Not verified in the GUI.** `container.rs`' *"Four rulings"* corrected to three and a decision. D867, D868, D871, D872 amended; §1, §5.3, §5.3c, §5.6, §5.7, §5.8, §5.9, §5.10, §6.2, §9.3, §9.4; `roadmap.md`'s step 2 struck)*
-- **D875** — **A flex container is laid out by taffy over Ondin's own nodes, text keeps each sizing mode's meaning in it, and dragging an item's edge stops its growth.** D867's step 3, its first half. **The maintainer's rulings**: auto-width text never wraps (`white-space: nowrap`), auto height wraps at the width it is given with its stored width as the preferred one, fixed is fixed (`container::flexed_text`); a resize writes `flex-grow`/`flex-shrink` 0 on the main axis and `align-self: start` across a stretch (`build::keep_flex_sizes`, beside `keep_insets` in `commit_inner`); frames and groups become containers together — the group half built, a frame *under* a group D870's, built the same day as D876; results on the 1/64 px grid (D873 decided). **The session's**: a hidden layer leaves the flow, `display: none` and not `visibility: hidden`, as do a mask and a pinned child (`container::in_flow`); the engine in `container.rs`, `FlexTree` implementing taffy's low-level traits per pass — no mirror tree, and no cache kept between passes; `update` collecting `affected` from each dirty node's `chain_root`, 🚨 the first hop counting for a child *leaving* the flow; `RenderOverrides::flex_relayout`; an in-flow item turning about its box centre with its stored translation ignored in flow. ⚠️ `atomic_box` measures a group or boolean with no layout by its **specified** children's union, so layout nested inside one is not reflected. *(Built and tested 2026-09-24, committed 2026-09-24 (session 34); **step 3 unfinished** — nothing in the app gives a container a layout. **Amended the same day**: a group with a layout is resized by its box, `build::sized_flex_item` writing `FlexItem.width`/`height` px and stopping growth through `build::held`, the rule `keep_flex_sizes` now shares; the Scale tool takes its contents too, and `tools::scaled_flex` scales any flex container's padding and gaps per axis — session defaults. `container::flex_tests` 7, `tests/flex.rs` 8, two preview differentials; the amendment's two tests, `tools` and `tests/flex.rs`. D867, D868, D869, D872, D873 amended; §1, §2, §3, §5.3, §5.3c, §5.6, §5.7, §5.8, §5.9, §5.10, §6.2 and §9.3; `roadmap.md`'s *owed* and *open* paragraphs narrowed, and step 3's item 3 struck by the amendment)*
+- **D874** — **A pinned layer is placed by its CSS insets against its frame's used size, and every tool edits from where a layer is drawn, with one core function turning that into insets.** D867's step 2, model half and then the inspector card. **The maintainer's four rulings**: both insets on an axis **stretch** a layer with a size — 🚨 departing from CSS's replaced elements and so from D872 — and over-constrain one without; rotation, skew and flip turn about the **box centre**; centring is **`margin: auto`**, the only margin value; the inspector shows a **pin diagram** plus four px/% fields. **The session's**: 🚨 step 1's *edit from the document* (D868) is **reversed** — tools compute from used geometry and `build::keep_insets`, once at the top of `commit_inner`, appends the `SetInsets` that draws each pinned layer where the edit put it, dropping a write-back to where it already is, with `commit_inner` re-checking for empty because `changes_nothing` answers `false` there. `container.rs`, `Node::insets`, an additive `NodeDto` field with no schema bump, `Operation::SetInsets`; `resolve::used_geometry` places against the frame's **used** size, `update` sorting parents first before the used pass; `RenderOverrides::relayout` answers D868's preview question for insets alone. Stretch on sized kinds and `Text`; `Path`, `Line`, `Boolean` positioned only; `Group` and `Boolean` take none. **The card**, titled ***Position*** — the session's title, the maintainer having ruled out only *Constraints* — sits under Transform: a pin diagram whose struts pin an edge where it is, two `margin: auto` centre buttons, and four fields showing a pinned inset in its unit (a `px`/`%` suffix converting) or an unpinned edge's distance as `auto`, a field only clicked through pinning nothing. 🚨 Every pin, unpin and centre commit writes the drawn transform and, for a stretched layer, its drawn size into the stored values (`baked_placement`), so an unpinned axis stays where it is drawn. *(Built and tested 2026-09-24: the model half, then the card the same day. `ondin-export/tests/insets.rs` — pinned against baked, SVG, PNG and snapshot, each writer's flip failing only its own test — pays step 1's cross-crate debt for render and export; the model half added no app test; the card's `mod inset_card_tests`, five on a headless app through the real commit path, is the first app test of insets. **Two defects found by reading the model half, both fixed before the card shipped**: a non-size geometry patch — a corner radius — un-stretched a stretched layer, now `GeometryPatch::resizes`, wildcard-free, read by `keep_insets` and `relayout` (flip: `true` for `CornerRadius` rewrites `right` to 190); and `with_edge`'s unpin moved a layer whose stored placement was stale, now `baked_placement` (flip: removing it puts the layer at 40 against 240 and shrinks a half-unpinned stretch to 100 wide against 300). ⚠️ **Not verified in the GUI.** `container.rs`' *"Four rulings"* corrected to three and a decision. D867, D868, D871, D872 amended; §1, §5.3, §5.3c, §5.6, §5.7, §5.8, §5.9, §5.10, §6.2, §9.3, §9.4; `roadmap.md`'s step 2 struck. **Amended 2026-09-26**: a laid group's children take the card and `keep_insets` too (D887); the diagram is a square and the centre buttons end their axis's rows (D888). **Amended 2026-09-27**: the card is the mockup's screen 07, D888's square gone, and an unpinned field reads `auto` in its digits' place — the convention above reversed (D890))*
+- **D875** — **A flex container is laid out by taffy over Ondin's own nodes, text keeps each sizing mode's meaning in it, and dragging an item's edge stops its growth.** D867's step 3, its first half. **The maintainer's rulings**: auto-width text never wraps (`white-space: nowrap`), auto height wraps at the width it is given with its stored width as the preferred one, fixed is fixed (`container::flexed_text`); a resize writes `flex-grow`/`flex-shrink` 0 on the main axis and `align-self: start` across a stretch (`build::keep_flex_sizes`, beside `keep_insets` in `commit_inner`); frames and groups become containers together — the group half built, a frame *under* a group D870's, built the same day as D876; results on the 1/64 px grid (D873 decided). **The session's**: a hidden layer leaves the flow, `display: none` and not `visibility: hidden` — ruled since, D881 — as do a mask and a pinned child (`container::in_flow`); the engine in `container.rs`, `FlexTree` implementing taffy's low-level traits per pass — no mirror tree, and no cache kept between passes; `update` collecting `affected` from each dirty node's `chain_root`, 🚨 the first hop counting for a child *leaving* the flow; `RenderOverrides::flex_relayout`; an in-flow item turning about its box centre with its stored translation ignored in flow. ⚠️ `atomic_box` measures a group or boolean with no layout by its **specified** children's union, so layout nested inside one is not reflected. *(Built and tested 2026-09-24, committed 2026-09-24 (session 34); **step 3 unfinished** — nothing in the app gave a container a layout until the Container card, D878, which finished it; a resize writes px over a size keyword since D879. **Amended the same day**: a group with a layout is resized by its box, `build::sized_flex_item` writing `FlexItem.width`/`height` px and stopping growth through `build::held`, the rule `keep_flex_sizes` now shares; the Scale tool takes its contents too, and `tools::scaled_flex` scales any flex container's padding and gaps per axis — session defaults. `container::flex_tests` 7, `tests/flex.rs` 8, two preview differentials; the amendment's two tests, `tools` and `tests/flex.rs`. D867, D868, D869, D872, D873 amended; §1, §2, §3, §5.3, §5.3c, §5.6, §5.7, §5.8, §5.9, §5.10, §6.2 and §9.3; `roadmap.md`'s *owed* and *open* paragraphs narrowed, and step 3's item 3 struck by the amendment)*
 - **D876** — **A frame may sit in a group and never under a boolean or a mask, a card in a row is a rung of the row's chain, and the Scale tool takes a nested frame's contents with it.** D870 built, and the door it opened closed: a group can carry a frame into an operand or a mask at any depth with every pair legal, so an ancestor rule sits beside `can_parent`. **The maintainer's rulings**: (i) a frame with a boolean or mask ancestor is refused at the model level — `document::bars_frames`, `Document::frame_may_sit_under` and `holds_a_frame`, asked by `op_create_node`, `op_insert_subtree`, `op_reparent`, `op_set_mask` and the loader's check (7), each answering `ArtboardPlacement`; (ii) `query::group_chain` continues through a frame; (iii) the Scale tool on a group scales a nested frame's contents. **The session's defaults, revisitable**: "mask ancestor" is the mask's own subtree, a frame as masked content allowed; `build::group` takes frames, so `mask_target` prefers members `build::can_be_mask` accepts and `mask` refuses a target holding a frame; `boolean` and — 🚨 the one nothing downstream would catch, since it deletes its members — `flatten_union` refuse a member holding a frame; a non-clipping frame's ink is its box ∪ its children's, a clipping one's its box; the Scale recursion in `scale_subtree`, descendants only, so a frame scaled directly keeps its box-only behaviour; frames between groups are rungs, trailing frames trimmed unless the walk stopped at `inside`, and `id == inside` answers `[]`; `hover_target` calls `pick_at_pointer` itself; `pick_leaf` keeps an occupied frame with a group above it; `move_destination` fences a layer to its group's frames. ⚠️ `renderer::frame_barred` spells the barrier a second time, `bars_frames` being `pub(crate)`. **Amended the same day, at the maintainer's request**: *Use as mask* in the context menu dims with `mask_action`'s sentence wherever the verb would refuse (`menu::Context::mask_refused`, filled by `OndinApp::mask_refusal`) — a lone group holding a frame had been offered live and refused after the click; the row's fixture test flip-checked, `menu_context`'s assignment reached by none. *(Rulings 2026-09-24 by the maintainer; built and tested 2026-09-24, committed 2026-09-24 (session 34), every new test flip-checked — among them the randomized `update`/`rebuild` guard now creating card frames under groups, failing at seed 1 with the ink arm deleted from one pass. ⚠️ Not verified in the GUI; stepped into a card in a row, its background still takes the card, so D22's marquee is not started there — read, not tested. One more accumulated doc-comment theft repaired, `move_tx`'s doc on `move_destination`, and `flex_relayout`'s from session 33. D870, D62, D22, D839, D875 amended; §5.3, §5.3c, §5.6, §5.7, §5.7a, §5.9, §5.10, §5.11, §9.4; `context-menus.md` §4 (twice), §5.1; `roadmap.md`'s step 3 items 1–2 and *owed* paragraph)*
-- **D877** — **Dragging one item inside a flex container reorders it rather than moving it; the preview represents a reorder, and the slot the item will drop into is outlined.** D867's step 3, the marker's item 4. An in-flow item is placed by its container (D875), so the `SetTransform` a move commits is drawn nowhere and surfaces only when the layout is removed; what a drag can change is the item's place in the flow. `build::flex_reorder` counts the dragged box's centre against every other in-flow sibling's used box in reading order — on its line by main-axis centre, backwards under `row-reverse`/`column-reverse`, on another line by cross centre — out-of-flow siblings keeping their place. `RenderOverrides` represents `Reorder` as a per-parent child order, read by all three readers of an order — the scene walk, `PreviewView::children` and `operand_children`, `reevaluate_booleans` seeding from every reordered parent — and records each dragged item's layout slot (`landings`), which `canvas::draw_flex_landing` dashes for the one item `flex_reorder_of` answers. The commit is the `Reorder` alone. **All the session's defaults, none ruled**: ⚠️ `wrap-reverse` read as `wrap`; one layer leaving its frame moves as before; several move by their transforms except an in-flow item, which stores nothing and snaps back — reordering several is not built (*Revisit*). **Amended the same day**: both *Fix* verdicts closed — `operand_children` reading the order, and the landing drawn only for the reordered item (read, not tested) — and the multi-selection's stored translation dropped. **Amended again, at the maintainer's request**: the resize measured storing the slot, shifted, and every `SetTransform` on an in-flow item now keeps its linear part and the stored translation at the commit door (`build::kept_flow_translations`, in `keep_flex_sizes`; exempt where the same edit takes the item out of the flow, a write left unchanged dropped); `flex_relayout` re-lays a resized item rather than treating its `SetTransform` as a drag; and a multi-selection's in-flow items stay in their slots during the drag (`canvas::stays_in_flow`, asked by `move_tx` and `move_preview_tx`). ⚠️ Open and unmeasured: a rotation of an in-flow item about a non-centre pivot still previews at the tool's transform. *(Built and tested 2026-09-24, committed 2026-09-24 (session 34), every new test flip-checked, one predicted flip site wrong and recorded. ⚠️ Not verified in the GUI. One accumulated doc-comment theft repaired, `canvas::quad_of`'s summary on `selection_quad`. D875, D94 amended; §5.3c, §6.2, §9.3, §9.4; `roadmap.md`'s step 3 item 4, and the marker rewritten as a handoff)*
+- **D877** — **Dragging one item inside a flex container reorders it rather than moving it; the preview represents a reorder, and the slot the item will drop into is outlined.** D867's step 3, the marker's item 4. An in-flow item is placed by its container (D875), so the `SetTransform` a move commits is drawn nowhere and surfaces only when the layout is removed; what a drag can change is the item's place in the flow. `build::flex_reorder` counts the dragged box's centre against every other in-flow sibling's used box in reading order — on its line by main-axis centre, backwards under `row-reverse`/`column-reverse`, on another line by cross centre — out-of-flow siblings keeping their place. `RenderOverrides` represents `Reorder` as a per-parent child order, read by all three readers of an order — the scene walk, `PreviewView::children` and `operand_children`, `reevaluate_booleans` seeding from every reordered parent — and records each dragged item's layout slot (`landings`), which `canvas::draw_flex_landing` dashes for the one item `flex_reorder_of` answers. The commit is the `Reorder` alone. **All the session's defaults, none ruled**: ⚠️ `wrap-reverse` read as `wrap` — read since, D883; one layer leaving its frame moves as before; several move by their transforms except an in-flow item, which stores nothing and snaps back — reordering several is not built (*Revisit*). **Amended the same day**: both *Fix* verdicts closed — `operand_children` reading the order, and the landing drawn only for the reordered item (read, not tested) — and the multi-selection's stored translation dropped. **Amended again, at the maintainer's request**: the resize measured storing the slot, shifted, and every `SetTransform` on an in-flow item now keeps its linear part and the stored translation at the commit door (`build::kept_flow_translations`, in `keep_flex_sizes`; exempt where the same edit takes the item out of the flow, a write left unchanged dropped); `flex_relayout` re-lays a resized item rather than treating its `SetTransform` as a drag; and a multi-selection's in-flow items stay in their slots during the drag (`canvas::stays_in_flow`, asked by `move_tx` and `move_preview_tx`). ⚠️ Open and unmeasured: a rotation of an in-flow item about a non-centre pivot still previews at the tool's transform. *(Built and tested 2026-09-24, committed 2026-09-24 (session 34), every new test flip-checked, one predicted flip site wrong and recorded. ⚠️ Not verified in the GUI. One accumulated doc-comment theft repaired, `canvas::quad_of`'s summary on `selection_quad`. D875, D94 amended; §5.3c, §6.2, §9.3, §9.4; `roadmap.md`'s step 3 item 4, and the marker rewritten as a handoff)*
+- **D878** — **The Container and Item cards, built from the maintainer's mockup, and where they are not the mockup.** D867's step 3, the marker's item 5 and the last of the step. `panels/layout.rs`: **Container** — `display`, and under `flex` direction, wrap, three alignments, two gaps and padding — for any selected frame or group; **Item** — grow, shrink, basis, `align-self` and four limits, or why the layer is out of the flow and the button that brings it back — for any child of a laid container. The cards run from the layer in its parent to its children: Frame templates, Align, Transform, Position, Item, Container, Layout grid — ⚠️ the grid moved down from beside Frame templates. The mockup's pictures are painted on its 16-unit grid and turned by transpose and mirror, not its `rot`, which puts align-start's wall on the wrong side in a column. **New behaviour**: `display: none` from the card keeps every child where it is drawn and a hugging frame its hugged size (`inspector::baked_ops`, the Position card's unpin rule), and *Unpin insets* does the same. The other departures are the app's conventions and widgets winning: `display` as the first row, `grid` a disabled cell, a resolved number beside a keyword unit, no header badges, no cell tooltips — reversed since, D886. 🚨 **Except the mixed state**: a number shows a dash, copying `typography::mixed_text` — which widens §15 D130's departure against D636's *"not a precedent"*, and against the mockup, which reads *"Mixed"* too. *(Built and tested 2026-09-24, uncommitted when recorded; **Keep** every departure but that one — ***Fix*** the mixed dash by D636's route. Seven tests in `layout.rs`. ⚠️ Not verified in the GUI. D867, D869, D875 amended; §1, §5.3c, §9.3, §9.4; `roadmap.md`'s step 3 item 5 struck. **Amended 2026-09-26**: every number field committed nothing until D885; labels in sentence case, D884; the out-of-flow block reworded, D889. **Amended 2026-09-27**: the Position card has a header badge and these two still none, and the resolved-number convention's precedent is reversed there — which wins is open, D890)*
+- **D879** — **W and H offer only the sizing modes that differ for the layer, and a resize writes px over a size keyword.** `container::style_of` tells three of CSS's four apart per kind — a frame's `auto` is its stored size and `fit-content` hugs; a laid group's `auto` and `fit-content` both hug; a leaf's size is its measure — so `layout::size_modes` offers px, fit-content for a frame with a layout, auto for a laid group, and `%` for any in-flow kind layout can resize; fewer than two is no menu. A mode picked moves nothing (`size_mode_tx`, `%` of the parent's content box to 0.1%); the proportion lock stands aside while a side is a keyword or `%`. **Core**: `keep_flex_sizes` sets `width`/`height` back to `auto` on every axis a resizing `SetGeometry` changed, whatever the parent (`sized_in_px`). A laid group's W and H reach `build::sized_flex_item` through `resize_box_to` — read for this entry — which writes only the axes the resize changed (both, until the same session). ⚠️ **Not CSS**: taffy gets `auto` for `FitContent`, so a fit-content frame in a stretching parent stretches. *(Built and tested 2026-09-24, uncommitted when recorded; **Keep**, the stretch flagged for the maintainer. Tests `a_resize_writes_px_over_a_size_keyword` and `a_laid_group_resized_along_one_axis_keeps_hugging_along_the_other` in core, `the_size_menu_offers_only_modes_that_differ_for_the_kind` and `a_mode_picked_from_the_size_menu_moves_nothing`. D875 amended; §5.3c, §9.3, §9.4)*
+- **D880** — **A resize that stops an item's growth leaves a receipt in the Item card, with an Undo that is the whole step.** The maintainer's ruling 1 of three. `commit_inner` reads the grow, shrink and `align-self` flips `keep_flex_sizes` added off the transaction (`growth_held`) into a `FlexReceipt`; the card outlines the fields and names the flips. Undo takes the whole step, the flips being what make the resize hold. Valid while `EditorSession::revision` and `History::undo_depth` are where the commit left them — 🚨 the depth because undo and redo do not bump the revision (D616's amendment); a run commit leaves none. *(Ruled 2026-09-24, built and tested the same day, uncommitted when recorded; **Resolved.** Test `a_resize_leaves_a_receipt_until_anything_else_is_committed`, the depth dropped red at *"an undo takes it away"*. ⚠️ Its redo half rests on the same defect, and D616's *Fix* turns it red — decide the redo then. §5.3c, §9.4)*
+- **D881** — **A hidden layer leaves the flow: ruled.** The maintainer's ruling 2, D875's (e) promoted from the session's default — `display: none`'s reading, the eye closing the row up — once the Item card came to say so in words. *(Ruled 2026-09-24; **Resolved**, record-only — no line of code changed, cited on `container::in_flow`'s doc. D875 amended; §5.3c)*
+- **D882** — **An in-flow item's X and Y are inert.** The maintainer's ruling 3, and a consequence of D877's second amendment: `kept_flow_translations` drops a typed translation at the commit door, so a live field would take a number and commit nothing. Disabled in place, the reason on hover. ⚠️ **The multi-selection Transform card's X and Y are still live**, and in-flow members of the set silently keep their slots. *(Ruled 2026-09-24, built the same day, uncommitted when recorded and not tested; **Keep**, the multi card an open gap. §9.4)*
+- **D883** — **`flex_reorder` reads `wrap-reverse`: the first line is the bottom one, so a lower line comes first.** D877 read it as `wrap` — *"Fix when a control can set it"* — and the Container card's wrap control can. *(Fixed and tested 2026-09-24, uncommitted when recorded; **Resolved.** Test `wrap_reverse_reorders_with_its_lines_read_bottom_up`, the arm dropped answering `Some(1)`. D877 amended; §5.3c)*
+- **D884** — **The cards' labels are CSS's names in sentence case: *Justify content*, *Flex start*.** The maintainer's ruling: CSS's names, first letter raised and hyphens gone — sentence case, the app's convention — so each is still a name a reader can look up. The model, the file and the snapshot keep CSS's identifiers; only the chrome is dressed. **The session's spellings**: a unit in a suffix stays lower case (`SizeMode::word`, *auto*, *fit content*), the unit menu's keywords are *Auto*, *Fit content*, and the receipt's sentence lower-cases the names again. ⚠️ *Center* is CSS's spelling against the app's *Centre*, and kept. *(Ruled 2026-09-26, built the same day, uncommitted when recorded; **Resolved**, the session's spellings **Keep**. No test pins a label. D867, D878, D880 amended; §5.3c, §9.4)*
+- **D885** — **Every number field in the Container and Item cards committed nothing: a scrub followed the pointer and snapped back on release.** Each built its edit only when the number moved *this frame*, reading it through the preview — so on the release frame, the valve's committing frame, the edit was empty and the valve dropped the preview. Both gaps, the padding, grow, shrink, and every `size_field` — basis, limits, a `%` W or H. Fixed by `layout::edited`, a per-widget latch held through the frame engagement ends; not an unconditional edit, which would write a mixed selection's first value to every subject on a click. *(Reported and fixed 2026-09-26, uncommitted when recorded; **Resolved.** Test `a_scrub_on_a_container_field_lands_as_one_undo_step`, a real scrub through the real valve; the latch dropped fails at *"the gap landed"*, 10. ⚠️ Only the gap and padding are driven; no earlier test drove a field at all. §9.3)*
+- **D886** — **The `display`, direction and wrap cells carry tooltips, and `grid`'s says why it cannot be picked.** `ui::segmented_tipped` takes a `tip` per cell; `segmented_enabled` delegates with none. Reverses D878's item 8 — and arrives the way D722 said it should, by widening the signature, the disabled cell's hover-only sense now carrying `grid`'s reason. *(Asked and built 2026-09-26, uncommitted when recorded; **Resolved**. Not tested — a tooltip's ink never reaches `run_ui`'s shapes. D722, D878 amended; §9.4)*
+- **D887** — **The Position card is offered to a child of a group with a layout, and `build::keep_insets` pins against that group's box.** D871's group half, placed by `resolve::frame_box` since D875 and offered by nothing: `inset_subjects` and `inset_placement` admit a laid group, and 🚨 `keep_insets`, frame-only until now, had a pinned child of a laid group moved by a tool **snap back on release**. ⚠️ It pins against the group's **committed** box, so the Scale tool's `scaled_flex` on a laid group with a pinned child is unmeasured; and pinning an item of a hugging container can move things — both open. *(Reported and fixed 2026-09-26, uncommitted when recorded; **Resolved**, those two open. Tests in `tests/flex.rs` and `inset_card_tests`, three flips at their predicted sites; the preview's half unchecked. D869, D871, D874 amended; §5.3c, §9.4)*
+- **D888** — **The pin diagram is a square with heavier strokes, and the centre buttons sit at the end of their axis's fields.** `INSET_DIAGRAM_SIDE`, three control rows and two row gaps, 102 pt, centred on its own row; strokes 1.5, a pinned strut 2.5. Where it sits and where the buttons went are the session's. *(Asked and built 2026-09-26, uncommitted when recorded; **Keep**. Not measured, not seen on screen. D874 amended; §9.4. ***Superseded in part the next day by D890*** — it lasted one session; only the tooltips' *container* survives)*
+- **D889** — **The Item card's out-of-flow block says it in words: *Absolutely positioned*, and what that does to the layout.** *"Pinned to its container's right and bottom edges, so it sits outside the layout"*, over *Unpin and return to the layout* — in place of *position: absolute*, a sentence naming insets and the Position card, and *Unpin insets*. *(Asked and built 2026-09-26, uncommitted when recorded; **Keep**. The test asserts the new `pinned_edges` string. D878 amended; §9.4)*
+- **D890** — **The Position card is laid out as the mockup's screen 07: the diagram at the left spanning two field rows, `auto` in an unpinned field's digits, and an *Absolute* badge in the header.** The maintainer's ask, after D888's square. The diagram `INSET_DIAGRAM_W` (74) × two field rows and their gap (65), L R over T B beside it, the centre buttons sharing a row underneath; a well with **no container outline**, the struts alone saying where the container is. 🚨 An unpinned inset reads `auto` where its number would be, the distance still its value — **reversing D874's** distance beside an inert `auto`, and leaving the Item and Transform sizing fields on the old one, which wins there open. A pinned inset carries an accent edge. `ui::section_head_badged` and `OndinApp::panel_badged` give the header its *Absolute*; the Container and Item cards still have none. **The session's**: no caret on the unit, the colours mapped to theme constants. *(Asked and built 2026-09-27, uncommitted when recorded; **Keep**. Test `the_card_is_laid_out_as_the_mockup`, the `auto` formatter off failing at *"the three unpinned edges"*, 0 against 3. ⚠️ Not seen on screen. Supersedes D888 in part; D874, D878 amended; §9.4. ***Amended the same day by D891***: the badge only in a container with a layout, a plain frame's top and left shown held, a centred axis solid red, and the flip 0 against 2)*
+- **D891** — **The Position card's *Absolute* badge shows only inside a container with a layout, a plain frame's top and left are drawn as held by default, and a centred axis is solid in the measure red.** The maintainer's three asks after D890. `laid` — the anchor's parent has a `display` — gates the badge, which in a plain frame, where everything is absolute, said nothing. Outside a layout an axis with no inset is `held`: D871's implicit left/top, which a frame resize keeps exactly as a pin would, so its strut is solid accent and its field shows the distance — **nothing written**, because an authored inset would pull the child out of the flow the day its container got a layout, where the default simply stops applying. A strut between two auto margins is `color::MEASURE`, the canvas's distance red, where D890 dashed it in accent — the hue's one use off the canvas. *(Asked and built 2026-09-27, uncommitted when recorded; **Keep**, the held display the session's reading — **confirmed by the maintainer the same day**, so ruled. Tests in `inset_card_tests`, three flips — the top-never-held one failing one assertion earlier than predicted; the colours unasserted. ⚠️ Not seen on screen; held against pinned under the Scale tool unmeasured. D871, D874, D890 amended; §5.3c, §9.4)*
 
 ---
 
@@ -19194,7 +19208,8 @@ three suppressions are one test rather than three.
 
 **D867 — Container layout is being built, as CSS flexbox and CSS grid under CSS's names, on taffy —
 and §1's deferral of it is reversed. *Decided 2026-09-23 by the maintainer; step 1 built 2026-09-24
-(D868), step 2 the same day (D874), step 3 in progress the same day (D875), the rest not built.*** Filed
+(D868), step 2 the same day (D874), step 3 the same day (D875–D883, the cards uncommitted when
+recorded), the rest not built.*** Filed
 beside D385 because the word *grid* now names two features in this document, and a reader looking
 for one will land on the other: D385's layout grids are chrome drawn over a frame, and this is the
 CSS grid **container**, which places children. `architecture.md` §5.3c opens by saying so.
@@ -19288,6 +19303,10 @@ compiles was not measured for this amendment (`cargo tree -p ondin-core -e norma
 of the four is a GPU or UI crate, and `deps_forbidden` was green in the caller's run. §3's core list
 is fourteen names against fourteen declared, and §2's table has a row. This number is now cited from
 `Cargo.toml`, `container.rs`, `op.rs`, `document.rs` and `tests/flex.rs` as well as `resolve.rs`.
+
+**Amended 2026-09-26: *"under CSS's names"* is about the names, not their spelling in the chrome.**
+The maintainer ruled the cards' labels into sentence case — *Justify content*, *Flex start*, *Row
+gap* — and the model, the save format and the snapshot keep CSS's identifiers (D884).
 
 **D868 — What the user sets and what is drawn become two numbers, and the drawn one is never saved.
 *Decided 2026-09-23 by the maintainer; D867's step 1 built and tested 2026-09-24, step 2's model
@@ -19590,7 +19609,7 @@ before text, since a text item is measured for layout by `FlexTree`'s own measur
 
 **D869 — A group with `display` has a box; a group without one is exactly today's group. *Decided
 2026-09-23 by the maintainer; built in core and the preview 2026-09-24 (D875), a resize the same day
-(D875's amendment) — the inspector not.*** **Containers are not frame-only.** `display: flex | grid`
+(D875's amendment), the inspector's Container card the same day (D878).*** **Containers are not frame-only.** `display: flex | grid`
 applies to a `Group` as well as to an `Artboard`, and setting it gives the group a box: its bounds
 become its layout box, padding included, instead of the union of its children; resizing it sets
 `width`/`height` and reflows, instead of scaling its contents as `tools::resize_group` does (§5.6);
@@ -19634,7 +19653,13 @@ half — untested, and the *Position* card still offers only a frame's children.
 `build::sized_flex_item`, so the *"still to do"* above is done and `ondin-app` now reads `display`, in
 `tools/mod.rs` alone. None of the four passages above is among the readers, so each is still the
 question it was; and nothing gives a group a `display` — the Scale tool's `tools::scaled_flex`
-rewrites one only where it is already set)*
+rewrites one only where it is already set. **Amended a third time 2026-09-24: the Container card
+sets `display`** (D878), on a group as on a frame, so a group gets a layout from the inspector; its W
+and H fields reach `build::sized_flex_item` through `tools::resize_box_to` (D879). Whether any of the
+four passages above is among the cards' readers was not checked. **Amended 2026-09-26: the pinned
+child of a laid group is tested and offered the card** (D887) — in core and the app, not the preview —
+and `build::keep_insets` pins against the group's box, where it was frame-only and the child snapped
+back after a move)*
 
 **D870 — A frame may sit inside any group, and `paint_targets` already stops at one. *Decided
 2026-09-23 by the maintainer; built and tested 2026-09-24 (D876), committed 2026-09-24 (session 34).*** `build::can_parent` lets a frame hang off the root or
@@ -19883,10 +19908,12 @@ inset is one specified value on one node, and D867 has the distinction. §5.3c; 
 carries a pointer. **Amended 2026-09-24: the model half is built and tested** — `container.rs`,
 `Node::insets`, `Operation::SetInsets`, the layout pass, `build::keep_insets` and a preview reflow —
 and D874 has it, with the maintainer's four rulings the build turned on. **In frames only**: the
-*"group with `display`"* half waits on D869. The inspector card — a pin diagram and four px/% fields —
+*"group with `display`"* half waits on D869 — *placed by core and the preview since D875, and offered
+the card and converted at the commit seam since D887, 2026-09-26*. The inspector card — a pin diagram and four px/% fields —
 was not built with it, so nothing in the app pinned a layer. **Amended again the same day: it is
 built**, titled *Position*, and D874 has it — pin left, pin right, stretch and scale are now
-something a user can reach)*
+something a user can reach. **Amended 2026-09-27**: the card shows the implicit left/top outside a
+layout as held at its distance, without writing an inset (D891))*
 
 **D872 — Every leaf is measured, and shapes are replaced elements. *Decided 2026-09-23 by the
 maintainer; built 2026-09-24 (D875), committed 2026-09-24 (session 34).*** **Shapes hold their size because they are replaced elements, and the spike
@@ -20220,10 +20247,29 @@ number spent**: the card is ruling 4 built and its choices are this entry's. D86
 verdicts, `architecture.md` §1, §5.3c, §5.9, §6.2 and §9.4, `context-menus.md` §7 amended;
 `roadmap.md`'s step 2 struck)*
 
+**Amended 2026-09-26, twice over.** *"Insets place a child of an `Artboard` only"* and the card's
+*"parent an `Artboard`"* are frames-only no longer: `inset_subjects`, `inset_placement` and
+`keep_insets` all admit a group with a layout, against its laid box, and `keep_insets`' frame-only arm
+had a pinned child of a laid group moved by a tool snap back (D887). And the card's shape changed at
+the maintainer's ask: the diagram is a square, `INSET_DIAGRAM_SIDE`, on a row of its own with heavier
+strokes, and the two centre buttons are no longer beside it but at the end of the L/R and T/B rows,
+their tooltips saying *container* where they said *frame* (D888).
+
+**Amended 2026-09-27**: the card is the mockup's screen 07 (D890), and D888's square went with it.
+The diagram is a well at the left, 74 wide and two field rows tall, with **no container outline** — the
+struts alone say where the container is — and the fields sit beside it, the two centre buttons sharing
+a row underneath. 🚨 **The unpinned field's convention above is reversed**: an unpinned inset reads
+`auto` in the digits' place, its distance still the value a scrub starts from, where it showed the
+distance beside an inert `auto` unit; a pinned one carries an accent edge. The click-through guard
+stands. And the card's header carries an *Absolute* badge while the layer is pinned — ***only inside a
+container with a layout since D891***, which also shows a plain frame's unpinned top and left as held
+at their distance, the implicit left/top of D871, rather than as `auto`.
+
 **D875 — A flex container is laid out by taffy over Ondin's own nodes, text keeps each sizing mode's
 meaning in it, and dragging an item's edge stops its growth. *Rulings (a)–(d) the maintainer's,
 2026-09-24; (e) and the engine's shape the session's. Built and tested 2026-09-24, committed
-2026-09-24 (session 34) — step 3 is not finished.*** This is D867's step 3, its first half: the flex model, the engine,
+2026-09-24 (session 34) — step 3 is not finished; its inspector cards, the rest of it, are
+D878–D883.*** This is D867's step 3, its first half: the flex model, the engine,
 `Resolved`'s layout pass, a conversion at the commit seam and a preview reflow. **Not in it, and each
 still step 3's**: frames under groups (D870 — its three rulings are reserved as D876 and recorded
 with their build), resizing a group with a layout, reorder by drag, and the inspector's container and
@@ -20232,7 +20278,8 @@ item cards. So **nothing in the app authors a layout yet** — no line of `ondin
 under groups were built the same day, D876; resizing a group with a layout too, amended below, and
 reorder by drag, D877 — so `ondin-app` writes `SetFlexItem` and `Reorder` now, and `SetDisplay`
 only as the Scale tool rescaling a layout a container already has; nothing in it gives one a
-layout.)*
+layout.)* *(Nor is that true since D878: the Container card writes `SetDisplay`, and the Item card
+`SetFlexItem`.)*
 
 **The maintainer's rulings**, given 2026-09-24:
 
@@ -20272,7 +20319,9 @@ rather than `visibility: hidden`, the design-tool reading of an eye switched off
 closes its row up. A mask is out of flow too (D869), and so is a child with any authored inset,
 `position: absolute`'s reading, placed against its container's box by D874's arithmetic. All three
 are `container::in_flow`. *Revisit if the maintainer rules that the eye keeps the slot* — that is
-`in_flow`'s `visible` term, and `atomic_box`'s filter with it.
+`in_flow`'s `visible` term, and `atomic_box`'s filter with it. ***Ruled 2026-09-24 — D881***: the
+maintainer took this reading when the Item card came to say it in words, so it is no longer a default
+and the *Revisit* is closed.
 
 **The engine, the session's.** It lives in `ondin-core/src/container.rs`, the module step 2 made —
 D867's naming question answered with no rename of D385's `layout.rs`. **taffy's low-level traits
@@ -20316,7 +20365,9 @@ read only where the parent has a layout; `flex-shrink` defaults to 1, CSS's. **P
 world units only**, the type's doc having why: a percentage padding resolves against the width on
 both axes, and a percentage gap needs a definite container size. `width`/`height` stay `auto` for a
 shape or a frame, whose stored size is its CSS size; they exist for what has no size of its own — a
-group with a layout, hugging until a size is typed, and a frame asked to hug with `FitContent`. Both
+group with a layout, hugging until a size is typed, and a frame asked to hug with `FitContent`.
+*(Widened by D879: the W and H fields set `%` on any in-flow kind layout can resize and `fit-content`
+on a frame, and a resize writes a changed axis back to `auto`.)* Both
 fields save as additive `NodeDto` fields skipped at their defaults, **no schema bump**.
 `Operation::SetDisplay` and `SetFlexItem` each write the whole value, `SetInsets`' reason; each
 refuses a non-finite number with `OpError::NonFinite`, has no kind gate, answers `true` to
@@ -20452,7 +20503,7 @@ an in-flow item or would land where it is. `build::is_flex_item` is the first ha
 public because the app has to tell a reorder from a move before it knows whether the reorder changes
 anything. ⚠️ **`wrap-reverse` is read as `wrap`**, lines compared top-down — a simplification the
 function's doc states, not CSS's reading, and nothing in the app builds such a container yet. *Fix
-when a control can set it.*
+when a control can set it.* *(Fixed 2026-09-24, once the Container card could set it — D883.)*
 
 **The canvas, `canvas::flex_reorder_of`.** A move is a reorder when exactly one layer is selected, it
 is in its container's flow, and `move_destination` does not take it out of its parent. The preview is
@@ -20671,6 +20722,662 @@ brief and a read of `build.rs`' `keep_flex_sizes`, `kept_flow_translations` and 
 docs for the flips — not re-run; the probe's measurement, the gates and the 2514-test count as reported
 by the caller. No number spent. `architecture.md` §5.3c, §6.2, §9.3 and §9.4 amended; `roadmap.md`'s
 step 3 marker rewritten as the next session's handoff)*
+
+**D878 — The Container and Item cards: container layout's inspector, built from the maintainer's
+mockup, and where the cards are not the mockup. *The mockup the maintainer's; every departure from it
+the session's, with its reason. Built and tested 2026-09-24, uncommitted when recorded.*** D867's
+step 3, the handoff marker's item 5 and the last of the step. Session 34 stopped there rather than
+invent a design, and the maintainer drew one: `design/Layout Cards.dc.html`, ten screens, and
+`design/LayoutGlyph.dc.html` for the pictures. Until these cards nothing in the app gave a container a
+layout (D875), so every flex behaviour D875–D877 built was reachable only from a file or a test.
+
+**The cards**, in a new `panels/layout.rs`. **Container** (`inspector_container`) is offered for any
+selection holding a frame or a group (`container_subjects`, filtered on `frame_subjects`' rule), and
+every edit applies to each of them: `display`, and under `flex` the direction and wrap, three
+dropdowns — `justify-content`, `align-items`, `align-content`, the last dimmed in place while nothing
+wraps, so toggling wrap does not shift the card under the pointer — the two gaps and the padding.
+**Item** (`inspector_item`) is offered for any selected layer whose parent is a container with a
+layout (`item_subjects`): `flex-grow`, `flex-shrink`, `flex-basis`, `align-self` — reading
+*auto · \<inherited\>* while unset — and the four limits behind a *min / max* disclosure; or, for a layer
+the flow skips, the reason and one button that brings it back. A selection partly in the flow gets the
+rows for the part that is, and a line counting the rest. Every label is a CSS property's name and
+every value a CSS value (D867) — *spelled as CSS spells them until D884 put them in sentence case,
+`justify-content` reading* Justify content. Edits are built from the committed document and go through
+`commit_edit` or `edit_valve` (D51's rule), and `DisplayNode::display` and `item` now have overrides
+behind them, as `insets` does, so a scrubbed gap or grow accumulates. `ui::Prefix::Label` is new — a
+CSS name as a field's prefix, at the unit's size, where `X`'s size would take the field's width from
+the number.
+
+**The order**, in `inspector_single` and `inspector_multi` alike: Frame templates, Align, Transform,
+Position, Item, Container, Layout grid, then Appearance and paint — from the layer in its parent to
+its children, the mockup's order; a frame that is both an item and a container gets both, Item first.
+⚠️ **The Layout grid moved**: it sat third, beside Frame templates under the identity card (D389), and
+now sits under Container, the grid dividing what the container lays out. Frame templates stayed. The
+mockup's screen 09 draws no templates card, and the session read that as silence rather than a
+ruling.
+
+**Where the cards are not the mockup, and why.**
+
+1. **`display` is the card's first row**, a segmented control, not a control in the card's header:
+   `OndinApp::panel` takes a title and one action.
+2. **`grid` is a visibly disabled cell** — `ui::segmented_enabled`'s bargain, a control that vanishes
+   reading as a feature the app lacks — until step 4 builds it.
+3. 🚨 **The mixed state, and this one is not a clean adaptation.** A number field shows a dash
+   (`layout::dash_if`, a copy of `typography::mixed_text`, citing it as the convention); a sizing
+   field's unit reads `–` for a mixed mode; a dropdown reads *Mixed* (`ui::MIXED_WORD`); a segmented
+   control raises no cell and draws no mark. The mockup's screen 08 has numbers and dropdowns read
+   *"Mixed"* and a dashed outline on each segment value present. **D130 is *Resolved* and says a
+   control says "Mixed", with a dash only where five letters do not fit — *"and there are exactly
+   two"*.** The Type panel's numeric fields already depart from it, and D636 recorded that departure
+   with *"do not cite this entry as the argument for a sixth dash"*. This card does cite it, and
+   against a mockup that sides with D130. ***Fix*** by D636's route: ask the size question once, then
+   amend D130's *"exactly two"* or the fields. The segments' blank mixed state sits with it, D130's
+   segmented spelling being `ui::segment_mixed`'s dash.
+4. **The pictures turn by transpose and mirror, not by the mockup's `rot`.** `Orient` transposes
+   through the diagonal for a column and mirrors whichever axis runs backwards. A rotation that
+   takes a row's justify-start wall (left) to a column's (top) takes align-start's wall from the top
+   to the *right*, where a column's cross start is on the left; the diagonal takes both where they
+   belong, one rule for every picture instead of an angle per kind. `wrap-reverse` mirrors the cross
+   axis for the `align-items` and `align-content` pictures, CSS swapping cross-start and cross-end.
+   The pictures are painted on the mockup's 16-unit grid (`Glyph`, `Mark`, `paint_glyph`), the icon
+   font having nothing for a justification.
+5. **Gap and padding prefixes are Phosphor glyphs** — `arrows-out-line-*` for the gaps,
+   `arrows-in-line-*` for padding — not the mockup's drawn marks: a field prefix is a font glyph
+   (`Prefix::Icon`). The first gap field is always the gap between items, `column-gap` in a row and
+   `row-gap` in a column, each carrying its CSS name as the unit, and the other dims on one line.
+   `wrap`'s cell is a new `icon::ARROW_U_DOWN_LEFT`, e07e.
+6. **A keyword size shows the number it resolved to, the keyword where the unit goes**
+   (`layout::size_field`) — the Position card's convention, an unpinned edge's distance beside an
+   inert `auto` — not the keyword in the field, where the mockup puts it: a keyword in the digits'
+   place is a number nobody can scrub. A basis at `auto`, with nothing resolved to show, shows a dash.
+   ⚠️ ***Its precedent reversed 2026-09-27*** (D890): the Position card now reads `auto` in the
+   digits' place with the distance underneath, and scrubs, so the argument does not hold of that
+   widget. This field is unchanged; the two conventions disagree and which wins here is open.
+7. **No header badges** — *flex · row*, *out of flow*, *absolute*, *in flow*. `panel` has no slot for
+   one. ***The slot exists since 2026-09-27*** (D890, `OndinApp::panel_badged`), and the Position card
+   has its *Absolute*; these two cards still have none, and nothing has been decided about them.
+8. **No tooltips on segmented cells**: `ui::segmented` hands back an index and nothing else (D722).
+   ***Reversed 2026-09-26*** (D886): the `display`, direction and wrap cells carry one each through
+   `ui::segmented_tipped`, the disabled `grid` saying why.
+9. **The Layout grid's move and Frame templates' staying put**, above.
+10. 🚨 **New behaviour: `display: none` from the card keeps every child where it is drawn.**
+    `OndinApp::set_display` writes each in-flow child's used transform and size back as its own
+    (`inspector::baked_ops`), and a frame's hugged size as its stored size, a `fit-content` width or
+    height going back to `auto`. Without it, `none` would send every child to wherever its stored
+    transform last had it — a place not drawn since the layout was set — and a hugging frame to a
+    stale stored size. That is the Position card's unpin rule (D874's `baked_placement`), for the
+    same reason, and `baked_placement`'s body is now `baked_ops`, one spelling for all of them.
+    `keep_flex_sizes` lets the children's transforms stand, the same transaction relaying their
+    parent (D877's second amendment). Setting `flex` bakes nothing and needs to bake nothing: the
+    stored transforms are what the layout then ignores, and what `none` would go back to.
+11. **The out-of-flow block** names the reason — *position: absolute* with the pinned edges named,
+    *Hidden*, *Mask*, in `out_of_flow`'s order — and its button (*Unpin insets*, *Show layer*,
+    *Release mask*) acts on every subject out for that same reason, in one commit
+    (`back_into_flow`). *Unpin insets* writes the drawn transform and size and then clears the insets,
+    the unpin rule again; each layer rejoins at its own place among its siblings. ***Reworded
+    2026-09-26*** (D889): the title is *Absolutely positioned*, the sentence *"Pinned to its container's
+    right and bottom edges, so it sits outside the layout."*, and the button *Unpin and return to the
+    layout*, doing what *Unpin insets* did.
+12. **Disclosure state is coarse.** The *min / max* disclosure's open state is one egui temp flag for
+    the whole app, not per layer. The padding per-side toggle is keyed by the first subject and is
+    forced open whenever two opposite sides differ, so the paired fields never stand for a pair they
+    do not describe.
+13. **The W and H sizing menu (D879) is the single card's only**; `inspector_multi`'s Transform card
+    is unchanged.
+
+**The evidence**, `layout.rs`' `mod tests`, seven — five of them on a headless app through the real
+commit path:
+`the_pictures_turn_with_the_layout_through_the_diagonal` — a quarter turn clockwise in place of the
+transpose fails on *"align-start in a column"*, the wall at x 14.5, as predicted;
+`display_none_keeps_every_child_where_it_is_drawn` — the children's `baked_ops` dropped fails on *"a
+stayed where it was drawn"*, back at its stored x 300, as predicted;
+`the_way_back_into_the_flow_puts_a_layer_at_its_own_place`; `each_card_offers_itself_for_what_it_describes`,
+which draws both cards and the Transform card over a run of selections and states — mixed padding,
+the limits open, a pinned rect, a layout removed — without panicking; and D879's and
+D880's, recorded there. ⚠️ **The last two of those named here have no flip recorded.** `app.rs`'
+`only_the_layers_panel_commits_without_the_committer` caught `layout.rs` missing from its hand-kept
+array, the run-time directory check doing what it was written for. ⚠️ **Not verified in the GUI** —
+none of step 3's app behaviour has been looked at on screen.
+
+*(Built and tested 2026-09-24 by session 35 from the maintainer's mockup, uncommitted when recorded.
+**Keep** every departure above as a design adaptation **except 3, which is *Fix***. Recorded from the
+brief and a read of `panels/layout.rs` whole, `inspector.rs`' two card orders, `inspector_transform`'s
+X/Y and W/H and `baked_ops`, `session.rs`' `DisplayNode`, `FlexReceipt` and `commit_inner`, `ui.rs`'
+`Prefix` and `segmented_enabled`, `theme.rs`' new glyph, `build.rs`' `keep_flex_sizes`,
+`sized_flex_item` and `flex_reorder`, `container.rs`' `style_of` and `in_flow`, `tools/mod.rs`'
+`resize_layer`, `resize_box_to` and `scale_geometry`'s group arm, `tests/flex.rs`' two new tests, and
+the mockup's mixed-state notes; flips as the tests' docs record them, not re-run; gates as reported by
+the caller. 🚨 **Item 3 came to the brief as a clean *Keep***, and D130 and D636 are why it is not.
+D867, D869 and D875 amended; `architecture.md` §1, §5.3c, §9.3 and §9.4 amended; `roadmap.md`'s step 3
+item 5 struck. **Amended 2026-09-26, after the maintainer's first look**: a scrubbed gap or grow
+accumulated in the preview and then **committed nothing** — every number field in both cards, D885;
+the labels are in sentence case, D884; item 8 is reversed, D886; item 11 is reworded, D889.
+**Amended 2026-09-27**: item 6's precedent is reversed and item 7's reason gone, D890)*
+
+**D879 — The W and H fields' unit is a menu of the sizing modes that differ for the layer, and a
+resize writes px over a size keyword. *The session's; the menu is the mockup's. Built and tested
+2026-09-24, uncommitted when recorded.*** CSS has four ways of saying a size — px, `%`, `auto`,
+`fit-content` — and `container::style_of` tells only three apart, merging a different two per kind.
+A **frame**'s `auto` is its stored size, which is px, and its `fit-content` hugs its children. A
+**group with a layout** has no stored size, so `auto` and `fit-content` both hug. A **leaf** is
+sized by its own geometry or measure either way. Offering all four everywhere would put two entries
+in the menu that do the same thing and name different CSS, so `layout::size_modes` offers only what
+differs: a frame, px and — with a layout of its own to hug — `fit-content`; a group with a layout, px
+and `auto`; a `container::can_stretch` leaf, px; and `%` joins any of them that is in its parent's
+flow (`build::is_flex_item`) and that layout can resize — never a path, a line or a boolean. **Fewer
+than two is no menu**, and the field is the plain px field it always was. `size_mode_of` reads the
+merges back: a frame's or a leaf's `auto` shows as px, a group's `fit-content` as `auto`.
+
+**Picking a mode moves nothing** (`OndinApp::size_mode_tx`). Px writes the drawn size into the stored
+size — `baked_ops`' `SetGeometry` half — with the keyword back to `auto`, or for a group writes
+`Px` of the drawn box; `%` converts the drawn size against the parent's content box, its drawn size
+less its padding (`content_extent`), rounded to 0.1%; a keyword writes itself. Typing or dragging
+writes px, or `%` while the mode is `%`, and a click in and out of a keyword field commits nothing.
+**The proportion lock stands aside while either side is a keyword or `%`** — disabled, the reason on
+hover — since a ratio between a size the user fixed and one the layout decides is not one anyone
+chose, and pairing a typed W onto a hugging H would write the H back in px. That is the mockup's rule.
+
+**The core rule: a resize writes px.** `build::keep_flex_sizes` now runs `sized_in_px` on every
+`SetGeometry` whose patch `resizes()` — whatever the parent, laid out or not, before the in-flow
+`held` rule — setting `width`/`height` back to `Auto` on each axis the resize changed. For a kind with
+a stored size `auto` *is* that size, the one the resize has just written, so a drag or a typed number
+on a hugging frame or a percentage-wide item holds instead of snapping back to the keyword; the axis
+the resize did not change keeps its keyword. *Any parent*, because a frame hugging its content at
+the top of the page is the commonest case. A layer whose `SetFlexItem` the transaction sets itself is
+still left to it (D875).
+
+**A laid group's W and H route through `build::sized_flex_item`**, as the roadmap's marker asked —
+read for this entry, not assumed. A `Group` has no `tools::resizable_size`, so the Transform card
+writes through `tools::resize_box_to`, a synthesized bottom-right drag, into `resize_layer`, whose
+group-with-display arm sends it down `resize_geometry` to `scale_geometry`'s group arm and
+`sized_flex_item` (D875's amendment) — the handle's own path, so a typed size and a dragged one write
+the same thing. **`sized_flex_item` writes only the axes the resize changed**, compared against the
+group's used box, so a typed W on a group whose H is `auto` leaves H hugging — `sized_in_px`'s
+per-axis rule, for the one kind that has no stored size. It wrote both until the same session:
+`arch-scribe` read it for this entry, found a typed W fixing a hugging H at its hugged height, and it
+was fixed before the commit. Pinned by
+`tests/flex.rs::a_laid_group_resized_along_one_axis_keeps_hugging_along_the_other`; **flip run**,
+the height written unconditionally, fails on *"the untouched axis still hugs"* at `Px(70)`, the
+predicted site.
+
+⚠️ **Not CSS, and kept: `fit-content` stretches.** `style_of` hands taffy `auto` for `FitContent`, so
+CSS's rule that a `fit-content` cross size is not stretched is not modelled — a fit-content frame in a
+parent with `align-items: stretch` stretches. *Keep*; the maintainer is to be told, and it is theirs
+if it bites. And D875's model sentence, *"`width`/`height` stay `auto` for a shape or a frame"*, is
+widened: `%` on any in-flow kind layout can resize, and `fit-content` on a frame, are authorable
+now, and a shape at `%` is sized by its container rather than by its stored size until a resize or a
+px pick writes one.
+
+**The evidence.** `tests/flex.rs · a_resize_writes_px_over_a_size_keyword` — a top-level frame at
+`fit-content` on both axes and an item at `50%`, each resized: `sized_in_px` not called fails on *"the
+dragged width held"* at 80, the frame snapping back to hug its row, as predicted.
+`layout.rs · the_size_menu_offers_only_modes_that_differ_for_the_kind`, the table cell by cell, and
+`a_mode_picked_from_the_size_menu_moves_nothing` — a hugging frame switched to px keeps 150 as its
+stored width, and a 40-wide item switched to `%` becomes 36.4% of the 110 content box and is drawn
+within 0.1 of 40. ⚠️ **Neither app test has a flip recorded.**
+
+*(Built and tested 2026-09-24, uncommitted when recorded; **Keep**. Recorded from the brief and a read
+of `layout.rs`' `size_modes`, `size_mode_of`, `size_field`, `size_mode_tx` and `content_extent`,
+`inspector_transform`'s W/H, `build.rs`' `keep_flex_sizes`, `sized_in_px`, `held` and
+`sized_flex_item`, `container.rs`' `style_of` and `can_stretch`, and `tools/mod.rs`' `resize_box_to`,
+`resize_layer` and `scale_geometry`'s group arm; the flip as the test's doc records it. D875 amended;
+`architecture.md` §5.3c, §9.3 and §9.4 amended)*
+
+**D880 — A resize that stops an item's growth leaves a receipt in the Item card, and its Undo is the
+whole step. *The maintainer's ruling, 2026-09-24 — ruling 1 of three, the session's recommendation
+accepted. Built and tested 2026-09-24, uncommitted when recorded.*** D875's ruling (b) has a resize of
+an in-flow item write `flex-grow: 0` and `flex-shrink: 0` and, across a stretch, `align-self:
+flex-start` — properties the user never typed, so the Item card's numbers would change under a drag
+with nothing to say why. The maintainer was offered naming them, and took it: *"I'll take your
+recommendations … for all 3"*.
+
+**How it is read.** `EditorSession::commit_inner` notes the items the transaction sets itself, and
+after `keep_flex_sizes` reads the flips it added off the transaction it hands back, before it is
+applied (`growth_held`): a `SetFlexItem` on an item the edit did not set, and only grow, shrink and
+`align-self` — a keyword going back to `auto` (D879) is the resize itself, and W and H already show
+it. They are kept as `FlexReceipt { held, revision, depth }`, and the card outlines each flipped field
+in the accent and says *"Resizing set flex-grow: 0 and …"* — *"flex grow to 0"* since D884 — with an
+**Undo**.
+
+**The Undo is the whole step, never the flips alone.** The flips are what make the resize hold —
+undoing them and keeping the size hands the space back and the drag snaps — and they are one
+transaction with it anyway. So the receipt is only true while that step is the top of the history:
+`flex_receipt()` answers only while `EditorSession::revision` and `History::undo_depth` equal the
+values they had straight after the commit. The next commit ends it; a run commit leaves none, a merged
+step having no single thing to undo; selection is not part of it, so selecting something else and
+coming back finds the receipt still there and its Undo still undoes exactly that step. 🚨 **The depth
+is load-bearing, because undo and redo do not bump `revision`** — they update the document directly and
+never pass through `commit_inner` (D616's amendment, found recording this entry). *Do not drop the
+depth as redundant with the revision.*
+
+**The evidence**, `layout.rs · a_resize_leaves_a_receipt_until_anything_else_is_committed`: a grow set
+by hand is no receipt; a resize is, naming the one item and its grow and shrink going 1 → 0 with
+`align-self` untouched; an undo takes it away; a redo brings it back; the next commit ends it. The
+depth half of `flex_receipt`'s test dropped fails on *"an undo takes it away"*, as predicted. ⚠️ **The
+redo half rests on the same defect.** Once D616's *Fix* makes undo and redo bump the revision, the
+receipt no longer returns on redo and this test fails at *"a redo puts the step back on top"*. That is
+not a regression to be repaired back. Decide then whether a redone resize should name its flips again —
+which would take the receipt's revision re-recorded on redo — or whether the redo half goes.
+
+*(Ruled 2026-09-24 by the maintainer; built and tested the same day, uncommitted when recorded;
+**Resolved.** Recorded from the brief and a read of `session.rs`' `FlexReceipt`, `flex_receipt`,
+`growth_held`, `commit_inner`, `undo` and `redo`, and `layout.rs`' `item_rows` receipt and test; the
+flip as the test's doc records it. D616 amended with the defect this entry turned up, and
+`session.rs`' comment asserting the opposite corrected; `architecture.md` §5.3c and §9.4 amended)*
+
+**D881 — A hidden layer leaves the flow: ruled. *The maintainer's ruling, 2026-09-24 — ruling 2 of
+three, the session's recommendation accepted. Record-only.*** D875's (e) made a hidden layer leave
+its container's flow — CSS's `display: none` rather than `visibility: hidden`, the design-tool reading
+of an eye switched off, so hiding an item closes its row up — and filed it as *"the session's
+default, not a ruling"*, with *Revisit if the maintainer rules that the eye keeps the slot*. The Item
+card is what made it need a ruling: it says so in words, *"Hidden layers take no space in the
+layout"*, beside a *Show layer* button, and an unruled default is not a sentence to put in front of
+every user. The maintainer ruled for it. **No line of code changed**; `container::in_flow`'s doc says
+ruled and cites this number, which is where a reader meets the question. *(Ruled 2026-09-24;
+**Resolved.** D875's (e) amended; `architecture.md` §5.3c amended)*
+
+**D882 — An in-flow item's X and Y are inert. *The maintainer's ruling, 2026-09-24 — ruling 3 of
+three, the session's recommendation accepted. Built 2026-09-24, uncommitted when recorded; not
+tested.*** A consequence rather than a design. D877's second amendment keeps an in-flow item's stored
+translation at the commit door — `build::kept_flow_translations`, inside `keep_flex_sizes` — and
+drops a `SetTransform` left changing nothing, so a typed X on an item its container places would take
+the number and commit nothing. By the preview's rule — `flex_relayout` skips a layer the transaction
+drags with `SetTransform` — it would also be drawn where it was typed until the release, a promise the
+commit does not keep; that half is read, not measured. So `inspector_transform` disables the X/Y row
+for a layer `build::is_flex_item` answers for, drawn rather than hidden so the card does not jump, with
+*"Placed by its container's layout — drag it on the canvas to reorder"* on hover. The hover region is
+an explicit `ui.interact` beside the disabled scope, a widget inside one reporting no hover
+(`inspector::menu_action`'s shape). ⚠️ **Not done for the multi-selection Transform card**:
+`inspector_multi_transform`'s X and Y are live over a set holding in-flow items, whose translations the
+same door drops, so those members silently keep their slots while the rest move. *(Ruled 2026-09-24,
+built the same day; **Keep** for the single card, and the multi card is an open gap, recorded so the
+next reader does not take its live fields for a decision. No test pins the disabling. `architecture.md`
+§9.4 amended)*
+
+**D883 — `flex_reorder` reads `wrap-reverse`. *The session's; fixed and tested 2026-09-24,
+uncommitted when recorded.*** D877 read `wrap-reverse` as `wrap`, comparing lines top-down —
+*"a simplification the function's doc states, not CSS's reading, and nothing in the app builds such a
+container yet. Fix when a control can set it"*. The Container card's wrap control can. Under
+`wrap-reverse` CSS swaps cross-start and cross-end, so the first line is the one at the bottom of a
+row, or the right of a column, and a line further *down* comes first: `flex_reorder` compares a
+sibling on another line by cross centre in the reversed sense when `lines_reversed`. Main-axis order
+along a line is unchanged, `row-reverse` and `column-reverse` still reading it backwards. The canvas
+asks the same function (`flex_reorder_of`), so the preview's reorder and its landing outline follow.
+The Container card's pictures turn the same way (D878's item 4). **The evidence**, `tests/flex.rs ·
+wrap_reverse_reorders_with_its_lines_read_bottom_up`: a 200-wide row of four 60-wide rects wrapping
+two to a line, the first line at the bottom; `c`, on the upper line, dragged to the left of `a` lands
+at the front of the flow. Dropping the `lines_reversed` arm answers `Some(1)` — `d`, above, counted as
+an earlier line — on the predicted assertion. *(Fixed and tested 2026-09-24; **Resolved.** Recorded
+from the brief and a read of `build.rs`' `flex_reorder` and the test; the flip as its doc records it.
+D877 amended; `architecture.md` §5.3c amended)*
+
+**D884 — The cards' labels are CSS's names in sentence case: *Justify content*, *Flex start*. *The
+maintainer's ruling, 2026-09-26; three spellings the session's. Built 2026-09-26, uncommitted when
+recorded.*** D878 put CSS's spelling in the chrome as a stylesheet has it — `justify-content`,
+`flex-start`, `row-gap` — on D867's *"under CSS's names"*. Having lived with the cards, the maintainer
+ruled the spelling apart from the naming: keep CSS's names, *"upper case the first letter and remove
+hyphens"*. So `flex` reads *Flex*, `justify-content` *Justify content*, `row-gap` *Row gap*. **Sentence
+case, not title case** — the app's own convention for a card or a row, *Layout grid*, *Frame
+templates*, *Use as mask* — and nothing else changes, so each label is still a name a reader can look
+up. In `panels/layout.rs`: the `display` cells *None*, *Flex*, *Grid*; the values `justify_name`,
+`align_name` and `content_name` return (*Flex start*, *Flex end*, *Center*, *Space between*,
+*Stretch*, *Baseline* …); the dropdowns *Justify content*, *Align items*, *Align content* and *Align
+self*; the gap fields' units *Column gap* and *Row gap*; *Flex grow*, *Flex shrink*, *Flex basis* and
+the four limits, *Min width* to *Max height*; *Min / max*, *All auto* and *Needs wrap*; and an unset
+`align-self`'s row *Auto* and face *Auto · Stretch*.
+
+**The model, the save format and the snapshot keep CSS's identifiers**; only the chrome is dressed.
+That is what D867's *"under CSS's names"* still means for everything but a label — a file, the MCP
+snapshot and a future HTML/CSS export say `justify-content: flex-start` — and D878's *"every label is
+a CSS property's name"* now means the name and not its spelling.
+
+**Three spellings are the session's, not the ruling.** A unit in a field's suffix stays lower case, as
+`px` and `%` are and as the Position card's `auto` is — `SizeMode::word` gives *px*, *%*, *auto*, *fit
+content* — since a unit beside a number is not a label. The unit's menu lists `SizeMode::label`, *px*,
+*%*, *Auto*, *Fit content*, its two keywords being menu rows. And inside the receipt's sentence (D880)
+the names are lower-cased again: *"Resizing set flex grow to 0 and align self to flex start."*
+⚠️ **One spelling is CSS's against the app's own**: the value `center` reads *Center*, where the app's
+prose says *Centre* — the Position card's *"Centre in the container horizontally"* one card up. Kept,
+as CSS's name, which is the half of the ruling that stands. *A reader "correcting" it to British
+spelling would be renaming a CSS value, not fixing a typo.*
+
+*(Ruled 2026-09-26 by the maintainer, built the same day, uncommitted when recorded; **Resolved** for
+the ruling, **Keep** for the three spellings. No test pins a label. Recorded from the brief and a read
+of `layout.rs`' module doc, its names block and labels, `SizeMode::word` and `label`, and the receipt's
+sentence. D867, D878 and D880 amended; `architecture.md` §5.3c and §9.4 amended)*
+
+**D885 — Every number field in the Container and Item cards committed nothing: a scrub followed the
+pointer and snapped back on release. *Reported by the maintainer; the session's fix. Fixed and tested
+2026-09-26, uncommitted when recorded.*** Scrubbing or typing a gap or a padding *"moves the layer a
+bit, then resets to zero"*. Each field built its transaction only when `v != start` — the number moved
+*this frame* — and read that number through the preview (`display_node`), which it has to, or a scrub
+goes nowhere (§9.3). The two rules meet on the release frame: nothing moves, the field shows the value
+its own preview installed, so `OndinApp::edit_valve` was handed an empty transaction on the one frame
+it commits on, and then dropped the preview. Every field of that shape had it — both gaps, the padding
+pair and each side, flex grow and shrink, and every `layout::size_field`: the basis, the four limits,
+and the Transform card's W and H while their unit is `%` (`SizeEdit::typed`). **The Position card never
+had it**, because a pinned inset's field builds its edit unconditionally.
+
+**The fix is a latch, not an unconditional edit.** `layout::edited(resp, moved)` keeps a per-widget
+flag in egui temp data, set on the first frame the number moves and held through the frame the field's
+engagement — `dragged() || has_focus()` — ends, so it is still true on the valve's committing frame and
+false after. *The cards cannot build unconditionally, as the Position card does*: a click in and out of
+a field would then write the value it shows — a mixed selection's first value, or a keyword's resolved
+size — to every subject. A click in and out still writes nothing. One `data_mut` does the read and the
+write, since one inside another deadlocks.
+
+**Why nothing caught it**: session 35's tests (D878–D880) called the methods the fields call, and none
+drove a field, so the transaction a field builds on its last frame was never asked for. **The
+evidence**, `layout.rs · a_scrub_on_a_container_field_lands_as_one_undo_step`: the real card and the
+real valve under `RawInput`, the *Column gap*'s digits pressed, dragged 80 points in four steps and let
+go, then the left-and-right padding the same way — the gap going from 10 to over 15 as one undo step.
+**Flip run**: `edited` answering `moved` alone — the latch dropped, the code as it was — fails on *"the
+gap landed"* with the gap back at 10, the reported symptom at the predicted site. ⚠️ **Only the gap and
+the padding are driven.** Grow, shrink, the basis, the limits and a `%` W or H share `edited` and no
+test drives them.
+
+*(Fixed and tested 2026-09-26, uncommitted when recorded; **Resolved.** ⚠️ Not verified in the GUI.
+Recorded from the brief and a read of `layout.rs`' `edited`, its five call sites, `size_field` and the
+test; the flip as the test's doc records it. `architecture.md` §9.3 amended)*
+
+**D886 — The `display`, direction and wrap cells carry tooltips, and `grid`'s says why it cannot be
+picked. *The maintainer's ask; the widget and the texts the session's. Built 2026-09-26, uncommitted
+when recorded; not tested.*** The maintainer found the direction and wrap cells — pictures with no word
+beside them — hard to read without a tooltip, and reported *"I can't seem to click Grid"*: `grid` is
+step 4, a disabled cell (D878's item 2), and the cell said nothing about why. D878's item 8 had kept
+*no tooltips on segmented cells*, `ui::segmented` handing back an index and nothing else. **Reversed.**
+`ui::segmented_tipped` takes `tip: Fn(usize) -> &'static str`, one per cell, an empty string meaning
+none, and `segmented_enabled` is now its untipped form, delegating with `|_| ""`, so no existing caller
+changed. The texts are `layout.rs`' `DIRECTION_TIPS` (*"Row — items run left to right"* …),
+`WRAP_TIPS` and `DISPLAY_TIPS`, whose third reads *"Grid — not built yet (container layout's next
+step)"*.
+
+**It arrived the way D722 said it should.** D722 took the click sense off a disabled cell, having found
+that no caller could hang the tooltip the sense was kept for, and ended *"If the tooltip is ever wanted,
+the change is to hand `paint` the response — widening the signature is the honest way to offer it"*.
+The signature widened — by `tip`, rather than by handing `paint` the response — and the comment in
+`segmented_tipped` says so. **A disabled cell's hover-only sense now carries a tooltip**, which is the
+hover D722 kept the cell registered for. *Do not drop a disabled cell's `interact` as registering
+nothing*: `grid`'s explanation hangs from it.
+
+⚠️ **Not tested, by the harness's own limit**: a tooltip's ink never reaches `run_ui`'s shapes, so
+that the texts appear is read, not measured.
+
+*(Asked 2026-09-26 by the maintainer, built the same day, uncommitted when recorded; **Resolved**,
+reversing D878's item 8. Recorded from the brief and a read of `ui.rs`' `segmented_enabled` and
+`segmented_tipped` and `layout.rs`' three arrays. D722 and D878 amended; `architecture.md` §9.4
+amended)*
+
+**D887 — The Position card is offered to a child of a group with a layout, and `build::keep_insets`
+pins against that group's box. *Reported by the maintainer; the session's fix. Fixed and tested
+2026-09-26, uncommitted when recorded.*** *"The position panel shows on the items when the frame is
+flex, but not when a group is flex."* D871 decided insets apply *"in a box — a frame, or a group with
+`display`"*; D874 built frames only, the group half waiting on D869; and once D875 gave a laid group a
+box, `resolve::frame_box` placed a pinned child against it — in core, and in the preview's `relayout`
+(D869's amendment) — with nothing checking it and the card offering only a frame's children. Three
+places now read the rule D871 states: `inspector::inset_subjects` admits a layer whose parent is a
+`Group` with `display`; `inset_placement` measures it against `preview_frame(parent)`, the laid box
+through the preview; and `build::keep_insets` reads a laid group's `res.used_frame(parent)` where it
+read an `Artboard`'s size alone.
+
+🚨 **The last was a live defect, not only a missing card.** `keep_insets` was frame-only while the
+placement was not, so a tool moving a pinned child of a laid group left its insets as they were, and on
+release the child **snapped back** to where they put it. Reachable before today only through a
+document that already carried such a pin.
+
+⚠️ **The box `keep_insets` pins against is the committed one.** A frame the same edit resizes hands
+its children its new size, read off the transaction; a laid group's box is `Resolved`'s, from before
+the edit, so an edit that re-lays the group and moves a pinned child at once pins against the size the
+group had. The Scale tool on a laid group is such an edit — `tools::scaled_flex` re-sizes the group and
+moves its children in one transaction — and **what it does to a pinned child is unmeasured**; open in
+`roadmap.md`.
+
+⚠️ **Noticed, not changed and not measured**: pinning an in-flow item of a *hugging* container takes it
+out of the flow, the container re-lays without it and shrinks, and so *"a pin never moves anything"*
+can fail there — for a laid group that hugs and for a `fit-content` frame alike. An open question, in
+`roadmap.md`, not a finding.
+
+**The evidence.** Core, `tests/flex.rs ·
+a_pinned_child_of_a_flex_group_is_placed_against_its_box_and_re_pinned_when_moved`: a group padded 20
+round one 60 × 30 item, 100 × 70; a 40 × 30 rect pinned right 0 and bottom 0, drawn at (110, 90); a
+move to (10, 10) inside the box commits right 50, bottom 30. **Flip run**, `keep_insets`' group arm
+deleted: fails on *"it stays where the move put it"*, the rect back at (110, 90), the predicted site —
+the first two assertions green, `resolve` never having been frame-only. App, `inspector.rs ·
+inset_card_tests · a_laid_groups_child_gets_the_card_and_pins_against_the_groups_box`: the same shape
+of group, a rect pinned right 0 at stored y 15 drawn at (110, 65)–(150, 95), offered the card, its top
+pinned from the diagram at 15 without moving. **Two flips, both at their predicted sites**:
+`inset_subjects`' group arm deleted fails the first assertion, the subjects empty; `inset_placement`'s
+deleted commits nothing and fails *"the top is pinned where it is"*, `None`. The neighbouring
+`the_card_is_offered_to_a_frames_own_layers_only` kept its name, and its doc now says *"only"* is
+narrower than the rule since this entry. ⚠️ **The preview's half is still unchecked**: no test places
+a pinned child of a laid group through `RenderOverrides::relayout`.
+
+*(Reported 2026-09-26 by the maintainer, fixed and tested the same day, uncommitted when recorded;
+**Resolved**, the Scale tool's case and the hugging container open. ⚠️ Not verified in the GUI.
+Recorded from the brief and a read of `inspector.rs`' `inset_subjects`, `inset_placement` and both
+tests, `build.rs`' `keep_insets`, `resolve.rs`' `frame_box` and `tests/flex.rs`' test; flips as the
+tests' docs record them. D869, D871 and D874 amended; `architecture.md` §5.3c and §9.4 amended;
+`roadmap.md`'s *owed* item narrowed to the preview's half)*
+
+**D888 — The pin diagram is a square with heavier strokes, and the centre buttons sit at the end of
+their axis's fields. *The maintainer's ask; the placement the session's. Built 2026-09-26, uncommitted
+when recorded; not measured and not seen on screen.*** *"It's showing quite wide now. It would be ideal
+to have it shown as a square and slightly thicker lines."* D874's card drew the diagram as wide as the
+card less the centre buttons beside it — by the code's own account a frame three times as wide as it
+was tall, reading as a strip. Now its side is `INSET_DIAGRAM_SIDE`, `3 × ui::CONTROL_H + 2 ×
+ui::CARD_ROW_GAP` — 102 pt at today's 28 and 9, three field rows and the gaps between them, so it sits
+in the card's rhythm rather than at a size of its own — centred on a row of its own. The inner frame is
+inset 8 (was 7) and the layer is 36% of it each way (was 34% × 40%); every stroke is 1.5 (was 1.0) and
+a pinned strut 2.5 (was 2.0).
+
+**The session's calls, not the maintainer's**: where the square sits, and where the two `margin: auto`
+buttons went, since the square's row leaves no column beside it — each to the end of its own axis's
+fields, the horizontal one after L and R and the vertical one after T and B, the fields now `(full −
+CONTROL_H − 2 · gap) / 2` wide. Their tooltips say *"Centre in the container …"* where they said
+*frame*, a container being either since D887. ⚠️ **Not measured and not seen**: no probe measured the
+card's rows at any width, and nobody has looked at it on screen.
+
+*(Asked 2026-09-26 by the maintainer, built the same day, uncommitted when recorded; **Keep**, the
+placement revisitable. The old figures are the brief's. Recorded from the brief and a read of
+`inspector.rs`' `inspector_insets`, `INSET_DIAGRAM_SIDE` and `inset_diagram` and `ui.rs`' two
+constants. D874 amended; `architecture.md` §9.4 amended)* ***Superseded in part the next day, by
+D890*** — it lasted one session. The maintainer looked at the square and asked for the mockup's card
+instead: the square, its container outline, its row of its own, the 1.5 and 2.5 strokes and the
+buttons at the row ends are all gone, and `INSET_DIAGRAM_SIDE` with them. What survives is the centre
+buttons' tooltips saying *container* where they said *frame*.
+
+**D890 — The Position card is laid out as the mockup's screen 07: the diagram at the left spanning
+two field rows, `auto` in an unpinned field's digits, and an *Absolute* badge in the header. *The
+maintainer's ask; the placements the mockup's, the colours, one height and one omission the session's.
+Built and tested 2026-09-27, uncommitted when recorded; not seen on screen.*** D888's square lasted
+one session. Shown it, the maintainer asked *"can we try it like the design's? It's more compact,
+flows well with the aesthetic of the app, and the graphic itself with only the side lines without the
+container rectangle looks better."* The design is `design/Layout Cards.dc.html`, the screen labelled
+*"07 Out of flow"*, and the card now follows it.
+
+**The layout.** The diagram sits at the left, `INSET_DIAGRAM_W` wide — 74, the mockup's first grid
+column — and `2 × ui::CONTROL_H + ui::CARD_ROW_GAP` tall, 65 at today's 28 and 9: two field rows and
+the gap between them, so the diagram's top and bottom are the fields'. ⚠️ **The mockup draws it 67
+tall**; the app's is sized to the rows it spans rather than copied. Beside it, L and R over T and B,
+each field `(full − INSET_DIAGRAM_W − 2 · gap) / 2`, and underneath, the two `margin: auto` centre
+buttons share a row, half the width each (`ui::field_button_sized`). Measured by a probe at the
+inspector's 284 column: the diagram 74 × 65, the fields 83 × 28 with the top row's top and the bottom
+row's bottom on the diagram's, the buttons 123.5 wide.
+
+**The diagram has no container outline** — the struts alone say where the container is, which is the
+half of the ask the maintainer named. A well in the field's own ground — `FIELD`, a `FIELD_BORDER`
+hairline, a 5-pt corner — holds the layer, a 28 × 20 box at its centre, accent at 14% under a 70% edge
+while any inset is authored and text at 5% under 25% while none is. Each strut is 2 wide, running from
+6 in from the well's edge to 3 short of the layer's: solid `ACCENT_300` where the edge is pinned,
+dashed text at 25% where it is not, brightening under the pointer, and dashed in the accent where it is
+pinned between two auto margins, the centring the buttons switch — ***solid in the measure red since
+D891***, the dashed accent having read as the unpinned struts. Each strut's hit band reaches from
+the well's edge to the layer's and 5 pt either side of the strut, so the target is still the gap and
+not a two-point line, as D874 had it.
+
+**The fields.** A pinned inset shows its number and its unit, `px` or `%`, the unit clickable to
+convert as before, and carries the mockup's accent edge — accent at 9% and a 55% hairline, painted
+**over** the field after it is drawn, the field's ground being opaque. 🚨 **An unpinned inset reads
+`auto` where its number would be, and this reverses D874's convention** — the edge's current distance
+beside an inert `auto` unit. The distance is still the field's value, formatted as the word, so a
+scrub starts from where the edge is rather than from zero; hover says *"Not pinned — type a value,
+drag, or click the diagram to pin"*. *Do not "simplify" an unpinned field's value to zero because the
+word hides it*: the distance underneath is what a scrub starts from, and what `inset_field`'s
+click-through guard compares against — its edit is empty while the value still equals the distance, so
+a click in and out still pins nothing. ***Except, since D891, a top or left held by default*** outside
+a layout, which shows its distance and no unit.
+
+⚠️ **That leaves two conventions in the inspector, and which wins is not decided.** D878's item 6 gave
+the Item card's and the Transform card's sizing fields a keyword's resolved number beside the keyword
+unit, citing this card's convention as its precedent and arguing that *"a keyword in the digits'
+place is a number nobody can scrub"*. This card now puts a keyword in the digits' place and scrubs it,
+so the precedent is gone and the argument does not hold of this widget; `layout::size_field` still
+shows the number. Recorded on `size_field`'s doc and in `roadmap.md`'s open decisions for container
+layout, and not changed here.
+
+**The header badge.** *Absolute* — sentence case, D884's rule, where the mockup writes *absolute* —
+shows while the anchor has any authored inset and the selection is not pinned differently, the state
+the Item card calls *Absolutely positioned*; over a mixed selection the card's own line says so
+instead. `ui::section_head_badged` is `section_head` with an optional badge at the right-hand end, left
+of the action icon, and `section_head` now delegates with `badge: None`; the private `ui::head_badge`
+draws it — 18 pt tall, accent at 18% under 10-pt `ACCENT_100` text, 6 pt either side, a 4-pt corner —
+and it is inert, the row still toggling through it. `OndinApp::panel_badged` is `panel` with a badge,
+and `panel` delegates. **D878's item 7 kept *no header badges* on the Container and Item cards because
+`panel` had no slot for one**; the Position card now has one and those two still have none, so that
+item's reason no longer holds and nothing has been decided about them. ***Narrowed the same day***
+(D891): the badge shows only inside a container with a layout — in a plain frame every child is
+absolute, and the maintainer found the badge pointless there.
+
+**The session's calls, not ruled.** The mockup's caret on the unit, `px` with a chevron after it, is
+not drawn: `ui::Suffix` has no chevron, and the unit converts on a click as it did. And the mockup's
+colours are mapped to the theme's constants — the well the field's `FIELD` ground where the mockup
+fills it with text at 5%, the pinned strut `ACCENT_300`, the badge's word `ACCENT_100`. The diagram's
+65 against the mockup's 67, above, is the session's too.
+
+**The evidence**, `inspector.rs · inset_card_tests · the_card_is_laid_out_as_the_mockup`: the fixture's
+rect pinned on the right, the card drawn at 284 and measured off its painted shapes — a `FIELD` ground
+74 wide, four 28-tall grounds beside it whose top and bottom are the well's, *auto* three times, `160`
+and `px` once each (300 − 40 − 100), and the badge. **Flip run**: the `auto` formatter off, an unpinned
+field showing its distance as before this entry, fails on *"the three unpinned edges"*, 0 against 3,
+the predicted site. ***The test changed the same day with D891***: *auto* twice, the held top's `30`
+once, and no badge in the plain frame; the same flip now fails on *"left and bottom, unpinned"*, 0
+against 2.
+
+*(Asked 2026-09-27 by the maintainer, built and tested the same day, uncommitted when recorded;
+**Keep** — the maintainer's ask, the placements the mockup's. ⚠️ **Not verified in the GUI**; the
+gates are the brief's (fmt, `cargo test --workspace`, clippy `--workspace` and `-p ondin-app`, `check
+--release`, the doc gate), and so are the probe's figures and the flip. Recorded from the brief and a
+read of `inspector.rs`' `inspector_insets`, `inset_field`, `INSET_DIAGRAM_W`, `inset_diagram`,
+`panel_badged` and the test, `ui.rs`' `section_head_badged` and `head_badge`, `layout.rs`'
+`size_field`, and the mockup's screen 07 for its 74 × 67 and its well's fill. Supersedes D888 in
+part; D874, D878 and D888 amended; `architecture.md` §9.4 amended; `roadmap.md`'s step 3 marker and
+its open decisions amended)* ***Amended the same day by D891***: the badge only inside a container
+with a layout, a plain frame's top and left shown as held, a centred axis solid in the measure red.
+
+**D891 — The Position card's *Absolute* badge shows only inside a container with a layout, a plain
+frame's top and left are drawn as held by default, and a centred axis is solid in the measure red.
+*The maintainer's three asks after seeing D890; the held display the session's reading of the second.
+Built and tested 2026-09-27, uncommitted when recorded; not seen on screen.*** Three refinements to
+`inspector_insets`, `inset_field` and `inset_diagram`, each answering a sentence of the maintainer's.
+
+**The badge shows only where it tells something.** *"Make the Absolute pill show up only when the
+container is an actual flex/grid. Otherwise it's pointless since everything is absolute."* D890 drew
+it whenever the anchor had an authored inset and the selection was not pinned differently; it is now
+`laid && !mixed && insets.is_authored()`, `laid` being whether the anchor's parent has a `display`.
+Inside a layout a pin is what takes the layer out of the flow — the state the Item card calls
+*Absolutely positioned* (D889). In a plain frame every child is placed as `position: absolute` places
+it, pinned or not, so the chip named the frame's state and not the layer's. ⚠️ **`laid` is read off
+the anchor's parent alone**: a selection spanning a plain frame and a laid container is badged, and
+held (below), as its anchor is. Noticed, not changed.
+
+**Top and left are shown as held outside a layout, without an inset being written.** The maintainer
+asked whether a layer should be pinned top and left by default, *"since that's the default pinning
+(or isn't it?) … Once it's in a flex container, the pinning resets. If top/left isn't the default,
+then leave it as is."* It is the default. D871: *"A child with no authored insets keeps its stored
+position — the implicit left/top — so every existing document is unchanged, and resizing a frame still
+leaves its children pinned top-left as it does today."* A frame resize from any handle goes through
+`tools::resize_to_handle`, which edits the frame's geometry and, from a left or top handle, its own
+transform, never its children's — so an unpinned child keeps its offset from the frame's top-left
+exactly as a left or top inset at that distance would. The card now says so: `held` is `(!laid &&
+left and right both None, !laid && top and bottom both None)`. A held strut is drawn solid
+`ACCENT_300`, as a pin is; its field shows the distance — no unit, and no accent edge, since nothing
+is authored and the accent edge is what says a pin was set — with a tooltip saying it is held by
+default; and the layer box is accent while anything is pinned or held. Clicking a held strut pins it
+for real, at the distance it is at; pinning the opposite edge, right or bottom, ends the default on
+that axis, which then reads as any unpinned axis does.
+
+**Why a display and not an authored top and left**, which was the literal reading of the ask: the two
+diverge the day the container gets a layout. An authored inset takes a child out of the flow
+(`container::in_flow` refuses any layer whose insets are authored), and an unpinned child joins it —
+so writing top and left would pull every such child out of the flow when its frame was given a
+`display`. The held display is what *"the pinning resets"* describes, arriving the right way round:
+`held` is false wherever `laid` is true, and the default simply stops applying. *Do not "simplify" the
+held display into a real inset because the two look the same in a plain frame* — they are the same
+there and nowhere else.
+
+⚠️ **Held and pinned are not proven identical everywhere.** Under the Scale tool an unpinned child's
+transform is scaled with its frame, while a pinned child's insets are rewritten by `build::keep_insets`
+to draw it where the tool put it — against the frame's size after the edit, *"the Scale tool's case"*
+in `keep_insets`' own doc. By that reading the two land alike, and no test says they do. D887's
+unmeasured case is the neighbouring one — a pinned child of a *laid* group, re-pinned against the
+group's committed box — where nothing is ever held. The held display says nothing new about either.
+
+**A centred axis is solid, in the measure red.** The centred struts were *"a bit too close to the
+'off' lines … make the lines solid and a red color. Same red color we use for the distance
+markers."* D890 drew a strut pinned between two auto margins dashed in `ACCENT_300`, beside unpinned
+struts dashed in faint text; it is now solid `theme::color::MEASURE`, `#f26d6d`, the red of the
+canvas's distance markers (`measure.rs`, D198/D200). ⚠️ **What it costs is a claim the constant's own
+doc makes**: `MEASURE` is argued there as the third chrome hue, the one meaning *a labelled distance on
+the canvas* whether reported or created. This is its one use outside the canvas, and a ⚠️ paragraph on
+the constant records it. That paragraph also calls a centred axis *"a measurement's meaning as much as
+a pin's"*; that reading is the session's — the maintainer's reason was only that it stand apart from
+the unpinned struts.
+
+**The evidence**, `inspector.rs · inset_card_tests`. `the_card_is_laid_out_as_the_mockup`, in a plain
+frame with the right pinned, asserts `auto` twice (left and bottom), the top's held distance `30` once,
+`160` and `px` once each, and **no** badge; `a_laid_groups_child_gets_the_card_and_pins_against_the_groups_box`
+now asserts the *Absolute* badge is drawn. **Three flip runs.** The badge's `laid` dropped fails on
+*"no badge in a plain frame"*, 1 against 0, the predicted site. The top never held fails on *"left and
+bottom, unpinned"*, 3 against 2 — **one assertion earlier than the *"held by default"* line it was
+predicted to fail on**, since the top reads `auto` again before its `30` is counted. The `auto`
+formatter off fails on the same line, 0 against 2 — D890's flip, recorded there as 0 against 3 before
+the top was held. ⚠️ **Neither the red strut nor a held strut is asserted by any test**: painted
+colours are not checked, so a centred strut drawn dashed accent again, or a held one drawn dashed,
+passes the suite.
+
+*(Asked 2026-09-27 by the maintainer, built and tested the same day, uncommitted when recorded;
+**Keep** — the maintainer's asks, the held display the session's reading of the second. ⚠️ **Not
+verified in the GUI**; the gates are the brief's (fmt, `cargo test --workspace`, clippy `-p ondin-app
+--all-targets`, the doc gate, `check --release`), and so are the flips, and so is `design-oracle`'s
+check of D871 against the code. Recorded from the brief and a read of `inspector.rs`'
+`inspector_insets`, `inset_field`, `inset_diagram` and both tests, `theme.rs`' `MEASURE`,
+`tools::resize_to_handle`'s doc, `container::in_flow` and `build::keep_insets`' doc. D871, D874 and
+D890 amended; `architecture.md` §5.3c and §9.4 amended; `roadmap.md`'s step 3 marker amended)*
+
+**Confirmed by the maintainer, 2026-09-27** — *"Confirmed."*, in reply to this entry's report, which
+set out all three changes, the held display's reasoning (shown and not written, so a layout makes it
+stop applying) and the offer of a quieter colour for a held strut. **So the held display is ruled, no
+longer the session's reading, and the solid accent for a held strut stands.** ⚠️ The reply is one
+word and names no screen: it confirms the behaviour as reported, and is not recorded here as a look
+at the GUI. The Scale-tool equivalence and a mixed selection's anchor-only `laid` stay as the
+entry states them.
+
+**D889 — The Item card's out-of-flow block says it in words: *Absolutely positioned*, and what that
+does to the layout. *The maintainer's ask; the wording the session's. Built and tested 2026-09-26,
+uncommitted when recorded.*** D878's item 11 titled a pinned layer's block with the CSS — *position:
+absolute* — and put under it *"The right inset is pinned in Position, so the layout skips this
+layer"*, over a button reading *Unpin insets*. The maintainer asked for *Absolutely positioned* in
+place of the declaration, and said the sentence did not make sense to them: it named an inset and a
+card, jargon about jargon, where what a reader needs is what holds the layer and what the layout does
+about it. The title is now *Absolutely positioned* — still CSS's own phrase for such a box, only not its
+syntax; the body is `layout::pinned_edges` and *", so it sits outside the layout."*, as in *"Pinned to
+its container's right and bottom edges, so it sits outside the layout."*; and the button reads *Unpin
+and return to the layout*, doing what *Unpin insets* did. The *Hidden* and *Mask* blocks are unchanged.
+`pinned_edges` names the pinned edges top, right, bottom, left, and reads *"Pinned inside its
+container"* with none. **The evidence**: `the_way_back_into_the_flow_puts_a_layer_at_its_own_place`
+asserts the new string for a right-and-bottom pin. *(Asked 2026-09-26 by the maintainer, built the same
+day, uncommitted when recorded; **Keep**. Recorded from the brief and a read of `layout.rs`'
+`out_of_flow_block`, `pinned_edges` and the test. D878 amended; `architecture.md` §9.4 amended)*
 
 **D386 — The chrome's hairline was resolved against the wrong ground, and its rhythm was seven
 numbers. *Fixed and tested 2026-08-29; the outline is reviewed and accepted.*** Two audits in one
@@ -27398,7 +28105,11 @@ claimed, so the cell still reports hover for the ground and for any future toolt
 neither focus nor click. ⚠️ **Still registered rather than not sensed at all**, because dropping the
 `interact` would take the hover the ground is drawn from with it. If the tooltip is ever wanted, the
 change is to hand `paint` the response — **widening the signature is the honest way to offer it, and
-a sense nobody can read is not.**
+a sense nobody can read is not.** ***Wanted 2026-09-26, and it came that way*** (D886): the signature
+widened by a `tip` per cell rather than by handing `paint` the response — `ui::segmented_tipped`, of
+which `segmented_enabled` is now the untipped form — and the Container card's disabled `grid` cell
+hangs its reason from the hover this entry kept. *"No caller can carry that tooltip"* stays true of
+`segmented_enabled`'s own signature and nothing else.
 
 ⚠️ **The bargain the doc describes is otherwise unchanged and is cited elsewhere correctly.** §9.4
 records it at §15 D134 — a slot that cannot hold a gradient keeps its tabs rather than losing them —
@@ -34145,6 +34856,30 @@ and the prediction quietly read them as absolute. **The second assertion is not 
 the whole invalidation rule, asserted.**
 
 §9.4 amended.
+
+🚨 **Amended 2026-09-24: *"which undo and redo also go through"* is false, so the two doors this entry
+named as covered are the two that break its rule.** Found recording D880, whose receipt has to read
+`History::undo_depth` precisely because an undo leaves the revision where it was.
+`EditorSession::undo` and `redo` call `History::undo`/`redo` and `Resolved::update` directly and never
+reach `commit_inner`, so an undo or a redo moves the document — frames included — with `revision`
+unmoved. `commit_inner`'s own comment said the same thing — *"an undo is a commit too, through the
+same door"* — and is corrected. Whether the sentence was ever true was not checked. Every reader keyed
+on the counter is therefore stale after an undo or a redo until the next commit — **read, not
+measured**, each of them:
+
+- **This memo**: `frame_covering` and the drop rule answer from frames an undo has moved, removed or
+  put back.
+- **The Export panel's preview** (§7), which keys its render on the revision, goes on showing the
+  pre-undo picture.
+- **`recovery_tick`'s third gate** skips the snapshot over a document an undo changed, if the last
+  snapshot was taken at the same revision, so a crash then restores the pre-undo document.
+- 🚨 **`finish_save`**, which compares `revision == at`: an undo landing while a save is in flight
+  marks the session clean over a file holding the pre-undo document, and with `dirty` false nothing
+  gated on it writes the file again.
+
+***Fix*** — reported to the maintainer rather than repaired in the change that found it. ⚠️ **The
+obvious repair, bumping the revision in `undo` and `redo`, also ends D880's receipt on redo**, and that
+entry's test fails on it by design; decide the receipt's redo when this is fixed, not after.
 
 **D615 — A shadow's spread is bounded by the buffer it runs in.
 *Fixed and tested 2026-09-09; Fix — `effects::spread_steps`, one helper both backends count to.***

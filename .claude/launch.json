@@ -6,6 +6,12 @@
       "runtimeExecutable": "python",
       "runtimeArgs": ["-m", "http.server", "8731", "--directory", "target/probe"],
       "port": 8731
+    },
+    {
+      "name": "design-static",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8732", "--directory", "design"],
+      "port": 8732
     }
   ]
 }

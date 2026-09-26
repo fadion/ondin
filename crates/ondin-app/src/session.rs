@@ -392,6 +392,21 @@ impl<'a> DisplayNode<'a> {
             .and_then(|o| o.insets)
             .unwrap_or_else(|| *self.node.insets())
     }
+    /// The layer's layout as a container (§15 D869), a live Container-card scrub's
+    /// included — [`Self::insets`]' rule, so a gap or a padding being dragged reads
+    /// the value it is dragging (§15 D878).
+    pub fn display(&self) -> Option<ondin_core::container::Display> {
+        self.over
+            .and_then(|o| o.display)
+            .unwrap_or_else(|| self.node.display().copied())
+    }
+    /// The layer's flex-item properties (§15 D875), a live Item-card scrub's
+    /// included — [`Self::insets`]' rule again.
+    pub fn item(&self) -> ondin_core::container::FlexItem {
+        self.over
+            .and_then(|o| o.item)
+            .unwrap_or_else(|| *self.node.item())
+    }
     /// The layer's effect stack (§5.3a).
     ///
     /// **With an override behind it, unlike `clip` and `proportions_locked`
@@ -509,7 +524,38 @@ pub struct EditorSession {
     /// (§7): rendering a layer is far too expensive to do per frame and exactly
     /// cheap enough to do per edit.
     revision: u64,
+    /// What the last commit's resize did to flex items' growth — see
+    /// [`FlexReceipt`] and [`Self::flex_receipt`], which is the only reader.
+    flex_receipt: Option<FlexReceipt>,
     status: Status,
+}
+
+/// **The flex-item properties a resize changed on the user's behalf** — the
+/// Item card's receipt (§15 D880).
+///
+/// A resize of an in-flow item writes `flex-grow: 0`, `flex-shrink: 0` and, on a
+/// stretched cross axis, `align-self: flex-start` (`build::keep_flex_sizes`, §15
+/// D875), none of which the user typed. The card names them and offers Undo.
+///
+/// **Its Undo is the whole step, never the flips alone.** The flips are what make
+/// the resize hold, so undoing them and keeping the size would hand the space back
+/// and the drag would snap — and they are one transaction with it anyway. So the
+/// receipt is only true while that step is the top of the history: it records the
+/// revision and the undo depth straight after the commit, and
+/// [`EditorSession::flex_receipt`] answers `None` the moment either moves — the
+/// next commit, an undo, a merged run. Selection is not part of it: selecting
+/// something else and coming back finds the step still on top, and Undo still
+/// undoes exactly it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FlexReceipt {
+    /// Each item the commit changed, with its properties before and after.
+    pub held: Vec<(
+        NodeId,
+        ondin_core::container::FlexItem,
+        ondin_core::container::FlexItem,
+    )>,
+    revision: u64,
+    depth: usize,
 }
 
 impl Default for EditorSession {
@@ -545,6 +591,7 @@ impl EditorSession {
             run: None,
             saved_at,
             revision: 0,
+            flex_receipt: None,
             status: Status::default(),
         }
     }
@@ -552,6 +599,14 @@ impl EditorSession {
     /// How many commits this session has seen — see the field.
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// The last resize's [`FlexReceipt`], while its step is still the top of the
+    /// history — `None` once anything has been committed or undone since.
+    pub fn flex_receipt(&self) -> Option<&FlexReceipt> {
+        self.flex_receipt
+            .as_ref()
+            .filter(|r| r.revision == self.revision && r.depth == self.history.undo_depth())
     }
 
     // --- rendering inputs -------------------------------------------------
@@ -1044,9 +1099,19 @@ impl EditorSession {
         // conversion is also what recognises a pinned layer written back to where
         // it is already drawn as changing nothing.
         let tx = ondin_core::build::keep_insets(&self.doc, &self.resolved, tx);
+        // The items this edit sets itself, so the receipt below names only what
+        // `keep_flex_sizes` added on the user's behalf.
+        let asked: Vec<NodeId> =
+            tx.0.iter()
+                .filter_map(|op| match op {
+                    Operation::SetFlexItem { id, .. } => Some(*id),
+                    _ => None,
+                })
+                .collect();
         // And a resized flex item keeps the size it was dragged to (§15 D875), and
         // an in-flow item its stored translation (§15 D877).
         let tx = ondin_core::build::keep_flex_sizes(&self.doc, &self.resolved, tx);
+        let held = self.growth_held(&tx, &asked);
         // And either can empty a transaction outright — `keep_insets` one pinned
         // layer written back where it already is, `keep_flex_sizes` a translation
         // alone on an in-flow item — which the test above has already let through
@@ -1118,9 +1183,23 @@ impl EditorSession {
         // **A counter, not a hash of the document.** Anything that caches a
         // *rendering* of the document needs to know when it has gone stale, and
         // the only cheap answer is "something was committed since". Here rather
-        // than at the call sites for [`Self::dirty`]'s reason — an undo is a
-        // commit too, through the same door, so nothing has to remember.
+        // than at the call sites, so no commit has to remember.
+        //
+        // 🚨 **Undo and redo do not come through this door and do not bump it.**
+        // This comment said *"an undo is a commit too, through the same door"*;
+        // `undo` and `redo` update the document directly, so every cache keyed on
+        // the revision — `FrameIndex`, the Export preview, the recovery gate,
+        // `finish_save` — is stale after one until the next commit. A defect,
+        // reported and not yet repaired (§15 D616's amendment); the receipt below
+        // reads the undo depth beside it for exactly this reason (§15 D880).
         self.revision = self.revision.wrapping_add(1);
+        // Recorded after the bump, so the receipt names this revision; a run's
+        // merged commit has no single step to undo and leaves none.
+        self.flex_receipt = (!held.is_empty() && !run).then(|| FlexReceipt {
+            held,
+            revision: self.revision,
+            depth: self.history.undo_depth(),
+        });
         // **A commit makes any preview stale by definition**, so it goes here
         // rather than at the call sites that remembered to.
         //
@@ -1148,6 +1227,34 @@ impl EditorSession {
         // time from the other direction.
         self.clear_gesture_preview();
         Ok(())
+    }
+
+    /// The items whose growth `tx` stops that the edit did not set itself —
+    /// [`FlexReceipt::held`], read off the transaction `keep_flex_sizes` handed
+    /// back, before it is applied. Only `flex-grow`, `flex-shrink` and
+    /// `align-self` count: a size keyword going back to `auto` is the resize
+    /// itself, shown in the Transform card's W and H (§15 D879).
+    fn growth_held(
+        &self,
+        tx: &Transaction,
+        asked: &[NodeId],
+    ) -> Vec<(
+        NodeId,
+        ondin_core::container::FlexItem,
+        ondin_core::container::FlexItem,
+    )> {
+        tx.0.iter()
+            .filter_map(|op| match op {
+                Operation::SetFlexItem { id, item } if !asked.contains(id) => {
+                    let was = *self.doc.get(*id)?.item();
+                    (was.grow != item.grow
+                        || was.shrink != item.shrink
+                        || was.align_self != item.align_self)
+                        .then_some((*id, was, *item))
+                }
+                _ => None,
+            })
+            .collect()
     }
 
     /// Take the last transaction back. **Answers whether the document actually

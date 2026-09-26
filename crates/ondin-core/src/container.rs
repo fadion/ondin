@@ -702,7 +702,8 @@ pub fn is_container(kind: &NodeKind) -> bool {
 /// taken out by insets (which place it absolutely, `position: absolute`'s
 /// reading, §15 D874). **A hidden layer leaves the flow** — CSS's `display: none`
 /// rather than `visibility: hidden`, the design-tool reading of an eye switched
-/// off, and the session's default rather than a ruling (§15 D875).
+/// off: the session's default in §15 D875, **ruled by the maintainer in §15
+/// D881**, when the Item card came to say so in words.
 pub fn in_flow(view: &dyn LayoutView, id: crate::NodeId) -> bool {
     view.visible(id) && !view.mask(id) && !view.insets(id).is_authored()
 }

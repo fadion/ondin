@@ -833,6 +833,21 @@ pub fn section_head(
     action: Option<HeadAction>,
     sense: bool,
 ) -> HeadClicks {
+    section_head_badged(ui, label, open, action, None, sense)
+}
+
+/// [`section_head`] with an optional **badge** at the right-hand end, left of the
+/// action icon if there is one — a small accent chip naming a state the card is
+/// in, the mockup's *absolute* on the Position card (`design/Layout Cards.dc.html`,
+/// screen 07; §15 D890). Inert: the row still toggles through it.
+pub fn section_head_badged(
+    ui: &mut egui::Ui,
+    label: &str,
+    open: bool,
+    action: Option<HeadAction>,
+    badge: Option<&str>,
+    sense: bool,
+) -> HeadClicks {
     let mut clicks = HeadClicks::default();
     let row = ui
         .horizontal(|ui| {
@@ -852,29 +867,35 @@ pub fn section_head(
                 ui.label(eyebrow(label));
             });
 
-            if let Some(a) = action {
+            if action.is_some() || badge.is_some() {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    // Rightwards the pad runs all the way out to the card's edge:
-                    // the icon already sits against the content margin, so that
-                    // band is the card's own padding and nothing else wants it.
-                    let pad = egui::Margin {
-                        left: HEAD_ACTION_PAD as i8,
-                        right: CARD_MARGIN_X as i8,
-                        top: HEAD_ACTION_PAD as i8,
-                        bottom: HEAD_ACTION_PAD as i8,
-                    };
-                    clicks.acted = icon_button_padded(
-                        ui,
-                        a.glyph,
-                        egui::Vec2::splat(HEAD_ACTION_W),
-                        15.0,
-                        a.active,
-                        a.enabled,
-                        pad,
-                    )
-                    .on_hover_text(a.tooltip)
-                    .clicked()
-                        && a.enabled;
+                    if let Some(a) = action {
+                        // Rightwards the pad runs all the way out to the card's
+                        // edge: the icon already sits against the content margin,
+                        // so that band is the card's own padding and nothing else
+                        // wants it.
+                        let pad = egui::Margin {
+                            left: HEAD_ACTION_PAD as i8,
+                            right: CARD_MARGIN_X as i8,
+                            top: HEAD_ACTION_PAD as i8,
+                            bottom: HEAD_ACTION_PAD as i8,
+                        };
+                        clicks.acted = icon_button_padded(
+                            ui,
+                            a.glyph,
+                            egui::Vec2::splat(HEAD_ACTION_W),
+                            15.0,
+                            a.active,
+                            a.enabled,
+                            pad,
+                        )
+                        .on_hover_text(a.tooltip)
+                        .clicked()
+                            && a.enabled;
+                    }
+                    if let Some(word) = badge {
+                        head_badge(ui, word);
+                    }
                 });
             }
         })
@@ -899,6 +920,27 @@ pub fn section_head(
         clicks.toggled = head.clicked();
     }
     clicks
+}
+
+/// A [`section_head_badged`] badge: an 18-pt accent chip, the mockup's — accent
+/// 18% under 10-pt accent-100 text, 6 pt either side, a 4-pt corner.
+fn head_badge(ui: &mut egui::Ui, word: &str) {
+    let galley = ui.painter().layout_no_wrap(
+        word.to_owned(),
+        egui::FontId::proportional(10.0),
+        color::ACCENT_100,
+    );
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(galley.size().x + 12.0, 18.0),
+        egui::Sense::hover(),
+    );
+    ui.painter()
+        .rect_filled(rect, 4.0, color::ACCENT.gamma_multiply(0.18));
+    ui.painter().galley(
+        rect.center() - galley.size() / 2.0,
+        galley,
+        color::ACCENT_100,
+    );
 }
 
 /// Horizontal inset between a [`field_frame`]'s hairline and its contents.
@@ -1387,6 +1429,11 @@ pub enum Prefix {
     Text(&'static str),
     /// A Phosphor glyph.
     Icon(&'static str),
+    /// A CSS property's name — `flex-grow`, `min-width` — at the unit's size
+    /// rather than [`PREFIX_PT`]: a label a whole word long, which at the size of
+    /// `X` would take the field's width from the number it names (the layout cards,
+    /// §15 D878).
+    Label(&'static str),
 }
 
 /// Type size of a [`Prefix::Text`].
@@ -1435,6 +1482,9 @@ impl Prefix {
                 .size(PREFIX_PT)
                 .color(theme::text::FAINT),
             Prefix::Icon(g) => theme::icon_text(g, PREFIX_ICON_PT, theme::text::FAINT),
+            Prefix::Label(t) => egui::RichText::new(t)
+                .size(SUFFIX_PT)
+                .color(theme::text::FAINT),
         }
     }
 
@@ -3489,6 +3539,8 @@ pub fn segmented(
 /// that impossible: the per-cell `Response` never leaves this function. The
 /// inspector's layout-grid row cites *"`ui::segmented_enabled`'s bargain"* and
 /// quotes only the visible-but-unavailable half, which is the half that is true.
+/// A cell that needs a tooltip goes through [`segmented_tipped`] (§15 D886),
+/// which this is the untipped form of.
 pub fn segmented_enabled(
     ui: &mut egui::Ui,
     width: f32,
@@ -3496,6 +3548,28 @@ pub fn segmented_enabled(
     n: usize,
     selected: usize,
     enabled: impl Fn(usize) -> bool,
+    paint: impl Fn(&egui::Painter, usize, egui::Rect, bool),
+) -> Option<usize> {
+    segmented_tipped(ui, width, cell_h, n, selected, enabled, |_| "", paint)
+}
+
+/// [`segmented_enabled`] with a **tooltip per cell** — `tip(i)`, where an empty
+/// string is none (§15 D886).
+///
+/// For a control whose cells are pictures with no word beside them — the
+/// Container card's direction arrows and wrap turns, which read as nothing in
+/// particular until somebody says what they are. A disabled cell carries its
+/// tooltip too, which is what the hover-only sense below was kept for: the
+/// Container card's `grid` says *why* it cannot be picked.
+#[allow(clippy::too_many_arguments)]
+pub fn segmented_tipped(
+    ui: &mut egui::Ui,
+    width: f32,
+    cell_h: f32,
+    n: usize,
+    selected: usize,
+    enabled: impl Fn(usize) -> bool,
+    tip: impl Fn(usize) -> &'static str,
     paint: impl Fn(&egui::Painter, usize, egui::Rect, bool),
 ) -> Option<usize> {
     const PAD: f32 = 2.0;
@@ -3535,11 +3609,12 @@ pub fn segmented_enabled(
         // 🚨 **A disabled cell senses hover, not click** (§15 D722,
         // `[S18.2-L3-04]`). This was `Sense::click()` either way, on the stated
         // ground that *"the cell can carry a tooltip explaining why it is
-        // unavailable"* — **which no caller can do**: this function returns
-        // `Option<usize>`, `resp` is a local that never escapes, and `paint` is
-        // handed a `&Painter` rather than a response. One production caller
-        // (`picker::picker_body`), zero tooltips, and `segmented` passes
-        // `|_| true` so it has no disabled cells at all.
+        // unavailable"* — **which no caller could then do**: the function
+        // returned `Option<usize>`, `resp` never escaped, and `paint` was handed a
+        // `&Painter` rather than a response. The one production caller
+        // (`picker::picker_body`) hung none, and `segmented` passes `|_| true` so
+        // it has no disabled cells at all. (`tip` below is how a caller can now,
+        // §15 D886.)
         //
         // What it did instead was put the cell in the **keyboard tab order** —
         // `Sense::click()` is `CLICK | FOCUSABLE`, which `focus_ring`'s ⚠️ warns
@@ -3549,10 +3624,10 @@ pub fn segmented_enabled(
         // ⚠️ **Still registered, rather than not sensed at all.** The rect stays
         // claimed so the cell reports hover, which is what the *ground* is drawn
         // from and what a future tooltip would rest on; `Sense::hover()` is
-        // `Sense::empty()` (§15 D688), so it takes no focus and no click. If the
-        // tooltip is ever wanted, the change is to hand `paint` the response —
-        // widening the signature is the honest way to offer it, and a sense
-        // nobody can read is not.
+        // `Sense::empty()` (§15 D688), so it takes no focus and no click. The
+        // tooltip was wanted in the end (§15 D886), and it arrived the way this
+        // said it should — by widening the signature, as [`segmented_tipped`]'s
+        // `tip` — rather than by a sense nobody could read.
         let resp = ui.interact(
             rect,
             ui.id()
@@ -3571,6 +3646,12 @@ pub fn segmented_enabled(
                 .rect_filled(rect, egui::CornerRadius::same(4), theme::color::text_a(18));
         }
         paint(ui.painter(), i, rect, on);
+        let words = tip(i);
+        let resp = if words.is_empty() {
+            resp
+        } else {
+            resp.on_hover_text(words)
+        };
         if live && resp.clicked() {
             clicked = Some(i);
         }
@@ -5276,7 +5357,11 @@ mod tests {
     fn the_number_still_sits_a_prefix_and_a_gap_from_the_fields_edge() {
         let ctx = egui::Context::default();
         theme::install(&ctx);
-        for prefix in [Prefix::Text("W"), Prefix::Icon(icon::ARROW_CLOCKWISE)] {
+        for prefix in [
+            Prefix::Text("W"),
+            Prefix::Icon(icon::ARROW_CLOCKWISE),
+            Prefix::Label("flex-grow"),
+        ] {
             paint_value_field(&ctx, prefix, None); // warm the font atlas
             let (shapes, _) = paint_value_field(&ctx, prefix, None);
             let texts: Vec<_> = shapes
@@ -5307,6 +5392,11 @@ mod tests {
                     Prefix::Icon(g) => f.layout_no_wrap(
                         g.to_owned(),
                         theme::icon_font(PREFIX_ICON_PT),
+                        egui::Color32::WHITE,
+                    ),
+                    Prefix::Label(t) => f.layout_no_wrap(
+                        t.to_owned(),
+                        egui::FontId::proportional(SUFFIX_PT),
                         egui::Color32::WHITE,
                     ),
                 };

@@ -303,6 +303,52 @@ fn a_pinned_child_of_a_flex_frame_is_placed_against_the_frame() {
     assert_eq!(s.bounds(kept).x0, 20.0, "the row closed up");
 }
 
+/// **A pinned child of a group with a layout is placed against the group's box,
+/// and a tool that moves it re-pins it where it was put** (`build::keep_insets`,
+/// §15 D887). The group is 100 × 70 — padding 20 round the one 60 × 30 item left
+/// in its row — so right 0, bottom 0 puts the pinned 40 × 30 at (60, 40) inside
+/// it, (110, 90) in the world; a move to (10, 10) is right 50, bottom 30.
+///
+/// **Flip run**, `keep_insets`' group arm deleted (a laid group's child skipped as
+/// it was before D887): fails on *"it stays where the move put it"*, the rect
+/// back at (110, 90) — the predicted site. The first two assertions stay green,
+/// since the placement in `resolve` was never frame-only.
+#[test]
+fn a_pinned_child_of_a_flex_group_is_placed_against_its_box_and_re_pinned_when_moved() {
+    let mut s = Scene::new();
+    let g = s.add(s.root, NodeKind::Group, (50.0, 50.0));
+    s.add(g, rect(60.0, 30.0), (0.0, 0.0));
+    let pinned = s.add(g, rect(40.0, 30.0), (0.0, 0.0));
+    s.display(g, row());
+    s.commit(vec![Operation::SetInsets {
+        id: pinned,
+        insets: ondin_core::Insets {
+            right: Some(ondin_core::LengthPct::Px(0.0)),
+            bottom: Some(ondin_core::LengthPct::Px(0.0)),
+            ..Default::default()
+        },
+    }]);
+    assert_eq!(
+        s.bounds(g),
+        Rect::new(50.0, 50.0, 150.0, 120.0),
+        "the fixture"
+    );
+    assert_eq!(s.bounds(pinned), Rect::new(110.0, 90.0, 150.0, 120.0));
+
+    s.commit(vec![Operation::SetTransform {
+        id: pinned,
+        transform: Affine::translate((10.0, 10.0)),
+    }]);
+    assert_eq!(
+        s.bounds(pinned),
+        Rect::new(60.0, 60.0, 100.0, 90.0),
+        "it stays where the move put it"
+    );
+    let insets = *s.doc.get(pinned).unwrap().insets();
+    assert_eq!(insets.right, Some(ondin_core::LengthPct::Px(50.0)));
+    assert_eq!(insets.bottom, Some(ondin_core::LengthPct::Px(30.0)));
+}
+
 /// A group with a layout nested in a frame's row takes its slot from the row and
 /// lays out its own column inside it.
 #[test]
@@ -544,5 +590,129 @@ fn a_tools_transform_on_a_flex_item_keeps_its_stored_translation() {
     assert!(
         s.bounds(a).x0 > 250.0,
         "the rect goes back by its own transform, near (300, 150), not to (0, 20)"
+    );
+}
+
+/// **A resize writes px over a size keyword** (`build::keep_flex_sizes`, §15 D879)
+/// — a frame at the top of the page hugging its row with `width: fit-content`, and
+/// an item in that row at `width: 50%`. Each resized, each holds the size it was
+/// given and its keyword goes back to `auto`, which for a kind with a stored size
+/// is that size; the axis the resize did not change keeps its keyword.
+///
+/// **Flip run**, `sized_in_px` not called: fails on *"the dragged width held"* at
+/// 80 — the frame snapping back to hug its row — the predicted site.
+#[test]
+fn a_resize_writes_px_over_a_size_keyword() {
+    use ondin_core::container::Dimension;
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(400.0, 200.0), (0.0, 0.0));
+    let a = s.add(f, rect(40.0, 30.0), (0.0, 0.0));
+    s.display(f, row());
+    s.item(f, |i| {
+        i.width = Dimension::FitContent;
+        i.height = Dimension::FitContent;
+    });
+    assert_eq!(s.bounds(f).width(), 80.0, "the fixture hugs: 20 + 40 + 20");
+
+    s.resize(f, 300.0, 70.0);
+    assert_eq!(s.bounds(f).width(), 300.0, "the dragged width held");
+    let item = *s.doc.get(f).unwrap().item();
+    assert_eq!(item.width, Dimension::Auto, "px now: its stored size");
+    assert_eq!(
+        item.height,
+        Dimension::FitContent,
+        "the axis the resize left alone keeps its keyword"
+    );
+
+    s.item(a, |i| i.width = Dimension::Percent(50.0));
+    assert_ne!(s.bounds(a).width(), 40.0, "the fixture sizes by percentage");
+    s.resize(a, 70.0, 30.0);
+    assert_eq!(s.bounds(a).width(), 70.0, "the item's dragged width held");
+    assert_eq!(s.doc.get(a).unwrap().item().width, Dimension::Auto);
+}
+
+/// **A laid group resized along one axis keeps hugging along the other**
+/// (`build::sized_flex_item`, §15 D879) — a side handle, or a W typed in the
+/// Transform card, writes `width` in px and leaves `height` at `auto`, the same
+/// per-axis rule `keep_flex_sizes` applies to a kind with a stored size.
+///
+/// **Flip run**, both axes written unconditionally (the rule before D879): fails
+/// on *"the untouched axis still hugs"*, `Px(70)` — the predicted site.
+#[test]
+fn a_laid_group_resized_along_one_axis_keeps_hugging_along_the_other() {
+    use ondin_core::container::Dimension;
+    let mut s = Scene::new();
+    let g = s.add(s.root, NodeKind::Group, (0.0, 0.0));
+    let first = s.add(g, rect(40.0, 30.0), (0.0, 0.0));
+    s.display(g, row());
+    let hugged = s.bounds(g).height();
+    assert_eq!(hugged, 70.0, "the fixture hugs: 20 + 30 + 20");
+
+    let item = ondin_core::build::sized_flex_item(&s.doc, &s.res, g, Size::new(200.0, hugged))
+        .expect("a group with a layout takes a size");
+    s.commit(vec![Operation::SetFlexItem { id: g, item }]);
+    let item = *s.doc.get(g).unwrap().item();
+    assert_eq!(item.width, Dimension::Px(200.0));
+    assert_eq!(
+        item.height,
+        Dimension::Auto,
+        "the untouched axis still hugs"
+    );
+
+    s.resize(first, 40.0, 50.0);
+    assert_eq!(
+        s.bounds(g).height(),
+        90.0,
+        "and goes on hugging: 20 + 50 + 20"
+    );
+}
+
+/// **`wrap-reverse` reorders with its lines read bottom-up** (`build::flex_reorder`,
+/// §15 D883) — a 200-wide row of four 60-wide rects wrapping two to a line, the
+/// first line (`a`, `b`) at the bottom.
+///
+/// `c`, on the upper line, dragged down to the left of `a` lands at the front of
+/// the flow: `d` beside it on the upper line is a *later* line, so nothing comes
+/// before it.
+///
+/// **Flip run**, the `lines_reversed` arm dropped (lines compared top-down, the
+/// reading before D883): answers `Some(1)` — `d`, above, counted as an earlier line
+/// — on the predicted assertion.
+#[test]
+fn wrap_reverse_reorders_with_its_lines_read_bottom_up() {
+    use ondin_core::container::FlexWrap;
+    use ondin_core::kurbo::Vec2;
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(200.0, 200.0), (0.0, 0.0));
+    let a = s.add(f, rect(60.0, 30.0), (0.0, 0.0));
+    let _b = s.add(f, rect(60.0, 30.0), (0.0, 0.0));
+    let c = s.add(f, rect(60.0, 30.0), (0.0, 0.0));
+    let _d = s.add(f, rect(60.0, 30.0), (0.0, 0.0));
+    s.display(
+        f,
+        Some(Display::Flex(Flex {
+            wrap: FlexWrap::WrapReverse,
+            column_gap: 10.0,
+            row_gap: 10.0,
+            padding: [20.0; 4],
+            align_items: AlignItems::Start,
+            ..Default::default()
+        })),
+    );
+    assert!(
+        s.bounds(a).y0 > s.bounds(c).y0,
+        "the fixture: the first line is at the bottom"
+    );
+    assert_eq!(s.bounds(a).x0, s.bounds(c).x0, "and two to a line");
+
+    let target = (s.bounds(a).x0 + 5.0, s.bounds(a).center().y);
+    let delta = Vec2::new(
+        target.0 - s.bounds(c).center().x,
+        target.1 - s.bounds(c).center().y,
+    );
+    assert_eq!(
+        ondin_core::build::flex_reorder(&s.doc, &s.res, c, delta),
+        Some(Operation::Reorder { id: c, index: 0 }),
+        "dropped before a, on the first line: nothing precedes it"
     );
 }

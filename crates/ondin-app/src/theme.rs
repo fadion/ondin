@@ -201,6 +201,13 @@ pub mod color {
     /// `a3332d`), and that separation has to hold: measures are frequently drawn
     /// *to* a guide, so the number and the line it is measuring from must not read
     /// as the same object.
+    ///
+    /// ⚠️ **One use outside the canvas, at the maintainer's ask** (§15 D891): the
+    /// Position card's pin diagram draws a *centred* axis's struts in it, because
+    /// dashed accent had read as the unpinned struts — the maintainer's reason.
+    /// That a centred axis, two equal distances held to the container's middle, is
+    /// a measurement's meaning as much as a pin's is the session's reading, not
+    /// the ask.
     pub const MEASURE: Color32 = Color32::from_rgb(0xf2, 0x6d, 0x6d);
     /// Ink on [`MEASURE`], for [`BADGE_INK`]'s reason: the pill's ground is light.
     pub const MEASURE_INK: Color32 = Color32::from_rgb(0x2b, 0x0c, 0x0c);
@@ -585,6 +592,10 @@ pub mod icon {
     // the circular ones (`ARROW_COUNTER_CLOCKWISE`), which read as "rotate".
     pub const ARROW_U_UP_LEFT: &str = "\u{e08a}";
     pub const ARROW_U_UP_RIGHT: &str = "\u{e08c}";
+    /// `flex-wrap: wrap` in the Container card — a line running on and turning back
+    /// under itself, the design's picture (§15 D878); `wrap-reverse` is
+    /// [`ARROW_U_UP_LEFT`], turning back over.
+    pub const ARROW_U_DOWN_LEFT: &str = "\u{e07e}";
     /// The Scale tool, in the rail and — rasterized by `cursor.rs` — as its
     /// cursor, so the button and the pointer are the same drawing.
     pub const RESIZE: &str = "\u{ed6e}";
@@ -944,6 +955,7 @@ pub mod icon {
         ("pencil-simple", PENCIL_SIMPLE),
         ("arrow-u-up-left", ARROW_U_UP_LEFT),
         ("arrow-u-up-right", ARROW_U_UP_RIGHT),
+        ("arrow-u-down-left", ARROW_U_DOWN_LEFT),
         ("resize", RESIZE),
         ("scan", SCAN),
         ("square-split-horizontal", SQUARE_SPLIT_HORIZONTAL),

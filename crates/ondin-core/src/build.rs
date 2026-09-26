@@ -3684,6 +3684,14 @@ fn push_offset(doc: &Document, res: &Resolved, id: NodeId, delta: Vec2, ops: &mu
 /// explicit cross size is what stops a stretch. A layer whose item properties the
 /// transaction sets itself is left to it.
 ///
+/// **And a resize writes the size in px, whatever keyword was there** (§15 D879):
+/// a `SetGeometry` that changes a layer's size on an axis whose `width` or
+/// `height` is `%` or `fit-content` sets that axis back to `auto` — which, for a
+/// kind with a stored size, *is* its stored size — so a drag or a typed number on a
+/// hugging frame or a percentage-wide item holds instead of snapping back to the
+/// keyword. Any parent, laid out or not: a frame hugging its content at the top
+/// of the page is the commonest case of it.
+///
 /// **And every `SetTransform` on an in-flow item keeps the item's stored
 /// translation** ([`kept_flow_translations`], §15 D877's amendment) — the other
 /// half of making a tool's edit of a flex item mean what is drawn; a write left
@@ -3707,17 +3715,10 @@ pub fn keep_flex_sizes(doc: &Document, res: &Resolved, tx: Transaction) -> Trans
         let Operation::SetGeometry { id, geometry } = op else {
             continue;
         };
-        if !geometry.resizes()
-            || explicit.contains(id)
-            || !container::parent_lays_out(&view, *id)
-            || !container::in_flow(&view, *id)
-        {
+        if !geometry.resizes() || explicit.contains(id) {
             continue;
         }
-        let (Some(parent), Some(used)) = (view.parent(*id), res.used_kind(doc, *id)) else {
-            continue;
-        };
-        let Some(Display::Flex(flex)) = view.display(parent) else {
+        let Some(used) = res.used_kind(doc, *id) else {
             continue;
         };
         let Some(now) = crate::geometry::local_bounds(used, None) else {
@@ -3730,7 +3731,14 @@ pub fn keep_flex_sizes(doc: &Document, res: &Resolved, tx: Transaction) -> Trans
             continue;
         };
         let item = *items.entry(*id).or_insert_with(|| view.item(*id));
-        items.insert(*id, held(&flex, item, now.size(), then.size()));
+        let mut item = sized_in_px(item, now.size(), then.size());
+        if container::parent_lays_out(&view, *id)
+            && container::in_flow(&view, *id)
+            && let Some(Display::Flex(flex)) = view.parent(*id).and_then(|p| view.display(p))
+        {
+            item = held(&flex, item, now.size(), then.size());
+        }
+        items.insert(*id, item);
     }
     let mut ids: Vec<(NodeId, crate::container::FlexItem)> = items
         .into_iter()
@@ -3810,6 +3818,25 @@ fn kept_flow_translations(doc: &Document, tx: Transaction) -> Transaction {
     Transaction(ops)
 }
 
+/// `item` with `width` and `height` back at `auto` on whichever axes a resize from
+/// `from` to `to` changed — [`keep_flex_sizes`]' px rule (§15 D879), for a kind
+/// whose stored size is its CSS size, where `auto` is that stored size and so the
+/// size the resize has just written.
+fn sized_in_px(
+    mut item: crate::container::FlexItem,
+    from: kurbo::Size,
+    to: kurbo::Size,
+) -> crate::container::FlexItem {
+    use crate::container::Dimension;
+    if (from.width - to.width).abs() > 1e-9 {
+        item.width = Dimension::Auto;
+    }
+    if (from.height - to.height).abs() > 1e-9 {
+        item.height = Dimension::Auto;
+    }
+    item
+}
+
 /// `item` with growth stopped on whichever axes a resize from `from` to `to`
 /// changed, in a container laid out by `flex` — [`keep_flex_sizes`]' rule (§15
 /// D875), spelled once for it and for [`sized_flex_item`].
@@ -3848,7 +3875,8 @@ fn held(
 /// writes its geometry and [`keep_flex_sizes`] holds it. A group with a layout
 /// has only its box, which is `width`/`height` on its [`crate::container::FlexItem`]
 /// — `auto`, hugging its contents, until something sets them. So a resize writes
-/// them in px, and **its growth is stopped here rather than by
+/// them in px — each only if the resize changed it, so an axis left alone keeps
+/// hugging (§15 D879) — and **its growth is stopped here rather than by
 /// `keep_flex_sizes`**, which leaves a transaction's own `SetFlexItem` alone.
 ///
 /// `None` when `id` is not a group with a layout, or nothing changes.
@@ -3864,13 +3892,22 @@ pub fn sized_flex_item(
         return None;
     }
     let mut item = *node.item();
-    item.width = Dimension::Px(size.width);
-    item.height = Dimension::Px(size.height);
+    // **Only the axes the resize changed** (§15 D879's px rule, which leaves an
+    // unchanged axis's keyword alone): a side handle or a typed W on a group that
+    // hugs its height keeps it hugging. With no box to compare against, both.
+    let now = res.used_frame(id);
+    let changed = |was: Option<f64>, to: f64| was.is_none_or(|w| (w - to).abs() > 1e-9);
+    if changed(now.map(|n| n.width), size.width) {
+        item.width = Dimension::Px(size.width);
+    }
+    if changed(now.map(|n| n.height), size.height) {
+        item.height = Dimension::Px(size.height);
+    }
     let view = crate::resolve::DocView(doc);
     if container::parent_lays_out(&view, id)
         && container::in_flow(&view, id)
         && let Some(Display::Flex(flex)) = node.parent().and_then(|p| view.display(p))
-        && let Some(now) = res.used_frame(id)
+        && let Some(now) = now
     {
         item = held(&flex, item, now, size);
     }
@@ -3889,11 +3926,10 @@ pub fn sized_flex_item(
 /// sibling on the centre's line (its cross-axis extent spans the centre) comes
 /// before it when its main-axis centre does, and one on another line when that
 /// line does — which is what makes a wrapping row reorder by line, then along it.
-/// `row-reverse` and `column-reverse` read the main axis backwards.
-///
-/// ⚠️ **`wrap-reverse` is read as `wrap`** — lines compared top-down — which is
-/// the session's simplification and not CSS's reading; nothing builds that
-/// container from the app yet.
+/// `row-reverse` and `column-reverse` read the main axis backwards, and
+/// `wrap-reverse` the cross axis: its first line is the one at the bottom of a row
+/// (the right of a column), so a line further *down* comes first (§15 D883 — read as
+/// `wrap` until the Container card made the value reachable, §15 D878).
 ///
 /// Siblings out of the flow — pinned, hidden, masks — keep their indices
 /// relative to the flow around them; the result is an index into the child list
@@ -3913,6 +3949,7 @@ pub fn flex_reorder(doc: &Document, res: &Resolved, id: NodeId, delta: Vec2) -> 
         flex.direction,
         FlexDirection::RowReverse | FlexDirection::ColumnReverse
     );
+    let lines_reversed = flex.wrap == container::FlexWrap::WrapReverse;
     let (at_main, at_cross) = main_cross(flex.direction, at);
     let others: Vec<NodeId> = doc
         .get(parent)?
@@ -3946,6 +3983,8 @@ pub fn flex_reorder(doc: &Document, res: &Resolved, id: NodeId, delta: Vec2) -> 
                 } else {
                     s_main < at_main
                 }
+            } else if lines_reversed {
+                s_cross > at_cross
             } else {
                 s_cross < at_cross
             }
@@ -4075,8 +4114,22 @@ pub fn keep_insets(doc: &Document, res: &Resolved, tx: Transaction) -> Transacti
         } else {
             res.used_kind(doc, parent.id()).unwrap_or(parent.kind())
         };
-        let NodeKind::Artboard { size: frame } = parent_kind else {
-            continue;
+        // **A group with a layout pins too** (§15 D871, D887) — against its laid
+        // box, which is what `resolve::frame_box` places the child against. This
+        // was frame-only while the placement was not, so a pinned child of a laid
+        // group moved by a tool kept its insets and snapped back on release.
+        // ⚠️ The box is the **committed** one: an edit that also re-lays the group
+        // pins against the size it had, where a frame resized in the same edit
+        // pins against its new size. The Scale tool on a laid group is such an
+        // edit (`tools::scaled_flex` re-sizes it and moves its children at once),
+        // and what it does to a pinned child there is unmeasured.
+        let frame = match parent_kind {
+            NodeKind::Artboard { size } => *size,
+            NodeKind::Group if parent.display().is_some() => match res.used_frame(parent.id()) {
+                Some(size) => size,
+                None => continue,
+            },
+            _ => continue,
         };
         // Where the edit wants it drawn: the transform it wrote, else where it is
         // drawn now. At what size: the size it wrote, else the size drawn now.
@@ -4093,7 +4146,7 @@ pub fn keep_insets(doc: &Document, res: &Resolved, tx: Transaction) -> Transacti
         let Some(bx) = crate::geometry::local_bounds(&kind, None) else {
             continue;
         };
-        let insets = crate::container::inverse(node.insets(), *frame, local, bx, &kind);
+        let insets = crate::container::inverse(node.insets(), frame, local, bx, &kind);
         if insets != *node.insets() {
             out.0.push(Operation::SetInsets { id, insets });
         } else if !geometry_changed

@@ -17,6 +17,7 @@
 //! backdrop pane behind it. Collapse state is keyed by panel title and survives
 //! changing the selection, so a designer who never wants to see Effects only has
 //! to close it once.
+use super::layout::SizeMode;
 use super::paint::{self, PaintDrag, PaintKind, PaintList, PaintSlot};
 use super::picker::Picker;
 use crate::app::OndinApp;
@@ -26,7 +27,7 @@ use crate::theme::{self, color, icon};
 use crate::tools;
 use crate::ui::{
     self, Prefix, Scrub, Swatch, card, field_row_active, hex_of, icon_button, parse_hex,
-    section_head, segment_label, segmented, swatch, value_field,
+    segment_label, segmented, swatch, value_field,
 };
 use eframe::egui;
 use ondin_core::Brush;
@@ -1541,9 +1542,10 @@ impl OndinApp {
             // inspector that looked like an unstyled prototype.
             self.identity_boolean_row(ui);
         });
-        // **The same two frame panels, in the same order as on a single frame** —
-        // directly under the identity card, where the design puts them. Both draw
-        // nothing unless the selection has a frame in it (`frame_subjects`).
+        // **The same frame and layout panels, in the same order as on a single
+        // layer** — templates under the identity card, the layout cards and the grid
+        // under Position. Each draws nothing unless the selection has something it
+        // describes (`frame_subjects` and its three siblings).
         //
         // ⚠️ **Templates over a selection is the *only* way to say "make each of
         // these frames this size", and it reads like a duplicate of the Transform
@@ -1555,12 +1557,14 @@ impl OndinApp {
         // the thing they measure, and only one of them is the thing a designer
         // laying out a flow is asking for.
         self.inspector_frame_templates(ui);
-        self.inspector_layout_grids(ui);
         self.inspector_align(ui);
         self.inspector_multi_transform(ui);
         // Where the single-layer inspector has it, under Transform: a pin applies
         // to every pinnable layer in the selection, each at its own distances.
         self.inspector_insets(ui);
+        self.inspector_item(ui);
+        self.inspector_container(ui);
+        self.inspector_layout_grids(ui);
         self.inspector_multi_appearance(ui);
         let fresh = self.paint_subject_changed();
         self.inspector_paint_panels(ui, PaintScope::Selection, fresh);
@@ -1674,12 +1678,9 @@ impl OndinApp {
         // layer is* rather than about how it is drawn — and because a mask draws
         // nothing, so every card below it describes ink nobody will see.
         self.inspector_mask(ui, id);
-        // **A frame's two panels come second and third, above Align and
-        // Transform**, which is where the design puts them and is the order the
-        // work is done in: you say what kind of page this is, then what it is
-        // divided into, and only then push things around on it. Everything below
-        // here describes a layer among layers; these two describe the page itself,
-        // and a page's identity belongs directly under its name.
+        // **A frame's templates come second, above Align and Transform** — you say
+        // what kind of page this is before you push things around on it, and a
+        // page's identity belongs directly under its name.
         //
         // ⚠️ **Templates *above* Transform, though a template writes W and H.**
         // That is the argument for the old arrangement — a dropdown under the two
@@ -1687,18 +1688,27 @@ impl OndinApp {
         // four rows into a card about position and rotation. The read-back is what
         // makes the separation safe: the templates panel says which one the frame
         // *is*, so the two never disagree without saying so.
-        // **Neither is gated on the kind here.** Both ask the selection what they
-        // are acting on and draw nothing for one with no frame in it
-        // (`frame_subjects`), which is what lets one call each serve this and
+        //
+        // **The Layout grid used to sit beside it and moved down with container
+        // layout** (§15 D878): the cards now run from the layer in its parent —
+        // Transform, Position, Item — to its children — Container, then the grid
+        // that divides them — to paint, the maintainer's mockup's order.
+        //
+        // **None of these is gated on the kind here.** Each asks the selection what
+        // it is acting on and draws nothing for one it cannot describe
+        // (`frame_subjects`, `inset_subjects`, `item_subjects`,
+        // `container_subjects`), which is what lets one call each serve this and
         // `inspector_multi`. Export is written the same way and for the same reason.
         self.inspector_frame_templates(ui);
-        self.inspector_layout_grids(ui);
         self.inspector_align(ui);
         self.inspector_transform(ui, id, world, size0);
         // Straight under the numbers it changes the meaning of: a pinned layer's X
         // and W are where its insets put it (§15 D871). Draws nothing for a layer
         // no frame can pin (`inset_subjects`).
         self.inspector_insets(ui);
+        self.inspector_item(ui);
+        self.inspector_container(ui);
+        self.inspector_layout_grids(ui);
         // **A selected path gets the corner radius too, without entering point
         // editing** — asked for, and right: "round the corners of this shape" is
         // a thing you want of the whole layer, exactly as it is on a rect, and
@@ -4428,7 +4438,7 @@ impl OndinApp {
     /// desired world transform and projects it back with
     /// `build::local_for_world`, so the node lands exactly where the number says
     /// regardless of what containers it sits in.
-    fn inspector_transform(
+    pub(super) fn inspector_transform(
         &mut self,
         ui: &mut egui::Ui,
         id: NodeId,
@@ -4491,6 +4501,27 @@ impl OndinApp {
             _ => None,
         };
         let shown_line = line_ends.map(|(a, b)| (b.y - a.y).atan2(b.x - a.x));
+        let laid_out = ondin_core::build::is_flex_item(&self.session.doc, id);
+        // **W's and H's units are a menu of sizing modes** where the layer has more
+        // than one that means something (§15 D879) — `layout::size_modes` decides
+        // which, per kind — and plain px fields everywhere else.
+        let size_menu = self.session.display_node(id).and_then(|n| {
+            let modes = super::layout::size_modes(n.kind(), n.display().is_some(), laid_out);
+            let item = n.item();
+            (modes.len() > 1).then(|| {
+                let pct = |d: ondin_core::container::Dimension| match d {
+                    ondin_core::container::Dimension::Percent(v) => Some(v),
+                    _ => None,
+                };
+                SizeMenu {
+                    w: super::layout::size_mode_of(n.kind(), item.width),
+                    h: super::layout::size_mode_of(n.kind(), item.height),
+                    w_pct: pct(item.width),
+                    h_pct: pct(item.height),
+                    modes,
+                }
+            })
+        });
         let toggled = self.panel(ui, "Transform", Some(action), |app, ui| {
             let fw = (ui.available_width() - ui::CARD_COL_GAP) / 2.0;
             // The basis — rotation, skew, flip, and whatever scale the ancestor chain has
@@ -4504,7 +4535,14 @@ impl OndinApp {
             // back out by someone tidying up.
             let basis = [world[0], world[1], world[2], world[3], 0.0, 0.0];
             let row = egui::vec2(fw, 28.0);
-            ui.horizontal(|ui| {
+            // **Inert for an item in its container's flow** (§15 D882): its container
+            // places it, and a typed position would be dropped at the commit door
+            // anyway — `build::keep_flex_sizes` keeps an in-flow item's stored
+            // translation (§15 D877's amendment) — so a live field here would take
+            // a number and do nothing with it. Drawn, not hidden, so the row does
+            // not jump, with the reason on hover beside the disabled scope (a
+            // widget inside one reports no hover).
+            let xy = ui::disable_unless(ui, !laid_out, |ui| ui.horizontal(|ui| {
                 let mut x = shown.x;
                 let rx = value_field(
                     ui,
@@ -4546,7 +4584,15 @@ impl OndinApp {
                 if interacting(&ry) {
                     app.reveal_selection();
                 }
-            });
+            }));
+            if laid_out {
+                ui.interact(
+                    xy.response.rect,
+                    ui.id().with("xy-laid-out"),
+                    egui::Sense::hover(),
+                )
+                .on_hover_text("Placed by its container's layout — drag it on the canvas to reorder");
+            }
             if let Some(size) = size0 {
                 // The *mode*, not merely "is this text", because what a typed number
                 // means to a text layer depends on which of the three it is — see
@@ -4622,42 +4668,107 @@ impl OndinApp {
                 // directions scale against the shape as it is now rather than against
                 // a value the other field has already changed.
                 let now = size;
+                // **The lock stands aside while either side is a keyword or a
+                // percentage** (§15 D879, the mockup's rule): a ratio between a size
+                // the user fixed and one the layout decides is not a ratio anyone
+                // chose, and pairing a typed W onto a hugging H would write the H
+                // back in px.
+                let both_px = size_menu
+                    .as_ref()
+                    .is_none_or(|m| m.w == SizeMode::Px && m.h == SizeMode::Px);
+                let pairs = locked && both_px;
                 let paired = |want: Size, drove_x: bool| {
-                    if locked {
+                    if pairs {
                         tools::paired_size(now, want, drove_x)
                     } else {
                         want
                     }
                 };
+                // A percentage typed into W or H is the item's `width`/`height`,
+                // written as one; the size itself is the layout's to work out.
+                let percent_tx = |app: &Self, horizontal: bool, v: f64| {
+                    let Some(node) = app.session.doc.get(id) else {
+                        return Transaction(Vec::new());
+                    };
+                    let mut item = *node.item();
+                    let d = ondin_core::container::Dimension::Percent(v.max(0.0));
+                    if horizontal {
+                        item.width = d;
+                    } else {
+                        item.height = d;
+                    }
+                    Transaction(vec![Operation::SetFlexItem { id, item }])
+                };
+                let mut picks: Vec<(bool, SizeMode)> = Vec::new();
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
-                    let mut w = size.width;
-                    let rw = value_field(
-                        ui,
-                        wide,
-                        Prefix::Text("W"),
-                        &mut w,
-                        Scrub::whole(0.5).range(1.0..=f64::MAX),
-                        |d| d.custom_formatter(ui::number(2)),
-                    );
-                    let want = paired(Size::new(w.max(1.0), size.height), true);
-                    // W authors the height only when the lock makes it drive H as well —
-                    // which is the corner drag, and a corner is precisely the handle that
-                    // fixes a text box.
-                    let tx = size_tx(app, want.width, want.height, locked);
-                    app.edit_valve(&rw, tx);
-                    let mut h = size.height;
-                    let rh = value_field(
-                        ui,
-                        rest,
-                        Prefix::Text("H"),
-                        &mut h,
-                        Scrub::whole(0.5).range(1.0..=f64::MAX),
-                        |d| d.custom_formatter(ui::number(2)),
-                    );
-                    let want = paired(Size::new(size.width, h.max(1.0)), false);
-                    let tx = size_tx(app, want.width, want.height, true);
-                    app.edit_valve(&rh, tx);
+                    for horizontal in [true, false] {
+                        let (letter, slot, drawn) = if horizontal {
+                            ("W", wide, size.width)
+                        } else {
+                            ("H", rest, size.height)
+                        };
+                        let mode = size_menu.as_ref().map(|m| {
+                            if horizontal {
+                                (m.w, m.w_pct)
+                            } else {
+                                (m.h, m.h_pct)
+                            }
+                        });
+                        let mut v = drawn;
+                        let (resp, typed) = match (&size_menu, mode) {
+                            (Some(m), Some((mode, pct))) => {
+                                let e = super::layout::size_field(
+                                    ui,
+                                    slot,
+                                    Prefix::Text(letter),
+                                    Some(mode),
+                                    Some(pct.unwrap_or(drawn)),
+                                    &m.modes,
+                                );
+                                if let Some(p) = e.picked {
+                                    picks.push((horizontal, p));
+                                }
+                                if let Some(t) = e.typed {
+                                    v = t;
+                                }
+                                (e.resp, e.typed.is_some())
+                            }
+                            _ => {
+                                let r = value_field(
+                                    ui,
+                                    slot,
+                                    Prefix::Text(letter),
+                                    &mut v,
+                                    Scrub::whole(0.5).range(1.0..=f64::MAX),
+                                    |d| d.custom_formatter(ui::number(2)),
+                                );
+                                (r, true)
+                            }
+                        };
+                        let tx = match mode {
+                            Some((SizeMode::Percent, _)) if typed => percent_tx(app, horizontal, v),
+                            // A keyword's field shows the size it resolved to, and
+                            // a click in and out must not fix that size in px.
+                            Some((SizeMode::Percent | SizeMode::Auto | SizeMode::FitContent, _))
+                                if !typed =>
+                            {
+                                Transaction(Vec::new())
+                            }
+                            _ if horizontal => {
+                                let want = paired(Size::new(v.max(1.0), size.height), true);
+                                // W authors the height only when the lock makes it
+                                // drive H as well — which is the corner drag, and a
+                                // corner is precisely the handle that fixes a text box.
+                                size_tx(app, want.width, want.height, pairs)
+                            }
+                            _ => {
+                                let want = paired(Size::new(size.width, v.max(1.0)), false);
+                                size_tx(app, want.width, want.height, true)
+                            }
+                        };
+                        app.edit_valve(&resp, tx);
+                    }
                     // The design's chain button. A *broken* chain when it is
                     // off, whole when on — the tint alone would say the same
                     // thing, but only to someone who already knows which state
@@ -4672,13 +4783,21 @@ impl OndinApp {
                     // lock is a property of the layer, not of this row, and a
                     // user who reads it as "W and H scale together" is then
                     // surprised by what a corner drag does (`canvas::keep_ratio`).
-                    if ui::field_button(ui, glyph, 28.0, 15.0, ui::FieldButton::on_if(locked))
-                        .on_hover_text(if locked {
+                    let state = if both_px {
+                        ui::FieldButton::on_if(locked)
+                    } else {
+                        ui::FieldButton::Disabled
+                    };
+                    if ui::field_button(ui, glyph, 28.0, 15.0, state)
+                        .on_hover_text(if !both_px {
+                            "Proportions do not lock while a side is sized by a keyword or %"
+                        } else if locked {
                             "Unlock proportions — Shift while dragging a handle also releases it"
                         } else {
                             "Lock proportions — W and H scale together, and handles resize proportionally"
                         })
                         .clicked()
+                        && both_px
                     {
                         app.commit_edit(Transaction(vec![Operation::SetProportionsLocked {
                             id,
@@ -4686,6 +4805,10 @@ impl OndinApp {
                         }]));
                     }
                 });
+                for (horizontal, mode) in picks {
+                    let tx = app.size_mode_tx(id, horizontal, mode, size);
+                    app.commit_edit(tx);
+                }
             }
             // **A line gets a length where every other kind gets W and H** (§15 D229).
             // Its box is meaningless — the axis-aligned rectangle round a diagonal is
@@ -7166,24 +7289,29 @@ impl OndinApp {
         }
     }
 
-    /// Where the selected layers are pinned inside their frames — CSS insets and
-    /// `margin: auto` (`ondin_core::container`, §15 D871, D874).
+    /// Where the selected layers are pinned inside their containers — a frame, or
+    /// a group with a layout (§15 D887) — CSS insets and `margin: auto`
+    /// (`ondin_core::container`, §15 D871, D874).
     ///
     /// **A pin diagram and four fields**, the maintainer's choice of the options
     /// offered: the diagram is the quick way to say *which* edges hold, the fields
     /// keep CSS's names and numbers in view. Clicking a strut pins that edge at the
     /// distance it is at now (`container::with_edge`), so a pin never moves anything;
-    /// the two buttons beside it centre on an axis the CSS way — both insets and
-    /// auto margins. The fields show a pinned inset in its own unit, and an unpinned
-    /// edge's current distance marked `auto`; typing into one pins it, and the unit
-    /// suffix switches a pinned inset between px and % of the frame without moving
-    /// the layer.
+    /// the two buttons under the fields centre on an axis the CSS way — both
+    /// insets and auto margins. The fields show a pinned inset in its own unit with
+    /// an accent edge, and an unpinned one as `auto` — outside a layout, a top or
+    /// left with no inset on its axis as held at its distance (§15 D891); typing
+    /// into one or dragging it pins it, and the unit suffix switches a pinned inset
+    /// between px and % of the container without moving the layer. Laid out as the
+    /// mockup's screen 07 (§15 D890), with an *Absolute* badge in the header while
+    /// the layer is pinned inside a container with a layout and the selection is
+    /// not pinned differently (§15 D891).
     ///
     /// **Titled *Position*, CSS's name for the property these belong to** — not
     /// *Constraints*, which is the design-tool word for the same idea and the one
     /// the maintainer asked not to borrow.
     ///
-    /// Drawn for any selection with a layer in it that a frame can pin
+    /// Drawn for any selection with a layer in it that a container can pin
     /// ([`Self::inset_subjects`]); a pin or a unit edits every one of them, each at
     /// its own distances, and a typed value writes the same number to each.
     fn inspector_insets(&mut self, ui: &mut egui::Ui) {
@@ -7203,7 +7331,38 @@ impl OndinApp {
         let mixed = subjects
             .iter()
             .any(|id| self.session.display_node(*id).map(|n| n.insets()) != Some(insets));
-        self.panel(ui, "Position", None, |app, ui| {
+        // Whether the container lays its children out. Outside one — a plain
+        // frame — every child is placed as `position: absolute` would place it,
+        // and a child with no insets is held at its top and left (§15 D871).
+        let laid = self
+            .session
+            .doc
+            .get(anchor)
+            .and_then(|n| n.parent())
+            .and_then(|p| self.session.doc.get(p))
+            .is_some_and(|p| p.display().is_some());
+        // The mockup's header chip, **only where it tells something** (§15 D891):
+        // inside a container with a layout, where a pin is what takes the layer out
+        // of the flow — the state the Item card reports as *Absolutely
+        // positioned*. In a plain frame everything is absolute, so the chip said
+        // nothing. Not over a selection pinned differently: the line below says
+        // that instead.
+        let badge = (laid && !mixed && insets.is_authored()).then_some("Absolute");
+        // **Top and left are held by default outside a layout** (§15 D871, D891):
+        // an axis with no inset keeps its offset from the container's top-left
+        // through every resize, which is exactly a pin at the current distance. The
+        // diagram and the field say so without writing one — an authored inset would
+        // take the layer out of the flow the day its container gets a layout, where
+        // an implied one simply stops being implied.
+        let held = (
+            !laid && insets.left.is_none() && insets.right.is_none(),
+            !laid && insets.top.is_none() && insets.bottom.is_none(),
+        );
+        // **The mockup's layout** (`design/Layout Cards.dc.html`, screen 07; §15
+        // D890): the diagram at the left spanning two field rows, L R over T B
+        // beside it, and the two centre buttons sharing a row underneath. §15
+        // D888's centred square and buttons-at-the-row-ends lasted one session.
+        self.panel_badged(ui, "Position", None, badge, |app, ui| {
             if mixed {
                 ui.label(
                     egui::RichText::new("Pinned differently. A pin applies to every layer.")
@@ -7214,66 +7373,79 @@ impl OndinApp {
             let full = ui.available_width();
             let gap = ui::CARD_COL_GAP;
             let side = ui::CONTROL_H;
+            let field = egui::vec2((full - INSET_DIAGRAM_W - gap * 2.0) / 2.0, side);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = gap;
-                let diagram = egui::vec2(full - side - gap, 2.0 * side + ui::CARD_ROW_GAP);
-                if let Some(edge) = inset_diagram(ui, diagram, &insets) {
+                let diagram = egui::vec2(INSET_DIAGRAM_W, 2.0 * side + ui::CARD_ROW_GAP);
+                if let Some(edge) = inset_diagram(ui, diagram, &insets, held) {
                     app.toggle_pin(&subjects, edge, inset_of(&insets, edge).is_none());
                 }
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = ui::CARD_ROW_GAP;
-                    for horizontal in [true, false] {
-                        let on = if horizontal {
-                            insets.margin_auto.left && insets.margin_auto.right
-                        } else {
-                            insets.margin_auto.top && insets.margin_auto.bottom
-                        };
-                        let (glyph, tip) = match (horizontal, on) {
-                            (true, false) => (
-                                icon::ALIGN_CENTER_VERTICAL,
-                                "Centre in the frame horizontally",
-                            ),
-                            (true, true) => {
-                                (icon::ALIGN_CENTER_VERTICAL, "Stop centring horizontally")
+                    for pair in [[Pin::Left, Pin::Right], [Pin::Top, Pin::Bottom]] {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = gap;
+                            for edge in pair {
+                                let is_held = match edge {
+                                    Pin::Left => held.0,
+                                    Pin::Top => held.1,
+                                    Pin::Right | Pin::Bottom => false,
+                                };
+                                app.inset_field(
+                                    ui, &subjects, edge, field, &insets, &place, is_held,
+                                );
                             }
-                            (false, false) => (
-                                icon::ALIGN_CENTER_HORIZONTAL,
-                                "Centre in the frame vertically",
-                            ),
-                            (false, true) => {
-                                (icon::ALIGN_CENTER_HORIZONTAL, "Stop centring vertically")
-                            }
-                        };
-                        let state = if on {
-                            ui::FieldButton::On
-                        } else {
-                            ui::FieldButton::Off
-                        };
-                        if ui::field_button(ui, glyph, side, 15.0, state)
-                            .on_hover_text(tip)
-                            .clicked()
-                        {
-                            app.toggle_centre(&subjects, horizontal, !on);
-                        }
+                        });
                     }
                 });
             });
-            let half = egui::vec2((full - gap) / 2.0, side);
-            for pair in [[Pin::Left, Pin::Right], [Pin::Top, Pin::Bottom]] {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = gap;
-                    for edge in pair {
-                        app.inset_field(ui, &subjects, edge, half, &insets, &place);
+            let button = egui::vec2((full - gap) / 2.0, side);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                for horizontal in [true, false] {
+                    let on = if horizontal {
+                        insets.margin_auto.left && insets.margin_auto.right
+                    } else {
+                        insets.margin_auto.top && insets.margin_auto.bottom
+                    };
+                    let (glyph, tip) = match (horizontal, on) {
+                        (true, false) => (
+                            icon::ALIGN_CENTER_VERTICAL,
+                            "Centre in the container horizontally",
+                        ),
+                        (true, true) => (icon::ALIGN_CENTER_VERTICAL, "Stop centring horizontally"),
+                        (false, false) => (
+                            icon::ALIGN_CENTER_HORIZONTAL,
+                            "Centre in the container vertically",
+                        ),
+                        (false, true) => {
+                            (icon::ALIGN_CENTER_HORIZONTAL, "Stop centring vertically")
+                        }
+                    };
+                    let state = if on {
+                        ui::FieldButton::On
+                    } else {
+                        ui::FieldButton::Off
+                    };
+                    if ui::field_button_sized(ui, glyph, button, 15.0, state)
+                        .on_hover_text(tip)
+                        .clicked()
+                    {
+                        app.toggle_centre(&subjects, horizontal, !on);
                     }
-                });
-            }
+                }
+            });
         });
     }
 
-    /// The selected layers a frame can pin: every one whose parent is a frame and
-    /// whose kind takes insets (`container::takes_insets` — not a group or a
-    /// boolean, whose box is its children's). Filtered rather than
-    /// all-or-nothing, `frame_subjects`' rule.
+    /// The selected layers a container can pin: every one whose parent has edges —
+    /// a frame, or a group with a layout (§15 D871, D887) — and whose kind takes
+    /// insets (`container::takes_insets` — not a group or a boolean, whose box is
+    /// its children's). Filtered rather than all-or-nothing, `frame_subjects`' rule.
+    ///
+    /// ⚠️ **It read "whose parent is a frame" until §15 D887**, while core placed a
+    /// pinned child of a laid group all along (`resolve::frame_box`): the card
+    /// showed for a flex frame's items and not for a flex group's.
     fn inset_subjects(&self) -> Vec<NodeId> {
         let doc = &self.session.doc;
         self.session
@@ -7284,21 +7456,25 @@ impl OndinApp {
             .filter(|id| {
                 doc.get(*id).is_some_and(|n| {
                     ondin_core::container::takes_insets(n.kind())
-                        && n.parent()
-                            .and_then(|p| doc.get(p))
-                            .is_some_and(|p| matches!(p.kind(), NodeKind::Artboard { .. }))
+                        && n.parent().and_then(|p| doc.get(p)).is_some_and(|p| {
+                            matches!(p.kind(), NodeKind::Artboard { .. })
+                                || (matches!(p.kind(), NodeKind::Group) && p.display().is_some())
+                        })
                 })
             })
             .collect()
     }
 
-    /// Where `id` is drawn inside its frame, as the card measures it: the frame's
-    /// shown size, the layer's shown local transform and its box — all through the
-    /// preview, so the distances follow a drag in flight.
+    /// Where `id` is drawn inside its container, as the card measures it: the
+    /// container's shown size — a frame's, or a laid group's box — the layer's shown
+    /// local transform and its box, all through the preview, so the distances
+    /// follow a drag in flight.
     fn inset_placement(&self, id: NodeId) -> Option<InsetPlacement> {
         let parent = self.session.doc.get(id)?.parent()?;
-        let NodeKind::Artboard { size: frame } = *self.session.display_node(parent)?.kind() else {
-            return None;
+        let frame = match *self.session.display_node(parent)?.kind() {
+            NodeKind::Artboard { size } => size,
+            NodeKind::Group => self.session.preview_frame(parent)?,
+            _ => return None,
         };
         let local = self.session.preview_local_transform(id)?;
         let kind = self.session.display_node(id)?.kind().clone();
@@ -7343,31 +7519,10 @@ impl OndinApp {
     /// means. Written alongside an explicit `SetInsets`, which `build::keep_insets`
     /// leaves to the edit rather than re-reading as a move.
     fn baked_placement(&self, id: NodeId, p: &InsetPlacement) -> Vec<Operation> {
-        let Some(node) = self.session.doc.get(id) else {
-            return Vec::new();
-        };
-        let mut ops = Vec::new();
-        if node.transform() != p.local {
-            ops.push(Operation::SetTransform {
-                id,
-                transform: p.local,
-            });
+        match self.session.doc.get(id) {
+            Some(node) => baked_ops(id, node, p.local, &p.kind),
+            None => Vec::new(),
         }
-        if p.kind != *node.kind() {
-            let geometry = match &p.kind {
-                NodeKind::Rect { size, .. }
-                | NodeKind::Ellipse { size }
-                | NodeKind::Polygon { size, .. }
-                | NodeKind::Star { size, .. }
-                | NodeKind::Artboard { size } => Some(GeometryPatch::Size(*size)),
-                NodeKind::Text { sizing, .. } => Some(GeometryPatch::TextSizing(*sizing)),
-                _ => None,
-            };
-            if let Some(geometry) = geometry {
-                ops.push(Operation::SetGeometry { id, geometry });
-            }
-        }
-        ops
     }
 
     /// Centre every subject on an axis the CSS way — both insets, each at its
@@ -7411,14 +7566,17 @@ impl OndinApp {
         self.commit_edit(Transaction(ops));
     }
 
-    /// One inset's field: its value in its own unit when pinned, the edge's current
-    /// distance marked `auto` when not.
+    /// One inset's field: its value in its own unit when pinned, with the accent
+    /// edge; `auto` when not, over the edge's current distance (§15 D890) — except
+    /// an edge `held` by default (top or left outside a layout, §15 D891), which
+    /// shows that distance, since it is the distance the layer is kept at.
     ///
     /// **An unpinned field that is only clicked through pins nothing**: the edit it
-    /// hands the valve is empty until the number differs from the distance it was
-    /// showing, so a click in and out cannot pin an edge by accident. A typed or
+    /// hands the valve is empty until the number differs from the distance under
+    /// its `auto`, so a click in and out cannot pin an edge by accident. A typed or
     /// dragged number pins it in px. The unit suffix is committed directly rather
     /// than through the valve, `ui::value_field_suffixed`'s rule for a conversion.
+    #[allow(clippy::too_many_arguments)]
     fn inset_field(
         &mut self,
         ui: &mut egui::Ui,
@@ -7427,6 +7585,7 @@ impl OndinApp {
         size: egui::Vec2,
         insets: &ondin_core::Insets,
         place: &InsetPlacement,
+        held: bool,
     ) {
         use ondin_core::LengthPct;
         let set = inset_of(insets, edge);
@@ -7437,23 +7596,26 @@ impl OndinApp {
             None => distance,
         };
         let mut v = shown;
-        let (unit, tip) = match set {
-            Some(LengthPct::Px(_)) => ("px", "Switch to a percentage of the frame"),
-            Some(LengthPct::Percent(_)) => ("%", "Switch to px"),
-            None => (
-                "auto",
-                "Not pinned: type a value or click the diagram to pin",
-            ),
+        let unit = match set {
+            Some(LengthPct::Px(_)) => Some(("px", "Switch to a percentage of the container")),
+            Some(LengthPct::Percent(_)) => Some(("%", "Switch to px")),
+            None => None,
         };
         let percent = matches!(set, Some(LengthPct::Percent(_)));
+        let at = egui::Rect::from_min_size(ui.cursor().min, size);
+        // **An unpinned edge reads `auto` where its number would be** — the
+        // mockup's field, §15 D890 — with its distance still underneath, so a
+        // scrub starts from where the edge is rather than from zero. It showed the
+        // distance beside an `auto` unit until then (§15 D874).
+        let unpinned = set.is_none() && !held;
         let (resp, flip) = ui::value_field_suffixed(
             ui,
             size,
             ui::Prefix::Text(inset_label(edge)),
-            Some(ui::Suffix {
-                text: unit,
-                clickable: set.is_some(),
-                tooltip: tip,
+            unit.map(|(text, tooltip)| ui::Suffix {
+                text,
+                clickable: true,
+                tooltip,
             }),
             &mut v,
             if percent {
@@ -7461,8 +7623,37 @@ impl OndinApp {
             } else {
                 ui::Scrub::whole(0.5)
             },
-            |d| d.custom_formatter(ui::number(usize::from(percent))),
+            |d| {
+                if unpinned {
+                    d.custom_formatter(|_, _| "auto".into())
+                } else {
+                    d.custom_formatter(ui::number(usize::from(percent)))
+                }
+            },
         );
+        let resp = if unpinned {
+            resp.on_hover_text("Not pinned — type a value, drag, or click the diagram to pin")
+        } else if set.is_none() {
+            // Held by default: the distance, and no accent edge — nothing is
+            // authored, and the accent is what says a pin was set.
+            resp.on_hover_text(
+                "Held at this distance by default — nothing is pinned on this axis. \
+                 Type or drag to pin it",
+            )
+        } else {
+            // The mockup's accent edge on a pinned inset: the tint over the field
+            // and a hairline round it, painted after, since the field's ground is
+            // opaque.
+            ui.painter()
+                .rect_filled(at, 5.0, color::ACCENT.gamma_multiply(0.09));
+            ui.painter().rect_stroke(
+                at,
+                5.0,
+                egui::Stroke::new(1.0, color::ACCENT.gamma_multiply(0.55)),
+                egui::StrokeKind::Inside,
+            );
+            resp
+        };
         if flip && let Some(was) = set {
             // Converted, not re-valued: the same distance in the other unit.
             let px = was.resolve(extent);
@@ -11363,7 +11554,7 @@ impl OndinApp {
     /// the state survives changing selection. Returns whether the header's
     /// action icon was clicked.
     ///
-    /// Open, the header row is the target ([`section_head`]). **Collapsed, the
+    /// Open, the header row is the target ([`ui::section_head`]). **Collapsed, the
     /// whole card is** — a collapsed panel is a title and nothing else, so
     /// asking the user to find the header row inside a card that consists of
     /// the header row is a distinction without a difference. The two are
@@ -11374,6 +11565,19 @@ impl OndinApp {
         ui: &mut egui::Ui,
         title: &'static str,
         action: Option<ui::HeadAction>,
+        body: impl FnOnce(&mut Self, &mut egui::Ui),
+    ) -> bool {
+        self.panel_badged(ui, title, action, None, body)
+    }
+
+    /// [`Self::panel`] with a badge in its header (`ui::section_head_badged`) —
+    /// the Position card's *Absolute* (§15 D890).
+    pub(super) fn panel_badged(
+        &mut self,
+        ui: &mut egui::Ui,
+        title: &'static str,
+        action: Option<ui::HeadAction>,
+        badge: Option<&str>,
         body: impl FnOnce(&mut Self, &mut egui::Ui),
     ) -> bool {
         let open = !self.collapsed_panels.contains(title);
@@ -11392,7 +11596,7 @@ impl OndinApp {
         let (mut clicks, card_rect) = ui
             .push_id(title, |ui| {
                 ui::card_at(ui, |ui| {
-                    let clicks = section_head(ui, title, open, action, open);
+                    let clicks = ui::section_head_badged(ui, title, open, action, badge, open);
                     if open {
                         body(self, ui);
                     }
@@ -12026,6 +12230,58 @@ const GRID_CELL: f32 = 28.0;
 /// note is about. Spelled as the constant, it cannot drift again.
 const GRID_ROW_GAP: f32 = ui::CARD_ROW_GAP;
 
+/// The ops that write `local` and `kind` — where layout or insets draw `node` —
+/// into its stored transform and size, each only where it differs.
+///
+/// **The one spelling of "keep it where it is drawn"** for the three edits that
+/// take a layer out of whatever was placing it: a Position pin changed
+/// (`OndinApp::baked_placement`), an Item card's *Unpin insets*, and a container's
+/// layout set to `none` (`panels::layout`, §15 D878) — and, its `SetGeometry`
+/// half alone, for W's or H's `px` picked from the sizing menu, which fixes a
+/// hugged or percentage size where it is drawn (`size_mode_tx`, §15 D879). Written as one function
+/// because the kind-to-patch table is a definition of a shape's size, and a second
+/// copy would be the first to miss a kind.
+pub(super) fn baked_ops(
+    id: NodeId,
+    node: &ondin_core::Node,
+    local: Affine,
+    kind: &NodeKind,
+) -> Vec<Operation> {
+    let mut ops = Vec::new();
+    if node.transform() != local {
+        ops.push(Operation::SetTransform {
+            id,
+            transform: local,
+        });
+    }
+    if kind != node.kind() {
+        let geometry = match kind {
+            NodeKind::Rect { size, .. }
+            | NodeKind::Ellipse { size }
+            | NodeKind::Polygon { size, .. }
+            | NodeKind::Star { size, .. }
+            | NodeKind::Artboard { size } => Some(GeometryPatch::Size(*size)),
+            NodeKind::Text { sizing, .. } => Some(GeometryPatch::TextSizing(*sizing)),
+            _ => None,
+        };
+        if let Some(geometry) = geometry {
+            ops.push(Operation::SetGeometry { id, geometry });
+        }
+    }
+    ops
+}
+
+/// The Transform card's W and H sizing modes for one layer (§15 D879): which
+/// `layout::size_modes` offers, which each side is in, and the percentage a `%`
+/// side holds — the number its field shows in place of the drawn size.
+struct SizeMenu {
+    modes: Vec<SizeMode>,
+    w: SizeMode,
+    h: SizeMode,
+    w_pct: Option<f64>,
+    h_pct: Option<f64>,
+}
+
 /// Where a layer is drawn inside its frame, as the Position card measures it
 /// (`OndinApp::inset_placement`): the frame's size, the layer's local transform
 /// and its box, and the kind that box was measured from — everything
@@ -12102,77 +12358,110 @@ fn inset_label(edge: ondin_core::container::Edge) -> &'static str {
     }
 }
 
-/// The Position card's pin diagram: a frame, a layer in the middle of it, and a
-/// strut from each of the layer's edges to the frame's — solid accent where that
-/// edge is pinned, faint where it is not. Clicking a strut answers its edge.
+/// The width of the Position card's pin diagram ([`inset_diagram`]) — the
+/// mockup's 74 (`design/Layout Cards.dc.html`, screen 07). Its height is two field
+/// rows and the gap between them, beside which it sits.
+const INSET_DIAGRAM_W: f32 = 74.0;
+
+/// The Position card's pin diagram, the mockup's: a layer in the middle of a
+/// field-coloured well and a strut from each of its edges out towards the well's
+/// — **no container outline** (§15 D890), the struts alone saying where the
+/// container is. A pinned strut is solid accent, an unpinned one dashed and
+/// faint, brighter under the pointer; the layer is accent while any edge holds.
+/// Clicking a strut answers its edge.
 ///
 /// **Drawn, not a widget per strut**: four `interact` rects over one painted
-/// picture, each the band between the layer's edge and the frame's, so the target
-/// is the whole gap and not a one-point line. A strut between two auto margins
-/// is drawn dashed, which is the centring the buttons beside it switch.
+/// picture, each the band between the layer's edge and the well's, so the target
+/// is the whole gap and not a one-point line. A pinned strut between two auto
+/// margins — the centring the buttons under the fields switch — is drawn solid in
+/// the measure red (§15 D891; it was dashed accent until then).
+///
+/// ⚠️ **§15 D888's square with a container outline lasted one session**: the
+/// maintainer asked for the mockup's instead.
+///
+/// `held` is whether the left and the top edge are **held by default** (§15
+/// D891) — an axis with no inset outside a layout, which keeps its offset from
+/// the container's top-left — and such a strut is drawn solid, as the pin it
+/// behaves as; clicking it pins it for real. A centred axis is drawn solid in
+/// the measure red, [`color::MEASURE`], at the maintainer's ask: dashed, it read
+/// as the unpinned struts beside it.
 fn inset_diagram(
     ui: &mut egui::Ui,
     size: egui::Vec2,
     insets: &ondin_core::Insets,
+    held: (bool, bool),
 ) -> Option<ondin_core::container::Edge> {
     use ondin_core::container::Edge as Pin;
+    // The mockup's measures: struts start 6 in from the well's edge, stop 3 short
+    // of the layer's, and are 2 wide; the layer is 28 × 20.
+    const INSET: f32 = 6.0;
+    const CLEAR: f32 = 3.0;
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
     let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 4.0, color::FIELD);
-    let frame = rect.shrink(7.0);
+    painter.rect_filled(rect, 5.0, color::FIELD);
     painter.rect_stroke(
-        frame,
-        2.0,
-        egui::Stroke::new(1.0, theme::text::FAINT),
+        rect,
+        5.0,
+        egui::Stroke::new(1.0, color::FIELD_BORDER),
         egui::StrokeKind::Inside,
     );
-    let layer = egui::Rect::from_center_size(
-        frame.center(),
-        egui::vec2(frame.width() * 0.34, frame.height() * 0.4),
-    );
-    painter.rect_filled(layer, 2.0, color::HOVER);
+    let layer = egui::Rect::from_center_size(rect.center(), egui::vec2(28.0, 20.0));
+    let (fill, edge_colour) = if insets.is_authored() || held.0 || held.1 {
+        (
+            color::ACCENT.gamma_multiply(0.14),
+            color::ACCENT.gamma_multiply(0.7),
+        )
+    } else {
+        (theme::color::text_a(13), theme::color::text_a(64))
+    };
+    painter.rect_filled(layer, 3.0, fill);
     painter.rect_stroke(
         layer,
-        2.0,
-        egui::Stroke::new(1.0, theme::text::DIM),
+        3.0,
+        egui::Stroke::new(1.0, edge_colour),
         egui::StrokeKind::Inside,
     );
+    let well = rect.shrink(INSET);
+    let near = layer.expand(CLEAR);
     let mid = layer.center();
+    // Each band reaches from the well's edge to the layer's and a few points
+    // either side of the strut, so a target is not a two-point line.
+    const REACH: f32 = 5.0;
     let struts = [
         (
             Pin::Left,
-            egui::pos2(frame.left(), mid.y),
-            egui::pos2(layer.left(), mid.y),
+            egui::pos2(well.left(), mid.y),
+            egui::pos2(near.left(), mid.y),
             egui::Rect::from_min_max(
-                egui::pos2(frame.left(), layer.top()),
-                egui::pos2(layer.left(), layer.bottom()),
+                egui::pos2(rect.left(), layer.top() - REACH),
+                egui::pos2(layer.left(), layer.bottom() + REACH),
             ),
         ),
         (
             Pin::Right,
-            egui::pos2(layer.right(), mid.y),
-            egui::pos2(frame.right(), mid.y),
+            egui::pos2(near.right(), mid.y),
+            egui::pos2(well.right(), mid.y),
             egui::Rect::from_min_max(
-                egui::pos2(layer.right(), layer.top()),
-                egui::pos2(frame.right(), layer.bottom()),
+                egui::pos2(layer.right(), layer.top() - REACH),
+                egui::pos2(rect.right(), layer.bottom() + REACH),
             ),
         ),
         (
             Pin::Top,
-            egui::pos2(mid.x, frame.top()),
-            egui::pos2(mid.x, layer.top()),
+            egui::pos2(mid.x, well.top()),
+            egui::pos2(mid.x, near.top()),
             egui::Rect::from_min_max(
-                egui::pos2(layer.left(), frame.top()),
-                egui::pos2(layer.right(), layer.top()),
+                egui::pos2(layer.left() - REACH, rect.top()),
+                egui::pos2(layer.right() + REACH, layer.top()),
             ),
         ),
         (
             Pin::Bottom,
-            egui::pos2(mid.x, layer.bottom()),
-            egui::pos2(mid.x, frame.bottom()),
+            egui::pos2(mid.x, near.bottom()),
+            egui::pos2(mid.x, well.bottom()),
             egui::Rect::from_min_max(
-                egui::pos2(layer.left(), layer.bottom()),
-                egui::pos2(layer.right(), frame.bottom()),
+                egui::pos2(layer.left() - REACH, layer.bottom()),
+                egui::pos2(layer.right() + REACH, rect.bottom()),
             ),
         ),
     ];
@@ -12183,32 +12472,47 @@ fn inset_diagram(
         let id = ui.id().with(("inset-strut", inset_label(edge)));
         let resp = ui.interact(hit, id, egui::Sense::click());
         let pinned = inset_of(insets, edge).is_some();
+        let by_default = match edge {
+            Pin::Left => held.0,
+            Pin::Top => held.1,
+            Pin::Right | Pin::Bottom => false,
+        };
         let centred = match edge {
             Pin::Left | Pin::Right => centred_h,
             Pin::Top | Pin::Bottom => centred_v,
         };
-        let colour = if pinned {
-            color::ACCENT
+        let colour = if pinned && centred {
+            color::MEASURE
+        } else if pinned || by_default {
+            color::ACCENT_300
         } else if resp.hovered() {
-            theme::text::MUTED
+            theme::color::text_a(140)
         } else {
-            theme::text::FAINT
+            theme::color::text_a(64)
         };
-        let stroke = egui::Stroke::new(if pinned { 2.0 } else { 1.0 }, colour);
-        if pinned && centred {
-            painter.add(egui::Shape::dashed_line(&[a, b], stroke, 3.0, 2.0));
-        } else {
+        let stroke = egui::Stroke::new(2.0, colour);
+        if pinned || by_default {
             painter.line_segment([a, b], stroke);
+        } else {
+            painter.add(egui::Shape::dashed_line(&[a, b], stroke, 3.0, 2.0));
         }
-        let tip = match (pinned, edge) {
-            (false, Pin::Left) => "Pin the left edge",
-            (false, Pin::Right) => "Pin the right edge",
-            (false, Pin::Top) => "Pin the top edge",
-            (false, Pin::Bottom) => "Pin the bottom edge",
-            (true, Pin::Left) => "Unpin the left edge",
-            (true, Pin::Right) => "Unpin the right edge",
-            (true, Pin::Top) => "Unpin the top edge",
-            (true, Pin::Bottom) => "Unpin the bottom edge",
+        let tip = match (pinned, by_default, edge) {
+            (true, _, Pin::Left) => "Unpin the left edge",
+            (true, _, Pin::Right) => "Unpin the right edge",
+            (true, _, Pin::Top) => "Unpin the top edge",
+            (true, _, Pin::Bottom) => "Unpin the bottom edge",
+            (false, true, Pin::Left) => {
+                "Held at the left by default — click to pin it, or pin the right edge to \
+                 follow that instead"
+            }
+            (false, true, _) => {
+                "Held at the top by default — click to pin it, or pin the bottom edge to \
+                 follow that instead"
+            }
+            (false, false, Pin::Left) => "Pin the left edge",
+            (false, false, Pin::Right) => "Pin the right edge",
+            (false, false, Pin::Top) => "Pin the top edge",
+            (false, false, Pin::Bottom) => "Pin the bottom edge",
         };
         if resp.on_hover_text(tip).clicked() {
             clicked = Some(edge);
@@ -25649,7 +25953,9 @@ mod inset_card_tests {
     /// frame, which sits in no frame to be pinned against — and draws a frame
     /// without panicking. (Groups and booleans are refused by
     /// `container::takes_insets`, which `container`'s own tests cover; this test
-    /// does not build one.)
+    /// does not build one.) ⚠️ **"Only" is narrower than the rule since §15
+    /// D887**: a group with a layout's children are offered the card too, which
+    /// the next test covers.
     #[test]
     fn the_card_is_offered_to_a_frames_own_layers_only() {
         let (mut app, frame, rect) = app_with_pinnable();
@@ -25668,5 +25974,190 @@ mod inset_card_tests {
             ui.set_max_width(240.0);
             app.inspector_insets(ui);
         });
+    }
+
+    /// **The card is offered to a child of a group with a layout, and pins it
+    /// against the group's box** (§15 D887) — it was frame-only while core placed
+    /// such a child all along. The group at (50, 50) hugs a row of one 60 × 30
+    /// item: 100 × 70 with its padding of 20. A 40 × 30 rect pinned right 0 and
+    /// stored at y 15 sits at (60, 15) inside it; pinning its top from the diagram
+    /// keeps it there, at top 15.
+    ///
+    /// **Flip run**, `inset_subjects`' group arm deleted: fails on the first
+    /// assertion, the subjects empty — the predicted site. With `inset_placement`'s
+    /// group arm deleted instead, the pin commits nothing and fails on *"the top
+    /// is pinned where it is"*.
+    #[test]
+    fn a_laid_groups_child_gets_the_card_and_pins_against_the_groups_box() {
+        use ondin_core::container::{Display, Flex};
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = ondin_core::IdSource::new(0xAB);
+        let root = ids.mint();
+        let (group, item, pinned) = (ids.mint(), ids.mint(), ids.mint());
+        let rect = |id, index, w, at: (f64, f64)| Operation::CreateNode {
+            id,
+            parent: group,
+            index,
+            kind: NodeKind::Rect {
+                size: Size::new(w, 30.0),
+                corner_radii: RoundedRectRadii::default(),
+            },
+            transform: Some(Affine::translate(at)),
+            name: None,
+        };
+        let mut doc = ondin_core::Document::new(root);
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: group,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Group,
+                transform: Some(Affine::translate((50.0, 50.0))),
+                name: None,
+            },
+            rect(item, 0, 60.0, (0.0, 0.0)),
+            rect(pinned, 1, 40.0, (0.0, 15.0)),
+            Operation::SetDisplay {
+                id: group,
+                display: Some(Display::Flex(Flex {
+                    padding: [20.0; 4],
+                    ..Default::default()
+                })),
+            },
+            Operation::SetInsets {
+                id: pinned,
+                insets: ondin_core::Insets {
+                    right: Some(ondin_core::LengthPct::Px(0.0)),
+                    ..Default::default()
+                },
+            },
+        ]))
+        .unwrap();
+        app.session.adopt_document(doc, None);
+        app.session.selection.set(vec![pinned]);
+        assert_eq!(app.inset_subjects(), vec![pinned]);
+        let before = drawn(&app, pinned);
+        assert_eq!(
+            before,
+            KRect::new(110.0, 65.0, 150.0, 95.0),
+            "the fixture: right 0 in a 100-wide box, y 15 from its transform"
+        );
+
+        app.toggle_pin(&[pinned], Pin::Top, true);
+        assert_eq!(drawn(&app, pinned), before, "pinning moved it");
+        assert_eq!(
+            app.session.doc.get(pinned).unwrap().insets().top,
+            Some(ondin_core::LengthPct::Px(15.0)),
+            "the top is pinned where it is"
+        );
+
+        crate::theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let out = ctx.run_ui(Default::default(), |ui| {
+            ui.set_max_width(284.0);
+            app.inspector_insets(ui);
+        });
+        // Inside a layout a pin is what takes the layer out of the flow, so the
+        // header says *Absolute* (§15 D891) — which the plain frame's card does not.
+        assert!(
+            out.shapes.iter().any(|cs| matches!(
+                &cs.shape,
+                egui::epaint::Shape::Text(t) if t.galley.text() == "Absolute"
+            )),
+            "the badge, in a container with a layout"
+        );
+    }
+
+    /// **The card is the mockup's screen 07** (§15 D890): the diagram 74 wide at
+    /// the left, spanning the two field rows exactly; the four fields beside it;
+    /// a pinned field's value with its unit and an unpinned one reading `auto`.
+    /// And §15 D891's two rules, in a plain frame: the top — no inset on its axis —
+    /// shows the distance it is held at by default, and there is no *Absolute*
+    /// badge (the laid-group test above asserts the one it gets there). Measured
+    /// off the painted shapes at the inspector column's 284.
+    ///
+    /// **Flip run**, the `auto` formatter off (an unpinned field showing its
+    /// distance, as before D890): fails on *"left and bottom, unpinned"*, 0 against
+    /// 2 — the predicted site. (Recorded as 0 against 3 at D890, before the top
+    /// was held.) **Flip run**, the top never held: fails on the same line, 3
+    /// against 2 — one assertion before the *"held by default"* one it was
+    /// predicted to fail on, the top reading `auto` again. **Flip run**, the
+    /// badge's `laid` dropped: fails on *"no badge in a plain frame"*, 1 against 0,
+    /// predicted.
+    #[test]
+    fn the_card_is_laid_out_as_the_mockup() {
+        let (mut app, _frame, rect) = app_with_pinnable();
+        app.toggle_pin(&[rect], Pin::Right, true);
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut out = ctx.run_ui(Default::default(), |_| {});
+        for _ in 0..3 {
+            out = ctx.run_ui(Default::default(), |ui| {
+                ui.set_max_width(284.0);
+                app.inspector_insets(ui);
+            });
+        }
+        let texts: Vec<(String, egui::Rect)> = out
+            .shapes
+            .iter()
+            .filter_map(|cs| match &cs.shape {
+                egui::epaint::Shape::Text(t) => Some((
+                    t.galley.text().to_owned(),
+                    t.galley.rect.translate(t.pos.to_vec2()),
+                )),
+                _ => None,
+            })
+            .collect();
+        let grounds: Vec<egui::Rect> = out
+            .shapes
+            .iter()
+            .filter_map(|cs| match &cs.shape {
+                egui::epaint::Shape::Rect(r) if r.fill == color::FIELD => Some(r.rect),
+                _ => None,
+            })
+            .collect();
+        let well = *grounds
+            .iter()
+            .find(|r| r.width() == INSET_DIAGRAM_W)
+            .expect("the diagram's well");
+        let fields: Vec<egui::Rect> = grounds
+            .iter()
+            .copied()
+            // Beside the well, not under it: the second centre button is also a
+            // 28-tall ground right of the well's edge.
+            .filter(|r| {
+                r.height() == ui::CONTROL_H && r.left() > well.right() && r.top() < well.bottom()
+            })
+            .collect();
+        assert_eq!(
+            fields.len(),
+            4,
+            "four fields beside the diagram: {fields:?}"
+        );
+        let top = fields.iter().map(|r| r.top()).fold(f32::MAX, f32::min);
+        let bottom = fields.iter().map(|r| r.bottom()).fold(f32::MIN, f32::max);
+        assert_eq!(
+            (well.top(), well.bottom()),
+            (top, bottom),
+            "spanning both rows"
+        );
+        let word = |w: &str| texts.iter().filter(|(t, _)| t == w).count();
+        assert_eq!(word("auto"), 2, "left and bottom, unpinned");
+        assert_eq!(
+            word("30"),
+            1,
+            "the top, held by default at its distance (§15 D891)"
+        );
+        assert_eq!(
+            (word("160"), word("px")),
+            (1, 1),
+            "the pinned right, 300 - 40 - 100"
+        );
+        assert_eq!(
+            word("Absolute"),
+            0,
+            "no badge in a plain frame, where everything is absolute (§15 D891)"
+        );
     }
 }

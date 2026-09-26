@@ -9,6 +9,7 @@ pub(crate) mod dashboard;
 mod export;
 mod inspector;
 pub(crate) mod layers;
+mod layout;
 pub(crate) mod paint;
 mod picker;
 mod typography;

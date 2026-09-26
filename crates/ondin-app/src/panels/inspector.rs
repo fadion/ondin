@@ -4723,7 +4723,10 @@ impl OndinApp {
                                     slot,
                                     Prefix::Text(letter),
                                     Some(mode),
+                                    // Always a number: W and H are real sizes
+                                    // of the layer (§15 D895).
                                     Some(pct.unwrap_or(drawn)),
+                                    drawn,
                                     &m.modes,
                                 );
                                 if let Some(p) = e.picked {

@@ -492,18 +492,18 @@ fn shared<T: Copy + PartialEq, S>(all: &[S], f: impl Fn(&S) -> T) -> Option<T> {
     all.iter().all(|s| f(s) == first).then_some(first)
 }
 
-/// A number field's digits replaced with a dash while the selection disagrees —
-/// `typography::mixed_text`'s convention, and for its reason: showing one of the
-/// values reads as a claim that it is *the* value.
+/// A number field's digits replaced with **"Mixed"** while the selection
+/// disagrees — showing one of the values would read as a claim that it is *the*
+/// value.
 ///
-/// ⚠️ **That convention is itself a departure from §15 D130**, which says a
-/// control reads "Mixed" wherever five letters fit and names exactly two dashes;
-/// §15 D636 recorded the Type panel's as *not a precedent*, and the mockup's
-/// screen 08 has these fields read "Mixed" too. Open, with a *Fix* verdict (§15
-/// D878's item 3) — not a rule to copy into the next card.
-fn dash_if(d: egui::DragValue<'_>, mixed: bool) -> egui::DragValue<'_> {
+/// §15 D130's rule, "Mixed" wherever five letters fit, and the mockup's screen
+/// 08. It read a dash, copying `typography::mixed_text`, until §15 D892 closed
+/// D878's *Fix* verdict on it — the maintainer's ruling that the layout cards
+/// follow D130 before grid copies them. The unit beside a mixed sizing mode still
+/// reads a dash ([`size_field`]): five letters do not fit a unit's slot.
+fn mixed_if(d: egui::DragValue<'_>, mixed: bool) -> egui::DragValue<'_> {
     if mixed {
-        return d.custom_formatter(|_, _| "–".into());
+        return d.custom_formatter(|_, _| ui::MIXED_WORD.into());
     }
     d
 }
@@ -652,35 +652,47 @@ pub(crate) struct SizeEdit {
 
 /// A value field whose unit is a **menu of sizing modes** (§15 D879).
 ///
-/// The number is the size in the unit the mode names — px, or a percentage — and
-/// for a keyword it is the size the keyword resolved to (`resolved`), marked with
-/// the keyword where the unit would be — the Position card's convention for an
-/// unpinned inset until §15 D890. A keyword with nothing resolved to show — a
-/// basis at `auto` — shows a dash. Typing or dragging the number writes it in px,
-/// or in % while the mode is %.
+/// **What the digits show is the maintainer's rule, §15 D895: a number where the
+/// number is a real size of the layer, the keyword where the property is unset.**
 ///
-/// ⚠️ **The mockup shows the keyword *in* the field and the resolved size only on
-/// canvas**, and since §15 D890 the Position card does exactly that for an
-/// unpinned inset — `auto` in the digits' place with the distance still under it,
-/// so it scrubs from where the edge is. This field still shows the number; the
-/// two conventions now disagree, and which one wins here is not decided.
+/// - `number` given: the size in the unit the mode names — px, a percentage, or
+///   for a keyword the size it resolved to, the keyword standing where the unit
+///   would be. The Transform card's W and H always pass one: a hugging frame
+///   *is* 150 wide, and Figma's and Framer's W fields say so the same way.
+/// - `number` absent and the mode a keyword: the keyword in the digits' place,
+///   `under` beneath it so a scrub starts from there, and a dash for the unit —
+///   Webflow's field, and the Position card's unpinned inset (§15 D890). The Item
+///   card's basis and limits: an unset `min-width` has no number worth showing.
+/// - `number` absent and no mode: the selection disagrees, and the digits read
+///   "Mixed" ([`mixed_if`], §15 D892).
+///
+/// Typing or dragging writes the number in px, or in % while the mode is %.
 pub(crate) fn size_field(
     ui: &mut egui::Ui,
     size: egui::Vec2,
     prefix: Prefix,
     mode: Option<SizeMode>,
     number: Option<f64>,
+    under: f64,
     modes: &[SizeMode],
 ) -> SizeEdit {
-    let mut v = number.unwrap_or(0.0);
+    let mut v = number.unwrap_or(under);
     let start = v;
     let percent = mode == Some(SizeMode::Percent);
+    // The keyword standing in the digits, when there is no number to show.
+    let word = match (number, mode) {
+        (None, Some(m @ (SizeMode::Auto | SizeMode::FitContent))) => Some(m.word()),
+        _ => None,
+    };
     let (resp, flip) = ui::value_field_suffixed(
         ui,
         size,
         prefix,
         Some(Suffix {
-            text: mode.map_or("–", SizeMode::word),
+            text: match (number, mode) {
+                (Some(_), Some(m)) => m.word(),
+                _ => "–",
+            },
             clickable: modes.len() > 1,
             tooltip: "How this size is set",
         }),
@@ -690,7 +702,10 @@ pub(crate) fn size_field(
         } else {
             Scrub::whole(0.5).range(0.0..=f64::MAX)
         },
-        |d| dash_if(d.custom_formatter(ui::number(2)), number.is_none()),
+        |d| match word {
+            Some(w) => d.custom_formatter(move |_, _| w.into()),
+            None => mixed_if(d.custom_formatter(ui::number(2)), number.is_none()),
+        },
     );
     let mut picked = None;
     egui::Popup::menu(&resp)
@@ -1234,7 +1249,7 @@ impl OndinApp {
                         }),
                         &mut v,
                         Scrub::whole(0.5).range(0.0..=f64::MAX),
-                        |d| dash_if(d.custom_formatter(ui::number(2)), shown.is_none()),
+                        |d| mixed_if(d.custom_formatter(ui::number(2)), shown.is_none()),
                     );
                     let tx = if !edited(&resp, v != start) {
                         Transaction(Vec::new())
@@ -1300,7 +1315,7 @@ impl OndinApp {
                     Prefix::Icon(glyph),
                     &mut v,
                     Scrub::whole(0.5).range(0.0..=f64::MAX),
-                    |d| dash_if(d.custom_formatter(ui::number(2)), shown.is_none()),
+                    |d| mixed_if(d.custom_formatter(ui::number(2)), shown.is_none()),
                 )
                 .on_hover_text(word);
                 let tx = if !edited(&resp, v != start) {
@@ -1350,7 +1365,7 @@ impl OndinApp {
                         Prefix::Text(letter),
                         &mut v,
                         Scrub::whole(0.5).range(0.0..=f64::MAX),
-                        |d| dash_if(d.custom_formatter(ui::number(2)), shown.is_none()),
+                        |d| mixed_if(d.custom_formatter(ui::number(2)), shown.is_none()),
                     );
                     let tx = if !edited(&resp, v != start) {
                         Transaction(Vec::new())
@@ -1596,7 +1611,7 @@ impl OndinApp {
                     Prefix::Label(label),
                     &mut v,
                     Scrub::fine(0.05, 1).range(0.0..=f64::MAX),
-                    |d| dash_if(d.custom_formatter(ui::number(2)), shown.is_none()),
+                    |d| mixed_if(d.custom_formatter(ui::number(2)), shown.is_none()),
                 );
                 accent(ui, at, flipped);
                 let tx = if !edited(&resp, v != start) {
@@ -1841,6 +1856,8 @@ impl OndinApp {
             Prefix::Label(label),
             mode,
             number,
+            // Under a keyword, the size drawn, so a scrub starts from it.
+            drawn.unwrap_or(0.0),
             modes,
         );
         if let Some(m) = edit.picked {
@@ -2437,6 +2454,43 @@ mod tests {
             "left and right landed together: {padding:?}"
         );
         assert_eq!(padding[0], 20.0, "and top was left alone");
+    }
+
+    /// **A field over a selection that disagrees reads "Mixed", and a basis at
+    /// `auto` reads `auto`** — the maintainer's rulings of §15 D892 and D895,
+    /// asserted on the Item card's painted text for two rects that disagree about
+    /// `flex-grow` and agree on an `auto` basis.
+    ///
+    /// **Flip runs**: `mixed_if` back to a dash fails on *"the grow field says
+    /// so"*, "Mixed" counted 0 against 1, predicted. The keyword word dropped from
+    /// `size_field` (the basis back on the number path) fails on **the same
+    /// line**, 2 against 1 — not on *"the basis reads its keyword"* as predicted:
+    /// with no number and no word the basis's digits read "Mixed" too, which is
+    /// exactly the confusion D892 would have introduced without D895.
+    #[test]
+    fn a_mixed_field_reads_mixed_and_an_unset_basis_reads_auto() {
+        let mut s = scene();
+        set_item(&mut s.app, s.a, |i| i.grow = 1.0);
+        s.app.session.selection.set(vec![s.a, s.b]);
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let out = ctx.run_ui(Default::default(), |ui| {
+            ui.set_max_width(284.0);
+            s.app.inspector_item(ui);
+        });
+        let texts: Vec<String> = out
+            .shapes
+            .iter()
+            .filter_map(|cs| match &cs.shape {
+                egui::epaint::Shape::Text(t) => Some(t.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect();
+        let count = |w: &str| texts.iter().filter(|t| *t == w).count();
+        assert_eq!(count("Mixed"), 1, "the grow field says so: {texts:?}");
+        assert_eq!(count("auto"), 1, "the basis reads its keyword: {texts:?}");
+        assert_eq!(count("–"), 1, "and its unit a dash: {texts:?}");
     }
 
     /// **Each card offers itself for what it describes and draws without

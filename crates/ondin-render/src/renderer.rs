@@ -596,7 +596,9 @@ impl RenderOverrides {
     /// where the drag wants it drawn. A *resized* item is re-laid like its
     /// siblings, since its container can move it as its size changes — even when
     /// the resize carries a `SetTransform` too, as a left- or top-handle one does
-    /// (§15 D877's amendment). And the
+    /// (§15 D877's amendment). So is a *turned* one — a `SetTransform` changing the
+    /// linear part, which the layout applies about the box centre in the slot
+    /// (§15 D896). And the
     /// items of a layout this preview *removes* are put back by their transforms —
     /// no pass roots at a container with no layout, so nothing else would.
     ///
@@ -619,10 +621,33 @@ impl RenderOverrides {
                     _ => None,
                 })
                 .collect();
+        // **A turn is not a drag** (§15 D896, the maintainer's ruling on an in-flow
+        // item's rotation): a `SetTransform` that changes the linear part — a
+        // rotation, a scale, a skew, a flip — is re-laid like a resize, and
+        // `item_placed` turns the item about its box centre in its slot, which is
+        // what the commit draws. Skipped as a drag it was drawn about the tool's
+        // pivot and jumped on release (§15 D877's second amendment). A move keeps
+        // the linear part and stays a drag.
+        let linear = |a: Affine| {
+            let [a, b, c, d, _, _] = a.as_coeffs();
+            [a, b, c, d]
+        };
+        let turned = |id: &NodeId, to: &Affine| {
+            doc.get(*id).is_some_and(|n| {
+                linear(n.transform())
+                    .iter()
+                    .zip(linear(*to))
+                    .any(|(x, y)| (x - y).abs() > 1e-9)
+            })
+        };
         let dragged: FxHashSet<NodeId> =
             tx.0.iter()
                 .filter_map(|op| match op {
-                    Operation::SetTransform { id, .. } if !resized.contains(id) => Some(*id),
+                    Operation::SetTransform { id, transform }
+                        if !resized.contains(id) && !turned(id, transform) =>
+                    {
+                        Some(*id)
+                    }
                     _ => None,
                 })
                 .collect();

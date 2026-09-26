@@ -2768,6 +2768,37 @@ fn a_left_handle_resize_of_a_flex_item_previews_as_its_commit() {
     );
 }
 
+/// **Rotating a flex item about a pivot other than its centre previews as its
+/// commit** (§15 D896, the maintainer's ruling that an in-flow item turns about
+/// its box centre in its slot). The fixture's first rect turned 30° about a point
+/// far off to its lower right — the `SetTransform` a rotate tool writes for a
+/// pivot that is not the centre, translation and all.
+///
+/// The layout keeps the item in its slot and turns it about its box centre with
+/// the new linear part, ignoring the translation; the preview used to treat the
+/// `SetTransform` as a drag and draw it about the tool's pivot, which jumped on
+/// release (§15 D877's second amendment, measured nowhere until this).
+///
+/// **Flip run**, `flex_relayout`'s `turned` exemption deleted: fails on the
+/// differential, the predicted site.
+#[test]
+fn rotating_a_flex_item_about_another_pivot_previews_as_its_commit() {
+    let (doc, _frame, first, _) = flex_fixture();
+    let pivot = ondin_core::kurbo::Vec2::new(300.0, 200.0);
+    let turn = Affine::translate(pivot)
+        * Affine::rotate(30f64.to_radians())
+        * Affine::translate(-pivot)
+        * doc.get(first).unwrap().transform();
+    assert_preview_matches_commit(
+        &doc,
+        &Transaction(vec![Operation::SetTransform {
+            id: first,
+            transform: turn,
+        }]),
+        "a rotation about another pivot",
+    );
+}
+
 /// **Resizing one flex item draws its siblings where the release will** — the
 /// preview running the flex engine on its own state (`flex_relayout`), where a
 /// field patch could only have moved the item and left the row overlapping.

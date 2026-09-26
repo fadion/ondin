@@ -956,12 +956,15 @@ impl<'v> FlexTree<'v> {
             }
         };
         self.leaves.push(leaf);
-        if display.is_some() {
+        if let Some(Display::Flex(flex)) = display {
             for child in self.view.children(id) {
                 if in_flow(self.view, child)
                     && let Some(c) = self.push(child)
                 {
                     self.children[index].push(taffy::NodeId::from(c));
+                    if fit_content_across(&self.view.item(child), &flex) {
+                        self.styles[c].align_self = Some(taffy::AlignItems::FLEX_START);
+                    }
                 }
             }
         }
@@ -1175,6 +1178,26 @@ fn style_of(kind: &NodeKind, display: Option<&Display>, item: &FlexItem) -> taff
         None => {}
     }
     style
+}
+
+/// Whether `item`, in a `flex` container, is **`fit-content` across the line and
+/// would be stretched** — so it must not be (§15 D893, the maintainer's ruling).
+///
+/// CSS stretches an item across its line only when its cross size is `auto`; a
+/// definite one, which `fit-content` is, makes `stretch` behave as `flex-start`
+/// (CSS Flexbox §8.3). Figma's *Hug* inside a stretching parent likewise keeps
+/// hugging. taffy is handed `auto` for `FitContent` ([`style_of`] — it has no
+/// such size), so without this a hugging frame in a stretching row stretched,
+/// which §15 D879 flagged. The main axis is untouched: `fit-content` there is the
+/// flex basis's content size, and `flex-grow` may still grow it, as in CSS.
+fn fit_content_across(item: &FlexItem, parent: &Flex) -> bool {
+    let across = if parent.direction.is_row() {
+        item.height
+    } else {
+        item.width
+    };
+    across == Dimension::FitContent
+        && item.align_self.unwrap_or(parent.align_items) == AlignItems::Stretch
 }
 
 fn align_items(a: AlignItems) -> taffy::AlignItems {

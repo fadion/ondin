@@ -349,6 +349,54 @@ fn a_pinned_child_of_a_flex_group_is_placed_against_its_box_and_re_pinned_when_m
     assert_eq!(insets.bottom, Some(ondin_core::LengthPct::Px(30.0)));
 }
 
+/// **A frame that hugs across the line is not stretched** (§15 D893) — CSS's
+/// `stretch` applying only to an `auto` cross size, and Figma's *Hug* staying
+/// hugged. In a 400 × 200 row with padding 20 and the default `align-items:
+/// stretch`, a card frame holding a 40 × 30 rect and set to `fit-content` both
+/// ways stays 30 tall; a rect beside it, whose cross size is `auto`, still
+/// stretches to 160 (§15 D872). A frame is no control here: its `auto` is its
+/// stored size, which is definite and never stretched either (§15 D879) — the
+/// first draft of this test used one and found exactly that.
+///
+/// **Flip run**, the `fit_content_across` patch in `FlexTree::push` deleted:
+/// fails on *"the hugging card keeps hugging"*, 160 against 30 — the predicted
+/// site; the stretching rect stays green, as it should.
+#[test]
+fn a_frame_that_hugs_across_the_line_is_not_stretched() {
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(400.0, 200.0), (0.0, 0.0));
+    let hug = s.add(f, frame(10.0, 10.0), (0.0, 0.0));
+    s.add(hug, rect(40.0, 30.0), (0.0, 0.0));
+    let tall = s.add(f, rect(40.0, 30.0), (0.0, 0.0));
+    s.display(
+        f,
+        Some(Display::Flex(Flex {
+            padding: [20.0; 4],
+            ..Default::default()
+        })),
+    );
+    s.display(hug, Some(Display::Flex(Flex::default())));
+    s.item(hug, |i| {
+        i.width = ondin_core::container::Dimension::FitContent;
+        i.height = ondin_core::container::Dimension::FitContent;
+    });
+    assert_eq!(
+        s.bounds(hug).width(),
+        40.0,
+        "the fixture hugs along the row"
+    );
+    assert_eq!(
+        s.bounds(hug).height(),
+        30.0,
+        "the hugging card keeps hugging across the line"
+    );
+    assert_eq!(
+        s.bounds(tall).height(),
+        160.0,
+        "an `auto` height still stretches: 200 less 20 twice"
+    );
+}
+
 /// A group with a layout nested in a frame's row takes its slot from the row and
 /// lays out its own column inside it.
 #[test]

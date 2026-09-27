@@ -41,7 +41,7 @@ which is this file's own §9.5 lesson: **check the section before believing the 
 | *Now · Path editing* | **Nothing open as of 2026-09-22.** The one item — whole-path geometry patches — **moved to *Later · Parked decisions*** that day: it is non-blocking with a stated trigger (revisited *with* MCP, which is parked), which is what *Later* is for by this file's own table above. ⚠️ **That honours §15 D123's closing note rather than breaking it** — the note asks for it to stay *"in the todo as a decision rather than a gap"*, and it stays in this file; what changes is that it stops sitting under a heading meaning *open work on live code*. ⚠️ **The `retain_valid`/`subpath_lengths` pair left this row on 2026-09-19**, ruled to the narrow `#[allow(dead_code)]` with the no-effect call removed (§15 D637, *Resolved*) — it had been here since 2026-09-09. |
 | *Now · Files, library and storage* | **Nothing open as of 2026-09-23** — the cover cache's lifecycle, opened that day while closing §15 D862, closed the same day: `Covers::pass` drains once a dashboard pass and the project mosaic asks only on screen (§15 D863), and textures past a cap of 128 go least recently asked-for first (§15 D864). *The text below is the row as it stood that morning.* **One item as of 2026-09-23**: the cover cache's lifecycle — no texture is ever evicted, `drain` runs only when a card asks, and the project mosaic is ungated. Found while closing §15 D862; no behaviour is wrong, it is memory and wasted repaints. *The text below is the row as it stood before.* **Nothing open as of 2026-09-19** — the last two closed that day: the cover render moved onto **a worker of its own** rather than onto `Writer`'s FIFO queue, `FRAME_BUDGET` deleted with what it bounded (§15 D820), and **rollback was refused outright** and is a §0 non-goal, the retry being the recovery (§15 D814). 🚨 **The threading then flaked a *dashboard* test 2 runs in 20**, found by running the filter twenty times after six clean runs had said nothing. *The text below is the row as it stood that morning.* **Two**, as of 2026-09-19: a dashboard cover rendered synchronously on the UI thread, which needs a thread, and **rollback** after a partly-failed migration, which needs a ruling. **Three left this row that day.** The non-Unicode filename was **reproduced** — a lone UTF-16 surrogate, which NTFS accepts and `to_str` refuses — and the migration now carries such a file by its `OsStr` name (§15 D809); the per-machine index has an injection point, and it is a `cfg!` rather than any of the four answers the bullet proposed (§15 D807); and the partly-failed migration got its list in the modal and a *Try again* button, leaving only the third of its three asks (§15 D810). ⚠️ **This row said *"Three, all from the codebase review"* while the section held four**, the migration bullet never having been named in it — so it was short by one from the day it was written and the arithmetic in it was never a count of anything. ⚠️ **This row did not exist until 2026-09-09** and the section had held open work since 2026-09-06; the *"nothing open"* line below was the half that got corrected first, and a missing row is the same failure with nothing to contradict. |
 | *Now · Text alignment* | **Nothing open as of 2026-09-22.** Side bearings / optical margin alignment moved to *Later · Parked decisions*, undecided — it had been filed `Later:` inside a `Now` section since the section was written, which is the prefix table broken from the inside — **and was built hours later the same day** (§15 D830): both edges, `ParagraphStyle::optical_margins`, off by default, one adjustment to the line's geometry that no arm of reads `align`. ⚠️ **The bullet's own example was backwards the whole time it stood** — it blamed `H` for having *almost no* left bearing, and `H` has the largest of the capitals measured. ⚠️ *This row said "Side bearings / optical margin alignment, marked **Later**" and was perfectly accurate for weeks — it described the bullet exactly, including the contradiction, and that is why nobody acted on it.* What is left in the section is one standing rule: don't use ink bounds for alignment — **which D830 does not break, and which now says it is about the *datum***. |
-| *Next · Container layout* | **Opened 2026-09-23 and designed** (§15 D867–D873): five steps — used geometry behind an identity pass, absolute insets, flex, grid, then components — plus the decisions still open. **Steps 1 and 2 are built** (2026-09-24, §15 D868, D874) — step 2 with its inspector card, so pinning shipped; **step 3, flex, is built** the same day (§15 D875–D877), its inspector cards last (§15 D878–D883), and frames under groups with it (§15 D876) — and the maintainer's first look at the cards came back with seven findings, answered in session 36 (2026-09-26, §15 D884–D889), and the Position card then laid out as the mockup and refined (2026-09-27, §15 D890–D891). **Step 3 committed 2026-09-27**; what flex still owes is the section's *owed* and *open* paragraphs — tests and rulings, no feature. The only `Next` section in the file, and not a `Now`, because what is left in it is that and steps 4–5. |
+| *Next · Container layout* | **Opened 2026-09-23 and designed** (§15 D867–D873): five steps — used geometry behind an identity pass, absolute insets, flex, grid, then components — plus the decisions still open. **Steps 1 and 2 are built** (2026-09-24, §15 D868, D874) — step 2 with its inspector card, so pinning shipped; **step 3, flex, is built** the same day (§15 D875–D877), its inspector cards last (§15 D878–D883), and frames under groups with it (§15 D876) — and the maintainer's first look at the cards came back with seven findings, answered in session 36 (2026-09-26, §15 D884–D889), and the Position card then laid out as the mockup and refined (2026-09-27, §15 D890–D891). **Step 3 committed 2026-09-27**, and the maintainer's six rulings on what flex had left the same day (§15 D892–D897); what flex still owes is the section's *owed* paragraph — tests, no feature — its *open* decisions now all grid's. The only `Next` section in the file, and not a `Now`, because what is left in it is that and steps 4–5. |
 | *Later* | The command palette and cheatsheet; the parked decisions; post-v1 (MCP, Command Mode, multiplayer). |
 
 **Sections with nothing open**: *Doc drift*, *Now · Images*, *Now · Inspector*, *Now · Keyboard*,
@@ -1455,7 +1455,7 @@ are chrome.
 3. **Flex**, with live reflow during gestures and reorder by drag. **BUILT AND COMMITTED
    2026-09-27** (`30d8b3d` the code, `e48eec3` the record) — the block below was the handoff marker
    of sessions 35 and 36 and is kept as the account of how the step closed. What flex still owes is
-   the *owed* and *open* paragraphs after this list.
+   the *owed* paragraph after this list; the *open* one is grid's since §15 D892–D897.
 
    **Items 1–4 below are built, tested and committed** (session 34 — the code as one commit, since
    its parts interleave in the same files, then the record; `git log` has them), and **item 5, the
@@ -1487,6 +1487,15 @@ are chrome.
    GUI. **D884–D891 are all spent**: session 36's reserved block is exhausted, and a further entry
    needs a new reservation.
 
+   **Then the maintainer's six rulings on what flex had left before grid** (2026-09-27, §15
+   **D892–D897**, the session's recommendations taken whole and committed in four groups): *"Mixed"*
+   in the cards' number fields (D892); a `fit-content` item not stretched across its line (D893); a
+   pin out of a hugging container moving nothing (D894); a sizing field's keyword in its digits where
+   the property is unset (D895); an in-flow item turning about its box centre, the preview now
+   agreeing (D896); no header badges on the Container and Item cards (D897). Not seen in the GUI.
+   D892–D897 are spent from a block reserved to D903; the closing negative grep found D898–D903 at
+   zero code sites, and the session released them — no block is reserved.
+
    **Still to do, in this order:**
    1. ~~**Write D875**~~ — done in session 34, and CLAUDE.md's D-number paragraph brought up to date
       the same session.
@@ -1515,29 +1524,14 @@ preview, or a flex container's hit-testing; a **preview** test of a pinned child
 layout — core and the app are checked since §15 D887, and `RenderOverrides::relayout`'s placement of
 one is not; a measurement of what the **Scale tool on a laid group** does to a pinned child —
 `tools::scaled_flex` re-sizes the group and moves its children in one edit, while `keep_insets` pins
-against the group's committed box (§15 D887); and a measurement of the
-**rotation preview's residue** — an in-flow item rotated about a pivot other than its centre previews
-at the tool's transform, its `SetTransform` counted as a drag, and is laid out on release about its
-box centre (§15 D877's second amendment). Open and unmeasured.
+against the group's committed box (§15 D887); and a test of **where a rotated in-flow item is
+drawn** — the preview and the commit agree since §15 D896, both through `container::item_placed`,
+and nothing asserts the box-centre turn either of them makes. Open and unmeasured.
 
 **Open, and each is a decision rather than work** (§15 D867, D868, D875 carry the detail): how a
 grid preview reflows, flex's being `RenderOverrides::flex_relayout` and insets' `relayout`;
 `TextSizing`'s mapping in grid, and what resizing a grid item writes — flex's are the maintainer's
-rulings (§15 D875) and are not assumed to carry over; and whether the maintainer confirms the
-session's reading of an **in-flow item's rotation origin and stored translation** —
-`container::item_placed` composes `placed_at(slot, box, stored)`, turning the item about its box
-centre with its stored linear part and ignoring its stored translation while it is in flow (§15
-D875). That is answered in code and **not ruled**; `tests/flex.rs` commits a rotation of an in-flow
-item and checks only what is stored — its turn kept, its shift dropped (§15 D877's second amendment) —
-and no test checks where a rotated in-flow item is drawn. And **what a pin does in a hugging
-container**: pinning an in-flow item takes it out of the flow, so a laid group that hugs, or a
-`fit-content` frame, re-lays without it and shrinks, and *"a pin never moves anything"* can fail
-there. Noticed in session 36 (§15 D887), not measured, and nothing decided about it. And **how a
-keyword reads in a sizing field**: the Position card puts an unpinned inset's `auto` in the digits'
-place, its distance underneath (§15 D890), while `layout::size_field` — the Item card's basis and
-limits, the Transform card's W and H — still shows a keyword's resolved number beside the keyword
-unit, which cited the Position card's old convention as its precedent (§15 D878's item 6). The two
-now disagree, and which wins in the sizing fields is not decided.
+rulings (§15 D875) and are not assumed to carry over.
 
 ## Later · Command palette (`Ctrl+K`, with `Ctrl+/` as an alias — `shortcuts.md` §8)
 

@@ -2366,6 +2366,86 @@ mod tests {
         assert!(s.app.session.doc.get(s.b).unwrap().visible());
     }
 
+    /// One card drawn headlessly in the inspector column's 284, with real pointer
+    /// events — the harness the field-scrub tests share (§15 D885, D901). `card`
+    /// is which card: `inspector_container` or `inspector_item`.
+    struct Panel {
+        ctx: egui::Context,
+        app: OndinApp,
+        time: f64,
+        card: fn(&mut OndinApp, &mut egui::Ui),
+    }
+
+    impl Panel {
+        fn new(app: OndinApp, card: fn(&mut OndinApp, &mut egui::Ui)) -> Self {
+            let ctx = egui::Context::default();
+            crate::theme::install(&ctx);
+            Panel {
+                ctx,
+                app,
+                time: 0.0,
+                card,
+            }
+        }
+
+        fn frame(&mut self, events: Vec<egui::Event>) -> egui::FullOutput {
+            self.time += 0.1;
+            let (app, card) = (&mut self.app, self.card);
+            self.ctx.run_ui(
+                egui::RawInput {
+                    time: Some(self.time),
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1200.0, 900.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.set_max_width(284.0);
+                    card(app, ui);
+                },
+            )
+        }
+
+        /// Settled, then where the first run reading exactly `text` is.
+        fn run(&mut self, text: &str) -> egui::Pos2 {
+            let mut out = self.frame(Vec::new());
+            for _ in 0..2 {
+                out = self.frame(Vec::new());
+            }
+            out.shapes
+                .iter()
+                .find_map(|cs| match &cs.shape {
+                    egui::epaint::Shape::Text(t) if t.galley.text() == text => {
+                        Some(t.galley.rect.translate(t.pos.to_vec2()).center())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("no run reads {text:?}"))
+        }
+
+        /// Press at `from`, drag 80 points right in four steps, let go.
+        fn scrub(&mut self, from: egui::Pos2) {
+            let button = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            };
+            self.frame(vec![egui::Event::PointerMoved(from), button(from, true)]);
+            for step in 1..=4 {
+                let at = from + egui::vec2(20.0 * step as f32, 0.0);
+                self.frame(vec![egui::Event::PointerMoved(at)]);
+            }
+            let at = from + egui::vec2(80.0, 0.0);
+            self.frame(vec![button(at, false)]);
+            for _ in 0..3 {
+                self.frame(Vec::new());
+            }
+        }
+    }
+
     /// **A scrub on a Container field lands, as one undo step** (§15 D885) — the
     /// Column gap, then the left-and-right padding, each pressed on its digits,
     /// dragged 80 points and let go, through the real card and the real valve.
@@ -2381,79 +2461,9 @@ mod tests {
     /// the predicted site.
     #[test]
     fn a_scrub_on_a_container_field_lands_as_one_undo_step() {
-        struct Panel {
-            ctx: egui::Context,
-            app: OndinApp,
-            time: f64,
-        }
-        impl Panel {
-            fn frame(&mut self, events: Vec<egui::Event>) -> egui::FullOutput {
-                self.time += 0.1;
-                let app = &mut self.app;
-                self.ctx.run_ui(
-                    egui::RawInput {
-                        time: Some(self.time),
-                        screen_rect: Some(egui::Rect::from_min_size(
-                            egui::Pos2::ZERO,
-                            egui::vec2(1200.0, 900.0),
-                        )),
-                        events,
-                        ..Default::default()
-                    },
-                    |ui| {
-                        ui.set_max_width(284.0);
-                        app.inspector_container(ui);
-                    },
-                )
-            }
-
-            /// Settled, then where the first run reading exactly `text` is.
-            fn run(&mut self, text: &str) -> egui::Pos2 {
-                let mut out = self.frame(Vec::new());
-                for _ in 0..2 {
-                    out = self.frame(Vec::new());
-                }
-                out.shapes
-                    .iter()
-                    .find_map(|cs| match &cs.shape {
-                        egui::epaint::Shape::Text(t) if t.galley.text() == text => {
-                            Some(t.galley.rect.translate(t.pos.to_vec2()).center())
-                        }
-                        _ => None,
-                    })
-                    .unwrap_or_else(|| panic!("no run reads {text:?}"))
-            }
-
-            /// Press at `from`, drag 80 points right in four steps, let go.
-            fn scrub(&mut self, from: egui::Pos2) {
-                let button = |pos, pressed| egui::Event::PointerButton {
-                    pos,
-                    button: egui::PointerButton::Primary,
-                    pressed,
-                    modifiers: Default::default(),
-                };
-                self.frame(vec![egui::Event::PointerMoved(from), button(from, true)]);
-                for step in 1..=4 {
-                    let at = from + egui::vec2(20.0 * step as f32, 0.0);
-                    self.frame(vec![egui::Event::PointerMoved(at)]);
-                }
-                let at = from + egui::vec2(80.0, 0.0);
-                self.frame(vec![button(at, false)]);
-                for _ in 0..3 {
-                    self.frame(Vec::new());
-                }
-            }
-        }
-
         let s = scene();
         let frame_id = s.frame;
-        let ctx = egui::Context::default();
-        crate::theme::install(&ctx);
-        let mut p = Panel {
-            ctx,
-            app: s.app,
-            time: 0.0,
-        };
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
         p.app.session.selection.set(vec![frame_id]);
         let flex = |app: &OndinApp| match app.session.doc.get(frame_id).unwrap().display() {
             Some(Display::Flex(f)) => *f,
@@ -2479,6 +2489,39 @@ mod tests {
             "left and right landed together: {padding:?}"
         );
         assert_eq!(padding[0], 20.0, "and top was left alone");
+    }
+
+    /// **The Item card's fields land too** (§15 D885's other half, never driven
+    /// until §15 D901): `a`'s Flex grow scrubbed from 0, then its basis scrubbed
+    /// from the `auto` in its digits — each pressed on its digits, dragged 80
+    /// points and let go, one undo step apiece. The basis starts from the drawn
+    /// width under the word (§15 D895's `under`), so it lands in px above 40.
+    ///
+    /// **Flip run**, `edited` answering `moved` alone: fails on *"the grow
+    /// landed"*, grow back at 0 — the predicted site.
+    #[test]
+    fn a_scrub_on_an_item_field_lands_as_one_undo_step() {
+        let s = scene();
+        let a = s.a;
+        let mut p = Panel::new(s.app, OndinApp::inspector_item);
+        p.app.session.selection.set(vec![a]);
+        let item = |app: &OndinApp| *app.session.doc.get(a).unwrap().item();
+        assert_eq!(item(&p.app).grow, 0.0, "the fixture");
+        let depth = p.app.session.history.undo_depth();
+
+        let at = p.run("0");
+        p.scrub(at);
+        let grow = item(&p.app).grow;
+        assert!(grow > 0.5, "the grow landed: {grow}");
+        assert_eq!(p.app.session.history.undo_depth(), depth + 1, "as one step");
+
+        let at = p.run("auto");
+        p.scrub(at);
+        match item(&p.app).basis {
+            Dimension::Px(v) => assert!(v > 40.0, "the basis landed in px: {v}"),
+            other => panic!("the basis did not land: {other:?}"),
+        }
+        assert_eq!(p.app.session.history.undo_depth(), depth + 2, "one more");
     }
 
     /// **A field over a selection that disagrees reads "Mixed", and a basis at

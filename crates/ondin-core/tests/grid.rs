@@ -1111,6 +1111,53 @@ fn an_area_before_the_explicit_grid_keeps_its_negative_line() {
     assert_eq!(s.bounds(a).origin(), (0.0, 50.0).into());
 }
 
+/// **A grid laid out more than once in one pass reports its last layout**
+/// (`laid_grid`, §15 D916's *"last report wins"*, owed since as read and not
+/// tested). The grid `g` grows in a hugging flex row `f` that aligns to the
+/// baseline, and `f` grows in a 600-wide row `o`: `o` *measures* `f` first, and
+/// taffy's baseline step lays `f`'s items out in full even in a measure — so `g`
+/// is laid at its own 100 while `f` hugs, and again at 580 once `f` has grown to
+/// 600 and `g` with it. The report is the second: columns 0–290 and 290–580.
+///
+/// **Flip run**, `set_detailed_grid_info` keeping the first report (`if
+/// self.grid.is_none()` on the write): fails on *"the columns of the layout
+/// that placed it"* with 0–50 and 50–100, the measure's — the predicted site.
+#[test]
+fn a_grid_laid_out_twice_reports_its_last_layout() {
+    let mut s = Scene::new();
+    let o = s.add(s.root, frame(600.0, 100.0), (0.0, 0.0));
+    let f = s.add(o, frame(10.0, 100.0), (0.0, 0.0));
+    let g = s.add(f, frame(100.0, 50.0), (0.0, 0.0));
+    let beside = s.add(f, rect(20.0, 20.0), (0.0, 0.0));
+    s.display(o, Some(Display::Flex(Flex::default())));
+    s.display(
+        f,
+        Some(Display::Flex(Flex {
+            align_items: AlignItems::Baseline,
+            ..Default::default()
+        })),
+    );
+    s.display(g, Some(Display::Grid(grid(vec![fr(1.0), fr(1.0)], vec![]))));
+    s.item(f, |i| {
+        i.width = ondin_core::container::Dimension::FitContent;
+        i.grow = 1.0;
+    });
+    s.item(g, |i| i.grow = 1.0);
+    assert_eq!(s.bounds(f).width(), 600.0, "the fixture: f grown across o");
+    assert_eq!(
+        s.bounds(g).width(),
+        580.0,
+        "and g across f, beside the rect"
+    );
+    assert_eq!(s.bounds(beside).x0, 580.0, "the fixture: the rect after g");
+    let laid = ondin_core::build::laid_grid(&s.doc, g).expect("a grid");
+    assert_eq!(
+        laid.columns.spans,
+        vec![(0.0, 290.0), (290.0, 580.0)],
+        "the columns of the layout that placed it"
+    );
+}
+
 /// An auto-width label, `Inter` 12.
 fn label(content: &str) -> NodeKind {
     NodeKind::Text {

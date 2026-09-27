@@ -3078,6 +3078,53 @@ mod tests {
                 self.frame(Vec::new());
             }
         }
+
+        /// Settled, then where every run reading exactly `text` is, top to bottom.
+        fn runs(&mut self, text: &str) -> Vec<egui::Pos2> {
+            self.shapes()
+                .iter()
+                .filter_map(|cs| match &cs.shape {
+                    egui::epaint::Shape::Text(t) if t.galley.text() == text => {
+                        Some(t.galley.rect.translate(t.pos.to_vec2()).center())
+                    }
+                    _ => None,
+                })
+                .collect()
+        }
+
+        /// Settled, then what the card painted.
+        fn shapes(&mut self) -> Vec<egui::epaint::ClippedShape> {
+            for _ in 0..2 {
+                self.frame(Vec::new());
+            }
+            self.frame(Vec::new()).shapes
+        }
+
+        /// Press at `from`, move to `to` in four steps, and let go only if
+        /// `release` — a grip's drag.
+        fn drag(&mut self, from: egui::Pos2, to: egui::Pos2, release: bool) {
+            self.frame(vec![egui::Event::PointerMoved(from), press(from, true)]);
+            for step in 1..=4 {
+                let at = from + (to - from) * (step as f32 / 4.0);
+                self.frame(vec![egui::Event::PointerMoved(at)]);
+            }
+            if release {
+                self.frame(vec![press(to, false)]);
+                self.frame(Vec::new());
+            }
+        }
+    }
+
+    /// Whether `shapes` hold the grip reorder's insertion line — the one
+    /// horizontal `ACCENT` stroke 1.5 wide the track list draws.
+    fn reorder_line(shapes: &[egui::epaint::ClippedShape]) -> bool {
+        shapes.iter().any(|cs| {
+            matches!(
+                &cs.shape,
+                egui::epaint::Shape::LineSegment { points: [a, b], stroke }
+                    if a.y == b.y && stroke.color == color::ACCENT && stroke.width == 1.5
+            )
+        })
     }
 
     fn grid_of(app: &OndinApp, id: NodeId) -> Grid {
@@ -3188,6 +3235,112 @@ mod tests {
             lines.end,
             ondin_core::container::GridPlacement::Span(2),
             "{lines:?}"
+        );
+    }
+
+    /// The column list of `id`'s grid, as its CSS line reads it.
+    fn columns_css(app: &OndinApp, id: NodeId) -> String {
+        ondin_core::container::tracks_css(&grid_of(app, id).columns)
+    }
+
+    /// **A track row's grip drops its entry in the slot it is let go over, as one
+    /// undo step** (§15 D920, which pinned `reordered`'s arithmetic alone): the
+    /// first of `100px 1fr`'s grips dragged below the second row's middle lands
+    /// it last, `1fr 100px`, and the insertion line is drawn while the button is
+    /// held and gone once it is let go.
+    ///
+    /// **Flip run**, the list's `released |= grip.drag_stopped()` dropped — the
+    /// release no longer reaching the commit: fails on *"dropped last"* with the
+    /// list as it was, the predicted site.
+    #[test]
+    fn a_track_rows_grip_drag_reorders_the_list() {
+        let s = grid_scene();
+        let frame_id = s.frame;
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        p.app.session.selection.set(vec![frame_id]);
+        let grips = p.runs(icon::DOTS_SIX_VERTICAL);
+        assert_eq!(grips.len(), 2, "the fixture: a grip per column entry");
+        let depth = p.app.session.history.undo_depth();
+        let below = grips[1] + egui::vec2(0.0, 8.0);
+        p.drag(grips[0], below, false);
+        assert!(reorder_line(&p.frame(Vec::new()).shapes), "the line, held");
+        p.frame(vec![press(below, false)]);
+        p.frame(Vec::new());
+        assert_eq!(columns_css(&p.app, frame_id), "1fr 100px", "dropped last");
+        assert_eq!(p.app.session.history.undo_depth(), depth + 1, "one step");
+        assert!(!reorder_line(&p.shapes()), "and gone with the drag");
+    }
+
+    /// **A grip drag let go where no grip saw it is over, and draws nothing
+    /// later** (§15 D920's amendment, read and not tested until now): a drag
+    /// begun on a grip, the selection changed to an item with the button still
+    /// down and let go there, and the frame selected again — then a press on
+    /// nothing at all draws no insertion line and reorders nothing.
+    ///
+    /// **Flip run**, the clean-up's `remove::<TrackDrag>` dropped: fails on *"no
+    /// line follows a later press"*, the stale drag's line drawn under the new
+    /// press — the predicted site, and the symptom `arch-scribe` read.
+    #[test]
+    fn a_grip_drag_let_go_elsewhere_draws_nothing_later() {
+        let s = grid_scene();
+        let (frame_id, a) = (s.frame, s.a);
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        p.app.session.selection.set(vec![frame_id]);
+        let grips = p.runs(icon::DOTS_SIX_VERTICAL);
+        let away = grips[0] + egui::vec2(0.0, 40.0);
+        p.drag(grips[0], away, false);
+        assert!(
+            reorder_line(&p.frame(Vec::new()).shapes),
+            "the fixture: held"
+        );
+        p.app.session.selection.set(vec![a]);
+        p.frame(vec![press(away, false)]);
+        p.frame(Vec::new());
+        p.app.session.selection.set(vec![frame_id]);
+        p.frame(Vec::new());
+        let nowhere = egui::pos2(1000.0, 800.0);
+        p.drag(nowhere, nowhere + egui::vec2(0.0, 30.0), false);
+        assert!(
+            !reorder_line(&p.frame(Vec::new()).shapes),
+            "no line follows a later press"
+        );
+        p.frame(vec![press(nowhere, false)]);
+        p.frame(Vec::new());
+        assert_eq!(columns_css(&p.app, frame_id), "100px 1fr", "nothing moved");
+    }
+
+    /// **A refusal stays under the CSS line only while the line reads what was
+    /// refused, and only until the field is engaged again** (§15 D920's
+    /// amendment): `100` refused, then a `+` changes the list and the reason
+    /// goes; refused again, then the field clicked into, and it goes too.
+    ///
+    /// **Flip runs**: `refusal` answering whatever was stored, the `about ==
+    /// shown` test dropped, fails on *"a `+` makes it about a list that is gone"*;
+    /// `css_field`'s removal on `gained_focus` dropped fails on *"gone once the
+    /// field is engaged again"* — each the predicted site.
+    #[test]
+    fn a_refusal_lasts_until_the_list_or_the_field_moves_on() {
+        const WHY: &str = "100 needs a unit: px, % or fr";
+        let s = grid_scene();
+        let frame_id = s.frame;
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        p.app.session.selection.set(vec![frame_id]);
+        p.retype("100px 1fr", "100", egui::Key::Enter);
+        assert_eq!(p.runs(WHY).len(), 1, "the fixture: refused, and why");
+        let at = p.run(icon::PLUS);
+        p.click(at);
+        assert_eq!(columns_css(&p.app, frame_id), "100px 1fr 1fr");
+        assert!(
+            p.runs(WHY).is_empty(),
+            "a `+` makes it about a list that is gone"
+        );
+        p.retype("100px 1fr 1fr", "100", egui::Key::Enter);
+        assert_eq!(p.runs(WHY).len(), 1, "refused again");
+        let at = p.run("100px 1fr 1fr");
+        p.click(at);
+        assert!(
+            p.runs(WHY).is_empty(),
+            "gone once the field is engaged again"
         );
     }
 }

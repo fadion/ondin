@@ -86,7 +86,8 @@
   designed**: CSS flexbox, CSS grid and absolute insets (§5.3c, §15 D867, D871) — insets on frames
   built 2026-09-24, inspector card included (§15 D874); flex built the same day — its model, engine
   and preview, an item's reorder by drag, a laid group's resize, and the Container and Item cards
-  (§15 D875, D877, D878); grid not built. "v1" in
+  (§15 D875, D877, D878); grid built 2026-09-27 but for its canvas track lines (§15 D914, D916,
+  D920). "v1" in
   this document names the phase in which the basic editing tools were finished, not a release tag,
   and that phase is over. *Persistent* constraints in §13's sense — live relationships between
   arbitrary properties, a dependency graph — are not that feature and stay on this list.
@@ -1102,7 +1103,7 @@ pub fn next_grid_color(existing: &[LayoutGrid]) -> Color;    // the first of GRI
   `+` steps: `LayoutGrid::new` carries the plain default, which is what a loaded file or a fixture
   should get.
 
-### 5.3c Container layout — flexbox, grid and insets (steps 1–3 built, step 4 begun; §15 D867–D916)
+### 5.3c Container layout — flexbox, grid and insets (steps 1–3 built, step 4 begun; §15 D867–D920)
 
 > **Mostly design ahead of code**, in the sense §12 and §13 are, and it sits here rather than at the
 > end because what it changes is the node model. **Built as of 2026-09-24**: the used-geometry
@@ -1110,9 +1111,9 @@ pub fn next_grid_color(existing: &[LayoutGrid]) -> Color;    // the first of GRI
 > D874) — the paragraphs on those say so in the present tense. **Flex is built too** (step 3, §15
 > D875): its model, engine, layout pass and preview, a laid group's resize, an item's reorder by drag
 > (§15 D877), and the inspector's Container and Item cards (§15 D878–D889); frames sit inside groups
-> since the same day (§15 D876). **Grid's model, engine, preview and gestures are built** (step 4's
-> first two parts, §15 D914 and D916, 2026-09-27); its cards and canvas lines are not, and components
-> are not.
+> since the same day (§15 D876). **Grid's model, engine, preview, gestures and cards are built**
+> (step 4's first three parts, §15 D914, D916 and D920, 2026-09-27); its canvas lines are not, and
+> components are not.
 > Every other passage of this document still describes `HEAD`; where one states a rule this design
 > will change,
 > it carries a forward pointer here instead of being rewritten. **When a step below lands, this
@@ -1216,7 +1217,9 @@ rulings, the maintainer's:
 
 **What stretches** is a kind whose size is a field — `Rect`, `Ellipse`, `Polygon`, `Star`,
 `Artboard`, and `Text`, whose stretched width is a wrap width (`AutoHeight(w)`, a `Fixed` box keeping
-its height) and whose stretched height makes it `Fixed`. `Path`, `Line` and `Boolean` are positioned
+its height) and whose stretched height makes it `Fixed`. That differs from a container's stretch,
+which never wraps auto width (below), on purpose: pinning both edges is the author choosing a width,
+as CSS's `left` and `right` are (§15 D917's amendment). `Path`, `Line` and `Boolean` are positioned
 and keep their size. **`Group` and `Boolean` take no insets at all**, their box being their children's
 and measured after placement; the field is stored and inert on them. **An edit to a pinned layer is
 an edit of its insets, converted in one place**: tools compute from where the layer is drawn and
@@ -1344,7 +1347,8 @@ layer leaving its frame moves by its transform as before.
 **Several in-flow items of one container, none leaving it, reorder as a block** (§15 D902, the
 session's): `build::flex_reorder_many` reads the centre of their union against the other siblings by
 the same reading order — `build::flow_index`, shared with `flex_reorder` — and moves them there in
-their child-list order, deriving its `Reorder`s by walking the target order. Any other several move by
+their child-list order, deriving its `Reorder`s by walking the target order; in a grid the block
+moves by tracks instead (below, §15 D918). Any other several move by
 their transforms except an in-flow item, which stores no translation and keeps its slot, in the drag
 as on release (`canvas::stays_in_flow`).
 The preview represents the reorder as a per-parent child order and outlines the slot the item will
@@ -1371,8 +1375,9 @@ D874), `ondin-export/tests/insets.rs` proving the SVG, PNG and snapshot writers 
 **built 2026-09-24** (§15 D875): the engine, the layout pass, live reflow, resize — a laid group's
 included — reorder by drag (§15 D877) and the inspector cards (§15 D878), none of the app side yet
 looked at on screen;
-(4) grid, with the track editor — its model and engine, preview and gestures **built 2026-09-27**
-(§15 D914, D916), its cards and canvas lines not; (5) components and overrides, on the same pipeline.
+(4) grid, with the track editor — its model and engine, preview and gestures, and cards **built
+2026-09-27** (§15 D914, D916, D920), its canvas lines not; (5) components and overrides, on the same
+pipeline.
 
 **Grid's open questions were answered before its code** (§15 D913, 2026-09-27; the model, engine,
 preview and gestures are built since, below):
@@ -1396,9 +1401,16 @@ Fr, Auto, MinContent, MaxContent}`, untagged in the file so a list reads like it
 record for both layouts**: `LayoutItem` carries `justify_self`, `grid_column` and `grid_row` beside
 flex's fields, each read under the parent's `display`, so lines written under flex take effect when
 the parent turns to grid. **What CSS refuses, the operations refuse** (`OpError::BadLayout`: a
-negative track, an `fr` minimum, `repeat(0, …)` or an empty repeat, line 0, `span 0`); a file carrying
-one opens, the value kept as written and read around by `container::style_of`. `lay_out` is one
+negative track, an `fr` minimum, `repeat(0, …)` or an empty repeat, line 0, `span 0`, and more than
+`container::MAX_TRACKS` — a thousand — explicit tracks on an axis, CSS letting a user agent clamp an
+overly large grid, §15 D919); a file carrying
+one opens, the value kept as written and read around by `container::style_of`, its template laid to
+the cap. `lay_out` is one
 `FlexTree` pass still, `compute_child_layout` sending a grid container to taffy's grid algorithm.
+⚠️ **taffy's grid reads `baseline` as `start`** (its own *TODO*), so grid's cards do not offer it and
+the model keeps it for flex (§15 D914, D919). Grid's values have CSS text in core — `tracks_css` and
+`parse_tracks`, `placement_css` and `parse_placement` — for the cards' typed fields; the parser reads,
+and `Grid::is_valid` judges at the operation (§15 D920).
 
 **`normal` is CSS's** (§15 D915, the maintainer's ruling). With neither the item's self-alignment nor
 the container's set, a replaced item keeps its own size at the start of its area and a box — text, a
@@ -1416,12 +1428,20 @@ shape) takes `start`, or `end` where the resize moved the left or top edge and h
 D905's rule on both physical axes. The size is the resize's own and the cells are kept.
 `build::resized_edges` is the edge reading, which flex's `resized_from_cross_start` reads through the
 flow. **A drop writes lines**: `build::grid_drop` moves the item's area by the tracks its centre
-crossed on each axis — both axes written, the span in the author's spelling, a start stopped at line
-1 — and answers nothing when the centre stays in its tracks, so no undo step. `build::layout_drop`
+crossed on each axis — both axes written, the span in the author's spelling, the start landing on a
+track the grid has and a start before the explicit grid written as the negative line that names it
+(§15 D918's amendment) — and answers nothing when the centre stays in its tracks, so no undo step. The centre and not the
+pointer §15 D913 names: it is flex's reading (§15 D877), and a pointer would snap a spanning or
+off-centre grab on release (§15 D916's amendment). `build::layout_drop`
 sends a drag to it or to `flex_reorder` by the parent's `display`; `canvas::flex_reorder_of` asks it,
-so the preview adds the lines and the siblings reflow round the landing. ⚠️ **Several items of one
-grid keep their cells** — `flow_index` answers `None` in a grid — and what they should write is not
-ruled. **The tracks are derived when asked, and stored nowhere**: `container::laid_grid`, public as
+so the preview adds the lines and the siblings reflow round the landing. **Several items of one grid
+move as a block** (§15 D918, the session's): `build::grid_drop_many` moves every item's area by the
+tracks the centre of their union crossed, writing each explicit lines, so the arrangement is kept; a
+block pushed towards the grid's first track stops there whole, its shift clamped to its leading item's
+room, and a start before the explicit grid is written with the negative line that names it (§15
+D918's amendment).
+`grid_drop` is its block of one, and `build::layout_drop_many` — `flex_reorder_many` or
+`grid_drop_many` by the parent's `display` — is what `canvas::flex_block_reorder_of` asks. **The tracks are derived when asked, and stored nowhere**: `container::laid_grid`, public as
 `build::laid_grid`, re-runs the pass from the grid's layout root under taffy's `detailed_layout_info`
 and answers each axis's tracks in the container's space and every in-flow item's area as CSS line
 numbers. §15 D913 said *"derived into `Resolved`"*; `Resolved` keeps used geometry and not the
@@ -6769,7 +6789,8 @@ The rect stays claimed, so the cell still reports hover for its ground; `Sense::
 the signature is the honest way to offer it, and a sense nobody can read is not. It was wanted, and
 the signature widened by a `tip` per cell instead: `ui::segmented_tipped`, of which
 `segmented_enabled` is the untipped form, and whose disabled cells hang their tooltip from that hover
-— the Container card's `grid` saying why it cannot be picked (§15 D886).
+— the Container card's `grid` saying why it cannot be picked (§15 D886), until the grid cards
+enabled it (§15 D920).
 
 **Chrome never sets `CursorIcon::PointingHand`.** A web page uses the hand to mean "this is a link"; a
 design tool's panels are all controls, so a cursor that changed on every header, icon button, swatch and
@@ -7179,7 +7200,8 @@ input event (winit/egui)
   abandoned. ⚠️ **Six callers, not four, and D808's four were what it audited rather than what there
   was** (§15 D841): `picker::hex_row` and `typography::char_hex` had the same defect and the same
   numbers. Every live `lost_focus()` in `crates/` has since been read, and each now calls this, reads
-  the key itself, or is one of the gates below. 🚨 **The *write* is what is declined and never the
+  the key itself, or is one of the gates below. The grid cards' typed CSS fields were written to it
+  from the start (`layout::grid::css_field`, §15 D920). 🚨 **The *write* is what is declined and never the
   block** — the buffer clear has to run on every way out, or a cancelled edit leaves its typed text in
   the field, which nothing asserts and no gate sees.
   🚨 **And the gate above does not cover that class, which is a fact about its *name* rather than a
@@ -8037,7 +8059,8 @@ reorder is outlined**: a landing is recorded for every dragged in-flow item, so 
 `flex_reorder_of` with the drag's snapped delta, as the drop outline asks `move_destination`, and draws
 that item's landing alone. An item the move is taking out of its frame would otherwise be outlined in
 the slot it is leaving, a promise the release does not keep; a multi-selection gets no outline either
-(§15 D877's amendment) — a block of items that will reorder included (§15 D902). A grid item's move
+(§15 D877's amendment) — a block of items that will reorder included (§15 D902), and a grid block
+(§15 D918). A grid item's move
 is outlined by the same filter, in the cell its drop writes (§15 D916). ⚠️ **Read, not tested**: no test reaches the canvas's drawing.
 
 **The artboard list the drop rule reads is memoized, and the key is `EditorSession::revision`** (§15
@@ -8452,13 +8475,22 @@ order under Position** (§5.3c, §15 D878) — so the cards run Transform, Posit
 Layout grid: from the layer in its parent to its children, the order of the maintainer's mockup, and
 a frame that is both an item and a container gets both. Each finds its own subjects
 (`item_subjects`, `container_subjects`) on `frame_subjects`' rule, so one call serves this and
-`inspector_multi`. *Container* opens with `display` as a segmented row — `none` and `flex`, and `grid`
-a disabled cell until step 4 — and under `flex` has direction and wrap, each cell of the three rows
-carrying a tooltip, `grid`'s saying why it cannot be picked (`ui::segmented_tipped`, §15 D886); three
+`inspector_multi`. *Container* opens with `display` as a segmented row — `none`, `flex` and `grid`,
+`grid` a disabled cell until the grid cards (§15 D920) — and under `flex` has direction and wrap, each
+cell of the three rows carrying a tooltip (`ui::segmented_tipped`, §15 D886); three
 dropdowns whose layout
 pictures turn with the container (`layout::Orient`, a transpose and a mirror, never a rotation), the
-two gaps, and padding as two paired fields that open to four. *Item* has grow and shrink, basis,
-`align-self` — *Auto · \<inherited\>* while unset — and four limits behind a *Min / max* disclosure,
+two gaps, and padding as two paired fields that open to four. **Under `grid`** (`panels/layout/grid.rs`,
+§15 D920) it has `grid-auto-flow` as *Row* and *Column*; the column and row track lists, each a head
+with its track count and a `+`, a row per entry — a grip, a kind menu leading the row, the kind's
+fields, a cross — and under it the whole template as a CSS line, which applies on a defocus that
+commits and never on `Escape` and shows a parse error or a refused list in red; `justify-content`,
+`justify-items`, `align-items` and `align-content`, named *Start* and *End* rather than *Flex start*,
+the items rows leading with *Normal* (§15 D915) and none offering `baseline` (§15 D919); the gaps,
+columns first; and the padding. Switching between flex and grid keeps the padding and the gaps.
+*Item* has, in a flex container, grow and shrink, basis and `align-self`; in a grid, `grid-column` and
+`grid-row` typed as CSS, start and end, and `justify-self` and `align-self`; each self-alignment *Auto
+· \<inherited\>* while unset; and in either, four limits behind a *Min / max* disclosure,
 a basis or limit left at a keyword reading it in the digits' place (§15 D895), with no unit beside it
 — typing or dragging a number is how to leave it (§15 D906);
 for a layer the flow skips it says why instead, in words — *Absolutely positioned* and which edges
@@ -8469,7 +8501,8 @@ from the card writes every in-flow child's drawn transform and size into its sto
 hugging frame's hugged size into its own** (`inspector::baked_ops`), so nothing moves: the Position
 card's unpin rule, for the same reason, and *Unpin and return to the layout* does the same. **A resize's flips come with
 a receipt** (§15 D880): the grow, shrink or `align-self` a resize changed on the user's behalf is
-outlined and named, with an Undo that takes the whole step back. The fields read `DisplayNode::display`
+outlined and named, with an Undo that takes the whole step back — and a grid item's `justify-self`
+and `align-self` named but not outlined (§15 D920). The fields read `DisplayNode::display`
 and `item`, which have overrides behind them, and commit through `layout::edited`'s latch (§9.3, §15
 D885). A number field over a disagreeing selection reads *"Mixed"* (§15 D892). Neither card has a
 header badge, by ruling (§15 D897): a badge is for a state a card has nowhere else to say. §15 D878
@@ -11147,7 +11180,9 @@ rather than following the pointer and snapping back (§15 D877's second amendmen
 of one container, none leaving it, reorder as a block** (§15 D902): `canvas::flex_block_reorder_of`
 answers `build::flex_reorder_many`'s `Reorder`s, which `move_tx` commits alone — one undo step — and
 `move_preview_tx` appends to every item's translation, so the block is under the pointer and its
-siblings open the gap; `stays_in_flow` is then a mixed selection's rule. An Alt-drag is unchanged.
+siblings open the gap; `stays_in_flow` is then a mixed selection's rule. Several items of one grid
+move as a block the same way, through `build::layout_drop_many`, each written the lines of its area
+moved by the tracks the block's centre crossed (§5.3c, §15 D918). An Alt-drag is unchanged.
 
 **`Ctrl`+`D` remembers.** A duplicate lands in place; move it and duplicate again and the new copy
 repeats that movement, as does every press after it — `CloneChain` holds the last clone, where it

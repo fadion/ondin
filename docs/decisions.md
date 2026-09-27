@@ -1253,7 +1253,7 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D875** — **A flex container is laid out by taffy over Ondin's own nodes, text keeps each sizing mode's meaning in it, and dragging an item's edge stops its growth.** D867's step 3, its first half. **The maintainer's rulings**: auto-width text never wraps (`white-space: nowrap`), auto height wraps at the width it is given with its stored width as the preferred one, fixed is fixed (`container::flexed_text`); a resize writes `flex-grow`/`flex-shrink` 0 on the main axis and `align-self: start` across a stretch — `end` when dragged by the cross start, ruled since, D905 — (`build::keep_flex_sizes`, beside `keep_insets` in `commit_inner`, and in the preview since D904); frames and groups become containers together — the group half built, a frame *under* a group D870's, built the same day as D876; results on the 1/64 px grid (D873 decided). **The session's**: a hidden layer leaves the flow, `display: none` and not `visibility: hidden` — ruled since, D881 — as do a mask and a pinned child (`container::in_flow`); the engine in `container.rs`, `FlexTree` implementing taffy's low-level traits per pass — no mirror tree, and no cache kept between passes; `update` collecting `affected` from each dirty node's `chain_root`, 🚨 the first hop counting for a child *leaving* the flow; `RenderOverrides::flex_relayout`; an in-flow item turning about its box centre with its stored translation ignored in flow — ruled since, D896. ⚠️ `atomic_box` measures a group or boolean with no layout by its **specified** children's union, so layout nested inside one is not reflected — closed for a nested layout, D899. *(Built and tested 2026-09-24, committed 2026-09-24 (session 34); **step 3 unfinished** — nothing in the app gave a container a layout until the Container card, D878, which finished it; a resize writes px over a size keyword since D879. **Amended the same day**: a group with a layout is resized by its box, `build::sized_flex_item` writing `FlexItem.width`/`height` px and stopping growth through `build::held`, the rule `keep_flex_sizes` now shares; the Scale tool takes its contents too, and `tools::scaled_flex` scales any flex container's padding and gaps per axis — session defaults. `container::flex_tests` 7, `tests/flex.rs` 8, two preview differentials; the amendment's two tests, `tools` and `tests/flex.rs`. D867, D868, D869, D872, D873 amended; §1, §2, §3, §5.3, §5.3c, §5.6, §5.7, §5.8, §5.9, §5.10, §6.2 and §9.3; `roadmap.md`'s *owed* and *open* paragraphs narrowed, and step 3's item 3 struck by the amendment)*
 - **D876** — **A frame may sit in a group and never under a boolean or a mask, a card in a row is a rung of the row's chain, and the Scale tool takes a nested frame's contents with it.** D870 built, and the door it opened closed: a group can carry a frame into an operand or a mask at any depth with every pair legal, so an ancestor rule sits beside `can_parent`. **The maintainer's rulings**: (i) a frame with a boolean or mask ancestor is refused at the model level — `document::bars_frames`, `Document::frame_may_sit_under` and `holds_a_frame`, asked by `op_create_node`, `op_insert_subtree`, `op_reparent`, `op_set_mask` and the loader's check (7), each answering `ArtboardPlacement`; (ii) `query::group_chain` continues through a frame; (iii) the Scale tool on a group scales a nested frame's contents. **The session's defaults, revisitable**: "mask ancestor" is the mask's own subtree, a frame as masked content allowed; `build::group` takes frames, so `mask_target` prefers members `build::can_be_mask` accepts and `mask` refuses a target holding a frame; `boolean` and — 🚨 the one nothing downstream would catch, since it deletes its members — `flatten_union` refuse a member holding a frame; a non-clipping frame's ink is its box ∪ its children's, a clipping one's its box; the Scale recursion in `scale_subtree`, descendants only, so a frame scaled directly keeps its box-only behaviour; frames between groups are rungs, trailing frames trimmed unless the walk stopped at `inside`, and `id == inside` answers `[]`; `hover_target` calls `pick_at_pointer` itself; `pick_leaf` keeps an occupied frame with a group above it; `move_destination` fences a layer to its group's frames. ⚠️ `renderer::frame_barred` spells the barrier a second time, `bars_frames` being `pub(crate)`. **Amended the same day, at the maintainer's request**: *Use as mask* in the context menu dims with `mask_action`'s sentence wherever the verb would refuse (`menu::Context::mask_refused`, filled by `OndinApp::mask_refusal`) — a lone group holding a frame had been offered live and refused after the click; the row's fixture test flip-checked, `menu_context`'s assignment reached by none. *(Rulings 2026-09-24 by the maintainer; built and tested 2026-09-24, committed 2026-09-24 (session 34), every new test flip-checked — among them the randomized `update`/`rebuild` guard now creating card frames under groups, failing at seed 1 with the ink arm deleted from one pass. ⚠️ Not verified in the GUI; stepped into a card in a row, its background still takes the card, so D22's marquee is not started there — read, not tested. One more accumulated doc-comment theft repaired, `move_tx`'s doc on `move_destination`, and `flex_relayout`'s from session 33. D870, D62, D22, D839, D875 amended; §5.3, §5.3c, §5.6, §5.7, §5.7a, §5.9, §5.10, §5.11, §9.4; `context-menus.md` §4 (twice), §5.1; `roadmap.md`'s step 3 items 1–2 and *owed* paragraph)*
 - **D877** — **Dragging one item inside a flex container reorders it rather than moving it; the preview represents a reorder, and the slot the item will drop into is outlined.** D867's step 3, the marker's item 4. An in-flow item is placed by its container (D875), so the `SetTransform` a move commits is drawn nowhere and surfaces only when the layout is removed; what a drag can change is the item's place in the flow. `build::flex_reorder` counts the dragged box's centre against every other in-flow sibling's used box in reading order — on its line by main-axis centre, backwards under `row-reverse`/`column-reverse`, on another line by cross centre — out-of-flow siblings keeping their place. `RenderOverrides` represents `Reorder` as a per-parent child order, read by all three readers of an order — the scene walk, `PreviewView::children` and `operand_children`, `reevaluate_booleans` seeding from every reordered parent — and records each dragged item's layout slot (`landings`), which `canvas::draw_flex_landing` dashes for the one item `flex_reorder_of` answers. The commit is the `Reorder` alone. **All the session's defaults, none ruled**: ⚠️ `wrap-reverse` read as `wrap` — read since, D883; one layer leaving its frame moves as before; several move by their transforms except an in-flow item, which stores nothing and snaps back — reordering several is not built (*Revisit*) — built since for items of one container, D902. **Amended the same day**: both *Fix* verdicts closed — `operand_children` reading the order, and the landing drawn only for the reordered item (read, not tested) — and the multi-selection's stored translation dropped. **Amended again, at the maintainer's request**: the resize measured storing the slot, shifted, and every `SetTransform` on an in-flow item now keeps its linear part and the stored translation at the commit door (`build::kept_flow_translations`, in `keep_flex_sizes`; exempt where the same edit takes the item out of the flow, a write left unchanged dropped); `flex_relayout` re-lays a resized item rather than treating its `SetTransform` as a drag; and a multi-selection's in-flow items stay in their slots during the drag (`canvas::stays_in_flow`, asked by `move_tx` and `move_preview_tx`). ⚠️ Open and unmeasured: a rotation of an in-flow item about a non-centre pivot still previews at the tool's transform — *answered 2026-09-27 (D896): a turn is re-laid, and a differential says preview and commit agree*. *(Built and tested 2026-09-24, committed 2026-09-24 (session 34), every new test flip-checked, one predicted flip site wrong and recorded. ⚠️ Not verified in the GUI. One accumulated doc-comment theft repaired, `canvas::quad_of`'s summary on `selection_quad`. D875, D94 amended; §5.3c, §6.2, §9.3, §9.4; `roadmap.md`'s step 3 item 4, and the marker rewritten as a handoff)*
-- **D878** — **The Container and Item cards, built from the maintainer's mockup, and where they are not the mockup.** D867's step 3, the marker's item 5 and the last of the step. `panels/layout.rs`: **Container** — `display`, and under `flex` direction, wrap, three alignments, two gaps and padding — for any selected frame or group; **Item** — grow, shrink, basis, `align-self` and four limits, or why the layer is out of the flow and the button that brings it back — for any child of a laid container. The cards run from the layer in its parent to its children: Frame templates, Align, Transform, Position, Item, Container, Layout grid — ⚠️ the grid moved down from beside Frame templates. The mockup's pictures are painted on its 16-unit grid and turned by transpose and mirror, not its `rot`, which puts align-start's wall on the wrong side in a column. **New behaviour**: `display: none` from the card keeps every child where it is drawn and a hugging frame its hugged size (`inspector::baked_ops`, the Position card's unpin rule), and *Unpin insets* does the same. The other departures are the app's conventions and widgets winning: `display` as the first row, `grid` a disabled cell, a resolved number beside a keyword unit, no header badges, no cell tooltips — reversed since, D886. 🚨 **Except the mixed state**: a number shows a dash, copying `typography::mixed_text` — which widens §15 D130's departure against D636's *"not a precedent"*, and against the mockup, which reads *"Mixed"* too. *(Built and tested 2026-09-24, uncommitted when recorded; **Keep** every departure but that one — ***Fix*** the mixed dash by D636's route. Seven tests in `layout.rs`. ⚠️ Not verified in the GUI. D867, D869, D875 amended; §1, §5.3c, §9.3, §9.4; `roadmap.md`'s step 3 item 5 struck. **Amended 2026-09-26**: every number field committed nothing until D885; labels in sentence case, D884; the out-of-flow block reworded, D889. **Amended 2026-09-27**: the Position card has a header badge and these two still none, and the resolved-number convention's precedent is reversed there — which wins is open, D890. **Amended again the same day, by the maintainer's rulings**: item 3's number fields read *Mixed* (D892), and its segmented rows and unit dash settled by D892's amendment the same day, closing it; item 6 reversed for the Item card's basis and limits (D895); item 7 ruled, no badges (D897))*
+- **D878** — **The Container and Item cards, built from the maintainer's mockup, and where they are not the mockup.** D867's step 3, the marker's item 5 and the last of the step. `panels/layout.rs`: **Container** — `display`, and under `flex` direction, wrap, three alignments, two gaps and padding — for any selected frame or group; **Item** — grow, shrink, basis, `align-self` and four limits, or why the layer is out of the flow and the button that brings it back — for any child of a laid container. The cards run from the layer in its parent to its children: Frame templates, Align, Transform, Position, Item, Container, Layout grid — ⚠️ the grid moved down from beside Frame templates. The mockup's pictures are painted on its 16-unit grid and turned by transpose and mirror, not its `rot`, which puts align-start's wall on the wrong side in a column. **New behaviour**: `display: none` from the card keeps every child where it is drawn and a hugging frame its hugged size (`inspector::baked_ops`, the Position card's unpin rule), and *Unpin insets* does the same. The other departures are the app's conventions and widgets winning: `display` as the first row, `grid` a disabled cell (enabled since, D920), a resolved number beside a keyword unit, no header badges, no cell tooltips — reversed since, D886. 🚨 **Except the mixed state**: a number shows a dash, copying `typography::mixed_text` — which widens §15 D130's departure against D636's *"not a precedent"*, and against the mockup, which reads *"Mixed"* too. *(Built and tested 2026-09-24, uncommitted when recorded; **Keep** every departure but that one — ***Fix*** the mixed dash by D636's route. Seven tests in `layout.rs`. ⚠️ Not verified in the GUI. D867, D869, D875 amended; §1, §5.3c, §9.3, §9.4; `roadmap.md`'s step 3 item 5 struck. **Amended 2026-09-26**: every number field committed nothing until D885; labels in sentence case, D884; the out-of-flow block reworded, D889. **Amended 2026-09-27**: the Position card has a header badge and these two still none, and the resolved-number convention's precedent is reversed there — which wins is open, D890. **Amended again the same day, by the maintainer's rulings**: item 3's number fields read *Mixed* (D892), and its segmented rows and unit dash settled by D892's amendment the same day, closing it; item 6 reversed for the Item card's basis and limits (D895); item 7 ruled, no badges (D897))*
 - **D879** — **W and H offer only the sizing modes that differ for the layer, and a resize writes px over a size keyword.** `container::style_of` tells three of CSS's four apart per kind — a frame's `auto` is its stored size and `fit-content` hugs; a laid group's `auto` and `fit-content` both hug; a leaf's size is its measure — so `layout::size_modes` offers px, fit-content for a frame with a layout, auto for a laid group, and `%` for any in-flow kind layout can resize; fewer than two is no menu. A mode picked moves nothing (`size_mode_tx`, `%` of the parent's content box to 0.1%); the proportion lock stands aside while a side is a keyword or `%`. **Core**: `keep_flex_sizes` sets `width`/`height` back to `auto` on every axis a resizing `SetGeometry` changed, whatever the parent (`sized_in_px`). A laid group's W and H reach `build::sized_flex_item` through `resize_box_to` — read for this entry — which writes only the axes the resize changed (both, until the same session). ⚠️ **Not CSS**: taffy gets `auto` for `FitContent`, so a fit-content frame in a stretching parent stretches — ***reversed 2026-09-27 by the maintainer's ruling*** (D893), such an item now `flex-start` across the line. *(Built and tested 2026-09-24, uncommitted when recorded; **Keep**, the stretch flagged for the maintainer — who ruled for CSS, D893. Tests `a_resize_writes_px_over_a_size_keyword` and `a_laid_group_resized_along_one_axis_keeps_hugging_along_the_other` in core, `the_size_menu_offers_only_modes_that_differ_for_the_kind` and `a_mode_picked_from_the_size_menu_moves_nothing`. D875 amended; §5.3c, §9.3, §9.4)*
 - **D880** — **A resize that stops an item's growth leaves a receipt in the Item card, with an Undo that is the whole step.** The maintainer's ruling 1 of three. `commit_inner` reads the grow, shrink and `align-self` flips `keep_flex_sizes` added off the transaction (`growth_held`) into a `FlexReceipt`; the card outlines the fields and names the flips. Undo takes the whole step, the flips being what make the resize hold. Valid while `EditorSession::revision` and `History::undo_depth` are where the commit left them — 🚨 the depth because undo and redo do not bump the revision (D616's amendment); a run commit leaves none. *(Ruled 2026-09-24, built and tested the same day, uncommitted when recorded; **Resolved.** Test `a_resize_leaves_a_receipt_until_anything_else_is_committed`, the depth dropped red at *"an undo takes it away"*. ⚠️ Its redo half rests on the same defect, and D616's *Fix* turns it red — decide the redo then. §5.3c, §9.4)*
 - **D881** — **A hidden layer leaves the flow: ruled.** The maintainer's ruling 2, D875's (e) promoted from the session's default — `display: none`'s reading, the eye closing the row up — once the Item card came to say so in words. *(Ruled 2026-09-24; **Resolved**, record-only — no line of code changed, cited on `container::in_flow`'s doc. D875 amended; §5.3c)*
@@ -1261,7 +1261,7 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D883** — **`flex_reorder` reads `wrap-reverse`: the first line is the bottom one, so a lower line comes first.** D877 read it as `wrap` — *"Fix when a control can set it"* — and the Container card's wrap control can. *(Fixed and tested 2026-09-24, uncommitted when recorded; **Resolved.** Test `wrap_reverse_reorders_with_its_lines_read_bottom_up`, the arm dropped answering `Some(1)`. D877 amended; §5.3c)*
 - **D884** — **The cards' labels are CSS's names in sentence case: *Justify content*, *Flex start*.** The maintainer's ruling: CSS's names, first letter raised and hyphens gone — sentence case, the app's convention — so each is still a name a reader can look up. The model, the file and the snapshot keep CSS's identifiers; only the chrome is dressed. **The session's spellings**: a unit in a suffix stays lower case (`SizeMode::word`, *auto*, *fit content*), the unit menu's keywords are *Auto*, *Fit content*, and the receipt's sentence lower-cases the names again. ⚠️ *Center* is CSS's spelling against the app's *Centre*, and kept. *(Ruled 2026-09-26, built the same day, uncommitted when recorded; **Resolved**, the session's spellings **Keep**. No test pins a label. D867, D878, D880 amended; §5.3c, §9.4)*
 - **D885** — **Every number field in the Container and Item cards committed nothing: a scrub followed the pointer and snapped back on release.** Each built its edit only when the number moved *this frame*, reading it through the preview — so on the release frame, the valve's committing frame, the edit was empty and the valve dropped the preview. Both gaps, the padding, grow, shrink, and every `size_field` — basis, limits, a `%` W or H. Fixed by `layout::edited`, a per-widget latch held through the frame engagement ends; not an unconditional edit, which would write a mixed selection's first value to every subject on a click. *(Reported and fixed 2026-09-26, uncommitted when recorded; **Resolved.** Test `a_scrub_on_a_container_field_lands_as_one_undo_step`, a real scrub through the real valve; the latch dropped fails at *"the gap landed"*, 10. ⚠️ Only the gap and padding are driven; no earlier test drove a field at all — the Item card's grow and basis since, D901. §9.3)*
-- **D886** — **The `display`, direction and wrap cells carry tooltips, and `grid`'s says why it cannot be picked.** `ui::segmented_tipped` takes a `tip` per cell; `segmented_enabled` delegates with none. Reverses D878's item 8 — and arrives the way D722 said it should, by widening the signature, the disabled cell's hover-only sense now carrying `grid`'s reason. *(Asked and built 2026-09-26, uncommitted when recorded; **Resolved**. Not tested — a tooltip's ink never reaches `run_ui`'s shapes. D722, D878 amended; §9.4)*
+- **D886** — **The `display`, direction and wrap cells carry tooltips, and `grid`'s says why it cannot be picked.** `ui::segmented_tipped` takes a `tip` per cell; `segmented_enabled` delegates with none. Reverses D878's item 8 — and arrives the way D722 said it should, by widening the signature, the disabled cell's hover-only sense now carrying `grid`'s reason — until the grid cards enabled the cell and its tooltip says what grid does (D920). *(Asked and built 2026-09-26, uncommitted when recorded; **Resolved**. Not tested — a tooltip's ink never reaches `run_ui`'s shapes. D722, D878 amended; §9.4)*
 - **D887** — **The Position card is offered to a child of a group with a layout, and `build::keep_insets` pins against that group's box.** D871's group half, placed by `resolve::frame_box` since D875 and offered by nothing: `inset_subjects` and `inset_placement` admit a laid group, and 🚨 `keep_insets`, frame-only until now, had a pinned child of a laid group moved by a tool **snap back on release**. ⚠️ It pins against the group's **committed** box, so the Scale tool's `scaled_flex` on a laid group with a pinned child is unmeasured; and pinning an item of a hugging container can move things — both open; the second ruled and fixed 2026-09-27 (D894), the first measured and fixed the same day (D900). *(Reported and fixed 2026-09-26, uncommitted when recorded; **Resolved**, those two open. Tests in `tests/flex.rs` and `inset_card_tests`, three flips at their predicted sites; the preview's half unchecked — checked since, D901. D869, D871, D874 amended; §5.3c, §9.4)*
 - **D888** — **The pin diagram is a square with heavier strokes, and the centre buttons sit at the end of their axis's fields.** `INSET_DIAGRAM_SIDE`, three control rows and two row gaps, 102 pt, centred on its own row; strokes 1.5, a pinned strut 2.5. Where it sits and where the buttons went are the session's. *(Asked and built 2026-09-26, uncommitted when recorded; **Keep**. Not measured, not seen on screen. D874 amended; §9.4. ***Superseded in part the next day by D890*** — it lasted one session; only the tooltips' *container* survives)*
 - **D889** — **The Item card's out-of-flow block says it in words: *Absolutely positioned*, and what that does to the layout.** *"Pinned to its container's right and bottom edges, so it sits outside the layout"*, over *Unpin and return to the layout* — in place of *position: absolute*, a sentence naming insets and the Position card, and *Unpin insets*. *(Asked and built 2026-09-26, uncommitted when recorded; **Keep**. The test asserts the new `pinned_edges` string. D878 amended; §9.4)*
@@ -1288,11 +1288,14 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D910** — **`build::laid_group_box` measures a laid group by its own pass where its chain root's does not reach it.** A laid group inside a plain group that is a flex item (D899), or one hidden or made a mask, is a layout root of its own that the chain root's pass never places; the `None` made `keep_insets` skip its pinned children, and a moved one snapped back — measured at (60, 50) with its insets unchanged, where it lands at (40, 40). The repair D900 asked for. *(Fixed and tested 2026-09-27, uncommitted when recorded; **Fixed**. Test `a_pinned_child_of_a_laid_group_in_a_plain_group_moves_where_dragged`; the hidden and mask cases amended the same day, `a_pinned_child_of_a_laid_group_out_of_the_flow_moves_where_dragged`, each biting on its own. D899, D900 amended; §5.3c; `roadmap.md`'s *owed* item struck)*
 - **D911** — **The gesture preview lays out every layout root from a touched node up to its chain root.** `flex_relayout` laid out the chain root alone, and since D899 that root can sit above a plain group whose laid group is a root of its own, un-laid in the preview: a nested column's second rect previewed 20 wide at y 50 against the commit's 40 wide at y 70. `chain_root`'s doc now says it is the topmost root, not the only one. The repair D899 asked for. *(Fixed and tested 2026-09-27, uncommitted when recorded; **Fixed**. Test `a_layout_nested_in_a_plain_group_previews_as_it_commits`. D899 amended; §5.3c, §6.2; `roadmap.md`'s *owed* item struck)*
 - **D912** — **The multi card's X/Y tooltip promises a reorder only where a drag makes one.** D903's hover said *"drag them on the canvas to reorder"* over any selection with an in-flow member, and a mixed selection's drag reorders nothing (D902). `inspector::drags_as_a_block` — every outermost member an in-flow item of one container — chooses that tail; otherwise *"select a container's items on their own to reorder them by dragging"*. Amended the same day: `inspector::laid_out_xy` answers the card's gate and hover both, its strings asserted; the card's call to it is read. *(Fixed and tested 2026-09-27, uncommitted when recorded; **Fixed**. Test `only_one_containers_items_are_told_to_drag_to_reorder`, one flip not biting until a case was added. D903 amended; §9.4)*
-- **D913** — **Grid's open questions answered before its code: text keeps its sizing mode, a resize writes size and self-alignment, a drag writes explicit lines, and the track editor is the inspector's list with read-only lines on the canvas.** The maintainer's rulings, three of the session's recommendations taken — D875's ruling (a) for every container; a resize writing px and `justify-self`/`align-self` `start`, `end` from the left or top edge (D905), the cells kept — and one declined: every drop writes `grid-column`/`grid-row` for the cell under the pointer, where the session had recommended reordering an auto-placed item by D877's machinery, so a dragged item becomes explicitly placed and D877's reorder does not apply in a grid. Track positions from taffy's `detailed_layout_info`, derived and never saved (D868); dragging a boundary is later, not declined. **The session's, stated with the plan and not objected to**: the preview widens `flex_relayout` into one pass over any laid container; grid placement on the one item record, `FlexItem` renamed — built as `LayoutItem` (D914), not the `Item` planned, which collides with the app's `menu::Item`; grid's alignment rows say `start`/`end`. *(Ruled 2026-09-27, record-only; **Resolved** as rulings, **not built** — step 4's model and engine built since, D914, and its preview and gestures, D916, which stores no track positions in `Resolved`. §5.3c; `roadmap.md`'s open paragraph struck)*
-- **D914** — **Grid's model and engine: `Display::Grid`, one item record for both layouts, and what CSS refuses the operations refuse.** Container layout's step 4, the first of D913's four sub-steps. `Grid` — tracks as CSS's grammar (a `repeat()` holds sizes, so cannot nest), `AlignContent` on both axes because a grid's `normal` content distribution is `stretch`, and a **`justify-items` §5.3c's table lacked**, added once `align-items: start` alone left an item 100 wide across its column. `FlexItem` → `LayoutItem`, `SetFlexItem` → `SetLayoutItem`, gaining `justify_self`, `grid_column`, `grid_row`; `Display` no longer `Copy`, `LayoutView::display` borrowed. `OpError::BadLayout` at the operations; a file carrying such a value opens, its stored value kept and laid around. taffy's `grid` feature, one `FlexTree` per pass; the Scale tool scales px tracks. ⚠️ **Open, for the maintainer**: a shape fills its grid cell under the default, where CSS's `normal` puts a replaced element at `start`. *(Built and tested 2026-09-27, uncommitted when recorded; **Keep**, the session's — the shape-in-a-cell question **open**, answered since by D915, and sub-step 2 built since, D916. Tests `tests/grid.rs`, eleven, and a third randomized run in `tests/resolve.rs`. D913 corrected; §5.3c, §2, §5.3, §5.6, §5.7, §5.9, §6.2; `roadmap.md` step 4's first sub-step struck)*
-- **D915** — **Grid's `normal`: a shape keeps its size at the start of its cell and a box stretches, as CSS does.** The maintainer's ruling, *"I'd lean into CSS parity as much as it makes sense"*, answering D914's open question. `Grid::justify_items` and `align_items` become `Option<AlignItems>`, `None` CSS's `normal` and the default, skipped in the file; under it a replaced item (`container::is_replaced`, D872) is held at `start` in its taffy style by `container::grid_held`, and text and a container with a layout stretch. `fit-content` is never stretched in a grid, D893's rule on both axes; an explicit `stretch` stretches a shape. Flex's `align_items` stays plain, its `normal` being `stretch`. The cards owe grid a `normal` entry. *(Ruled and built 2026-09-27, uncommitted when recorded; **Resolved**, answering D914. Test `normal_holds_a_shape_at_the_start_and_stretches_a_box`, two flips, one failing an assertion earlier than predicted. D914 amended; §5.3c; `roadmap.md` step 4's ⚠️ struck)*
-- **D916** — **Grid's preview and gestures: a resize holds on both axes, a drop writes the lines of its new cell, and a laid grid's tracks are derived when asked.** Step 4's second sub-step, built to D913's rulings. `build::grid_resize_held`, under `flex_holds` and `sized_flex_item`, turns a stretch released by a resize into `start`, or `end` from the left or top edge (`build::resized_edges`, which flex's D905 reading now shares); `build::grid_drop` moves the area by the tracks the item's centre crossed, span and spelling kept, nothing in its own cell; `build::layout_drop` is the canvas's one door. `container::laid_grid` re-runs the pass under taffy's `detailed_layout_info` — **nothing stored in `Resolved`**, a departure from D913's wording. The preview needed no change and is tested now. ⚠️ Several grid items dragged keep their cells, unruled; D913's *"cell under the pointer"* is read as the centre's. *(Built and tested 2026-09-27, uncommitted when recorded; **Keep**, the session's. Tests in `tests/grid.rs`, `tests/overrides.rs` and `canvas.rs`'s `flex_canvas_tests`, each flip at its predicted site. D913, D914 amended; §2, §3, §5.3c, §9.4; `roadmap.md` step 4's (2) struck)*
-- **D917** — **An auto-width text stretched narrower than its line wrapped, in flex and in grid; `container::flexed_text` now floors the fixed box at the line's width.** D875's ruling (a) says auto width never wraps, and `flexed_text` made a stretched label `Fixed` at the size handed back, on the claim — D875's and the function's doc — that such a box *"cannot wrap it, a grown box being at least as wide as its line"*: true only of a stretch that widens it. A cross-axis stretch, or a grid cell's, can give less. Measured before the repair, an `Inter` 12 label 161.65 wide on one line was laid `Fixed(30 × 100)` in a 30px grid column and `Fixed(30 × 14.40625)` in a 30-wide flex column. **Flex had it first**; grid inherited it through D913's first ruling, and under grid's `normal` text stretches (D915), so there it was the default case. The box keeps the line's width and overflows its slot from the start, `white-space: nowrap`; height, `AutoHeight` and `Fixed` unchanged. *(Found and fixed 2026-09-27, uncommitted when recorded; **Fixed**, the session's, a defect against D875's ruling (a) and D913's first ruling. Test `an_auto_width_label_stretched_narrower_keeps_its_line`, its flip at the predicted site and reaching the grid half alone. D875 corrected; §5.3c)*
+- **D913** — **Grid's open questions answered before its code: text keeps its sizing mode, a resize writes size and self-alignment, a drag writes explicit lines, and the track editor is the inspector's list with read-only lines on the canvas.** The maintainer's rulings, three of the session's recommendations taken — D875's ruling (a) for every container; a resize writing px and `justify-self`/`align-self` `start`, `end` from the left or top edge (D905), the cells kept — and one declined: every drop writes `grid-column`/`grid-row` for the cell under the pointer, where the session had recommended reordering an auto-placed item by D877's machinery, so a dragged item becomes explicitly placed and D877's reorder does not apply in a grid. Track positions from taffy's `detailed_layout_info`, derived and never saved (D868); dragging a boundary is later, not declined. **The session's, stated with the plan and not objected to**: the preview widens `flex_relayout` into one pass over any laid container; grid placement on the one item record, `FlexItem` renamed — built as `LayoutItem` (D914), not the `Item` planned, which collides with the app's `menu::Item`; grid's alignment rows say `start`/`end`. *(Ruled 2026-09-27, record-only; **Resolved** as rulings, **not built** — step 4's model and engine built since, D914, its preview and gestures, D916, which stores no track positions in `Resolved`, and the inspector's track list, D920. §5.3c; `roadmap.md`'s open paragraph struck)*
+- **D914** — **Grid's model and engine: `Display::Grid`, one item record for both layouts, and what CSS refuses the operations refuse.** Container layout's step 4, the first of D913's four sub-steps. `Grid` — tracks as CSS's grammar (a `repeat()` holds sizes, so cannot nest), `AlignContent` on both axes because a grid's `normal` content distribution is `stretch`, and a **`justify-items` §5.3c's table lacked**, added once `align-items: start` alone left an item 100 wide across its column. `FlexItem` → `LayoutItem`, `SetFlexItem` → `SetLayoutItem`, gaining `justify_self`, `grid_column`, `grid_row`; `Display` no longer `Copy`, `LayoutView::display` borrowed. `OpError::BadLayout` at the operations; a file carrying such a value opens, its stored value kept and laid around. taffy's `grid` feature, one `FlexTree` per pass; the Scale tool scales px tracks. ⚠️ **Open, for the maintainer**: a shape fills its grid cell under the default, where CSS's `normal` puts a replaced element at `start`. *(Built and tested 2026-09-27, uncommitted when recorded; **Keep**, the session's — the shape-in-a-cell question **open**, answered since by D915, and sub-step 2 built since, D916, and sub-step 3, D920; the two readings it left untested tested since, D919. Tests `tests/grid.rs`, eleven, and a third randomized run in `tests/resolve.rs`. D913 corrected; §5.3c, §2, §5.3, §5.6, §5.7, §5.9, §6.2; `roadmap.md` step 4's first sub-step struck)*
+- **D915** — **Grid's `normal`: a shape keeps its size at the start of its cell and a box stretches, as CSS does.** The maintainer's ruling, *"I'd lean into CSS parity as much as it makes sense"*, answering D914's open question. `Grid::justify_items` and `align_items` become `Option<AlignItems>`, `None` CSS's `normal` and the default, skipped in the file; under it a replaced item (`container::is_replaced`, D872) is held at `start` in its taffy style by `container::grid_held`, and text and a container with a layout stretch. `fit-content` is never stretched in a grid, D893's rule on both axes; an explicit `stretch` stretches a shape. Flex's `align_items` stays plain, its `normal` being `stretch`. The cards owe grid a `normal` entry — drawn since, D920. *(Ruled and built 2026-09-27, uncommitted when recorded; **Resolved**, answering D914. Test `normal_holds_a_shape_at_the_start_and_stretches_a_box`, two flips, one failing an assertion earlier than predicted. D914 amended; §5.3c; `roadmap.md` step 4's ⚠️ struck)*
+- **D916** — **Grid's preview and gestures: a resize holds on both axes, a drop writes the lines of its new cell, and a laid grid's tracks are derived when asked.** Step 4's second sub-step, built to D913's rulings. `build::grid_resize_held`, under `flex_holds` and `sized_flex_item`, turns a stretch released by a resize into `start`, or `end` from the left or top edge (`build::resized_edges`, which flex's D905 reading now shares); `build::grid_drop` moves the area by the tracks the item's centre crossed, span and spelling kept, nothing in its own cell; `build::layout_drop` is the canvas's one door. `container::laid_grid` re-runs the pass under taffy's `detailed_layout_info` — **nothing stored in `Resolved`**, a departure from D913's wording. The preview needed no change and is tested now. Several grid items dragged kept their cells, unruled, until D918; D913's *"cell under the pointer"* is read as the centre's — kept, amended 2026-09-27: D877's reading, and a pointer reading would snap a spanning or off-centre grab on release. *(Built and tested 2026-09-27, uncommitted when recorded; **Keep**, the session's. Tests in `tests/grid.rs`, `tests/overrides.rs` and `canvas.rs`'s `flex_canvas_tests`, each flip at its predicted site. D913, D914 amended; §2, §3, §5.3c, §9.4; `roadmap.md` step 4's (2) struck)*
+- **D917** — **An auto-width text stretched narrower than its line wrapped, in flex and in grid; `container::flexed_text` now floors the fixed box at the line's width.** D875's ruling (a) says auto width never wraps, and `flexed_text` made a stretched label `Fixed` at the size handed back, on the claim — D875's and the function's doc — that such a box *"cannot wrap it, a grown box being at least as wide as its line"*: true only of a stretch that widens it. A cross-axis stretch, or a grid cell's, can give less. Measured before the repair, an `Inter` 12 label 161.65 wide on one line was laid `Fixed(30 × 100)` in a 30px grid column and `Fixed(30 × 14.40625)` in a 30-wide flex column. **Flex had it first**; grid inherited it through D913's first ruling, and under grid's `normal` text stretches (D915), so there it was the default case. The box keeps the line's width and overflows its slot from the start, `white-space: nowrap`; height, `AutoHeight` and `Fixed` unchanged. Amended the same day: a text pinned on both edges still wraps (D874), on purpose — pinning is the author choosing a width, a container's stretch is not; and the unreadable-box arm is unreachable. *(Found and fixed 2026-09-27, uncommitted when recorded; **Fixed**, the session's, a defect against D875's ruling (a) and D913's first ruling. Test `an_auto_width_label_stretched_narrower_keeps_its_line`, its flip at the predicted site and reaching the grid half alone. D875 corrected, D874 amended; §5.3c)*
+- **D918** — **Several items of one grid dragged together move as a block.** `build::grid_drop_many` shifts every item's area by the tracks the centre of the block's union box crossed — D902's reading carried to grid — writing each explicit lines, span and spelling kept (D916); a negative shift is clamped to the leading item's room, so a block pushed towards the grid's first track stops there whole rather than reshuffling — and, amended the same day, a start before the explicit grid is written with the negative line that names it rather than clamped to 1, which had moved an item on an axis the drag left alone. `grid_drop` is its block of one; `build::layout_drop_many` sends several to it or to `flex_reorder_many` by the parent's `display`, and `canvas::flex_block_reorder_of` asks that, so preview and commit both carry it. The session's, under the maintainer's delegation, not a ruling. *(Built and tested 2026-09-27, uncommitted when recorded; **Keep**, answering D913's and D916's open question. Tests `several_items_of_a_grid_move_as_a_block`, its first cut unable to reach the clamp, and `two_grid_items_dragged_together_move_as_a_block`, each flip at its predicted site. D913, D916 amended; §5.3c, §9.4; `roadmap.md` step 4's ⚠️ struck)*
+- **D919** — **What grid's first sub-steps left, closed: at most 1000 explicit tracks on an axis, D914's two untested readings tested, and no `baseline` in grid's cards.** `container::MAX_TRACKS`: `Grid::is_valid` refuses a template past it on either axis (`track_count`, saturating, a repeat counting its tracks `repeat` times), and `template` lays a file's to it — CSS lets a user agent clamp an overly large grid, and a `u16` count times a few entries would have taffy allocate millions. Per axis, not per repeat: a thousand entries each `repeat(1000, …)` pass a per-repeat cap. ⚠️ `layout::MAX_TRACKS`, 10 000, is the layout grids' (D488) — two constants, one name. `scaled_layout`'s grid arm and every refused value a file can carry are now tested. `baseline` is left out of the cards because taffy 0.14.0's grid reads it as `start`; the model keeps it. The session's, under the maintainer's delegation. *(Built and tested 2026-09-27, uncommitted when recorded; **Keep**. Tests `values_css_refuses_are_refused` widened, `every_value_css_refuses_is_read_around_in_a_file` and `a_grid_scales_its_tracks_gaps_and_padding_by_their_own_axis`, each flip at its predicted site. D914 amended; §5.3c)*
+- **D920** — **Grid's cards: the `grid` cell enabled, two track lists each with a CSS line, grid's four alignments, and an item's lines typed as CSS.** Step 4's third sub-step, the mockup's screen 04, in `panels/layout/grid.rs`. Picking flex or grid over the other keeps the padding and the gaps. A track list is a row per entry — grip, kind menu, fields, cross — and a CSS line that applies on a defocus that commits and never on `Escape` (D841), a parse error or a refused list shown in red and nothing committed. Grid's rows say *Start*/*End*, lead the items rows with *Normal* (D915), draw `justify-items` (D914) and offer no `baseline` (D919); `grid-column`/`grid-row` are typed CSS. Core gains `parse_tracks`/`tracks_css` and `parse_placement`/`placement_css`. The session's, under the maintainer's delegation. ~~⚠️ `breadth_field`'s doc claims D906's rule, and the field draws a `–` unit under a keyword.~~ Amended the same day: the dash dropped (D906's rule), a refusal shown only while the field reads what it refused, an unreadable line said rather than dropped, a stale grip drag ended. *(Built and tested 2026-09-27, uncommitted when recorded; **Keep**, the dash ***Fix*** — fixed the same day. Tests in `layout.rs`, `layout/grid.rs` and `tests/grid.rs`, the flips at their predicted sites; the grip drag not driven. ⚠️ Not verified in the GUI. D878, D886, D913, D914, D915 amended; §1, §5.3c, §9.3, §9.4; `roadmap.md` step 4's (3) struck)*
 
 ---
 
@@ -20101,7 +20104,8 @@ read it.
 **Scope limits, the session's.** What stretches is a kind whose size is a field — `Rect`,
 `Ellipse`, `Polygon`, `Star`, `Artboard`, and `Text` through its sizing: a stretched width wraps an
 auto-width node at it, `AutoHeight(w)`, and keeps a `Fixed` node's height; a stretched height makes it
-`Fixed`. `Path`, `Line` and `Boolean` are positioned by their insets and keep their size, since
+`Fixed`. *(Unlike a container's stretch, which never wraps auto width — kept so on purpose, D917's
+amendment of 2026-09-27.)* `Path`, `Line` and `Boolean` are positioned by their insets and keep their size, since
 stretching one scales its points and pen-editing a stretched path then needs the inverse — later
 work. **`Group` and `Boolean` take no insets at all**: their box is their children's, measured after
 placement, so there is nothing to place them by; the field is stored and inert on them. And insets
@@ -21151,7 +21155,8 @@ step 4, a disabled cell (D878's item 2), and the cell said nothing about why. D8
 none, and `segmented_enabled` is now its untipped form, delegating with `|_| ""`, so no existing caller
 changed. The texts are `layout.rs`' `DIRECTION_TIPS` (*"Row — items run left to right"* …),
 `WRAP_TIPS` and `DISPLAY_TIPS`, whose third reads *"Grid — not built yet (container layout's next
-step)"*.
+step)"* — *"Grid — lay the children out in rows and columns of tracks"* since the grid cards enabled
+the cell, D920.
 
 **It arrived the way D722 said it should.** D722 took the click sense off a disabled cell, having found
 that no caller could hang the tooltip the sense was kept for, and ended *"If the tooltip is ever wanted,
@@ -21729,17 +21734,21 @@ builds — and stated its answer to the first with the plan rather than asking i
    the cross edges has nothing to follow here.
 3. **Dragging a grid item writes explicit lines, on every drop — the recommendation declined.** Each
    drop writes `grid-column` and `grid-row` for the cell under the pointer, so a designer can drop an
-   item into any empty cell. **The session had recommended otherwise**: an auto-placed item reorders
+   item into any empty cell. *(Built reading the dragged box's centre, and kept so 2026-09-27 — D916's
+   amendment.)* **The session had recommended otherwise**: an auto-placed item reorders
    in flow order, reusing D877's machinery and keeping the document free of line numbers, and only an
    item already placed by lines has its lines moved. Also declined: always reorder. **The consequence,
    accepted with the ruling**: every item a drag touches becomes explicitly placed and stays so, and
    D877's reorder does not apply inside a grid. ⚠️ Not ruled: what several grid items dragged
-   together write — D902's block is flex's answer, and nothing here carries it over.
+   together write — D902's block is flex's answer, and nothing here carries it over. *(Answered
+   2026-09-27 by the session under the maintainer's delegation, D918: D902's block carried over, every
+   item moved by the tracks the block's centre crossed.)*
 4. **The track editor, this step, is the inspector's track list — the mockup's screen 04, *Grid
    container + grid item* — and read-only track lines drawn on the canvas over a selected grid
    container; the recommendation taken.** Track positions come from taffy's `detailed_layout_info`
    feature, derived into `Resolved` and never saved: invariant 4, D868 — *corrected 2026-09-27: derived
-   on demand by re-running the pass, and stored nowhere, `Resolved` included (D916)*. **Dragging a track boundary on
+   on demand by re-running the pass, and stored nowhere, `Resolved` included (D916)*. *(The track list
+   built 2026-09-27, D920; the canvas lines not yet.)* **Dragging a track boundary on
    the canvas is later, not declined.** Declined for this step: draggable boundaries now, and the
    inspector alone. ⚠️ Core's manifest turns that feature off today — `default-features = false`, its
    comment naming *"the detailed-info reporting"* among what it drops — so step 4 enables it beside
@@ -21773,7 +21782,7 @@ sub-steps. Built and tested 2026-09-27, uncommitted when recorded, its gates sti
 ordered step 4 as model and engine, preview and gestures, the cards, the canvas track lines. This is
 the first: a grid can be stored, saved, laid out by `Resolved` and undone. **Nothing in the app
 authors one yet** — the Container card's `grid` cell still says *not built yet* (D886) — so a grid
-reaches a document through a file or a test.
+reaches a document through a file or a test. *(The cards author one since, D920.)*
 
 **The model.** `container::Display` gains `Grid(Grid)`: `columns` and `rows`, each a `Vec<Track>`
 (empty is CSS's `none`, every track implicit and `auto`); `auto_flow`, `GridAutoFlow::{Row, Column}`,
@@ -21787,7 +21796,7 @@ and `align_items` to `AlignItems::Stretch` (*superseded the same day: `Option<Al
 D909's mapping; taffy 0.14.0's grid reads the two pairs alike (read in its `compute/grid/alignment.rs`
 and `compute/common/alignment.rs`), a grid having no reversal for `flex-start` to follow. ⚠️ **The
 same file treats `baseline` as `start` in a grid** — taffy's own *TODO* — so an item aligned to the
-baseline is not. `Display::is_valid` and `Display::padding` are new, and **`Display` is no longer
+baseline is not. *(Grid's cards do not offer it since, D919.)* `Display::is_valid` and `Display::padding` are new, and **`Display` is no longer
 `Copy`**, a track list being a `Vec`; `LayoutView::display` returns `Option<&Display>`, borrowed,
 because most callers ask only whether there is a layout and an owned grid would clone a `Vec` per
 ask.
@@ -21797,7 +21806,7 @@ grid `align-items` is the vertical axis alone: the first test set only `align-it
 a came back 100 wide, stretched across its column — CSS's correct reading. Without `justify-items`
 the only way to stop every item stretching sideways is `justify-self` on each one. §5.3c's table now
 lists it. ⚠️ **The mockup has no row for it either** (screen 04), so the card owes one the design
-does not draw.
+does not draw. *(Drawn since, D920.)*
 
 **Tracks are CSS's grammar.** `Track::{Size(TrackSize), Repeat { repeat: u16, tracks:
 Vec<TrackSize> }}` — **a repeat holds sizes, not entries**, so `repeat()` inside `repeat()` is
@@ -21830,7 +21839,8 @@ detail is not worth the artwork. **That is D492's asymmetry and not its mechanis
 stored value stays as written, is saved back as written, and is ignored by the engine alone.
 ⚠️ **Only the zero-count repeat is pinned** (`a_file_with_a_refused_track_opens_and_lays_around_it`,
 `100px repeat(0, 50px)` laid as one column); the other readings are read from `template`,
-`min_breadth`/`max_breadth` and `grid_lines`, not tested.
+`min_breadth`/`max_breadth` and `grid_lines`, not tested. *(Tested since, D919 —
+`every_value_css_refuses_is_read_around_in_a_file`, the `fr` minimum asserted kept rather than read.)*
 
 **The engine is the same pass.** taffy's `grid` feature is on (`ondin-core/Cargo.toml`), which adds
 `smallvec` to core's closure. There is still one `FlexTree` per pass: `compute_child_layout` sends a
@@ -21849,7 +21859,8 @@ differential asserts it; sub-step 2 owes one. *(Both paid by D916: the feature i
 **What else moved with it.** The Scale tool's `tools::scaled_flex` became **`scaled_layout`**, and
 scales a grid's gaps, padding and **px tracks** per axis — columns by `csx`, rows by `csy` — a `%` or
 `fr` track being a share that scales by itself; ⚠️ its grid arm is reached by no test, the one test
-naming the function driving a flex group. `build::flow_index` answers `None` for a grid parent,
+naming the function driving a flex group. *(Reached since, D919 —
+`a_grid_scales_its_tracks_gaps_and_padding_by_their_own_axis`.)* `build::flow_index` answers `None` for a grid parent,
 since a grid's drop writes lines (D913), **so D877's reorder never fires in a grid** — and what a drag
 does there meanwhile is read from `canvas`, not run: `build::is_flex_item`, which asks only whether
 the parent lays the item out, is true of a grid item, so one grid item dragged is
@@ -21922,7 +21933,7 @@ supersedes D914's saved shape for the two fields: a value written `"Stretch"` st
 `Some(Stretch)`, but D914 skipped `Stretch` as the default, so a file of that shape that left them
 alone would now read `normal`. Free, on the session's word that grid is unpushed and no file carries
 one — and nothing in the app can author a grid yet, the Container card's `grid` cell still saying
-*not built yet* (D886).
+*not built yet* (D886). *(True when written; the cards author one since, D920.)*
 
 **What `normal` does, `container::grid_held`.** On an axis where the item's own self-alignment and
 the container's are both unset, a **replaced** item keeps its own size at the start of its area, and
@@ -21958,6 +21969,7 @@ six.
 
 **What it leaves the cards**, D913's third sub-step: grid's alignment rows need a `normal` entry, and
 it is the face of the default — the reason D914 wanted the ruling before the cards rather than after.
+*(Built 2026-09-27, D920: both items rows lead with **Normal**, and an item's **Auto** reads it.)*
 
 *(Ruled 2026-09-27 by the maintainer, built and tested the same day, uncommitted when recorded;
 **Resolved**, answering D914's open question. Recorded from the brief and a read of `container.rs`'
@@ -22034,7 +22046,8 @@ what is built reads the dragged box's centre**, shifted by the drag, as D877's r
 one-track item grabbed at its centre the two agree; for a spanning item or an off-centre grab they do
 not, and the span is the reason for the centre. And under `normal` a shape sits at its cell's start,
 so its centre is not the cell's. The session's reading of the ruling; nothing records it put back to
-the maintainer. *Revisit if they meant the pointer.*
+the maintainer. *Revisit if they meant the pointer.* *(Kept as the centre 2026-09-27, the session's
+call under the maintainer's delegation — the amendment below.)*
 
 **`build::layout_drop` is the canvas's one door** — a flex parent to `flex_reorder`, a grid parent to
 `grid_drop`. `canvas::flex_reorder_of` calls it, keeping flex's name while it serves both, so
@@ -22044,7 +22057,8 @@ asks `flex_reorder_of` too, so it draws a grid item's new cell; read, not tested
 **Several items of one grid keep their cells**: `flex_reorder_many`'s `flow_index` answers `None`
 under a grid, so the multi-selection arm's `stays_in_flow` holds each in-flow item where it is. That
 is D913's recorded gap — what several grid items dragged together write — and it is **still not
-ruled**. `a_drop_writes_the_lines_of_the_cell_it_lands_in`: the first item, its centre dragged from
+ruled**. *(Answered the same day by D918: they move as a block, and `flex_block_reorder_of` asks
+`build::layout_drop_many`.)* `a_drop_writes_the_lines_of_the_cell_it_lands_in`: the first item, its centre dragged from
 (30, 30) to (230, 90), is written `3 / auto` and `2 / auto` and lands at (220, 80), its siblings
 flowing round it; a (20, 10) nudge is `None`. **Flip run**: the no-op guard removed fails on *"back in
 its own cell"*, predicted. `a_dropped_area_keeps_its_span_and_its_spelling`: `1 / span 2` dragged one
@@ -22068,9 +22082,21 @@ own 20 × 20 — D877's indicator, in a grid. `build::is_flex_item`'s and `kept_
 already said they answer for a grid (D914), so a grid item's stored translation is kept under a
 resize's shift as a flex item's is.
 
+**Amended 2026-09-27, the same day: the centre is kept, not the pointer.** The maintainer asked the
+session to work through what it had noticed and left alone, with its suggestion for each, having
+said earlier *"I'll trust your judgement on the ruling. I'd lean into CSS parity as much as it makes
+sense"*; this ⚠️ was one of those items. `grid_drop` goes on reading the dragged box's centre across
+the tracks, the session's call under that delegation and not a ruling, for two reasons. **It is
+D877's reading for flex**, where the dragged box's centre is counted against the siblings, so the
+two layouts read a drag alike. **And a literal pointer reading would snap on release**: an item
+spanning several tracks, or one grabbed off its centre, would land up to half its span away from
+where it was drawn under the hand — the reason the span paragraph above already gives for the
+centre. For a one-track item grabbed at its centre the two readings agree. No code changed; the
+several-item gap closed the same day is D918's.
+
 *(Built and tested 2026-09-27, uncommitted when recorded; **Keep**, the session's, built to D913's
-rulings — the several-item grid drop **open**, and D913's *"derived into `Resolved`"* departed from,
-with a reason. ⚠️ Not verified in the GUI; gates not reported to this record. Recorded from the
+rulings — the several-item grid drop **open**, answered since by D918; D913's pointer read as the
+centre, kept by the amendment; and D913's *"derived into `Resolved`"* departed from, with a reason. ⚠️ Not verified in the GUI; gates not reported to this record. Recorded from the
 brief and a read of `container.rs`' `is_replaced`, `LaidTracks`, `LaidGrid`, `laid_grid`, `FlexTree`
 and `set_detailed_grid_info`, `build.rs`' `flex_holds`, `resized_edges`, `resized_from_cross_start`,
 `grid_resize_held`, `sized_flex_item`, `flow_index`, `layout_drop`, `laid_grid` and `grid_drop`, core's
@@ -22110,7 +22136,7 @@ narrower than its line, so it overflows its slot rather than wrapping, CSS's `wh
 which is what D875(a) already calls auto width. It sits at the slot's start and overflows to the
 right. **Not changed**: the height, which a stretch may still make taller than the line, harmlessly;
 `AutoHeight` and `Fixed` text; and the arm where the text's box cannot be read, which still takes the
-size whole (read in the code, not in the brief). `flexed_text`'s doc now says *"never narrower than
+size whole (read in the code, not in the brief) *(and can never run — the amendment below)*. `flexed_text`'s doc now says *"never narrower than
 its line"*, and a 🚨 comment on the arm names the sentence it replaced. ⚠️ **The `max` is
 load-bearing and reads like a redundant clamp**: taking the plain width given is the version this
 entry fixes, and the test below is what fails.
@@ -22125,12 +22151,336 @@ assertion failing first, so no flip of its own bites on it; its evidence that th
 the probe's pre-repair `Fixed(30 × 14.40625)` above. A flip that reaches flex alone would need the
 two halves split.
 
+**Amended 2026-09-27, the same day: why an auto-width text pinned on both edges still wraps.** D874's
+scope limits, under the maintainer's ruling 1 that both insets on an axis stretch, give a text pinned
+left and right the stretched width as a wrap width — `container::resized` turns auto width into
+`AutoHeight(w)` — so it wraps; D875's ruling (a), D913's first ruling and this entry make a
+container's stretch never wrap it. **Kept different on purpose**, the session's call under the
+maintainer's delegation (D916's amendment says how that was given), and not a ruling. Pinning both
+edges is the **author** choosing a width, and CSS wraps the text of an absolutely positioned box given
+both `left` and `right`; a container's stretch is not a width the author chose for the text, so the
+text's own mode governs there. *Do not read the two as one rule applied inconsistently*: each is
+where its own sentence says, and this is the sentence that says they differ. No code changed. D874
+carries a pointer here.
+
+**And the unreadable-box arm is unreachable.** `flexed_text`'s `TextSizing::Auto` arm falls back to
+the size whole when `geometry::local_bounds` answers `None` — which it never does for a text kind:
+its `Text` arm answers `None` only if `TextRef::of` does, and `TextRef::of` refuses only a kind that
+is not text, which `flexed_text` has already returned for. So the floor always applies. A comment
+above the arm now says so (`container.rs`); the arm is kept as written.
+
 *(Found 2026-09-27 — raised when D916 was recorded, then measured with a probe — and fixed the same
 day, uncommitted when recorded; **Fixed**, the session's, a defect against D875's ruling (a) and
 D913's first ruling. Gates reported green: fmt, `cargo test --workspace`, clippy over the workspace
 and per package, the doc gate and `check --release`. Recorded from the brief and a read of
 `container.rs`' `flexed_text` and `tests/grid.rs`' test and its `label` and `grid` fixtures; the
-probe's numbers the brief's, the flip not re-run. D875 corrected; `architecture.md` §5.3c amended)*
+probe's numbers the brief's, the flip not re-run. D875 corrected; `architecture.md` §5.3c amended.
+The amendment recorded from the brief, D874 and a read of `container.rs`' `resized` and
+`flexed_text`, `geometry.rs`' `local_bounds` and `node.rs`' `TextRef::of`; D874 amended)*
+
+**D918 — Several items of one grid dragged together move as a block: every area shifted by the
+tracks the block's centre crossed, and a block pushed towards line 1 stopped there whole. *The
+session's, under the maintainer's delegation — not a ruling. Built and tested 2026-09-27, uncommitted
+when recorded.*** D913 left open what several grid items dragged together write — *"D902's block is
+flex's answer, and nothing here carries it over"* — and D916 built grid's drop for one item and left
+several where D877's rule put them: `flex_reorder_many` answers `None` under a grid, so the
+multi-selection arm's `stays_in_flow` held each in-flow item in its cell and the release committed
+nothing. The maintainer asked the session to work through what it had noticed and left alone, with
+its suggestion for each, having said earlier the same day *"I'll trust your judgement on the ruling.
+I'd lean into CSS parity as much as it makes sense"*. This is the session's answer to one of those
+items, acted on; D916's and D917's amendments are two more.
+
+**D902's reading, carried to grid.** A flex block reorders as one, to where its centre falls; a grid
+block moves as one, by the tracks its centre crosses. `build::grid_drop_many(doc, res, ids, delta) ->
+Option<Vec<Operation>>` answers `None` unless every id is an in-flow item (`is_flex_item`) of one
+parent that is a laid grid (`container::laid_grid`). The shift on each axis is read off the centre of
+the block's **union box** — the union of the items' world bounds, mapped into the grid's space before
+and after the drag, `LaidTracks::index_at` at each — as a single item's is off its own centre, and
+every item's area moves by that same `(dc, dr)`, so the arrangement inside the block is kept, gaps
+and all. Every item is written explicit lines on both axes, its span and spelling kept as D916's
+single drop keeps them. `Some(vec![])` when the centre stays in its tracks: the block lands where it
+was, no operation and no undo step.
+
+**A block pushed towards line 1 stops there whole.** A negative shift is clamped to the room of the
+block's first item — `room`, `by.max((1 - first).min(0))`, `first` the smallest start among the
+items — so the block goes back only as far as its leading item can, and not at all when that item
+already starts before line 1. *Do not drop `room` as redundant beside the clamp `placed` applies to
+every start*: that clamp stops each start alone, so the leading item is held at line 1 while the rest
+move the full shift and close the gaps the block had — the drag reshuffles it. The first test below
+is what fails. **For one item it matters too**, read and not tested: only an item spanning more than
+one track can have its centre cross more tracks back than its start has room for, and under the
+per-start clamp one whose end is written as a line would keep its end moving while its start was held,
+shortening its span.
+
+~~⚠️ **Read, not tested: an item already before line 1 is still pulled to it.** `room` stops such a
+block's shift, but `placed` writes every start through that same clamp, so an item whose start is
+still below 1 after the shift — one an author put at a negative line beyond the explicit grid — is
+written at line 1 on that axis, even one the drag left alone, and a block holding one does not keep
+its arrangement there. Only a file or a test can put an item there while the cards are unbuilt.~~
+
+**Amended 2026-09-27, the same day: the ⚠️ above was a defect, and it is repaired.** A line before
+the explicit grid's first has no positive number, and CSS names it with a negative one: line `p` is
+line `p − (explicit + 2)` counted from the far end, so in three columns line 0 is `-5`. `grid_drop_many`
+now writes such a start (and end) that way instead of clamping it to 1, and `room` clamps a negative
+shift to the **grid's own first track** (`LaidTracks::line_of(0)`) rather than to line 1 — the block
+still stops there whole, and since a drop's start lands on a track the grid already has, nothing
+before it is invented. The per-start clamp is gone, so the single-item span-shortening reading above
+no longer has a mechanism. Evidence: `tests/grid.rs · an_area_before_the_explicit_grid_keeps_its_negative_line`
+— three 50px columns, `a` at `-5` in the leading implicit track the grid grows for it (asserted:
+`before` is 1, `a` at x 0), dragged one row down: its column is written `-5` again and it stays at
+x 0. **Flip run**, `line` clamping to 1 as it did: fails on *"its column kept"* with `Line(1)`, the
+predicted site. `grid_drop`'s own doc, which said a start pushed before line 1 *"stops there"*, was
+corrected with it. Gates green after: fmt, `cargo test --workspace -j 4`, clippy over the workspace and
+per package, the doc gate, `check --release`.
+
+**One implementation.** `grid_drop` is now `grid_drop_many(&[id])`'s first operation. And
+`build::layout_drop_many` is `layout_drop`'s twin for several — a flex parent to `flex_reorder_many`
+(D902), a grid parent to `grid_drop_many`. `canvas::flex_block_reorder_of` calls it, keeping flex's
+name as `flex_reorder_of` does while it serves both, so `move_tx` commits the block's `SetLayoutItem`s
+alone — one transaction, no `SetTransform`, D877's reason — and `move_preview_tx` appends them to
+every item's translation, the block under the hand and its siblings reflowing round the cells it will
+land in. ⚠️ **No landing outline**: `draw_flex_landing` draws for the one item `flex_reorder_of`
+answers for, so a grid block is outlined no more than a flex block is (D902's ⚠️). Read, not tested.
+
+**The evidence.** `ondin-core/tests/grid.rs · several_items_of_a_grid_move_as_a_block`: in the first
+test's grid, `a` and `b` drawn at (20, 20) and (130, 20), their union's centre at (85, 30), dragged
+(+100, +60) to (185, 90) — one column and one row over — land at (130, 80) and (220, 80), columns 2 and
+3 of row 2, side by side as they were; a (5, 5) nudge answers `Some([])`. Then four 50px columns, `a`
+placed at column 2 and `b` at column 4, their union's centre at x 110 in column 3, dragged −110 into
+column 1: two columns back, where `a` has room for one, so `a` goes to line 1 and `b` to line 3, the
+gap kept. **Flip run**: `room` answering the raw shift fails on *"stopped whole at line 1"*, `b` at
+line 2, the predicted site. ⚠️ **The test's first cut could not reach the clamp**: its union's centre
+sat in column 2, so the raw shift was −1 and the leading item had room for it. That was found by
+reading the arithmetic back before the flip, not by the flip, and the clamp was given its own fixture.
+*A clamp's test has to ask for more than the room.* And through the app, `canvas.rs`'
+`flex_canvas_tests::two_grid_items_dragged_together_move_as_a_block`: `app_with_a_grid`'s `a` and `b`
+side by side in row 1 of 100 × 100 cells, their union's centre at (60, 10), `move_tx` by (+200, +100)
+— two columns and one row — commits two `SetLayoutItem`s and nothing else, `a` at column 3 and `b` at
+column 4 of row 2. It calls `move_tx`, not `canvas_ui`; the real drag is D916's single-item test.
+**Flip run**: `flex_block_reorder_of` asking `flex_reorder_many` as it did fails on *"both written"*
+with an empty transaction, predicted. `app_with_a_grid` was lifted out of D916's canvas test for the
+two to share, as the brief reports.
+
+*(Built and tested 2026-09-27, uncommitted when recorded; **Keep**, the session's under the
+maintainer's delegation, answering D913's and D916's open question. Gates reported green: fmt, `cargo
+test --workspace` over 37 binaries — one run lost to `LNK1102: out of memory` linking two export test
+binaries at once, re-run with `-j 4` and green, the linker's failure and not the code's — clippy over
+the workspace and per package, the doc gate and `check --release`. ⚠️ Not verified in the GUI.
+Recorded from the brief and a read of `build.rs`' `grid_drop`, `grid_drop_many`, `layout_drop_many`
+and `is_flex_item`, `canvas.rs`' `flex_reorder_of`, `flex_block_reorder_of`, `move_preview_tx`,
+`move_tx` and `draw_flex_landing`, and the two tests with their docs and fixtures; flips as the tests'
+docs record them, not re-run. D913 and D916 amended; `architecture.md` §5.3c and §9.4 amended;
+`roadmap.md` step 4's ⚠️ struck)*
+
+**D919 — What grid's first sub-steps left, closed: at most 1000 explicit tracks on an axis, the two
+readings D914 left untested tested, and no `baseline` in grid's cards. *The session's, under the
+maintainer's delegation — not rulings. Built and tested 2026-09-27, uncommitted when recorded.***
+The maintainer, the same day: *"Let's wrap up the open list from earlier and move into step 3 (the
+cards)"* — step 4's third sub-step, D920 — the list being what the session had noticed and left
+alone while building D914–D918, and the delegation the one D916's amendment records (*"I'll trust
+your judgement … I'd lean into CSS parity as much as it makes sense"*). Three items, each the
+session's call.
+
+**A template makes at most `container::MAX_TRACKS`, a thousand, explicit tracks on an axis.** A
+`repeat()` count is a `u16`, so one entry can ask for 65 535 tracks and a few entries a few times
+that, which taffy would allocate — from a file, or, since D920, from a pasted CSS line. CSS allows for
+exactly this: a user agent may clamp an overly large grid (*"Clamping Overly Large Grids"*, CSS
+Grid). `Grid::is_valid` refuses a template past the cap on either axis, so `op_set_display` answers
+`OpError::BadLayout`, D914's door; the count is `container::track_count` — saturating, a repeat
+counting its tracks `repeat` times — public, and the Container card's *N tracks* (D920). **The cap
+is on the axis's total, not on each repeat**: a thousand entries each `repeat(1000, …)` pass a
+per-repeat cap and ask for a million. A file's template is not refused — D914's asymmetry — but laid
+to the cap by `template`: a repeat that would pass it repeats as many whole times as fit, and what
+follows is laid only as far as there is room. `template`'s doc said the entries after such a repeat
+are *dropped*, which a multi-track repeat's remainder makes untrue — a single track after it still
+fits — and is corrected. `tests/grid.rs · values_css_refuses_are_refused` gains two refused
+templates, `repeat(1001, auto)` and `repeat(300, auto auto) repeat(401, auto)` — 600 and 401, refused
+only together — and accepts `repeat(1000, auto)`, exactly the cap. ⚠️ **Two constants have this
+name**: `layout::MAX_TRACKS`, 10 000, is §5.3b's layout grids' (D488), and this is the CSS grid
+container's — §5.3c's *"'Grid' names two unrelated things"* arriving in an identifier. Each is read
+only in its own module.
+
+**The tests the list owed.** D914 left two readings reached by nothing: `tools::scaled_layout`'s grid
+arm, and `style_of`'s reading of every refused value but the zero-count repeat.
+`tools/mod.rs · guide_scale_tests::a_grid_scales_its_tracks_gaps_and_padding_by_their_own_axis`: at ×2
+across and ×0.5 down the px columns double — a `minmax()`'s px end inside a `repeat()` with them —
+the px rows halve, `fr` and `%` stay the shares they are, the column gap doubles and the row gap
+halves, and the padding's top and bottom halve while its sides double. **Flip run**, the columns
+scaled by `csy`: fails on *"the columns, across"* at 50 rather than 200, predicted.
+`tests/grid.rs · every_value_css_refuses_is_read_around_in_a_file`, one case per value on columns
+`100px 50px 100px`, 10 × 10 items at the start of their cells: `-50px` is read as 0, `c` at x 100
+rather than 150; line 0 as `auto`, `d` auto-placed at x 0 rather than at column 3; `span 0` as one
+track, `d` 50 wide rather than 150; and `repeat(5000, 10px)` after three columns laid to 1000
+explicit, read back through `build::laid_grid`. **Flip run**, `template` given no budget: fails on
+*"laid to the cap"* at 5003, predicted. ⚠️ **The `fr` minimum is asserted opening and kept as stored,
+not read as `auto`**: the file lays out, and nothing checks the track it makes. An empty repeat is not
+spelled — the file's pretty-printed list makes it a multi-line edit — and is read by the same guard
+as `repeat(0, …)`, which D914's `a_file_with_a_refused_track_opens_and_lays_around_it` pins. The
+helper `reopened` saves, swaps a string it asserts the file spells exactly once, and opens the file
+again: how a test gets a value the operations refuse into a document.
+
+**`baseline` is not offered in grid's cards.** taffy 0.14.0's grid treats `baseline` as `start` — its
+own *TODO* in `compute/grid/alignment.rs`, read by D914 — so a card offering it would name a
+behaviour nothing draws. `layout/grid.rs`' `SELF` and `ITEMS` leave it out of the self- and items
+rows. **The model keeps the value**: flex honours it, an item's record keeps both layouts'
+properties (D914), and a grid carrying it — from a file, or from an item whose parent turned from
+flex to grid — lays it as `start`. ⚠️ **Read, not tested: such a value still reads *Baseline* on its
+row's face**, no row lit in the menu, since `glyph_combo` names whatever value it is shown; picking a
+row replaces it. *Revisit when taffy's grid aligns to a baseline.*
+
+*(Built and tested 2026-09-27, uncommitted when recorded; **Keep**, the session's under the
+maintainer's delegation. Gates reported green: fmt, `cargo test --workspace -j 4` over 37 binaries,
+clippy over the workspace and per package, the doc gate and `check --release`. Recorded from the
+brief and a read of `container.rs`' `Grid::is_valid`, `MAX_TRACKS`, `track_count` and `template`,
+core's `layout.rs`' `MAX_TRACKS`, `tests/grid.rs`' two tests and `reopened`, the `tools/mod.rs` test, and
+`layout/grid.rs`' `SELF` and `ITEMS` with `glyph_combo`'s face in `panels/layout.rs`; flips as the
+tests' docs record them, not re-run. D914 amended; `architecture.md` §5.3c amended)*
+
+**D920 — Grid's cards: the `grid` cell enabled, two track lists each with a CSS line, grid's four
+alignments, and an item's lines typed as CSS. *The session's; container layout's step 4, the third
+of D913's four sub-steps, under the maintainer's delegation — not rulings. Built and tested
+2026-09-27, uncommitted when recorded.*** D913's item 4 ruled that this step's track editor is the
+inspector's track list, as the mockup's screen 04 (*Grid container + grid item*, `design/Layout
+Cards.dc.html`) draws it, and the maintainer asked for the cards once the leftovers were closed
+(D919). Until now the Container card's `grid` cell was disabled, its tooltip saying why (D886), and a
+grid reached a document only through a file or a test (D914); D914 and D915 left the cards two debts
+— a `justify-items` row the mockup does not draw, and a `normal` entry, the face of the default.
+
+**Grid values as CSS text, in core** (`container.rs`). `tracks_css` and `parse_tracks` write and read
+a track list as `grid-template-columns` spells it — whitespace-separated sizes, `minmax(a, b)`,
+`repeat(n, sizes…)`, keywords in any case, a unitless `0` for `0px` as CSS allows, and `none` or
+nothing the empty list; an error names what could not be read (*"100 needs a unit: px, % or fr"*).
+`track_size_css` writes one size; `placement_css` and `parse_placement` do one end of a
+`grid-column`/`grid-row` — `auto`, `n`, `-n`, `span n` — and line 0 and `span 0` do not parse. **The
+parser does not validate**: `Grid::is_valid` is the one judge, at the operation, so `minmax(1fr,
+2fr)` parses and is refused there. `track_count` is public for the card's head (D919), and `Display`
+gains `padding_mut`, `gaps` and `gaps_mut`.
+
+**The Container card.** The `display` row's `grid` cell is enabled, its tooltip now saying what grid
+does. `set_display(subjects, to)` takes the cell — none, flex, grid — and **switching between flex
+and grid keeps the padding and the gaps**, the properties the two share by name, starting the rest
+at CSS's defaults; the children's item records keep both layouts' properties (D914), so what they had
+under the other layout is waiting for them. `display_tx` generalises `flex_tx`, now its flex arm, and
+`gap_row` and `padding_rows` serve either layout. Under `grid`, `grid_container_rows` — **not
+`grid_rows`, which is the layout grids' chrome in `panels::inspector`**, §5.3c's *two meanings of
+"grid"* arriving in a method name — draws `grid-auto-flow` as a two-cell segment, *Row* and
+*Column*; the column and row track lists; `justify-content`, **`justify-items`** (D914's addition),
+`align-items` and `align-content`; the gaps, columns first and both live; and the padding. Grid's
+alignment names read *Start* and *End*, not *Flex start* (D913's session call); its items rows lead
+with **Normal** (D915) and offer *Stretch*, *Start*, *End* and *Center* — no `baseline` (D919); and
+the `justify-*` rows' pictures are transposed (`ACROSS`), every alignment picture being drawn for a
+vertical axis. The mockup puts an arrow with each flow word, as the brief reports; the card has the
+words alone, a simplification.
+
+**The track list** (`track_list`, `track_row`, `track_fields`) is the mockup's: a head with the
+property's name, how many tracks the list makes — *N tracks*, *None*, or *Mixed* where the selection
+disagrees — and a `+` that appends `1fr` to each subject's own list; then, while the selection
+agrees, a row per entry: a grip (`ui::grip`, live with two entries or more), **a kind menu leading
+the row** — px, fr, %, auto, min-content, max-content, minmax, repeat; the mockup's chip — the kind's
+fields, and a cross that removes the entry. The fields are a number with an inert unit for px, % and
+fr; nothing for a keyword; `minmax()` as two `breadth_field`s, each a number whose unit is a menu of
+the breadth kinds, `fr` not offered as the minimum; and `repeat()` as a count, 1 to 1000 with a `×`
+suffix, and a `breadth_field` for a single repeated track — or, for several, the tracks as read-only
+CSS text, edited in the CSS line.
+
+**A kind picked converts the track, keeping what means the same** (`converted`). The number does not
+travel between px, % and fr — 200px is not 200fr — so each starts at its kind's default: 100px, 25%,
+1fr. A single `fr` becomes `minmax()`'s maximum over a 100px minimum and any other single size its
+minimum under `1fr`, so an `fr` minimum is never made; a single size becomes `repeat()`'s one track,
+twice over. Out of a function, its lead size — a `repeat()`'s first track, a `minmax()`'s maximum —
+comes back where it is of the kind picked, and the kind's default where it is not.
+
+**Reorder by the grip, without moving the rows.** While a grip is dragged the rows stay put and an
+accent line follows the pointer between them — before the first row whose middle is below it, or
+after the last — and the release commits the list with the entry in that slot (`reordered`, a slot
+being the gap before an entry, so the slots either side of the entry move nothing). Simpler than the
+paint stack's floating-layer drag, on purpose, as the brief records.
+
+**The CSS line under each list** is the whole template as editable CSS, for pasting one from a
+browser's inspector. `css_field` holds the text in a buffer while it has focus, so a half-typed list
+is not a live one, and hands it back only on a defocus that commits — **never on `Escape`**,
+`ui::defocus_commits`, D841's rule, the buffer cleared on every way out and only the write gated —
+and only where it differs from what was shown. A parse error, or a list CSS refuses (the cap, D919,
+included), is shown in red under the field and nothing is committed, no undo step. A selection that
+disagrees reads *Mixed* in the field and takes a typed list for every subject.
+
+**The Item card** (`item_rows`, split into `flex_item_rows`, `grid_item_rows` and `limit_rows`). In
+a grid, `grid-column` and `grid-row` are two CSS fields each, start and end, typed as CSS writes them
+— `auto`, `2`, `-1`, `span 2` — under the CSS line's commit rule; then `justify-self` and
+`align-self`, whose *Auto* reads what the container's items row resolves to (*Auto · Normal*). The
+size limits and the resize receipt are both layouts'; the receipt names `justify self` too, with
+grid's *start* and *end*. **The mockup draws a line as a chevron combo**; a typed field was chosen
+because a line is a number *or* a span, and one field that reads both is shorter than two that each
+read half. ⚠️ **Read, not tested: a line that does not parse is dropped without a word** — the field
+goes back to what it showed, where the track list's CSS line says why. ⚠️ **And the receipt names a
+grid item's flips without outlining its fields**, where D880's outlines flex's: `grid_item_rows` is
+not handed them.
+
+⚠️ **`breadth_field`'s doc and the field disagree, and the disagreement is with D906.** The doc says
+a keyword stands in the digits *"with no unit (§15 D906's rule)"*; the field draws a `–` as its unit
+under a keyword, clickable — its one door from a keyword to the kinds menu short of typing a number.
+D906's ruling names the Item card's basis and limits, so its letter does not reach a track's breadth;
+its heading — *a size field showing a keyword in its digits has no unit* — does, and the doc cites
+it. *Fix*: drop the dash, D906's rule, or keep it and say here and in the doc why this field differs.
+
+**Amended 2026-09-27, the same day, before commit: the dash is dropped, and four of the readings
+above are repaired.** *(The session's.)*
+- **The dash goes, D906's rule.** Under a keyword the breadth field has no unit at all; typing or
+  dragging a number leaves the keyword for px and brings the unit's menu back, which is the way from
+  one keyword to another — the Item card's basis's way (D906). `breadth_field`'s doc says so and
+  records the first cut. The *Fix* above is closed.
+- **A refusal is about the text that was refused.** `css_field`'s callers record a refusal with what
+  the field read when it happened (`refuse`), and it is shown only while the field still reads that
+  (`refusal`) — an apply through a `+`, a cross or an undo changes the list and the message goes —
+  and it is dropped the moment the field is engaged again. The first cut kept it standing through all
+  of those, keyed on the first subject, back whenever that frame was selected.
+- **An unreadable line is said, not dropped**: the Item card's line fields refuse it the same way,
+  *"`two` is not a line — auto, 2, -1 or span 2"*, under their row. The first ⚠️ of the Item card
+  paragraph above is closed.
+- **A grip drag that ended where no grip saw it ends once no button is held** — the selection
+  changed under it, or the list turned mixed — rather than drawing its line whenever that list is
+  next shown.
+- `a_picked_kind_keeps_what_means_the_same` takes a `3fr` maximum, so its coming back out of a
+  `minmax()` is told apart from the `1fr` default; `track_row` lost an unused width and
+  `flex_item_rows` a dead `let _`.
+
+⚠️ **Read, not tested**: the refusal's lifetime and the drag's clean-up are not driven by a test; the
+refusal's first appearance is (`the_css_line_applies_on_enter_and_never_on_escape`). Gates green
+after: fmt, `cargo test --workspace -j 4` (37 binaries), clippy over the workspace and per package,
+the doc gate, `check --release`. §5.3c's gestures sentence that still said a drop's start *"stopped
+at line 1"* was brought up to D918's amendment in the same pass.
+
+**The evidence**, in `layout.rs`' tests, the `Panel` harness with real events:
+`picking_grid_keeps_the_padding_and_the_gaps` — the display row's *Grid* clicked over a flex row with
+gap 10 and padding 20 lays a grid with both and no tracks; **flip run**, `kept` returning the fresh
+layout, fails on *"the padding travelled"* at 0, predicted.
+`a_track_is_added_with_the_plus_and_removed_with_the_cross` — `100px 1fr` reads *2 tracks*, the `+`
+makes `100px 1fr 1fr`, and the first cross `1fr 1fr`. `the_css_line_applies_on_enter_and_never_on_escape`
+— `200px repeat(2, 1fr)` and Enter lands, `50px` and `Escape` does not, and `100` is refused with its
+reason shown and no undo step; **flip run**, `css_field` committing on a bare `lost_focus()`, fails on
+*"Escape abandons it"* with `50px` landed, predicted. `a_grid_items_lines_are_typed_as_css` — a grid
+item's card has no *Flex grow*, its *Justify self* reads *Auto · Normal*, and `2` then `span 2` land
+as `2 / span 2`. In `layout/grid.rs`, `a_picked_kind_keeps_what_means_the_same` and
+`a_grip_drop_moves_the_entry_to_its_slot` pin the conversion and the reorder's arithmetic; **the grip
+drag itself is driven by no test**. In core, `tests/grid.rs`' `a_track_list_reads_and_writes_as_css`
+— the mockup's own line, `200px 1fr minmax(100px, 2fr) repeat(3, auto)`, parsed to its four entries
+and written back the same — `what_is_not_a_track_list_is_an_error` and
+`a_placement_reads_and_writes_as_css`.
+
+*(Built and tested 2026-09-27, uncommitted when recorded; **Keep**, the session's under the
+maintainer's delegation — the breadth field's dash ***Fix***, against D906, fixed the same day (the
+amendment above). ⚠️ **Not verified in the
+GUI**: nothing in these cards has been seen on screen, and the maintainer is asked to look. Gates
+reported green: fmt, `cargo test --workspace -j 4` over 37 binaries, clippy over the workspace and
+per package, the doc gate and `check --release`. Recorded from the brief and a read of
+`container.rs`' CSS-text functions, `track_count` and `Display`'s accessors; `layout.rs`' module doc,
+`DISPLAY_TIPS`, `display_cell`, `inspector_container`, `set_display`, `flex_tx`, `display_tx`,
+`gap_row`, `padding_rows`, `glyph_combo`, `item_rows`, `flex_item_rows` and the four tests;
+`layout/grid.rs` whole; and `tests/grid.rs`' three tests; flips as the tests' docs record them, not
+re-run. `converted`'s doc and its test's, which called `%` a share yet sent it to the minimum and
+named a `minmax()`'s first size where the code takes its maximum, corrected. D878, D886, D913, D914
+and D915 amended; `architecture.md` §1, §5.3c, §9.3 and §9.4 amended; `roadmap.md` step 4's (3)
+struck)*
 
 **D898 — The randomized `update`/`rebuild` guard authors layout inputs, and compares a laid group's
 box. *The session's; built 2026-09-27, committed as `da5b652`. Entry reconstructed 2026-09-27 from

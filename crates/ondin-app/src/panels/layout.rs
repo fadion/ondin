@@ -14,6 +14,12 @@
 //! Item, then Container and the Layout grid, then paint. A frame that is both an item
 //! and a container gets both cards, Item first.
 //!
+//! **Neither card has a header badge** — the mockup's *flex · row*, *out of flow*,
+//! *in flow* — and that is ruled, not an omission (§15 D897): a badge is for a
+//! state a card has nowhere else to say, which is why the Position card has
+//! *Absolute* (`OndinApp::panel_badged`). The Item card says out-of-flow in a whole
+//! block, and Container's badge would repeat the display row under it.
+//!
 //! Three things the cards say that are rulings rather than readings:
 //!
 //! - **A hidden layer is out of the flow** (§15 D881) — the Item card says so in
@@ -499,8 +505,13 @@ fn shared<T: Copy + PartialEq, S>(all: &[S], f: impl Fn(&S) -> T) -> Option<T> {
 /// §15 D130's rule, "Mixed" wherever five letters fit, and the mockup's screen
 /// 08. It read a dash, copying `typography::mixed_text`, until §15 D892 closed
 /// D878's *Fix* verdict on it — the maintainer's ruling that the layout cards
-/// follow D130 before grid copies them. The unit beside a mixed sizing mode still
-/// reads a dash ([`size_field`]): five letters do not fit a unit's slot.
+/// follow D130 before grid copies them. The unit beside a mixed sizing mode
+/// reads a dash ([`size_field`]), and **that dash is not a mixed marker**: the
+/// digits already say "Mixed", and the dash says *no single unit* — the same
+/// meaning §15 D895 gives it beside a keyword, Webflow's unit slot. Room was never
+/// the reason (`ui::Suffix` is laid out to its text and holds *fit content*); an
+/// earlier line here said it was. The mixed segment rows use `ui::segment_mixed`,
+/// one of D130's two dashes (§15 D892).
 fn mixed_if(d: egui::DragValue<'_>, mixed: bool) -> egui::DragValue<'_> {
     if mixed {
         return d.custom_formatter(|_, _| ui::MIXED_WORD.into());
@@ -985,8 +996,10 @@ impl OndinApp {
             .collect();
         self.panel(ui, "Container", None, |app, ui| {
             let full = ui.available_width();
-            // Nothing raised while the selection disagrees: `segmented`'s mixed
-            // reading, an index past the last cell.
+            // Nothing raised while the selection disagrees — `segmented`'s mixed
+            // reading, an index past the last cell — and the first cell's picture
+            // traded for `ui::segment_mixed`'s dash, the Type panel's convention
+            // and one of D130's two dashes; blank read as a bug (§15 D892).
             if let Some(i) = ui::segmented_tipped(
                 ui,
                 full,
@@ -995,7 +1008,13 @@ impl OndinApp {
                 mode.unwrap_or(3),
                 |i| i != 2,
                 |i| DISPLAY_TIPS[i],
-                display_cell,
+                |p, i, r, on| {
+                    if mode.is_none() && i == 0 {
+                        ui::segment_mixed(p, r);
+                    } else {
+                        display_cell(p, i, r, on);
+                    }
+                },
             ) {
                 app.set_display(&subjects, i == 1);
             }
@@ -1127,7 +1146,10 @@ impl OndinApp {
                 at,
                 |_| true,
                 |i| DIRECTION_TIPS[i],
-                |p, i, r, on| ui::segment_glyph(p, r, arrows[i], on),
+                |p, i, r, on| match direction {
+                    None if i == 0 => ui::segment_mixed(p, r),
+                    _ => ui::segment_glyph(p, r, arrows[i], on),
+                },
             ) {
                 let tx = self.flex_tx(subjects, |f| f.direction = DIRECTIONS[i]);
                 self.commit_edit(tx);
@@ -1148,7 +1170,10 @@ impl OndinApp {
                 at,
                 |_| true,
                 |i| WRAP_TIPS[i],
-                |p, i, r, on| ui::segment_glyph(p, r, turns[i], on),
+                |p, i, r, on| match wrap {
+                    None if i == 0 => ui::segment_mixed(p, r),
+                    _ => ui::segment_glyph(p, r, turns[i], on),
+                },
             ) {
                 let tx = self.flex_tx(subjects, |f| f.wrap = WRAPS[i]);
                 self.commit_edit(tx);
@@ -2491,6 +2516,58 @@ mod tests {
         assert_eq!(count("Mixed"), 1, "the grow field says so: {texts:?}");
         assert_eq!(count("auto"), 1, "the basis reads its keyword: {texts:?}");
         assert_eq!(count("–"), 1, "and its unit a dash: {texts:?}");
+    }
+
+    /// **A segment row over containers that disagree marks the mixed state**
+    /// (§15 D892): two frames, a row and a column, selected together — the
+    /// direction row raises nothing and draws `ui::segment_mixed`'s dash where its
+    /// first arrow was, the Type panel's convention. It drew nothing at all, which
+    /// `segment_mixed`'s own doc says reads as a bug. The display and wrap rows
+    /// agree and draw no dash, and no Container field has a unit, so one dash is
+    /// the whole count.
+    ///
+    /// **Flip run**, the direction row's `None if i == 0` arm deleted: fails on
+    /// *"the direction row says it is mixed"*, 0 against 1, predicted.
+    #[test]
+    fn a_segment_row_over_containers_that_disagree_marks_it() {
+        let mut s = scene();
+        let mut ids = IdSource::new(0xCB);
+        let column = ids.mint();
+        s.app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: column,
+                parent: s.app.session.doc.root(),
+                index: 1,
+                kind: NodeKind::Artboard {
+                    size: Size::new(200.0, 200.0),
+                },
+                transform: Some(Affine::translate((600.0, 0.0))),
+                name: None,
+            },
+            Operation::SetDisplay {
+                id: column,
+                display: Some(Display::Flex(Flex {
+                    direction: FlexDirection::Column,
+                    ..Default::default()
+                })),
+            },
+        ]));
+        s.app.session.selection.set(vec![s.frame, column]);
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let out = ctx.run_ui(Default::default(), |ui| {
+            ui.set_max_width(284.0);
+            s.app.inspector_container(ui);
+        });
+        let dashes = out
+            .shapes
+            .iter()
+            .filter(
+                |cs| matches!(&cs.shape, egui::epaint::Shape::Text(t) if t.galley.text() == "–"),
+            )
+            .count();
+        assert_eq!(dashes, 1, "the direction row says it is mixed");
     }
 
     /// **Each card offers itself for what it describes and draws without

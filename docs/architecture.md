@@ -1177,10 +1177,13 @@ properties.
 **Built 2026-09-24 in frames, inspector card included** (§15 D874). The group-with-`display` half
 is placed by core and the preview since step 3 — `resolve::frame_box` answers a group's laid-out box
 — and since 2026-09-26 the card offers a laid group's children too and `build::keep_insets` pins them
-against that box (§15 D887), tested in core and the app and not in the preview. ⚠️ The box
-`keep_insets` reads is the **committed** one, so an edit that re-lays the group and moves a pinned
-child at once — the Scale tool's `tools::scaled_flex` — pins against the size the group had;
-unmeasured. `ondin-core/src/container.rs` holds the arithmetic: `LengthPct` (`Px`, or `Percent`
+against that box (§15 D887), tested in core, the app and the preview (§15 D901). The box
+`keep_insets` reads is the one the edit leaves — `build::laid_group_box`, the group's layout run over
+the document after the edit (§15 D900); it read the **committed** one, and the Scale tool's
+`tools::scaled_flex`, which re-lays the group and moves a pinned child at once, re-pinned the child
+against the old size. A laid group the chain root's pass never places — behind a plain group in a
+flex row, or hidden, or a mask — is measured by its own pass; `laid_group_box` found no box for it and
+the child snapped back on release (§15 D910). `ondin-core/src/container.rs` holds the arithmetic: `LengthPct` (`Px`, or `Percent`
 stored as typed, horizontal insets against the frame's width and vertical against its height),
 `AutoMargins`, `Insets`, and `place`/`inverse`, CSS's absolute-positioning rule for one axis and
 its reverse. `Node::insets` is the specified property, saved as an additive `NodeDto` field skipped
@@ -1226,9 +1229,9 @@ geometry (bounds for a path, a line and a boolean), with `width`/`height` defaul
 CSS's behaviour for `<img>`, and what stops CSS's default `flex-shrink: 1` squeezing a 40-unit
 rectangle to 30.643 — except between two absolute insets, which stretch a sized shape (§15 D874).
 A group without `display`, placed as an item, is atomic the same way, its
-intrinsic size its children's union bounds — ⚠️ through their **specified** geometry, so layout
-nested inside such a group is not reflected (`container::atomic_box`, a known simplification, §15
-D875). **Text keeps each sizing mode's meaning** (§15 D875, the maintainer's ruling): auto width
+intrinsic size its children's union bounds — ⚠️ through their **specified** geometry
+(`container::atomic_box`, §15 D875), except a child container with a layout, measured by that layout
+(§15 D899; it was measured as specified until then, so a nested layout was not reflected). **Text keeps each sizing mode's meaning** (§15 D875, the maintainer's ruling): auto width
 never wraps (`white-space: nowrap`), auto height wraps at the width it is given — its stored width
 the preferred one, never below its widest word — and fixed is fixed; `container::flexed_text` turns
 the size a container gives back into a kind. Min-content is `text::content_widths`, and taffy's
@@ -1283,20 +1286,28 @@ container with a layout that is not itself an in-flow item of one — as the par
 reaches it, a whole chain of nested flex containers in one pass; items take their slot and size
 (`item_placed`), a root its size (`root_sized`: a frame asked to hug grows its kind, a group takes the
 box). `update` collects `affected` from each dirty node's **`chain_root`**, so a change to one item
-re-lays its siblings — 🚨 the first hop counting for a child that has just *left* the flow. **Out of
+re-lays its siblings — 🚨 the first hop counting for a child that has just *left* the flow — and the
+climb passes through a group or boolean with no layout, since an edit inside that atomic box resizes
+it; `root` moves only on a hop into a layout, so a deep plain-group tree still answers the node (§15
+D899). So the chain root is the topmost pass and not always the only one: a laid group behind such a
+group is a root of its own, and the preview re-lays every root from a touched node up to its chain
+root, as `place_node` does (§15 D911). **Out of
 flow**: a hidden layer (`display: none`'s reading, the maintainer's ruling — §15 D881), a mask,
 and a child with any inset (`container::in_flow`). **An in-flow item turns about its box centre and
 its stored translation is ignored while in flow** — the maintainer's ruling (§15 D896), CSS's
 `transform-origin`; the preview re-lays a turn as the commit does, and where a rotated one is drawn is
-still asserted by no test. **A `fit-content` item is not stretched across its line** (§15 D893):
+asserted by `tests/flex.rs · an_in_flow_item_turns_about_its_box_centre_in_its_slot` (§15 D901). **A `fit-content` item is not stretched across its line** (§15 D893):
 taffy has no such size and is handed `auto`, so `FlexTree::push` sets a `fit-content`-across child of
 a stretching container to `flex-start` (`container::fit_content_across`), CSS's reading of a definite
-cross size. **A resize sticks**: `build::keep_flex_sizes`, beside `keep_insets` in
+cross size. **`Start` and `End` are CSS's `flex-start` and `flex-end`** in `justify-content`,
+`align-items`/`align-self` and `align-content` — the flow's own start, which `row-reverse` puts on the
+right and `wrap-reverse` at the bottom of a row — as the cards name and draw them (§15 D909); they were
+handed to taffy as its physical `START`/`END` until then. **A resize sticks**: `build::keep_flex_sizes`, beside `keep_insets` in
 `commit_inner`, writes `flex-grow`/`flex-shrink` 0 for a main-axis resize and `align-self: start` for
 a cross resize of a stretched item (the maintainer's ruling) — or `end` where the resize held the cross
 axis's end edge and moved its start, a row's item dragged by its top (§15 D905, the maintainer's
-ruling), judged on the parent's physical axes because the model's `start`/`end` are taffy's physical
-`START`/`END` — spelled once as `build::held`, which `sized_flex_item` calls too for a laid group's
+ruling), judged on the flow's cross axis — under `wrap-reverse` a row's cross start is its bottom, so
+there a drag by the top writes `start` and keeps the bottom (§15 D909) — spelled once as `build::held`, which `sized_flex_item` calls too for a laid group's
 resize, handed the transform the same edit writes. **The gesture preview applies the same holds**
 (`build::flex_holds`, §15 D904), so a resize is drawn as it will land rather than re-laid as stored
 until the release. The Item card names those flips, with an Undo
@@ -1319,9 +1330,13 @@ other in-flow sibling's used box in reading order — on its line by main-axis c
 `row-reverse`/`column-reverse`; on another line by cross centre — and out-of-flow siblings keep their
 place. Child order being flow order and paint order, the item's z-order moves with it. Under
 `wrap-reverse` the first line is the bottom one of a row, so a lower line comes first (§15 D883). One
-layer leaving its frame moves by its transform as before;
-several move by their transforms except an in-flow item, which stores no translation and keeps its
-slot, in the drag as on release (`canvas::stays_in_flow`) — reordering several at once is not built.
+layer leaving its frame moves by its transform as before.
+**Several in-flow items of one container, none leaving it, reorder as a block** (§15 D902, the
+session's): `build::flex_reorder_many` reads the centre of their union against the other siblings by
+the same reading order — `build::flow_index`, shared with `flex_reorder` — and moves them there in
+their child-list order, deriving its `Reorder`s by walking the target order. Any other several move by
+their transforms except an in-flow item, which stores no translation and keeps its slot, in the drag
+as on release (`canvas::stays_in_flow`).
 The preview represents the reorder as a per-parent child order and outlines the slot the item will
 land in (§6.2, §9.4).
 
@@ -1331,7 +1346,8 @@ basis, `align-self` and limits, or says why a layer is out of the flow and puts 
 taken away with `display: none` from the Container card leaves every child where it is drawn and a
 hugging frame the size it hugged to, the Position card's unpin rule. The Transform card's W and H
 offer the sizing modes that differ for the layer (§15 D879), and an in-flow item's X and Y are inert
-(§15 D882). A sizing field shows a number where the number is a real size of the layer — W and H —
+(§15 D882) — the multi card's too, while any member is in flow (§15 D903). A sizing field shows a
+number where the number is a real size of the layer — W and H —
 and the keyword in the digits where the property is unset — the basis and the limits (§15 D895).
 *(A fit-content frame in a stretching parent stretched until §15 D893, taffy being handed `auto`; it
 hugs now, above.)*
@@ -3515,8 +3531,9 @@ impl Resolved {
   differential and `inner_ink` is compared by nothing anywhere — so a new map joins a partial guard.
   D778 carries what would re-open the question. ⚠️ **Container layout's used boxes are that seventh
   map**, `used` (§5.3c, §15 D868) — reopened on a different ground from D778's, since a used box is
-  derivable nowhere else, and it came with the comparison it owed: the guard asserts `used_local` and
-  `used_kind` for every node, so it compares **five of the seven**, with `boolean`, `inner_ink` and
+  derivable nowhere else, and it came with the comparison it owed: the guard asserts `used_local`,
+  `used_kind` and — since §15 D898, over random layout inputs — `used_frame` for every node, so it
+  compares **five of the seven**, with `boolean`, `inner_ink` and
   `failed` still outside it.
 - **`used` is sparse and is read only through `used_local` and `used_kind`**, which answer the node's
   own `transform()` and `kind()` wherever there is no entry — so "no entry" means "as specified"
@@ -3542,9 +3559,10 @@ impl Resolved {
   check of that. A `cfg(test)` probe in `resolve.rs` answers first when it answers `Some`, and D868 has what
   it covers. What
   proves a used geometry reaches render and export is `ondin-export/tests/insets.rs`, a pinned
-  document written byte for byte as its baked twin. ⚠️ **The app side has only the Position card's**
-  (`inspector::inset_card_tests`, through the real commit path); nothing tests that hit-testing,
-  snapping or the rulers read used geometry.
+  document written byte for byte as its baked twin. The app side has the Position card's
+  (`inspector::inset_card_tests`, through the real commit path) and, since §15 D901, a click through
+  the real canvas, snapping's targets and the rulers' band, each asserting a flex item's or a pinned
+  layer's drawn box and nothing at its stored one (`canvas::flex_canvas_tests`, `rulers::tests`).
 - No `FontContext` is threaded through: `core::text` owns a thread-local parley engine and returns
   layouts carrying the exact `peniko::FontData` blob parley resolved, so the renderer draws glyphs
   straight from it.
@@ -3570,7 +3588,8 @@ impl Resolved {
   that changed**, so a translate still re-shapes nothing. 🚨 **The expansion starts from each dirty
   node's `container::chain_root`** (§15 D875), not the node: under flex an item moves when its
   neighbour grows, so a change re-lays its whole chain from the topmost container above it — and the
-  first hop counts for a child that has just left the flow, whose siblings close up behind it.
+  first hop counts for a child that has just left the flow, whose siblings close up behind it. The
+  chain runs through a group or boolean with no layout, an atomic box its contents resize (§15 D899).
 - ⚠️ **The affected set carries each node's depth, and the parents-first sort caches its key** (§15
   D594). `collect_subtree` records depth as it descends — a child's is its parent's plus one, free
   there — into an `FxHashMap<NodeId, usize>`, and the sort is `sort_by_cached_key` over a lookup.
@@ -3720,7 +3739,9 @@ impl Resolved {
   one that travels **outwards** and has a second map to agree about. **Since 2026-09-24 it also
   creates card frames, clipping or not, under groups one time in three** (§15 D876), a third route by
   which a box travels up the tree: the frame-ink arm deleted from `recompute_bounds` alone fails it at
-  seed 1. ⚠️ **What it cannot say is whether
+  seed 1. **Since 2026-09-27 a second run authors layout inputs** — random `SetDisplay`, `SetFlexItem`
+  and `SetInsets` — and the guard compares `used_frame` too (§15 D898); its first run found §15
+  D899's reflow defect at seed 7. ⚠️ **What it cannot say is whether
   the rule those routes agree about is right**: both passes narrowed by the mask's own box instead of
   the box it clips with, identically, and this property held throughout (§15 D460). A differential
   between two implementations of one rule guards a change to either and is silent about the rule.
@@ -4436,11 +4457,16 @@ pub trait ScenePainter {
   pinned child is then placed against the box its container has just been given. **Those values
   include the resize holds the commit will add**: `set_preview` appends `build::flex_holds` — the
   growth, `align-self` and size keyword `keep_flex_sizes` writes — without which a stretched item
-  dragged shorter was stretched back every frame (§15 D904). ⚠️ **Where `item_placed` answers
+  dragged shorter was stretched back every frame (§15 D904). ⚠️ **`flex_relayout` lays out every
+  layout root from a touched node up to its chain root**, not the chain root alone: since `chain_root`
+  climbs through a plain group (§15 D899), a laid group nested behind one is a root of its own that the
+  outer pass stops at, and it went un-laid in the preview, where `Resolved` lays every root its walk
+  reaches (§15 D911). ⚠️ **Where `item_placed` answers
   `local: None`, the item's transform is the preview's own override**, then the document's: `None`
   means the slot equals what the pass read, and `PreviewView::local` reads the override. Falling back
   to the document drew an end-aligned item at its committed transform after a top-handle resize
-  (§15 D905). ⚠️ **It skips only
+  (§15 D905), and `landing_of` outlined a dragged item held exactly on its slot at its stored one
+  (§15 D908). ⚠️ **It skips only
   a layer the transaction drags with `SetTransform`**: a resized item is re-laid like its siblings,
   since its container can move it as its size changes — **even when the resize carries a
   `SetTransform`**, as a left- or top-handle one does to hold the opposite edge: a layer the same
@@ -7943,7 +7969,7 @@ reorder is outlined**: a landing is recorded for every dragged in-flow item, so 
 `flex_reorder_of` with the drag's snapped delta, as the drop outline asks `move_destination`, and draws
 that item's landing alone. An item the move is taking out of its frame would otherwise be outlined in
 the slot it is leaving, a promise the release does not keep; a multi-selection gets no outline either
-(§15 D877's amendment). ⚠️ **Read, not tested**: no test reaches the canvas's drawing.
+(§15 D877's amendment) — a block of items that will reorder included (§15 D902). ⚠️ **Read, not tested**: no test reaches the canvas's drawing.
 
 **The artboard list the drop rule reads is memoized, and the key is `EditorSession::revision`** (§15
 D616). `OndinApp::artboards` was a full-document walk answering a question about four nodes, asked
@@ -8192,8 +8218,12 @@ H take `tools::resize_box_to`, as any box without an authored `size` does (above
 `build::sized_flex_item`. The menu is the single card's only; the multi card's W and H are plain.
 **And an in-flow item's X and Y are disabled** (§15 D882): its container places it, and
 `keep_flex_sizes` drops a typed translation at the commit door, so a live field would take a number
-and commit nothing. The reason is on hover beside the disabled row. ⚠️ **The multi card's X and Y are
-not disabled**, and in-flow members of a set silently keep their slots.
+and commit nothing. The reason is on hover beside the disabled row. **The multi card's X and Y are
+disabled while any outermost member is in flow** (§15 D903), the hover counting them: live, they moved
+the free members and left the in-flow ones in their slots, silently. The hover says *"drag them on
+the canvas to reorder"* only where that drag reorders — every member an in-flow item of one container,
+`inspector::drags_as_a_block` (§15 D902, D912) — and otherwise to select a container's items on their
+own. One function, `inspector::laid_out_xy`, answers the gate and the hover both (§15 D912).
 
 **Directly under W and H, while the Scale tool is held, is a Scale field — one percentage in W's slot,
 with `0.5x` and `2x` filling the rest of the row** (§15 D311, D313). It is the Scale tool's verb
@@ -11042,8 +11072,11 @@ parent gets no `SetTransform` and keeps its slot, the translation being one the 
 predicate answers both halves, `canvas::stays_in_flow`: `move_tx`'s multi-selection arm stores
 nothing for such an item, and `canvas::move_preview_tx` — the preview's transaction, lifted out of
 `update_drag` — drops its `SetTransform`, so it stays in its slot during the drag as on release
-rather than following the pointer and snapping back (§15 D877's second amendment). Reordering several
-at once is not built. An Alt-drag is unchanged.
+rather than following the pointer and snapping back (§15 D877's second amendment). **Several items
+of one container, none leaving it, reorder as a block** (§15 D902): `canvas::flex_block_reorder_of`
+answers `build::flex_reorder_many`'s `Reorder`s, which `move_tx` commits alone — one undo step — and
+`move_preview_tx` appends to every item's translation, so the block is under the pointer and its
+siblings open the gap; `stays_in_flow` is then a mixed selection's rule. An Alt-drag is unchanged.
 
 **`Ctrl`+`D` remembers.** A duplicate lands in place; move it and duplicate again and the new copy
 repeats that movement, as does every press after it — `CloneChain` holds the last clone, where it

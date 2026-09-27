@@ -1494,7 +1494,11 @@ are chrome.
    the property is unset (D895); an in-flow item turning about its box centre, the preview now
    agreeing (D896); no header badges on the Container and Item cards (D897). Not seen in the GUI.
    D892–D897 are spent from a block reserved to D903; the closing negative grep found D898–D903 at
-   zero code sites, and the session released them — no block is reserved.
+   zero code sites, and the session released them — no block is reserved. ⚠️ **True when written, and
+   made false by the work that followed**: D898–D903 were then spent — cited from `crates/` by seven
+   commits, the randomized layout guard through the multi card's X and Y — with no entry written for
+   any of them, and were reconstructed from their citation sites on 2026-09-27 (§15 D898–D903; D898
+   carries the account).
 
    **Still to do, in this order:**
    1. ~~**Write D875**~~ — done in session 34, and CLAUDE.md's D-number paragraph brought up to date
@@ -1509,24 +1513,12 @@ are chrome.
    derived instances are meant to share layout's derive-from-specified path (§15 D868), and nothing
    more is decided about them.
 
-**Owed somewhere in 1–4 and not placed in the order by anyone yet**: random operations that author
-layout inputs, which exist now — `SetInsets` (§15 D874), `SetDisplay` and `SetFlexItem` (§15
-D875) — while `incremental_update_equals_rebuild_over_random_ops` compares the used map and can only
-ever see identity until it generates one, and `assert_resolved_matches_rebuild` does not compare
-`Resolved::used_frame`; `tests/container.rs` and `tests/flex.rs` check `update` against `rebuild`
-after every commit in their fixed scenarios, which is not the randomized guard (§15 D868); an
-**app-side routing test** — `ondin-export/tests/insets.rs` proves render and export draw a used
-geometry and the Position card's `inset_card_tests` drive the card through the real commit path, but
-nothing proves hit-testing in the app, snapping or the rulers read it (§15 D874), and the app's flex
-tests stop at the transaction — `move_tx`'s reorder, `move_preview_tx`'s, and a laid group's resize
-(§15 D875's amendment, D877) — with nothing driving `update_drag`, what the canvas draws from its
-preview, or a flex container's hit-testing; a **preview** test of a pinned child of a group with a
-layout — core and the app are checked since §15 D887, and `RenderOverrides::relayout`'s placement of
-one is not; a measurement of what the **Scale tool on a laid group** does to a pinned child —
-`tools::scaled_flex` re-sizes the group and moves its children in one edit, while `keep_insets` pins
-against the group's committed box (§15 D887); and a test of **where a rotated in-flow item is
-drawn** — the preview and the commit agree since §15 D896, both through `container::item_placed`,
-and nothing asserts the box-centre turn either of them makes. Open and unmeasured.
+**Owed somewhere in 1–4 and not placed in the order by anyone yet**: what the canvas **draws** from a
+flex preview — the landing outline among it, whose one-item filter is read and not tested (§15 D877's
+amendment) and draws nothing for a block (§15 D902) — and a laid group's resize driven through the
+canvas rather than asserted at the transaction (§15 D875's amendment, D901); and a test of a **mixed selection's move**, in-flow items with
+free layers, whose arm in `move_tx` and `move_preview_tx` no test has reached since several items of
+one container became a block (§15 D902). Open and unmeasured.
 
 **Open, and each is a decision rather than work** (§15 D867, D868, D875 carry the detail): how a
 grid preview reflows, flex's being `RenderOverrides::flex_relayout` and insets' `relayout`;

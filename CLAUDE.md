@@ -6,16 +6,16 @@ documents, and is untracked.
 
 | File | Holds |
 | --- | --- |
-| `docs/architecture.md` | The design and the invariants. **Source of truth.** ~12,000 lines. |
-| `docs/decisions.md` | **§15** — every deviation from that design, **D1–D830** with no gaps, each with a verdict. ~47,700 lines. |
-| `docs/roadmap.md` | Open work, decided non-goals, parked decisions, post-v1. **Every `Now` section is clear as of 2026-09-23** — *Files, library and storage* reopened and closed that day (the cover cache's lifecycle, §15 D863–D864); what is left is *Later* and §0. **`Next · Container layout`** (flexbox, CSS grid and insets — `architecture.md` §5.3c, §15 D867–D883): steps 1–3 built and committed — step 3's cards (D878–D883), the maintainer's first-look fixes (D884–D891) and six rulings on what flex had left (D892–D897) all landed in session 36. **Flex owes tests only** (the section's *owed* paragraph); **step 4, grid, is next**. |
+| `docs/architecture.md` | The design and the invariants. **Source of truth.** ~13,000 lines. |
+| `docs/decisions.md` | **§15** — every deviation from that design, **D1–D912** with no gaps, each with a verdict. ~53,500 lines. |
+| `docs/roadmap.md` | Open work, decided non-goals, parked decisions, post-v1. **Every `Now` section is clear as of 2026-09-23** — *Files, library and storage* reopened and closed that day (the cover cache's lifecycle, §15 D863–D864); what is left is *Later* and §0. **`Next · Container layout`** (flexbox, CSS grid and insets — `architecture.md` §5.3c, §15 D867–D883): steps 1–3 built and committed — step 3's cards (D878–D883), the maintainer's first-look fixes (D884–D891) and six rulings on what flex had left (D892–D897) all landed in session 36. Session 37 (D904–D912): a resize's holds in the preview, a top-edge resize aligning to the end, `Start`/`End` made `flex-start`/`flex-end` as the cards always drew (D909), and a layout nested in a plain group laid by both the preview and `keep_insets`. **Flex owes tests only** (the section's *owed* paragraph); **step 4, grid, is next**. |
 | `docs/shortcuts.md` | The whole keymap — bound, unbound and agreed. |
 | `docs/context-menus.md` | The context-menu spec and its own deviation ledger. |
 | `docs/vm.md` | The language behind Command Mode. Nothing here is built. |
 | `todo.md` | **The maintainer's private scratchpad. Untracked.** Not a project record — never write a decision, a gap or a trap there and leave it there. |
 
 **Don't page these in by hand — ask `design-oracle`.** `architecture.md` and
-`decisions.md` are ~59,000 lines together, and reading them is what runs a session out
+`decisions.md` are ~66,500 lines together, and reading them is what runs a session out
 of room. Page a section in only when you need to *edit* it.
 
 ## The record
@@ -67,13 +67,22 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 897 index rows, 897 body headings, next free
-D898** (measured at the close of session 36) — but trust the procedure over any number written
+anywhere cited either. **The live figures: 912 index rows, 912 body headings, next free
+D913** (measured at the close of session 37) — but trust the procedure over any number written
 down here, including that one. **No block is reserved**: the next session reserves its own.
-⚠️ **Session 36 then reserved a second block, D892–D903, and spent six** — D892–D897, the
-maintainer's six rulings on what flex had left before grid. The closing negative grep over
-**D898–D903 found zero code sites** and the block was released. Census: 797 distinct numbers
-cited from `crates/`, none unresolved.
+⚠️ **Session 37 reserved D904–D909, then D908–D915, and spent nine** — D904–D907 (the resize
+preview, the top-edge ruling, the keyword field's unit, the unit menu), then D908–D912 (the
+drop outline's fallback, flex-start, and a layout nested in a plain group, twice, and a tooltip).
+The closing negative grep over **D913–D915 found zero code sites** and they are released.
+Census: 812 distinct numbers cited from `crates/`, none unresolved — nine arrivals (D904–D912)
+and no departures against `c27d9bc`.
+🚨 **Session 36's released block did not stay released.** It reserved D892–D903, spent six, and
+the closing grep found **D898–D903 at zero code sites** — and the *next seven commits* then
+spent all six in comments with no entry written (`da5b652` … `c27d9bc`). Session 37 found them
+as the census's unresolved half and reconstructed D898–D903 from the commit messages and the
+citation sites; each says so in its first line. **A release is a statement about the moment of
+the grep; a number typed afterwards is owed from that moment** — the *"a number is owed from
+the moment it is typed"* warning further down, arriving across a session boundary.
 ⚠️ **Session 36 reserved D884–D891 and spent all eight** — D884–D889, the maintainer's first look
 at the layout cards (sentence-case labels, the fields that committed nothing, cell tooltips,
 Position for a laid group's children, the square pin diagram, the out-of-flow wording), then **D890
@@ -153,6 +162,9 @@ nothing. Put the number on the doc of whatever a reader meets the question at.
 grep -rhoE 'D[0-9]{1,3}\b' crates/ --include=*.rs | sort -u
 ```
 
+812 distinct numbers at the close of session 37 — **nine arrivals (D904–D912) and no departures**
+against `c27d9bc` (803 there, which already included D898–D903 cited with no entries — the
+unresolved half this census exists to see). Before that:
 772 distinct numbers at the close of session 34 (its commits) — **six arrivals (D869, D870,
 D873, D875, D876, D877) and no departures** against `9da640d` (766 there: session 32's 761 plus
 session 33's five). Before that: 761 at the close of session 32 — six arrivals (D861–D866) and no

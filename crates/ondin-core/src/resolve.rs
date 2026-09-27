@@ -163,10 +163,10 @@ impl crate::container::LayoutView for DocView<'_> {
     fn kind(&self, id: NodeId) -> Option<NodeKind> {
         self.0.get(id).map(|n| n.kind().clone())
     }
-    fn display(&self, id: NodeId) -> Option<crate::container::Display> {
-        self.0.get(id).and_then(|n| n.display().copied())
+    fn display(&self, id: NodeId) -> Option<&crate::container::Display> {
+        self.0.get(id).and_then(|n| n.display())
     }
-    fn item(&self, id: NodeId) -> crate::container::FlexItem {
+    fn item(&self, id: NodeId) -> crate::container::LayoutItem {
         self.0.get(id).map(|n| *n.item()).unwrap_or_default()
     }
     fn insets(&self, id: NodeId) -> crate::container::Insets {

@@ -40,8 +40,8 @@ use crate::theme::{self, color, icon};
 use crate::ui::{self, Prefix, Scrub, Suffix};
 use eframe::egui;
 use ondin_core::container::{
-    self, AlignContent, AlignItems, Dimension, Display, Flex, FlexDirection, FlexItem, FlexWrap,
-    JustifyContent,
+    self, AlignContent, AlignItems, Dimension, Display, Flex, FlexDirection, FlexWrap,
+    JustifyContent, LayoutItem,
 };
 use ondin_core::kurbo::Size;
 use ondin_core::{NodeId, NodeKind, Operation, Transaction};
@@ -1005,10 +1005,17 @@ impl OndinApp {
             .iter()
             .map(|id| self.session.display_node(*id).and_then(|n| n.display()))
             .collect();
-        let mode = shared(&displays, |d| usize::from(d.is_some()));
+        let mode = shared(&displays, |d| match d {
+            None => 0,
+            Some(Display::Flex(_)) => 1,
+            Some(Display::Grid(_)) => 2,
+        });
         let flexes: Vec<Flex> = displays
             .iter()
-            .filter_map(|d| d.map(|Display::Flex(f)| f))
+            .filter_map(|d| match d {
+                Some(Display::Flex(f)) => Some(*f),
+                _ => None,
+            })
             .collect();
         self.panel(ui, "Container", None, |app, ui| {
             let full = ui.available_width();
@@ -1089,7 +1096,7 @@ impl OndinApp {
                             }
                         }
                         if item != *node.item() {
-                            ops.push(Operation::SetFlexItem { id: *id, item });
+                            ops.push(Operation::SetLayoutItem { id: *id, item });
                         }
                     }
                     ops.push(Operation::SetDisplay {
@@ -1111,8 +1118,7 @@ impl OndinApp {
             subjects
                 .iter()
                 .filter_map(|id| {
-                    let Some(Display::Flex(was)) = self.session.doc.get(*id)?.display().copied()
-                    else {
+                    let Some(&Display::Flex(was)) = self.session.doc.get(*id)?.display() else {
                         return None;
                     };
                     let mut now = was;
@@ -1574,7 +1580,7 @@ impl OndinApp {
 
     /// Every flowing subject's item properties with `f` applied, as the ops that
     /// change one — from the committed document, [`Self::flex_tx`]'s rule.
-    fn item_tx(&self, subjects: &[NodeId], f: impl Fn(&mut FlexItem)) -> Transaction {
+    fn item_tx(&self, subjects: &[NodeId], f: impl Fn(&mut LayoutItem)) -> Transaction {
         Transaction(
             subjects
                 .iter()
@@ -1582,7 +1588,7 @@ impl OndinApp {
                     let was = *self.session.doc.get(*id)?.item();
                     let mut now = was;
                     f(&mut now);
-                    (now != was).then_some(Operation::SetFlexItem { id: *id, item: now })
+                    (now != was).then_some(Operation::SetLayoutItem { id: *id, item: now })
                 })
                 .collect(),
         )
@@ -1592,7 +1598,7 @@ impl OndinApp {
     /// four limits behind a disclosure — with the receipt of a resize that changed
     /// any of them (§15 D880).
     fn item_rows(&mut self, ui: &mut egui::Ui, subjects: &[NodeId]) {
-        let items: Vec<FlexItem> = subjects
+        let items: Vec<LayoutItem> = subjects
             .iter()
             .filter_map(|id| self.session.display_node(*id).map(|n| n.item()))
             .collect();
@@ -1604,11 +1610,13 @@ impl OndinApp {
         let parent = self.session.doc.get(subjects[0]).and_then(|n| n.parent());
         let parent_flex = parent
             .and_then(|p| self.session.display_node(p))
-            .and_then(|n| n.display())
-            .map(|Display::Flex(f)| f)
+            .and_then(|n| match n.display() {
+                Some(Display::Flex(f)) => Some(f),
+                _ => None,
+            })
             .unwrap_or_default();
         // What the last resize flipped, for the subjects in hand.
-        let receipt: Vec<(FlexItem, FlexItem)> = self
+        let receipt: Vec<(LayoutItem, LayoutItem)> = self
             .session
             .flex_receipt()
             .map(|r| {
@@ -1641,7 +1649,7 @@ impl OndinApp {
                 ("Flex grow", true, flipped_grow),
                 ("Flex shrink", false, flipped_shrink),
             ] {
-                let get = |i: &FlexItem| if is_grow { i.grow } else { i.shrink };
+                let get = |i: &LayoutItem| if is_grow { i.grow } else { i.shrink };
                 let shown = shared(&items, get);
                 let mut v = shown.unwrap_or_else(|| get(&first));
                 let start = v;
@@ -1858,9 +1866,9 @@ impl OndinApp {
             NodeKind::Artboard { size } => *size,
             _ => self.session.preview_frame(id)?,
         };
-        let pad = match node.display() {
-            Some(Display::Flex(f)) if horizontal => f.padding[1] + f.padding[3],
-            Some(Display::Flex(f)) => f.padding[0] + f.padding[2],
+        let pad = match node.display().map(|d| d.padding()) {
+            Some(p) if horizontal => p[1] + p[3],
+            Some(p) => p[0] + p[2],
             None => 0.0,
         };
         let extent = if horizontal { size.width } else { size.height } - pad;
@@ -1876,11 +1884,11 @@ impl OndinApp {
         &mut self,
         ui: &mut egui::Ui,
         subjects: &[NodeId],
-        items: &[FlexItem],
+        items: &[LayoutItem],
         label: &'static str,
         width: f32,
-        get: impl Fn(&FlexItem) -> Dimension,
-        put: impl Fn(&mut FlexItem, Dimension) + Copy,
+        get: impl Fn(&LayoutItem) -> Dimension,
+        put: impl Fn(&mut LayoutItem, Dimension) + Copy,
         drawn: Option<f64>,
         extent: Option<f64>,
         modes: &[SizeMode],
@@ -1984,7 +1992,7 @@ impl OndinApp {
             item.height = to;
         }
         if item != *node.item() {
-            ops.push(Operation::SetFlexItem { id, item });
+            ops.push(Operation::SetLayoutItem { id, item });
         }
         Transaction(ops)
     }
@@ -1995,8 +2003,8 @@ impl OndinApp {
 type Limit = (
     &'static str,
     bool,
-    fn(&FlexItem) -> Dimension,
-    fn(&mut FlexItem, Dimension),
+    fn(&LayoutItem) -> Dimension,
+    fn(&mut LayoutItem, Dimension),
 );
 
 /// `first`'s padding on `side`, or zero — the fallback a mixed field starts from.
@@ -2092,11 +2100,11 @@ mod tests {
         app.session.resolved.world_bounds(id).expect("measured")
     }
 
-    fn set_item(app: &mut OndinApp, id: NodeId, f: impl FnOnce(&mut FlexItem)) {
+    fn set_item(app: &mut OndinApp, id: NodeId, f: impl FnOnce(&mut LayoutItem)) {
         let mut item = *app.session.doc.get(id).unwrap().item();
         f(&mut item);
         app.session
-            .commit(Transaction(vec![Operation::SetFlexItem { id, item }]));
+            .commit(Transaction(vec![Operation::SetLayoutItem { id, item }]));
     }
 
     /// **The sizing menu offers only the modes that mean something different for
@@ -2483,7 +2491,7 @@ mod tests {
         p.app.session.selection.set(vec![frame_id]);
         let flex = |app: &OndinApp| match app.session.doc.get(frame_id).unwrap().display() {
             Some(Display::Flex(f)) => *f,
-            None => panic!("the fixture lost its layout"),
+            _ => panic!("the fixture lost its flex layout"),
         };
 
         assert_eq!(flex(&p.app).column_gap, 10.0, "the fixture");

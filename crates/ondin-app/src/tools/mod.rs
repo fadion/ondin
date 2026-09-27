@@ -1712,7 +1712,7 @@ fn scale_geometry(
                         _ => None,
                     });
                     if let Some(item) = ondin_core::build::sized_flex_item(doc, res, id, size, to) {
-                        ops.push(Operation::SetFlexItem { id, item });
+                        ops.push(Operation::SetLayoutItem { id, item });
                     }
                 }
                 if scaling == Scaling::Photographic {
@@ -1844,7 +1844,7 @@ fn scale_scalars(
     // right for all of it and was wrong for exactly this one item.
     if scaling == Scaling::Photographic {
         ops.extend(scaled_guides(doc, id, csx, csy));
-        ops.extend(scaled_flex(doc, id, csx, csy));
+        ops.extend(scaled_layout(doc, id, csx, csy));
     }
 
     let Some(s) = scaling.scalar(csx, csy) else {
@@ -1999,24 +1999,65 @@ fn scaled_guides(doc: &Document, id: NodeId, csx: f64, csy: f64) -> Vec<Operatio
     ops
 }
 
-/// A flex container's **padding and gaps** under the Scale tool, each by its own
-/// axis's factor (§15 D875).
+/// A container's **padding and gaps** under the Scale tool, each by its own axis's
+/// factor (§15 D875) — and a grid's **px tracks** with them, columns by `csx` and
+/// rows by `csy` (§15 D914).
 ///
 /// [`scaled_guides`]' argument, one property over: a resize leaves absolute
-/// lengths alone and the Scale tool takes them, and a padding or a gap is a length
-/// *along an axis* — left and right padding and the gap between columns by `csx`,
-/// top and bottom and the gap between rows by `csy` — so the mean would leave a
-/// card's insides out of proportion under any non-uniform scale.
-fn scaled_flex(doc: &Document, id: NodeId, csx: f64, csy: f64) -> Option<Operation> {
-    let ondin_core::container::Display::Flex(flex) = *doc.get(id)?.display()?;
-    let mut scaled = flex;
-    scaled.column_gap *= csx;
-    scaled.row_gap *= csy;
-    let [top, right, bottom, left] = flex.padding;
-    scaled.padding = [top * csy, right * csx, bottom * csy, left * csx];
-    (scaled != flex).then_some(Operation::SetDisplay {
+/// lengths alone and the Scale tool takes them, and a padding, a gap or a px track
+/// is a length *along an axis* — left and right padding, the gap between columns
+/// and a column's px by `csx`, top and bottom, the gap between rows and a row's px
+/// by `csy` — so the mean would leave a card's insides out of proportion under any
+/// non-uniform scale. A `%` or `fr` track is a share, not a length, and scales by
+/// itself.
+fn scaled_layout(doc: &Document, id: NodeId, csx: f64, csy: f64) -> Option<Operation> {
+    use ondin_core::container::{Display, Track, TrackBreadth, TrackSize};
+    let was = doc.get(id)?.display()?;
+    let pad =
+        |[top, right, bottom, left]: [f64; 4]| [top * csy, right * csx, bottom * csy, left * csx];
+    let breadth = |b: TrackBreadth, k: f64| match b {
+        TrackBreadth::Px(v) => TrackBreadth::Px(v * k),
+        other => other,
+    };
+    let size = |s: TrackSize, k: f64| match s {
+        TrackSize::Breadth(b) => TrackSize::Breadth(breadth(b, k)),
+        TrackSize::MinMax { min, max } => TrackSize::MinMax {
+            min: breadth(min, k),
+            max: breadth(max, k),
+        },
+    };
+    let tracks = |ts: &[Track], k: f64| -> Vec<Track> {
+        ts.iter()
+            .map(|t| match t {
+                Track::Size(s) => Track::Size(size(*s, k)),
+                Track::Repeat { repeat, tracks } => Track::Repeat {
+                    repeat: *repeat,
+                    tracks: tracks.iter().map(|s| size(*s, k)).collect(),
+                },
+            })
+            .collect()
+    };
+    let scaled = match was {
+        Display::Flex(f) => {
+            let mut s = *f;
+            s.column_gap *= csx;
+            s.row_gap *= csy;
+            s.padding = pad(f.padding);
+            Display::Flex(s)
+        }
+        Display::Grid(g) => {
+            let mut s = g.clone();
+            s.column_gap *= csx;
+            s.row_gap *= csy;
+            s.padding = pad(g.padding);
+            s.columns = tracks(&g.columns, csx);
+            s.rows = tracks(&g.rows, csy);
+            Display::Grid(s)
+        }
+    };
+    (&scaled != was).then_some(Operation::SetDisplay {
         id,
-        display: Some(ondin_core::container::Display::Flex(scaled)),
+        display: Some(scaled),
     })
 }
 
@@ -9202,7 +9243,8 @@ mod tests {
     /// **Flip run**, `resize_layer`'s `laid_group` routing deleted (the group
     /// going through `resize_group`, as before): fails on *"the box"* under the
     /// resize at `(Auto, Auto)` — the group still hugging, its rects scaled
-    /// instead. The predicted site. With `scaled_flex` deleted instead, the Scale
+    /// instead. The predicted site. With `scaled_layout` (then `scaled_flex`)
+    /// deleted instead, the Scale
     /// half fails on *"the padding"* at `[5.0; 4]`.
     #[test]
     fn a_group_with_a_layout_is_resized_by_its_box() {

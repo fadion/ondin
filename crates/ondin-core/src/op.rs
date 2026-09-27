@@ -256,11 +256,11 @@ pub enum Operation {
         id: NodeId,
         display: Option<crate::container::Display>,
     },
-    /// The layer's properties as a flex item (`crate::container::FlexItem`) — the
-    /// whole set.
-    SetFlexItem {
+    /// The layer's properties as a layout item, flex or grid
+    /// (`crate::container::LayoutItem`) — the whole set.
+    SetLayoutItem {
         id: NodeId,
-        item: crate::container::FlexItem,
+        item: crate::container::LayoutItem,
     },
     /// The ground behind and around the frames — the one operation with no node
     /// to name, because the ground belongs to the document rather than to
@@ -386,7 +386,7 @@ impl Operation {
             | Operation::SetLayoutGrids { id, .. }
             | Operation::SetInsets { id, .. }
             | Operation::SetDisplay { id, .. }
-            | Operation::SetFlexItem { id, .. } => Some(*id),
+            | Operation::SetLayoutItem { id, .. } => Some(*id),
             Operation::CreateNode { .. }
             | Operation::DeleteNode { .. }
             | Operation::InsertSubtree { .. }
@@ -528,7 +528,7 @@ impl Operation {
             // A layout moves every child of the container it is set on, and an
             // item's properties move it and its siblings.
             | Operation::SetDisplay { .. }
-            | Operation::SetFlexItem { .. }
+            | Operation::SetLayoutItem { .. }
             | Operation::SetText { .. }
             | Operation::SetTextStyle { .. }
             | Operation::SetTextSpans { .. }
@@ -765,7 +765,7 @@ impl Operation {
             Operation::SetDisplay { id, display } => {
                 node(id).is_some_and(|n| n.display() == display.as_ref())
             }
-            Operation::SetFlexItem { id, item } => node(id).is_some_and(|n| n.item() == item),
+            Operation::SetLayoutItem { id, item } => node(id).is_some_and(|n| n.item() == item),
 
             Operation::SetCanvasBackground { background } => doc.canvas_background() == *background,
             Operation::SetGuidePosition { id, position } => {
@@ -1138,6 +1138,13 @@ pub enum OpError {
     /// no repairable file at stake yet: the value has not been written.
     #[error("a number is not finite")]
     NonFinite,
+    /// A layout value CSS itself refuses — a negative track size, `minmax()`
+    /// with an `fr` minimum, `repeat(0, …)`, a grid line 0 or `span 0` (§15
+    /// D914). Refused at the operation so no control can write one; a file that
+    /// carries one anyway is read around it, not refused
+    /// (`crate::container::Grid::is_valid`).
+    #[error("a layout value CSS does not accept")]
+    BadLayout,
 }
 
 #[cfg(test)]

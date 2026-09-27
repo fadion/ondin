@@ -3712,7 +3712,7 @@ pub fn keep_flex_sizes(doc: &Document, res: &Resolved, tx: Transaction) -> Trans
     out
 }
 
-/// The `SetFlexItem`s that make `tx`'s resizes hold — [`keep_flex_sizes`]' rules
+/// The `SetLayoutItem`s that make `tx`'s resizes hold — [`keep_flex_sizes`]' rules
 /// for growth, `align-self` and size keywords, and nothing else — in id order.
 ///
 /// **Split out so the gesture preview can apply them** (§15 D904). The preview
@@ -3731,11 +3731,11 @@ pub fn flex_holds(doc: &Document, res: &Resolved, tx: &Transaction) -> Vec<Opera
     let explicit: FxHashSet<NodeId> =
         tx.0.iter()
             .filter_map(|op| match op {
-                Operation::SetFlexItem { id, .. } => Some(*id),
+                Operation::SetLayoutItem { id, .. } => Some(*id),
                 _ => None,
             })
             .collect();
-    let mut items: FxHashMap<NodeId, crate::container::FlexItem> = FxHashMap::default();
+    let mut items: FxHashMap<NodeId, crate::container::LayoutItem> = FxHashMap::default();
     for op in &tx.0 {
         let Operation::SetGeometry { id, geometry } = op else {
             continue;
@@ -3766,18 +3766,18 @@ pub fn flex_holds(doc: &Document, res: &Resolved, tx: &Transaction) -> Vec<Opera
             // left- or top-handle resize shifts the origin to hold the far edge.
             let was = res.used_local(doc, *id).unwrap_or(Affine::IDENTITY);
             let to = written_transform(tx, *id).unwrap_or(was);
-            let from_start = resized_from_cross_start(&flex, (was, now), (to, then));
-            item = held(&flex, item, now.size(), then.size(), from_start);
+            let from_start = resized_from_cross_start(flex, (was, now), (to, then));
+            item = held(flex, item, now.size(), then.size(), from_start);
         }
         items.insert(*id, item);
     }
-    let mut ids: Vec<(NodeId, crate::container::FlexItem)> = items
+    let mut ids: Vec<(NodeId, crate::container::LayoutItem)> = items
         .into_iter()
         .filter(|(id, item)| doc.get(*id).is_some_and(|n| n.item() != item))
         .collect();
     ids.sort_by_key(|(id, _)| *id);
     ids.into_iter()
-        .map(|(id, item)| Operation::SetFlexItem { id, item })
+        .map(|(id, item)| Operation::SetLayoutItem { id, item })
         .collect()
 }
 
@@ -3828,7 +3828,8 @@ fn resized_from_cross_start(
 
 /// `tx` with every `SetTransform` on an **in-flow flex item** keeping the item's
 /// stored translation — its new rotation, skew and flip taken, its position not
-/// (§15 D877's amendment).
+/// (§15 D877's amendment). A grid item too, since [`is_flex_item`] answers for
+/// any layout (§15 D914).
 ///
 /// **The tools write where they want a layer drawn, and for an item in a flow
 /// that is not where it is drawn.** A resize from a left or top handle holds the
@@ -3897,10 +3898,10 @@ fn kept_flow_translations(doc: &Document, tx: Transaction) -> Transaction {
 /// whose stored size is its CSS size, where `auto` is that stored size and so the
 /// size the resize has just written.
 fn sized_in_px(
-    mut item: crate::container::FlexItem,
+    mut item: crate::container::LayoutItem,
     from: kurbo::Size,
     to: kurbo::Size,
-) -> crate::container::FlexItem {
+) -> crate::container::LayoutItem {
     use crate::container::Dimension;
     if (from.width - to.width).abs() > 1e-9 {
         item.width = Dimension::Auto;
@@ -3919,11 +3920,11 @@ fn sized_in_px(
 /// start otherwise.
 fn held(
     flex: &crate::container::Flex,
-    mut item: crate::container::FlexItem,
+    mut item: crate::container::LayoutItem,
     from: kurbo::Size,
     to: kurbo::Size,
     from_start: bool,
-) -> crate::container::FlexItem {
+) -> crate::container::LayoutItem {
     use crate::container::AlignItems;
     let dw = (from.width - to.width).abs() > 1e-9;
     let dh = (from.height - to.height).abs() > 1e-9;
@@ -3954,11 +3955,11 @@ fn held(
 ///
 /// A shape's or a frame's stored size is its CSS width and height, so a resize
 /// writes its geometry and [`keep_flex_sizes`] holds it. A group with a layout
-/// has only its box, which is `width`/`height` on its [`crate::container::FlexItem`]
+/// has only its box, which is `width`/`height` on its [`crate::container::LayoutItem`]
 /// — `auto`, hugging its contents, until something sets them. So a resize writes
 /// them in px — each only if the resize changed it, so an axis left alone keeps
 /// hugging (§15 D879) — and **its growth is stopped here rather than by
-/// `keep_flex_sizes`**, which leaves a transaction's own `SetFlexItem` alone.
+/// `keep_flex_sizes`**, which leaves a transaction's own `SetLayoutItem` alone.
 ///
 /// `to` is the local transform the same edit writes for the group, if it writes
 /// one — a left- or top-handle resize shifts the origin to hold the far edge — and
@@ -3971,7 +3972,7 @@ pub fn sized_flex_item(
     id: NodeId,
     size: kurbo::Size,
     to: Option<Affine>,
-) -> Option<crate::container::FlexItem> {
+) -> Option<crate::container::LayoutItem> {
     use crate::container::{self, Dimension, Display, LayoutView};
     let node = doc.get(id)?;
     if !matches!(node.kind(), NodeKind::Group) || node.display().is_none() {
@@ -3997,14 +3998,14 @@ pub fn sized_flex_item(
     {
         let was = res.used_local(doc, id).unwrap_or(Affine::IDENTITY);
         let from_start = resized_from_cross_start(
-            &flex,
+            flex,
             (was, kurbo::Rect::from_origin_size(kurbo::Point::ZERO, now)),
             (
                 to.unwrap_or(was),
                 kurbo::Rect::from_origin_size(kurbo::Point::ZERO, size),
             ),
         );
-        item = held(&flex, item, now, size, from_start);
+        item = held(flex, item, now, size, from_start);
     }
     (item != *node.item()).then_some(item)
 }
@@ -4123,7 +4124,10 @@ fn flow_index(
 ) -> Option<usize> {
     use crate::container::{self, Display, FlexDirection};
     let view = crate::resolve::DocView(doc);
-    let Display::Flex(flex) = *doc.get(parent)?.display()?;
+    // A grid's drop writes lines rather than reordering (§15 D913); not this.
+    let Display::Flex(flex) = doc.get(parent)?.display()? else {
+        return None;
+    };
     let to_parent = res.world_transform(parent)?.inverse();
     let at = to_parent * at;
     let reversed = matches!(
@@ -4174,6 +4178,11 @@ fn flow_index(
 /// it is not pinned, hidden or a mask. The question [`flex_reorder`] asks first,
 /// public for the app's drag, which has to know a reorder from a move before it
 /// knows whether the reorder changes anything.
+///
+/// ⚠️ **True of a grid item too** (§15 D914): the question is "is its parent
+/// laying it out", which a grid answers as a flex row does. The name is flex's
+/// because flex came first; a grid's drop writes lines rather than reordering
+/// (§15 D913), and [`flex_reorder`] answers nothing there.
 pub fn is_flex_item(doc: &Document, id: NodeId) -> bool {
     let view = crate::resolve::DocView(doc);
     crate::container::parent_lays_out(&view, id) && crate::container::in_flow(&view, id)

@@ -397,12 +397,12 @@ impl<'a> DisplayNode<'a> {
     /// the value it is dragging (§15 D878).
     pub fn display(&self) -> Option<ondin_core::container::Display> {
         self.over
-            .and_then(|o| o.display)
-            .unwrap_or_else(|| self.node.display().copied())
+            .and_then(|o| o.display.clone())
+            .unwrap_or_else(|| self.node.display().cloned())
     }
-    /// The layer's flex-item properties (§15 D875), a live Item-card scrub's
+    /// The layer's layout-item properties (§15 D875, D914), a live Item-card scrub's
     /// included — [`Self::insets`]' rule again.
-    pub fn item(&self) -> ondin_core::container::FlexItem {
+    pub fn item(&self) -> ondin_core::container::LayoutItem {
         self.over
             .and_then(|o| o.item)
             .unwrap_or_else(|| *self.node.item())
@@ -552,8 +552,8 @@ pub struct FlexReceipt {
     /// Each item the commit changed, with its properties before and after.
     pub held: Vec<(
         NodeId,
-        ondin_core::container::FlexItem,
-        ondin_core::container::FlexItem,
+        ondin_core::container::LayoutItem,
+        ondin_core::container::LayoutItem,
     )>,
     revision: u64,
     depth: usize,
@@ -1108,7 +1108,7 @@ impl EditorSession {
         let asked: Vec<NodeId> =
             tx.0.iter()
                 .filter_map(|op| match op {
-                    Operation::SetFlexItem { id, .. } => Some(*id),
+                    Operation::SetLayoutItem { id, .. } => Some(*id),
                     _ => None,
                 })
                 .collect();
@@ -1244,12 +1244,12 @@ impl EditorSession {
         asked: &[NodeId],
     ) -> Vec<(
         NodeId,
-        ondin_core::container::FlexItem,
-        ondin_core::container::FlexItem,
+        ondin_core::container::LayoutItem,
+        ondin_core::container::LayoutItem,
     )> {
         tx.0.iter()
             .filter_map(|op| match op {
-                Operation::SetFlexItem { id, item } if !asked.contains(id) => {
+                Operation::SetLayoutItem { id, item } if !asked.contains(id) => {
                     let was = *self.doc.get(*id)?.item();
                     (was.grow != item.grow
                         || was.shrink != item.shrink

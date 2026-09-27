@@ -4716,7 +4716,7 @@ impl OndinApp {
                     } else {
                         item.height = d;
                     }
-                    Transaction(vec![Operation::SetFlexItem { id, item }])
+                    Transaction(vec![Operation::SetLayoutItem { id, item }])
                 };
                 let mut picks: Vec<(bool, SizeMode)> = Vec::new();
                 ui.horizontal(|ui| {

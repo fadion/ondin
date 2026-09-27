@@ -58,8 +58,9 @@ pub struct NodeOverride {
     /// Replacement layout (`ondin_core::container::Display`) — `Some(None)` takes
     /// one away. Read only by the flex relayout, like `insets`.
     pub display: Option<Option<ondin_core::container::Display>>,
-    /// Replacement flex-item properties, read only by the flex relayout.
-    pub item: Option<ondin_core::container::FlexItem>,
+    /// Replacement layout-item properties, read only by the flex relayout (which
+    /// lays a grid as well, §15 D914).
+    pub item: Option<ondin_core::container::LayoutItem>,
     /// The box a group with a layout is given under this preview (§15 D869) —
     /// `Resolved::used_frame`'s twin, written by the flex relayout.
     pub frame: Option<ondin_core::kurbo::Size>,
@@ -1109,11 +1110,11 @@ impl RenderOverrides {
             // layout or an item's properties into placements for the whole chain.
             Operation::SetDisplay { id, display } => {
                 if self.ghost(*id).is_none() {
-                    self.entry(*id).display = Some(*display);
+                    self.entry(*id).display = Some(display.clone());
                     self.mark_moved(doc, *id);
                 }
             }
-            Operation::SetFlexItem { id, item } => {
+            Operation::SetLayoutItem { id, item } => {
                 if self.ghost(*id).is_none() {
                     self.entry(*id).item = Some(*item);
                     self.mark_moved(doc, *id);
@@ -1557,13 +1558,13 @@ impl ondin_core::container::LayoutView for PreviewView<'_> {
     fn kind(&self, id: NodeId) -> Option<NodeKind> {
         self.ov.current_kind(self.doc, id)
     }
-    fn display(&self, id: NodeId) -> Option<ondin_core::container::Display> {
-        match self.ov.get(id).and_then(|o| o.display) {
-            Some(d) => d,
-            None => self.doc.get(id).and_then(|n| n.display().copied()),
+    fn display(&self, id: NodeId) -> Option<&ondin_core::container::Display> {
+        match self.ov.get(id).and_then(|o| o.display.as_ref()) {
+            Some(d) => d.as_ref(),
+            None => self.doc.get(id).and_then(|n| n.display()),
         }
     }
-    fn item(&self, id: NodeId) -> ondin_core::container::FlexItem {
+    fn item(&self, id: NodeId) -> ondin_core::container::LayoutItem {
         self.ov
             .get(id)
             .and_then(|o| o.item)

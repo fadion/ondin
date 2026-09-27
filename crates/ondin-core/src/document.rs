@@ -472,7 +472,7 @@ impl Document {
             Operation::SetLayoutGrids { id, grids } => self.op_set_grids(*id, grids, dirty),
             Operation::SetInsets { id, insets } => self.op_set_insets(*id, insets, dirty),
             Operation::SetDisplay { id, display } => self.op_set_display(*id, display, dirty),
-            Operation::SetFlexItem { id, item } => self.op_set_flex_item(*id, item, dirty),
+            Operation::SetLayoutItem { id, item } => self.op_set_layout_item(*id, item, dirty),
             Operation::SetCanvasBackground { background } => {
                 Ok(self.op_set_canvas_background(*background))
             }
@@ -1355,8 +1355,9 @@ impl Document {
 
     /// Replace a layer's layout (`crate::container::Display`, §15 D867).
     ///
-    /// Refused when a number in it is not finite, `op_set_insets`' rule. No kind
-    /// gate: stored on any layer and read on a frame or a group. The node is
+    /// Refused when a number in it is not finite, `op_set_insets`' rule, and when
+    /// a grid carries a track CSS refuses (`OpError::BadLayout`, §15 D914). No
+    /// kind gate: stored on any layer and read on a frame or a group. The node is
     /// dirtied; its subtree follows through `Resolved::update`'s expansion, which
     /// is every child the layout moves.
     fn op_set_display(
@@ -1368,25 +1369,32 @@ impl Document {
         if display.as_ref().is_some_and(|d| !d.is_finite()) {
             return Err(OpError::NonFinite);
         }
+        if display.as_ref().is_some_and(|d| !d.is_valid()) {
+            return Err(OpError::BadLayout);
+        }
         let node = self.nodes.get_mut(&id).ok_or(OpError::NoSuchNode(id))?;
-        let old = std::mem::replace(&mut node.display, *display);
+        let old = std::mem::replace(&mut node.display, display.clone());
         dirty.0.insert(id);
         Ok(Operation::SetDisplay { id, display: old })
     }
 
-    /// Replace a layer's flex-item properties (`crate::container::FlexItem`).
+    /// Replace a layer's layout-item properties (`crate::container::LayoutItem`).
     ///
-    /// Refused when a number is not finite. The node is dirtied, and **its parent
-    /// with it**: an item's properties move its siblings too, and `Resolved`'s
-    /// expansion descends from the parent to reach them.
-    fn op_set_flex_item(
+    /// Refused when a number is not finite, and when a grid line is one CSS
+    /// refuses — line 0, `span 0` (`OpError::BadLayout`, §15 D914). The node is
+    /// dirtied, and **its parent with it**: an item's properties move its siblings
+    /// too, and `Resolved`'s expansion descends from the parent to reach them.
+    fn op_set_layout_item(
         &mut self,
         id: NodeId,
-        item: &crate::container::FlexItem,
+        item: &crate::container::LayoutItem,
         dirty: &mut DirtySet,
     ) -> Result<Operation, OpError> {
         if !item.is_finite() {
             return Err(OpError::NonFinite);
+        }
+        if !item.is_valid() {
+            return Err(OpError::BadLayout);
         }
         let node = self.nodes.get_mut(&id).ok_or(OpError::NoSuchNode(id))?;
         let old = std::mem::replace(&mut node.item, *item);
@@ -1395,7 +1403,7 @@ impl Document {
         if let Some(p) = parent {
             dirty.0.insert(p);
         }
-        Ok(Operation::SetFlexItem { id, item: old })
+        Ok(Operation::SetLayoutItem { id, item: old })
     }
 
     /// The ground is not a node, so this dirties nothing: `Resolved` holds
@@ -1921,7 +1929,7 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
             insets: n.insets,
             // A copy lays out its children the way the original does, and sits in
             // a flex row the way it did.
-            display: n.display,
+            display: n.display.clone(),
             item: n.item,
         });
     }

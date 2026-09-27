@@ -250,7 +250,7 @@ fn incremental_update_equals_rebuild_over_random_ops() {
 
 /// **The same guard with container layout in it** (§15 D898): every op above,
 /// plus random `SetDisplay` (a flex layout with random direction, wrap,
-/// alignments, gaps and padding, or none), `SetFlexItem` (random grow, shrink,
+/// alignments, gaps and padding, or none), `SetLayoutItem` (random grow, shrink,
 /// basis, sizes and `align-self`) and `SetInsets` (random pins in px or %, and
 /// `margin: auto`) — the layout inputs steps 2 and 3 made real, which the run
 /// above never authors and so could only ever compare the used map at identity
@@ -271,11 +271,27 @@ fn incremental_update_equals_rebuild_over_random_ops() {
 #[test]
 fn incremental_update_equals_rebuild_over_random_layout_ops() {
     for seed in 0..40u64 {
-        run_random_session(seed, true);
+        run_random_session_with(seed, true, false);
+    }
+}
+
+/// **The layout guard with grid in it** (§15 D914): a container's random layout
+/// is a grid half the time — random tracks of every breadth, `minmax()`,
+/// `repeat()`, both flows, every alignment — and an item's random properties
+/// carry random lines and spans. A third run, the second's reason: the two above
+/// draw exactly what they always have.
+#[test]
+fn incremental_update_equals_rebuild_over_random_grid_ops() {
+    for seed in 0..40u64 {
+        run_random_session_with(seed, true, true);
     }
 }
 
 fn run_random_session(seed: u64, layout: bool) {
+    run_random_session_with(seed, layout, false);
+}
+
+fn run_random_session_with(seed: u64, layout: bool, grid: bool) {
     let mut rng = Lcg::new(seed.wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(1));
     let mut ids = IdSource::new(0xF00D);
     let root = ids.mint();
@@ -307,7 +323,7 @@ fn run_random_session(seed: u64, layout: bool) {
 
     for _ in 0..60 {
         // Pick an operation. Bias toward creation early (movable may be empty).
-        // The layout run draws from three more: `SetDisplay`, `SetFlexItem`,
+        // The layout run draws from three more: `SetDisplay`, `SetLayoutItem`,
         // `SetInsets` (§15 D898).
         let choice = rng.next_range(if layout { 13 } else { 10 });
         let tx = match choice {
@@ -482,19 +498,27 @@ fn run_random_session(seed: u64, layout: bool) {
                 };
                 Transaction(vec![Operation::SetEffects { id, effects }])
             }),
-            // give a random container a flex layout, or take it away
+            // give a random container a flex layout (or, in the grid run, a grid
+            // one half the time), or take it away
             10 => pick(&mut rng, &container_targets(&doc, &containers, &movable))
                 .copied()
                 .map(|id| {
-                    let display = (rng.next_range(4) != 0).then(|| rand_flex(&mut rng));
+                    let display = (rng.next_range(4) != 0).then(|| {
+                        if grid && rng.next_range(2) == 0 {
+                            rand_grid(&mut rng)
+                        } else {
+                            rand_flex(&mut rng)
+                        }
+                    });
                     Transaction(vec![Operation::SetDisplay { id, display }])
                 }),
             // set a random node's item properties
             11 => pick(&mut rng, &movable).copied().map(|id| {
-                Transaction(vec![Operation::SetFlexItem {
-                    id,
-                    item: rand_item(&mut rng),
-                }])
+                let mut item = rand_item(&mut rng);
+                if grid {
+                    rand_grid_item(&mut rng, &mut item);
+                }
+                Transaction(vec![Operation::SetLayoutItem { id, item }])
             }),
             // pin a random node, or unpin it
             12 => pick(&mut rng, &movable).copied().map(|id| {
@@ -662,6 +686,105 @@ fn rand_flex(rng: &mut Lcg) -> ondin_core::container::Display {
     })
 }
 
+/// A random grid layout for the grid run (§15 D914) — up to four entries a
+/// side, each a breadth of any kind, a `minmax()` or a `repeat()`, and every
+/// alignment and both flows. Every value one CSS accepts, so none is refused.
+fn rand_grid(rng: &mut Lcg) -> ondin_core::container::Display {
+    use ondin_core::container::*;
+    fn breadth(rng: &mut Lcg, fr: bool) -> TrackBreadth {
+        match rng.next_range(if fr { 6 } else { 5 }) {
+            0 => TrackBreadth::Px(10.0 + rng.next_range(120) as f64),
+            1 => TrackBreadth::Percent(5.0 + rng.next_range(40) as f64),
+            2 => TrackBreadth::Auto,
+            3 => TrackBreadth::MinContent,
+            4 => TrackBreadth::MaxContent,
+            _ => TrackBreadth::Fr(1.0 + rng.next_range(3) as f64),
+        }
+    }
+    fn size(rng: &mut Lcg) -> TrackSize {
+        if rng.next_range(4) == 0 {
+            TrackSize::MinMax {
+                min: breadth(rng, false),
+                max: breadth(rng, true),
+            }
+        } else {
+            TrackSize::Breadth(breadth(rng, true))
+        }
+    }
+    fn tracks(rng: &mut Lcg) -> Vec<Track> {
+        (0..rng.next_range(5))
+            .map(|_| {
+                if rng.next_range(5) == 0 {
+                    Track::Repeat {
+                        repeat: 1 + rng.next_range(3) as u16,
+                        tracks: (0..1 + rng.next_range(2)).map(|_| size(rng)).collect(),
+                    }
+                } else {
+                    Track::Size(size(rng))
+                }
+            })
+            .collect()
+    }
+    let content = [
+        AlignContent::Stretch,
+        AlignContent::Start,
+        AlignContent::End,
+        AlignContent::Center,
+        AlignContent::SpaceBetween,
+        AlignContent::SpaceAround,
+        AlignContent::SpaceEvenly,
+    ];
+    let align = [
+        AlignItems::Stretch,
+        AlignItems::Start,
+        AlignItems::End,
+        AlignItems::Center,
+        AlignItems::Baseline,
+    ];
+    let columns = tracks(rng);
+    let rows = tracks(rng);
+    let mut n = |k: usize| rng.next_range(k as u64) as usize;
+    Display::Grid(Grid {
+        columns,
+        rows,
+        auto_flow: [GridAutoFlow::Row, GridAutoFlow::Column][n(2)],
+        justify_content: content[n(7)],
+        justify_items: align[n(5)],
+        align_items: align[n(5)],
+        align_content: content[n(7)],
+        column_gap: n(20) as f64,
+        row_gap: n(20) as f64,
+        padding: [n(30) as f64, n(30) as f64, n(30) as f64, n(30) as f64],
+    })
+}
+
+/// Random grid lines and `justify-self` over `item` — each end `auto` one time
+/// in two, else a line (negative now and then) or a span.
+fn rand_grid_item(rng: &mut Lcg, item: &mut ondin_core::container::LayoutItem) {
+    use ondin_core::container::{AlignItems, GridLines, GridPlacement};
+    let end = |rng: &mut Lcg| match rng.next_range(6) {
+        0..=2 => GridPlacement::Auto,
+        3 => GridPlacement::Line(1 + rng.next_range(4) as i16),
+        4 => GridPlacement::Line(-1 - rng.next_range(3) as i16),
+        _ => GridPlacement::Span(1 + rng.next_range(3) as u16),
+    };
+    item.grid_column = GridLines {
+        start: end(rng),
+        end: end(rng),
+    };
+    item.grid_row = GridLines {
+        start: end(rng),
+        end: end(rng),
+    };
+    item.justify_self = [
+        None,
+        Some(AlignItems::Stretch),
+        Some(AlignItems::Start),
+        Some(AlignItems::End),
+        Some(AlignItems::Center),
+    ][rng.next_range(5) as usize];
+}
+
 /// A random dimension: each of CSS's four ways of saying a size.
 fn rand_dim(rng: &mut Lcg) -> ondin_core::container::Dimension {
     use ondin_core::container::Dimension;
@@ -675,8 +798,8 @@ fn rand_dim(rng: &mut Lcg) -> ondin_core::container::Dimension {
 
 /// Random item properties — grow, shrink, basis, sizes and `align-self`; the
 /// limits left at `auto` one time in two so they do not always clamp.
-fn rand_item(rng: &mut Lcg) -> ondin_core::container::FlexItem {
-    use ondin_core::container::{AlignItems, Dimension, FlexItem};
+fn rand_item(rng: &mut Lcg) -> ondin_core::container::LayoutItem {
+    use ondin_core::container::{AlignItems, Dimension, LayoutItem};
     let align = [
         None,
         Some(AlignItems::Stretch),
@@ -691,7 +814,7 @@ fn rand_item(rng: &mut Lcg) -> ondin_core::container::FlexItem {
             rand_dim(rng)
         }
     };
-    FlexItem {
+    LayoutItem {
         grow: rng.next_range(3) as f64,
         shrink: rng.next_range(3) as f64,
         basis: rand_dim(rng),
@@ -702,6 +825,7 @@ fn rand_item(rng: &mut Lcg) -> ondin_core::container::FlexItem {
         min_height: limit(rng),
         max_height: limit(rng),
         align_self: align[rng.next_range(5) as usize],
+        ..LayoutItem::default()
     }
 }
 

@@ -2959,7 +2959,7 @@ fn layout_and_item_edits_preview_as_their_commits() {
     grow.grow = 1.0;
     assert_preview_matches_commit(
         &doc,
-        &Transaction(vec![Operation::SetFlexItem {
+        &Transaction(vec![Operation::SetLayoutItem {
             id: first,
             item: grow,
         }]),

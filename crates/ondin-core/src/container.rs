@@ -1,7 +1,8 @@
-//! Container layout (§5.3c) — so far, build steps 2 and 3: **absolute insets**,
-//! which is what this project calls constraints (§15 D871), and **flex** (§15
-//! D875), the engine for which is further down (`LayoutView`, `FlexTree`,
-//! `lay_out`). The insets half is described first because it came first.
+//! Container layout (§5.3c) — build steps 2 to 4: **absolute insets**, which is
+//! what this project calls constraints (§15 D871), **flex** (§15 D875) and
+//! **grid** (§15 D913, D914), the engine for both of which is further down
+//! (`LayoutView`, `FlexTree`, `lay_out` — one taffy tree, each container laid by
+//! its own `display`). The insets half is described first because it came first.
 //!
 //! **CSS, under CSS's names.** A child of a frame may carry `top`, `right`,
 //! `bottom` and `left` insets, each in px or % of the frame, and `margin: auto`
@@ -541,19 +542,251 @@ impl Flex {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Grid (build step 4, §15 D913, D914)
+// ---------------------------------------------------------------------------
+
+/// CSS `grid-auto-flow` — which axis auto-placement fills first. `dense` is not
+/// offered (§5.3c's property set).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GridAutoFlow {
+    #[default]
+    Row,
+    Column,
+}
+
+/// One CSS `<track-breadth>`, or `auto`: what a single track, or either end of a
+/// `minmax()`, sizes by.
+///
+/// **`Fr` is a max only**: CSS refuses `minmax(1fr, …)`, and so does
+/// [`Grid::is_valid`]. Percent is stored as typed, [`LengthPct`]'s reason.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum TrackBreadth {
+    Px(f64),
+    Percent(f64),
+    Fr(f64),
+    Auto,
+    MinContent,
+    MaxContent,
+}
+
+impl TrackBreadth {
+    fn is_finite(self) -> bool {
+        match self {
+            TrackBreadth::Px(v) | TrackBreadth::Percent(v) | TrackBreadth::Fr(v) => v.is_finite(),
+            TrackBreadth::Auto | TrackBreadth::MinContent | TrackBreadth::MaxContent => true,
+        }
+    }
+
+    /// CSS's own refusal: no length, percentage or `fr` below zero.
+    fn is_valid(self) -> bool {
+        match self {
+            TrackBreadth::Px(v) | TrackBreadth::Percent(v) | TrackBreadth::Fr(v) => v >= 0.0,
+            TrackBreadth::Auto | TrackBreadth::MinContent | TrackBreadth::MaxContent => true,
+        }
+    }
+}
+
+/// One track's size: a breadth, or `minmax(min, max)`.
+///
+/// **Untagged in the file**, so a track list reads close to its CSS:
+/// `{"Px":200.0}`, `"Auto"`, `{"min":{"Px":100.0},"max":{"Fr":2.0}}`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum TrackSize {
+    Breadth(TrackBreadth),
+    MinMax {
+        min: TrackBreadth,
+        max: TrackBreadth,
+    },
+}
+
+impl TrackSize {
+    fn is_finite(self) -> bool {
+        match self {
+            TrackSize::Breadth(b) => b.is_finite(),
+            TrackSize::MinMax { min, max } => min.is_finite() && max.is_finite(),
+        }
+    }
+
+    fn is_valid(self) -> bool {
+        match self {
+            TrackSize::Breadth(b) => b.is_valid(),
+            TrackSize::MinMax { min, max } => {
+                min.is_valid() && max.is_valid() && !matches!(min, TrackBreadth::Fr(_))
+            }
+        }
+    }
+}
+
+/// One entry of `grid-template-columns` or `-rows`: a track, or `repeat(n, …)`.
+///
+/// **A repeat holds sizes, not entries**, so it cannot nest — CSS's own grammar,
+/// made unrepresentable rather than refused. `auto-fill`/`auto-fit` are deferred
+/// (§5.3c), so the count is a number. Untagged in the file, [`TrackSize`]'s
+/// reason: `{"repeat":3,"tracks":["Auto"]}`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Track {
+    Size(TrackSize),
+    Repeat { repeat: u16, tracks: Vec<TrackSize> },
+}
+
+impl Track {
+    fn is_finite(&self) -> bool {
+        match self {
+            Track::Size(s) => s.is_finite(),
+            Track::Repeat { tracks, .. } => tracks.iter().all(|s| s.is_finite()),
+        }
+    }
+
+    /// A repeat must repeat something at least once — `repeat(0, …)` and
+    /// `repeat(2, )` are both refused by CSS.
+    fn is_valid(&self) -> bool {
+        match self {
+            Track::Size(s) => s.is_valid(),
+            Track::Repeat { repeat, tracks } => {
+                *repeat > 0 && !tracks.is_empty() && tracks.iter().all(|s| s.is_valid())
+            }
+        }
+    }
+}
+
+/// A grid container's properties — CSS's, under CSS's names (§15 D867, D914).
+///
+/// **Content alignment is [`AlignContent`] on both axes**, `justify-content`
+/// included, because a grid container's `normal` content distribution behaves as
+/// `stretch` on both axes (CSS Box Alignment; taffy's own default, too): an `auto`
+/// track grows into the free space unless told otherwise, and
+/// [`JustifyContent`] — flex's set — has no `stretch` to say that with. `Start`
+/// and `End` are the grid's own start and end; a grid has no reversal for
+/// `flex-start` to follow, so the two readings are one here (§15 D909's question
+/// does not arise).
+///
+/// Padding and gap are world units, [`Flex`]'s reason. An empty track list is
+/// CSS's `none`: every track is implicit and `auto`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Grid {
+    /// `grid-template-columns`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub columns: Vec<Track>,
+    /// `grid-template-rows`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rows: Vec<Track>,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub auto_flow: GridAutoFlow,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub justify_content: AlignContent,
+    /// `justify-items` — each item across its area, horizontally. **Not in
+    /// §5.3c's first cut, and added with grid** (§15 D914): in a grid
+    /// `align-items` is the vertical axis alone, so without it the only way to
+    /// stop every item stretching sideways is `justify-self` on each one.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub justify_items: AlignItems,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub align_items: AlignItems,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub align_content: AlignContent,
+    /// The gap between rows (CSS `row-gap`).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub row_gap: f64,
+    /// The gap between columns (CSS `column-gap`).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub column_gap: f64,
+    /// Top, right, bottom, left — CSS's order.
+    #[serde(default, skip_serializing_if = "is_zero4")]
+    pub padding: [f64; 4],
+}
+
+impl Grid {
+    fn is_finite(&self) -> bool {
+        self.row_gap.is_finite()
+            && self.column_gap.is_finite()
+            && self.padding.iter().all(|p| p.is_finite())
+            && self.columns.iter().chain(&self.rows).all(Track::is_finite)
+    }
+
+    /// Every track one CSS accepts. The operation that writes a grid refuses
+    /// anything else (`OpError::BadLayout`); a file that carries one anyway opens,
+    /// and is laid as [`style_of`] reads it — read around at layout, **kept as
+    /// stored** and saved back as written. §15 D492's asymmetry (refused at the
+    /// operation, not at the door) without its repair: D492's loader drops a bad
+    /// export spec, and nothing here is rewritten at load.
+    pub fn is_valid(&self) -> bool {
+        self.columns.iter().chain(&self.rows).all(Track::is_valid)
+    }
+}
+
+/// One end of an item's `grid-column` or `grid-row`: `auto`, a line number, or
+/// `span n`. Line numbers count from 1, and from −1 at the far end, as CSS's do.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GridPlacement {
+    #[default]
+    Auto,
+    Line(i16),
+    Span(u16),
+}
+
+impl GridPlacement {
+    /// CSS refuses line 0 and `span 0`.
+    fn is_valid(self) -> bool {
+        match self {
+            GridPlacement::Auto => true,
+            GridPlacement::Line(n) => n != 0,
+            GridPlacement::Span(n) => n != 0,
+        }
+    }
+}
+
+/// An item's `grid-column` or `grid-row`: its start and end, CSS's `start / end`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GridLines {
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub start: GridPlacement,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub end: GridPlacement,
+}
+
+impl GridLines {
+    fn is_valid(self) -> bool {
+        self.start.is_valid() && self.end.is_valid()
+    }
+}
+
 /// How a container lays out its children — CSS `display`. **`None` on the node
 /// is not CSS's `display: none`** (which hides): it is a container with no layout
 /// of its own, whose children are placed by their transforms and insets, which is
 /// what every frame was before this and what a group has always been.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+///
+/// **Not `Copy` since grid** (§15 D914): a track list is a `Vec`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Display {
     Flex(Flex),
+    Grid(Grid),
 }
 
 impl Display {
     pub fn is_finite(&self) -> bool {
         match self {
             Display::Flex(f) => f.is_finite(),
+            Display::Grid(g) => g.is_finite(),
+        }
+    }
+
+    /// Every value one CSS accepts — [`Grid::is_valid`]; a flex container has no
+    /// value CSS refuses that is not also non-finite.
+    pub fn is_valid(&self) -> bool {
+        match self {
+            Display::Flex(_) => true,
+            Display::Grid(g) => g.is_valid(),
+        }
+    }
+
+    /// Top, right, bottom, left — either layout's.
+    pub fn padding(&self) -> [f64; 4] {
+        match self {
+            Display::Flex(f) => f.padding,
+            Display::Grid(g) => g.padding,
         }
     }
 }
@@ -578,8 +811,14 @@ impl Dimension {
     }
 }
 
-/// A layer's properties **as a flex item** — CSS's `flex-*`, `align-self` and the
-/// size properties (§15 D867).
+/// A layer's properties **as an item of a layout** — CSS's size properties,
+/// `flex-*`, `grid-column`/`grid-row` and the self-alignments (§15 D867, D914).
+///
+/// **One record for both layouts, as CSS keeps them on the element**: which fields
+/// are read depends on the parent's `display` — `grow`, `shrink` and `basis` under
+/// flex, `grid_column`, `grid_row` and `justify_self` under grid, the sizes and
+/// `align_self` under both — so a layer whose container turns from flex to grid
+/// keeps its grid placement, and back. It was `FlexItem` until grid (§15 D914).
 ///
 /// **A shape's or a frame's own stored size is its CSS width and height** — the
 /// replaced-element reading §15 D872 decided — so `width`/`height` stay `Auto`
@@ -591,7 +830,7 @@ impl Dimension {
 /// below its own size, because a replaced element's automatic minimum is its
 /// intrinsic size — the §15 D872 spike's 40-stays-40.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct FlexItem {
+pub struct LayoutItem {
     #[serde(default, skip_serializing_if = "is_default")]
     pub width: Dimension,
     #[serde(default, skip_serializing_if = "is_default")]
@@ -612,11 +851,19 @@ pub struct FlexItem {
     pub basis: Dimension,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub align_self: Option<AlignItems>,
+    /// `justify-self`, read under grid; `None` is `auto` — the container's
+    /// `justify-items` ([`Grid::justify_items`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub justify_self: Option<AlignItems>,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub grid_column: GridLines,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub grid_row: GridLines,
 }
 
-impl Default for FlexItem {
+impl Default for LayoutItem {
     fn default() -> Self {
-        FlexItem {
+        LayoutItem {
             width: Dimension::Auto,
             height: Dimension::Auto,
             min_width: Dimension::Auto,
@@ -627,14 +874,17 @@ impl Default for FlexItem {
             shrink: 1.0,
             basis: Dimension::Auto,
             align_self: None,
+            justify_self: None,
+            grid_column: GridLines::default(),
+            grid_row: GridLines::default(),
         }
     }
 }
 
-impl FlexItem {
+impl LayoutItem {
     /// All at CSS's defaults — what the save format skips.
     pub fn is_default(&self) -> bool {
-        *self == FlexItem::default()
+        *self == LayoutItem::default()
     }
 
     /// Every number finite; the operation that writes this refuses anything else.
@@ -652,6 +902,13 @@ impl FlexItem {
         .all(Dimension::is_finite)
             && self.grow.is_finite()
             && self.shrink.is_finite()
+    }
+
+    /// Every grid line one CSS accepts: no line 0 and no `span 0`. The operation
+    /// that writes this refuses anything else; the engine reads one from a file as
+    /// `auto` ([`style_of`]).
+    pub fn is_valid(&self) -> bool {
+        self.grid_column.is_valid() && self.grid_row.is_valid()
     }
 }
 
@@ -682,7 +939,7 @@ pub fn quantize(v: f32) -> f64 {
     (f64::from(v) * 64.0).round() / 64.0
 }
 
-/// The questions the flex engine asks of a tree — answered from the committed
+/// The questions the layout engine asks of a tree — answered from the committed
 /// document by `Resolved`, and from a preview's overrides by `RenderOverrides`,
 /// so the two run one layout rather than two (`boolean::Operands`' shape).
 ///
@@ -692,15 +949,18 @@ pub trait LayoutView {
     fn parent(&self, id: crate::NodeId) -> Option<crate::NodeId>;
     fn children(&self, id: crate::NodeId) -> Vec<crate::NodeId>;
     fn kind(&self, id: crate::NodeId) -> Option<NodeKind>;
-    fn display(&self, id: crate::NodeId) -> Option<Display>;
-    fn item(&self, id: crate::NodeId) -> FlexItem;
+    /// Borrowed, since grid (§15 D914): a grid's track list is a `Vec`, and most
+    /// callers only ask whether there is a layout at all.
+    fn display(&self, id: crate::NodeId) -> Option<&Display>;
+    fn item(&self, id: crate::NodeId) -> LayoutItem;
     fn insets(&self, id: crate::NodeId) -> Insets;
     fn visible(&self, id: crate::NodeId) -> bool;
     fn mask(&self, id: crate::NodeId) -> bool;
     fn local(&self, id: crate::NodeId) -> Affine;
 }
 
-/// Whether `kind` can be a flex container: a frame, or a group (§15 D869).
+/// Whether `kind` can be a layout container, flex or grid: a frame, or a group
+/// (§15 D869).
 pub fn is_container(kind: &NodeKind) -> bool {
     matches!(kind, NodeKind::Artboard { .. } | NodeKind::Group)
 }
@@ -724,7 +984,7 @@ pub fn parent_lays_out(view: &dyn LayoutView, id: crate::NodeId) -> bool {
 }
 
 /// Whether `id` roots a layout pass: a container with a layout that is **not**
-/// itself laid out by one — the top of a chain of nested flex containers, which
+/// itself laid out by one — the top of a chain of nested layout containers, which
 /// [`lay_out`] lays out whole.
 pub fn is_layout_root(view: &dyn LayoutView, id: crate::NodeId) -> bool {
     view.display(id).is_some()
@@ -881,14 +1141,15 @@ pub struct Laid {
     pub size: Size,
 }
 
-/// Lay out the flex container `root` and every flex container nested in its flow,
-/// returning a [`Laid`] for `root` (its size — a container that hugs grows to fit)
-/// and for every in-flow node beneath it, each in its parent's space.
+/// Lay out the container `root` — flex or grid — and every container nested in
+/// its flow, returning a [`Laid`] for `root` (its size — a container that hugs
+/// grows to fit) and for every in-flow node beneath it, each in its parent's space.
 ///
 /// Leaves are measured, not read (§15 D872): a shape's intrinsic size is its
 /// geometry, as an image's is, so CSS's automatic minimum keeps it from being
 /// squeezed below it; a text node by its sizing mode, each mode meaning what it
-/// means outside a container (§15 D875); a group or a boolean without a layout
+/// means outside a container (§15 D875), in a grid cell as in a flex line (§15
+/// D913's first ruling); a group or a boolean without a layout
 /// as one atomic box, its children's union. Results come back on the 1/64 px grid
 /// ([`quantize`]).
 pub fn lay_out(view: &dyn LayoutView, root: crate::NodeId) -> Vec<Laid> {
@@ -917,7 +1178,7 @@ pub fn lay_out(view: &dyn LayoutView, root: crate::NodeId) -> Vec<Laid> {
 
 /// What a node in a [`FlexTree`] is, for the engine's purposes.
 enum Leaf {
-    /// A flex container, laid out by taffy.
+    /// A container with a layout, flex or grid, laid out by taffy.
     Container,
     /// A box with a size of its own — a shape, a frame with no layout, a group or
     /// a boolean taken whole.
@@ -965,12 +1226,15 @@ impl<'v> FlexTree<'v> {
     /// index.
     fn push(&mut self, id: crate::NodeId) -> Option<usize> {
         let kind = self.view.kind(id)?;
-        let display = self.view.display(id).filter(|_| is_container(&kind));
+        // Through a copy of the `&'v` so the borrow is the view's, not `self`'s,
+        // and outlives the recursion below.
+        let view = self.view;
+        let display = view.display(id).filter(|_| is_container(&kind));
         let item = self.view.item(id);
         let index = self.ids.len();
         self.ids.push(id);
         self.children.push(Vec::new());
-        self.styles.push(style_of(&kind, display.as_ref(), &item));
+        self.styles.push(style_of(&kind, display, &item));
         self.caches.push(taffy::Cache::new());
         self.layouts.push(taffy::Layout::with_order(index as u32));
         let leaf = match (&display, &kind) {
@@ -984,13 +1248,15 @@ impl<'v> FlexTree<'v> {
             }
         };
         self.leaves.push(leaf);
-        if let Some(Display::Flex(flex)) = display {
+        if let Some(display) = display {
             for child in self.view.children(id) {
                 if in_flow(self.view, child)
                     && let Some(c) = self.push(child)
                 {
                     self.children[index].push(taffy::NodeId::from(c));
-                    if fit_content_across(&self.view.item(child), &flex) {
+                    if let Display::Flex(flex) = display
+                        && fit_content_across(&self.view.item(child), flex)
+                    {
                         self.styles[c].align_self = Some(taffy::AlignItems::FLEX_START);
                     }
                 }
@@ -1123,7 +1389,7 @@ pub fn atomic_box(view: &dyn LayoutView, id: crate::NodeId, kind: &NodeKind) -> 
 /// **A frame's stored size is its CSS size** unless it is asked to hug
 /// (`FitContent`); a group with a layout hugs unless a size is typed; a leaf's
 /// size is `auto` and comes from its measure.
-fn style_of(kind: &NodeKind, display: Option<&Display>, item: &FlexItem) -> taffy::Style {
+fn style_of(kind: &NodeKind, display: Option<&Display>, item: &LayoutItem) -> taffy::Style {
     use taffy::prelude::{auto, length, percent};
     let dim = |d: Dimension, stored: Option<f64>| -> taffy::Dimension {
         match d {
@@ -1166,6 +1432,9 @@ fn style_of(kind: &NodeKind, display: Option<&Display>, item: &FlexItem) -> taff
         flex_shrink: item.shrink as f32,
         flex_basis: dim(item.basis, None),
         align_self: item.align_self.map(align_items),
+        justify_self: item.justify_self.map(align_items),
+        grid_column: grid_lines(item.grid_column),
+        grid_row: grid_lines(item.grid_row),
         ..Default::default()
     };
     match display {
@@ -1192,20 +1461,36 @@ fn style_of(kind: &NodeKind, display: Option<&Display>, item: &FlexItem) -> taff
                 JustifyContent::SpaceEvenly => taffy::JustifyContent::SPACE_EVENLY,
             });
             style.align_items = Some(align_items(f.align_items));
-            style.align_content = Some(match f.align_content {
-                AlignContent::Stretch => taffy::AlignContent::STRETCH,
-                AlignContent::Start => taffy::AlignContent::FLEX_START,
-                AlignContent::End => taffy::AlignContent::FLEX_END,
-                AlignContent::Center => taffy::AlignContent::CENTER,
-                AlignContent::SpaceBetween => taffy::AlignContent::SPACE_BETWEEN,
-                AlignContent::SpaceAround => taffy::AlignContent::SPACE_AROUND,
-                AlignContent::SpaceEvenly => taffy::AlignContent::SPACE_EVENLY,
-            });
+            style.align_content = Some(content_alignment(f.align_content));
             style.gap = taffy::Size {
                 width: length(f.column_gap as f32),
                 height: length(f.row_gap as f32),
             };
             let [top, right, bottom, left] = f.padding.map(|p| length(p as f32));
+            style.padding = taffy::Rect {
+                left,
+                right,
+                top,
+                bottom,
+            };
+        }
+        Some(Display::Grid(g)) => {
+            style.display = taffy::Display::Grid;
+            style.grid_template_columns = template(&g.columns);
+            style.grid_template_rows = template(&g.rows);
+            style.grid_auto_flow = match g.auto_flow {
+                GridAutoFlow::Row => taffy::GridAutoFlow::Row,
+                GridAutoFlow::Column => taffy::GridAutoFlow::Column,
+            };
+            style.justify_content = Some(content_alignment(g.justify_content));
+            style.justify_items = Some(align_items(g.justify_items));
+            style.align_items = Some(align_items(g.align_items));
+            style.align_content = Some(content_alignment(g.align_content));
+            style.gap = taffy::Size {
+                width: length(g.column_gap as f32),
+                height: length(g.row_gap as f32),
+            };
+            let [top, right, bottom, left] = g.padding.map(|p| length(p as f32));
             style.padding = taffy::Rect {
                 left,
                 right,
@@ -1231,7 +1516,7 @@ fn style_of(kind: &NodeKind, display: Option<&Display>, item: &FlexItem) -> taff
 /// such size), so without this a hugging frame in a stretching row stretched,
 /// which §15 D879 flagged. The main axis is untouched: `fit-content` there is the
 /// flex basis's content size, and `flex-grow` may still grow it, as in CSS.
-fn fit_content_across(item: &FlexItem, parent: &Flex) -> bool {
+fn fit_content_across(item: &LayoutItem, parent: &Flex) -> bool {
     let across = if parent.direction.is_row() {
         item.height
     } else {
@@ -1250,6 +1535,92 @@ fn align_items(a: AlignItems) -> taffy::AlignItems {
         AlignItems::End => taffy::AlignItems::FLEX_END,
         AlignItems::Center => taffy::AlignItems::CENTER,
         AlignItems::Baseline => taffy::AlignItems::BASELINE,
+    }
+}
+
+/// `a` for taffy, on either axis. `Start` and `End` go as `flex-start` and
+/// `flex-end` (§15 D909), which a grid reads as its own start and end — taffy's
+/// grid treats the two pairs as one, having no reversal to tell them apart.
+fn content_alignment(a: AlignContent) -> taffy::AlignContent {
+    match a {
+        AlignContent::Stretch => taffy::AlignContent::STRETCH,
+        AlignContent::Start => taffy::AlignContent::FLEX_START,
+        AlignContent::End => taffy::AlignContent::FLEX_END,
+        AlignContent::Center => taffy::AlignContent::CENTER,
+        AlignContent::SpaceBetween => taffy::AlignContent::SPACE_BETWEEN,
+        AlignContent::SpaceAround => taffy::AlignContent::SPACE_AROUND,
+        AlignContent::SpaceEvenly => taffy::AlignContent::SPACE_EVENLY,
+    }
+}
+
+/// A track list for taffy. **Reads what CSS would refuse without refusing it**
+/// ([`Grid::is_valid`]'s reason — a file can carry one): a negative number is
+/// read as 0, a `minmax()` whose min is `fr` as `auto` at that end, and an empty
+/// or zero-count `repeat()` as nothing.
+fn template(tracks: &[Track]) -> Vec<taffy::GridTemplateComponent<String>> {
+    tracks
+        .iter()
+        .filter_map(|t| match t {
+            Track::Size(s) => Some(taffy::GridTemplateComponent::Single(track_size(*s))),
+            Track::Repeat { repeat, tracks } if *repeat > 0 && !tracks.is_empty() => Some(
+                taffy::GridTemplateComponent::Repeat(taffy::GridTemplateRepetition {
+                    count: taffy::RepetitionCount::Count(*repeat),
+                    tracks: tracks.iter().map(|s| track_size(*s)).collect(),
+                    line_names: Vec::new(),
+                }),
+            ),
+            Track::Repeat { .. } => None,
+        })
+        .collect()
+}
+
+/// One track size for taffy — a single breadth `b` is CSS's `minmax(b, b)`, save
+/// `fr`, which is `minmax(auto, fr)`: taffy's reading and CSS's.
+fn track_size(s: TrackSize) -> taffy::TrackSizingFunction {
+    let (min, max) = match s {
+        TrackSize::Breadth(b) => (b, b),
+        TrackSize::MinMax { min, max } => (min, max),
+    };
+    taffy::MinMax {
+        min: min_breadth(min),
+        max: max_breadth(max),
+    }
+}
+
+fn min_breadth(b: TrackBreadth) -> taffy::MinTrackSizingFunction {
+    use taffy::MinTrackSizingFunction as Min;
+    match b {
+        TrackBreadth::Px(v) => Min::length(v.max(0.0) as f32),
+        TrackBreadth::Percent(p) => Min::percent((p.max(0.0) / 100.0) as f32),
+        TrackBreadth::Fr(_) | TrackBreadth::Auto => Min::auto(),
+        TrackBreadth::MinContent => Min::min_content(),
+        TrackBreadth::MaxContent => Min::max_content(),
+    }
+}
+
+fn max_breadth(b: TrackBreadth) -> taffy::MaxTrackSizingFunction {
+    use taffy::MaxTrackSizingFunction as Max;
+    match b {
+        TrackBreadth::Px(v) => Max::length(v.max(0.0) as f32),
+        TrackBreadth::Percent(p) => Max::percent((p.max(0.0) / 100.0) as f32),
+        TrackBreadth::Fr(v) => taffy::prelude::fr(v.max(0.0) as f32),
+        TrackBreadth::Auto => Max::auto(),
+        TrackBreadth::MinContent => Max::min_content(),
+        TrackBreadth::MaxContent => Max::max_content(),
+    }
+}
+
+/// An item's `grid-column` or `grid-row` for taffy; line 0 and `span 0`, which
+/// CSS refuses, read as `auto`.
+fn grid_lines(l: GridLines) -> taffy::Line<taffy::GridPlacement<String>> {
+    let one = |p: GridPlacement| match p {
+        GridPlacement::Line(n) if n != 0 => taffy::GridPlacement::Line(n.into()),
+        GridPlacement::Span(n) if n != 0 => taffy::GridPlacement::Span(n),
+        _ => taffy::GridPlacement::Auto,
+    };
+    taffy::Line {
+        start: one(l.start),
+        end: one(l.end),
     }
 }
 
@@ -1303,6 +1674,9 @@ impl taffy::LayoutPartialTree for FlexTree<'_> {
         taffy::compute_cached_layout(self, node, inputs, |tree, node, inputs| {
             let index = usize::from(node);
             match tree.leaves[index] {
+                Leaf::Container if tree.styles[index].display == taffy::Display::Grid => {
+                    taffy::compute_grid_layout(tree, node, inputs)
+                }
                 Leaf::Container => taffy::compute_flexbox_layout(tree, node, inputs),
                 _ => {
                     let style = tree.styles[index].clone();
@@ -1357,6 +1731,26 @@ impl taffy::LayoutFlexboxContainer for FlexTree<'_> {
     }
 
     fn get_flexbox_child_style(&self, child: taffy::NodeId) -> Self::FlexboxItemStyle<'_> {
+        &self.styles[usize::from(child)]
+    }
+}
+
+impl taffy::LayoutGridContainer for FlexTree<'_> {
+    type GridContainerStyle<'a>
+        = &'a taffy::Style
+    where
+        Self: 'a;
+
+    type GridItemStyle<'a>
+        = &'a taffy::Style
+    where
+        Self: 'a;
+
+    fn get_grid_container_style(&self, node: taffy::NodeId) -> Self::GridContainerStyle<'_> {
+        &self.styles[usize::from(node)]
+    }
+
+    fn get_grid_child_style(&self, child: taffy::NodeId) -> Self::GridItemStyle<'_> {
         &self.styles[usize::from(child)]
     }
 }
@@ -1762,7 +2156,7 @@ mod flex_tests {
     struct Fake {
         kind: NodeKind,
         display: Option<Display>,
-        item: FlexItem,
+        item: LayoutItem,
         insets: Insets,
         visible: bool,
         mask: bool,
@@ -1783,7 +2177,7 @@ mod flex_tests {
                 Fake {
                     kind,
                     display: None,
-                    item: FlexItem::default(),
+                    item: LayoutItem::default(),
                     insets: Insets::default(),
                     visible: true,
                     mask: false,
@@ -1813,10 +2207,10 @@ mod flex_tests {
         fn kind(&self, id: NodeId) -> Option<NodeKind> {
             self.nodes.get(&id).map(|n| n.kind.clone())
         }
-        fn display(&self, id: NodeId) -> Option<Display> {
-            self.nodes[&id].display
+        fn display(&self, id: NodeId) -> Option<&Display> {
+            self.nodes[&id].display.as_ref()
         }
-        fn item(&self, id: NodeId) -> FlexItem {
+        fn item(&self, id: NodeId) -> LayoutItem {
             self.nodes[&id].item
         }
         fn insets(&self, id: NodeId) -> Insets {

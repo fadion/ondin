@@ -62,7 +62,7 @@ thiserror.workspace = true
 # prevent it — and **no gate can see it**, because both the comment and the entry
 # are prose and the number resolves either way. Corrected at D782.
 flo_curves = "=0.8.1"
-# Container layout — CSS flexbox (and CSS grid, when step 4 enables it) — §15 D867.
+# Container layout — CSS flexbox and CSS grid (enabled since step 4, below) — §15 D867.
 # Chosen on a measured spike against core's own text layout: it implements the
 # specs from tests generated off real browsers, where the alternative was writing a
 # flexbox and a grid track-sizing algorithm here with nobody else's tests behind
@@ -70,7 +70,8 @@ flo_curves = "=0.8.1"
 # (`container::FlexTree`) rather than its `TaffyTree`, so there is no second tree
 # to keep equal to the document; `default-features = false` drops that tree
 # (`taffy_tree`), block/float layout, `calc` and the detailed-info reporting.
-# Deps: `arrayvec` alone, measured with `cargo tree -p ondin-core -e normal`
+# Deps: `arrayvec` alone for flexbox, and `grid` adds `smallvec` (below) — the
+# first, measured with `cargo tree -p ondin-core -e normal`
 # (this said `arrayvec`, `smallvec` until 2026-09-24; `Cargo.lock` also lists
 # `serde` and `slotmap`, which are taffy's optional deps and are not built here).
 # Not a GPU or UI crate, so `deps_forbidden` stays green.
@@ -80,7 +81,9 @@ flo_curves = "=0.8.1"
 # const), and a layout engine whose answers can shift patch-to-patch is exactly
 # the dependency a review should see bump. It computes in `f32`; results come back
 # through `container::quantize` onto the 1/64 px grid (§15 D873).
-taffy = { version = "=0.14.0", default-features = false, features = ["std", "flexbox"] }
+#
+# `grid` since build step 4 (§15 D914), which adds `smallvec` to the deps above.
+taffy = { version = "=0.14.0", default-features = false, features = ["std", "flexbox", "grid"] }
 
 [dev-dependencies]
 # Used by IO tests to synthesize an older-version file for the migration test.

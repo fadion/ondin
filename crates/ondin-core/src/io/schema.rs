@@ -220,12 +220,12 @@ pub(crate) struct NodeDto {
     /// with none — additive on `insets`' terms, no version bump.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display: Option<crate::container::Display>,
-    /// The layer's flex-item properties, absent at CSS's defaults.
+    /// The layer's layout-item properties, absent at CSS's defaults.
     #[serde(
         default,
-        skip_serializing_if = "crate::container::FlexItem::is_default"
+        skip_serializing_if = "crate::container::LayoutItem::is_default"
     )]
-    pub item: crate::container::FlexItem,
+    pub item: crate::container::LayoutItem,
 }
 
 /// What a file written before `clip` existed meant: frames clipped.
@@ -306,7 +306,7 @@ impl NodeDto {
             effects: n.effects().to_vec(),
             grids: n.grids().to_vec(),
             insets: *n.insets(),
-            display: n.display().copied(),
+            display: n.display().cloned(),
             item: *n.item(),
         }
     }

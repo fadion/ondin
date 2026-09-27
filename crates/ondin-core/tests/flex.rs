@@ -11,7 +11,7 @@
 use ondin_core::kurbo::{Affine, Rect, RoundedRectRadii, Size, Vec2};
 use ondin_core::{
     Document, GeometryPatch, History, IdSource, NodeId, NodeKind, Operation, Resolved, Transaction,
-    container::{AlignItems, Display, Flex, FlexDirection, FlexItem},
+    container::{AlignItems, Display, Flex, FlexDirection, LayoutItem},
 };
 
 fn rect(w: f64, h: f64) -> NodeKind {
@@ -117,10 +117,10 @@ impl Scene {
         self.commit(vec![Operation::SetDisplay { id, display }]);
     }
 
-    fn item(&mut self, id: NodeId, f: impl FnOnce(&mut FlexItem)) {
+    fn item(&mut self, id: NodeId, f: impl FnOnce(&mut LayoutItem)) {
         let mut item = *self.doc.get(id).unwrap().item();
         f(&mut item);
-        self.commit(vec![Operation::SetFlexItem { id, item }]);
+        self.commit(vec![Operation::SetLayoutItem { id, item }]);
     }
 
     fn resize(&mut self, id: NodeId, w: f64, h: f64) {
@@ -319,7 +319,7 @@ fn a_group_with_a_layout_is_its_box() {
 
 /// **A growing group with a layout, resized, holds the size it was given** —
 /// `build::sized_flex_item`, the resize of a box with no size field (§15 D875).
-/// Its `width`/`height` go to px, and because a transaction's own `SetFlexItem`
+/// Its `width`/`height` go to px, and because a transaction's own `SetLayoutItem`
 /// is left alone by `keep_flex_sizes`, the growth it would have stopped is
 /// stopped here: `flex-grow`/`flex-shrink` 0 on the main axis, `align-self: start`
 /// on a stretched cross axis — `resizing_a_growing_item_holds_the_size_it_was_
@@ -348,7 +348,7 @@ fn resizing_a_growing_group_with_a_layout_holds_its_box() {
 
     let item = ondin_core::build::sized_flex_item(&s.doc, &s.res, g, Size::new(150.0, 70.0), None)
         .expect("a group with a layout takes a size");
-    s.commit(vec![Operation::SetFlexItem { id: g, item }]);
+    s.commit(vec![Operation::SetLayoutItem { id: g, item }]);
     assert_eq!(s.bounds(g).width(), 150.0, "the dragged width held");
     assert_eq!(s.bounds(g).height(), 70.0, "the dragged height held");
     let item = *s.doc.get(g).unwrap().item();
@@ -998,7 +998,7 @@ fn a_laid_group_resized_along_one_axis_keeps_hugging_along_the_other() {
     let item =
         ondin_core::build::sized_flex_item(&s.doc, &s.res, g, Size::new(200.0, hugged), None)
             .expect("a group with a layout takes a size");
-    s.commit(vec![Operation::SetFlexItem { id: g, item }]);
+    s.commit(vec![Operation::SetLayoutItem { id: g, item }]);
     let item = *s.doc.get(g).unwrap().item();
     assert_eq!(item.width, Dimension::Px(200.0));
     assert_eq!(

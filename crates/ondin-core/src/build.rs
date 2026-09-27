@@ -4283,51 +4283,133 @@ pub fn laid_grid(doc: &Document, id: NodeId) -> Option<crate::container::LaidGri
 /// axes are written, the one the drag left alone at the line it was laid at.
 /// **The span keeps the author's spelling**: an end given as a line moves with the
 /// start, one given as a span stays a span, and a one-track area is `start / auto`.
-/// A start pushed before line 1 stops there — a negative line counts from the far
-/// end, which is not what a drag towards the near one means.
+/// A drop's start lands on a track the grid already has — the nearest, past
+/// either end — though a span carried to the last track runs on into implicit
+/// ones, as CSS's would; an area in a leading implicit track (only a negative
+/// line makes one) keeps the negative line that names it ([`grid_drop_many`]).
 ///
 /// `None` when the centre stays in its tracks on both axes — a drop back into its
 /// own cell is no operation at all, so no undo step (§15 D877's rule for flex) —
 /// or `id` is not an in-flow item of a grid.
 pub fn grid_drop(doc: &Document, res: &Resolved, id: NodeId, delta: Vec2) -> Option<Operation> {
+    grid_drop_many(doc, res, &[id], delta)?.into_iter().next()
+}
+
+/// [`grid_drop`] for **several items of one grid, dragged as a block** (§15
+/// D918, D902's reading carried to grid): every item's area moves by the same
+/// number of tracks — read off the centre of the block's union box, as a single
+/// item's is off its own centre — so the arrangement inside the block is kept,
+/// and every item is written explicit lines. A block pushed towards the grid's
+/// first track stops there **whole**, its shift clamped to the leftmost (topmost)
+/// item's room, so the drag cannot reshuffle it; an area in a leading implicit
+/// track is written with the negative line that names it, not moved to line 1.
+///
+/// `Some` of no operations when the centre stays in its tracks — the block lands
+/// where it was; `None` when the items are not all in-flow items of one grid.
+/// A block of one is [`grid_drop`].
+pub fn grid_drop_many(
+    doc: &Document,
+    res: &Resolved,
+    ids: &[NodeId],
+    delta: Vec2,
+) -> Option<Vec<Operation>> {
     use crate::container::{self, GridLines, GridPlacement};
-    if !is_flex_item(doc, id) {
+    let parent = doc.get(*ids.first()?)?.parent()?;
+    if ids
+        .iter()
+        .any(|id| !is_flex_item(doc, *id) || doc.get(*id).and_then(|n| n.parent()) != Some(parent))
+    {
         return None;
     }
-    let parent = doc.get(id)?.parent()?;
     let view = crate::resolve::DocView(doc);
     let grid = container::laid_grid(&view, parent)?;
-    let area = grid.areas.iter().find(|(n, _)| *n == id)?.1;
+    let areas: Vec<(NodeId, [i32; 4])> = ids
+        .iter()
+        .map(|id| Some((*id, grid.areas.iter().find(|(n, _)| n == id)?.1)))
+        .collect::<Option<_>>()?;
     let to_parent = res.world_transform(parent)?.inverse();
-    let centre = res.world_bounds(id)?.center();
+    let centre = ids
+        .iter()
+        .filter_map(|id| res.world_bounds(*id))
+        .reduce(|a, b| a.union(b))?
+        .center();
     let (was, now) = (to_parent * centre, to_parent * (centre + delta));
     let shift = |tracks: &container::LaidTracks, a: f64, b: f64| -> Option<i32> {
         Some(tracks.index_at(b)? as i32 - tracks.index_at(a)? as i32)
     };
-    let (dc, dr) = (
+    // Stopped whole at the grid's first track: no further back than the block's
+    // first item has room for, so the block cannot reshuffle against the edge.
+    let room = |by: i32, tracks: &container::LaidTracks, starts: &mut dyn Iterator<Item = i32>| {
+        let first = starts.min().unwrap_or(1);
+        if by < 0 {
+            by.max((tracks.line_of(0) - first).min(0))
+        } else {
+            by
+        }
+    };
+    let dc = room(
         shift(&grid.columns, was.x, now.x)?,
+        &grid.columns,
+        &mut areas.iter().map(|(_, a)| a[0]),
+    );
+    let dr = room(
         shift(&grid.rows, was.y, now.y)?,
+        &grid.rows,
+        &mut areas.iter().map(|(_, a)| a[2]),
     );
     if dc == 0 && dr == 0 {
-        return None;
+        return Some(Vec::new());
     }
-    let placed = |lines: GridLines, start: i32, end: i32, by: i32| -> GridLines {
+    // A line before the explicit grid's first — a leading implicit track, which
+    // only a negative line makes — has no positive number, so it is written as
+    // the negative one CSS reads the same: line `p` is line `p − (explicit + 2)`
+    // counted from the far end (§15 D918's amendment). Clamping it to 1 moved an
+    // item on an axis the drag had not touched.
+    let line = |n: i32, tracks: &container::LaidTracks| {
+        let n = if n >= 1 {
+            n
+        } else {
+            n - (i32::from(tracks.explicit) + 2)
+        };
+        GridPlacement::Line(n.clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16)
+    };
+    let placed = |lines: GridLines, start: i32, end: i32, by: i32, tracks| -> GridLines {
         let span = (end - start).max(1);
-        let to = (start + by).max(1);
-        let line = |n: i32| GridPlacement::Line(n.clamp(1, i32::from(i16::MAX)) as i16);
+        let to = start + by;
         GridLines {
-            start: line(to),
+            start: line(to, tracks),
             end: match lines.end {
-                GridPlacement::Line(_) => line(to + span),
+                GridPlacement::Line(_) => line(to + span, tracks),
                 _ if span > 1 => GridPlacement::Span(span as u16),
                 _ => GridPlacement::Auto,
             },
         }
     };
-    let mut item = *doc.get(id)?.item();
-    item.grid_column = placed(item.grid_column, area[0], area[1], dc);
-    item.grid_row = placed(item.grid_row, area[2], area[3], dr);
-    Some(Operation::SetLayoutItem { id, item })
+    areas
+        .into_iter()
+        .map(|(id, area)| {
+            let mut item = *doc.get(id)?.item();
+            item.grid_column = placed(item.grid_column, area[0], area[1], dc, &grid.columns);
+            item.grid_row = placed(item.grid_row, area[2], area[3], dr, &grid.rows);
+            Some(Operation::SetLayoutItem { id, item })
+        })
+        .collect()
+}
+
+/// [`layout_drop`] for several items — a flex block's reorder
+/// ([`flex_reorder_many`], §15 D902) or a grid block's lines ([`grid_drop_many`],
+/// §15 D918). `None` when they are not all in-flow items of one container.
+pub fn layout_drop_many(
+    doc: &Document,
+    res: &Resolved,
+    ids: &[NodeId],
+    delta: Vec2,
+) -> Option<Vec<Operation>> {
+    use crate::container::Display;
+    match doc.get(doc.get(*ids.first()?)?.parent()?)?.display()? {
+        Display::Flex(_) => flex_reorder_many(doc, res, ids, delta),
+        Display::Grid(_) => grid_drop_many(doc, res, ids, delta),
+    }
 }
 
 /// Whether `id` is an item in its container's flow — its parent lays it out and

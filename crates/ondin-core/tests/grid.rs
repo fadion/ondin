@@ -573,31 +573,58 @@ fn grid_lines_written_under_flex_take_effect_under_grid() {
 
 /// **What CSS refuses, the operations refuse** (`OpError::BadLayout`, §15 D914):
 /// a negative track, an `fr` minimum, `repeat(0, …)`, an empty repeat, line 0
-/// and `span 0` — and nothing is changed by any of them.
+/// and `span 0` — and a template past `MAX_TRACKS` (§15 D919), one repeat at 1001
+/// and two entries whose repeats only pass it together — and nothing is changed
+/// by any of them.
 #[test]
 fn values_css_refuses_are_refused() {
     let mut s = Scene::new();
     let f = s.add(s.root, frame(200.0, 100.0), (0.0, 0.0));
     let a = s.add(f, rect(20.0, 20.0), (0.0, 0.0));
+    let auto = TrackSize::Breadth(TrackBreadth::Auto);
     let bad_tracks = [
-        px(-1.0),
-        Track::Size(TrackSize::MinMax {
+        vec![px(-1.0)],
+        vec![Track::Size(TrackSize::MinMax {
             min: TrackBreadth::Fr(1.0),
             max: TrackBreadth::Fr(2.0),
-        }),
-        Track::Repeat {
+        })],
+        vec![Track::Repeat {
             repeat: 0,
-            tracks: vec![TrackSize::Breadth(TrackBreadth::Auto)],
-        },
-        Track::Repeat {
+            tracks: vec![auto],
+        }],
+        vec![Track::Repeat {
             repeat: 2,
             tracks: vec![],
-        },
+        }],
+        vec![Track::Repeat {
+            repeat: 1001,
+            tracks: vec![auto],
+        }],
+        vec![
+            Track::Repeat {
+                repeat: 300,
+                tracks: vec![auto, auto],
+            },
+            Track::Repeat {
+                repeat: 401,
+                tracks: vec![auto],
+            },
+        ],
     ];
+    let at_the_cap = Track::Repeat {
+        repeat: 1000,
+        tracks: vec![auto],
+    };
+    s.try_commit(vec![Operation::SetDisplay {
+        id: f,
+        display: Some(Display::Grid(grid(vec![at_the_cap], vec![]))),
+    }])
+    .expect("exactly MAX_TRACKS is accepted");
+    s.display(f, None);
     for t in bad_tracks {
         let r = s.try_commit(vec![Operation::SetDisplay {
             id: f,
-            display: Some(Display::Grid(grid(vec![t.clone()], vec![]))),
+            display: Some(Display::Grid(grid(t.clone(), vec![]))),
         }]);
         assert!(matches!(r, Err(OpError::BadLayout)), "{t:?}: {r:?}");
     }
@@ -724,6 +751,120 @@ fn a_file_with_a_refused_track_opens_and_lays_around_it() {
         "kept as stored, not dropped: {:?}",
         g.columns
     );
+}
+
+/// `s`'s document saved, `from` swapped for `to` in the file — exactly once —
+/// and opened again: how a test gets a value the operations refuse into a
+/// document, as another tool or a hand edit would.
+fn reopened(s: &Scene, from: &str, to: &str) -> (Document, Resolved) {
+    let text = String::from_utf8(ondin_core::io::save(&s.doc).unwrap()).unwrap();
+    assert_eq!(
+        text.matches(from).count(),
+        1,
+        "the fixture spells {from} once"
+    );
+    let doc = ondin_core::io::load(text.replace(from, to).as_bytes()).expect("the file opens");
+    let res = Resolved::rebuild(&doc);
+    (doc, res)
+}
+
+/// **Every value the operations refuse is read around in a file** (§15 D914's
+/// rule, D919's cap), one case per value on columns `100px 50px 100px` over a
+/// 40px row, 10 × 10 items at the start of their cells — `c` at x 150:
+///
+/// - a **negative** px track is read as 0: `-50px` puts `c` at x 100;
+/// - **line 0** is read as `auto`: `d`, placed at column 3 and so wrapped to row
+///   2 at x 150, is auto-placed instead, at x 0;
+/// - **`span 0`** is read as `auto`, one track: `d` at `2 / span 2`, stretched,
+///   is 50 wide rather than 150;
+/// - an **`fr` minimum** is read as `auto` at that end — the file opens, lays out
+///   and keeps the value as stored;
+/// - a **repeat past the cap** repeats as many times as fit: `repeat(5000, 10px)`
+///   after three tracks lays 1000 explicit columns.
+///
+/// An empty repeat goes through the same guard as `repeat(0)`, which
+/// `a_file_with_a_refused_track_opens_and_lays_around_it` pins; the file's
+/// pretty-printed list makes it a multi-line edit, so it is not spelled here.
+///
+/// **Flip run**, `template` given no budget: fails on *"laid to the cap"* at
+/// 5003, the predicted site.
+#[test]
+fn every_value_css_refuses_is_read_around_in_a_file() {
+    let base = || {
+        let mut s = Scene::new();
+        let f = s.add(s.root, frame(400.0, 100.0), (0.0, 0.0));
+        let items = [0; 4].map(|_| s.add(f, rect(10.0, 10.0), (0.0, 0.0)));
+        s.display(
+            f,
+            Some(Display::Grid(Grid {
+                justify_items: Some(AlignItems::Start),
+                align_items: Some(AlignItems::Start),
+                ..grid(vec![px(100.0), px(50.0), px(100.0)], vec![px(40.0)])
+            })),
+        );
+        (s, f, items)
+    };
+    let x0 = |res: &Resolved, id| res.world_bounds(id).unwrap().x0;
+
+    let (s, _f, [_, _, c, _]) = base();
+    assert_eq!(s.bounds(c).x0, 150.0, "the fixture");
+    let (_doc, res) = reopened(&s, r#""Px": 50.0"#, r#""Px": -50.0"#);
+    assert_eq!(x0(&res, c), 100.0, "a negative track is 0");
+
+    let (mut s, _f, [.., d]) = base();
+    s.item(d, |i| i.grid_column.start = GridPlacement::Line(3));
+    assert_eq!(s.bounds(d).x0, 150.0, "the fixture: d at column 3");
+    let (_doc, res) = reopened(&s, r#""Line": 3"#, r#""Line": 0"#);
+    assert_eq!(x0(&res, d), 0.0, "line 0 is auto");
+
+    let (mut s, _f, [.., d]) = base();
+    s.item(d, |i| {
+        i.grid_column = GridLines {
+            start: GridPlacement::Line(2),
+            end: GridPlacement::Span(2),
+        };
+        i.justify_self = Some(AlignItems::Stretch);
+    });
+    assert_eq!(s.bounds(d).width(), 150.0, "the fixture: d across two");
+    let (_doc, res) = reopened(&s, r#""Span": 2"#, r#""Span": 0"#);
+    assert_eq!(
+        res.world_bounds(d).unwrap().width(),
+        50.0,
+        "span 0 is one track"
+    );
+
+    let (mut s, f, _) = base();
+    let minmax = Track::Size(TrackSize::MinMax {
+        min: TrackBreadth::Px(30.0),
+        max: TrackBreadth::Fr(1.0),
+    });
+    s.display(f, Some(Display::Grid(grid(vec![minmax], vec![]))));
+    let (doc, _res) = reopened(&s, r#""Px": 30.0"#, r#""Fr": 30.0"#);
+    let Some(Display::Grid(g)) = doc.get(f).unwrap().display() else {
+        panic!("the grid survived the load");
+    };
+    assert!(
+        matches!(
+            g.columns[0],
+            Track::Size(TrackSize::MinMax {
+                min: TrackBreadth::Fr(_),
+                ..
+            })
+        ),
+        "an fr minimum kept as stored: {:?}",
+        g.columns
+    );
+
+    let (mut s, f, _) = base();
+    let mut columns = vec![px(100.0), px(50.0), px(100.0)];
+    columns.push(Track::Repeat {
+        repeat: 3,
+        tracks: vec![TrackSize::Breadth(TrackBreadth::Px(10.0))],
+    });
+    s.display(f, Some(Display::Grid(grid(columns, vec![]))));
+    let (doc, _res) = reopened(&s, r#""repeat": 3"#, r#""repeat": 5000"#);
+    let g = ondin_core::build::laid_grid(&doc, f).expect("a grid");
+    assert_eq!(g.columns.explicit, 1000, "laid to the cap");
 }
 
 /// The first test's grid, with the four items at the start of their cells.
@@ -859,6 +1000,117 @@ fn a_dropped_area_keeps_its_span_and_its_spelling() {
     }
 }
 
+/// **Several items of one grid move as a block** (§15 D918, D902's reading in a
+/// grid): `a` and `b` in the first two cells — drawn at (20, 20) and (130, 20),
+/// their union's centre at (85, 30) — dragged by (+100, +60) to (185, 90), one
+/// column and one row over, land in column 2 and column 3 of row 2, side by side
+/// as they were; a nudge lands where it was.
+///
+/// **And a block pushed past line 1 stops there whole.** Four 50px columns, `a`
+/// placed in column 2 and `b` in column 4: their union's centre is at x 110, in
+/// column 3, and a drag of −110 puts it in column 1 — two columns back, where
+/// `a` has room for one. The block moves one: `a` to column 1, `b` to column 3,
+/// the gap between them kept, rather than `a` held at 1 and `b` moved two.
+///
+/// **Flip run**, `grid_drop_many`'s `room` answering the raw shift (each start
+/// then clamped alone by `line`, as a single item's is): fails on *"stopped
+/// whole at line 1"* with `b` at line 2, the predicted site.
+#[test]
+fn several_items_of_a_grid_move_as_a_block() {
+    use ondin_core::kurbo::Vec2;
+    let mut s = Scene::new();
+    let (_f, [a, b, ..]) = four_in_tracks(&mut s);
+    let ops = ondin_core::build::grid_drop_many(&s.doc, &s.res, &[a, b], Vec2::new(100.0, 60.0))
+        .expect("one grid's items");
+    assert_eq!(ops.len(), 2);
+    s.commit(ops);
+    assert_eq!(
+        s.bounds(a).origin(),
+        (130.0, 80.0).into(),
+        "a: column 2, row 2"
+    );
+    assert_eq!(
+        s.bounds(b).origin(),
+        (220.0, 80.0).into(),
+        "b: column 3, row 2"
+    );
+    assert_eq!(
+        ondin_core::build::grid_drop_many(&s.doc, &s.res, &[a, b], Vec2::new(5.0, 5.0)),
+        Some(Vec::new()),
+        "a nudge lands where it was"
+    );
+
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(200.0, 50.0), (0.0, 0.0));
+    let [a, b] = [0; 2].map(|_| s.add(f, rect(20.0, 20.0), (0.0, 0.0)));
+    s.display(
+        f,
+        Some(Display::Grid(grid(
+            vec![px(50.0), px(50.0), px(50.0), px(50.0)],
+            vec![px(50.0)],
+        ))),
+    );
+    s.item(a, |i| i.grid_column.start = GridPlacement::Line(2));
+    s.item(b, |i| i.grid_column.start = GridPlacement::Line(4));
+    assert_eq!(
+        (s.bounds(a).x0, s.bounds(b).x0),
+        (50.0, 150.0),
+        "the fixture"
+    );
+    let ops = ondin_core::build::grid_drop_many(&s.doc, &s.res, &[a, b], Vec2::new(-110.0, 0.0))
+        .expect("one grid's items");
+    s.commit(ops);
+    let column = |id| s.doc.get(id).unwrap().item().grid_column.start;
+    assert_eq!(
+        (column(a), column(b)),
+        (GridPlacement::Line(1), GridPlacement::Line(3)),
+        "stopped whole at line 1"
+    );
+}
+
+/// **An area before the explicit grid keeps the negative line that names it**
+/// (§15 D918's amendment) — three 50px columns, and `a` placed at `-5`: line −1
+/// is line 4, so −5 is the line before line 1, and the grid grows a leading
+/// implicit track for it, 20 wide around `a`. Dragged one row down, `a` is
+/// written `-5` again on the axis the drag left alone, and stays at x 0; the
+/// first cut wrote line 1 there and moved it a column right.
+///
+/// **Flip run**, `grid_drop_many`'s `line` clamping to 1 as it did: fails on
+/// *"its column kept"* with `Line(1)`, the predicted site.
+#[test]
+fn an_area_before_the_explicit_grid_keeps_its_negative_line() {
+    use ondin_core::kurbo::Vec2;
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(300.0, 100.0), (0.0, 0.0));
+    let a = s.add(f, rect(20.0, 20.0), (0.0, 0.0));
+    s.display(
+        f,
+        Some(Display::Grid(grid(
+            vec![px(50.0), px(50.0), px(50.0)],
+            vec![px(50.0), px(50.0)],
+        ))),
+    );
+    s.item(a, |i| i.grid_column.start = GridPlacement::Line(-5));
+    let g = ondin_core::build::laid_grid(&s.doc, f).expect("a grid");
+    assert_eq!(
+        g.columns.before, 1,
+        "the fixture: one leading implicit track"
+    );
+    assert_eq!(s.bounds(a).x0, 0.0, "the fixture: a in it");
+
+    let op =
+        ondin_core::build::grid_drop(&s.doc, &s.res, a, Vec2::new(0.0, 50.0)).expect("a row down");
+    s.commit(vec![op]);
+    let item = *s.doc.get(a).unwrap().item();
+    assert_eq!(
+        item.grid_column.start,
+        GridPlacement::Line(-5),
+        "its column kept"
+    );
+    assert_eq!(item.grid_row.start, GridPlacement::Line(2));
+    assert_eq!(s.bounds(a).origin(), (0.0, 50.0).into());
+}
+
 /// An auto-width label, `Inter` 12.
 fn label(content: &str) -> NodeKind {
     NodeKind::Text {
@@ -920,4 +1172,99 @@ fn an_auto_width_label_stretched_narrower_keeps_its_line() {
         })),
     );
     assert_eq!(width(&s, t), line, "flex: one line");
+}
+
+/// **A track list reads and writes as CSS** (§15 D920) — the mockup's own line,
+/// `200px 1fr minmax(100px, 2fr) repeat(3, auto)`, parses to its four entries and
+/// writes back the same; keywords in any case, no space after a comma, a unitless
+/// `0`, a percentage and the two content keywords all read; `none` and nothing
+/// are the empty list, which writes as `none`.
+#[test]
+fn a_track_list_reads_and_writes_as_css() {
+    use ondin_core::container::{parse_tracks, tracks_css};
+    let line = "200px 1fr minmax(100px, 2fr) repeat(3, auto)";
+    let tracks = parse_tracks(line).unwrap();
+    assert_eq!(
+        tracks,
+        vec![
+            px(200.0),
+            fr(1.0),
+            Track::Size(TrackSize::MinMax {
+                min: TrackBreadth::Px(100.0),
+                max: TrackBreadth::Fr(2.0),
+            }),
+            Track::Repeat {
+                repeat: 3,
+                tracks: vec![TrackSize::Breadth(TrackBreadth::Auto)],
+            },
+        ]
+    );
+    assert_eq!(tracks_css(&tracks), line);
+
+    assert_eq!(
+        parse_tracks("  MINMAX(0,Max-Content) 12.5%  repeat(2, 1.5fr min-content)  ").unwrap(),
+        vec![
+            Track::Size(TrackSize::MinMax {
+                min: TrackBreadth::Px(0.0),
+                max: TrackBreadth::MaxContent,
+            }),
+            Track::Size(TrackSize::Breadth(TrackBreadth::Percent(12.5))),
+            Track::Repeat {
+                repeat: 2,
+                tracks: vec![
+                    TrackSize::Breadth(TrackBreadth::Fr(1.5)),
+                    TrackSize::Breadth(TrackBreadth::MinContent),
+                ],
+            },
+        ]
+    );
+    assert_eq!(parse_tracks("none").unwrap(), vec![]);
+    assert_eq!(parse_tracks("   ").unwrap(), vec![]);
+    assert_eq!(tracks_css(&[]), "none");
+}
+
+/// **What is not a track list is an error, not a guess** — a number with no unit,
+/// an unclosed `repeat(`, a fractional count, a word CSS does not have — and what
+/// parses but CSS refuses is still refused at the operation, not here.
+#[test]
+fn what_is_not_a_track_list_is_an_error() {
+    use ondin_core::container::parse_tracks;
+    for bad in [
+        "100",
+        "repeat(3, auto",
+        "repeat(1.5, auto)",
+        "fit",
+        "1px,2px",
+    ] {
+        assert!(parse_tracks(bad).is_err(), "{bad}");
+    }
+    // `minmax(1fr, 2fr)` reads — and `Grid::is_valid` is what refuses it.
+    let t = parse_tracks("minmax(1fr, 2fr)").unwrap();
+    assert!(
+        !Grid {
+            columns: t,
+            ..Default::default()
+        }
+        .is_valid()
+    );
+}
+
+/// **A line reads and writes as CSS**: `auto`, a line, a negative line, `span n`,
+/// in any case; line 0 and `span 0`, which CSS refuses, do not read at all.
+#[test]
+fn a_placement_reads_and_writes_as_css() {
+    use ondin_core::container::{parse_placement, placement_css};
+    for (text, p) in [
+        ("auto", GridPlacement::Auto),
+        ("3", GridPlacement::Line(3)),
+        ("-1", GridPlacement::Line(-1)),
+        ("span 2", GridPlacement::Span(2)),
+    ] {
+        assert_eq!(parse_placement(text), Some(p), "{text}");
+        assert_eq!(placement_css(p), text);
+    }
+    assert_eq!(parse_placement(" SPAN  4 "), Some(GridPlacement::Span(4)));
+    for bad in ["0", "span 0", "span", "two", ""] {
+        assert_eq!(parse_placement(bad), None, "{bad}");
+    }
 }

@@ -2793,8 +2793,8 @@ impl OndinApp {
     ///
     /// **In a grid the one item's drop writes lines rather than reordering** (§15
     /// D913, D916) — `build::layout_drop` answers for either layout, so the name
-    /// stays flex's while the arm serves both. Several items of one grid keep
-    /// their cells: what a block's drop writes there is not ruled.
+    /// stays flex's while the arm serves both; several items of one grid move as a
+    /// block ([`Self::flex_block_reorder_of`], §15 D918).
     fn flex_reorder_of(&self, delta: Vec2) -> Option<(NodeId, Option<Operation>)> {
         let (doc, res) = (&self.session.doc, &self.session.resolved);
         let [id] = build::outermost(doc, self.session.selection.ids())[..] else {
@@ -2808,12 +2808,14 @@ impl OndinApp {
         Some((id, build::layout_drop(doc, res, id, delta)))
     }
 
-    /// [`Self::flex_reorder_of`] for **several** selected layers (§15 D902): when
-    /// every one is an in-flow item of the same flex container and none leaves it,
-    /// the move is a reorder of the block — `build::flex_reorder_many`'s ops,
-    /// empty when it lands where it was. Anything else — items of two containers,
-    /// in-flow items with free layers — keeps the rule [`Self::stays_in_flow`]
-    /// states: each in-flow item keeps its slot and the rest move.
+    /// [`Self::flex_reorder_of`] for **several** selected layers: when every one
+    /// is an in-flow item of the same container and none leaves it, the move is a
+    /// drop of the block — `build::layout_drop_many`'s ops, empty when it lands
+    /// where it was: a reorder in a flex container (§15 D902), each area shifted by
+    /// the tracks the block's centre crossed in a grid (§15 D918). Anything else —
+    /// items of two containers, in-flow items with free layers — keeps the rule
+    /// [`Self::stays_in_flow`] states: each in-flow item keeps its slot and the
+    /// rest move.
     fn flex_block_reorder_of(&self, delta: Vec2) -> Option<Vec<Operation>> {
         let (doc, res) = (&self.session.doc, &self.session.resolved);
         let ids = build::outermost(doc, self.session.selection.ids());
@@ -2824,7 +2826,7 @@ impl OndinApp {
         {
             return None;
         }
-        build::flex_reorder_many(doc, res, &ids, delta)
+        build::layout_drop_many(doc, res, &ids, delta)
     }
 
     /// The transaction a move of the selection by `delta` **previews** — what
@@ -2834,11 +2836,12 @@ impl OndinApp {
     /// under the hand. So it is `build::move_by_world`'s translation for every
     /// selected layer, and then:
     ///
-    /// - **one in-flow flex item** keeps that translation — the preview's flex pass
-    ///   skips a layer the transaction drags — and gains the reorder its release
-    ///   commits, so its siblings open the slot it will drop into (§15 D877);
-    /// - **several items of one flex container** keep their translations too and
-    ///   gain the block's reorder ([`Self::flex_block_reorder_of`], §15 D902);
+    /// - **one in-flow item** keeps that translation — the preview's layout pass
+    ///   skips a layer the transaction drags — and gains the reorder (flex, §15
+    ///   D877) or the lines (grid, D916) its release commits, so its siblings open
+    ///   the slot or the cell it will drop into;
+    /// - **several items of one container** keep their translations too and gain
+    ///   the block's drop ([`Self::flex_block_reorder_of`], §15 D902, D918);
     /// - **any other several layers** lose the translation of every in-flow item
     ///   that stays in its flow ([`Self::stays_in_flow`]), which keeps its slot on
     ///   release and so keeps it in the drag — it used to follow the pointer and
@@ -23302,12 +23305,87 @@ mod flex_canvas_tests {
     /// the drop committing nothing — the predicted site.
     #[test]
     fn a_real_drag_in_a_grid_writes_the_cell_it_lands_in() {
-        use ondin_core::container::{
-            Grid, GridLines, GridPlacement, Track, TrackBreadth, TrackSize,
-        };
+        use ondin_core::container::{GridLines, GridPlacement};
         let ctx = egui::Context::default();
         crate::theme::install(&ctx);
-        let mut app = OndinApp::headless(&ctx);
+        let (mut app, a, b) = app_with_a_grid(&ctx);
+        let bounds = |app: &OndinApp, id| app.session.resolved.world_bounds(id).unwrap();
+        assert_eq!(
+            bounds(&app, b).origin(),
+            Point::new(100.0, 0.0),
+            "the fixture"
+        );
+
+        let depth = app.session.history.undo_depth();
+        // The move's anchor is the pointer where the move *begins* — the first of
+        // `drag`'s eight steps — not the press, so a drag to (250, 150) moves the
+        // centre 7/8 of (240, 140): to (220, 132.5), column 3, row 2. The first cut
+        // aimed at (210, 110), whose 7/8 lands in column 2, row 1, and failed there.
+        drag(
+            &ctx,
+            &mut app,
+            Point::new(10.0, 10.0),
+            Point::new(250.0, 150.0),
+        );
+        assert_eq!(
+            bounds(&app, a).origin(),
+            Point::new(200.0, 100.0),
+            "a lands in column 3, row 2"
+        );
+        let item = *app.session.doc.get(a).unwrap().item();
+        assert_eq!(
+            (item.grid_column.start, item.grid_row.start),
+            (GridPlacement::Line(3), GridPlacement::Line(2))
+        );
+        assert_eq!(item.grid_column.end, GridLines::default().end);
+        assert_eq!(bounds(&app, b).origin(), Point::ZERO, "b flows back");
+        assert_eq!(app.session.history.undo_depth(), depth + 1, "one step");
+        assert_eq!(
+            app.session.doc.get(a).unwrap().transform(),
+            Affine::translate((300.0, 150.0)),
+            "and its stored transform is untouched"
+        );
+    }
+
+    /// **Two items of one grid dragged together move as a block** (§15 D918) —
+    /// `a` and `b` side by side in row 1, their union's centre at (60, 10), moved
+    /// by (+200, +100) to (260, 110): two columns and one row over. The move's
+    /// release writes both items' lines, `a` in column 3 and `b` in column 4 of
+    /// row 2, and no transform. Until D918 the pair kept their cells and the move
+    /// committed nothing.
+    ///
+    /// **Flip run**, `flex_block_reorder_of` asking `build::flex_reorder_many` as
+    /// it did: fails on *"both written"* with an empty transaction, the predicted
+    /// site.
+    #[test]
+    fn two_grid_items_dragged_together_move_as_a_block() {
+        use ondin_core::container::GridPlacement;
+        let ctx = egui::Context::default();
+        let (mut app, a, b) = app_with_a_grid(&ctx);
+        app.session.selection.set(vec![a, b]);
+        let tx = app.move_tx(Vec2::new(200.0, 100.0));
+        assert_eq!(tx.0.len(), 2, "both written: {tx:?}");
+        assert!(
+            tx.0.iter()
+                .all(|op| matches!(op, Operation::SetLayoutItem { .. })),
+            "lines, and no transform: {tx:?}"
+        );
+        app.session.doc.apply(&tx).expect("applies");
+        let start = |id| {
+            let item = *app.session.doc.get(id).unwrap().item();
+            (item.grid_column.start, item.grid_row.start)
+        };
+        assert_eq!(start(a), (GridPlacement::Line(3), GridPlacement::Line(2)));
+        assert_eq!(start(b), (GridPlacement::Line(4), GridPlacement::Line(2)));
+    }
+
+    /// A 400 × 200 frame at the origin laid as a grid of 100 × 100 cells, four
+    /// by two, holding two 20 × 20 rects under `normal` — `a` drawn at (0, 0) and
+    /// `b` at (100, 0), **both stored at (300, 150)**, `app_with_a_row`'s reason.
+    /// The camera on the frame's centre.
+    fn app_with_a_grid(ctx: &egui::Context) -> (OndinApp, NodeId, NodeId) {
+        use ondin_core::container::{Grid, Track, TrackBreadth, TrackSize};
+        let mut app = OndinApp::headless(ctx);
         let mut ids = IdSource::new(0xBA);
         let root = ids.mint();
         let (grid, a, b) = (ids.mint(), ids.mint(), ids.mint());
@@ -23351,43 +23429,8 @@ mod flex_canvas_tests {
         app.session.camera.center = Point::new(200.0, 100.0);
         app.session.camera.zoom = 1.0;
         for _ in 0..2 {
-            frame(&ctx, &mut app, Vec::new());
+            frame(ctx, &mut app, Vec::new());
         }
-        let bounds = |app: &OndinApp, id| app.session.resolved.world_bounds(id).unwrap();
-        assert_eq!(
-            bounds(&app, b).origin(),
-            Point::new(100.0, 0.0),
-            "the fixture"
-        );
-
-        let depth = app.session.history.undo_depth();
-        // The move's anchor is the pointer where the move *begins* — the first of
-        // `drag`'s eight steps — not the press, so a drag to (250, 150) moves the
-        // centre 7/8 of (240, 140): to (220, 132.5), column 3, row 2. The first cut
-        // aimed at (210, 110), whose 7/8 lands in column 2, row 1, and failed there.
-        drag(
-            &ctx,
-            &mut app,
-            Point::new(10.0, 10.0),
-            Point::new(250.0, 150.0),
-        );
-        assert_eq!(
-            bounds(&app, a).origin(),
-            Point::new(200.0, 100.0),
-            "a lands in column 3, row 2"
-        );
-        let item = *app.session.doc.get(a).unwrap().item();
-        assert_eq!(
-            (item.grid_column.start, item.grid_row.start),
-            (GridPlacement::Line(3), GridPlacement::Line(2))
-        );
-        assert_eq!(item.grid_column.end, GridLines::default().end);
-        assert_eq!(bounds(&app, b).origin(), Point::ZERO, "b flows back");
-        assert_eq!(app.session.history.undo_depth(), depth + 1, "one step");
-        assert_eq!(
-            app.session.doc.get(a).unwrap().transform(),
-            Affine::translate((300.0, 150.0)),
-            "and its stored transform is untouched"
-        );
+        (app, a, b)
     }
 }

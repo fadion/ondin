@@ -11053,6 +11053,73 @@ mod guide_scale_tests {
         assert_eq!(doc.guide(elsewhere).unwrap().position, 120.0);
         assert_eq!(doc.guide(global).unwrap().position, 120.0);
     }
+
+    /// **A grid under the Scale tool scales its lengths by their own axis**
+    /// (`scaled_layout`, §15 D914, D919) — at (×2 across, ×0.5 down): the columns' px,
+    /// a `minmax()`'s px ends and a `repeat()`'s px tracks double, the rows' px
+    /// halve, `fr` and `%` stay the shares they are; the column gap doubles, the
+    /// row gap halves, and the padding goes top ×0.5, right ×2, bottom ×0.5, left
+    /// ×2. No test reached this arm until it was written.
+    ///
+    /// **Flip run**, the grid arm scaling the columns by `csy`: fails on *"the
+    /// columns, across"* at 50 rather than 200, the predicted site.
+    #[test]
+    fn a_grid_scales_its_tracks_gaps_and_padding_by_their_own_axis() {
+        use ondin_core::container::{Display, Grid, Track, TrackBreadth as B, TrackSize as S};
+        let (mut doc, _res, frame, ..) = framed_guides();
+        let one = |b| Track::Size(S::Breadth(b));
+        doc.apply(&Transaction(vec![Operation::SetDisplay {
+            id: frame,
+            display: Some(Display::Grid(Grid {
+                columns: vec![
+                    one(B::Px(100.0)),
+                    one(B::Fr(1.0)),
+                    Track::Repeat {
+                        repeat: 2,
+                        tracks: vec![S::MinMax {
+                            min: B::Px(20.0),
+                            max: B::Percent(10.0),
+                        }],
+                    },
+                ],
+                rows: vec![one(B::Px(50.0)), one(B::Percent(25.0))],
+                column_gap: 10.0,
+                row_gap: 20.0,
+                padding: [1.0, 2.0, 3.0, 4.0],
+                ..Default::default()
+            })),
+        }]))
+        .unwrap();
+        let Some(Operation::SetDisplay {
+            display: Some(Display::Grid(g)),
+            ..
+        }) = scaled_layout(&doc, frame, 2.0, 0.5)
+        else {
+            panic!("a grid's SetDisplay");
+        };
+        assert_eq!(
+            g.columns,
+            vec![
+                one(B::Px(200.0)),
+                one(B::Fr(1.0)),
+                Track::Repeat {
+                    repeat: 2,
+                    tracks: vec![S::MinMax {
+                        min: B::Px(40.0),
+                        max: B::Percent(10.0),
+                    }],
+                },
+            ],
+            "the columns, across"
+        );
+        assert_eq!(
+            g.rows,
+            vec![one(B::Px(25.0)), one(B::Percent(25.0))],
+            "the rows, down"
+        );
+        assert_eq!((g.column_gap, g.row_gap), (20.0, 10.0));
+        assert_eq!(g.padding, [0.5, 4.0, 1.5, 8.0]);
+    }
 }
 
 /// `↑`/`↓` re-counting a polygon or star mid-draw (`docs/shortcuts.md` §9).

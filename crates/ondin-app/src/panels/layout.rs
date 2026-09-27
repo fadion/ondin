@@ -3,10 +3,13 @@
 //! (`design/Layout Cards.dc.html`, and `LayoutGlyph.dc.html` for the pictures).
 //!
 //! **Container** is a frame's or a group's layout — `display`, and under `flex` its
-//! direction, wrap, three alignments, two gaps and its padding. **Item** is a layer's
-//! place in its parent's layout — `flex-grow`, `flex-shrink`, `flex-basis`,
-//! `align-self` and the four size limits — or, for a layer out of the flow, why it is
-//! out and the one button that brings it back. Every label is a CSS property's name
+//! direction, wrap, three alignments, two gaps and its padding; under `grid` its
+//! flow, two track lists, four alignments, gaps and padding (the child module
+//! `grid`, §15 D920). **Item** is a layer's place in its parent's layout —
+//! `flex-grow`, `flex-shrink`, `flex-basis` and `align-self` in a flex container,
+//! its lines and both self-alignments in a grid, and the four size limits in
+//! either — or, for a layer out of the flow, why it is out and the one button that
+//! brings it back. Every label is a CSS property's name
 //! and every value a CSS value (§15 D867), **written in sentence case** —
 //! `justify-content` reads *Justify content*, `flex-start` *Flex start* (§15 D884).
 //!
@@ -40,11 +43,17 @@ use crate::theme::{self, color, icon};
 use crate::ui::{self, Prefix, Scrub, Suffix};
 use eframe::egui;
 use ondin_core::container::{
-    self, AlignContent, AlignItems, Dimension, Display, Flex, FlexDirection, FlexWrap,
+    self, AlignContent, AlignItems, Dimension, Display, Flex, FlexDirection, FlexWrap, Grid,
     JustifyContent, LayoutItem,
 };
 use ondin_core::kurbo::Size;
 use ondin_core::{NodeId, NodeKind, Operation, Transaction};
+
+/// Grid's rows of both cards — the track lists, `grid-auto-flow`, the grid
+/// alignments, and an item's lines (§15 D920). A child module so it shares this
+/// file's private pieces: `glyph_combo`, `shared`, `edited`, the gap and padding
+/// rows.
+mod grid;
 
 // --- the pictures ---------------------------------------------------------
 
@@ -452,12 +461,12 @@ const WRAP_TIPS: [&str; 3] = [
     "Wrap reverse — new lines stack the other way",
 ];
 
-/// What each `display` cell does, for its tooltip (§15 D886) — `grid`'s saying
-/// why it cannot be picked, which a disabled cell otherwise leaves to guesswork.
+/// What each `display` cell does, for its tooltip (§15 D886). `grid`'s said why
+/// it could not be picked until the grid step built it (§15 D920).
 const DISPLAY_TIPS: [&str; 3] = [
     "None — children keep their own places",
     "Flex — lay the children out in a row or a column",
-    "Grid — not built yet (container layout's next step)",
+    "Grid — lay the children out in rows and columns of tracks",
 ];
 
 const JUSTIFY: [JustifyContent; 6] = [
@@ -902,13 +911,8 @@ fn display_cell(p: &egui::Painter, i: usize, rect: egui::Rect, on: bool) {
         (Glyph::DisplayFlex, "Flex"),
         (Glyph::DisplayGrid, "Grid"),
     ][i];
-    // `grid` is visibly unavailable rather than absent — `segmented_enabled`'s
-    // bargain — until the grid step builds it (roadmap, container layout step 4).
-    let ink = match (i, on) {
-        (2, _) => theme::text::DISABLED,
-        (_, true) => color::TEXT,
-        (_, false) => theme::text::DIM,
-    };
+    // `grid` was drawn disabled until the grid step built it (§15 D920).
+    let ink = if on { color::TEXT } else { theme::text::DIM };
     let galley = p.layout_no_wrap(
         word.to_owned(),
         egui::FontId::proportional(ui::SEGMENT_LABEL_PT + 1.0),
@@ -993,9 +997,9 @@ impl OndinApp {
         }
     }
 
-    /// The **Container** card: `display`, and under `flex` everything a flex
-    /// container has (§15 D878). Drawn for any selection with a frame or a group in
-    /// it; every edit applies to each of them.
+    /// The **Container** card: `display`, and under `flex` or `grid` everything
+    /// that layout has (§15 D878, D920). Drawn for any selection with a frame or a
+    /// group in it; every edit applies to each of them.
     pub(super) fn inspector_container(&mut self, ui: &mut egui::Ui) {
         let subjects = self.container_subjects();
         if subjects.is_empty() {
@@ -1017,6 +1021,13 @@ impl OndinApp {
                 _ => None,
             })
             .collect();
+        let grids: Vec<Grid> = displays
+            .iter()
+            .filter_map(|d| match d {
+                Some(Display::Grid(g)) => Some(g.clone()),
+                _ => None,
+            })
+            .collect();
         self.panel(ui, "Container", None, |app, ui| {
             let full = ui.available_width();
             // Nothing raised while the selection disagrees — `segmented`'s mixed
@@ -1029,7 +1040,7 @@ impl OndinApp {
                 ui::SEGMENT_CELL_H,
                 3,
                 mode.unwrap_or(3),
-                |i| i != 2,
+                |_| true,
                 |i| DISPLAY_TIPS[i],
                 |p, i, r, on| {
                     if mode.is_none() && i == 0 {
@@ -1039,15 +1050,18 @@ impl OndinApp {
                     }
                 },
             ) {
-                app.set_display(&subjects, i == 1);
+                app.set_display(&subjects, i);
             }
-            if mode == Some(1) {
-                app.flex_rows(ui, &subjects, &flexes);
+            let laid: Vec<Display> = displays.iter().flatten().cloned().collect();
+            match mode {
+                Some(1) => app.flex_rows(ui, &subjects, &flexes, &laid),
+                Some(2) => app.grid_container_rows(ui, &subjects, &grids, &laid),
+                _ => {}
             }
         });
     }
 
-    /// Give every subject a flex layout, or take it away.
+    /// Give every subject the layout of `display` cell `to` — none, flex or grid.
     ///
     /// **Taking it away keeps every child where it is drawn** — its used transform
     /// and size written back as its own (`inspector::baked_ops`), and a frame that
@@ -1057,7 +1071,12 @@ impl OndinApp {
     /// Position card's unpin rule, for the same reason (§15 D878).
     /// `build::keep_flex_sizes` lets the children's transforms stand, because the
     /// same transaction relays their parent (§15 D877's amendment).
-    fn set_display(&mut self, subjects: &[NodeId], flex: bool) {
+    ///
+    /// **Switching between flex and grid keeps the padding and the gaps** (§15
+    /// D920) — the properties the two share by name — and starts the rest at CSS's
+    /// defaults; the children's item records keep both layouts' properties, so what
+    /// they had under the other layout is waiting for them.
+    fn set_display(&mut self, subjects: &[NodeId], to: usize) {
         let doc = &self.session.doc;
         let res = &self.session.resolved;
         let mut ops = Vec::new();
@@ -1065,12 +1084,28 @@ impl OndinApp {
             let Some(node) = doc.get(*id) else {
                 continue;
             };
-            match (flex, node.display().is_some()) {
-                (true, false) => ops.push(Operation::SetDisplay {
+            let was = node.display();
+            let kept = |mut d: Display| {
+                if let Some(w) = was {
+                    *d.padding_mut() = w.padding();
+                    let (c, r) = w.gaps();
+                    let (mc, mr) = d.gaps_mut();
+                    (*mc, *mr) = (c, r);
+                }
+                d
+            };
+            let now = match (to, was) {
+                (1, Some(Display::Flex(_))) | (2, Some(Display::Grid(_))) | (0, None) => continue,
+                (1, _) => Some(kept(Display::Flex(Flex::default()))),
+                (2, _) => Some(kept(Display::Grid(Grid::default()))),
+                _ => None,
+            };
+            match (now, was.is_some()) {
+                (Some(display), _) => ops.push(Operation::SetDisplay {
                     id: *id,
-                    display: Some(Display::Flex(Flex::default())),
+                    display: Some(display),
                 }),
-                (false, true) => {
+                (None, true) => {
                     for child in node.children() {
                         if ondin_core::build::is_flex_item(doc, *child)
                             && let (Some(c), Some(local), Some(kind)) = (
@@ -1114,18 +1149,27 @@ impl OndinApp {
     /// **from the committed document**, D51's rule for a transaction a valve both
     /// previews and commits.
     fn flex_tx(&self, subjects: &[NodeId], f: impl Fn(&mut Flex)) -> Transaction {
+        self.display_tx(subjects, |d| {
+            if let Display::Flex(flex) = d {
+                f(flex);
+            }
+        })
+    }
+
+    /// Every subject's layout, flex or grid, with `f` applied — [`Self::flex_tx`]
+    /// for what both layouts share (the gaps, the padding) and for grid's own rows
+    /// (§15 D920). From the committed document, D51's rule.
+    fn display_tx(&self, subjects: &[NodeId], f: impl Fn(&mut Display)) -> Transaction {
         Transaction(
             subjects
                 .iter()
                 .filter_map(|id| {
-                    let Some(&Display::Flex(was)) = self.session.doc.get(*id)?.display() else {
-                        return None;
-                    };
-                    let mut now = was;
+                    let was = self.session.doc.get(*id)?.display()?;
+                    let mut now = was.clone();
                     f(&mut now);
-                    (now != was).then_some(Operation::SetDisplay {
+                    (&now != was).then_some(Operation::SetDisplay {
                         id: *id,
-                        display: Some(Display::Flex(now)),
+                        display: Some(now),
                     })
                 })
                 .collect(),
@@ -1133,8 +1177,15 @@ impl OndinApp {
     }
 
     /// The rows under `display: flex` — the mockup's order: direction and wrap,
-    /// the three alignments, the gaps, the padding.
-    fn flex_rows(&mut self, ui: &mut egui::Ui, subjects: &[NodeId], flexes: &[Flex]) {
+    /// the three alignments, the gaps, the padding. `laid` is every subject's
+    /// layout, for the rows flex shares with grid.
+    fn flex_rows(
+        &mut self,
+        ui: &mut egui::Ui,
+        subjects: &[NodeId],
+        flexes: &[Flex],
+        laid: &[Display],
+    ) {
         let Some(&first) = flexes.first() else {
             return;
         };
@@ -1260,30 +1311,50 @@ impl OndinApp {
         // --- the gaps: between items first ------------------------------------
         // **The first field is always the gap between items** — `column-gap` in a
         // row, `row-gap` in a column — and a selection that disagrees about
-        // direction reads in row order (the mockup's two rules).
+        // direction reads in row order (the mockup's two rules). Between lines
+        // means nothing on one line.
         let column = direction.is_some_and(|d| !d.is_row());
+        self.gap_row(ui, subjects, laid, !column, wraps, full);
+
+        // --- the padding ------------------------------------------------------
+        self.padding_rows(ui, subjects, laid, full);
+    }
+
+    /// The two gaps, side by side — `column-gap` first when `column_first`, and
+    /// the second field dimmed unless `second_live`. Flex puts the gap between its
+    /// items first and dims the one between lines on one line; grid shows both,
+    /// columns first (§15 D920).
+    fn gap_row(
+        &mut self,
+        ui: &mut egui::Ui,
+        subjects: &[NodeId],
+        laid: &[Display],
+        column_first: bool,
+        second_live: bool,
+        full: f32,
+    ) {
+        let Some(first) = laid.first() else {
+            return;
+        };
+        let gap = ui::CARD_COL_GAP;
         let half = egui::vec2((full - gap) / 2.0, ui::CONTROL_H);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
-            for between_items in [true, false] {
-                let is_column_gap = between_items != column;
+            for is_first in [true, false] {
+                let is_column_gap = is_first == column_first;
                 let (glyph, word) = if is_column_gap {
                     (icon::ARROWS_OUT_LINE_HORIZONTAL, "Column gap")
                 } else {
                     (icon::ARROWS_OUT_LINE_VERTICAL, "Row gap")
                 };
-                let get = |f: &Flex| {
-                    if is_column_gap {
-                        f.column_gap
-                    } else {
-                        f.row_gap
-                    }
+                let get = |d: &Display| {
+                    let (c, r) = d.gaps();
+                    if is_column_gap { c } else { r }
                 };
-                let shown = shared(flexes, get);
-                // Between lines means nothing on one line.
-                let live = between_items || wraps;
+                let shown = shared(laid, get);
+                let live = is_first || second_live;
                 ui::disable_unless(ui, live, |ui| {
-                    let mut v = shown.unwrap_or_else(|| get(&first));
+                    let mut v = shown.unwrap_or_else(|| get(first));
                     let start = v;
                     let (resp, _) = ui::value_field_suffixed(
                         ui,
@@ -1301,37 +1372,39 @@ impl OndinApp {
                     let tx = if !edited(&resp, v != start) {
                         Transaction(Vec::new())
                     } else {
-                        self.flex_tx(subjects, |f| {
-                            if is_column_gap {
-                                f.column_gap = v.max(0.0);
-                            } else {
-                                f.row_gap = v.max(0.0);
-                            }
+                        self.display_tx(subjects, |d| {
+                            let (c, r) = d.gaps_mut();
+                            *(if is_column_gap { c } else { r }) = v.max(0.0);
                         })
                     };
                     self.edit_valve(&resp, tx);
                 });
             }
         });
-
-        // --- the padding ------------------------------------------------------
-        self.padding_rows(ui, subjects, flexes, full);
     }
 
     /// Padding: left-and-right and top-and-bottom as two fields, opening to the
     /// four sides — L R over T B, the Position card's order — with the button at
     /// the end of the row. **Open by itself whenever two opposite sides differ**, so
-    /// the two fields never have to stand for a pair they do not describe.
-    fn padding_rows(&mut self, ui: &mut egui::Ui, subjects: &[NodeId], flexes: &[Flex], full: f32) {
+    /// the two fields never have to stand for a pair they do not describe. Either
+    /// layout's (§15 D920).
+    fn padding_rows(
+        &mut self,
+        ui: &mut egui::Ui,
+        subjects: &[NodeId],
+        laid: &[Display],
+        full: f32,
+    ) {
+        let paddings: Vec<[f64; 4]> = laid.iter().map(Display::padding).collect();
         const TOP: usize = 0;
         const RIGHT: usize = 1;
         const BOTTOM: usize = 2;
         const LEFT: usize = 3;
         let gap = ui::CARD_COL_GAP;
         let side = ui::CONTROL_H;
-        let uneven = flexes
+        let uneven = paddings
             .iter()
-            .any(|f| f.padding[LEFT] != f.padding[RIGHT] || f.padding[TOP] != f.padding[BOTTOM]);
+            .any(|p| p[LEFT] != p[RIGHT] || p[TOP] != p[BOTTOM]);
         let key = egui::Id::new(("flex-padding-sides", subjects.first().copied()));
         let asked = ui.ctx().data(|d| d.get_temp::<bool>(key).unwrap_or(false));
         let open = asked || uneven;
@@ -1350,11 +1423,11 @@ impl OndinApp {
                     "Top and bottom padding",
                 ),
             ] {
-                let shown = shared(flexes, |f| {
-                    (f.padding[sides[0]] == f.padding[sides[1]]).then_some(f.padding[sides[0]])
+                let shown = shared(&paddings, |p| {
+                    (p[sides[0]] == p[sides[1]]).then_some(p[sides[0]])
                 })
                 .flatten();
-                let mut v = shown.unwrap_or(first_or_zero(flexes, sides[0]));
+                let mut v = shown.unwrap_or(first_or_zero(&paddings, sides[0]));
                 let start = v;
                 let resp = ui::value_field(
                     ui,
@@ -1368,9 +1441,9 @@ impl OndinApp {
                 let tx = if !edited(&resp, v != start) {
                     Transaction(Vec::new())
                 } else {
-                    self.flex_tx(subjects, |f| {
+                    self.display_tx(subjects, |d| {
                         for s in sides {
-                            f.padding[s] = v.max(0.0);
+                            d.padding_mut()[s] = v.max(0.0);
                         }
                     })
                 };
@@ -1403,8 +1476,8 @@ impl OndinApp {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = gap;
                 for (s, letter) in pair {
-                    let shown = shared(flexes, |f| f.padding[s]);
-                    let mut v = shown.unwrap_or(first_or_zero(flexes, s));
+                    let shown = shared(&paddings, |p| p[s]);
+                    let mut v = shown.unwrap_or(first_or_zero(&paddings, s));
                     let start = v;
                     let resp = ui::value_field(
                         ui,
@@ -1417,7 +1490,7 @@ impl OndinApp {
                     let tx = if !edited(&resp, v != start) {
                         Transaction(Vec::new())
                     } else {
-                        self.flex_tx(subjects, |f| f.padding[s] = v.max(0.0))
+                        self.display_tx(subjects, |d| d.padding_mut()[s] = v.max(0.0))
                     };
                     self.edit_valve(&resp, tx);
                 }
@@ -1594,9 +1667,10 @@ impl OndinApp {
         )
     }
 
-    /// The flowing subjects' rows: grow and shrink, basis, `align-self`, and the
-    /// four limits behind a disclosure — with the receipt of a resize that changed
-    /// any of them (§15 D880).
+    /// The flowing subjects' rows: grow and shrink, basis and `align-self` in a
+    /// flex container, or the lines and both self-alignments in a grid (§15
+    /// D920); the four limits behind a disclosure; and the receipt of a resize
+    /// that changed any of them (§15 D880).
     fn item_rows(&mut self, ui: &mut egui::Ui, subjects: &[NodeId]) {
         let items: Vec<LayoutItem> = subjects
             .iter()
@@ -1606,15 +1680,18 @@ impl OndinApp {
             return;
         };
         let full = ui.available_width();
-        let gap = ui::CARD_COL_GAP;
         let parent = self.session.doc.get(subjects[0]).and_then(|n| n.parent());
-        let parent_flex = parent
+        let parent_display = parent
             .and_then(|p| self.session.display_node(p))
-            .and_then(|n| match n.display() {
-                Some(Display::Flex(f)) => Some(f),
-                _ => None,
-            })
-            .unwrap_or_default();
+            .and_then(|n| n.display());
+        let parent_flex = match &parent_display {
+            Some(Display::Flex(f)) => *f,
+            _ => Flex::default(),
+        };
+        let parent_grid = match parent_display {
+            Some(Display::Grid(g)) => Some(g),
+            _ => None,
+        };
         // What the last resize flipped, for the subjects in hand.
         let receipt: Vec<(LayoutItem, LayoutItem)> = self
             .session
@@ -1630,6 +1707,121 @@ impl OndinApp {
         let flipped_grow = receipt.iter().any(|(w, n)| w.grow != n.grow);
         let flipped_shrink = receipt.iter().any(|(w, n)| w.shrink != n.shrink);
         let flipped_align = receipt.iter().any(|(w, n)| w.align_self != n.align_self);
+        let flipped_justify = receipt
+            .iter()
+            .any(|(w, n)| w.justify_self != n.justify_self);
+
+        // The first subject's drawn box, which a mode picked from a unit converts.
+        let drawn = self.session.preview_local_box(subjects[0]);
+
+        // **A grid item has its lines and its two self-alignments where a flex
+        // item has grow, shrink, basis and `align-self`** (§15 D920); the limits
+        // and the receipt below are both layouts'.
+        if let Some(grid) = &parent_grid {
+            self.grid_item_rows(ui, subjects, &items, grid, full);
+        } else {
+            self.flex_item_rows(
+                ui,
+                subjects,
+                &items,
+                &parent_flex,
+                parent,
+                drawn,
+                [flipped_grow, flipped_shrink, flipped_align],
+            );
+        }
+
+        // --- min / max ----------------------------------------------------------
+        self.limit_rows(ui, subjects, &items, first, parent, drawn, full);
+
+        // --- the receipt --------------------------------------------------------
+        if let Some((_, now)) = receipt.first() {
+            let mut said = Vec::new();
+            if flipped_grow {
+                said.push(format!("flex grow to {}", ui::number(2)(now.grow, 0..=2)));
+            }
+            if flipped_shrink {
+                said.push(format!(
+                    "flex shrink to {}",
+                    ui::number(2)(now.shrink, 0..=2)
+                ));
+            }
+            // Mid-sentence, so lower-cased back from the menu's sentence case —
+            // grid's names for a grid item (§15 D920).
+            let name = |a: AlignItems| match (&parent_grid, a) {
+                (Some(_), AlignItems::Start) => "start",
+                (Some(_), AlignItems::End) => "end",
+                _ => align_name(a),
+            };
+            if flipped_justify && let Some(a) = now.justify_self {
+                said.push(format!("justify self to {}", name(a).to_lowercase()));
+            }
+            if flipped_align && let Some(a) = now.align_self {
+                said.push(format!("align self to {}", name(a).to_lowercase()));
+            }
+            let list = match said.len() {
+                0 => return,
+                1 => said[0].clone(),
+                n => format!("{} and {}", said[..n - 1].join(", "), said[n - 1]),
+            };
+            let mut undo = false;
+            egui::Frame::new()
+                .fill(color::ACCENT.gamma_multiply(0.14))
+                .corner_radius(egui::CornerRadius::same(ui::BUTTON_R))
+                .inner_margin(egui::Margin::same(8))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(format!("Resizing set {list}."))
+                                    .size(11.0)
+                                    .color(theme::text::STRONG),
+                            )
+                            .wrap(),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                            undo = ui
+                                .add(
+                                    egui::Label::new(
+                                        egui::RichText::new("Undo")
+                                            .size(11.0)
+                                            .color(color::ACCENT_300),
+                                    )
+                                    .sense(egui::Sense::click()),
+                                )
+                                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                .on_hover_text("Undo the resize — the flips are what made it hold")
+                                .clicked();
+                        });
+                    });
+                });
+            if undo {
+                self.undo();
+            }
+        }
+    }
+
+    /// A flex item's rows: grow and shrink, basis and `align-self` (§15 D878),
+    /// each accented while the last resize's receipt names it (§15 D880) —
+    /// `flipped` is grow, shrink, align.
+    #[allow(clippy::too_many_arguments)]
+    fn flex_item_rows(
+        &mut self,
+        ui: &mut egui::Ui,
+        subjects: &[NodeId],
+        items: &[LayoutItem],
+        parent_flex: &Flex,
+        parent: Option<NodeId>,
+        drawn: Option<ondin_core::kurbo::Rect>,
+        flipped: [bool; 3],
+    ) {
+        let [flipped_grow, flipped_shrink, flipped_align] = flipped;
+        let Some(&first) = items.first() else {
+            return;
+        };
+        let full = ui.available_width();
+        let gap = ui::CARD_COL_GAP;
         let accent = |ui: &egui::Ui, rect: egui::Rect, on: bool| {
             if on {
                 ui.painter().rect_stroke(
@@ -1650,7 +1842,7 @@ impl OndinApp {
                 ("Flex shrink", false, flipped_shrink),
             ] {
                 let get = |i: &LayoutItem| if is_grow { i.grow } else { i.shrink };
-                let shown = shared(&items, get);
+                let shown = shared(items, get);
                 let mut v = shown.unwrap_or_else(|| get(&first));
                 let start = v;
                 let at = egui::Rect::from_min_size(ui.cursor().min, half);
@@ -1679,15 +1871,13 @@ impl OndinApp {
         });
 
         // --- basis ------------------------------------------------------------
-        // The first subject's drawn box, which a mode picked from a unit converts.
-        let drawn = self.session.preview_local_box(subjects[0]);
         let row = parent_flex.direction.is_row();
         let main = drawn.map(|b| if row { b.width() } else { b.height() });
         let main_extent = parent.and_then(|p| self.content_extent(p, row));
         self.dimension_row(
             ui,
             subjects,
-            &items,
+            items,
             "Flex basis",
             full,
             |i| i.basis,
@@ -1704,11 +1894,11 @@ impl OndinApp {
             "flex-align-self",
             "Align self",
             full,
-            shared(&items, |i| i.align_self),
+            shared(items, |i| i.align_self),
             &ALIGN,
             align_name,
             Glyph::Align,
-            |g| Orient::of(g, &parent_flex),
+            |g| Orient::of(g, parent_flex),
             Some(parent_flex.align_items),
             true,
             None,
@@ -1717,8 +1907,21 @@ impl OndinApp {
             self.commit_edit(tx);
         }
         accent(ui, at, flipped_align);
+    }
 
-        // --- min / max ----------------------------------------------------------
+    /// The four size limits behind their disclosure — either layout's item
+    /// (§15 D878, D920).
+    #[allow(clippy::too_many_arguments)]
+    fn limit_rows(
+        &mut self,
+        ui: &mut egui::Ui,
+        subjects: &[NodeId],
+        items: &[LayoutItem],
+        first: LayoutItem,
+        parent: Option<NodeId>,
+        drawn: Option<ondin_core::kurbo::Rect>,
+        full: f32,
+    ) {
         let set = [
             first.min_width,
             first.max_width,
@@ -1787,7 +1990,7 @@ impl OndinApp {
                 self.dimension_row(
                     ui,
                     subjects,
-                    &items,
+                    items,
                     label,
                     full,
                     get,
@@ -1796,64 +1999,6 @@ impl OndinApp {
                     extent,
                     &[SizeMode::Auto, SizeMode::Px, SizeMode::Percent],
                 );
-            }
-        }
-
-        // --- the receipt --------------------------------------------------------
-        if let Some((_, now)) = receipt.first() {
-            let mut said = Vec::new();
-            if flipped_grow {
-                said.push(format!("flex grow to {}", ui::number(2)(now.grow, 0..=2)));
-            }
-            if flipped_shrink {
-                said.push(format!(
-                    "flex shrink to {}",
-                    ui::number(2)(now.shrink, 0..=2)
-                ));
-            }
-            // Mid-sentence, so lower-cased back from the menu's sentence case.
-            if flipped_align && let Some(a) = now.align_self {
-                said.push(format!("align self to {}", align_name(a).to_lowercase()));
-            }
-            let list = match said.len() {
-                0 => return,
-                1 => said[0].clone(),
-                n => format!("{} and {}", said[..n - 1].join(", "), said[n - 1]),
-            };
-            let mut undo = false;
-            egui::Frame::new()
-                .fill(color::ACCENT.gamma_multiply(0.14))
-                .corner_radius(egui::CornerRadius::same(ui::BUTTON_R))
-                .inner_margin(egui::Margin::same(8))
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(format!("Resizing set {list}."))
-                                    .size(11.0)
-                                    .color(theme::text::STRONG),
-                            )
-                            .wrap(),
-                        );
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                            undo = ui
-                                .add(
-                                    egui::Label::new(
-                                        egui::RichText::new("Undo")
-                                            .size(11.0)
-                                            .color(color::ACCENT_300),
-                                    )
-                                    .sense(egui::Sense::click()),
-                                )
-                                .on_hover_cursor(egui::CursorIcon::PointingHand)
-                                .on_hover_text("Undo the resize — the flips are what made it hold")
-                                .clicked();
-                        });
-                    });
-                });
-            if undo {
-                self.undo();
             }
         }
     }
@@ -2008,8 +2153,8 @@ type Limit = (
 );
 
 /// `first`'s padding on `side`, or zero — the fallback a mixed field starts from.
-fn first_or_zero(flexes: &[Flex], side: usize) -> f64 {
-    flexes.first().map_or(0.0, |f| f.padding[side])
+fn first_or_zero(paddings: &[[f64; 4]], side: usize) -> f64 {
+    paddings.first().map_or(0.0, |p| p[side])
 }
 
 /// "Pinned to its container's top and right edges" — which of a layer's edges
@@ -2295,7 +2440,7 @@ mod tests {
         );
         assert_eq!(a0.x0, 20.0, "and lays out");
 
-        s.app.set_display(&[s.frame], false);
+        s.app.set_display(&[s.frame], 0);
         assert!(s.app.session.doc.get(s.frame).unwrap().display().is_none());
         assert_eq!(drawn(&s.app, s.a), a0, "a stayed where it was drawn");
         assert_eq!(drawn(&s.app, s.b), b0, "and b");
@@ -2870,7 +3015,179 @@ mod tests {
             },
         }]));
         draw(&mut s.app, vec![s.a]);
-        s.app.set_display(&[s.frame], false);
+        s.app.set_display(&[s.frame], 0);
         draw(&mut s.app, vec![s.frame]);
+    }
+
+    // --- grid's rows (§15 D920) -------------------------------------------------
+
+    /// [`scene`] with the frame's row turned into a grid of `100px 1fr` columns —
+    /// its gap 10 and padding 20 kept, as picking *Grid* keeps them.
+    fn grid_scene() -> Scene {
+        let mut s = scene();
+        s.app.set_display(&[s.frame], 2);
+        let Some(Display::Grid(g)) = s.app.session.doc.get(s.frame).unwrap().display().cloned()
+        else {
+            panic!("the fixture's grid");
+        };
+        let columns = ondin_core::container::parse_tracks("100px 1fr").unwrap();
+        s.app
+            .session
+            .commit(Transaction(vec![Operation::SetDisplay {
+                id: s.frame,
+                display: Some(Display::Grid(Grid { columns, ..g })),
+            }]));
+        s
+    }
+
+    fn press(at: egui::Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        }
+    }
+
+    fn key(key: egui::Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        }
+    }
+
+    impl Panel {
+        /// A click at `at`, and a frame to let it land.
+        fn click(&mut self, at: egui::Pos2) {
+            self.frame(vec![egui::Event::PointerMoved(at), press(at, true)]);
+            self.frame(vec![press(at, false)]);
+            self.frame(Vec::new());
+        }
+
+        /// Focus the field whose text reads `shown`, type `text` over it (a field
+        /// selects all on focus) and leave by `leave`.
+        fn retype(&mut self, shown: &str, text: &str, leave: egui::Key) {
+            let at = self.run(shown);
+            self.click(at);
+            self.frame(vec![egui::Event::Text(text.into())]);
+            self.frame(vec![key(leave)]);
+            for _ in 0..2 {
+                self.frame(Vec::new());
+            }
+        }
+    }
+
+    fn grid_of(app: &OndinApp, id: NodeId) -> Grid {
+        match app.session.doc.get(id).unwrap().display() {
+            Some(Display::Grid(g)) => g.clone(),
+            other => panic!("not a grid: {other:?}"),
+        }
+    }
+
+    /// **Picking *Grid* lays the frame out as a grid and keeps what the two share**
+    /// (§15 D920): the padding and the gaps travel from the flex row, and nothing
+    /// else — the tracks start empty, CSS's `none`. Driven through the display
+    /// row's cell, which was disabled until the grid step.
+    ///
+    /// **Flip run**, `set_display`'s `kept` returning the fresh layout untouched:
+    /// fails on *"the padding travelled"* at 0, the predicted site.
+    #[test]
+    fn picking_grid_keeps_the_padding_and_the_gaps() {
+        let s = scene();
+        let frame_id = s.frame;
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        p.app.session.selection.set(vec![frame_id]);
+        let at = p.run("Grid");
+        p.click(at);
+        let g = grid_of(&p.app, frame_id);
+        assert_eq!(g.padding, [20.0; 4], "the padding travelled");
+        assert_eq!(g.column_gap, 10.0, "and the gap");
+        assert!(g.columns.is_empty() && g.rows.is_empty(), "no tracks yet");
+    }
+
+    /// **The column list's `+` adds a `1fr` track, the cross removes one, and its
+    /// count says how many tracks the list makes** — `100px 1fr` reads *2 tracks*,
+    /// grows to `100px 1fr 1fr`, and loses its first to `1fr 1fr`.
+    #[test]
+    fn a_track_is_added_with_the_plus_and_removed_with_the_cross() {
+        let s = grid_scene();
+        let frame_id = s.frame;
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        p.app.session.selection.set(vec![frame_id]);
+        p.run("2 tracks");
+        // The first `+` is the columns' — their head is above the rows'.
+        let at = p.run(icon::PLUS);
+        p.click(at);
+        let css =
+            |app: &OndinApp| ondin_core::container::tracks_css(&grid_of(app, frame_id).columns);
+        assert_eq!(css(&p.app), "100px 1fr 1fr");
+        let at = p.run(icon::X);
+        p.click(at);
+        assert_eq!(css(&p.app), "1fr 1fr", "the first entry's cross");
+    }
+
+    /// **The CSS line applies on Enter and never on Escape** (`ui::defocus_commits`,
+    /// §15 D841): `100px 1fr` retyped `200px repeat(2, 1fr)` and Enter lands as the
+    /// list; retyped `50px` and Escape leaves it; retyped `100` — no unit — is
+    /// refused with its reason under the field, and the list stays.
+    ///
+    /// **Flip run**, `css_field` committing on a bare `lost_focus()`: fails on
+    /// *"Escape abandons it"* with `50px` landed, the predicted site.
+    #[test]
+    fn the_css_line_applies_on_enter_and_never_on_escape() {
+        let s = grid_scene();
+        let frame_id = s.frame;
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        p.app.session.selection.set(vec![frame_id]);
+        let css =
+            |app: &OndinApp| ondin_core::container::tracks_css(&grid_of(app, frame_id).columns);
+        p.retype("100px 1fr", "200px repeat(2, 1fr)", egui::Key::Enter);
+        assert_eq!(css(&p.app), "200px repeat(2, 1fr)", "Enter applies it");
+        p.retype("200px repeat(2, 1fr)", "50px", egui::Key::Escape);
+        assert_eq!(css(&p.app), "200px repeat(2, 1fr)", "Escape abandons it");
+        let depth = p.app.session.history.undo_depth();
+        p.retype("200px repeat(2, 1fr)", "100", egui::Key::Enter);
+        assert_eq!(css(&p.app), "200px repeat(2, 1fr)", "a bad list is refused");
+        assert_eq!(p.app.session.history.undo_depth(), depth, "with no step");
+        p.run("100 needs a unit: px, % or fr");
+    }
+
+    /// **A grid item's card has its lines and self-alignments where a flex item's
+    /// has grow, shrink and basis** (§15 D920), and **a line is typed as CSS**:
+    /// `a`'s column start retyped `2` and its end `span 2` land as
+    /// `2 / span 2`.
+    #[test]
+    fn a_grid_items_lines_are_typed_as_css() {
+        let s = grid_scene();
+        let a = s.a;
+        let mut p = Panel::new(s.app, OndinApp::inspector_item);
+        p.app.session.selection.set(vec![a]);
+        p.run("Grid column");
+        // A glyph combo's label and face are one galley; `auto` reads what the
+        // container's items row resolves to, `normal` (§15 D915).
+        p.run("Justify selfAuto · Normal");
+        let out = p.frame(Vec::new());
+        assert!(
+            !out.shapes.iter().any(|cs| matches!(
+                &cs.shape,
+                egui::epaint::Shape::Text(t) if t.galley.text() == "Flex grow"
+            )),
+            "no flex rows in a grid"
+        );
+        // Four fields read `auto`; the first is the column's start.
+        p.retype("auto", "2", egui::Key::Enter);
+        let start = p.app.session.doc.get(a).unwrap().item().grid_column.start;
+        assert_eq!(start, ondin_core::container::GridPlacement::Line(2));
+        // The column's end is now the first `auto` left.
+        p.retype("auto", "span 2", egui::Key::Enter);
+        let lines = p.app.session.doc.get(a).unwrap().item().grid_column;
+        assert_eq!(
+            lines.end,
+            ondin_core::container::GridPlacement::Span(2),
+            "{lines:?}"
+        );
     }
 }

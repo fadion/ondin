@@ -324,6 +324,9 @@ pub fn flexed_text(kind: &NodeKind, size: Size) -> NodeKind {
         k
     };
     match sizing {
+        // `local_bounds` answers for every text kind (`TextRef::of` refuses only
+        // a kind that is not text), so the floor below always applies; the
+        // fallback is the size whole and is unreachable.
         TextSizing::Auto => match geometry::local_bounds(kind, None) {
             Some(b) if near(b.width(), size.width) && near(b.height(), size.height) => kind.clone(),
             // 🚨 **Never narrower than its line** (§15 D917): a stretch can hand an
@@ -732,9 +735,33 @@ impl Grid {
     /// stored** and saved back as written. §15 D492's asymmetry (refused at the
     /// operation, not at the door) without its repair: D492's loader drops a bad
     /// export spec, and nothing here is rewritten at load.
+    ///
+    /// **And no more than [`MAX_TRACKS`] explicit tracks on an axis** (§15 D919).
     pub fn is_valid(&self) -> bool {
         self.columns.iter().chain(&self.rows).all(Track::is_valid)
+            && track_count(&self.columns) <= MAX_TRACKS
+            && track_count(&self.rows) <= MAX_TRACKS
     }
+}
+
+/// The most explicit tracks a template makes on one axis (§15 D919). CSS lets a
+/// user agent clamp an overly large grid (*"Clamping Overly Large Grids"*), and
+/// browsers do; a thousand is far past any layout drawn by hand and far short of
+/// what a `repeat(65535, …)` — the most a `u16` count asks for — times a few
+/// entries would make taffy allocate. The operation refuses a template over it;
+/// a file's is laid to it ([`template`]).
+pub const MAX_TRACKS: usize = 1000;
+
+/// How many explicit tracks `tracks` makes, saturating — a repeat counts its
+/// tracks `repeat` times. The Container card's *N tracks*.
+pub fn track_count(tracks: &[Track]) -> usize {
+    tracks
+        .iter()
+        .map(|t| match t {
+            Track::Size(_) => 1,
+            Track::Repeat { repeat, tracks } => usize::from(*repeat).saturating_mul(tracks.len()),
+        })
+        .fold(0usize, usize::saturating_add)
 }
 
 /// One end of an item's `grid-column` or `grid-row`: `auto`, a line number, or
@@ -773,6 +800,250 @@ impl GridLines {
     }
 }
 
+// --- grid values as CSS text (§15 D920) -------------------------------------
+//
+// The Container card's track list has an editable CSS line under it, for pasting
+// a template from a browser's inspector, and the Item card's lines are typed as
+// CSS writes them. The text is CSS's own, so what is pasted in is what a browser
+// would read; the parser is small because the property set is (§5.3c): lengths,
+// percentages, `fr`, the three keywords, `minmax()` and `repeat(n, …)`. It does
+// not validate — [`Grid::is_valid`] is the one judge, at the operation — so a
+// parse that succeeds can still be refused.
+
+/// A number as CSS writes it: no trailing zeros, no trailing point, at most four
+/// decimals (the 1/64 grid needs six, and nothing typed needs more than four).
+fn css_number(v: f64) -> String {
+    let s = format!("{v:.4}");
+    let s = s.trim_end_matches('0').trim_end_matches('.');
+    if s == "-0" { "0".into() } else { s.into() }
+}
+
+fn breadth_css(b: TrackBreadth) -> String {
+    match b {
+        TrackBreadth::Px(v) => format!("{}px", css_number(v)),
+        TrackBreadth::Percent(v) => format!("{}%", css_number(v)),
+        TrackBreadth::Fr(v) => format!("{}fr", css_number(v)),
+        TrackBreadth::Auto => "auto".into(),
+        TrackBreadth::MinContent => "min-content".into(),
+        TrackBreadth::MaxContent => "max-content".into(),
+    }
+}
+
+/// One track size as CSS text — `100px`, `minmax(100px, 2fr)`.
+pub fn track_size_css(s: TrackSize) -> String {
+    match s {
+        TrackSize::Breadth(b) => breadth_css(b),
+        TrackSize::MinMax { min, max } => {
+            format!("minmax({}, {})", breadth_css(min), breadth_css(max))
+        }
+    }
+}
+
+/// A track list as CSS writes `grid-template-columns` — `200px 1fr repeat(3,
+/// auto)`, and `none` for an empty one.
+pub fn tracks_css(tracks: &[Track]) -> String {
+    if tracks.is_empty() {
+        return "none".into();
+    }
+    tracks
+        .iter()
+        .map(|t| match t {
+            Track::Size(s) => track_size_css(*s),
+            Track::Repeat { repeat, tracks } => format!(
+                "repeat({repeat}, {})",
+                tracks
+                    .iter()
+                    .map(|s| track_size_css(*s))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// A track list from CSS text, the inverse of [`tracks_css`]: whitespace-
+/// separated sizes, `minmax(min, max)` and `repeat(n, sizes…)`, keywords in any
+/// case, and a unitless `0` for `0px` as CSS allows. `none` or nothing is the
+/// empty list. The error names what could not be read.
+pub fn parse_tracks(text: &str) -> Result<Vec<Track>, String> {
+    let mut p = CssText::new(text);
+    if p.rest().eq_ignore_ascii_case("none") || p.rest().is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    while !p.done() {
+        if p.eat_word("repeat(") {
+            let count = p.integer()?;
+            let repeat = u16::try_from(count).map_err(|_| format!("repeat count {count}"))?;
+            p.expect(',')?;
+            let mut tracks = Vec::new();
+            while !p.eat(')') {
+                if p.done() {
+                    return Err("repeat( is not closed".into());
+                }
+                tracks.push(p.size()?);
+            }
+            out.push(Track::Repeat { repeat, tracks });
+        } else {
+            out.push(Track::Size(p.size()?));
+        }
+    }
+    Ok(out)
+}
+
+/// One end of `grid-column`/`grid-row` as CSS text — `auto`, `2`, `-1`, `span 2`.
+pub fn placement_css(p: GridPlacement) -> String {
+    match p {
+        GridPlacement::Auto => "auto".into(),
+        GridPlacement::Line(n) => n.to_string(),
+        GridPlacement::Span(n) => format!("span {n}"),
+    }
+}
+
+/// One end of `grid-column`/`grid-row` from CSS text, the inverse of
+/// [`placement_css`]. `None` for anything else — line 0 and `span 0` included,
+/// which CSS refuses.
+pub fn parse_placement(text: &str) -> Option<GridPlacement> {
+    let t = text.trim();
+    if t.eq_ignore_ascii_case("auto") {
+        return Some(GridPlacement::Auto);
+    }
+    if let Some(n) = t
+        .get(..4)
+        .filter(|w| w.eq_ignore_ascii_case("span"))
+        .map(|_| t[4..].trim())
+    {
+        return n
+            .parse::<u16>()
+            .ok()
+            .filter(|n| *n != 0)
+            .map(GridPlacement::Span);
+    }
+    t.parse::<i16>()
+        .ok()
+        .filter(|n| *n != 0)
+        .map(GridPlacement::Line)
+}
+
+/// A cursor over CSS text for [`parse_tracks`] — whitespace skipped before every
+/// token.
+struct CssText<'a> {
+    rest: &'a str,
+}
+
+impl<'a> CssText<'a> {
+    fn new(text: &'a str) -> Self {
+        CssText { rest: text.trim() }
+    }
+
+    fn rest(&self) -> &'a str {
+        self.rest
+    }
+
+    fn skip(&mut self) {
+        self.rest = self.rest.trim_start();
+    }
+
+    fn done(&mut self) -> bool {
+        self.skip();
+        self.rest.is_empty()
+    }
+
+    fn eat(&mut self, c: char) -> bool {
+        self.skip();
+        match self.rest.strip_prefix(c) {
+            Some(r) => {
+                self.rest = r;
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn expect(&mut self, c: char) -> Result<(), String> {
+        if self.eat(c) {
+            Ok(())
+        } else {
+            Err(format!("expected '{c}' at \"{}\"", self.rest))
+        }
+    }
+
+    /// `word`, case-insensitively, if the text starts with it.
+    fn eat_word(&mut self, word: &str) -> bool {
+        self.skip();
+        match self.rest.get(..word.len()) {
+            Some(w) if w.eq_ignore_ascii_case(word) => {
+                self.rest = &self.rest[word.len()..];
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn number(&mut self) -> Result<f64, String> {
+        self.skip();
+        let end = self
+            .rest
+            .char_indices()
+            .find(|(i, c)| {
+                !(c.is_ascii_digit() || *c == '.' || (*i == 0 && (*c == '-' || *c == '+')))
+            })
+            .map_or(self.rest.len(), |(i, _)| i);
+        let (n, r) = self.rest.split_at(end);
+        let v = n
+            .parse::<f64>()
+            .map_err(|_| format!("expected a number at \"{}\"", self.rest))?;
+        self.rest = r;
+        Ok(v)
+    }
+
+    fn integer(&mut self) -> Result<i64, String> {
+        let v = self.number()?;
+        if v.fract() == 0.0 {
+            Ok(v as i64)
+        } else {
+            Err(format!("repeat count {v} is not whole"))
+        }
+    }
+
+    fn breadth(&mut self) -> Result<TrackBreadth, String> {
+        for (word, b) in [
+            ("min-content", TrackBreadth::MinContent),
+            ("max-content", TrackBreadth::MaxContent),
+            ("auto", TrackBreadth::Auto),
+        ] {
+            if self.eat_word(word) {
+                return Ok(b);
+            }
+        }
+        let v = self.number()?;
+        if self.eat_word("px") {
+            Ok(TrackBreadth::Px(v))
+        } else if self.eat_word("fr") {
+            Ok(TrackBreadth::Fr(v))
+        } else if self.eat('%') {
+            Ok(TrackBreadth::Percent(v))
+        } else if v == 0.0 {
+            Ok(TrackBreadth::Px(0.0))
+        } else {
+            Err(format!("{} needs a unit: px, % or fr", css_number(v)))
+        }
+    }
+
+    fn size(&mut self) -> Result<TrackSize, String> {
+        if self.eat_word("minmax(") {
+            let min = self.breadth()?;
+            self.expect(',')?;
+            let max = self.breadth()?;
+            self.expect(')')?;
+            Ok(TrackSize::MinMax { min, max })
+        } else {
+            Ok(TrackSize::Breadth(self.breadth()?))
+        }
+    }
+}
+
 /// How a container lays out its children — CSS `display`. **`None` on the node
 /// is not CSS's `display: none`** (which hides): it is a container with no layout
 /// of its own, whose children are placed by their transforms and insets, which is
@@ -807,6 +1078,31 @@ impl Display {
         match self {
             Display::Flex(f) => f.padding,
             Display::Grid(g) => g.padding,
+        }
+    }
+
+    /// Either layout's padding, to write.
+    pub fn padding_mut(&mut self) -> &mut [f64; 4] {
+        match self {
+            Display::Flex(f) => &mut f.padding,
+            Display::Grid(g) => &mut g.padding,
+        }
+    }
+
+    /// Either layout's `column-gap` and `row-gap`, to write — the two properties
+    /// flex and grid share by name (the Container card's gap row serves both).
+    pub fn gaps_mut(&mut self) -> (&mut f64, &mut f64) {
+        match self {
+            Display::Flex(f) => (&mut f.column_gap, &mut f.row_gap),
+            Display::Grid(g) => (&mut g.column_gap, &mut g.row_gap),
+        }
+    }
+
+    /// `(column-gap, row-gap)`.
+    pub fn gaps(&self) -> (f64, f64) {
+        match self {
+            Display::Flex(f) => (f.column_gap, f.row_gap),
+            Display::Grid(g) => (g.column_gap, g.row_gap),
         }
     }
 }
@@ -1751,22 +2047,37 @@ fn content_alignment(a: AlignContent) -> taffy::AlignContent {
 /// A track list for taffy. **Reads what CSS would refuse without refusing it**
 /// ([`Grid::is_valid`]'s reason — a file can carry one): a negative number is
 /// read as 0, a `minmax()` whose min is `fr` as `auto` at that end, and an empty
-/// or zero-count `repeat()` as nothing.
+/// or zero-count `repeat()` as nothing. **And the list stops at [`MAX_TRACKS`]**
+/// (§15 D919): a repeat that would pass it repeats as many whole times as fit,
+/// and what follows is laid only as far as there is room — a multi-track
+/// repeat can leave a remainder a later single track still fits in.
 fn template(tracks: &[Track]) -> Vec<taffy::GridTemplateComponent<String>> {
-    tracks
-        .iter()
-        .filter_map(|t| match t {
-            Track::Size(s) => Some(taffy::GridTemplateComponent::Single(track_size(*s))),
-            Track::Repeat { repeat, tracks } if *repeat > 0 && !tracks.is_empty() => Some(
-                taffy::GridTemplateComponent::Repeat(taffy::GridTemplateRepetition {
-                    count: taffy::RepetitionCount::Count(*repeat),
-                    tracks: tracks.iter().map(|s| track_size(*s)).collect(),
-                    line_names: Vec::new(),
-                }),
-            ),
-            Track::Repeat { .. } => None,
-        })
-        .collect()
+    let mut room = MAX_TRACKS;
+    let mut out = Vec::new();
+    for t in tracks {
+        match t {
+            Track::Size(s) if room > 0 => {
+                room -= 1;
+                out.push(taffy::GridTemplateComponent::Single(track_size(*s)));
+            }
+            Track::Repeat { repeat, tracks } if *repeat > 0 && !tracks.is_empty() => {
+                let times = usize::from(*repeat).min(room / tracks.len());
+                if times == 0 {
+                    continue;
+                }
+                room -= times * tracks.len();
+                out.push(taffy::GridTemplateComponent::Repeat(
+                    taffy::GridTemplateRepetition {
+                        count: taffy::RepetitionCount::Count(times as u16),
+                        tracks: tracks.iter().map(|s| track_size(*s)).collect(),
+                        line_names: Vec::new(),
+                    },
+                ));
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 /// One track size for taffy — a single breadth `b` is CSS's `minmax(b, b)`, save

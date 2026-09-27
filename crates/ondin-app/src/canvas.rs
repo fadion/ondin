@@ -22914,9 +22914,9 @@ mod flex_canvas_tests {
     //! routing tests §15 D874 and D877 left owed. `ondin-export/tests/insets.rs`
     //! proves render and export draw used geometry; these prove the canvas's own
     //! readers do: a click selects a flex item and a pinned layer where they are
-    //! drawn and not where they are stored, snapping measures their drawn edges,
-    //! and a real drag through `canvas_ui` — press, `update_drag`, release —
-    //! reorders the row.
+    //! drawn and not where they are stored, snapping measures a flex item's drawn
+    //! edges (a pinned layer's are not asserted), and a real drag through
+    //! `canvas_ui` — press, `update_drag`, release — reorders the row.
     //!
     //! Plain backticks throughout, per §15 D319 — a `#[cfg(test)]` module.
 

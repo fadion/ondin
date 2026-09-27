@@ -1270,9 +1270,9 @@ fn a_pinned_child_of_a_laid_group_out_of_the_flow_moves_where_dragged() {
 /// **Several items dragged together reorder as a block, keeping their order**
 /// (§15 D902, `build::flex_reorder_many`) — a row of four 20-wide rects at x 20,
 /// 50, 80 and 110 (padding 20, gap 10). `a` and `c`, not adjacent, dragged right
-/// past `d` land after it as `a, c`: `b, d, a, c`. `c` and `d` dragged left past
-/// `a` land first: `c, d, a, b`. A drag short of any sibling commits nothing, and
-/// items of two containers are not a block.
+/// past `d` land after it as `a, c`: `b, d, a, c`. The same two dragged back left
+/// past `b` land first again: `a, c, b, d`. A drag short of any sibling commits
+/// nothing, and items of two containers are not a block.
 ///
 /// **Flip run**, the ops placing each dragged item at its final index in turn
 /// rather than walking the target order: fails on *"a and c after d, in their

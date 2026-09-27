@@ -9307,7 +9307,7 @@ mod tests {
     /// `keep_flex_sizes`), which is where the defect was: `keep_insets` re-pinned
     /// the child against the group's *committed* box, 60 × 30, while the same edit
     /// doubled it — so the right inset came out as 60 − 100 − 20 = −60 and the child
-    /// was drawn at (260, 170), 60 off its corner on each axis. Measured by this
+    /// was drawn at (260, 170), 60 off its corner across and 30 down. Measured by this
     /// test's first run; unmeasured since §15 D887 recorded the possibility.
     ///
     /// **Flip run**, `keep_insets` measuring a laid group by its committed

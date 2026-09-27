@@ -82,8 +82,11 @@ flo_curves = "=0.8.1"
 # the dependency a review should see bump. It computes in `f32`; results come back
 # through `container::quantize` onto the 1/64 px grid (§15 D873).
 #
-# `grid` since build step 4 (§15 D914), which adds `smallvec` to the deps above.
-taffy = { version = "=0.14.0", default-features = false, features = ["std", "flexbox", "grid"] }
+# `grid` since build step 4 (§15 D914), which adds `smallvec` to the deps above;
+# `detailed_layout_info` with it (§15 D916), for a laid grid's track positions
+# and each item's area — `container::laid_grid`, read by the drop and the canvas's
+# track lines, and reported only for grid containers.
+taffy = { version = "=0.14.0", default-features = false, features = ["std", "flexbox", "grid", "detailed_layout_info"] }
 
 [dev-dependencies]
 # Used by IO tests to synthesize an older-version file for the migration test.

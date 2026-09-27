@@ -3067,3 +3067,191 @@ fn moving_a_shape_inside_a_plain_group_item_previews_the_row_reflowing() {
         "a shape moved inside a plain group item",
     );
 }
+
+/// A 400 × 200 frame at (500, 500) laid out as a grid — columns `100px 1fr 2fr`,
+/// rows `50px 50px`, no gaps — holding four painted 20 × 20 rects under the
+/// default `normal`, so each sits at the start of its cell (§15 D915). Returns
+/// the document, the frame and the four rects.
+fn grid_fixture() -> (Document, NodeId, [NodeId; 4]) {
+    use ondin_core::container::{Display, Grid, Track, TrackBreadth, TrackSize};
+    let mut ids = IdSource::new(0x6D);
+    let root = ids.mint();
+    let frame = ids.mint();
+    let mut doc = Document::new(root);
+    doc.apply(&Transaction(vec![Operation::CreateNode {
+        id: frame,
+        parent: root,
+        index: 0,
+        kind: NodeKind::Artboard {
+            size: Size::new(400.0, 200.0),
+        },
+        transform: Some(Affine::translate((500.0, 500.0))),
+        name: None,
+    }]))
+    .unwrap();
+    let rects = [0; 4].map(|_| {
+        let id = ids.mint();
+        let index = doc.get(frame).unwrap().children().len();
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id,
+                parent: frame,
+                index,
+                kind: NodeKind::Rect {
+                    size: Size::new(20.0, 20.0),
+                    corner_radii: RoundedRectRadii::default(),
+                },
+                transform: Some(Affine::translate((300.0, 150.0))),
+                name: None,
+            },
+            Operation::SetFills {
+                id,
+                fills: vec![Fill {
+                    brush: Brush::Solid(Color::from_rgba8(60, 120, 200, 255)),
+                    visible: true,
+                }],
+            },
+        ]))
+        .unwrap();
+        id
+    });
+    let b = |b: TrackBreadth| Track::Size(TrackSize::Breadth(b));
+    doc.apply(&Transaction(vec![Operation::SetDisplay {
+        id: frame,
+        display: Some(Display::Grid(Grid {
+            columns: vec![
+                b(TrackBreadth::Px(100.0)),
+                b(TrackBreadth::Fr(1.0)),
+                b(TrackBreadth::Fr(2.0)),
+            ],
+            rows: vec![b(TrackBreadth::Px(50.0)), b(TrackBreadth::Px(50.0))],
+            ..Default::default()
+        })),
+    }]))
+    .unwrap();
+    (doc, frame, rects)
+}
+
+/// **A grid previews as it commits** (§15 D916) — a drop writing the first
+/// rect's lines (column 3, row 2), which reflows the three auto-placed ones
+/// around it; the frame resized, which reflows the `fr` columns; a stretched
+/// item resized with the hold its commit adds; and the frame's layout switched
+/// from grid to flex and back. The preview's pass is flex's, and lays a grid
+/// through the same `lay_out` — read, until this, and not tested.
+///
+/// **Flip run**, `PreviewView::item` answering the document's item and not the
+/// preview's: fails on *"a drop writing lines"* — the three siblings drawn where
+/// they were — the predicted site.
+#[test]
+fn a_grid_previews_as_it_commits() {
+    use ondin_core::container::{AlignItems, Display, Flex, GridLines, GridPlacement, LayoutItem};
+    let (doc, frame, [first, second, ..]) = grid_fixture();
+    let placed = LayoutItem {
+        grid_column: GridLines {
+            start: GridPlacement::Line(3),
+            end: GridPlacement::Auto,
+        },
+        grid_row: GridLines {
+            start: GridPlacement::Line(2),
+            end: GridPlacement::Auto,
+        },
+        ..LayoutItem::default()
+    };
+    assert_preview_matches_commit(
+        &doc,
+        &Transaction(vec![Operation::SetLayoutItem {
+            id: first,
+            item: placed,
+        }]),
+        "a drop writing lines",
+    );
+    assert_preview_matches_commit(
+        &doc,
+        &Transaction(vec![Operation::SetGeometry {
+            id: frame,
+            geometry: GeometryPatch::Size(Size::new(700.0, 200.0)),
+        }]),
+        "the frame resized, the fr columns reflowing",
+    );
+    let stretched = LayoutItem {
+        justify_self: Some(AlignItems::Stretch),
+        ..LayoutItem::default()
+    };
+    let mut held = stretched;
+    held.justify_self = Some(AlignItems::Start);
+    let mut doc2 = doc.clone();
+    doc2.apply(&Transaction(vec![Operation::SetLayoutItem {
+        id: second,
+        item: stretched,
+    }]))
+    .unwrap();
+    assert_preview_matches_commit(
+        &doc2,
+        &Transaction(vec![
+            Operation::SetGeometry {
+                id: second,
+                geometry: GeometryPatch::Size(Size::new(60.0, 20.0)),
+            },
+            Operation::SetLayoutItem {
+                id: second,
+                item: held,
+            },
+        ]),
+        "a stretched item resized, with its hold",
+    );
+    let grid = doc.get(frame).unwrap().display().cloned();
+    let mut flexed = doc.clone();
+    flexed
+        .apply(&Transaction(vec![Operation::SetDisplay {
+            id: frame,
+            display: Some(Display::Flex(Flex::default())),
+        }]))
+        .unwrap();
+    assert_preview_matches_commit(
+        &flexed,
+        &Transaction(vec![Operation::SetDisplay {
+            id: frame,
+            display: grid,
+        }]),
+        "flex turned back into the grid",
+    );
+}
+
+/// **A dragged grid item lands in the cell its drop writes** (§15 D916, D877's
+/// indicator in a grid) — the first rect carried off by a translation while its
+/// lines put it in column 3, row 2: in a 400-wide frame, `100px 1fr 2fr` is 100,
+/// 100 and 200, so column 3 starts at x 200 and row 2 at y 50 — world (700, 550),
+/// the rect's own 20 × 20 at the start of the cell.
+#[test]
+fn a_dragged_grid_item_lands_in_its_new_cell() {
+    use ondin_core::container::{GridLines, GridPlacement, LayoutItem};
+    let (doc, _frame, [first, ..]) = grid_fixture();
+    let res = Resolved::rebuild(&doc);
+    let tx = Transaction(vec![
+        Operation::SetTransform {
+            id: first,
+            transform: Affine::translate((900.0, 900.0)),
+        },
+        Operation::SetLayoutItem {
+            id: first,
+            item: LayoutItem {
+                grid_column: GridLines {
+                    start: GridPlacement::Line(3),
+                    end: GridPlacement::Auto,
+                },
+                grid_row: GridLines {
+                    start: GridPlacement::Line(2),
+                    end: GridPlacement::Auto,
+                },
+                ..LayoutItem::default()
+            },
+        },
+    ]);
+    let ov = RenderOverrides::from_transaction(&doc, &res, &tx).expect("representable");
+    let landings = ov.landings();
+    assert_eq!(landings.len(), 1, "one landing");
+    let (id, world, bx) = landings[0];
+    assert_eq!(id, first);
+    assert_eq!(world.translation(), Vec2::new(700.0, 550.0), "its new cell");
+    assert_eq!(bx.size(), Size::new(20.0, 20.0), "its own box");
+}

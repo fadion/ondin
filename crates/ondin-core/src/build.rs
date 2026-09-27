@@ -3713,7 +3713,8 @@ pub fn keep_flex_sizes(doc: &Document, res: &Resolved, tx: Transaction) -> Trans
 }
 
 /// The `SetLayoutItem`s that make `tx`'s resizes hold — [`keep_flex_sizes`]' rules
-/// for growth, `align-self` and size keywords, and nothing else — in id order.
+/// for growth, `align-self` and size keywords, and in a grid both self-alignments
+/// ([`grid_resize_held`], §15 D916), and nothing else — in id order.
 ///
 /// **Split out so the gesture preview can apply them** (§15 D904). The preview
 /// re-lays every flex container a transaction touches (`RenderOverrides`'
@@ -3759,15 +3760,27 @@ pub fn flex_holds(doc: &Document, res: &Resolved, tx: &Transaction) -> Vec<Opera
         let mut item = sized_in_px(item, now.size(), then.size());
         if container::parent_lays_out(&view, *id)
             && container::in_flow(&view, *id)
-            && let Some(Display::Flex(flex)) = view.parent(*id).and_then(|p| view.display(p))
+            && let Some(display) = view.parent(*id).and_then(|p| view.display(p))
         {
             // Where the box was and where the tool wants it, each in the parent's
             // space: its slot, and the transform this edit writes for it — a
             // left- or top-handle resize shifts the origin to hold the far edge.
             let was = res.used_local(doc, *id).unwrap_or(Affine::IDENTITY);
             let to = written_transform(tx, *id).unwrap_or(was);
-            let from_start = resized_from_cross_start(flex, (was, now), (to, then));
-            item = held(flex, item, now.size(), then.size(), from_start);
+            let edges = resized_edges((was, now), (to, then));
+            item = match display {
+                Display::Flex(flex) => {
+                    let from_start = resized_from_cross_start(flex, edges);
+                    held(flex, item, now.size(), then.size(), from_start)
+                }
+                Display::Grid(grid) => grid_resize_held(
+                    grid,
+                    item,
+                    container::is_replaced(&view, *id),
+                    (now.size(), then.size()),
+                    (edges[0].0, edges[1].0),
+                ),
+            };
         }
         items.insert(*id, item);
     }
@@ -3791,9 +3804,8 @@ fn written_transform(tx: &Transaction, id: NodeId) -> Option<Affine> {
 
 /// Whether a resize of an item laid out by `flex` **kept its cross-axis end edge
 /// and moved its start** — a row's item dragged by its top, a column's by its left,
-/// and the other way round under `wrap-reverse` (§15 D905). `was` and `now` are the
-/// item's box in its own space with the local transform placing it, before and
-/// after.
+/// and the other way round under `wrap-reverse` (§15 D905) — read off `edges`,
+/// [`resized_edges`]' physical answer, through the flow.
 ///
 /// This decides between `align-self: flex-start` and `flex-end` when a resize
 /// releases a stretch: the edge the user held is the one the alignment keeps, so the
@@ -3804,26 +3816,83 @@ fn written_transform(tx: &Transaction, id: NodeId) -> Option<Affine> {
 ///
 /// Every other resize answers `false` — from the end edge, or about the centre,
 /// where both edges move and `flex-start` is the rule it always was.
-fn resized_from_cross_start(
-    flex: &crate::container::Flex,
-    was: (Affine, kurbo::Rect),
-    now: (Affine, kurbo::Rect),
-) -> bool {
+fn resized_from_cross_start(flex: &crate::container::Flex, edges: [(bool, bool); 2]) -> bool {
+    let [across, down] = edges;
+    let (low_moved, high_moved) = if flex.direction.is_row() {
+        down
+    } else {
+        across
+    };
+    match flex.wrap {
+        crate::container::FlexWrap::WrapReverse => high_moved,
+        _ => low_moved,
+    }
+}
+
+/// For each physical axis — across, then down — whether a resize **moved the
+/// box's low edge and held its high one** (left or top dragged), and whether it
+/// did the reverse. `was` and `now` are the box in its own space with the local
+/// transform placing it, before and after. About the centre, both edges move and
+/// both answers are `false`.
+///
+/// Flex reads one axis of it, through its flow ([`resized_from_cross_start`]);
+/// grid reads both, physically, having no reversal (§15 D913's second ruling).
+fn resized_edges(was: (Affine, kurbo::Rect), now: (Affine, kurbo::Rect)) -> [(bool, bool); 2] {
     let a = was.0.transform_rect_bbox(was.1);
     let b = now.0.transform_rect_bbox(now.1);
-    let (top_left, bottom_right) = if flex.direction.is_row() {
-        ((a.y0, b.y0), (a.y1, b.y1))
-    } else {
-        ((a.x0, b.x0), (a.x1, b.x1))
-    };
-    let (start, end) = match flex.wrap {
-        crate::container::FlexWrap::WrapReverse => (bottom_right, top_left),
-        _ => (top_left, bottom_right),
-    };
     // A resize holds its anchor through a product of transforms, so "held" means
     // to within rounding, not bit for bit.
-    let held = |(p, q): (f64, f64)| (p - q).abs() < 1e-6;
-    held(end) && !held(start)
+    let held = |p: f64, q: f64| (p - q).abs() < 1e-6;
+    let axis = |lo: (f64, f64), hi: (f64, f64)| {
+        (
+            held(hi.0, hi.1) && !held(lo.0, lo.1),
+            held(lo.0, lo.1) && !held(hi.0, hi.1),
+        )
+    };
+    [
+        axis((a.x0, b.x0), (a.x1, b.x1)),
+        axis((a.y0, b.y0), (a.y1, b.y1)),
+    ]
+}
+
+/// `item` with a released stretch aligned on whichever axes a resize from `from`
+/// to `to` changed, in a container laid out by `grid` — §15 D913's second ruling,
+/// [`held`]'s for grid: the size is written by the resize itself, and a stretch
+/// that would undo it becomes `start`, or `end` when the resize moved the axis's
+/// low edge and held its high one (`low_moved`, across then down), D905's rule on
+/// both axes. The item keeps its cells.
+///
+/// **"Stretched" is the resolved alignment** — the item's own, else the
+/// container's — and under `normal` a box stretches and a replaced item does not
+/// (§15 D915), so a shape resized under the default writes nothing here.
+fn grid_resize_held(
+    grid: &crate::container::Grid,
+    mut item: crate::container::LayoutItem,
+    replaced: bool,
+    (from, to): (kurbo::Size, kurbo::Size),
+    low_moved: (bool, bool),
+) -> crate::container::LayoutItem {
+    use crate::container::AlignItems;
+    let release = |own: &mut Option<AlignItems>, items: Option<AlignItems>, low: bool| {
+        let stretched = match own.or(items) {
+            Some(a) => a == AlignItems::Stretch,
+            None => !replaced,
+        };
+        if stretched {
+            *own = Some(if low {
+                AlignItems::End
+            } else {
+                AlignItems::Start
+            });
+        }
+    };
+    if (from.width - to.width).abs() > 1e-9 {
+        release(&mut item.justify_self, grid.justify_items, low_moved.0);
+    }
+    if (from.height - to.height).abs() > 1e-9 {
+        release(&mut item.align_self, grid.align_items, low_moved.1);
+    }
+    item
 }
 
 /// `tx` with every `SetTransform` on an **in-flow flex item** keeping the item's
@@ -3993,19 +4062,26 @@ pub fn sized_flex_item(
     let view = crate::resolve::DocView(doc);
     if container::parent_lays_out(&view, id)
         && container::in_flow(&view, id)
-        && let Some(Display::Flex(flex)) = node.parent().and_then(|p| view.display(p))
+        && let Some(display) = node.parent().and_then(|p| view.display(p))
         && let Some(now) = now
     {
         let was = res.used_local(doc, id).unwrap_or(Affine::IDENTITY);
-        let from_start = resized_from_cross_start(
-            flex,
+        let edges = resized_edges(
             (was, kurbo::Rect::from_origin_size(kurbo::Point::ZERO, now)),
             (
                 to.unwrap_or(was),
                 kurbo::Rect::from_origin_size(kurbo::Point::ZERO, size),
             ),
         );
-        item = held(flex, item, now, size, from_start);
+        item = match display {
+            Display::Flex(flex) => {
+                held(flex, item, now, size, resized_from_cross_start(flex, edges))
+            }
+            // A group with a layout is a box, never replaced (§15 D915).
+            Display::Grid(grid) => {
+                grid_resize_held(grid, item, false, (now, size), (edges[0].0, edges[1].0))
+            }
+        };
     }
     (item != *node.item()).then_some(item)
 }
@@ -4172,6 +4248,86 @@ fn flow_index(
         Some(i) => *i,
         None => flow.last().map_or(0, |i| i + 1),
     })
+}
+
+/// The operation dragging the laid-out item `id` by the world-space `delta`
+/// commits, **whatever its container's layout** — a flex item's `Reorder`
+/// ([`flex_reorder`], §15 D877), a grid item's new lines ([`grid_drop`], §15
+/// D913). `None` where it lands where it was, or `id` is not an item of either.
+/// The app's one door, so a drag need not know which layout it is in.
+pub fn layout_drop(doc: &Document, res: &Resolved, id: NodeId, delta: Vec2) -> Option<Operation> {
+    use crate::container::Display;
+    match doc.get(doc.get(id)?.parent()?)?.display()? {
+        Display::Flex(_) => flex_reorder(doc, res, id, delta),
+        Display::Grid(_) => grid_drop(doc, res, id, delta),
+    }
+}
+
+/// The committed document's grid container `id` as its pass lays it — its
+/// tracks and its items' areas ([`crate::container::laid_grid`], §15 D916). The
+/// public door, for the canvas's track lines and for tests.
+pub fn laid_grid(doc: &Document, id: NodeId) -> Option<crate::container::LaidGrid> {
+    crate::container::laid_grid(&crate::resolve::DocView(doc), id)
+}
+
+/// The `SetLayoutItem` that dragging the grid item `id` by the world-space
+/// `delta` commits — **explicit lines for the cell its centre is dropped on**
+/// (§15 D913's third ruling: every drop writes lines, so a dragged item becomes
+/// explicitly placed, and an auto-placed one is no exception).
+///
+/// The drag moves the item's **area** by as many tracks as its centre crossed, on
+/// each axis: read against the grid's laid tracks ([`crate::container::laid_grid`])
+/// in the container's space, the track under the centre before and after, and
+/// the area's start shifted by the difference — so an item spanning two columns
+/// keeps both, and one grabbed off-centre is not snapped by half its span. Both
+/// axes are written, the one the drag left alone at the line it was laid at.
+/// **The span keeps the author's spelling**: an end given as a line moves with the
+/// start, one given as a span stays a span, and a one-track area is `start / auto`.
+/// A start pushed before line 1 stops there — a negative line counts from the far
+/// end, which is not what a drag towards the near one means.
+///
+/// `None` when the centre stays in its tracks on both axes — a drop back into its
+/// own cell is no operation at all, so no undo step (§15 D877's rule for flex) —
+/// or `id` is not an in-flow item of a grid.
+pub fn grid_drop(doc: &Document, res: &Resolved, id: NodeId, delta: Vec2) -> Option<Operation> {
+    use crate::container::{self, GridLines, GridPlacement};
+    if !is_flex_item(doc, id) {
+        return None;
+    }
+    let parent = doc.get(id)?.parent()?;
+    let view = crate::resolve::DocView(doc);
+    let grid = container::laid_grid(&view, parent)?;
+    let area = grid.areas.iter().find(|(n, _)| *n == id)?.1;
+    let to_parent = res.world_transform(parent)?.inverse();
+    let centre = res.world_bounds(id)?.center();
+    let (was, now) = (to_parent * centre, to_parent * (centre + delta));
+    let shift = |tracks: &container::LaidTracks, a: f64, b: f64| -> Option<i32> {
+        Some(tracks.index_at(b)? as i32 - tracks.index_at(a)? as i32)
+    };
+    let (dc, dr) = (
+        shift(&grid.columns, was.x, now.x)?,
+        shift(&grid.rows, was.y, now.y)?,
+    );
+    if dc == 0 && dr == 0 {
+        return None;
+    }
+    let placed = |lines: GridLines, start: i32, end: i32, by: i32| -> GridLines {
+        let span = (end - start).max(1);
+        let to = (start + by).max(1);
+        let line = |n: i32| GridPlacement::Line(n.clamp(1, i32::from(i16::MAX)) as i16);
+        GridLines {
+            start: line(to),
+            end: match lines.end {
+                GridPlacement::Line(_) => line(to + span),
+                _ if span > 1 => GridPlacement::Span(span as u16),
+                _ => GridPlacement::Auto,
+            },
+        }
+    };
+    let mut item = *doc.get(id)?.item();
+    item.grid_column = placed(item.grid_column, area[0], area[1], dc);
+    item.grid_row = placed(item.grid_row, area[2], area[3], dr);
+    Some(Operation::SetLayoutItem { id, item })
 }
 
 /// Whether `id` is an item in its container's flow — its parent lays it out and

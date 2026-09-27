@@ -749,8 +749,9 @@ fn rand_grid(rng: &mut Lcg) -> ondin_core::container::Display {
         rows,
         auto_flow: [GridAutoFlow::Row, GridAutoFlow::Column][n(2)],
         justify_content: content[n(7)],
-        justify_items: align[n(5)],
-        align_items: align[n(5)],
+        // `None` is `normal` (§15 D915), one time in six.
+        justify_items: [None, Some(align[n(5)])][usize::from(n(6) != 0)],
+        align_items: [None, Some(align[n(5)])][usize::from(n(6) != 0)],
         align_content: content[n(7)],
         column_gap: n(20) as f64,
         row_gap: n(20) as f64,

@@ -2790,6 +2790,11 @@ impl OndinApp {
     /// left. Several layers are [`Self::flex_block_reorder_of`]'s — a block when
     /// they are all items of one container (§15 D902); otherwise an in-flow item
     /// keeps its slot ([`Self::stays_in_flow`]) and the rest move.
+    ///
+    /// **In a grid the one item's drop writes lines rather than reordering** (§15
+    /// D913, D916) — `build::layout_drop` answers for either layout, so the name
+    /// stays flex's while the arm serves both. Several items of one grid keep
+    /// their cells: what a block's drop writes there is not ruled.
     fn flex_reorder_of(&self, delta: Vec2) -> Option<(NodeId, Option<Operation>)> {
         let (doc, res) = (&self.session.doc, &self.session.resolved);
         let [id] = build::outermost(doc, self.session.selection.ids())[..] else {
@@ -2798,7 +2803,9 @@ impl OndinApp {
         if !build::is_flex_item(doc, id) || self.move_destination(id, delta).is_some() {
             return None;
         }
-        Some((id, build::flex_reorder(doc, res, id, delta)))
+        // A grid item's drop writes lines rather than reordering (§15 D913);
+        // `layout_drop` answers for either layout.
+        Some((id, build::layout_drop(doc, res, id, delta)))
     }
 
     /// [`Self::flex_reorder_of`] for **several** selected layers (§15 D902): when
@@ -2893,7 +2900,8 @@ impl OndinApp {
         // where it is drawn — its container is — so storing it would be a number
         // no one sees until the layout is taken away, when the item would jump to
         // wherever it happened to be dropped. A drop back into its own slot is an
-        // empty transaction, and so no undo step.
+        // empty transaction, and so no undo step. A grid item's move commits its
+        // new lines the same way (§15 D916).
         if let Some((_, reorder)) = self.flex_reorder_of(delta) {
             return Transaction(reorder.into_iter().collect());
         }
@@ -23279,5 +23287,107 @@ mod flex_canvas_tests {
                 "and no stored transform touched"
             );
         }
+    }
+
+    /// **A real drag in a grid writes the lines of the cell it is dropped on**
+    /// (§15 D913's third ruling, D916) — a 400 × 200 frame laid as a grid of
+    /// 100 × 100 cells holding two 20 × 20 rects under `normal`, so `a` sits at
+    /// (0, 0) and `b` at (100, 0), both stored at (300, 150). `a` pressed at its
+    /// centre and dragged to column 3, row 2, through `canvas_ui`: it is written
+    /// `3 / auto` and `2 / auto` and drawn at (200, 100), `b` flows back into the
+    /// first cell, as one undo step with no stored transform touched.
+    ///
+    /// **Flip run**, `flex_reorder_of` asking `build::flex_reorder` as it did
+    /// before grid: fails on *"a lands in column 3, row 2"* — `a` back at (0, 0),
+    /// the drop committing nothing — the predicted site.
+    #[test]
+    fn a_real_drag_in_a_grid_writes_the_cell_it_lands_in() {
+        use ondin_core::container::{
+            Grid, GridLines, GridPlacement, Track, TrackBreadth, TrackSize,
+        };
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0xBA);
+        let root = ids.mint();
+        let (grid, a, b) = (ids.mint(), ids.mint(), ids.mint());
+        let rect = |id, index| Operation::CreateNode {
+            id,
+            parent: grid,
+            index,
+            kind: NodeKind::Rect {
+                size: Size::new(20.0, 20.0),
+                corner_radii: Default::default(),
+            },
+            transform: Some(Affine::translate((300.0, 150.0))),
+            name: None,
+        };
+        let cell = || Track::Size(TrackSize::Breadth(TrackBreadth::Px(100.0)));
+        let mut doc = Document::new(root);
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: grid,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(400.0, 200.0),
+                },
+                transform: Some(Affine::IDENTITY),
+                name: None,
+            },
+            rect(a, 0),
+            rect(b, 1),
+            Operation::SetDisplay {
+                id: grid,
+                display: Some(Display::Grid(Grid {
+                    columns: vec![cell(), cell(), cell(), cell()],
+                    rows: vec![cell(), cell()],
+                    ..Default::default()
+                })),
+            },
+        ]))
+        .expect("the grid");
+        app.session.adopt_document(doc, None);
+        app.session.camera.center = Point::new(200.0, 100.0);
+        app.session.camera.zoom = 1.0;
+        for _ in 0..2 {
+            frame(&ctx, &mut app, Vec::new());
+        }
+        let bounds = |app: &OndinApp, id| app.session.resolved.world_bounds(id).unwrap();
+        assert_eq!(
+            bounds(&app, b).origin(),
+            Point::new(100.0, 0.0),
+            "the fixture"
+        );
+
+        let depth = app.session.history.undo_depth();
+        // The move's anchor is the pointer where the move *begins* — the first of
+        // `drag`'s eight steps — not the press, so a drag to (250, 150) moves the
+        // centre 7/8 of (240, 140): to (220, 132.5), column 3, row 2. The first cut
+        // aimed at (210, 110), whose 7/8 lands in column 2, row 1, and failed there.
+        drag(
+            &ctx,
+            &mut app,
+            Point::new(10.0, 10.0),
+            Point::new(250.0, 150.0),
+        );
+        assert_eq!(
+            bounds(&app, a).origin(),
+            Point::new(200.0, 100.0),
+            "a lands in column 3, row 2"
+        );
+        let item = *app.session.doc.get(a).unwrap().item();
+        assert_eq!(
+            (item.grid_column.start, item.grid_row.start),
+            (GridPlacement::Line(3), GridPlacement::Line(2))
+        );
+        assert_eq!(item.grid_column.end, GridLines::default().end);
+        assert_eq!(bounds(&app, b).origin(), Point::ZERO, "b flows back");
+        assert_eq!(app.session.history.undo_depth(), depth + 1, "one step");
+        assert_eq!(
+            app.session.doc.get(a).unwrap().transform(),
+            Affine::translate((300.0, 150.0)),
+            "and its stored transform is untouched"
+        );
     }
 }

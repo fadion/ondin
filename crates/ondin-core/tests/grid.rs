@@ -167,8 +167,8 @@ fn a_grid_places_its_items_in_its_tracks() {
             column_gap: 10.0,
             row_gap: 10.0,
             padding: [20.0; 4],
-            justify_items: AlignItems::Start,
-            align_items: AlignItems::Start,
+            justify_items: Some(AlignItems::Start),
+            align_items: Some(AlignItems::Start),
             ..grid(vec![px(100.0), fr(1.0), fr(2.0)], vec![px(50.0), px(40.0)])
         })),
     );
@@ -191,11 +191,12 @@ fn a_grid_places_its_items_in_its_tracks() {
     );
 }
 
-/// **An item with lines takes its area, and a stretched one fills it** — CSS's
-/// `normal`, which this model spells `Stretch` (§15 D914). `grid-column: 2 /
-/// span 2` over the tracks above is 80 + 10 + 160 = 250 wide from x 130, and
-/// `grid-row: 2` is the 40 row from y 80; the auto-placed item skips nothing it
-/// does not have to and takes the first cell, stretched to 100 × 50.
+/// **An item with lines takes its area, and a stretched one fills it.**
+/// `grid-column: 2 / span 2` over the tracks above is 80 + 10 + 160 = 250 wide
+/// from x 130, and `grid-row: 2` is the 40 row from y 80; the auto-placed item
+/// skips nothing it does not have to and takes the first cell, stretched to
+/// 100 × 50. Told `stretch` in so many words: under the default `normal` a
+/// shape keeps its size (the next test, §15 D915).
 #[test]
 fn a_placed_item_takes_its_lines_and_its_span() {
     let mut s = Scene::new();
@@ -208,6 +209,8 @@ fn a_placed_item_takes_its_lines_and_its_span() {
             column_gap: 10.0,
             row_gap: 10.0,
             padding: [20.0; 4],
+            justify_items: Some(AlignItems::Stretch),
+            align_items: Some(AlignItems::Stretch),
             ..grid(vec![px(100.0), fr(1.0), fr(2.0)], vec![px(50.0), px(40.0)])
         })),
     );
@@ -231,6 +234,176 @@ fn a_placed_item_takes_its_lines_and_its_span() {
     assert_eq!(s.bounds(placed), Rect::new(130.0, 80.0, 150.0, 120.0));
 }
 
+/// **`normal` is not `stretch`** (§15 D915, the maintainer's CSS-parity
+/// ruling): in two 100 × 50 cells, a 20 × 20 rect — a replaced element (§15
+/// D872) — keeps its size at the start of its cell, while a group with a layout
+/// — a box, hugging a 10 × 10 rect — stretches to fill its own. Asked to hug
+/// across (`fit-content`), the box keeps its 10 and still stretches down. Told
+/// `stretch` in so many words, the rect fills its cell as CSS stretches a
+/// replaced element; the hugging axis still does not (§15 D893's rule, in grid).
+///
+/// **Flip runs**, each predicted and each failing where predicted:
+/// `container::grid_held` answering `(false, false)` — taffy's own `normal` —
+/// fails on *"a shape keeps its size under normal"*, the rect 100 × 50, the
+/// predicted site. Its `fit-content` clause dropped was predicted to fail on
+/// *"fit-content is not stretched"*, under `stretch`, and fails one assertion
+/// earlier — *"fit-content hugs under normal"*, at a width of 100 — since a box
+/// under `normal` is stretched too; the later one would fail the same way.
+#[test]
+fn normal_holds_a_shape_at_the_start_and_stretches_a_box() {
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(200.0, 50.0), (0.0, 0.0));
+    let shape = s.add(f, rect(20.0, 20.0), (0.0, 0.0));
+    let boxed = s.add(f, NodeKind::Group, (0.0, 0.0));
+    let _inner = s.add(boxed, rect(10.0, 10.0), (0.0, 0.0));
+    s.display(boxed, Some(Display::Flex(Flex::default())));
+    let cells = grid(vec![px(100.0), px(100.0)], vec![px(50.0)]);
+    s.display(f, Some(Display::Grid(cells.clone())));
+    assert_eq!(
+        s.bounds(shape),
+        Rect::new(0.0, 0.0, 20.0, 20.0),
+        "a shape keeps its size under normal"
+    );
+    assert_eq!(
+        s.res.used_frame(boxed),
+        Some(Size::new(100.0, 50.0)),
+        "a box stretches under normal"
+    );
+    assert_eq!(s.bounds(boxed).x0, 100.0);
+
+    s.item(boxed, |i| {
+        i.width = ondin_core::container::Dimension::FitContent
+    });
+    assert_eq!(
+        s.res.used_frame(boxed),
+        Some(Size::new(10.0, 50.0)),
+        "fit-content hugs under normal"
+    );
+
+    s.display(
+        f,
+        Some(Display::Grid(Grid {
+            justify_items: Some(AlignItems::Stretch),
+            align_items: Some(AlignItems::Stretch),
+            ..cells
+        })),
+    );
+    assert_eq!(
+        s.bounds(shape),
+        Rect::new(0.0, 0.0, 100.0, 50.0),
+        "stretch stretches a shape"
+    );
+    assert_eq!(
+        s.res.used_frame(boxed),
+        Some(Size::new(10.0, 50.0)),
+        "fit-content is not stretched"
+    );
+}
+
+/// **Resizing a stretched grid item holds the size it was dragged to** (§15
+/// D913's second ruling): the drag writes the size, and the stretch that would
+/// undo it becomes `start` — or `end` when the drag moved the left or top edge
+/// and held the other (D905's rule, on both axes). The item keeps its cells, and
+/// an axis the drag left alone keeps its alignment. Two 100 × 50 cells told
+/// `stretch`: a right-handle drag to 60 keeps x 0–60; a left-handle drag on the
+/// second cell's item to 40 keeps its right edge at 200.
+///
+/// **Flip runs**: `flex_holds`' grid arm deleted (the code before grid) fails on
+/// *"the dragged width held"* — the rect stretched straight back to 100, the
+/// predicted site; `grid_resize_held`'s edge ignored (always `Start`) fails on
+/// *"a left-handle drag keeps its right edge"* at x 100–140, as predicted.
+#[test]
+fn resizing_a_stretched_grid_item_holds_the_size_it_was_dragged_to() {
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(200.0, 50.0), (0.0, 0.0));
+    let a = s.add(f, rect(20.0, 20.0), (0.0, 0.0));
+    let b = s.add(f, rect(20.0, 20.0), (0.0, 0.0));
+    s.display(
+        f,
+        Some(Display::Grid(Grid {
+            justify_items: Some(AlignItems::Stretch),
+            align_items: Some(AlignItems::Stretch),
+            ..grid(vec![px(100.0), px(100.0)], vec![px(50.0)])
+        })),
+    );
+    assert_eq!(s.bounds(a), Rect::new(0.0, 0.0, 100.0, 50.0), "the fixture");
+
+    s.resize(a, 60.0, 50.0);
+    assert_eq!(
+        s.bounds(a),
+        Rect::new(0.0, 0.0, 60.0, 50.0),
+        "the dragged width held"
+    );
+    let item = *s.doc.get(a).unwrap().item();
+    assert_eq!(item.justify_self, Some(AlignItems::Start));
+    assert_eq!(item.align_self, None, "the height was not dragged");
+    assert_eq!(item.grid_column, GridLines::default(), "its cells kept");
+
+    // A left-handle drag: the tool writes the size and the slot shifted to hold
+    // the right edge, as `tools::resize_box_to` does.
+    s.commit(vec![
+        Operation::SetGeometry {
+            id: b,
+            geometry: GeometryPatch::Size(Size::new(40.0, 50.0)),
+        },
+        Operation::SetTransform {
+            id: b,
+            transform: Affine::translate((160.0, 0.0)),
+        },
+    ]);
+    assert_eq!(
+        s.bounds(b),
+        Rect::new(160.0, 0.0, 200.0, 50.0),
+        "a left-handle drag keeps its right edge"
+    );
+    assert_eq!(
+        s.doc.get(b).unwrap().item().justify_self,
+        Some(AlignItems::End)
+    );
+}
+
+/// **Under `normal` a resized shape needs no hold** — it was never stretched
+/// (§15 D915) — so its item is left at CSS's defaults; **a laid group, a box, is
+/// stretched under `normal`** and its resize writes px and releases the stretch
+/// on the axis it changed (`build::sized_flex_item`, the tools' door for a group
+/// with a layout).
+#[test]
+fn under_normal_a_shape_needs_no_hold_and_a_box_does() {
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(200.0, 50.0), (0.0, 0.0));
+    let shape = s.add(f, rect(20.0, 20.0), (0.0, 0.0));
+    let boxed = s.add(f, NodeKind::Group, (0.0, 0.0));
+    let _inner = s.add(boxed, rect(10.0, 10.0), (0.0, 0.0));
+    s.display(boxed, Some(Display::Flex(Flex::default())));
+    s.display(
+        f,
+        Some(Display::Grid(grid(
+            vec![px(100.0), px(100.0)],
+            vec![px(50.0)],
+        ))),
+    );
+    s.resize(shape, 30.0, 30.0);
+    assert_eq!(s.bounds(shape), Rect::new(0.0, 0.0, 30.0, 30.0));
+    assert!(
+        s.doc.get(shape).unwrap().item().is_default(),
+        "nothing held"
+    );
+
+    assert_eq!(
+        s.res.used_frame(boxed),
+        Some(Size::new(100.0, 50.0)),
+        "stretched"
+    );
+    let item =
+        ondin_core::build::sized_flex_item(&s.doc, &s.res, boxed, Size::new(60.0, 50.0), None)
+            .expect("a group with a layout");
+    assert_eq!(item.width, ondin_core::container::Dimension::Px(60.0));
+    assert_eq!(item.justify_self, Some(AlignItems::Start));
+    assert_eq!(item.align_self, None, "the height was not changed");
+    s.commit(vec![Operation::SetLayoutItem { id: boxed, item }]);
+    assert_eq!(s.res.used_frame(boxed), Some(Size::new(60.0, 50.0)));
+}
+
 /// `grid-auto-flow: column` fills a column before moving to the next.
 #[test]
 fn column_flow_fills_a_column_first() {
@@ -241,8 +414,8 @@ fn column_flow_fills_a_column_first() {
         f,
         Some(Display::Grid(Grid {
             auto_flow: GridAutoFlow::Column,
-            justify_items: AlignItems::Start,
-            align_items: AlignItems::Start,
+            justify_items: Some(AlignItems::Start),
+            align_items: Some(AlignItems::Start),
             ..grid(vec![px(50.0), px(50.0)], vec![px(30.0), px(30.0)])
         })),
     );
@@ -272,8 +445,8 @@ fn auto_tracks_stretch_into_the_free_space() {
     let base = Grid {
         column_gap: 10.0,
         padding: [20.0; 4],
-        justify_items: AlignItems::Start,
-        align_items: AlignItems::Start,
+        justify_items: Some(AlignItems::Start),
+        align_items: Some(AlignItems::Start),
         ..grid(vec![auto.clone(), auto], vec![])
     };
     s.display(f, Some(Display::Grid(base.clone())));
@@ -299,8 +472,8 @@ fn a_repeat_expands_into_its_tracks() {
         f,
         Some(Display::Grid(Grid {
             column_gap: 10.0,
-            justify_items: AlignItems::Start,
-            align_items: AlignItems::Start,
+            justify_items: Some(AlignItems::Start),
+            align_items: Some(AlignItems::Start),
             ..grid(
                 vec![
                     Track::Repeat {
@@ -333,8 +506,8 @@ fn a_minmax_track_grows_with_the_frame_down_to_its_minimum() {
     s.display(
         f,
         Some(Display::Grid(Grid {
-            justify_items: AlignItems::Start,
-            align_items: AlignItems::Start,
+            justify_items: Some(AlignItems::Start),
+            align_items: Some(AlignItems::Start),
             ..grid(vec![minmax, px(50.0)], vec![])
         })),
     );
@@ -390,8 +563,8 @@ fn grid_lines_written_under_flex_take_effect_under_grid() {
     s.display(
         f,
         Some(Display::Grid(Grid {
-            justify_items: AlignItems::Start,
-            align_items: AlignItems::Start,
+            justify_items: Some(AlignItems::Start),
+            align_items: Some(AlignItems::Start),
             ..grid(vec![px(50.0), px(50.0)], vec![])
         })),
     );
@@ -510,8 +683,8 @@ fn a_file_with_a_refused_track_opens_and_lays_around_it() {
     s.display(
         f,
         Some(Display::Grid(Grid {
-            justify_items: AlignItems::Start,
-            align_items: AlignItems::Start,
+            justify_items: Some(AlignItems::Start),
+            align_items: Some(AlignItems::Start),
             ..grid(
                 vec![
                     px(100.0),
@@ -551,4 +724,200 @@ fn a_file_with_a_refused_track_opens_and_lays_around_it() {
         "kept as stored, not dropped: {:?}",
         g.columns
     );
+}
+
+/// The first test's grid, with the four items at the start of their cells.
+fn four_in_tracks(s: &mut Scene) -> (NodeId, [NodeId; 4]) {
+    let f = s.add(s.root, frame(400.0, 200.0), (0.0, 0.0));
+    let items = [0; 4].map(|_| s.add(f, rect(20.0, 20.0), (300.0, 150.0)));
+    s.display(
+        f,
+        Some(Display::Grid(Grid {
+            column_gap: 10.0,
+            row_gap: 10.0,
+            padding: [20.0; 4],
+            ..grid(vec![px(100.0), fr(1.0), fr(2.0)], vec![px(50.0), px(40.0)])
+        })),
+    );
+    (f, items)
+}
+
+/// **A laid grid reports its tracks and its items' areas** (§15 D916) — the
+/// first test's numbers read back: columns at 20–120, 130–210 and 220–380, rows
+/// at 20–70 and 80–120, and the fourth item in column 1, row 2, as CSS lines.
+#[test]
+fn a_laid_grid_reports_its_tracks_and_areas() {
+    let mut s = Scene::new();
+    let (f, [a, _, _, d]) = four_in_tracks(&mut s);
+    let g = ondin_core::build::laid_grid(&s.doc, f).expect("a grid");
+    assert_eq!(
+        g.columns.spans,
+        vec![(20.0, 120.0), (130.0, 210.0), (220.0, 380.0)]
+    );
+    assert_eq!(g.rows.spans, vec![(20.0, 70.0), (80.0, 120.0)]);
+    assert_eq!((g.columns.explicit, g.rows.explicit), (3, 2));
+    let area = |id| g.areas.iter().find(|(n, _)| *n == id).unwrap().1;
+    assert_eq!(area(a), [1, 2, 1, 2]);
+    assert_eq!(area(d), [1, 2, 2, 3]);
+    assert_eq!(
+        g.columns.index_at(125.0),
+        Some(0),
+        "a gap goes to the nearer edge"
+    );
+    assert_eq!(g.columns.index_at(900.0), Some(2), "past the end, the end");
+}
+
+/// **A drop writes the lines of the cell the centre lands in** (§15 D913's
+/// third ruling, `build::grid_drop`): the auto-placed first item, its centre at
+/// (30, 30), dragged by (+200, +60) to (230, 90) — column 3, row 2 — is written
+/// `3 / auto` and `2 / auto`, and lands at (220, 80); the three auto-placed
+/// siblings flow round it. A drag short of the next track is no operation.
+///
+/// **Flip run**, the "no operation when the centre stays" guard removed: fails on
+/// *"back in its own cell"*, `Some` for a 20 px nudge, the predicted site.
+#[test]
+fn a_drop_writes_the_lines_of_the_cell_it_lands_in() {
+    use ondin_core::kurbo::Vec2;
+    let mut s = Scene::new();
+    let (_f, [a, b, ..]) = four_in_tracks(&mut s);
+    assert_eq!(
+        ondin_core::build::grid_drop(&s.doc, &s.res, a, Vec2::new(20.0, 10.0)),
+        None,
+        "back in its own cell"
+    );
+    let op = ondin_core::build::grid_drop(&s.doc, &s.res, a, Vec2::new(200.0, 60.0))
+        .expect("a new cell");
+    let Operation::SetLayoutItem { item, .. } = &op else {
+        panic!("{op:?}")
+    };
+    assert_eq!(
+        (item.grid_column, item.grid_row),
+        (
+            GridLines {
+                start: GridPlacement::Line(3),
+                end: GridPlacement::Auto
+            },
+            GridLines {
+                start: GridPlacement::Line(2),
+                end: GridPlacement::Auto
+            }
+        )
+    );
+    s.commit(vec![op]);
+    assert_eq!(s.bounds(a).origin(), (220.0, 80.0).into(), "landed");
+    assert_eq!(
+        s.bounds(b).origin(),
+        (20.0, 20.0).into(),
+        "b took the first cell"
+    );
+}
+
+/// **A dragged area keeps its span, in the author's spelling**: `1 / span 2`
+/// dragged one column right is `2 / span 2`; `1 / 3` is `2 / 4`. The drag
+/// is counted in tracks crossed by the centre, so an item spanning two columns
+/// moves by one when its centre crosses one boundary, not by half its width.
+#[test]
+fn a_dropped_area_keeps_its_span_and_its_spelling() {
+    use ondin_core::kurbo::Vec2;
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(300.0, 100.0), (0.0, 0.0));
+    let wide = s.add(f, rect(20.0, 20.0), (0.0, 0.0));
+    s.display(
+        f,
+        Some(Display::Grid(Grid {
+            justify_items: Some(AlignItems::Stretch),
+            ..grid(vec![px(100.0), px(100.0), px(100.0)], vec![px(50.0)])
+        })),
+    );
+    for (end, moved) in [
+        (GridPlacement::Span(2), GridPlacement::Span(2)),
+        (GridPlacement::Line(3), GridPlacement::Line(4)),
+    ] {
+        s.item(wide, |i| {
+            i.grid_column = GridLines {
+                start: GridPlacement::Line(1),
+                end,
+            }
+        });
+        assert_eq!(s.bounds(wide).width(), 200.0, "the fixture: two columns");
+        // Its centre at x 100, on the boundary; 60 right is inside column 2.
+        let op = ondin_core::build::grid_drop(&s.doc, &s.res, wide, Vec2::new(60.0, 0.0))
+            .expect("one column over");
+        let Operation::SetLayoutItem { item, .. } = &op else {
+            panic!("{op:?}")
+        };
+        assert_eq!(
+            item.grid_column,
+            GridLines {
+                start: GridPlacement::Line(2),
+                end: moved
+            },
+            "{end:?}"
+        );
+        s.commit(vec![op]);
+        assert_eq!(s.bounds(wide).x0, 100.0, "{end:?}: moved one column");
+    }
+}
+
+/// An auto-width label, `Inter` 12.
+fn label(content: &str) -> NodeKind {
+    NodeKind::Text {
+        content: content.into(),
+        style: Box::new(ondin_core::TextStyle {
+            font_family: "Inter".into(),
+            font_size: 12.0,
+            weight: 400,
+            italic: false,
+            line_height: Some(ondin_core::Length::Em(1.2)),
+            ..Default::default()
+        }),
+        spans: Default::default(),
+        para_spans: Default::default(),
+        paragraph: Default::default(),
+        block: Default::default(),
+        sizing: ondin_core::TextSizing::Auto,
+        on_path: None,
+        on_path_flip: false,
+        on_path_offset: 0.0,
+    }
+}
+
+/// **An auto-width label stretched narrower than its line keeps its line** (§15
+/// D917): in a 30px grid column, and in a 30-wide flex column, a label 161.6 wide
+/// on one line is laid as a fixed box as wide as its line — overflowing its slot,
+/// `white-space: nowrap`'s reading — and not as a 30-wide box that wraps it.
+/// Auto width never wraps (D875, D913's first ruling); both layouts broke it the
+/// same way, the stretch handing the text *less* room than it measured.
+///
+/// **Flip run**, `flexed_text`'s floor removed (the fixed box at the stretched
+/// size, as it was): fails on *"grid: one line"* at a width of 30, the predicted
+/// site. The flex half is not reached under that flip; the probe that found this
+/// read flex's box as `Fixed(30 × 14.4)` before the repair.
+#[test]
+fn an_auto_width_label_stretched_narrower_keeps_its_line() {
+    let width = |s: &Scene, t| match s.res.used_kind(&s.doc, t) {
+        Some(NodeKind::Text { sizing, .. }) => match sizing {
+            ondin_core::TextSizing::Fixed(size) => size.width,
+            other => panic!("{other:?}"),
+        },
+        other => panic!("{other:?}"),
+    };
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(200.0, 100.0), (0.0, 0.0));
+    let t = s.add(f, label("a label wider than its column"), (0.0, 0.0));
+    let line = s.bounds(t).width();
+    assert!(line > 150.0, "the fixture: one long line, {line}");
+    s.display(f, Some(Display::Grid(grid(vec![px(30.0)], vec![]))));
+    assert_eq!(width(&s, t), line, "grid: one line");
+    assert_eq!(s.bounds(t).x0, 0.0, "at the start of its cell, overflowing");
+
+    s.resize(f, 30.0, 100.0);
+    s.display(
+        f,
+        Some(Display::Flex(Flex {
+            direction: ondin_core::container::FlexDirection::Column,
+            ..Default::default()
+        })),
+    );
+    assert_eq!(width(&s, t), line, "flex: one line");
 }

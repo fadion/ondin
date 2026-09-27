@@ -303,13 +303,14 @@ pub fn resized(kind: &NodeKind, size: Size, stretched: (bool, bool)) -> NodeKind
     out
 }
 
-/// A text node's kind at the `size` a flex container gave it, **each sizing mode
-/// keeping its meaning** (§15 D875, the maintainer's ruling): auto width stays
-/// auto (one line) unless the container stretched or grew it, when it becomes a
-/// fixed box at that size — which cannot wrap it, since a grown box is at least as
-/// wide as its line; auto height wraps at the width it was given, becoming fixed
-/// only if the container also made it taller than its lines; a fixed box takes
-/// the size whole.
+/// A text node's kind at the `size` a flex or grid container gave it, **each
+/// sizing mode keeping its meaning** (§15 D875, the maintainer's ruling; D913's
+/// first for grid): auto width stays auto (one line) unless the container
+/// stretched or grew it, when it becomes a fixed box at that size — **never
+/// narrower than its line**, so it cannot wrap (§15 D917: a stretch can give less
+/// room as well as more); auto height wraps at the width it was given, becoming
+/// fixed only if the container also made it taller than its lines; a fixed box
+/// takes the size whole.
 pub fn flexed_text(kind: &NodeKind, size: Size) -> NodeKind {
     let NodeKind::Text { sizing, .. } = kind else {
         return kind.clone();
@@ -325,7 +326,18 @@ pub fn flexed_text(kind: &NodeKind, size: Size) -> NodeKind {
     match sizing {
         TextSizing::Auto => match geometry::local_bounds(kind, None) {
             Some(b) if near(b.width(), size.width) && near(b.height(), size.height) => kind.clone(),
-            _ => with(TextSizing::Fixed(size)),
+            // 🚨 **Never narrower than its line** (§15 D917): a stretch can hand an
+            // auto-width label *less* room than its line — a flex column or a grid
+            // column narrower than the text — and a fixed box that narrow wraps it,
+            // which auto width never does (D875, D913's first ruling). The box keeps
+            // the line's width and overflows its slot, `white-space: nowrap`'s CSS
+            // reading. The sentence above said a stretched box "cannot wrap", true
+            // only of one the container made *wider*.
+            Some(b) => with(TextSizing::Fixed(Size::new(
+                size.width.max(b.width()),
+                size.height,
+            ))),
+            None => with(TextSizing::Fixed(size)),
         },
         TextSizing::AutoHeight(_) => {
             let k = with(TextSizing::AutoHeight(size.width));
@@ -681,10 +693,18 @@ pub struct Grid {
     /// §5.3c's first cut, and added with grid** (§15 D914): in a grid
     /// `align-items` is the vertical axis alone, so without it the only way to
     /// stop every item stretching sideways is `justify-self` on each one.
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub justify_items: AlignItems,
-    #[serde(default, skip_serializing_if = "is_default")]
-    pub align_items: AlignItems,
+    ///
+    /// **`None` is CSS's `normal`**, and it is not `stretch` (§15 D915, the
+    /// maintainer's CSS-parity ruling): a replaced item — a shape (§15 D872) —
+    /// sits at the start of its area at its own size, and a box (text, a laid
+    /// group) stretches across it. `Some(Stretch)` stretches both. Flex keeps a
+    /// plain [`AlignItems`], its `normal` being `stretch` for everything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub justify_items: Option<AlignItems>,
+    /// `align-items` — vertically; `None` is `normal`, [`Self::justify_items`]'
+    /// reading.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub align_items: Option<AlignItems>,
     #[serde(default, skip_serializing_if = "is_default")]
     pub align_content: AlignContent,
     /// The gap between rows (CSS `row-gap`).
@@ -975,6 +995,17 @@ pub fn in_flow(view: &dyn LayoutView, id: crate::NodeId) -> bool {
     view.visible(id) && !view.mask(id) && !view.insets(id).is_authored()
 }
 
+/// Whether `id` is a **replaced element** to the layout engine (§15 D872) — what
+/// `FlexTree::push` makes a `Leaf::Replaced`: anything but text and a container
+/// with a layout of its own. Asked where CSS treats the two differently, which is
+/// grid's `normal` (§15 D915).
+pub fn is_replaced(view: &dyn LayoutView, id: crate::NodeId) -> bool {
+    match view.kind(id) {
+        Some(NodeKind::Text { .. }) | None => false,
+        Some(k) => !(is_container(&k) && view.display(id).is_some()),
+    }
+}
+
 /// Whether `id`'s parent lays its children out — a frame or a group with a
 /// `display`.
 pub fn parent_lays_out(view: &dyn LayoutView, id: crate::NodeId) -> bool {
@@ -1176,6 +1207,120 @@ pub fn lay_out(view: &dyn LayoutView, root: crate::NodeId) -> Vec<Laid> {
         .collect()
 }
 
+/// One axis of a laid grid: each track's start and end in the container's own
+/// space, on the 1/64 px grid, implicit tracks included.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LaidTracks {
+    pub spans: Vec<(f64, f64)>,
+    /// Implicit tracks **before** the explicit grid — which only an item placed at
+    /// a negative line beyond it makes. CSS's line 1 is the start of track
+    /// `before`.
+    pub before: u16,
+    /// Tracks the template made; the rest are implicit.
+    pub explicit: u16,
+}
+
+impl LaidTracks {
+    /// The track under `v`, or the nearest one — a point in a gap goes to the
+    /// closer edge, one past either end to the end track. `None` with no tracks.
+    pub fn index_at(&self, v: f64) -> Option<usize> {
+        let distance = |(a, b): (f64, f64)| {
+            if v < a {
+                a - v
+            } else if v > b {
+                v - b
+            } else {
+                0.0
+            }
+        };
+        (0..self.spans.len()).min_by(|i, j| {
+            distance(self.spans[*i])
+                .partial_cmp(&distance(self.spans[*j]))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+    }
+
+    /// Track `index`'s start line as CSS numbers it — 1 at the explicit grid's
+    /// start, so a leading implicit track answers 0 or less.
+    pub fn line_of(&self, index: usize) -> i32 {
+        index as i32 - i32::from(self.before) + 1
+    }
+}
+
+/// A grid container as its layout pass left it (§15 D916): its tracks on both
+/// axes, and the area each in-flow child was placed in, as CSS line numbers
+/// `(column start, column end, row start, row end)`.
+///
+/// **Derived on demand and never stored** — `Resolved` keeps used geometry and
+/// not the passes that made it, so this re-runs the pass (§15 D868's derived,
+/// never-saved rule, kept by not keeping it at all). Asked by a drop and by the
+/// canvas's track lines, not per frame of every document.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LaidGrid {
+    pub columns: LaidTracks,
+    pub rows: LaidTracks,
+    pub areas: Vec<(crate::NodeId, [i32; 4])>,
+}
+
+/// The tracks and item areas of the grid container `id`, from the pass that
+/// lays it out — its own if it is a layout root, else the pass of the root
+/// above it along an unbroken chain of in-flow items, which is where its size is
+/// decided. `None` if `id` is not a container with a grid.
+pub fn laid_grid(view: &dyn LayoutView, id: crate::NodeId) -> Option<LaidGrid> {
+    if !matches!(view.display(id), Some(Display::Grid(_))) || !is_container(&view.kind(id)?) {
+        return None;
+    }
+    let mut root = id;
+    while parent_lays_out(view, root) && in_flow(view, root) {
+        root = view.parent(root)?;
+    }
+    let mut tree = FlexTree::new(view);
+    tree.want = Some(id);
+    let r = tree.push(root)?;
+    taffy::compute_root_layout(
+        &mut tree,
+        taffy::NodeId::from(r),
+        taffy::Size {
+            width: taffy::AvailableSpace::MaxContent,
+            height: taffy::AvailableSpace::MaxContent,
+        },
+    );
+    let info = tree.grid.take()?;
+    let axis = |t: &taffy::DetailedGridTracksInfo<String>| LaidTracks {
+        spans: t
+            .positions
+            .iter()
+            .map(|l| (quantize(l.start), quantize(l.end)))
+            .collect(),
+        before: t.negative_implicit_tracks,
+        explicit: t.explicit_tracks,
+    };
+    let (columns, rows) = (axis(&info.columns), axis(&info.rows));
+    // taffy numbers lines from the whole grid's first; CSS from the explicit's.
+    let css = |line: u16, before: u16| i32::from(line) - i32::from(before);
+    let index = tree.ids.iter().position(|n| *n == id)?;
+    let areas = tree.children[index]
+        .iter()
+        .zip(&info.items)
+        .map(|(child, a)| {
+            (
+                tree.ids[usize::from(*child)],
+                [
+                    css(a.column_start, columns.before),
+                    css(a.column_end, columns.before),
+                    css(a.row_start, rows.before),
+                    css(a.row_end, rows.before),
+                ],
+            )
+        })
+        .collect();
+    Some(LaidGrid {
+        columns,
+        rows,
+        areas,
+    })
+}
+
 /// What a node in a [`FlexTree`] is, for the engine's purposes.
 enum Leaf {
     /// A container with a layout, flex or grid, laid out by taffy.
@@ -1206,6 +1351,11 @@ struct FlexTree<'v> {
     /// asked about — the memo §15 D872 owed: taffy asks a text node the same
     /// question several times a pass, and each answer is a parley shape.
     measured: rustc_hash::FxHashMap<(usize, u32), taffy::Size<f32>>,
+    /// The grid container whose tracks this pass was asked for ([`laid_grid`]),
+    /// and what taffy reported for it — kept from its **last** full layout, which
+    /// is the one its parent places it by.
+    want: Option<crate::NodeId>,
+    grid: Option<taffy::DetailedGridInfo<String>>,
 }
 
 impl<'v> FlexTree<'v> {
@@ -1219,6 +1369,8 @@ impl<'v> FlexTree<'v> {
             caches: Vec::new(),
             layouts: Vec::new(),
             measured: Default::default(),
+            want: None,
+            grid: None,
         }
     }
 
@@ -1254,10 +1406,23 @@ impl<'v> FlexTree<'v> {
                     && let Some(c) = self.push(child)
                 {
                     self.children[index].push(taffy::NodeId::from(c));
-                    if let Display::Flex(flex) = display
-                        && fit_content_across(&self.view.item(child), flex)
-                    {
-                        self.styles[c].align_self = Some(taffy::AlignItems::FLEX_START);
+                    match display {
+                        Display::Flex(flex) => {
+                            if fit_content_across(&self.view.item(child), flex) {
+                                self.styles[c].align_self = Some(taffy::AlignItems::FLEX_START);
+                            }
+                        }
+                        Display::Grid(grid) => {
+                            // `is_replaced`'s answer, read off the leaf just built.
+                            let replaced = matches!(self.leaves[c], Leaf::Replaced(_));
+                            let (across, down) = grid_held(&self.view.item(child), grid, replaced);
+                            if across {
+                                self.styles[c].justify_self = Some(taffy::AlignItems::START);
+                            }
+                            if down {
+                                self.styles[c].align_self = Some(taffy::AlignItems::START);
+                            }
+                        }
                     }
                 }
             }
@@ -1483,8 +1648,10 @@ fn style_of(kind: &NodeKind, display: Option<&Display>, item: &LayoutItem) -> ta
                 GridAutoFlow::Column => taffy::GridAutoFlow::Column,
             };
             style.justify_content = Some(content_alignment(g.justify_content));
-            style.justify_items = Some(align_items(g.justify_items));
-            style.align_items = Some(align_items(g.align_items));
+            // `None` goes to taffy as `normal`; the replaced items it must not
+            // stretch are held at the start in `FlexTree::push` (§15 D915).
+            style.justify_items = g.justify_items.map(align_items);
+            style.align_items = g.align_items.map(align_items);
             style.align_content = Some(content_alignment(g.align_content));
             style.gap = taffy::Size {
                 width: length(g.column_gap as f32),
@@ -1524,6 +1691,34 @@ fn fit_content_across(item: &LayoutItem, parent: &Flex) -> bool {
     };
     across == Dimension::FitContent
         && item.align_self.unwrap_or(parent.align_items) == AlignItems::Stretch
+}
+
+/// Which axes of a grid item — across, down — must be **held at the start of
+/// its area rather than stretched** (§15 D915, the maintainer's CSS-parity
+/// ruling):
+///
+/// - **Under `normal`**, the item's self-alignment and the container's both
+///   unset, a *replaced* item keeps its own size at the start — CSS Box
+///   Alignment's `normal` for a grid item with a natural size, and a shape is a
+///   replaced element here (§15 D872). taffy's `normal` stretches anything sized
+///   `auto`, and a shape goes to it `auto` and measured, so the start is written
+///   in. A box — text, a laid group — stretches under `normal`, as a `div` does.
+/// - **`fit-content` is never stretched**, under `normal` or `stretch`: CSS
+///   stretches only an `auto` size, and taffy is handed `auto` for
+///   `FitContent`. §15 D893's rule for flex, on both of a grid's axes.
+///
+/// An explicit `stretch` stretches a replaced item as it does in CSS; every
+/// other alignment is taffy's to apply.
+fn grid_held(item: &LayoutItem, parent: &Grid, replaced: bool) -> (bool, bool) {
+    let axis = |own: Option<AlignItems>, items: Option<AlignItems>, size: Dimension| {
+        let normal = own.is_none() && items.is_none();
+        let stretched = normal || own.or(items) == Some(AlignItems::Stretch);
+        (normal && replaced) || (stretched && size == Dimension::FitContent)
+    };
+    (
+        axis(item.justify_self, parent.justify_items, item.width),
+        axis(item.align_self, parent.align_items, item.height),
+    )
 }
 
 /// `a` for taffy — `Start` and `End` as `flex-start` and `flex-end`, which follow
@@ -1752,6 +1947,16 @@ impl taffy::LayoutGridContainer for FlexTree<'_> {
 
     fn get_grid_child_style(&self, child: taffy::NodeId) -> Self::GridItemStyle<'_> {
         &self.styles[usize::from(child)]
+    }
+
+    fn set_detailed_grid_info(
+        &mut self,
+        node: taffy::NodeId,
+        info: taffy::DetailedGridInfo<Self::CustomIdent>,
+    ) {
+        if self.want == Some(self.ids[usize::from(node)]) {
+            self.grid = Some(info);
+        }
     }
 }
 

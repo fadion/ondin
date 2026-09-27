@@ -8,7 +8,7 @@
 //! frame resize reflows, a group with a layout is its box, and taking a layout
 //! away puts every child back where its transform says.
 
-use ondin_core::kurbo::{Affine, Rect, RoundedRectRadii, Size};
+use ondin_core::kurbo::{Affine, Rect, RoundedRectRadii, Size, Vec2};
 use ondin_core::{
     Document, GeometryPatch, History, IdSource, NodeId, NodeKind, Operation, Resolved, Transaction,
     container::{AlignItems, Display, Flex, FlexDirection, FlexItem},
@@ -833,5 +833,54 @@ fn an_in_flow_item_turns_about_its_box_centre_in_its_slot() {
     assert!(
         near(b.x0, 25.0) && near(b.y0, 15.0) && near(b.x1, 55.0) && near(b.y1, 55.0),
         "turned about its box centre in its slot: {b:?}"
+    );
+}
+
+/// **Several items dragged together reorder as a block, keeping their order**
+/// (§15 D902, `build::flex_reorder_many`) — a row of four 20-wide rects at x 20,
+/// 50, 80 and 110 (padding 20, gap 10). `a` and `c`, not adjacent, dragged right
+/// past `d` land after it as `a, c`: `b, d, a, c`. `c` and `d` dragged left past
+/// `a` land first: `c, d, a, b`. A drag short of any sibling commits nothing, and
+/// items of two containers are not a block.
+///
+/// **Flip run**, the ops placing each dragged item at its final index in turn
+/// rather than walking the target order: fails on *"a and c after d, in their
+/// order"* — the predicted site, the pair ending interleaved with `d`.
+#[test]
+fn several_items_dragged_together_reorder_as_a_block() {
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(400.0, 200.0), (0.0, 0.0));
+    let [a, b, c, d] = [0, 1, 2, 3].map(|_| s.add(f, rect(20.0, 30.0), (0.0, 0.0)));
+    s.display(f, row());
+    assert_eq!(s.bounds(d).x0, 110.0, "the fixture");
+    let order = |s: &Scene| s.doc.get(f).unwrap().children().to_vec();
+
+    let ops = ondin_core::build::flex_reorder_many(&s.doc, &s.res, &[a, c], Vec2::new(80.0, 0.0))
+        .expect("a block");
+    s.commit(ops);
+    assert_eq!(
+        order(&s),
+        vec![b, d, a, c],
+        "a and c after d, in their order"
+    );
+
+    let ops = ondin_core::build::flex_reorder_many(&s.doc, &s.res, &[a, c], Vec2::new(-80.0, 0.0))
+        .expect("a block");
+    s.commit(ops);
+    assert_eq!(order(&s), vec![a, c, b, d], "and back to the front");
+
+    assert_eq!(
+        ondin_core::build::flex_reorder_many(&s.doc, &s.res, &[b, d], Vec2::new(2.0, 0.0)),
+        Some(Vec::new()),
+        "short of any sibling: nothing"
+    );
+
+    let g = s.add(s.root, frame(100.0, 100.0), (500.0, 0.0));
+    let e = s.add(g, rect(20.0, 30.0), (0.0, 0.0));
+    s.display(g, row());
+    assert_eq!(
+        ondin_core::build::flex_reorder_many(&s.doc, &s.res, &[a, e], Vec2::new(10.0, 0.0)),
+        None,
+        "items of two containers are not a block"
     );
 }

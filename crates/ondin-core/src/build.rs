@@ -3936,21 +3936,10 @@ pub fn sized_flex_item(
 /// with `id` taken out, which is what `Reorder` means. `None` when `id` is not an
 /// in-flow flex item, or would land where it is.
 pub fn flex_reorder(doc: &Document, res: &Resolved, id: NodeId, delta: Vec2) -> Option<Operation> {
-    use crate::container::{self, Display, FlexDirection};
     if !is_flex_item(doc, id) {
         return None;
     }
-    let view = crate::resolve::DocView(doc);
     let parent = doc.get(id)?.parent()?;
-    let Display::Flex(flex) = *doc.get(parent)?.display()?;
-    let to_parent = res.world_transform(parent)?.inverse();
-    let at = to_parent * (res.world_bounds(id)?.center() + delta);
-    let reversed = matches!(
-        flex.direction,
-        FlexDirection::RowReverse | FlexDirection::ColumnReverse
-    );
-    let lines_reversed = flex.wrap == container::FlexWrap::WrapReverse;
-    let (at_main, at_cross) = main_cross(flex.direction, at);
     let others: Vec<NodeId> = doc
         .get(parent)?
         .children()
@@ -3958,6 +3947,96 @@ pub fn flex_reorder(doc: &Document, res: &Resolved, id: NodeId, delta: Vec2) -> 
         .copied()
         .filter(|c| *c != id)
         .collect();
+    let at = res.world_bounds(id)?.center() + delta;
+    let index = flow_index(doc, res, parent, &others, at)?;
+    let now = doc.get(parent)?.children().iter().position(|c| *c == id)?;
+    (index != now).then_some(Operation::Reorder { id, index })
+}
+
+/// [`flex_reorder`] for **several items of one flex container dragged
+/// together** (§15 D902): they move as a block to where the block's centre falls,
+/// keeping their order among themselves — Figma's multi-item drag in auto layout.
+/// `None` unless every one of `ids` is an in-flow item of the same container;
+/// otherwise the `Reorder`s that turn the child list into the new one, empty when
+/// the block lands where it is.
+///
+/// The block's centre is the centre of the union of their drawn boxes, read
+/// against the *other* in-flow siblings by [`flow_index`], the same reading order
+/// one item is. The ops are derived by walking the target order and moving
+/// whatever is out of place into it — correct by construction, where placing each
+/// dragged item at its final index in turn is not: worked by hand, `[a, d1, b, d2,
+/// c]` with `d1, d2` dropped after `c` goes `[a, b, d2, d1, c]` after the first
+/// such op and `[a, b, d1, c, d2]` after the second.
+pub fn flex_reorder_many(
+    doc: &Document,
+    res: &Resolved,
+    ids: &[NodeId],
+    delta: Vec2,
+) -> Option<Vec<Operation>> {
+    let first = *ids.first()?;
+    let parent = doc.get(first)?.parent()?;
+    if ids
+        .iter()
+        .any(|id| !is_flex_item(doc, *id) || doc.get(*id).and_then(|n| n.parent()) != Some(parent))
+    {
+        return None;
+    }
+    let children = doc.get(parent)?.children().to_vec();
+    let block: Vec<NodeId> = children
+        .iter()
+        .copied()
+        .filter(|c| ids.contains(c))
+        .collect();
+    let others: Vec<NodeId> = children
+        .iter()
+        .copied()
+        .filter(|c| !ids.contains(c))
+        .collect();
+    let at = ids
+        .iter()
+        .filter_map(|id| res.world_bounds(*id))
+        .reduce(|a, b| a.union(b))?
+        .center()
+        + delta;
+    let index = flow_index(doc, res, parent, &others, at)?;
+    let mut target = others;
+    for (k, id) in block.iter().enumerate() {
+        target.insert(index + k, *id);
+    }
+    let mut now = children;
+    let mut ops = Vec::new();
+    for (i, id) in target.iter().enumerate() {
+        if now[i] != *id {
+            let from = now.iter().position(|c| c == id)?;
+            now.remove(from);
+            now.insert(i, *id);
+            ops.push(Operation::Reorder { id: *id, index: i });
+        }
+    }
+    Some(ops)
+}
+
+/// Where in `parent`'s child list — `others`, the list with the dragged taken
+/// out — a dragged box whose centre is at world `at` lands: [`flex_reorder`]'s
+/// reading-order rule, shared with [`flex_reorder_many`] so the two cannot drift.
+fn flow_index(
+    doc: &Document,
+    res: &Resolved,
+    parent: NodeId,
+    others: &[NodeId],
+    at: Point,
+) -> Option<usize> {
+    use crate::container::{self, Display, FlexDirection};
+    let view = crate::resolve::DocView(doc);
+    let Display::Flex(flex) = *doc.get(parent)?.display()?;
+    let to_parent = res.world_transform(parent)?.inverse();
+    let at = to_parent * at;
+    let reversed = matches!(
+        flex.direction,
+        FlexDirection::RowReverse | FlexDirection::ColumnReverse
+    );
+    let lines_reversed = flex.wrap == container::FlexWrap::WrapReverse;
+    let (at_main, at_cross) = main_cross(flex.direction, at);
     let flow: Vec<usize> = (0..others.len())
         .filter(|i| container::in_flow(&view, others[*i]))
         .collect();
@@ -3990,12 +4069,10 @@ pub fn flex_reorder(doc: &Document, res: &Resolved, id: NodeId, delta: Vec2) -> 
             }
         })
         .count();
-    let index = match flow.get(before) {
+    Some(match flow.get(before) {
         Some(i) => *i,
         None => flow.last().map_or(0, |i| i + 1),
-    };
-    let now = doc.get(parent)?.children().iter().position(|c| *c == id)?;
-    (index != now).then_some(Operation::Reorder { id, index })
+    })
 }
 
 /// Whether `id` is an item in its container's flow — its parent lays it out and

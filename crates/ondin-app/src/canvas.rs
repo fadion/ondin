@@ -23178,6 +23178,72 @@ mod flex_canvas_tests {
         );
     }
 
+    /// **A hand drag that ends on the new slot draws the drop outline there**
+    /// (§15 D908) — `a` pressed at its centre and, once the move has begun, dragged
+    /// 70.3 right and 0.2 down from its anchor, past `b`, **with shape snapping off
+    /// and the pixel grid on**: the grid rounds the move to whole units
+    /// (`snap::to_pixel`), so its box sits at (90, 20), exactly the slot the reorder
+    /// gives it (20 + 60 + 10). No edge snap is needed; any drag ending within half a
+    /// unit of where the item will go lands there.
+    ///
+    /// **Flip run**, `RenderOverrides::landing_of` falling back to the document's
+    /// transform again: fails on *"the outline is on the slot"* at (300, 150) — the
+    /// predicted site. **Control**, that flip with the grid off as well: passes, the
+    /// box at (90.3, 20.2) and so never on the slot — the grid alone is the route.
+    /// ⚠️ **With shape snapping on, as the first cut ran, the grid was never
+    /// consulted**: `a`'s edges aligned to `b`'s right edge and top and claimed both
+    /// axes (`snap::snap_rect`), landing on the slot by an edge snap instead — found
+    /// by `arch-scribe` reading `snap_rect`, and the reason the test now turns shapes
+    /// off. ⚠️ **The first cut also measured the 70.3 from the press** and
+    /// landed at (20, 20), no reorder at all: the move's anchor is the pointer on
+    /// the frame it begins, past egui's threshold, so the real delta was 61.5 and
+    /// snapped `a`'s centre onto `b`'s — not past it. The anchor is read back now.
+    #[test]
+    fn a_drag_ending_on_the_new_slot_outlines_the_slot() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, _frame_id, a, _b) = app_with_a_row(&ctx);
+        // The pixel grid alone: with shapes on, `a`'s edges align to `b`'s and
+        // claim both axes first, so the grid would never be consulted.
+        app.snap_shapes = false;
+        assert!(app.snap_grid, "the default this test is about");
+        let press = Point::new(40.0, 35.0);
+        let start = app.to_screen(press, RECT, PPP);
+        frame(&ctx, &mut app, vec![egui::Event::PointerMoved(start)]);
+        frame(&ctx, &mut app, vec![button(start, true)]);
+        // The drag's anchor is the pointer on the frame the move begins, past
+        // egui's threshold — so step until it begins, read it back, and measure
+        // the 70.3 from there.
+        let mut anchor = None;
+        for step in 1..=10 {
+            let p = app.to_screen(press + Vec2::new(2.0 * step as f64, 0.0), RECT, PPP);
+            frame(&ctx, &mut app, vec![egui::Event::PointerMoved(p)]);
+            if let crate::preview::Drag::Move { anchor: at } = app.drag {
+                anchor = Some(at);
+                break;
+            }
+        }
+        let anchor = anchor.expect("the move has begun");
+        let to = anchor + Vec2::new(70.3, 0.2);
+        for step in 1..=8 {
+            let w = anchor + (to - anchor) * (step as f64 / 8.0);
+            let p = app.to_screen(w, RECT, PPP);
+            frame(&ctx, &mut app, vec![egui::Event::PointerMoved(p)]);
+        }
+        let (_, _, ov) = app.session.render_inputs();
+        let landing = ov
+            .landings()
+            .iter()
+            .find(|(id, _, _)| *id == a)
+            .map(|(_, world, _)| world.translation())
+            .expect("a reorder under way, so a landing");
+        assert_eq!(
+            landing,
+            ondin_core::kurbo::Vec2::new(90.0, 20.0),
+            "the outline is on the slot"
+        );
+    }
+
     /// **Two items dragged together reorder as a block** (§15 D902) — `a` and `b`
     /// selected, pressed on `a` and dragged 120 right through the real canvas:
     /// the block's centre passes the third item's, so it lands after it, `a` then

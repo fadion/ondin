@@ -2739,6 +2739,42 @@ fn a_dragged_flex_item_lands_in_its_reordered_slot() {
     assert_eq!(bx.size(), Size::new(40.0, 30.0), "its own box");
 }
 
+/// **A drag that holds an item exactly on its new slot lands there too** (§15
+/// D908) — `a_dragged_flex_item_lands_in_its_reordered_slot` with the drag's
+/// transform the slot itself, (90, 20) in the frame: what a snap to the
+/// neighbour's edge hands the preview.
+///
+/// `item_placed` answers `local: None` when the slot is the transform the pass
+/// read — the drag's — and `landing_of` fell back to the document's, so the
+/// outline was drawn at the rect's stored (500, 500) inside the frame: 1000, 1000
+/// in the world. The same fallback §15 D905 found in `flex_relayout`.
+///
+/// **Flip run**, `landing_of` falling back to `node.transform()` again: fails on
+/// *"its slot"* at (1000, 1000), the predicted site.
+#[test]
+fn a_flex_item_dragged_onto_its_slot_lands_there() {
+    let (doc, _frame, first, _) = flex_fixture();
+    let res = Resolved::rebuild(&doc);
+    let tx = Transaction(vec![
+        Operation::SetTransform {
+            id: first,
+            transform: Affine::translate((90.0, 20.0)),
+        },
+        Operation::Reorder {
+            id: first,
+            index: 1,
+        },
+    ]);
+    let ov = RenderOverrides::from_transaction(&doc, &res, &tx).expect("representable");
+    let landings = ov.landings();
+    assert_eq!(landings.len(), 1, "one landing");
+    assert_eq!(
+        landings[0].1.translation(),
+        Vec2::new(590.0, 520.0),
+        "its slot"
+    );
+}
+
 /// **A layout nested in a plain group previews as it commits** (§15 D911) — a
 /// flex row holding a plain group, holding a laid column of two 20 × 20 rects;
 /// the first resized to 40 × 40.

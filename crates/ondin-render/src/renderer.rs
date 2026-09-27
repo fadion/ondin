@@ -782,7 +782,13 @@ impl RenderOverrides {
         placed: &ondin_core::container::Placed,
     ) -> Option<(NodeId, Affine, kurbo::Rect)> {
         let node = doc.get(id)?;
-        let local = placed.local.unwrap_or_else(|| node.transform());
+        // `local: None` means the slot *is* the transform the pass read — the
+        // drag's own, not the document's (§15 D908, `flex_relayout`'s fallback).
+        let local = placed.local.unwrap_or_else(|| {
+            self.get(id)
+                .and_then(|o| o.transform)
+                .unwrap_or_else(|| node.transform())
+        });
         let bx = match placed.frame {
             Some(size) => kurbo::Rect::from_origin_size(kurbo::Point::ZERO, size),
             None => {

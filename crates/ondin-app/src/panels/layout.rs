@@ -671,9 +671,12 @@ pub(crate) struct SizeEdit {
 ///   would be. The Transform card's W and H always pass one: a hugging frame
 ///   *is* 150 wide, and Figma's and Framer's W fields say so the same way.
 /// - `number` absent and the mode a keyword: the keyword in the digits' place,
-///   `under` beneath it so a scrub starts from there, and a dash for the unit —
-///   Webflow's field, and the Position card's unpinned inset (§15 D890). The Item
-///   card's basis and limits: an unset `min-width` has no number worth showing.
+///   `under` beneath it so a scrub starts from there, and **no unit at all** — the
+///   Position card's unpinned inset (§15 D890). The Item card's basis and limits:
+///   an unset `min-width` has no number worth showing. It carried a dash for the
+///   unit that opened the menu until the maintainer ruled it out (§15 D906): the
+///   keyword already says how the size is set, and typing or dragging a number is
+///   how to leave it, landing in px with the menu back.
 /// - `number` absent and no mode: the selection disagrees, and the digits read
 ///   "Mixed" ([`mixed_if`], §15 D892).
 ///
@@ -695,11 +698,12 @@ pub(crate) fn size_field(
         (None, Some(m @ (SizeMode::Auto | SizeMode::FitContent))) => Some(m.word()),
         _ => None,
     };
-    let (resp, flip) = ui::value_field_suffixed(
+    let (resp, unit) = ui::value_field_unit(
         ui,
         size,
         prefix,
-        Some(Suffix {
+        // No unit under a keyword (§15 D906).
+        word.is_none().then_some(Suffix {
             text: match (number, mode) {
                 (Some(_), Some(m)) => m.word(),
                 _ => "–",
@@ -719,19 +723,31 @@ pub(crate) fn size_field(
         },
     );
     let mut picked = None;
-    egui::Popup::menu(&resp)
-        .open_memory(flip.then_some(egui::SetOpenCommand::Toggle))
-        .show(|ui| {
-            ui::menu_rows(ui);
-            for m in modes {
-                let row = ui
-                    .selectable_label(mode == Some(*m), m.label())
-                    .on_hover_text(m.describe());
-                if row.clicked() {
-                    picked = Some(*m);
+    // **Anchored on the unit, right edges together** (§15 D907). It hung off the
+    // number's response, whose rect starts at the prefix, so a click on the unit at
+    // the field's right end opened the menu under the letter at its left — and, in
+    // the Transform card's W, over the field beside it.
+    if let Some(unit) = unit {
+        egui::Popup::menu(&unit)
+            .align(egui::RectAlign::BOTTOM_END)
+            .show(|ui| {
+                ui::menu_rows(ui);
+                // The dropdowns' row padding — the theme's `button_padding.x`, which
+                // a `ComboBox`'s rows inherit and `Popup::menu`'s own style cuts to
+                // 2, leaving "px" touching the highlight's edges. `y` is one of the
+                // two values `ui::MENU_ROW_H`'s floor is proved against
+                // (`a_menu_rows_height_does_not_depend_on_its_state`).
+                ui.spacing_mut().button_padding = egui::vec2(8.0, 2.0);
+                for m in modes {
+                    let row = ui
+                        .selectable_label(mode == Some(*m), m.label())
+                        .on_hover_text(m.describe());
+                    if row.clicked() {
+                        picked = Some(*m);
+                    }
                 }
-            }
-        });
+            });
+    }
     // Held until the valve's committing frame, not just the frame the number
     // moved on ([`edited`], §15 D885).
     let typed = edited(&resp, v != start).then_some(v);
@@ -2524,6 +2540,96 @@ mod tests {
         assert_eq!(p.app.session.history.undo_depth(), depth + 2, "one more");
     }
 
+    /// The Transform card as the single-layer inspector draws it — its world and
+    /// size read through the preview, `inspector_single`'s way — over the first
+    /// selected layer, a rect.
+    fn transform_card(app: &mut OndinApp, ui: &mut egui::Ui) {
+        let id = app.session.selection.ids()[0];
+        let world = app
+            .session
+            .preview_world_transform(id)
+            .unwrap_or_default()
+            .as_coeffs();
+        let size = app.session.display_node(id).and_then(|n| match n.kind() {
+            NodeKind::Rect { size, .. } => Some(*size),
+            _ => None,
+        });
+        app.inspector_transform(ui, id, world, size);
+    }
+
+    /// **The sizing menu opens under the unit that was clicked** (§15 D907) — W's
+    /// `px`, at the right-hand end of the field, clicked; the menu's `%` row is
+    /// found beneath it, its text within a few points of the unit's. It opened
+    /// under the number's response, which starts at the prefix, so the menu hung
+    /// under the "W" at the field's far end.
+    ///
+    /// **Flip runs**: the popup anchored on the number's response with its default
+    /// alignment, as it was, fails on *"under the unit"*, the row's text centred at
+    /// x 46 against the unit's 126 — the predicted site. The row padding dropped
+    /// fails on *"room either side"* at 2 and 2.2 points, `Popup::menu`'s own style —
+    /// which the first cut of this assertion did **not** catch: searched from the
+    /// front, it measured against the rotation field's ground under the popup.
+    #[test]
+    fn the_size_menu_opens_under_its_unit() {
+        let s = scene();
+        let a = s.a;
+        let mut p = Panel::new(s.app, transform_card);
+        p.app.session.selection.set(vec![a]);
+        let unit = p.run("px");
+        let button = |pressed| egui::Event::PointerButton {
+            pos: unit,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        p.frame(vec![egui::Event::PointerMoved(unit), button(true)]);
+        p.frame(vec![button(false)]);
+        let row = p.run("%");
+        assert!(row.y > unit.y, "below it: {row:?} against {unit:?}");
+        assert!(
+            (row.x - unit.x).abs() < 24.0,
+            "under the unit: the row at x {} against the unit's {}",
+            row.x,
+            unit.x
+        );
+
+        // The lit row — `px`, the mode W is in — and the highlight behind its text.
+        // Searched from the end: the popup paints last, and the fields under it have
+        // grounds that contain the same point.
+        let out = p.frame(Vec::new());
+        let text = out
+            .shapes
+            .iter()
+            .rev()
+            .find_map(|cs| match &cs.shape {
+                egui::epaint::Shape::Text(t) if t.galley.text() == "px" && t.pos.y > unit.y => {
+                    Some(t.galley.rect.translate(t.pos.to_vec2()))
+                }
+                _ => None,
+            })
+            .expect("the menu's px row");
+        let lit = out
+            .shapes
+            .iter()
+            .rev()
+            .find_map(|cs| match &cs.shape {
+                egui::epaint::Shape::Rect(r)
+                    if r.fill.a() > 0
+                        && r.rect.contains(text.center())
+                        && r.rect.height() < 40.0 =>
+                {
+                    Some(r.rect)
+                }
+                _ => None,
+            })
+            .expect("the lit row's highlight");
+        let (left, right) = (text.left() - lit.left(), lit.right() - text.right());
+        assert!(
+            left >= 7.0 && right >= 7.0,
+            "room either side of the text: {left} and {right}"
+        );
+    }
+
     /// **A field over a selection that disagrees reads "Mixed", and a basis at
     /// `auto` reads `auto`** — the maintainer's rulings of §15 D892 and D895,
     /// asserted on the Item card's painted text for two rects that disagree about
@@ -2534,7 +2640,9 @@ mod tests {
     /// `size_field` (the basis back on the number path) fails on **the same
     /// line**, 2 against 1 — not on *"the basis reads its keyword"* as predicted:
     /// with no number and no word the basis's digits read "Mixed" too, which is
-    /// exactly the confusion D892 would have introduced without D895.
+    /// exactly the confusion D892 would have introduced without D895. The unit
+    /// handed back to the keyword face (§15 D906's `word.is_none()` gate dropped)
+    /// fails on *"and has no unit"*, 1 against 0, predicted.
     #[test]
     fn a_mixed_field_reads_mixed_and_an_unset_basis_reads_auto() {
         let mut s = scene();
@@ -2558,7 +2666,7 @@ mod tests {
         let count = |w: &str| texts.iter().filter(|t| *t == w).count();
         assert_eq!(count("Mixed"), 1, "the grow field says so: {texts:?}");
         assert_eq!(count("auto"), 1, "the basis reads its keyword: {texts:?}");
-        assert_eq!(count("–"), 1, "and its unit a dash: {texts:?}");
+        assert_eq!(count("–"), 0, "and has no unit (§15 D906): {texts:?}");
     }
 
     /// **A segment row over containers that disagree marks the mixed state**

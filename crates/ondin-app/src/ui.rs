@@ -1592,9 +1592,9 @@ pub fn menu_rows(ui: &mut egui::Ui) {
 /// above the natural one** — and that is not automatic. A `selectable_label` is
 /// its 15pt row plus `button_padding.y` twice, which is **23** at the theme's 4:
 /// a floor of 22 there would be ignored outright and the compaction would be a
-/// constant that changed nothing. It works because every dropdown's own scope has
-/// already set that padding to 0 or 2 before [`menu_rows`] runs, putting the
-/// natural height at 15 or 19. *A new caller that leaves the theme's padding alone
+/// constant that changed nothing. It works because every dropdown sets that
+/// padding to 0 or 2 before its rows are laid out — most before [`menu_rows`]
+/// runs, the sizing menu just after — putting the natural height at 15 or 19. *A new caller that leaves the theme's padding alone
 /// gets a 23pt row and no error*, which is what
 /// `a_menu_rows_height_does_not_depend_on_its_state` asserts against at both of
 /// the values in use.
@@ -1881,6 +1881,25 @@ pub fn value_field_suffixed<N: egui::emath::Numeric>(
     scrub: Scrub,
     build: impl FnOnce(egui::DragValue<'_>) -> egui::DragValue<'_>,
 ) -> (egui::Response, bool) {
+    let (resp, unit) = value_field_unit(ui, size, prefix, suffix, value, scrub, build);
+    (resp, unit.is_some_and(|u| u.clicked()))
+}
+
+/// [`value_field_suffixed`], handing back the clickable unit's own response rather
+/// than whether it was clicked — `None` when there is no unit or it is inert.
+///
+/// For a caller that opens something *from* the unit: a popup anchored on the
+/// field's response opens under the prefix, the far end of the field from the thing
+/// that was clicked (§15 D907).
+pub fn value_field_unit<N: egui::emath::Numeric>(
+    ui: &mut egui::Ui,
+    size: egui::Vec2,
+    prefix: Prefix,
+    suffix: Option<Suffix<'_>>,
+    value: &mut N,
+    scrub: Scrub,
+    build: impl FnOnce(egui::DragValue<'_>) -> egui::DragValue<'_>,
+) -> (egui::Response, Option<egui::Response>) {
     let mut v = value.to_f64();
     let out = value_field_f64(ui, size, prefix, suffix, None, &mut v, scrub, build);
     // Written back only on a real change, so a field whose type cannot hold its own
@@ -2207,7 +2226,7 @@ fn value_field_f64(
     value: &mut f64,
     scrub: Scrub,
     build: impl FnOnce(egui::DragValue<'_>) -> egui::DragValue<'_>,
-) -> (egui::Response, bool) {
+) -> (egui::Response, Option<egui::Response>) {
     let scope = ui.scope(|ui| {
         field_row(ui, size, |ui| {
             // Reserved here and filled at the bottom of this closure: this is the
@@ -2529,7 +2548,7 @@ fn value_field_f64(
             let at = egui::pos2(strip.left(), resp.rect.center().y - lead.size().y / 2.0);
             ui.painter().galley(at, lead, theme::text::FAINT);
 
-            let mut unit_clicked = false;
+            let mut unit = None;
             if let Some((s, galley)) = trail {
                 // **Allocated, not merely painted into.** `field_frame`
                 // shrink-wraps its content, so a strip that was subtracted from
@@ -2608,7 +2627,7 @@ fn value_field_f64(
                     } else if hit.hovered() {
                         ink = theme::text::STRONG;
                     }
-                    unit_clicked = hit.clicked();
+                    unit = Some(hit);
                 }
                 let at = egui::pos2(
                     text_right - galley.size().x,
@@ -2616,7 +2635,7 @@ fn value_field_f64(
                 );
                 ui.painter().galley(at, galley, ink);
             }
-            (resp, unit_clicked)
+            (resp, unit)
         })
     });
 

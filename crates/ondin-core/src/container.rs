@@ -736,19 +736,35 @@ pub fn is_layout_root(view: &dyn LayoutView, id: crate::NodeId) -> bool {
 /// then, it is not in it. The rebuild comparison caught the first cut, which asked
 /// the dirty node whether it was in flow and stopped at itself. Only the hops
 /// above need the container to be in its own parent's flow.
+///
+/// 🚨 **And the chain runs through a group or a boolean with no layout of its
+/// own** (§15 D899): such a node is one atomic box to its container, measured
+/// from its children ([`atomic_box`]), so moving a shape inside it resizes it and
+/// reflows the row it sits in. Stopping there left `update` re-laying nothing —
+/// found by the randomized layout guard at its seventh seed, a rect moved inside
+/// a plain group in a flex column, the group's slot stale until a rebuild. **The
+/// climb only counts if it reaches a layout**: `root` moves only on a hop into a
+/// container that lays its children out, so a deep tree of plain groups — an SVG
+/// import — still answers the node itself, and an edit there re-derives what it
+/// always did.
 pub fn chain_root(view: &dyn LayoutView, id: crate::NodeId) -> crate::NodeId {
     let mut root = id;
     let mut cursor = id;
     let mut first = true;
-    loop {
-        let flows = first || in_flow(view, cursor);
-        if !(parent_lays_out(view, cursor) && flows) {
+    while let Some(parent) = view.parent(cursor) {
+        if parent_lays_out(view, cursor) {
+            if !(first || in_flow(view, cursor)) {
+                break;
+            }
+            root = parent;
+        } else if !matches!(
+            view.kind(parent),
+            Some(NodeKind::Group | NodeKind::Boolean { .. })
+        ) {
             break;
         }
-        let Some(parent) = view.parent(cursor) else {
-            break;
-        };
-        root = parent;
+        // Up one: into the container, or through an atomic box its item is
+        // measured by, `root` staying put until a layout is found above it.
         cursor = parent;
         first = false;
     }
@@ -1063,7 +1079,19 @@ impl<'v> FlexTree<'v> {
 /// **Specified geometry, not used**: a group with no layout is one atomic box to
 /// its container, and what is inside it is not re-laid by this pass. A boolean is
 /// measured by its operands' union, which is at least its result's box.
+///
+/// 🚨 **Except a container with a layout of its own**, which is measured by that
+/// layout — its own pass, its padding and its hugging — as the box `Resolved`
+/// gives it (§15 D899). It was measured like any group, by its children's
+/// *specified* union, so a flex row nested in a plain group lent its container a
+/// box that ignored its padding and its layout: §15 D875's ⚠️, now closed. Its
+/// children's specified placements still stand for everything else here, since
+/// nothing inside a plain group is in a flow.
 pub fn atomic_box(view: &dyn LayoutView, id: crate::NodeId, kind: &NodeKind) -> Option<Rect> {
+    if is_container(kind) && view.display(id).is_some() {
+        let size = lay_out(view, id).first().map(|l| l.size)?;
+        return Some(Rect::from_origin_size(Point::ZERO, size));
+    }
     match kind {
         NodeKind::Group | NodeKind::Boolean { .. } | NodeKind::Root => view
             .children(id)

@@ -244,11 +244,38 @@ fn overlaps(a: Rect, b: Rect) -> bool {
 #[test]
 fn incremental_update_equals_rebuild_over_random_ops() {
     for seed in 0..40u64 {
-        run_random_session(seed);
+        run_random_session(seed, false);
     }
 }
 
-fn run_random_session(seed: u64) {
+/// **The same guard with container layout in it** (§15 D898): every op above,
+/// plus random `SetDisplay` (a flex layout with random direction, wrap,
+/// alignments, gaps and padding, or none), `SetFlexItem` (random grow, shrink,
+/// basis, sizes and `align-self`) and `SetInsets` (random pins in px or %, and
+/// `margin: auto`) — the layout inputs steps 2 and 3 made real, which the run
+/// above never authors and so could only ever compare the used map at identity
+/// (§15 D868's condition for that map, owed since D874 and D875).
+///
+/// **A separate run rather than wider odds in the first**, so every seed of that
+/// one draws the same ops it always has and the flip results recorded against it
+/// stay true.
+///
+/// **It found a live defect on its first run** (§15 D899): at seed 7 a rect moved
+/// inside a plain group that was an item of a flex column, and `update` left the
+/// group's slot where it was — `container::chain_root` stopped at the group, which
+/// is measured from its children. **Flip runs**: that climb removed fails at seed
+/// 7 again, a used-local mismatch on the group; `update`'s `chain_root` widening
+/// turned off altogether (each dirty node's own id collected) fails at seed 0, a
+/// used-local mismatch — and the first run stays green under both, being unable
+/// to author a layout at all.
+#[test]
+fn incremental_update_equals_rebuild_over_random_layout_ops() {
+    for seed in 0..40u64 {
+        run_random_session(seed, true);
+    }
+}
+
+fn run_random_session(seed: u64, layout: bool) {
     let mut rng = Lcg::new(seed.wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(1));
     let mut ids = IdSource::new(0xF00D);
     let root = ids.mint();
@@ -280,7 +307,9 @@ fn run_random_session(seed: u64) {
 
     for _ in 0..60 {
         // Pick an operation. Bias toward creation early (movable may be empty).
-        let choice = rng.next_range(10);
+        // The layout run draws from three more: `SetDisplay`, `SetFlexItem`,
+        // `SetInsets` (§15 D898).
+        let choice = rng.next_range(if layout { 13 } else { 10 });
         let tx = match choice {
             // create a rect under a random container (artboard or group)
             0 | 1 => {
@@ -453,6 +482,27 @@ fn run_random_session(seed: u64) {
                 };
                 Transaction(vec![Operation::SetEffects { id, effects }])
             }),
+            // give a random container a flex layout, or take it away
+            10 => pick(&mut rng, &container_targets(&doc, &containers, &movable))
+                .copied()
+                .map(|id| {
+                    let display = (rng.next_range(4) != 0).then(|| rand_flex(&mut rng));
+                    Transaction(vec![Operation::SetDisplay { id, display }])
+                }),
+            // set a random node's item properties
+            11 => pick(&mut rng, &movable).copied().map(|id| {
+                Transaction(vec![Operation::SetFlexItem {
+                    id,
+                    item: rand_item(&mut rng),
+                }])
+            }),
+            // pin a random node, or unpin it
+            12 => pick(&mut rng, &movable).copied().map(|id| {
+                Transaction(vec![Operation::SetInsets {
+                    id,
+                    insets: rand_insets(&mut rng),
+                }])
+            }),
             // delete a random movable node (and its subtree)
             _ => {
                 pick(&mut rng, &movable).map(|&id| Transaction(vec![Operation::DeleteNode { id }]))
@@ -497,14 +547,9 @@ fn assert_resolved_matches_rebuild(doc: &Document, live: &Resolved, seed: u64) {
     while let Some(id) = stack.pop() {
         // The used geometry first, because everything below is composed from it
         // (§15 D868) — a divergence there shows up as a wrong world transform one
-        // line later, and naming the cause is worth the two assertions. Equal to
-        // the document on every node *this test generates*, because none of its
-        // random ops authors a layout input — no `SetInsets`, `SetDisplay` or
-        // `SetFlexItem` — though since steps 2 and 3 the real pass lays out any
-        // document that has one (§15 D874, D875). Asserted anyway, because D868's
-        // condition for the seventh map was that this guard *compare* it rather
-        // than join the maps it leaves out; generating those ops is owed
-        // (`docs/roadmap.md`, *Next · Container layout*).
+        // line later, and naming the cause is worth the three assertions. The
+        // layout run authors layout inputs (§15 D898), so these compare real used
+        // geometry there; in the first run they compare the document with itself.
         assert_eq!(
             live.used_local(doc, id),
             fresh.used_local(doc, id),
@@ -514,6 +559,12 @@ fn assert_resolved_matches_rebuild(doc: &Document, live: &Resolved, seed: u64) {
             live.used_kind(doc, id),
             fresh.used_kind(doc, id),
             "used kind mismatch for {id:?} (seed {seed})"
+        );
+        // A laid group's box, which nothing compared until §15 D898.
+        assert_eq!(
+            live.used_frame(id),
+            fresh.used_frame(id),
+            "used frame mismatch for {id:?} (seed {seed})"
         );
         assert_eq!(
             live.world_transform(id),
@@ -563,6 +614,121 @@ fn rand_transform(rng: &mut Lcg) -> Affine {
     } else {
         Affine::translate((tx, ty))
     }
+}
+
+/// A random flex layout for the layout run (§15 D898) — every field drawn, so
+/// wrapping, reversed axes and space distribution all reach `update`.
+fn rand_flex(rng: &mut Lcg) -> ondin_core::container::Display {
+    use ondin_core::container::*;
+    let dir = [
+        FlexDirection::Row,
+        FlexDirection::RowReverse,
+        FlexDirection::Column,
+        FlexDirection::ColumnReverse,
+    ];
+    let wrap = [FlexWrap::NoWrap, FlexWrap::Wrap, FlexWrap::WrapReverse];
+    let justify = [
+        JustifyContent::Start,
+        JustifyContent::End,
+        JustifyContent::Center,
+        JustifyContent::SpaceBetween,
+        JustifyContent::SpaceAround,
+        JustifyContent::SpaceEvenly,
+    ];
+    let align = [
+        AlignItems::Stretch,
+        AlignItems::Start,
+        AlignItems::End,
+        AlignItems::Center,
+        AlignItems::Baseline,
+    ];
+    let content = [
+        AlignContent::Stretch,
+        AlignContent::Start,
+        AlignContent::End,
+        AlignContent::Center,
+        AlignContent::SpaceBetween,
+    ];
+    let mut n = |k: usize| rng.next_range(k as u64) as usize;
+    Display::Flex(Flex {
+        direction: dir[n(4)],
+        wrap: wrap[n(3)],
+        justify_content: justify[n(6)],
+        align_items: align[n(5)],
+        align_content: content[n(5)],
+        column_gap: n(20) as f64,
+        row_gap: n(20) as f64,
+        padding: [n(30) as f64, n(30) as f64, n(30) as f64, n(30) as f64],
+    })
+}
+
+/// A random dimension: each of CSS's four ways of saying a size.
+fn rand_dim(rng: &mut Lcg) -> ondin_core::container::Dimension {
+    use ondin_core::container::Dimension;
+    match rng.next_range(4) {
+        0 => Dimension::Auto,
+        1 => Dimension::Px(10.0 + rng.next_range(150) as f64),
+        2 => Dimension::Percent(10.0 + rng.next_range(90) as f64),
+        _ => Dimension::FitContent,
+    }
+}
+
+/// Random item properties — grow, shrink, basis, sizes and `align-self`; the
+/// limits left at `auto` one time in two so they do not always clamp.
+fn rand_item(rng: &mut Lcg) -> ondin_core::container::FlexItem {
+    use ondin_core::container::{AlignItems, Dimension, FlexItem};
+    let align = [
+        None,
+        Some(AlignItems::Stretch),
+        Some(AlignItems::Start),
+        Some(AlignItems::End),
+        Some(AlignItems::Center),
+    ];
+    let limit = |rng: &mut Lcg| {
+        if rng.next_range(2) == 0 {
+            Dimension::Auto
+        } else {
+            rand_dim(rng)
+        }
+    };
+    FlexItem {
+        grow: rng.next_range(3) as f64,
+        shrink: rng.next_range(3) as f64,
+        basis: rand_dim(rng),
+        width: rand_dim(rng),
+        height: rand_dim(rng),
+        min_width: limit(rng),
+        max_width: limit(rng),
+        min_height: limit(rng),
+        max_height: limit(rng),
+        align_self: align[rng.next_range(5) as usize],
+    }
+}
+
+/// Random insets — each edge unpinned, px or %, and `margin: auto` on an axis
+/// now and then; unpinned altogether one time in three.
+fn rand_insets(rng: &mut Lcg) -> ondin_core::Insets {
+    use ondin_core::LengthPct;
+    if rng.next_range(3) == 0 {
+        return ondin_core::Insets::default();
+    }
+    let edge = |rng: &mut Lcg| match rng.next_range(3) {
+        0 => None,
+        1 => Some(LengthPct::Px(rng.next_range(80) as f64)),
+        _ => Some(LengthPct::Percent(rng.next_range(50) as f64)),
+    };
+    let mut insets = ondin_core::Insets {
+        top: edge(rng),
+        right: edge(rng),
+        bottom: edge(rng),
+        left: edge(rng),
+        ..Default::default()
+    };
+    if rng.next_range(4) == 0 {
+        insets.margin_auto.left = true;
+        insets.margin_auto.right = true;
+    }
+    insets
 }
 
 /// Content pool for random text nodes — varied lengths and a multi-line case so

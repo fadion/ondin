@@ -764,3 +764,74 @@ fn wrap_reverse_reorders_with_its_lines_read_bottom_up() {
         "dropped before a, on the first line: nothing precedes it"
     );
 }
+
+/// **A layout nested in a plain group is measured by that layout** (§15 D899).
+/// In a row with padding 20 and gap 10, a group with no layout holds a flex
+/// group — padding 10 round a 40 × 30 rect, so 60 × 50 — and the next item sits
+/// after the plain group's box: at 20 + 60 + 10 = 90, the plain group 50 tall.
+/// `atomic_box` measured the nested layout by its children's stored union, 40 ×
+/// 30, which put the next item at 70 — §15 D875's ⚠️.
+///
+/// **Flip run**, `atomic_box`'s early return for a laid container deleted: fails
+/// on *"after the nested layout's padded box"*, 70 against 90 — the predicted
+/// site. The randomized guard cannot see this one: `update` and `rebuild` both
+/// measure through the same function.
+#[test]
+fn a_layout_nested_in_a_plain_group_is_measured_by_its_layout() {
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(400.0, 200.0), (0.0, 0.0));
+    let plain = s.add(f, NodeKind::Group, (0.0, 0.0));
+    let nested = s.add(plain, NodeKind::Group, (0.0, 0.0));
+    s.add(nested, rect(40.0, 30.0), (0.0, 0.0));
+    let next = s.add(f, rect(20.0, 20.0), (0.0, 0.0));
+    s.display(
+        nested,
+        Some(Display::Flex(Flex {
+            padding: [10.0; 4],
+            ..Default::default()
+        })),
+    );
+    s.display(f, row());
+    assert_eq!(
+        s.bounds(plain).height(),
+        50.0,
+        "the plain group is the nested layout's box"
+    );
+    assert_eq!(
+        s.bounds(next).x0,
+        90.0,
+        "after the nested layout's padded box"
+    );
+}
+
+/// **An in-flow item turns about its box centre in its slot, its stored
+/// translation ignored** (§15 D896's ruling, the half no test checked: the
+/// preview differential proves preview and commit agree, both through
+/// `container::item_placed`, not *where* they draw). A 40 × 30 rect first in a
+/// row with padding 20 has its slot at (20, 20), its centre at (40, 35); stored
+/// turned a quarter about a point far away, translation and all, it is drawn as a
+/// 30 × 40 box about that same centre — (25, 15) to (55, 55).
+///
+/// **Flip run**, `item_placed` turning about the box's top-left corner rather
+/// than its centre (`translate(slot) * linear * translate(−origin)`, the version
+/// somebody would write): fails on *"turned about its box centre"*, the box at
+/// (−10, 20)–(20, 60) — the predicted site. The stored translation is not
+/// flipped here: the commit door keeps the stored one (§15 D877's second
+/// amendment), so it is (0, 0) and could not show a difference.
+#[test]
+fn an_in_flow_item_turns_about_its_box_centre_in_its_slot() {
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(400.0, 200.0), (0.0, 0.0));
+    let turned = s.add(f, rect(40.0, 30.0), (0.0, 0.0));
+    s.display(f, row());
+    s.commit(vec![Operation::SetTransform {
+        id: turned,
+        transform: Affine::translate((300.0, 150.0)) * Affine::rotate(90f64.to_radians()),
+    }]);
+    let b = s.bounds(turned);
+    let near = |a: f64, e: f64| (a - e).abs() < 1e-6;
+    assert!(
+        near(b.x0, 25.0) && near(b.y0, 15.0) && near(b.x1, 55.0) && near(b.y1, 55.0),
+        "turned about its box centre in its slot: {b:?}"
+    );
+}

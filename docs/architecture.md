@@ -1293,14 +1293,20 @@ taffy has no such size and is handed `auto`, so `FlexTree::push` sets a `fit-con
 a stretching container to `flex-start` (`container::fit_content_across`), CSS's reading of a definite
 cross size. **A resize sticks**: `build::keep_flex_sizes`, beside `keep_insets` in
 `commit_inner`, writes `flex-grow`/`flex-shrink` 0 for a main-axis resize and `align-self: start` for
-a cross resize of a stretched item (the maintainer's ruling) — spelled once as `build::held`, which
-`sized_flex_item` calls too for a laid group's resize. The Item card names those flips, with an Undo
+a cross resize of a stretched item (the maintainer's ruling) — or `end` where the resize held the cross
+axis's end edge and moved its start, a row's item dragged by its top (§15 D905, the maintainer's
+ruling), judged on the parent's physical axes because the model's `start`/`end` are taffy's physical
+`START`/`END` — spelled once as `build::held`, which `sized_flex_item` calls too for a laid group's
+resize, handed the transform the same edit writes. **The gesture preview applies the same holds**
+(`build::flex_holds`, §15 D904), so a resize is drawn as it will land rather than re-laid as stored
+until the release. The Item card names those flips, with an Undo
 that takes the whole step back (§15 D880). **And a resize writes px over a size keyword**:
 `keep_flex_sizes` sets a `%` or `fit-content` width or height back to `auto` on each axis a resizing
 `SetGeometry` changed, whatever the parent — `auto` being the stored size the resize has just written
 (`build::sized_in_px`, §15 D879). **And the stored translation is kept**: before
-that, `keep_flex_sizes` runs `build::kept_flow_translations`, so every `SetTransform` on an in-flow item
-— a left- or top-handle resize's shift, a rotation's — keeps its linear part and the stored
+that, `keep_flex_sizes` runs `build::kept_flow_translations` — at the commit door only, never in the
+preview, where it would drop a drag's own translation (§15 D904) — so every `SetTransform` on an
+in-flow item — a left- or top-handle resize's shift, a rotation's — keeps its linear part and the stored
 translation, and one left unchanged is dropped; not where the same edit takes the item out of the flow
 (§15 D877's second amendment). A resize builds its shift on the used transform, which for an in-flow
 item is its slot, and that slot is the number this stops being stored. Padding and gap are px only, and the Scale tool
@@ -4427,7 +4433,14 @@ pub trait ScenePainter {
   and every layout root a touched node chains to is laid out over a `PreviewView` — the same
   `container::lay_out` `Resolved` runs, reading the specified values the transaction leaves — its
   results written as transform and kind overrides and `NodeOverride::frame`, a group's box, so a
-  pinned child is then placed against the box its container has just been given. ⚠️ **It skips only
+  pinned child is then placed against the box its container has just been given. **Those values
+  include the resize holds the commit will add**: `set_preview` appends `build::flex_holds` — the
+  growth, `align-self` and size keyword `keep_flex_sizes` writes — without which a stretched item
+  dragged shorter was stretched back every frame (§15 D904). ⚠️ **Where `item_placed` answers
+  `local: None`, the item's transform is the preview's own override**, then the document's: `None`
+  means the slot equals what the pass read, and `PreviewView::local` reads the override. Falling back
+  to the document drew an end-aligned item at its committed transform after a top-handle resize
+  (§15 D905). ⚠️ **It skips only
   a layer the transaction drags with `SetTransform`**: a resized item is re-laid like its siblings,
   since its container can move it as its size changes — **even when the resize carries a
   `SetTransform`**, as a left- or top-handle one does to hold the opposite edge: a layer the same
@@ -4457,7 +4470,11 @@ pub trait ScenePainter {
      differential does not cover it** (§9.3, §15 D592): the same projection with the session's
      already-shaped `TextLayout` handed in instead of re-derived, which is why that argument is a
      whole layout keyed to a `NodeId` — the property above then rests on the caller building both
-     from the same `parts()`, and it does.
+     from the same `parts()`, and it does. ⚠️ **And `set_preview` projects the gesture's transaction
+     plus `build::flex_holds`** (§15 D904), the half of the commit door's `keep_flex_sizes` a
+     re-laid item's drawing depends on; not `kept_flow_translations`, which would drop the
+     translation a drag's preview draws. The differential applies a transaction raw (§15 D896), so
+     it sees neither commit-door rewrite.
   2. **It refuses what it cannot represent.** The line runs *through* the structural ops rather
      than around them: one that only **adds** artwork is a ghost (`CreateNode`, `InsertSubtree`),
      because nothing in the committed tree changes and there is no node whose absence the walk has
@@ -7140,7 +7157,8 @@ input event (winit/egui)
   computing an edit *from* it computes from where layout put the node**, which is the rule since step
   2 (§15 D874): `build::keep_insets` turns the placement written for a pinned layer into its insets,
   and `build::keep_flex_sizes`, straight after it, turns a resize of an in-flow flex item into
-  `flex-grow`/`flex-shrink` 0 or `align-self: start` so the size holds (§15 D875), and keeps the
+  `flex-grow`/`flex-shrink` 0 or `align-self: start` — `end` from the cross start, §15 D905 — so the
+  size holds (§15 D875), and keeps the
   item's stored translation under a `SetTransform` written while it stays in the flow — the slot a
   control computed from being where its container puts it, not a place of its own (§15 D877's second
   amendment).
@@ -7148,7 +7166,10 @@ input event (winit/egui)
   `AutoHeight(w)`. `committed_node` has no
   used kind at all: it reports the value a commit is about to overwrite, which is the specified one.
   `keep_flex_sizes` also turns a resize of any layer into px on each axis it changed, a `%` or
-  `fit-content` width or height going back to `auto` (§15 D879). And `DisplayNode::display` and `item`
+  `fit-content` width or height going back to `auto` (§15 D879). **The preview carries those holds
+  too** (`build::flex_holds`, §15 D904): an item's H reads back through a preview that re-lays its
+  row, and while that preview laid a stretched item out as stored, each frame of a scrub started again
+  from the stretched height and the release committed it. And `DisplayNode::display` and `item`
   have overrides behind them, as `insets` does, so a Container- or Item-card scrub accumulates (§15
   D878). 🚨 **And a field reading through the preview cannot tell "edited" from "moved this frame".**
   On the release frame — the one `edit_valve` commits on — nothing moves and the field shows the value
@@ -8162,7 +8183,8 @@ one, and `%` for any kind in its parent's flow that layout can resize — `layou
 offers fewer than CSS's four because `container::style_of` merges a different two per kind. A keyword
 side shows the size it resolved to, the keyword where the unit goes — W and H being real sizes of the
 layer, where the Item card's unset basis and limits read their keyword in the digits' place (§15
-D895, the maintainer's ruling); picking
+D895, the maintainer's ruling); the menu opens under the unit, its right edge under the unit's — hung
+off the field's response it opened under the prefix (`ui::value_field_unit`, §15 D907); picking
 a mode moves nothing
 (`layout::size_mode_tx`); typing writes px, or `%` while the mode is `%`. **The proportion lock is
 disabled while either side is a keyword or `%`**, with the reason on hover. A laid group's typed W and
@@ -8338,7 +8360,8 @@ dropdowns whose layout
 pictures turn with the container (`layout::Orient`, a transpose and a mirror, never a rotation), the
 two gaps, and padding as two paired fields that open to four. *Item* has grow and shrink, basis,
 `align-self` — *Auto · \<inherited\>* while unset — and four limits behind a *Min / max* disclosure,
-a basis or limit left at a keyword reading it in the digits' place (§15 D895);
+a basis or limit left at a keyword reading it in the digits' place (§15 D895), with no unit beside it
+— typing or dragging a number is how to leave it (§15 D906);
 for a layer the flow skips it says why instead, in words — *Absolutely positioned* and which edges
 hold it, *Hidden*, or a mask (§15 D889) — with one button that puts back every subject out for that
 reason. Labels and values are CSS's names, written in sentence case — *Justify content*, *Flex start*
@@ -9295,7 +9318,8 @@ inspector's layout cards do not keep it either** — ***their number fields do s
 maintainer's ruling, `layout::mixed_if` spelling the word where `dash_if` copied `mixed_text`. The
 two things left over were settled the same day (D892's amendment): a mixed segmented row draws
 `ui::segment_mixed`'s dash in its first cell, one of D130's two; and a sizing field's unit reads `–`
-beside digits that already say "Mixed", which is D895's *no single unit* and not a mixed marker.
+beside digits that already say "Mixed", which is D895's *no single unit* and not a mixed marker —
+the one place that dash is left since a keyword in the digits lost its unit (§15 D906).
 
 **Three states on one field, twice.** Line height's suffix cycles `auto → % → px`, and a decoration's
 thickness and offset cycle `Font → px → %` — because in both cases the third state is a *value* ("the

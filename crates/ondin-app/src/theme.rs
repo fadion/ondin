@@ -142,6 +142,10 @@ pub mod color {
     /// selection, at panel strength, so a selected row and its bounding box are
     /// visibly the same statement.
     pub const SELECT_ROW: Color32 = select_a(43);
+    /// A selected grid container's **gaps** on the canvas, between its track
+    /// lines (§15 D921): the selection hue, faint enough that the artwork under a
+    /// gap still reads — a gap is the one part of a grid nothing is laid in.
+    pub const GRID_GAP: Color32 = select_a(30);
 
     /// The **key layer** outline: the one member of a selection that align aligns
     /// to and that a boolean takes as its base.

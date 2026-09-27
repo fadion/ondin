@@ -304,6 +304,20 @@ impl RenderOverrides {
         &self.landing
     }
 
+    /// The grid container `id` as **this preview** lays it — its tracks and its
+    /// items' areas ([`ondin_core::container::laid_grid`] over the patched
+    /// fields), `None` where it is not a grid. With nothing patched it is the
+    /// committed document's answer, `build::laid_grid`'s.
+    ///
+    /// **The canvas's track lines' one source** (§15 D921), so a container being
+    /// resized re-lays its lines against the box the gesture is drawing rather
+    /// than the one on disk — the half-previewing shape
+    /// §15 D391 found in the layout grids, where the box re-flowed and its bands
+    /// stayed put.
+    pub fn laid_grid(&self, doc: &Document, id: NodeId) -> Option<ondin_core::container::LaidGrid> {
+        ondin_core::container::laid_grid(&PreviewView { doc, ov: self }, id)
+    }
+
     /// The ground this preview asks for, if it touches the ground at all.
     pub fn canvas_background(&self) -> Option<Color> {
         self.canvas_background

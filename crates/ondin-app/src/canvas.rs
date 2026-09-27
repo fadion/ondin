@@ -872,6 +872,15 @@ impl Polyline {
     }
 }
 
+/// A grid container's track lines and gaps in its own space
+/// ([`OndinApp::track_lines`], §15 D921): each line's two ends and whether an
+/// explicit track has that edge, and each gap as a band.
+#[derive(Debug, Default)]
+struct TrackLines {
+    lines: Vec<(Point, Point, bool)>,
+    gaps: Vec<KRect>,
+}
+
 /// Where the pictures inside a pasted SVG go (`ondin_core::svg_in::ImageSink`).
 ///
 /// **The same three steps `OndinApp::load_image_bytes` takes**, and deliberately not
@@ -9806,6 +9815,142 @@ impl OndinApp {
         }
     }
 
+    /// **A grid container's tracks, read-only, over the artwork** (§15 D913's
+    /// fourth ruling, drawn as §15 D921 settles): every track edge as a 1px
+    /// `SELECT_DIM` line across the other axis's tracks — dashed where a track of
+    /// the template meets it, dotted where only implicit ones do — and each gap as
+    /// a faint [`color::GRID_GAP`] band.
+    ///
+    /// **For every selected grid container, and for the container of a layer
+    /// being moved**, whose drop writes a cell and so wants the cells in view
+    /// while it is aimed (§15 D916's drop). From the preview
+    /// ([`ondin_render::RenderOverrides::laid_grid`]), so a resize on the canvas
+    /// re-lays the lines with the box; under the hover outline and the selection
+    /// chrome, and gone wherever [`Self::chrome_hidden`] takes the selection's —
+    /// an inspector scrub included, whose edit hold hides them for its length
+    /// (§15 D128; whether they should stay up for one is D921's open question).
+    ///
+    /// ⚠️ **Not §5.3b's layout grids** ([`Self::draw_layout_grids`]) — those are
+    /// a frame's own columns, chrome with no effect on anything, and they stay
+    /// under the frame labels; these are where a CSS grid laid its items.
+    fn draw_grid_tracks(&self, painter: &egui::Painter, rect: egui::Rect, ppp: f32) {
+        if self.chrome_hidden() {
+            return;
+        }
+        let (doc, _, ov) = self.session.render_inputs();
+        let mut subjects: Vec<NodeId> = self.session.selection.ids().to_vec();
+        if matches!(self.drag, Drag::Move { .. }) {
+            for id in self.session.selection.ids() {
+                if let Some(parent) = doc.get(*id).and_then(|n| n.parent())
+                    && !subjects.contains(&parent)
+                {
+                    subjects.push(parent);
+                }
+            }
+        }
+        // The chrome rides an Alt-drag's copy — a selected container being
+        // copied is the one under the pointer. **Only a selected one**: the
+        // container of an item being copied stays where it is, and its lines
+        // with it (`arch-scribe`'s reading of the first cut, which shifted both).
+        let copied = self.alt_clone_offset(rect, ppp);
+        for id in subjects {
+            if !self.shown_visible(id) {
+                continue;
+            }
+            let offset = match self.session.selection.ids().contains(&id) {
+                true => copied,
+                false => egui::Vec2::ZERO,
+            };
+            let Some(grid) = ov.laid_grid(doc, id) else {
+                continue;
+            };
+            let (Some(bx), Some(world)) = (
+                self.session.preview_local_box(id),
+                self.session.preview_world_transform(id),
+            ) else {
+                continue;
+            };
+            let lines = Self::track_lines(&grid, bx);
+            for band in lines.gaps {
+                let quad = self.local_quad(band, world, rect, ppp).map(|p| p + offset);
+                painter.add(egui::Shape::convex_polygon(
+                    quad.to_vec(),
+                    color::GRID_GAP,
+                    egui::Stroke::NONE,
+                ));
+            }
+            let stroke = egui::Stroke::new(1.0, color::SELECT_DIM);
+            for (a, b, explicit) in lines.lines {
+                let ends = [a, b].map(|p| self.to_screen(world * p, rect, ppp) + offset);
+                let (dash, gap) = if explicit { (4.0, 3.0) } else { (1.5, 2.5) };
+                painter.extend(egui::Shape::dashed_line(&ends, stroke, dash, gap));
+            }
+        }
+    }
+
+    /// A laid grid's lines and gaps in the container's own space, for
+    /// [`Self::draw_grid_tracks`]: every track edge once, as a segment across the
+    /// other axis's run of tracks — `bx`, the container's box, where that axis has
+    /// none — marked `true` where an **explicit** track has that edge; and every
+    /// space between two neighbouring tracks as a band across the same run — the
+    /// gap, and whatever `space-between` and its kin hand out there, since taffy
+    /// places the tracks apart by it (measured: `50px 50px 50px` in 400 under
+    /// `space-between` lays at 0, 175 and 350).
+    ///
+    /// Edges are merged where they coincide, so a grid with no gap draws one line
+    /// between two tracks rather than two on top of each other, and an explicit
+    /// track's edge stays dashed where an implicit one shares it.
+    fn track_lines(grid: &ondin_core::container::LaidGrid, bx: KRect) -> TrackLines {
+        use ondin_core::container::LaidTracks;
+        let run = |t: &LaidTracks, lo: f64, hi: f64| match (t.spans.first(), t.spans.last()) {
+            (Some(first), Some(last)) => (first.0, last.1),
+            _ => (lo, hi),
+        };
+        let edges = |t: &LaidTracks| {
+            let first = usize::from(t.before);
+            let explicit = first..first + usize::from(t.explicit);
+            let mut out: Vec<(f64, bool)> = Vec::new();
+            for (i, (a, b)) in t.spans.iter().enumerate() {
+                for v in [*a, *b] {
+                    match out.iter_mut().find(|(w, _)| (w - v).abs() < 1e-6) {
+                        Some(edge) => edge.1 |= explicit.contains(&i),
+                        None => out.push((v, explicit.contains(&i))),
+                    }
+                }
+            }
+            out
+        };
+        let gaps = |t: &LaidTracks| -> Vec<(f64, f64)> {
+            t.spans
+                .windows(2)
+                .filter(|w| w[1].0 > w[0].1 + 1e-6)
+                .map(|w| (w[0].1, w[1].0))
+                .collect()
+        };
+        let (y0, y1) = run(&grid.rows, bx.y0, bx.y1);
+        let (x0, x1) = run(&grid.columns, bx.x0, bx.x1);
+        let mut out = TrackLines::default();
+        for (x, explicit) in edges(&grid.columns) {
+            out.lines
+                .push((Point::new(x, y0), Point::new(x, y1), explicit));
+        }
+        for (y, explicit) in edges(&grid.rows) {
+            out.lines
+                .push((Point::new(x0, y), Point::new(x1, y), explicit));
+        }
+        out.gaps.extend(
+            gaps(&grid.columns)
+                .into_iter()
+                .map(|(a, b)| KRect::new(a, y0, b, y1)),
+        );
+        out.gaps.extend(
+            gaps(&grid.rows)
+                .into_iter()
+                .map(|(a, b)| KRect::new(x0, a, x1, b)),
+        );
+        out
+    }
+
     /// The selection outline for `id`, from the **preview** layer so it tracks a
     /// gesture.
     fn selection_quad(&self, id: NodeId, rect: egui::Rect, ppp: f32) -> Option<[egui::Pos2; 4]> {
@@ -10415,6 +10560,10 @@ impl OndinApp {
         // it is a label on the artwork, not part of the chrome that answers a
         // gesture.
         self.draw_frame_labels(ui, painter, rect, ppp);
+
+        // A selected grid container's tracks, over the artwork and its labels and
+        // under everything that answers the pointer — see the function.
+        self.draw_grid_tracks(painter, rect, ppp);
 
         // What the pointer is over but has not selected — the exact outline of
         // the shape, drawn under the selection chrome so a selected layer's own
@@ -14137,6 +14286,241 @@ mod layout_grid_tests {
             LayoutGrid { count: 7, ..grid },
         ));
         assert_eq!(bands(&app, &ctx).len(), 4);
+    }
+}
+
+/// A selected grid container's track lines (§15 D921): their arithmetic in
+/// `track_lines`, and that `draw_grid_tracks` puts them over the right box, only
+/// while the container is selected, and follows a resize's preview.
+#[cfg(test)]
+mod grid_track_tests {
+    use super::*;
+    use ondin_core::container::{Display, Grid, LaidGrid, LaidTracks};
+    use ondin_core::kurbo::Size;
+
+    const AREA: egui::Rect =
+        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(800.0, 600.0));
+
+    /// A 400×200 frame at the origin laying out `100px 1fr` columns — gap 10,
+    /// padding 20, so columns at 20–120 and 130–380 — with one 20×20 rect in it.
+    fn app_with_grid(ctx: &egui::Context) -> (OndinApp, NodeId) {
+        let mut app = OndinApp::headless(ctx);
+        let mut ids = ondin_core::IdSource::new(1);
+        let root = ids.mint();
+        let (frame, item) = (ids.mint(), ids.mint());
+        let mut doc = Document::new(root);
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: frame,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(400.0, 200.0),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::CreateNode {
+                id: item,
+                parent: frame,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(20.0, 20.0),
+                    corner_radii: Default::default(),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetDisplay {
+                id: frame,
+                display: Some(Display::Grid(Grid {
+                    columns: ondin_core::container::parse_tracks("100px 1fr").unwrap(),
+                    column_gap: 10.0,
+                    padding: [20.0; 4],
+                    ..Default::default()
+                })),
+            },
+        ]))
+        .expect("build the fixture");
+        app.session.adopt_document(doc, None);
+        (app, frame)
+    }
+
+    /// The screen x of every vertical line the overlay drew, and how many gap
+    /// bands — the only `convex_polygon`s it makes.
+    fn drawn(app: &OndinApp, ctx: &egui::Context) -> (Vec<f32>, usize) {
+        let shapes = ctx
+            .run_ui(Default::default(), |ui| {
+                app.draw_grid_tracks(ui.painter(), AREA, 1.0);
+            })
+            .shapes;
+        let mut xs: Vec<f32> = Vec::new();
+        let mut bands = 0;
+        for c in shapes {
+            match c.shape {
+                egui::Shape::LineSegment { points: [a, b], .. } if (a.x - b.x).abs() < 0.01 => {
+                    if !xs.iter().any(|x| (x - a.x).abs() < 0.01) {
+                        xs.push(a.x);
+                    }
+                }
+                egui::Shape::Path(_) => bands += 1,
+                _ => {}
+            }
+        }
+        xs.sort_by(f32::total_cmp);
+        (xs, bands)
+    }
+
+    fn screen_x(app: &OndinApp, x: f64) -> f32 {
+        app.to_screen(Point::new(x, 0.0), AREA, 1.0).x
+    }
+
+    /// **A selected grid draws a line at each column edge and a band in its gap,
+    /// and an unselected one draws nothing until one of its items is moved** —
+    /// the lines at 20, 120, 130 and 380 of the frame's own space, wherever the
+    /// camera puts them. **Under an Alt-drag the lines of a copied container
+    /// ride the copy and a copied item's container stays.**
+    ///
+    /// **Flip run**, the offset applied to every subject as the first cut did:
+    /// fails on *"an item's container stays"*, its lines 50 right — the
+    /// predicted site.
+    #[test]
+    fn a_selected_grid_draws_its_column_edges_and_gap() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, frame) = app_with_grid(&ctx);
+        assert_eq!(drawn(&app, &ctx), (Vec::new(), 0), "nothing selected");
+        app.session.selection.set(vec![frame]);
+        let (xs, bands) = drawn(&app, &ctx);
+        let want: Vec<f32> = [20.0, 120.0, 130.0, 380.0]
+            .map(|x| screen_x(&app, x))
+            .to_vec();
+        assert_eq!(xs.len(), 4, "four column edges: {xs:?}");
+        for (x, w) in xs.iter().zip(&want) {
+            assert!((x - w).abs() < 0.01, "{xs:?} against {want:?}");
+        }
+        assert_eq!(bands, 1, "one column gap, and no row gap");
+
+        // An item selected draws nothing until it is moved — then its container's
+        // lines, since the drop writes a cell.
+        let item = app.session.doc.get(frame).unwrap().children()[0];
+        app.session.selection.set(vec![item]);
+        assert_eq!(drawn(&app, &ctx), (Vec::new(), 0), "an item at rest");
+        app.drag = Drag::Move {
+            anchor: Point::ZERO,
+        };
+        let moving = drawn(&app, &ctx).0;
+        assert_eq!(moving.len(), 4, "its container's, while it moves");
+
+        // An Alt-drag carries a copy 50 right: the item's container stays put,
+        // and a copied container's lines ride its copy.
+        app.alt_clone = Some(AltClone {
+            copies: Vec::new(),
+            delta: Vec2::new(50.0, 0.0),
+        });
+        assert_eq!(drawn(&app, &ctx).0, moving, "an item's container stays");
+        app.session.selection.set(vec![frame]);
+        let copied = drawn(&app, &ctx).0;
+        let shift = screen_x(&app, 70.0) - screen_x(&app, 20.0);
+        assert!(
+            (copied[0] - (moving[0] + shift)).abs() < 0.01,
+            "a copied container's ride the copy: {copied:?} from {moving:?}"
+        );
+    }
+
+    /// **The lines follow a resize's preview**: the frame dragged to 600 wide
+    /// moves the `1fr` column's end to 580 before anything is committed.
+    ///
+    /// **Flip run**, `draw_grid_tracks` reading `build::laid_grid` (the committed
+    /// document) instead of the preview's: fails on *"the fr column's end follows
+    /// the drag"* with the last line still at 380, the predicted site.
+    #[test]
+    fn the_lines_follow_a_resize_preview() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, frame) = app_with_grid(&ctx);
+        app.session.selection.set(vec![frame]);
+        app.session
+            .set_preview(&Transaction(vec![Operation::SetGeometry {
+                id: frame,
+                geometry: ondin_core::GeometryPatch::Size(Size::new(600.0, 200.0)),
+            }]));
+        let (xs, _) = drawn(&app, &ctx);
+        let last = *xs.last().expect("lines");
+        assert!(
+            (last - screen_x(&app, 580.0)).abs() < 0.01,
+            "the fr column's end follows the drag: {xs:?}"
+        );
+    }
+
+    /// **`track_lines` draws each edge once, dashed wherever an explicit track
+    /// has it, and a band in each gap** — rows with an implicit track *before*
+    /// the template's two (a leading item placed at a negative line) and one
+    /// after, touching the second with no gap, over columns with two gaps.
+    ///
+    /// **Flip run**, the merge keeping the first track's mark (`edge.1 |= …`
+    /// dropped): fails on *"an edge an explicit track shares is dashed"* at y 20,
+    /// which the leading implicit track reaches first — the predicted site.
+    #[test]
+    fn track_lines_merge_edges_and_mark_the_explicit_ones() {
+        let tracks = |spans: Vec<(f64, f64)>, before, explicit| LaidTracks {
+            spans,
+            before,
+            explicit,
+        };
+        let grid = LaidGrid {
+            columns: tracks(vec![(20.0, 120.0), (130.0, 210.0), (220.0, 380.0)], 0, 3),
+            rows: tracks(
+                vec![(0.0, 20.0), (20.0, 70.0), (80.0, 120.0), (120.0, 140.0)],
+                1,
+                2,
+            ),
+            areas: Vec::new(),
+        };
+        let out = OndinApp::track_lines(&grid, KRect::new(0.0, 0.0, 400.0, 200.0));
+        let vertical: Vec<(f64, f64, f64, bool)> = out
+            .lines
+            .iter()
+            .filter(|(a, b, _)| a.x == b.x)
+            .map(|(a, b, e)| (a.x, a.y, b.y, *e))
+            .collect();
+        assert_eq!(
+            vertical.iter().map(|v| v.0).collect::<Vec<_>>(),
+            vec![20.0, 120.0, 130.0, 210.0, 220.0, 380.0]
+        );
+        assert!(
+            vertical.iter().all(|v| v.1 == 0.0 && v.2 == 140.0 && v.3),
+            "every column edge crosses the rows' run, dashed: {vertical:?}"
+        );
+        let horizontal: Vec<(f64, bool)> = out
+            .lines
+            .iter()
+            .filter(|(a, b, _)| a.y == b.y)
+            .map(|(a, b, e)| {
+                assert_eq!((a.x, b.x), (20.0, 380.0), "across the columns' run");
+                (a.y, *e)
+            })
+            .collect();
+        assert_eq!(
+            horizontal,
+            vec![
+                (0.0, false),
+                (20.0, true),
+                (70.0, true),
+                (80.0, true),
+                (120.0, true),
+                (140.0, false),
+            ],
+            "an edge an explicit track shares is dashed, each edge once"
+        );
+        assert_eq!(
+            out.gaps,
+            vec![
+                KRect::new(120.0, 0.0, 130.0, 140.0),
+                KRect::new(210.0, 0.0, 220.0, 140.0),
+                KRect::new(20.0, 70.0, 380.0, 80.0),
+            ]
+        );
     }
 }
 

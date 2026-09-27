@@ -8,7 +8,7 @@ documents, and is untracked.
 | --- | --- |
 | `docs/architecture.md` | The design and the invariants. **Source of truth.** ~13,000 lines. |
 | `docs/decisions.md` | **§15** — every deviation from that design, **D1–D912** with no gaps, each with a verdict. ~53,500 lines. |
-| `docs/roadmap.md` | Open work, decided non-goals, parked decisions, post-v1. **Every `Now` section is clear as of 2026-09-23** — *Files, library and storage* reopened and closed that day (the cover cache's lifecycle, §15 D863–D864); what is left is *Later* and §0. **`Next · Container layout`** (flexbox, CSS grid and insets — `architecture.md` §5.3c, §15 D867–D883): steps 1–3 built and committed — step 3's cards (D878–D883), the maintainer's first-look fixes (D884–D891) and six rulings on what flex had left (D892–D897) all landed in session 36. Session 37 (D904–D912): a resize's holds in the preview, a top-edge resize aligning to the end, `Start`/`End` made `flex-start`/`flex-end` as the cards always drew (D909), and a layout nested in a plain group laid by both the preview and `keep_insets`. **Flex owes tests only** (the section's *owed* paragraph); **step 4, grid, is next**. |
+| `docs/roadmap.md` | Open work, decided non-goals, parked decisions, post-v1. **Every `Now` section is clear as of 2026-09-23** — *Files, library and storage* reopened and closed that day (the cover cache's lifecycle, §15 D863–D864); what is left is *Later* and §0. **`Next · Container layout`** (flexbox, CSS grid and insets — `architecture.md` §5.3c, §15 D867–D883): steps 1–3 built and committed — step 3's cards (D878–D883), the maintainer's first-look fixes (D884–D891) and six rulings on what flex had left (D892–D897) all landed in session 36. Session 37 (D904–D912): a resize's holds in the preview, a top-edge resize aligning to the end, `Start`/`End` made `flex-start`/`flex-end` as the cards always drew (D909), and a layout nested in a plain group laid by both the preview and `keep_insets`. **Flex owes tests only** (the section's *owed* paragraph). **Step 4, grid, is three-quarters built** (session 38, D913–D920): its model and engine, preview and gestures, and the cards are committed; **the section's handoff marker under step 4 is the next session's list** — the maintainer's first look at the grid cards, then the canvas track lines, then the owed tests. |
 | `docs/shortcuts.md` | The whole keymap — bound, unbound and agreed. |
 | `docs/context-menus.md` | The context-menu spec and its own deviation ledger. |
 | `docs/vm.md` | The language behind Command Mode. Nothing here is built. |
@@ -67,9 +67,18 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 912 index rows, 912 body headings, next free
-D913** (measured at the close of session 37) — but trust the procedure over any number written
+anywhere cited either. **The live figures: 920 index rows, 920 body headings, next free
+D921** (measured at the close of session 38) — but trust the procedure over any number written
 down here, including that one. **No block is reserved**: the next session reserves its own.
+⚠️ **Session 38 reserved D913–D924 once, up front, and spent eight** — D913 (the maintainer's
+four grid rulings), D914 (grid's model and engine), D915 (grid's `normal`), D916 (its preview and
+gestures), D917 (a stretched label that wrapped, flex too), D918 (several grid items as a block),
+D919 (the track cap and the leftovers), D920 (the cards) — each typed into code only after the
+block was grep-checked. The closing negative grep over **D921–D924 found zero sites in `crates/`
+or `docs/`** and they are released. **D916, D917, D918 and D920 were each amended the same day**
+by the session that wrote them, from `arch-scribe`'s readings, before commit — an entry is not
+closed when it is written. Census: 820 distinct numbers cited from `crates/`, none unresolved —
+eight arrivals (D913–D920) against `8056696` (812).
 ⚠️ **Session 37 reserved D904–D909, then D908–D915, and spent nine** — D904–D907 (the resize
 preview, the top-edge ruling, the keyword field's unit, the unit menu), then D908–D912 (the
 drop outline's fallback, flex-start, and a layout nested in a plain group, twice, and a tooltip).

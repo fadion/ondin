@@ -3794,26 +3794,52 @@ impl OndinApp {
             false,
             "One layer at a time: a selection has no shared transform origin",
         );
+        // **X and Y are inert while any member is placed by its container** (§15
+        // D903, closing D882's gap): the single-layer card's rule, for the same
+        // reason — `build::keep_flex_sizes` keeps an in-flow item's stored
+        // translation, so a typed position would move the free members and leave
+        // the laid-out ones in their slots, silently. A partial edit that says
+        // nothing is worse than a field that says why it is off.
+        let laid_out =
+            ondin_core::build::outermost(&self.session.doc, self.session.selection.ids())
+                .into_iter()
+                .filter(|id| ondin_core::build::is_flex_item(&self.session.doc, *id))
+                .count();
         self.panel(ui, "Transform", Some(action), |app, ui| {
             let fw = (ui.available_width() - ui::CARD_COL_GAP) / 2.0;
             let row = egui::vec2(fw, 28.0);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
-                app.multi_number(
-                    ui,
-                    row,
-                    MultiField::X,
-                    Prefix::Text("X"),
-                    Some(union.min_x()),
-                );
-                app.multi_number(
-                    ui,
-                    row,
-                    MultiField::Y,
-                    Prefix::Text("Y"),
-                    Some(union.min_y()),
-                );
+            let xy = ui::disable_unless(ui, laid_out == 0, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
+                    app.multi_number(
+                        ui,
+                        row,
+                        MultiField::X,
+                        Prefix::Text("X"),
+                        Some(union.min_x()),
+                    );
+                    app.multi_number(
+                        ui,
+                        row,
+                        MultiField::Y,
+                        Prefix::Text("Y"),
+                        Some(union.min_y()),
+                    );
+                })
             });
+            if laid_out > 0 {
+                // Beside the disabled scope, which reports no hover of its own.
+                ui.interact(
+                    xy.response.rect,
+                    ui.id().with("multi-xy-laid-out"),
+                    egui::Sense::hover(),
+                )
+                .on_hover_text(format!(
+                    "{laid_out} of these {} placed by a container's layout — drag them on \
+                     the canvas to reorder",
+                    if laid_out == 1 { "is" } else { "are" }
+                ));
+            }
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
                 // **W as wide as X, H taking what is left, and the chain in the
@@ -26228,6 +26254,69 @@ mod inset_card_tests {
         );
     }
 
+    /// **Centring an item out of a hugging container never moves it either** (§15
+    /// D894's other caller, which only a plain frame had reached): the same group
+    /// as the pinning test — hugging a 60 and a 40 at (50, 50), padding 20 — and
+    /// the second item centred horizontally. It leaves the row, the group shrinks
+    /// to 100, and the item stays at x 130, its insets derived against the new box
+    /// with `margin: auto` between them.
+    ///
+    /// **Flip run**, `toggle_centre` committing without `kept_in_place`: fails on
+    /// *"centring moved it"* — the predicted site.
+    #[test]
+    fn centring_out_of_a_hugging_container_leaves_the_item_where_it_is() {
+        use ondin_core::container::{Display, Flex};
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = ondin_core::IdSource::new(0xB0);
+        let root = ids.mint();
+        let (group, first, second) = (ids.mint(), ids.mint(), ids.mint());
+        let rect = |id, index, w| Operation::CreateNode {
+            id,
+            parent: group,
+            index,
+            kind: NodeKind::Rect {
+                size: Size::new(w, 30.0),
+                corner_radii: RoundedRectRadii::default(),
+            },
+            transform: Some(Affine::IDENTITY),
+            name: None,
+        };
+        let mut doc = ondin_core::Document::new(root);
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: group,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Group,
+                transform: Some(Affine::translate((50.0, 50.0))),
+                name: None,
+            },
+            rect(first, 0, 60.0),
+            rect(second, 1, 40.0),
+            Operation::SetDisplay {
+                id: group,
+                display: Some(Display::Flex(Flex {
+                    padding: [20.0; 4],
+                    ..Default::default()
+                })),
+            },
+        ]))
+        .unwrap();
+        app.session.adopt_document(doc, None);
+        let before = drawn(&app, second);
+        assert_eq!(before.x0, 130.0, "the fixture");
+
+        app.toggle_centre(&[second], true, true);
+        assert_eq!(drawn(&app, group).width(), 100.0, "the group shrank");
+        assert_eq!(drawn(&app, second), before, "centring moved it");
+        let insets = *app.session.doc.get(second).unwrap().insets();
+        assert!(
+            insets.margin_auto.left && insets.margin_auto.right,
+            "and it is centred the CSS way"
+        );
+    }
+
     /// **The card is the mockup's screen 07** (§15 D890): the diagram 74 wide at
     /// the left, spanning the two field rows exactly; the four fields beside it;
     /// a pinned field's value with its unit and an unpinned one reading `auto`.
@@ -26318,5 +26407,142 @@ mod inset_card_tests {
             0,
             "no badge in a plain frame, where everything is absolute (§15 D891)"
         );
+    }
+}
+
+#[cfg(test)]
+mod multi_xy_flex_tests {
+    //! The multi-selection Transform card's X and Y over flex items (§15 D903).
+    //! Plain backticks throughout, per §15 D319.
+    use super::*;
+
+    /// **X and Y do nothing to a selection with an in-flow item in it** — the
+    /// first item of a row (padding 20 left, 30 top) and a free rect beside the
+    /// frame, both selected, so X reads the item's 20; a real 80-point scrub on
+    /// X's digits moves neither and makes no undo step. They used to be live: the
+    /// free rect moved and the laid-out item stayed in its slot, saying nothing
+    /// (§15 D882's gap).
+    ///
+    /// **Flip run**, the `laid_out == 0` gate made `true`: fails on *"nothing
+    /// moved"*, the free rect shifted — the predicted site. ⚠️ **The first draft
+    /// selected two in-flow items and its flip did not bite**: the commit door
+    /// keeps an in-flow item's stored translation, so with no free member the
+    /// open field changed nothing either way. The defect is the mixed selection's,
+    /// and that is what this fixture is.
+    #[test]
+    fn x_and_y_are_inert_over_a_selection_with_an_in_flow_item() {
+        use ondin_core::container::{AlignItems, Display, Flex};
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = ondin_core::IdSource::new(0xAF);
+        let root = ids.mint();
+        let (row, a, b) = (ids.mint(), ids.mint(), ids.mint());
+        let rect = |id, parent, index, w, at: (f64, f64)| Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind: NodeKind::Rect {
+                size: Size::new(w, 30.0),
+                corner_radii: RoundedRectRadii::default(),
+            },
+            transform: Some(Affine::translate(at)),
+            name: None,
+        };
+        let mut doc = ondin_core::Document::new(root);
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: row,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(400.0, 200.0),
+                },
+                transform: Some(Affine::IDENTITY),
+                name: None,
+            },
+            rect(a, row, 0, 40.0, (0.0, 0.0)),
+            // Free, beside the frame: moved by an X edit if one gets through.
+            rect(b, root, 1, 60.0, (500.0, 300.0)),
+            Operation::SetDisplay {
+                id: row,
+                display: Some(Display::Flex(Flex {
+                    column_gap: 10.0,
+                    padding: [30.0, 20.0, 30.0, 20.0],
+                    align_items: AlignItems::Start,
+                    ..Default::default()
+                })),
+            },
+        ]))
+        .unwrap();
+        app.session.adopt_document(doc, None);
+        app.session.selection.set(vec![a, b]);
+        let before = (
+            app.session.doc.get(a).unwrap().transform(),
+            app.session.doc.get(b).unwrap().transform(),
+        );
+        let depth = app.session.history.undo_depth();
+
+        let mut time = 0.0;
+        let mut frame = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            time += 0.1;
+            ctx.run_ui(
+                egui::RawInput {
+                    time: Some(time),
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1200.0, 900.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.set_max_width(284.0);
+                    app.inspector_multi_transform(ui);
+                },
+            )
+        };
+        let mut out = frame(&mut app, Vec::new());
+        for _ in 0..2 {
+            out = frame(&mut app, Vec::new());
+        }
+        let from = out
+            .shapes
+            .iter()
+            .find_map(|cs| match &cs.shape {
+                egui::epaint::Shape::Text(t) if t.galley.text() == "20" => {
+                    Some(t.galley.rect.translate(t.pos.to_vec2()).center())
+                }
+                _ => None,
+            })
+            .expect("X reads 20");
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(
+            &mut app,
+            vec![egui::Event::PointerMoved(from), button(from, true)],
+        );
+        for step in 1..=4 {
+            let at = from + egui::vec2(20.0 * step as f32, 0.0);
+            frame(&mut app, vec![egui::Event::PointerMoved(at)]);
+        }
+        let at = from + egui::vec2(80.0, 0.0);
+        frame(&mut app, vec![button(at, false)]);
+        for _ in 0..3 {
+            frame(&mut app, Vec::new());
+        }
+        assert_eq!(
+            (
+                app.session.doc.get(a).unwrap().transform(),
+                app.session.doc.get(b).unwrap().transform(),
+            ),
+            before,
+            "nothing moved"
+        );
+        assert_eq!(app.session.history.undo_depth(), depth, "and no step");
     }
 }

@@ -2877,3 +2877,77 @@ fn layout_and_item_edits_preview_as_their_commits() {
         "the nested group's layout taken away",
     );
 }
+
+/// **A pinned child of a group with a layout previews as its commit** (§15 D887,
+/// the preview half its entry left unchecked) — the fixture's nested column: its
+/// second rect pinned to the group's bottom-right, which takes it out of the
+/// column so the group re-lays and hugs smaller, and the pin is placed against
+/// that new box. Then, with the pin committed, the column's other rect widened,
+/// which resizes the box the pin is placed against.
+///
+/// `flex_relayout` must run before `relayout` for either to hold: the insets pass
+/// reads the box the flex pass has just given the group.
+///
+/// **Flip run**, the two passes swapped in `from_transaction_shaped`: fails on
+/// the **first** case, *"a laid group's child pinned"* — not on the second, as
+/// predicted. Pinning alone is enough: the pin takes the rect out of the column,
+/// the group hugs smaller, and an insets pass run first places the pin against
+/// the group's committed, larger box.
+#[test]
+fn a_pinned_child_of_a_laid_group_previews_as_its_commit() {
+    let (doc, _frame, _first, group) = flex_fixture();
+    let kids = doc.get(group).unwrap().children().to_vec();
+    let (top, pinned) = (kids[0], kids[1]);
+    let pin = Operation::SetInsets {
+        id: pinned,
+        insets: ondin_core::Insets {
+            right: Some(ondin_core::LengthPct::Px(0.0)),
+            bottom: Some(ondin_core::LengthPct::Px(0.0)),
+            ..Default::default()
+        },
+    };
+    assert_preview_matches_commit(
+        &doc,
+        &Transaction(vec![pin.clone()]),
+        "a laid group's child pinned",
+    );
+    let mut pinned_doc = doc.clone();
+    pinned_doc.apply(&Transaction(vec![pin])).unwrap();
+    assert_preview_matches_commit(
+        &pinned_doc,
+        &Transaction(vec![Operation::SetGeometry {
+            id: top,
+            geometry: GeometryPatch::Size(Size::new(70.0, 20.0)),
+        }]),
+        "a pinned child of a laid group, then its sibling resized",
+    );
+}
+
+/// **Moving a shape inside a plain group that is a flex item previews the row
+/// reflowing** (§15 D899) — the fixture's nested group with its layout taken
+/// away, so it is one atomic box in the row measured from its two rects, and one
+/// of them moved far out: the group grows, and the row's text after it moves. The
+/// preview picks what to re-lay through `container::chain_root`, which stopped at
+/// the plain group until D899.
+///
+/// **Flip run**, `chain_root`'s climb through a plain group removed: fails on
+/// the differential — the text drawn at its committed slot while the commit moves
+/// it — the predicted site.
+#[test]
+fn moving_a_shape_inside_a_plain_group_item_previews_the_row_reflowing() {
+    let (mut doc, _frame, _first, group) = flex_fixture();
+    doc.apply(&Transaction(vec![Operation::SetDisplay {
+        id: group,
+        display: None,
+    }]))
+    .unwrap();
+    let inner = doc.get(group).unwrap().children()[0];
+    assert_preview_matches_commit(
+        &doc,
+        &Transaction(vec![Operation::SetTransform {
+            id: inner,
+            transform: Affine::translate((640.0, 500.0)),
+        }]),
+        "a shape moved inside a plain group item",
+    );
+}

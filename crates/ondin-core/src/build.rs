@@ -3790,19 +3790,20 @@ fn written_transform(tx: &Transaction, id: NodeId) -> Option<Affine> {
 }
 
 /// Whether a resize of an item laid out by `flex` **kept its cross-axis end edge
-/// and moved its start** — a row's item dragged by its top, a column's by its left
-/// (§15 D905). `was` and `now` are the item's box in its own space with the local
-/// transform placing it, before and after.
+/// and moved its start** — a row's item dragged by its top, a column's by its left,
+/// and the other way round under `wrap-reverse` (§15 D905). `was` and `now` are the
+/// item's box in its own space with the local transform placing it, before and
+/// after.
 ///
-/// This decides between `align-self: start` and `end` when a resize releases a
-/// stretch: the edge the user held is the one the alignment keeps, so the item does
-/// not jump to the other side of its line on release. CSS's `start` and `end` —
-/// what [`crate::container::AlignItems`] maps to — are the physical top and bottom
-/// of a row's line (left and right of a column's) whatever `wrap-reverse` says, so
-/// the test is on the parent's axes and not on the flex lines' order.
+/// This decides between `align-self: flex-start` and `flex-end` when a resize
+/// releases a stretch: the edge the user held is the one the alignment keeps, so the
+/// item does not jump to the other side of its line on release. Those are the flow's
+/// cross-start and cross-end, which `wrap-reverse` swaps — the bottom of a row's line
+/// is its start there (§15 D909). This read the parent's physical axes while the
+/// model's `Start` was mapped to CSS's physical `start`; the two moved together.
 ///
 /// Every other resize answers `false` — from the end edge, or about the centre,
-/// where both edges move and `start` is the rule it always was.
+/// where both edges move and `flex-start` is the rule it always was.
 fn resized_from_cross_start(
     flex: &crate::container::Flex,
     was: (Affine, kurbo::Rect),
@@ -3810,10 +3811,14 @@ fn resized_from_cross_start(
 ) -> bool {
     let a = was.0.transform_rect_bbox(was.1);
     let b = now.0.transform_rect_bbox(now.1);
-    let (start, end) = if flex.direction.is_row() {
+    let (top_left, bottom_right) = if flex.direction.is_row() {
         ((a.y0, b.y0), (a.y1, b.y1))
     } else {
         ((a.x0, b.x0), (a.x1, b.x1))
+    };
+    let (start, end) = match flex.wrap {
+        crate::container::FlexWrap::WrapReverse => (bottom_right, top_left),
+        _ => (top_left, bottom_right),
     };
     // A resize holds its anchor through a product of transforms, so "held" means
     // to within rounding, not bit for bit.

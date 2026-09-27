@@ -460,6 +460,13 @@ pub enum FlexWrap {
 }
 
 /// CSS `justify-content` — the subset a flex container reads.
+///
+/// **`Start` and `End` are CSS's `flex-start` and `flex-end`**, here and in
+/// [`AlignItems`] and [`AlignContent`] (§15 D909): the flow's own start, which
+/// `row-reverse` puts on the right and `wrap-reverse` at the bottom of a row. The
+/// cards name them so (§15 D884) and draw them so (`Orient`). They were mapped to
+/// taffy's `START`/`END` — CSS's physical `start`/`end`, which ignore both
+/// reversals — so under either the canvas drew the opposite of the card.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum JustifyContent {
     #[default]
@@ -1171,8 +1178,9 @@ fn style_of(kind: &NodeKind, display: Option<&Display>, item: &FlexItem) -> taff
                 FlexWrap::WrapReverse => taffy::FlexWrap::WrapReverse,
             };
             style.justify_content = Some(match f.justify_content {
-                JustifyContent::Start => taffy::JustifyContent::START,
-                JustifyContent::End => taffy::JustifyContent::END,
+                // `flex-start`/`flex-end`, not `start`/`end` (§15 D909).
+                JustifyContent::Start => taffy::JustifyContent::FLEX_START,
+                JustifyContent::End => taffy::JustifyContent::FLEX_END,
                 JustifyContent::Center => taffy::JustifyContent::CENTER,
                 JustifyContent::SpaceBetween => taffy::JustifyContent::SPACE_BETWEEN,
                 JustifyContent::SpaceAround => taffy::JustifyContent::SPACE_AROUND,
@@ -1181,8 +1189,8 @@ fn style_of(kind: &NodeKind, display: Option<&Display>, item: &FlexItem) -> taff
             style.align_items = Some(align_items(f.align_items));
             style.align_content = Some(match f.align_content {
                 AlignContent::Stretch => taffy::AlignContent::STRETCH,
-                AlignContent::Start => taffy::AlignContent::START,
-                AlignContent::End => taffy::AlignContent::END,
+                AlignContent::Start => taffy::AlignContent::FLEX_START,
+                AlignContent::End => taffy::AlignContent::FLEX_END,
                 AlignContent::Center => taffy::AlignContent::CENTER,
                 AlignContent::SpaceBetween => taffy::AlignContent::SPACE_BETWEEN,
                 AlignContent::SpaceAround => taffy::AlignContent::SPACE_AROUND,
@@ -1228,11 +1236,13 @@ fn fit_content_across(item: &FlexItem, parent: &Flex) -> bool {
         && item.align_self.unwrap_or(parent.align_items) == AlignItems::Stretch
 }
 
+/// `a` for taffy — `Start` and `End` as `flex-start` and `flex-end`, which follow
+/// `wrap-reverse` (§15 D909).
 fn align_items(a: AlignItems) -> taffy::AlignItems {
     match a {
         AlignItems::Stretch => taffy::AlignItems::STRETCH,
-        AlignItems::Start => taffy::AlignItems::START,
-        AlignItems::End => taffy::AlignItems::END,
+        AlignItems::Start => taffy::AlignItems::FLEX_START,
+        AlignItems::End => taffy::AlignItems::FLEX_END,
         AlignItems::Center => taffy::AlignItems::CENTER,
         AlignItems::Baseline => taffy::AlignItems::BASELINE,
     }

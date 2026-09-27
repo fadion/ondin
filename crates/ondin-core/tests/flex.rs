@@ -627,13 +627,238 @@ fn a_dragged_flex_item_reorders_by_where_its_centre_falls() {
             ..Default::default()
         })),
     );
-    // Right to left now: b at the right edge, a left of it, c left of that.
+    // Right to left now: b at the right edge, a left of it, c left of that —
+    // `flex-start` in a reversed row is its right (§15 D909; this comment was true
+    // of CSS and false of the engine until then, which packed the row left).
     assert!(s.bounds(b).x0 > s.bounds(a).x0, "the fixture reversed");
+    assert_eq!(s.bounds(b).x1, 380.0, "b at the right edge: 400 less 20");
     assert_eq!(
         reorder(&s, a, 100.0),
         Some(0),
         "row-reverse reads backwards: right is the start"
     );
+}
+
+/// **`Start` is CSS's `flex-start`, which follows both reversals** (§15 D909) —
+/// the cards' word and picture, and now the engine's. A 400 × 200 frame, padding
+/// 20, holding a 40 × 30 and a 60 × 50: in `row-reverse` justified to the start the
+/// row packs against the right; in `wrap-reverse` aligned to the start, lines and
+/// items against the bottom. And a stretched item there, dragged by its **top**,
+/// held the flow's cross-start — the bottom — so it aligns to the start, not the
+/// end (§15 D905 under the reversal).
+///
+/// **Flip runs**: `justify-content`'s mapping back to taffy's `START` fails on
+/// *"row-reverse packs right"*, a at 90..130 — and so does
+/// `a_dragged_flex_item_reorders_by_where_its_centre_falls` on its new right-edge
+/// assertion, b ending at 160; `align_items`' and `align-content`'s
+/// back to `START` fail on *"wrap-reverse sits at the bottom"*, a at y 20..50 —
+/// the predicted sites. `resized_from_cross_start` without its `WrapReverse` swap
+/// fails on *"the flow's start held"*, `End` — predicted.
+#[test]
+fn flex_start_follows_the_reversals() {
+    use ondin_core::container::{AlignContent, FlexWrap};
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(400.0, 200.0), (0.0, 0.0));
+    let a = s.add(f, rect(40.0, 30.0), (0.0, 0.0));
+    let b = s.add(f, rect(60.0, 50.0), (0.0, 0.0));
+    s.display(
+        f,
+        Some(Display::Flex(Flex {
+            direction: FlexDirection::RowReverse,
+            column_gap: 10.0,
+            padding: [20.0; 4],
+            align_items: AlignItems::Start,
+            ..Default::default()
+        })),
+    );
+    assert_eq!(
+        (s.bounds(a).x0, s.bounds(a).x1),
+        (340.0, 380.0),
+        "row-reverse packs right: a first, against the right padding"
+    );
+    assert_eq!(s.bounds(b).x1, 330.0, "b left of it");
+
+    s.display(
+        f,
+        Some(Display::Flex(Flex {
+            wrap: FlexWrap::WrapReverse,
+            column_gap: 10.0,
+            padding: [20.0; 4],
+            align_items: AlignItems::Start,
+            align_content: AlignContent::Start,
+            ..Default::default()
+        })),
+    );
+    assert_eq!(
+        (s.bounds(a).y0, s.bounds(a).y1),
+        (150.0, 180.0),
+        "wrap-reverse sits at the bottom"
+    );
+    assert_eq!(s.bounds(b).y1, 180.0, "b too, its line's start");
+
+    // Stretched across one line of the reversed wrap, then dragged by its top.
+    s.display(
+        f,
+        Some(Display::Flex(Flex {
+            wrap: FlexWrap::WrapReverse,
+            column_gap: 10.0,
+            padding: [20.0; 4],
+            align_content: AlignContent::Stretch,
+            ..Default::default()
+        })),
+    );
+    assert_eq!(s.bounds(a).height(), 160.0, "stretched across");
+    let slot = s.res.used_local(&s.doc, a).unwrap();
+    s.commit(vec![
+        Operation::SetGeometry {
+            id: a,
+            geometry: GeometryPatch::Size(Size::new(40.0, 70.0)),
+        },
+        Operation::SetTransform {
+            id: a,
+            transform: slot * Affine::translate((0.0, 90.0)),
+        },
+    ]);
+    assert_eq!(
+        s.doc.get(a).unwrap().item().align_self,
+        Some(AlignItems::Start),
+        "the flow's start held"
+    );
+    assert_eq!(
+        (s.bounds(a).y0, s.bounds(a).y1),
+        (110.0, 180.0),
+        "and the bottom stayed"
+    );
+}
+
+/// **A released stretch keeps the edge the user held, on every axis** (§15 D905
+/// under D909) — one stretched 40 × 30 rect in a 400 × 200 frame, padding 20,
+/// resized across its line from each cross edge, in a row and a column, with and
+/// without `wrap-reverse`. Dragged by the edge the flow calls its cross-start —
+/// top or left, or bottom or right when reversed — it aligns to `flex-end`;
+/// dragged by the other, to `flex-start`; and either way the edge it did not drag
+/// stays where it was.
+///
+/// **Flip run**, `resized_from_cross_start` answering `false`: fails on the first
+/// start-edge case, *"row, top"*, `Start` — predicted. The swap under
+/// `wrap-reverse` dropped fails on *"row, wrap-reverse, top"* — predicted.
+#[test]
+fn a_released_stretch_keeps_the_held_edge_on_every_axis() {
+    use ondin_core::container::FlexWrap;
+    // (what, direction, wrap, dragged the top/left edge, the keyword, the box's
+    // cross extent afterwards)
+    let cases = [
+        (
+            "row, top",
+            FlexDirection::Row,
+            FlexWrap::NoWrap,
+            true,
+            AlignItems::End,
+            (110.0, 180.0),
+        ),
+        (
+            "row, bottom",
+            FlexDirection::Row,
+            FlexWrap::NoWrap,
+            false,
+            AlignItems::Start,
+            (20.0, 90.0),
+        ),
+        (
+            "row, wrap-reverse, top",
+            FlexDirection::Row,
+            FlexWrap::WrapReverse,
+            true,
+            AlignItems::Start,
+            (110.0, 180.0),
+        ),
+        (
+            "row, wrap-reverse, bottom",
+            FlexDirection::Row,
+            FlexWrap::WrapReverse,
+            false,
+            AlignItems::End,
+            (20.0, 90.0),
+        ),
+        (
+            "column, left",
+            FlexDirection::Column,
+            FlexWrap::NoWrap,
+            true,
+            AlignItems::End,
+            (280.0, 380.0),
+        ),
+        (
+            "column, right",
+            FlexDirection::Column,
+            FlexWrap::NoWrap,
+            false,
+            AlignItems::Start,
+            (20.0, 120.0),
+        ),
+        (
+            "column, wrap-reverse, left",
+            FlexDirection::Column,
+            FlexWrap::WrapReverse,
+            true,
+            AlignItems::Start,
+            (280.0, 380.0),
+        ),
+        (
+            "column, wrap-reverse, right",
+            FlexDirection::Column,
+            FlexWrap::WrapReverse,
+            false,
+            AlignItems::End,
+            (20.0, 120.0),
+        ),
+    ];
+    for (what, direction, wrap, from_start, keyword, extent) in cases {
+        let mut s = Scene::new();
+        let f = s.add(s.root, frame(400.0, 200.0), (0.0, 0.0));
+        let a = s.add(f, rect(40.0, 30.0), (0.0, 0.0));
+        s.display(
+            f,
+            Some(Display::Flex(Flex {
+                direction,
+                wrap,
+                padding: [20.0; 4],
+                ..Default::default()
+            })),
+        );
+        let row = direction.is_row();
+        let across = |b: Rect| if row { (b.y0, b.y1) } else { (b.x0, b.x1) };
+        assert_eq!(
+            across(s.bounds(a)),
+            if row { (20.0, 180.0) } else { (20.0, 380.0) },
+            "{what}: stretched across"
+        );
+        // Shrunk to 70 tall in a row, 100 wide in a column; from the top or left
+        // edge the tool shifts the origin by what the size lost, as it writes it.
+        let (size, lost) = if row {
+            (Size::new(40.0, 70.0), Vec2::new(0.0, 90.0))
+        } else {
+            (Size::new(100.0, 30.0), Vec2::new(260.0, 0.0))
+        };
+        let mut ops = vec![Operation::SetGeometry {
+            id: a,
+            geometry: GeometryPatch::Size(size),
+        }];
+        if from_start {
+            let slot = s.res.used_local(&s.doc, a).unwrap();
+            ops.push(Operation::SetTransform {
+                id: a,
+                transform: slot * Affine::translate(lost),
+            });
+        }
+        s.commit(ops);
+        assert_eq!(
+            s.doc.get(a).unwrap().item().align_self,
+            Some(keyword),
+            "{what}"
+        );
+        assert_eq!(across(s.bounds(a)), extent, "{what}: the held edge stayed");
+    }
 }
 
 /// **A tool's `SetTransform` on an in-flow item keeps the item's stored

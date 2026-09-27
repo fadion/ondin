@@ -4192,13 +4192,24 @@ fn main_cross(direction: crate::container::FlexDirection, p: Point) -> (f64, f64
 /// run from its chain root so a group that is itself an item gets the size its
 /// container gives it (§15 D900). `keep_insets`' measure of a laid group after an
 /// edit, where `Resolved::used_frame` would answer for the document before it.
+///
+/// ⚠️ **Its own pass when the chain root's does not reach it** (§15 D910). A
+/// laid group inside a plain group that is a flex item has the flex container as
+/// its chain root (§15 D899), whose pass stops at the plain group; one hidden or
+/// made a mask is out of its container's flow. Either is a layout root of its own
+/// ([`crate::container::is_layout_root`]), and this answered `None` for both — so
+/// `keep_insets` skipped its pinned children and a move of one snapped back.
 fn laid_group_box(doc: &Document, group: NodeId) -> Option<kurbo::Size> {
+    use crate::container::{chain_root, is_layout_root, lay_out};
     let view = crate::resolve::DocView(doc);
-    let root = crate::container::chain_root(&view, group);
-    crate::container::lay_out(&view, root)
-        .into_iter()
-        .find(|l| l.id == group)
-        .map(|l| l.size)
+    let find = |root| {
+        lay_out(&view, root)
+            .into_iter()
+            .find(|l| l.id == group)
+            .map(|l| l.size)
+    };
+    find(chain_root(&view, group))
+        .or_else(|| is_layout_root(&view, group).then(|| find(group)).flatten())
 }
 
 /// `tx` with the insets of every **pinned** layer it moves or resizes rewritten,
@@ -4306,11 +4317,13 @@ pub fn keep_insets(doc: &Document, res: &Resolved, tx: Transaction) -> Transacti
         // 🚨 **The box the edit leaves, not the committed one** (§15 D900). A laid
         // group's box is its layout's answer, so it is read by running that
         // layout over `after` — the document as the edit leaves it — from the
-        // group's chain root. It read `res.used_frame`, the committed box, and the
-        // Scale tool on a laid group re-sizes the group and moves a pinned child
-        // in one edit: doubled, a right-pinned child was re-pinned against the
-        // old box and drawn 60 off its corner. A frame's box needed no such pass:
-        // its size is in its kind, `parent_kind` above.
+        // group's chain root, or from the group itself where that pass does not
+        // reach it (`laid_group_box`, §15 D910). It read `res.used_frame`, the
+        // committed box, and the Scale tool on a laid group re-sizes the group and
+        // moves a pinned child in one edit: doubled, a right-pinned child was
+        // re-pinned against the old box and drawn 60 across and 30 down from its
+        // corner. A frame's box needed no such pass: its size is in its kind,
+        // `parent_kind` above.
         let frame = match parent_kind {
             NodeKind::Artboard { size } => *size,
             NodeKind::Group if parent.display().is_some() => {

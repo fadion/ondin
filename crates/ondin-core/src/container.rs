@@ -732,10 +732,15 @@ pub fn is_layout_root(view: &dyn LayoutView, id: crate::NodeId) -> bool {
         && !(parent_lays_out(view, id) && in_flow(view, id))
 }
 
-/// The layout root whose pass decides `id`'s placement — `id` itself, or the
+/// The topmost layout root a change to `id` has to re-lay — `id` itself, or the
 /// topmost container above it along an unbroken chain of in-flow items. **The
 /// widening step 1 owed**: under flex a node moves when a sibling grows, so a
 /// change to any item re-lays its whole chain from here.
+///
+/// ⚠️ **Not always the only pass that places `id`** (§15 D911): since the chain
+/// climbs through plain groups (below), a layout nested in one between `id` and
+/// the answer is a root of its own, which this root's pass stops short of. A
+/// caller re-laying a change runs every layout root on the way up too.
 ///
 /// ⚠️ **The first hop counts for any child of a flex container, in flow or not**:
 /// a layer pinned, hidden or made a mask *leaves* the flow, and its siblings close

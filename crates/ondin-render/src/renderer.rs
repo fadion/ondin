@@ -582,12 +582,14 @@ impl RenderOverrides {
 
     /// Re-lay, under this preview, every flex container a node it touches belongs
     /// to — the whole chain up to the layout root, because a flex item's size moves
-    /// its siblings (§15 D875).
+    /// its siblings (§15 D875), and every layout root on the way up, which a plain
+    /// group between them hides from the outer pass (§15 D911).
     ///
     /// **The preview's answer to a reflow, for flex.** `absorb` patches fields and
     /// cannot re-run layout, so this runs `ondin_core::container::lay_out` — the
     /// engine `Resolved` runs — over a [`PreviewView`] that reads the patched
-    /// fields, from each touched node's `chain_root`, and writes what it places as
+    /// fields, from each layout root between a touched node and its `chain_root`
+    /// inclusive, and writes what it places as
     /// ordinary transform, kind and frame overrides. Before [`Self::relayout`], so
     /// a pinned child is placed against the box its container's layout has just
     /// given it.
@@ -653,11 +655,24 @@ impl RenderOverrides {
                 .collect();
         let results = {
             let view = PreviewView { doc, ov: self };
+            // **Every layout root from a touched node up to its chain root**, not the
+            // chain root alone (§15 D911). The chain climbs through a plain group to
+            // the flex container it is an item of (§15 D899), and that container's
+            // pass stops at the plain group — so a layout nested inside it, which is
+            // a root of its own, went un-laid: its items kept their committed places
+            // while the commit, which lays every root it reaches, moved them.
             let mut roots: Vec<NodeId> = Vec::new();
             for id in self.nodes.keys() {
-                let root = ondin_core::container::chain_root(&view, *id);
-                if ondin_core::container::is_layout_root(&view, root) && !roots.contains(&root) {
-                    roots.push(root);
+                let top = ondin_core::container::chain_root(&view, *id);
+                let mut at = Some(*id);
+                while let Some(n) = at {
+                    if ondin_core::container::is_layout_root(&view, n) && !roots.contains(&n) {
+                        roots.push(n);
+                    }
+                    if n == top {
+                        break;
+                    }
+                    at = ondin_core::container::LayoutView::parent(&view, n);
                 }
             }
             let mut results = Vec::new();

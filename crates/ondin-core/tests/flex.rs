@@ -1136,6 +1136,137 @@ fn an_in_flow_item_turns_about_its_box_centre_in_its_slot() {
     );
 }
 
+/// **A pinned child of a laid group nested in a plain group moves where it is
+/// dragged** (§15 D910) — a laid group `g`, a row with padding 5, inside a plain
+/// group that is an item of a flex row, holding a 40 × 30 and a 10 × 10 pinned to
+/// its bottom-right corner at (60, 50). Moved 20 left and 10 up, it lands at
+/// (40, 40), pinned 20 from the right and 10 from the bottom.
+///
+/// `keep_insets` measures a laid group by `laid_group_box`, which ran the pass of
+/// the group's chain root — the flex row, whose pass stops at the plain group —
+/// found nothing, and skipped the child: the move was written as a transform the
+/// insets then overrode, and it snapped back to the corner.
+///
+/// **Flip run**, `laid_group_box` without its own-pass fallback: fails on *"where
+/// it was dragged"*, at (60, 50) — the predicted site.
+#[test]
+fn a_pinned_child_of_a_laid_group_in_a_plain_group_moves_where_dragged() {
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(400.0, 200.0), (0.0, 0.0));
+    let p = s.add(f, NodeKind::Group, (0.0, 0.0));
+    let g = s.add(p, NodeKind::Group, (0.0, 0.0));
+    s.add(g, rect(40.0, 30.0), (0.0, 0.0));
+    let k = s.add(g, rect(10.0, 10.0), (0.0, 0.0));
+    s.display(f, row());
+    s.display(
+        g,
+        Some(Display::Flex(Flex {
+            padding: [5.0; 4],
+            ..Default::default()
+        })),
+    );
+    s.commit(vec![Operation::SetInsets {
+        id: k,
+        insets: ondin_core::Insets {
+            right: Some(ondin_core::LengthPct::Px(0.0)),
+            bottom: Some(ondin_core::LengthPct::Px(0.0)),
+            ..Default::default()
+        },
+    }]);
+    assert_eq!(
+        s.bounds(g),
+        Rect::new(20.0, 20.0, 70.0, 60.0),
+        "the fixture"
+    );
+    assert_eq!(
+        s.bounds(k),
+        Rect::new(60.0, 50.0, 70.0, 60.0),
+        "in its corner"
+    );
+    let local = s.res.used_local(&s.doc, k).unwrap();
+    s.commit(vec![Operation::SetTransform {
+        id: k,
+        transform: Affine::translate((-20.0, -10.0)) * local,
+    }]);
+    assert_eq!(
+        s.bounds(k),
+        Rect::new(40.0, 40.0, 50.0, 50.0),
+        "where it was dragged"
+    );
+    let insets = s.doc.get(k).unwrap().insets();
+    assert_eq!(
+        (insets.right, insets.bottom),
+        (
+            Some(ondin_core::LengthPct::Px(20.0)),
+            Some(ondin_core::LengthPct::Px(10.0))
+        ),
+        "pinned where it now is"
+    );
+}
+
+/// **The same move holds for a laid group out of its row's flow — hidden, or a
+/// mask** (§15 D910's other half, untested until now). Each takes `g` out of the
+/// row, so the row's pass never lays it and `laid_group_box` has to run `g`'s own:
+/// the pinned child, moved 20 left and 10 up, lands there and is pinned 20 from
+/// the right and 10 from the bottom.
+///
+/// **Flip runs**, `laid_group_box` without its own-pass fallback: fails on *"hidden:
+/// where it was dragged"*, the child back in its corner at (140, 110) — predicted.
+/// Run with the mask case first, it fails on *"a mask: where it was dragged"* at the
+/// same place, so each case bites on its own.
+#[test]
+fn a_pinned_child_of_a_laid_group_out_of_the_flow_moves_where_dragged() {
+    let hide: fn(NodeId) -> Operation = |id| Operation::SetVisible { id, visible: false };
+    let mask: fn(NodeId) -> Operation = |id| Operation::SetMask { id, mask: true };
+    for (what, leave) in [("hidden", hide), ("a mask", mask)] {
+        let mut s = Scene::new();
+        let f = s.add(s.root, frame(400.0, 200.0), (0.0, 0.0));
+        s.add(f, rect(40.0, 30.0), (0.0, 0.0));
+        let g = s.add(f, NodeKind::Group, (100.0, 80.0));
+        s.add(g, rect(40.0, 30.0), (0.0, 0.0));
+        let k = s.add(g, rect(10.0, 10.0), (0.0, 0.0));
+        s.display(f, row());
+        s.display(
+            g,
+            Some(Display::Flex(Flex {
+                padding: [5.0; 4],
+                ..Default::default()
+            })),
+        );
+        s.commit(vec![
+            Operation::SetInsets {
+                id: k,
+                insets: ondin_core::Insets {
+                    right: Some(ondin_core::LengthPct::Px(0.0)),
+                    bottom: Some(ondin_core::LengthPct::Px(0.0)),
+                    ..Default::default()
+                },
+            },
+            leave(g),
+        ]);
+        let before = s.bounds(k);
+        let local = s.res.used_local(&s.doc, k).unwrap();
+        s.commit(vec![Operation::SetTransform {
+            id: k,
+            transform: Affine::translate((-20.0, -10.0)) * local,
+        }]);
+        assert_eq!(
+            s.bounds(k),
+            before - Vec2::new(20.0, 10.0),
+            "{what}: where it was dragged"
+        );
+        let insets = s.doc.get(k).unwrap().insets();
+        assert_eq!(
+            (insets.right, insets.bottom),
+            (
+                Some(ondin_core::LengthPct::Px(20.0)),
+                Some(ondin_core::LengthPct::Px(10.0))
+            ),
+            "{what}: pinned where it now is"
+        );
+    }
+}
+
 /// **Several items dragged together reorder as a block, keeping their order**
 /// (§15 D902, `build::flex_reorder_many`) — a row of four 20-wide rects at x 20,
 /// 50, 80 and 110 (padding 20, gap 10). `a` and `c`, not adjacent, dragged right

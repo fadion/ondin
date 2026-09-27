@@ -2739,6 +2739,86 @@ fn a_dragged_flex_item_lands_in_its_reordered_slot() {
     assert_eq!(bx.size(), Size::new(40.0, 30.0), "its own box");
 }
 
+/// **A layout nested in a plain group previews as it commits** (§15 D911) — a
+/// flex row holding a plain group, holding a laid column of two 20 × 20 rects;
+/// the first resized to 40 × 40.
+///
+/// The commit re-lays the column: the second rect moves down to y 70 and
+/// stretches to 40 wide. The preview laid out only the chain root — the row,
+/// whose pass stops at the plain group — so it drew the second rect where it
+/// was, 20 wide at y 50.
+///
+/// **Flip run**, `flex_relayout` laying out the chain root alone, as it did:
+/// fails on the differential, the second rect's `Fill` at y 50 against 70 — the
+/// predicted site, and the run that found it.
+#[test]
+fn a_layout_nested_in_a_plain_group_previews_as_it_commits() {
+    use ondin_core::container::{Display, Flex, FlexDirection};
+    let mut ids = IdSource::new(0xAB);
+    let root = ids.mint();
+    let (f, p, g, r1, r2) = (ids.mint(), ids.mint(), ids.mint(), ids.mint(), ids.mint());
+    let mut doc = Document::new(root);
+    let create = |id, parent, index, kind| Operation::CreateNode {
+        id,
+        parent,
+        index,
+        kind,
+        transform: Some(Affine::translate((7.0, 7.0))),
+        name: None,
+    };
+    let rect = |s| NodeKind::Rect {
+        size: Size::new(s, s),
+        corner_radii: RoundedRectRadii::default(),
+    };
+    let fill = |id| Operation::SetFills {
+        id,
+        fills: vec![Fill {
+            brush: Brush::Solid(Color::from_rgba8(60, 120, 200, 255)),
+            visible: true,
+        }],
+    };
+    doc.apply(&Transaction(vec![
+        create(
+            f,
+            root,
+            0,
+            NodeKind::Artboard {
+                size: Size::new(400.0, 200.0),
+            },
+        ),
+        create(p, f, 0, NodeKind::Group),
+        create(g, p, 0, NodeKind::Group),
+        create(r1, g, 0, rect(20.0)),
+        create(r2, g, 1, rect(20.0)),
+        fill(r1),
+        fill(r2),
+        Operation::SetDisplay {
+            id: f,
+            display: Some(Display::Flex(Flex {
+                padding: [20.0; 4],
+                ..Default::default()
+            })),
+        },
+        Operation::SetDisplay {
+            id: g,
+            display: Some(Display::Flex(Flex {
+                direction: FlexDirection::Column,
+                row_gap: 5.0,
+                ..Default::default()
+            })),
+        },
+    ]))
+    .unwrap();
+    assert_preview_matches_commit(
+        &doc,
+        &Transaction(vec![Operation::SetGeometry {
+            id: r1,
+            geometry: ondin_core::GeometryPatch::Size(Size::new(40.0, 40.0)),
+        }]),
+        "a rect in a laid group in a plain group in a flex row, resized",
+    );
+}
+
 /// **A left-handle resize of a flex item previews as its commit** (§15 D877's
 /// amendment) — the fixture's first rect widened from 40 to 60 with the
 /// `SetTransform` a held right edge writes beside it.

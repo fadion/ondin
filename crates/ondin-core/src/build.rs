@@ -4016,6 +4016,19 @@ fn main_cross(direction: crate::container::FlexDirection, p: Point) -> (f64, f64
     }
 }
 
+/// The box a group with a layout is laid out to in `doc` — its own layout pass,
+/// run from its chain root so a group that is itself an item gets the size its
+/// container gives it (§15 D900). `keep_insets`' measure of a laid group after an
+/// edit, where `Resolved::used_frame` would answer for the document before it.
+fn laid_group_box(doc: &Document, group: NodeId) -> Option<kurbo::Size> {
+    let view = crate::resolve::DocView(doc);
+    let root = crate::container::chain_root(&view, group);
+    crate::container::lay_out(&view, root)
+        .into_iter()
+        .find(|l| l.id == group)
+        .map(|l| l.size)
+}
+
 /// `tx` with the insets of every **pinned** layer it moves or resizes rewritten,
 /// so the layer stays where the edit put it (§15 D871, D874).
 ///
@@ -4118,17 +4131,22 @@ pub fn keep_insets(doc: &Document, res: &Resolved, tx: Transaction) -> Transacti
         // box, which is what `resolve::frame_box` places the child against. This
         // was frame-only while the placement was not, so a pinned child of a laid
         // group moved by a tool kept its insets and snapped back on release.
-        // ⚠️ The box is the **committed** one: an edit that also re-lays the group
-        // pins against the size it had, where a frame resized in the same edit
-        // pins against its new size. The Scale tool on a laid group is such an
-        // edit (`tools::scaled_flex` re-sizes it and moves its children at once),
-        // and what it does to a pinned child there is unmeasured.
+        // 🚨 **The box the edit leaves, not the committed one** (§15 D900). A laid
+        // group's box is its layout's answer, so it is read by running that
+        // layout over `after` — the document as the edit leaves it — from the
+        // group's chain root. It read `res.used_frame`, the committed box, and the
+        // Scale tool on a laid group re-sizes the group and moves a pinned child
+        // in one edit: doubled, a right-pinned child was re-pinned against the
+        // old box and drawn 60 off its corner. A frame's box needed no such pass:
+        // its size is in its kind, `parent_kind` above.
         let frame = match parent_kind {
             NodeKind::Artboard { size } => *size,
-            NodeKind::Group if parent.display().is_some() => match res.used_frame(parent.id()) {
-                Some(size) => size,
-                None => continue,
-            },
+            NodeKind::Group if parent.display().is_some() => {
+                match laid_group_box(&after, parent.id()) {
+                    Some(size) => size,
+                    None => continue,
+                }
+            }
             _ => continue,
         };
         // Where the edit wants it drawn: the transform it wrote, else where it is

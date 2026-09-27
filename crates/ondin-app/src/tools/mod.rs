@@ -9287,6 +9287,105 @@ mod tests {
         }
     }
 
+    /// **A pinned child of a flex group scaled with it stays pinned to the scaled
+    /// box** (§15 D900) — the fixture above plus a 10 × 10 pinned to the group's
+    /// bottom-right, so drawn at (50, 20) in a 60 × 30 box; the Scale tool doubles
+    /// the group from its bottom-right handle. The child doubles to 20 × 20 and
+    /// stays flush with the corner of the 120 × 60 box: at (100, 40) inside it,
+    /// (200, 140) in the world.
+    ///
+    /// Committed through the real door (`build::keep_insets`, then
+    /// `keep_flex_sizes`), which is where the defect was: `keep_insets` re-pinned
+    /// the child against the group's *committed* box, 60 × 30, while the same edit
+    /// doubled it — so the right inset came out as 60 − 100 − 20 = −60 and the child
+    /// was drawn at (260, 170), 60 off its corner on each axis. Measured by this
+    /// test's first run; unmeasured since §15 D887 recorded the possibility.
+    ///
+    /// **Flip run**, `keep_insets` measuring a laid group by its committed
+    /// `used_frame` again: fails on *"flush with the scaled box's corner"* — the
+    /// predicted site.
+    #[test]
+    fn a_pinned_child_of_a_flex_group_scaled_with_it_stays_pinned_to_the_scaled_box() {
+        use ondin_core::container::{Display, Flex};
+        let mut ids = IdSource::new(0xF1F);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let (row, a, b, pinned) = (ids.mint(), ids.mint(), ids.mint(), ids.mint());
+        let square = |id, index, side| Operation::CreateNode {
+            id,
+            parent: row,
+            index,
+            kind: NodeKind::Rect {
+                size: Size::new(side, side),
+                corner_radii: Default::default(),
+            },
+            transform: None,
+            name: None,
+        };
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: row,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Group,
+                transform: Some(Affine::translate((100.0, 100.0))),
+                name: None,
+            },
+            square(a, 0, 20.0),
+            square(b, 1, 20.0),
+            square(pinned, 2, 10.0),
+            Operation::SetDisplay {
+                id: row,
+                display: Some(Display::Flex(Flex {
+                    column_gap: 10.0,
+                    padding: [5.0; 4],
+                    ..Default::default()
+                })),
+            },
+            Operation::SetInsets {
+                id: pinned,
+                insets: ondin_core::Insets {
+                    right: Some(ondin_core::LengthPct::Px(0.0)),
+                    bottom: Some(ondin_core::LengthPct::Px(0.0)),
+                    ..Default::default()
+                },
+            },
+        ]))
+        .expect("the row");
+        let res = Resolved::rebuild(&doc);
+        assert_eq!(
+            res.world_bounds(pinned),
+            Some(Rect::new(150.0, 120.0, 160.0, 130.0)),
+            "the fixture: pinned to the 60 × 30 box's corner"
+        );
+
+        let tx = resize_layer(
+            &doc,
+            &res,
+            row,
+            Handle::BottomRight,
+            Point::new(220.0, 160.0),
+            Resize {
+                scaling: Scaling::Photographic,
+                ..Default::default()
+            },
+        );
+        let tx = ondin_core::build::keep_insets(&doc, &res, tx);
+        let tx = ondin_core::build::keep_flex_sizes(&doc, &res, tx);
+        doc.apply(&tx).unwrap();
+        let res = Resolved::rebuild(&doc);
+        assert_eq!(
+            res.used_frame(row),
+            Some(Size::new(120.0, 60.0)),
+            "the box doubled"
+        );
+        assert_eq!(
+            res.world_bounds(pinned),
+            Some(Rect::new(200.0, 140.0, 220.0, 160.0)),
+            "flush with the scaled box's corner"
+        );
+    }
+
     /// **Auto-sized text takes the font size but never a box.** The early return in
     /// `scale_geometry` is about its box, which does not exist; its type size does,
     /// and a scaled icon with a label in it would otherwise come out with the label

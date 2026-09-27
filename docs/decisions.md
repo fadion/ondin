@@ -1288,6 +1288,8 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D910** — **`build::laid_group_box` measures a laid group by its own pass where its chain root's does not reach it.** A laid group inside a plain group that is a flex item (D899), or one hidden or made a mask, is a layout root of its own that the chain root's pass never places; the `None` made `keep_insets` skip its pinned children, and a moved one snapped back — measured at (60, 50) with its insets unchanged, where it lands at (40, 40). The repair D900 asked for. *(Fixed and tested 2026-09-27, uncommitted when recorded; **Fixed**. Test `a_pinned_child_of_a_laid_group_in_a_plain_group_moves_where_dragged`; the hidden and mask cases amended the same day, `a_pinned_child_of_a_laid_group_out_of_the_flow_moves_where_dragged`, each biting on its own. D899, D900 amended; §5.3c; `roadmap.md`'s *owed* item struck)*
 - **D911** — **The gesture preview lays out every layout root from a touched node up to its chain root.** `flex_relayout` laid out the chain root alone, and since D899 that root can sit above a plain group whose laid group is a root of its own, un-laid in the preview: a nested column's second rect previewed 20 wide at y 50 against the commit's 40 wide at y 70. `chain_root`'s doc now says it is the topmost root, not the only one. The repair D899 asked for. *(Fixed and tested 2026-09-27, uncommitted when recorded; **Fixed**. Test `a_layout_nested_in_a_plain_group_previews_as_it_commits`. D899 amended; §5.3c, §6.2; `roadmap.md`'s *owed* item struck)*
 - **D912** — **The multi card's X/Y tooltip promises a reorder only where a drag makes one.** D903's hover said *"drag them on the canvas to reorder"* over any selection with an in-flow member, and a mixed selection's drag reorders nothing (D902). `inspector::drags_as_a_block` — every outermost member an in-flow item of one container — chooses that tail; otherwise *"select a container's items on their own to reorder them by dragging"*. Amended the same day: `inspector::laid_out_xy` answers the card's gate and hover both, its strings asserted; the card's call to it is read. *(Fixed and tested 2026-09-27, uncommitted when recorded; **Fixed**. Test `only_one_containers_items_are_told_to_drag_to_reorder`, one flip not biting until a case was added. D903 amended; §9.4)*
+- **D913** — **Grid's open questions answered before its code: text keeps its sizing mode, a resize writes size and self-alignment, a drag writes explicit lines, and the track editor is the inspector's list with read-only lines on the canvas.** The maintainer's rulings, three of the session's recommendations taken — D875's ruling (a) for every container; a resize writing px and `justify-self`/`align-self` `start`, `end` from the left or top edge (D905), the cells kept — and one declined: every drop writes `grid-column`/`grid-row` for the cell under the pointer, where the session had recommended reordering an auto-placed item by D877's machinery, so a dragged item becomes explicitly placed and D877's reorder does not apply in a grid. Track positions from taffy's `detailed_layout_info`, derived and never saved (D868); dragging a boundary is later, not declined. **The session's, stated with the plan and not objected to**: the preview widens `flex_relayout` into one pass over any laid container; grid placement on the one item record, `FlexItem` renamed — built as `LayoutItem` (D914), not the `Item` planned, which collides with the app's `menu::Item`; grid's alignment rows say `start`/`end`. *(Ruled 2026-09-27, record-only; **Resolved** as rulings, **not built** — step 4's model and engine built since, D914. §5.3c; `roadmap.md`'s open paragraph struck)*
+- **D914** — **Grid's model and engine: `Display::Grid`, one item record for both layouts, and what CSS refuses the operations refuse.** Container layout's step 4, the first of D913's four sub-steps. `Grid` — tracks as CSS's grammar (a `repeat()` holds sizes, so cannot nest), `AlignContent` on both axes because a grid's `normal` content distribution is `stretch`, and a **`justify-items` §5.3c's table lacked**, added once `align-items: start` alone left an item 100 wide across its column. `FlexItem` → `LayoutItem`, `SetFlexItem` → `SetLayoutItem`, gaining `justify_self`, `grid_column`, `grid_row`; `Display` no longer `Copy`, `LayoutView::display` borrowed. `OpError::BadLayout` at the operations; a file carrying such a value opens, its stored value kept and laid around. taffy's `grid` feature, one `FlexTree` per pass; the Scale tool scales px tracks. ⚠️ **Open, for the maintainer**: a shape fills its grid cell under the default, where CSS's `normal` puts a replaced element at `start`. *(Built and tested 2026-09-27, uncommitted when recorded; **Keep**, the session's — the shape-in-a-cell question **open**. Tests `tests/grid.rs`, eleven, and a third randomized run in `tests/resolve.rs`. D913 corrected; §5.3c, §2, §5.3, §5.6, §5.7, §5.9, §6.2; `roadmap.md` step 4's first sub-step struck)*
 
 ---
 
@@ -21688,6 +21690,209 @@ card's *flex · row* would repeat the `display` and direction rows directly unde
 changed**; `panels/layout.rs`' module doc says ruled and cites this number, which is where a reader
 meets the question. *(Ruled 2026-09-27; **Resolved**, resolving D878's item 7. The citation is in the
 working tree, uncommitted when recorded. D878 amended; `architecture.md` §9.4 amended)*
+
+**D913 — Grid's open questions answered before its code: a text item keeps its sizing mode, a resize
+writes size and self-alignment, a drag writes explicit lines, and the track editor is the inspector's
+list with read-only lines on the canvas. *The maintainer's rulings, 2026-09-27 — three of the
+session's recommendations taken and one declined; the preview's answer and two design calls the
+session's, stated with the plan and not objected to. Record-only: not built.*** `roadmap.md`'s
+*Next · Container layout* left step 4 three decisions — *"how a grid preview reflows …; `TextSizing`'s
+mapping in grid, and what resizing a grid item writes — flex's are the maintainer's rulings (§15
+D875) and are not assumed to carry over"* — and §5.3c carried the same list. Before any grid code was
+written, the session put the last two to the maintainer as questions with a recommendation each,
+added two of its own — what dragging a grid item writes, and how much of the track editor this step
+builds — and stated its answer to the first with the plan rather than asking it.
+
+1. **Text in a grid cell keeps each sizing mode's meaning, as in flex — D875's ruling (a), the
+   recommendation taken.** One rule for every container: the text's own mode governs. Auto width
+   never wraps, auto height wraps at the width it is given, fixed is fixed; an auto-width label in a
+   wide cell stays one line and is placed in the cell by `justify-self`. **Declined: CSS-strict**,
+   where a text item stretched across its cell — `justify-self: stretch`, the default — takes the
+   cell's width and wraps there whatever its authored mode. That is nearer a browser, and the text's
+   mode would stop meaning the same thing in a grid as in a flex row. *Do not correct grid alone
+   toward the browser*: D875 turned CSS's reading down for flex first, and the two containers are
+   ruled to agree.
+2. **Resizing a grid item writes its size and its self-alignment, and leaves its cells — the
+   recommendation taken.** Width and height in px, and `justify-self`/`align-self` `start` — `end`
+   where the item was dragged by its left or top edge, the edge D905 rules on for flex — so a
+   stretched item stops stretching and the edge the user held is the one that stays. Flex writes the
+   alignment on the cross axis alone, the main axis being grow and shrink's (D875's ruling (b)); a
+   grid item has an alignment on both. It is to mirror `build::keep_flex_sizes`. The item keeps its
+   `grid-column` and `grid-row`, and a span is edited in the Item card. **Declined**: snapping the
+   dragged edge to the track lines to edit the span, which cannot make an item smaller than its area;
+   and size by default with span behind a modifier. ⚠️ A grid has no `wrap-reverse`, so D909's swap of
+   the cross edges has nothing to follow here.
+3. **Dragging a grid item writes explicit lines, on every drop — the recommendation declined.** Each
+   drop writes `grid-column` and `grid-row` for the cell under the pointer, so a designer can drop an
+   item into any empty cell. **The session had recommended otherwise**: an auto-placed item reorders
+   in flow order, reusing D877's machinery and keeping the document free of line numbers, and only an
+   item already placed by lines has its lines moved. Also declined: always reorder. **The consequence,
+   accepted with the ruling**: every item a drag touches becomes explicitly placed and stays so, and
+   D877's reorder does not apply inside a grid. ⚠️ Not ruled: what several grid items dragged
+   together write — D902's block is flex's answer, and nothing here carries it over.
+4. **The track editor, this step, is the inspector's track list — the mockup's screen 04, *Grid
+   container + grid item* — and read-only track lines drawn on the canvas over a selected grid
+   container; the recommendation taken.** Track positions come from taffy's `detailed_layout_info`
+   feature, derived into `Resolved` and never saved: invariant 4, D868. **Dragging a track boundary on
+   the canvas is later, not declined.** Declined for this step: draggable boundaries now, and the
+   inspector alone. ⚠️ Core's manifest turns that feature off today — `default-features = false`, its
+   comment naming *"the detailed-info reporting"* among what it drops — so step 4 enables it beside
+   `grid`; both are features of taffy 0.14.0's manifest, read there. ⚠️ **The lines are chrome over a
+   CSS grid container, not §5.3b's layout grids** (D385), the collision D867 was filed beside.
+
+**The preview, the session's call and not a ruling.** It was not put as a question: the session
+stated it with the plan and the maintainer did not object. `RenderOverrides::flex_relayout` widens
+into one engine pass over any laid container rather than gaining a grid twin — grid's answer is
+flex's, and commit and preview go on running one engine, as D875 built them.
+
+**Two design calls the session stated with the plan, not rulings.** **Grid placement lives on the
+same per-node item record as flex's properties** — `grid-column`, `grid-row` and `justify-self` beside
+grow, shrink and `align-self` — as CSS does, where an element keeps its grid placement when its parent
+turns from flex to grid; `FlexItem` is to be renamed `Item` — *corrected 2026-09-27: built as
+`LayoutItem`, since `Item` collides with the app's `menu::Item` (D914)*. §5.3c's property table already lists them
+on one *Item* row. **And grid's alignment rows label `start` and `end`**, not the mockup's
+`flex-start`: in a grid container CSS treats `flex-start` as `start`. D909 made flex's `Start` and
+`End` `flex-start` and `flex-end`, which is why flex's rows keep saying *Flex start*.
+
+*(Ruled 2026-09-27 by the maintainer, in conversation, before any grid code; **Resolved** as rulings,
+**not built** — no line of `crates/` changed, and no code cites this number yet (true when written;
+step 4's model and engine cite it since, D914). Recorded from the
+brief, D875, D877, D902, D905 and D909, `ondin-core/Cargo.toml`'s taffy paragraph, taffy 0.14.0's
+manifest, and the title of the mockup's screen 04. `architecture.md` §5.3c's open paragraph pointed
+here; `roadmap.md`'s open paragraph struck and step 4 given its order)*
+
+**D914 — Grid's model and engine: `Display::Grid`, one item record for both layouts, and what CSS
+refuses the operations refuse. *The session's; container layout's step 4, the first of D913's four
+sub-steps. Built and tested 2026-09-27, uncommitted when recorded, its gates still running.*** D913
+ordered step 4 as model and engine, preview and gestures, the cards, the canvas track lines. This is
+the first: a grid can be stored, saved, laid out by `Resolved` and undone. **Nothing in the app
+authors one yet** — the Container card's `grid` cell still says *not built yet* (D886) — so a grid
+reaches a document through a file or a test.
+
+**The model.** `container::Display` gains `Grid(Grid)`: `columns` and `rows`, each a `Vec<Track>`
+(empty is CSS's `none`, every track implicit and `auto`); `auto_flow`, `GridAutoFlow::{Row, Column}`,
+`dense` not offered; `justify_content` and `align_content`; `justify_items` and `align_items`;
+`row_gap`, `column_gap` and `padding` in world units, `Flex`'s reason. **Content alignment is
+`AlignContent` on both axes**, `justify-content` included: a grid container's `normal` content
+distribution behaves as `stretch` on both, so an `auto` track grows into the free space, and flex's
+`JustifyContent` has no `stretch` to say that with — both default to `Stretch`, and `justify_items`
+and `align_items` to `AlignItems::Stretch`. `Start` and `End` go to taffy as `FLEX_START`/`FLEX_END`,
+D909's mapping; taffy 0.14.0's grid reads the two pairs alike (read in its `compute/grid/alignment.rs`
+and `compute/common/alignment.rs`), a grid having no reversal for `flex-start` to follow. ⚠️ **The
+same file treats `baseline` as `start` in a grid** — taffy's own *TODO* — so an item aligned to the
+baseline is not. `Display::is_valid` and `Display::padding` are new, and **`Display` is no longer
+`Copy`**, a track list being a `Vec`; `LayoutView::display` returns `Option<&Display>`, borrowed,
+because most callers ask only whether there is a layout and an owned grid would clone a `Vec` per
+ask.
+
+**`justify-items` is a departure from §5.3c's first cut**, whose Container row did not list it. In a
+grid `align-items` is the vertical axis alone: the first test set only `align-items: start`, and item
+a came back 100 wide, stretched across its column — CSS's correct reading. Without `justify-items`
+the only way to stop every item stretching sideways is `justify-self` on each one. §5.3c's table now
+lists it. ⚠️ **The mockup has no row for it either** (screen 04), so the card owes one the design
+does not draw.
+
+**Tracks are CSS's grammar.** `Track::{Size(TrackSize), Repeat { repeat: u16, tracks:
+Vec<TrackSize> }}` — **a repeat holds sizes, not entries**, so `repeat()` inside `repeat()` is
+unrepresentable rather than refused; `TrackSize::{Breadth, MinMax { min, max }}`; `TrackBreadth::{Px,
+Percent, Fr, Auto, MinContent, MaxContent}`, percent stored as typed, `LengthPct`'s reason.
+`auto-fill`/`auto-fit` stay deferred (§5.3c), so the count is a number. `Track` and `TrackSize` are
+`#[serde(untagged)]`, so a track list reads close to its CSS — `{"Px":200.0}`, `"Auto"`,
+`{"min":{"Px":100.0},"max":{"Fr":2.0}}`, `{"repeat":3,"tracks":["Auto"]}` — pinned by
+`a_grid_round_trips_through_the_save_format`. Additive and skipped at the default, so no schema bump
+(§5.11).
+
+**One item record for both layouts, renamed.** `FlexItem` became **`LayoutItem`**,
+`Operation::SetFlexItem` became **`SetLayoutItem`** and `Document::op_set_flex_item`
+**`op_set_layout_item`** — a mechanical rename, done first. ⚠️ **Entries before this one keep the old
+names**, as history; this is where a reader searching `FlexItem` should land. D913 planned `Item`,
+which collides with the app's `menu::Item`. The save key is still `item`, so no file changes. New
+fields: `justify_self: Option<AlignItems>` — `None` is `auto`, the container's `justify-items` — and
+`grid_column` and `grid_row`, each `GridLines { start, end }` of `GridPlacement::{Auto, Line(i16),
+Span(u16)}`, lines counted from 1 and from −1 at the far end. Which fields are read depends on the
+parent's `display`, **as CSS keeps them on the element**: lines written under flex do nothing there
+and take effect when the parent turns to grid (`grid_lines_written_under_flex_take_effect_under_grid`).
+
+**What CSS refuses, the operations refuse; a file carrying one opens.** New `OpError::BadLayout`:
+`op_set_display` refuses a grid with a negative track, a `minmax()` with an `fr` minimum,
+`repeat(0, …)` or an empty repeat (`Grid::is_valid`), and `op_set_layout_item` line 0 and `span 0`
+(`LayoutItem::is_valid`). A file is not refused: `style_of` reads around such a value — negative as
+0, an `fr` minimum as `auto`, a bad repeat dropped, line 0 and `span 0` as `auto` — because a layout
+detail is not worth the artwork. **That is D492's asymmetry and not its mechanism**: D492's loader
+*drops* an unusable export spec from the document, where this has **no load-time rewrite** — the
+stored value stays as written, is saved back as written, and is ignored by the engine alone.
+⚠️ **Only the zero-count repeat is pinned** (`a_file_with_a_refused_track_opens_and_lays_around_it`,
+`100px repeat(0, 50px)` laid as one column); the other readings are read from `template`,
+`min_breadth`/`max_breadth` and `grid_lines`, not tested.
+
+**The engine is the same pass.** taffy's `grid` feature is on (`ondin-core/Cargo.toml`), which adds
+`smallvec` to core's closure. There is still one `FlexTree` per pass: `compute_child_layout` sends a
+container whose taffy style is `Display::Grid` to `taffy::compute_grid_layout`, through a new `impl
+LayoutGridContainer`, and every other container to flexbox as before; `style_of` gains a grid arm,
+and every item's style carries `justify_self`, `grid_column` and `grid_row`, which flex ignores. So a
+grid nested in a flex row is laid in the row's pass —
+`a_group_with_a_grid_hugs_its_tracks_inside_a_flex_row`.
+`detailed_layout_info` is **not** enabled yet: it is for the canvas lines and the drop cell, D913's
+items 3 and 4. ⚠️ **Read, not tested: the preview already lays a grid.** `RenderOverrides::flex_relayout`
+runs `container::lay_out` at every layout root a touched node chains to, whatever its `display`, so a
+grid is re-laid in a gesture by construction — D913's *one pass over any laid container* — and no
+differential asserts it; sub-step 2 owes one.
+
+**What else moved with it.** The Scale tool's `tools::scaled_flex` became **`scaled_layout`**, and
+scales a grid's gaps, padding and **px tracks** per axis — columns by `csx`, rows by `csy` — a `%` or
+`fr` track being a share that scales by itself; ⚠️ its grid arm is reached by no test, the one test
+naming the function driving a flex group. `build::flow_index` answers `None` for a grid parent,
+since a grid's drop writes lines (D913), **so D877's reorder never fires in a grid** — and what a drag
+does there meanwhile is read from `canvas`, not run: `build::is_flex_item`, which asks only whether
+the parent lays the item out, is true of a grid item, so one grid item dragged is
+`flex_reorder_of`'s in-flow item with no reorder — drawn under the pointer, outlined in its own cell,
+committing an empty transaction — and several keep their cells (`stays_in_flow`). Until sub-step 2 a
+drag in a grid moves nothing. **And `keep_flex_sizes` is partly flex's only**: `build::held`, growth
+and `align-self`, runs under a flex parent alone, but `sized_in_px` (D879, *"whatever the parent"*)
+and `kept_flow_translations` (any in-flow item) reach a grid item as they reach a flex one. D913's
+resize ruling — px and both self-alignments — is sub-step 2's.
+
+⚠️ **Open, for the maintainer: under the default a shape fills its grid cell.** Both item alignments
+default to `Stretch`, so a 20 × 20 rect auto-placed in a 100 × 50 cell is drawn 100 × 50
+(`a_placed_item_takes_its_lines_and_its_span`, stretched in used geometry only). **CSS's `normal`
+puts a replaced element at `start` in a grid** — an item with a natural size or an aspect ratio is not
+stretched — and D872 made shapes replaced elements. D872's ⚠️ keeps the stretch for **flex**, where
+CSS's `normal` does stretch a replaced item across its line; that warning does not carry here, since
+in a grid it is the stretch that departs from CSS. The model has no `normal`: `style_of` hands taffy
+an explicit `STRETCH`, so taffy's own `normal` — `start` for an item with a definite style size or an
+aspect ratio, `stretch` otherwise, read in its `compute/grid/alignment.rs` — is never reached, and
+would stretch a shape anyway, a shape going to taffy at `auto` size and measured. **Kept consistent
+with flex for now**, which is the session's call and not a ruling. The alternative is a `normal`
+value, or reading a replaced leaf as `start` under the default in a grid. *Revisit when the
+maintainer rules* — before the cards, which would otherwise ship `Stretch` as the face of the default.
+
+**The evidence**, `ondin-core/tests/grid.rs`, eleven tests whose numbers can be checked by hand —
+tracks in px or in `fr` of a round remainder, and `start` on both axes wherever a stretch would muddy
+them. **Flip runs**, as the tests' docs and the brief record them, not re-run here:
+`compute_child_layout` sending a grid to `compute_flexbox_layout` fails
+`a_grid_places_its_items_in_its_tracks` on *"b, the second column"*, b at x 50, the predicted site —
+and nine of the eleven with it, by the brief's count; `style_of` handing taffy `FLEX_START` for
+`justify-content` where the model says `Stretch` fails `auto_tracks_stretch_into_the_free_space` on
+*"the tracks stretch"* at 50 and nothing else in the file. **And a third randomized run**,
+`tests/resolve.rs · incremental_update_equals_rebuild_over_random_grid_ops`: a container's random
+layout is a grid half the time, random tracks of every breadth with `minmax()` and `repeat()`, and an
+item's random properties carry random lines and spans. **A separate run, D898's reason**: the grid
+draws sit behind `grid &&` and `if grid`, so the two existing runs draw exactly what they did and
+D899's seed-7 and seed-0 flip records stay true. A panic planted in `style_of`'s grid arm fails that
+run alone, so it reaches grid.
+
+*(Built and tested 2026-09-27, uncommitted when recorded, gates reported as running; **Keep**, the
+session's — `justify-items` a departure §5.3c now carries; the shape-in-a-cell default **open** for
+the maintainer. ⚠️ Nothing of it reachable in the GUI. Recorded from the brief and a read of
+`container.rs`' grid types, `Display`, `LayoutItem`, `LayoutView`, `style_of`, `content_alignment`,
+`template`, `grid_lines`, `FlexTree::push` and `compute_child_layout`, `document.rs`'
+`op_set_display` and `op_set_layout_item`, `op.rs`' `BadLayout`, core's manifest, `tools/mod.rs`'
+`scaled_layout`, `build.rs`' `flow_index`, `flex_holds`, `kept_flow_translations` and
+`is_flex_item`, `canvas.rs`' `flex_reorder_of`, `move_preview_tx` and `move_tx`, `renderer.rs`'
+`flex_relayout`, `tests/grid.rs` and the third run in `tests/resolve.rs`, and taffy 0.14.0's
+`compute/grid/alignment.rs` and `compute/common/alignment.rs`; flips not re-run. D913 corrected;
+`architecture.md` §2, §5.3, §5.3c, §5.6, §5.7, §5.9 and §6.2 amended; `roadmap.md` step 4's first
+sub-step struck)*
 
 **D898 — The randomized `update`/`rebuild` guard authors layout inputs, and compares a laid group's
 box. *The session's; built 2026-09-27, committed as `da5b652`. Entry reconstructed 2026-09-27 from

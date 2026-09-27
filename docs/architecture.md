@@ -130,7 +130,7 @@ crates exactly (`=x.y.z`). Known-current as of 2026-07 (verify at scaffold time)
 | Geometry | `kurbo` | `BezPath`, `Affine`, `Rect`, `Point`, `Size` |
 | Paint | `peniko` | `Brush`, `Color`, `Gradient`; reuse the `color` crate types it re-exports |
 | Text layout & editing | `parley` 0.11 (bundles `fontique`) | CPU-only. Layout, shaping, and the `Cursor`/`Selection` cursor model behind `core::text::TextEdit`. `system` feature OFF — core never scans OS fonts |
-| Container layout | `taffy` (`=0.14.0`, core only) | CSS flexbox — grid when §5.3c's step 4 enables it. `default-features = false`, `std` + `flexbox`; used through its low-level traits over Ondin's own nodes, not its `TaffyTree` (§15 D867, D875). Computes in `f32`; results quantized to 1/64 px (§15 D873) |
+| Container layout | `taffy` (`=0.14.0`, core only) | CSS flexbox and grid (grid since §5.3c's step 4, §15 D914). `default-features = false`, `std` + `flexbox` + `grid`; used through its low-level traits over Ondin's own nodes, not its `TaffyTree` (§15 D867, D875). Computes in `f32`; results quantized to 1/64 px (§15 D873) |
 | Spatial index | `rstar` | R-tree |
 | Maps | `rustc-hash` | `FxHashMap` |
 | Serialization | `serde` + `serde_json` | native format = versioned JSON (§5.11); binary later behind same API |
@@ -206,7 +206,7 @@ permission.
   its own, and already in the workspace lock through `ureq`), `roxmltree` (the XML half of SVG import,
   §15 D394), `skrifa` and `read-fonts` (the font tables `text.rs` reads directly — OpenType
   feature and name records, metrics and glyph outlines), `flo_curves` (the boolean solver,
-  §15 D91), and `taffy` (container layout, §5.3c — `=`-pinned, `std` + `flexbox`, §15 D867, D875).
+  §15 D91), and `taffy` (container layout, §5.3c — `=`-pinned, `std` + `flexbox` + `grid`, §15 D867, D875, D914).
   (`parley` is CPU-only text layout — headless-safe, and core needs it
   for text bounds, hit-testing, and the editing cursor model.) Core must build and pass all tests
   with no graphics context. ⚠️ **This list is load-bearing beyond tidiness, and it omitted the last
@@ -578,10 +578,13 @@ pub struct Node {
     insets: Insets,            // CSS top/right/bottom/left + auto margins inside its frame — §5.3c,
                                // §15 D874; SPECIFIED, unset and skipped until pinned, inert
                                // outside a frame and on a Group or Boolean
-    display: Option<Display>,  // CSS `display` — `Flex(..)`; None = no layout, NOT CSS's
-                               // `display: none`. Read on a frame or a group — §5.3c, §15 D875
-    item: FlexItem,            // flex-grow/-shrink/-basis, align-self, width/height and limits;
-                               // read only where the parent has a layout; skipped at CSS's defaults
+    display: Option<Display>,  // CSS `display` — `Flex(..)` or `Grid(..)`; None = no layout, NOT
+                               // CSS's `display: none`. Read on a frame or a group — §5.3c, §15
+                               // D875, D914
+    item: LayoutItem,          // flex-grow/-shrink/-basis, align-self, justify-self, grid-column/
+                               // -row, width/height and limits — one record for both layouts
+                               // (§15 D914); read only where the parent has a layout; skipped at
+                               // CSS's defaults
 }
 
 pub enum NodeKind {
@@ -1099,7 +1102,7 @@ pub fn next_grid_color(existing: &[LayoutGrid]) -> Color;    // the first of GRI
   `+` steps: `LayoutGrid::new` carries the plain default, which is what a loaded file or a fixture
   should get.
 
-### 5.3c Container layout — flexbox, grid and insets (steps 1–3 built; §15 D867–D889)
+### 5.3c Container layout — flexbox, grid and insets (steps 1–3 built, step 4 begun; §15 D867–D914)
 
 > **Mostly design ahead of code**, in the sense §12 and §13 are, and it sits here rather than at the
 > end because what it changes is the node model. **Built as of 2026-09-24**: the used-geometry
@@ -1107,7 +1110,8 @@ pub fn next_grid_color(existing: &[LayoutGrid]) -> Color;    // the first of GRI
 > D874) — the paragraphs on those say so in the present tense. **Flex is built too** (step 3, §15
 > D875): its model, engine, layout pass and preview, a laid group's resize, an item's reorder by drag
 > (§15 D877), and the inspector's Container and Item cards (§15 D878–D889); frames sit inside groups
-> since the same day (§15 D876). Grid and components are not built.
+> since the same day (§15 D876). **Grid's model and engine are built** (step 4's first part, §15
+> D914, 2026-09-27); its preview, gestures, cards and canvas lines are not, and components are not.
 > Every other passage of this document still describes `HEAD`; where one states a rule this design
 > will change,
 > it carries a forward pointer here instead of being rewritten. **When a step below lands, this
@@ -1137,7 +1141,7 @@ and four cases are decided:
 
 | | |
 |---|---|
-| Container | `display` (unset \| flex \| grid), `flex-direction`, `flex-wrap`, `justify-content`, `align-items`, `align-content`, `gap` (row/column), `padding` (four sides), `grid-template-columns`/`-rows` (px, %, fr, auto, min-content, max-content, `minmax()`, `repeat(n)`), `grid-auto-flow` |
+| Container | `display` (unset \| flex \| grid), `flex-direction`, `flex-wrap`, `justify-content`, `align-items`, `justify-items` (grid — not in the first cut; added with grid, §15 D914), `align-content`, `gap` (row/column), `padding` (four sides), `grid-template-columns`/`-rows` (px, %, fr, auto, min-content, max-content, `minmax()`, `repeat(n)`), `grid-auto-flow` |
 | Item | `width`/`height` (auto \| px \| %), `min-`/`max-` of both, `flex-grow`, `flex-shrink`, `flex-basis`, `align-self`, `justify-self`, `grid-column`/`grid-row` (auto \| line \| span), `position` (in flow \| absolute) with `top`/`right`/`bottom`/`left` (px \| % \| auto) |
 | Deferred | `margin` other than `auto` (which is built, for centring between two insets — §15 D874), `order`, named grid areas, `auto-fill`/`auto-fit`, `calc`, `aspect-ratio`, block/inline/float layout — the engine supports each, so each is cheap later |
 
@@ -1153,8 +1157,8 @@ in core and the preview** (§15 D875): `container::is_container` answers for `Ar
 and a group with a layout's box is `Resolved::used_frame`, which its bounds and `local_box` read.
 **Resizing such a group writes its box** (§15 D875's amendment): `tools::resize_layer` routes it to
 `resize_geometry`, the held corner going into its transform, and `scale_geometry` writes its
-`FlexItem.width`/`height` in px through `build::sized_flex_item`, which also stops its growth, since
-`keep_flex_sizes` leaves a transaction's own `SetFlexItem` alone. Under the Scale tool its contents
+`LayoutItem.width`/`height` in px through `build::sized_flex_item`, which also stops its growth, since
+`keep_flex_sizes` leaves a transaction's own `SetLayoutItem` alone. Under the Scale tool its contents
 scale too (§5.6). The Container card sets `display` (§15 D878), and a laid group's typed W and H
 take the handles' path to `sized_flex_item` (§15 D879).
 
@@ -1180,7 +1184,7 @@ is placed by core and the preview since step 3 — `resolve::frame_box` answers 
 against that box (§15 D887), tested in core, the app and the preview (§15 D901). The box
 `keep_insets` reads is the one the edit leaves — `build::laid_group_box`, the group's layout run over
 the document after the edit (§15 D900); it read the **committed** one, and the Scale tool's
-`tools::scaled_flex`, which re-lays the group and moves a pinned child at once, re-pinned the child
+`tools::scaled_layout` (`scaled_flex` then), which re-lays the group and moves a pinned child at once, re-pinned the child
 against the old size. A laid group the chain root's pass never places — behind a plain group in a
 flex row, or hidden, or a mask — is measured by its own pass; `laid_group_box` found no box for it and
 the child snapped back on release (§15 D910). `ondin-core/src/container.rs` holds the arithmetic: `LengthPct` (`Px`, or `Percent`
@@ -1249,8 +1253,9 @@ dirty containers*; the built order puts the map ahead because the cached layout 
 used kind, and a text leaf measured *for* layout goes through §15 D872's measure function rather than
 that cache — and flex keeps the order, its text items measured by the engine's own measure (§15
 D868, D875). Edits to specified properties are ordinary operations — `SetInsets` for insets,
-`SetDisplay` and `SetFlexItem` for flex, the latter dirtying the parent too; for grid undecided — so
-undo needs nothing of its own. They save as additive `#[serde(default)]` fields with no schema
+`SetDisplay` and `SetLayoutItem` (`SetFlexItem` until grid) for flex and grid alike, whole values,
+the latter dirtying the parent too, and both refused with `OpError::BadLayout` where CSS refuses the
+value (§15 D914) — so undo needs nothing of its own. They save as additive `#[serde(default)]` fields with no schema
 bump (§5.11), because the default — no `display`, no insets — is exactly what every existing file means. ⚠️ **The cost is the risk.** Every consumer of
 geometry must read used geometry, and **every one that draws, measures or hit-tests now does**
 (2026-09-24, §15 D868): in core, `Resolved`'s world transforms, text, both bounds passes,
@@ -1269,11 +1274,12 @@ commit overwrites, and pen and path point editing, since a path does not stretch
 `RenderOverrides` (§6.2) patches the walk without re-resolving, so it cannot express a reflow in
 general; **for insets it re-runs `container::place`** in its `relayout` pass, since a pinned child's
 placement depends on its frame and itself alone, and **for flex it runs the engine itself** —
-`flex_relayout`, before `relayout`, over the preview's own state (§6.2, §15 D875). How a grid preview
-reflows is open.
+`flex_relayout`, before `relayout`, over the preview's own state (§6.2, §15 D875). A grid preview
+reflows through the same pass (§15 D913, the session's call); it runs `lay_out` at any layout root, so
+it lays a grid already — read, and not yet tested (§15 D914).
 
 **Engine: taffy 0.14.0**, f32, MIT (§15 D867), chosen on a measured spike, declared `=0.14.0` in
-core's manifest with `std` and `flexbox` only (§2, §3); used values come back quantized to **1/64
+core's manifest with `std`, `flexbox` and — since step 4 — `grid` (§2, §3); used values come back quantized to **1/64
 px** (`container::quantize`, §15 D873, decided), so that f32's noise digits never reach a field or a
 file. **No mirror tree**: `container::FlexTree` implements taffy's low-level traits over Ondin's own
 nodes, read through `container::LayoutView` — `resolve::DocView` for the committed document,
@@ -1321,7 +1327,7 @@ in-flow item — a left- or top-handle resize's shift, a rotation's — keeps it
 translation, and one left unchanged is dropped; not where the same edit takes the item out of the flow
 (§15 D877's second amendment). A resize builds its shift on the used transform, which for an in-flow
 item is its slot, and that slot is the number this stops being stored. Padding and gap are px only, and the Scale tool
-scales them per axis, as it does a frame's guides (`tools::scaled_flex`, §5.6).
+scales them per axis, as it does a frame's guides (`tools::scaled_layout`, §5.6).
 
 **A drag inside a flex container is a reorder** (§15 D877, the session's defaults). An in-flow item's
 stored translation is drawn nowhere, so a move of one in-flow layer that stays in its parent commits
@@ -1361,13 +1367,37 @@ D874), `ondin-export/tests/insets.rs` proving the SVG, PNG and snapshot writers 
 **built 2026-09-24** (§15 D875): the engine, the layout pass, live reflow, resize — a laid group's
 included — reorder by drag (§15 D877) and the inspector cards (§15 D878), none of the app side yet
 looked at on screen;
-(4) grid, with the track editor; (5) components and overrides, on the same pipeline.
+(4) grid, with the track editor — its model and engine **built 2026-09-27** (§15 D914), its preview
+and gestures, cards and canvas lines not; (5) components and overrides, on the same pipeline.
 
-**Open, not decided**: how grid previews reflow, how `TextSizing`'s three states map onto a grid
-layout, and what resizing a grid item writes — flex's answers (§15 D875) are not assumed to carry
-over. D867, D868 and D875 carry the detail of each. *(An in-flow item's rotation origin and stored
-translation left this list 2026-09-27, ruled — §15 D896 — and the preview's disagreement about a
+**Grid's open questions were answered before its code** (§15 D913, 2026-09-27; only the model and
+engine are built since, below):
+text in a grid cell keeps each sizing mode's meaning, D875's ruling carried over; resizing a grid
+item writes its size and `justify-self`/`align-self`, keeping its cells; a drag writes explicit
+`grid-column`/`grid-row`; the track editor this step is the inspector's list and read-only lines on
+the canvas; and a grid preview reflows through flex's pass widened to any laid container — the
+session's call, not a ruling. *(An in-flow item's rotation origin and stored translation had left
+the open list earlier the same day, ruled — §15 D896 — and the preview's disagreement about a
 rotation with it.)*
+
+**Grid, as built — the model and the engine** (§15 D914). `Display::Grid(Grid)`: `columns` and
+`rows` as `Vec<Track>` (empty is `none`), `auto_flow` (`Row`, `Column`; no `dense`),
+`justify_content`/`align_content` both `AlignContent` — a grid's `normal` distribution is `stretch`,
+so `auto` tracks grow into free space, which flex's `JustifyContent` cannot say — `justify_items` and
+`align_items`, gaps and padding in world units. **`Display` is not `Copy`** since, and
+`LayoutView::display` answers a borrow. A track is CSS's grammar: `Track::{Size, Repeat}`, a repeat
+holding `TrackSize`s so it cannot nest, `TrackSize::{Breadth, MinMax}`, `TrackBreadth::{Px, Percent,
+Fr, Auto, MinContent, MaxContent}`, untagged in the file so a list reads like its CSS. **One item
+record for both layouts**: `LayoutItem` carries `justify_self`, `grid_column` and `grid_row` beside
+flex's fields, each read under the parent's `display`, so lines written under flex take effect when
+the parent turns to grid. **What CSS refuses, the operations refuse** (`OpError::BadLayout`: a
+negative track, an `fr` minimum, `repeat(0, …)` or an empty repeat, line 0, `span 0`); a file carrying
+one opens, the value kept as written and read around by `container::style_of`. `lay_out` is one
+`FlexTree` pass still, `compute_child_layout` sending a grid container to taffy's grid algorithm.
+Not yet: `detailed_layout_info`, the drop's lines — `build::flow_index` answers `None` in a grid, so
+§15 D877's reorder never fires there — and §15 D913's resize rule; `build::held` is flex's alone.
+⚠️ **Open, for the maintainer**: under the default `Stretch` a shape fills its grid cell, where CSS's
+`normal` puts a replaced element at `start` (§15 D914).
 
 ### 5.4 Text node
 
@@ -2749,7 +2779,7 @@ end of one JSON file keep both, which is the whole reason the table sits where i
   unrelated, differently-turned layers end up together. §15 D50 has what this replaced.
   **A group with `display` set does not take this path** (§5.3c, §15 D869, D875's amendment):
   `tools::resize_layer` sends it to `resize_geometry` whatever it holds, and `scale_geometry`'s arm
-  for it writes its box — `FlexItem.width`/`height` in px through `build::sized_flex_item`, which also
+  for it writes its box — `LayoutItem.width`/`height` in px through `build::sized_flex_item`, which also
   stops its growth — and reflows, where scaling its items would hand the layout bigger items and leave
   the box hugging them. Under the Scale tool the arm recurses into the contents as well, the session
   reading D876's ruling for a nested frame across to a laid group. A group without `display` is
@@ -2832,10 +2862,12 @@ end of one JSON file keep both, which is the whole reason the table sits where i
   `scale_scalars` genuinely does not move at mean 1, so the early return is right for the rest of the
   list and was wrong for exactly this member of it.
   **A flex container's padding and gaps are scaled the same way** (§15 D875's amendment, the
-  session's default): `tools::scaled_flex`, beside `scaled_guides` behind the same fork, takes left
+  session's default): `tools::scaled_layout`, beside `scaled_guides` behind the same fork, takes left
   and right padding and the column gap by the x factor and top and bottom padding and the row gap by
   the y, for a frame as well as a group — each is a length along a named axis, and the mean would
-  leave a card's insides out of proportion.
+  leave a card's insides out of proportion. **A grid's px tracks go the same way** (§15 D914),
+  columns by x and rows by y; a `%` or `fr` track is a share and scales by itself. ⚠️ No test reaches
+  the grid arm.
 
 ### 5.7 Operations
 
@@ -2908,11 +2940,13 @@ pub enum Operation {
                                                       // parent gate; refused NonFinite; `changes_ink`
                                                       // is true, since an inset moves the layer
     SetDisplay  { id: NodeId, display: Option<Display> }, // the whole layout — §5.3c, §15 D875.
-                                                          // No kind gate; refused NonFinite;
-                                                          // `changes_ink` true
-    SetFlexItem { id: NodeId, item: FlexItem },       // the whole set; SetDisplay's terms, and it
-                                                      // dirties the PARENT too — an item's
-                                                      // properties move its siblings
+                                                          // No kind gate; refused NonFinite, and
+                                                          // BadLayout for a track CSS refuses
+                                                          // (§15 D914); `changes_ink` true
+    SetLayoutItem { id: NodeId, item: LayoutItem },   // the whole set; SetDisplay's terms (BadLayout
+                                                      // for line 0 or span 0), and it dirties the
+                                                      // PARENT too — an item's properties move
+                                                      // its siblings. `SetFlexItem` until §15 D914
     // the ops with no node to name — the ground and the guides belong to the document (§5.5):
     SetCanvasBackground { background: peniko::Color },
     AddGuide    { guide: Guide },
@@ -2931,7 +2965,7 @@ pub struct ApplyOutcome {
 
 pub enum OpError {
     NoSuchNode(NodeId), DuplicateId(NodeId), InvalidParent, WouldCycle, IndexOutOfRange,
-    BadOpacity, BadExportSpec, WrongKindForOp, ArtboardPlacement, MalformedSubtree,
+    BadOpacity, BadExportSpec, BadLayout, WrongKindForOp, ArtboardPlacement, MalformedSubtree,
     EmptyGeometry, BooleanAbandoned,  // §15 D736 — empty is the user's to fix; abandoned is not
     NoSuchGuide(GuideId), DuplicateGuide(GuideId), BadGuideOwner(NodeId), /* ... */
 }
@@ -3020,6 +3054,11 @@ pub enum OpError {
   predicate, and it is the same rule `ExportScale::from_label` and the CLI's parse were already
   applying to a *string*. The loader answers the same question by **dropping** the row (§5.11): the app
   should never author one, and a file that carries one should still open.
+- **`SetDisplay` and `SetLayoutItem` refuse a layout value CSS refuses** (`BadLayout`, §5.3c, §15
+  D914) — a negative track, a `minmax()` with an `fr` minimum, `repeat(0, …)` or an empty repeat,
+  grid line 0, `span 0`. The same asymmetry as `SetExports`', and **not the same loader**: nothing is
+  dropped or rewritten at load; the stored value stays as written, and `container::style_of` lays
+  around it.
 - **`Operation::changes_ink` classifies an op by whether applying it changes what is *drawn*** — the
   artwork, not the chrome round it — and `Transaction::changes_ink` is **any** of its ops, not all,
   since a transaction that moves a layer *and* renames it has a visible result. Exactly **eleven**
@@ -3739,9 +3778,10 @@ impl Resolved {
   one that travels **outwards** and has a second map to agree about. **Since 2026-09-24 it also
   creates card frames, clipping or not, under groups one time in three** (§15 D876), a third route by
   which a box travels up the tree: the frame-ink arm deleted from `recompute_bounds` alone fails it at
-  seed 1. **Since 2026-09-27 a second run authors layout inputs** — random `SetDisplay`, `SetFlexItem`
+  seed 1. **Since 2026-09-27 a second run authors layout inputs** — random `SetDisplay`, `SetLayoutItem`
   and `SetInsets` — and the guard compares `used_frame` too (§15 D898); its first run found §15
-  D899's reflow defect at seed 7. ⚠️ **What it cannot say is whether
+  D899's reflow defect at seed 7. A third run draws grids half the time, with random tracks, lines
+  and spans, kept separate so the first two draw what they always did (§15 D914). ⚠️ **What it cannot say is whether
   the rule those routes agree about is right**: both passes narrowed by the mask's own box instead of
   the box it clips with, identically, and this property held throughout (§15 D460). A differential
   between two implementations of one rule guards a change to either and is silent about the rule.
@@ -4450,7 +4490,7 @@ pub trait ScenePainter {
   new kind is left alone. *"Did the kind change"* is judged against what would be drawn now — the
   override kind, else the committed used kind — so an absorbed stored-size kind is always replaced by
   the placed one (§15 D874). **Before it, `flex_relayout` runs the flex engine on the preview**
-  (§15 D875): `absorb` records `SetDisplay` and `SetFlexItem` as `NodeOverride::display` and `item`,
+  (§15 D875): `absorb` records `SetDisplay` and `SetLayoutItem` as `NodeOverride::display` and `item`,
   and every layout root a touched node chains to is laid out over a `PreviewView` — the same
   `container::lay_out` `Resolved` runs, reading the specified values the transaction leaves — its
   results written as transform and kind overrides and `NodeOverride::frame`, a group's box, so a

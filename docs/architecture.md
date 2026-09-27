@@ -130,7 +130,7 @@ crates exactly (`=x.y.z`). Known-current as of 2026-07 (verify at scaffold time)
 | Geometry | `kurbo` | `BezPath`, `Affine`, `Rect`, `Point`, `Size` |
 | Paint | `peniko` | `Brush`, `Color`, `Gradient`; reuse the `color` crate types it re-exports |
 | Text layout & editing | `parley` 0.11 (bundles `fontique`) | CPU-only. Layout, shaping, and the `Cursor`/`Selection` cursor model behind `core::text::TextEdit`. `system` feature OFF — core never scans OS fonts |
-| Container layout | `taffy` (`=0.14.0`, core only) | CSS flexbox and grid (grid since §5.3c's step 4, §15 D914). `default-features = false`, `std` + `flexbox` + `grid`; used through its low-level traits over Ondin's own nodes, not its `TaffyTree` (§15 D867, D875). Computes in `f32`; results quantized to 1/64 px (§15 D873) |
+| Container layout | `taffy` (`=0.14.0`, core only) | CSS flexbox and grid (grid since §5.3c's step 4, §15 D914). `default-features = false`, `std` + `flexbox` + `grid` + `detailed_layout_info` (a laid grid's tracks, §15 D916); used through its low-level traits over Ondin's own nodes, not its `TaffyTree` (§15 D867, D875). Computes in `f32`; results quantized to 1/64 px (§15 D873) |
 | Spatial index | `rstar` | R-tree |
 | Maps | `rustc-hash` | `FxHashMap` |
 | Serialization | `serde` + `serde_json` | native format = versioned JSON (§5.11); binary later behind same API |
@@ -206,7 +206,7 @@ permission.
   its own, and already in the workspace lock through `ureq`), `roxmltree` (the XML half of SVG import,
   §15 D394), `skrifa` and `read-fonts` (the font tables `text.rs` reads directly — OpenType
   feature and name records, metrics and glyph outlines), `flo_curves` (the boolean solver,
-  §15 D91), and `taffy` (container layout, §5.3c — `=`-pinned, `std` + `flexbox` + `grid`, §15 D867, D875, D914).
+  §15 D91), and `taffy` (container layout, §5.3c — `=`-pinned, `std` + `flexbox` + `grid` + `detailed_layout_info`, §15 D867, D875, D914, D916).
   (`parley` is CPU-only text layout — headless-safe, and core needs it
   for text bounds, hit-testing, and the editing cursor model.) Core must build and pass all tests
   with no graphics context. ⚠️ **This list is load-bearing beyond tidiness, and it omitted the last
@@ -1102,7 +1102,7 @@ pub fn next_grid_color(existing: &[LayoutGrid]) -> Color;    // the first of GRI
   `+` steps: `LayoutGrid::new` carries the plain default, which is what a loaded file or a fixture
   should get.
 
-### 5.3c Container layout — flexbox, grid and insets (steps 1–3 built, step 4 begun; §15 D867–D914)
+### 5.3c Container layout — flexbox, grid and insets (steps 1–3 built, step 4 begun; §15 D867–D916)
 
 > **Mostly design ahead of code**, in the sense §12 and §13 are, and it sits here rather than at the
 > end because what it changes is the node model. **Built as of 2026-09-24**: the used-geometry
@@ -1110,8 +1110,9 @@ pub fn next_grid_color(existing: &[LayoutGrid]) -> Color;    // the first of GRI
 > D874) — the paragraphs on those say so in the present tense. **Flex is built too** (step 3, §15
 > D875): its model, engine, layout pass and preview, a laid group's resize, an item's reorder by drag
 > (§15 D877), and the inspector's Container and Item cards (§15 D878–D889); frames sit inside groups
-> since the same day (§15 D876). **Grid's model and engine are built** (step 4's first part, §15
-> D914, 2026-09-27); its preview, gestures, cards and canvas lines are not, and components are not.
+> since the same day (§15 D876). **Grid's model, engine, preview and gestures are built** (step 4's
+> first two parts, §15 D914 and D916, 2026-09-27); its cards and canvas lines are not, and components
+> are not.
 > Every other passage of this document still describes `HEAD`; where one states a rule this design
 > will change,
 > it carries a forward pointer here instead of being rewritten. **When a step below lands, this
@@ -1238,11 +1239,13 @@ intrinsic size its children's union bounds — ⚠️ through their **specified*
 (§15 D899; it was measured as specified until then, so a nested layout was not reflected). **Text keeps each sizing mode's meaning** (§15 D875, the maintainer's ruling): auto width
 never wraps (`white-space: nowrap`), auto height wraps at the width it is given — its stored width
 the preferred one, never below its widest word — and fixed is fixed; `container::flexed_text` turns
-the size a container gives back into a kind. Min-content is `text::content_widths`, and taffy's
+the size a container gives back into a kind, an auto-width box never narrower than its line, so a
+stretch that gives less overflows the slot from its start rather than wrapping (§15 D917). Min-content is `text::content_widths`, and taffy's
 repeated questions share a per-pass memo keyed by node and width. ⚠️ CSS's default
 `align-items: stretch` stretches a replaced element's cross size too, and that is kept; a UI that
 wants otherwise creates containers with an explicit alignment, which is a default and not a
-deviation.
+deviation. That is flex's default; a grid's is CSS's `normal`, which holds a replaced element at
+`start` (below, §15 D915).
 
 **Layout is derived, never stored** (§15 D868). Only specified properties are saved; used boxes live
 in `Resolved` and are never serialized (invariant 4) — as `Resolved`'s seventh map, `used`, sparse,
@@ -1276,10 +1279,11 @@ general; **for insets it re-runs `container::place`** in its `relayout` pass, si
 placement depends on its frame and itself alone, and **for flex it runs the engine itself** —
 `flex_relayout`, before `relayout`, over the preview's own state (§6.2, §15 D875). A grid preview
 reflows through the same pass (§15 D913, the session's call); it runs `lay_out` at any layout root, so
-it lays a grid already — read, and not yet tested (§15 D914).
+it lays a grid with no code of its own — tested since §15 D916
+(`ondin-render/tests/overrides.rs · a_grid_previews_as_it_commits`).
 
 **Engine: taffy 0.14.0**, f32, MIT (§15 D867), chosen on a measured spike, declared `=0.14.0` in
-core's manifest with `std`, `flexbox` and — since step 4 — `grid` (§2, §3); used values come back quantized to **1/64
+core's manifest with `std`, `flexbox` and — since step 4 — `grid` and `detailed_layout_info` (§2, §3; the last for a laid grid's tracks, §15 D916); used values come back quantized to **1/64
 px** (`container::quantize`, §15 D873, decided), so that f32's noise digits never reach a field or a
 file. **No mirror tree**: `container::FlexTree` implements taffy's low-level traits over Ondin's own
 nodes, read through `container::LayoutView` — `resolve::DocView` for the committed document,
@@ -1367,11 +1371,11 @@ D874), `ondin-export/tests/insets.rs` proving the SVG, PNG and snapshot writers 
 **built 2026-09-24** (§15 D875): the engine, the layout pass, live reflow, resize — a laid group's
 included — reorder by drag (§15 D877) and the inspector cards (§15 D878), none of the app side yet
 looked at on screen;
-(4) grid, with the track editor — its model and engine **built 2026-09-27** (§15 D914), its preview
-and gestures, cards and canvas lines not; (5) components and overrides, on the same pipeline.
+(4) grid, with the track editor — its model and engine, preview and gestures **built 2026-09-27**
+(§15 D914, D916), its cards and canvas lines not; (5) components and overrides, on the same pipeline.
 
-**Grid's open questions were answered before its code** (§15 D913, 2026-09-27; only the model and
-engine are built since, below):
+**Grid's open questions were answered before its code** (§15 D913, 2026-09-27; the model, engine,
+preview and gestures are built since, below):
 text in a grid cell keeps each sizing mode's meaning, D875's ruling carried over; resizing a grid
 item writes its size and `justify-self`/`align-self`, keeping its cells; a drag writes explicit
 `grid-column`/`grid-row`; the track editor this step is the inspector's list and read-only lines on
@@ -1384,7 +1388,8 @@ rotation with it.)*
 `rows` as `Vec<Track>` (empty is `none`), `auto_flow` (`Row`, `Column`; no `dense`),
 `justify_content`/`align_content` both `AlignContent` — a grid's `normal` distribution is `stretch`,
 so `auto` tracks grow into free space, which flex's `JustifyContent` cannot say — `justify_items` and
-`align_items`, gaps and padding in world units. **`Display` is not `Copy`** since, and
+`align_items`, each `None` for CSS's `normal` (§15 D915), gaps and padding in world units.
+**`Display` is not `Copy`** since, and
 `LayoutView::display` answers a borrow. A track is CSS's grammar: `Track::{Size, Repeat}`, a repeat
 holding `TrackSize`s so it cannot nest, `TrackSize::{Breadth, MinMax}`, `TrackBreadth::{Px, Percent,
 Fr, Auto, MinContent, MaxContent}`, untagged in the file so a list reads like its CSS. **One item
@@ -1394,10 +1399,33 @@ the parent turns to grid. **What CSS refuses, the operations refuse** (`OpError:
 negative track, an `fr` minimum, `repeat(0, …)` or an empty repeat, line 0, `span 0`); a file carrying
 one opens, the value kept as written and read around by `container::style_of`. `lay_out` is one
 `FlexTree` pass still, `compute_child_layout` sending a grid container to taffy's grid algorithm.
-Not yet: `detailed_layout_info`, the drop's lines — `build::flow_index` answers `None` in a grid, so
-§15 D877's reorder never fires there — and §15 D913's resize rule; `build::held` is flex's alone.
-⚠️ **Open, for the maintainer**: under the default `Stretch` a shape fills its grid cell, where CSS's
-`normal` puts a replaced element at `start` (§15 D914).
+
+**`normal` is CSS's** (§15 D915, the maintainer's ruling). With neither the item's self-alignment nor
+the container's set, a replaced item keeps its own size at the start of its area and a box — text, a
+container with a layout — stretches across it. taffy's own `normal` stretches anything sized `auto`,
+shapes included, so `FlexTree::push` writes `start` into a replaced child's taffy style where
+`container::grid_held` says to; `container::is_replaced` is the same split `push` makes into a
+`Leaf::Replaced`. **`fit-content` is never stretched in a grid**, under `normal` or `stretch` — §15
+D893's rule, on both axes — and an explicit `stretch` stretches a shape, as CSS does. Flex has no
+`normal`: there it is `stretch` for every item.
+
+**Grid's gestures** (§15 D916, built to §15 D913's rulings). **A resize holds**: `flex_holds` and
+`sized_flex_item` have a grid arm, `build::grid_resize_held` — on each axis the resize changed, an item
+its resolved alignment stretches (its own, else the container's; under `normal` a box and not a
+shape) takes `start`, or `end` where the resize moved the left or top edge and held the other, §15
+D905's rule on both physical axes. The size is the resize's own and the cells are kept.
+`build::resized_edges` is the edge reading, which flex's `resized_from_cross_start` reads through the
+flow. **A drop writes lines**: `build::grid_drop` moves the item's area by the tracks its centre
+crossed on each axis — both axes written, the span in the author's spelling, a start stopped at line
+1 — and answers nothing when the centre stays in its tracks, so no undo step. `build::layout_drop`
+sends a drag to it or to `flex_reorder` by the parent's `display`; `canvas::flex_reorder_of` asks it,
+so the preview adds the lines and the siblings reflow round the landing. ⚠️ **Several items of one
+grid keep their cells** — `flow_index` answers `None` in a grid — and what they should write is not
+ruled. **The tracks are derived when asked, and stored nowhere**: `container::laid_grid`, public as
+`build::laid_grid`, re-runs the pass from the grid's layout root under taffy's `detailed_layout_info`
+and answers each axis's tracks in the container's space and every in-flow item's area as CSS line
+numbers. §15 D913 said *"derived into `Resolved`"*; `Resolved` keeps used geometry and not the
+passes, so a stored map of tracks would be one more thing `update` has to keep equal to `rebuild`.
 
 ### 5.4 Text node
 
@@ -8009,7 +8037,8 @@ reorder is outlined**: a landing is recorded for every dragged in-flow item, so 
 `flex_reorder_of` with the drag's snapped delta, as the drop outline asks `move_destination`, and draws
 that item's landing alone. An item the move is taking out of its frame would otherwise be outlined in
 the slot it is leaving, a promise the release does not keep; a multi-selection gets no outline either
-(§15 D877's amendment) — a block of items that will reorder included (§15 D902). ⚠️ **Read, not tested**: no test reaches the canvas's drawing.
+(§15 D877's amendment) — a block of items that will reorder included (§15 D902). A grid item's move
+is outlined by the same filter, in the cell its drop writes (§15 D916). ⚠️ **Read, not tested**: no test reaches the canvas's drawing.
 
 **The artboard list the drop rule reads is memoized, and the key is `EditorSession::revision`** (§15
 D616). `OndinApp::artboards` was a full-document walk answering a question about four nodes, asked
@@ -11102,7 +11131,9 @@ nest"* until 2026-09-24, which had been false since D62.
 
 **Inside a flex container a move of one layer is a reorder** (§5.3c, §15 D877, the session's
 defaults). When exactly one layer is selected, in its container's flow, and `move_destination` keeps
-it in its parent, `canvas::flex_reorder_of` answers the `Reorder` `build::flex_reorder` asks for. The
+it in its parent, `canvas::flex_reorder_of` answers the `Reorder` `build::flex_reorder` asks for,
+through `build::layout_drop` — which, in a grid, answers the item's new lines instead (§5.3c, §15
+D916). The
 preview is the translation plus that reorder — the item under the pointer, its siblings laid out
 around the gap — and the release commits **the `Reorder` alone**: an in-flow item's stored
 translation is drawn nowhere and would surface only when the layout is removed. A drop back into its

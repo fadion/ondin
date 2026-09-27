@@ -1288,8 +1288,11 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D910** — **`build::laid_group_box` measures a laid group by its own pass where its chain root's does not reach it.** A laid group inside a plain group that is a flex item (D899), or one hidden or made a mask, is a layout root of its own that the chain root's pass never places; the `None` made `keep_insets` skip its pinned children, and a moved one snapped back — measured at (60, 50) with its insets unchanged, where it lands at (40, 40). The repair D900 asked for. *(Fixed and tested 2026-09-27, uncommitted when recorded; **Fixed**. Test `a_pinned_child_of_a_laid_group_in_a_plain_group_moves_where_dragged`; the hidden and mask cases amended the same day, `a_pinned_child_of_a_laid_group_out_of_the_flow_moves_where_dragged`, each biting on its own. D899, D900 amended; §5.3c; `roadmap.md`'s *owed* item struck)*
 - **D911** — **The gesture preview lays out every layout root from a touched node up to its chain root.** `flex_relayout` laid out the chain root alone, and since D899 that root can sit above a plain group whose laid group is a root of its own, un-laid in the preview: a nested column's second rect previewed 20 wide at y 50 against the commit's 40 wide at y 70. `chain_root`'s doc now says it is the topmost root, not the only one. The repair D899 asked for. *(Fixed and tested 2026-09-27, uncommitted when recorded; **Fixed**. Test `a_layout_nested_in_a_plain_group_previews_as_it_commits`. D899 amended; §5.3c, §6.2; `roadmap.md`'s *owed* item struck)*
 - **D912** — **The multi card's X/Y tooltip promises a reorder only where a drag makes one.** D903's hover said *"drag them on the canvas to reorder"* over any selection with an in-flow member, and a mixed selection's drag reorders nothing (D902). `inspector::drags_as_a_block` — every outermost member an in-flow item of one container — chooses that tail; otherwise *"select a container's items on their own to reorder them by dragging"*. Amended the same day: `inspector::laid_out_xy` answers the card's gate and hover both, its strings asserted; the card's call to it is read. *(Fixed and tested 2026-09-27, uncommitted when recorded; **Fixed**. Test `only_one_containers_items_are_told_to_drag_to_reorder`, one flip not biting until a case was added. D903 amended; §9.4)*
-- **D913** — **Grid's open questions answered before its code: text keeps its sizing mode, a resize writes size and self-alignment, a drag writes explicit lines, and the track editor is the inspector's list with read-only lines on the canvas.** The maintainer's rulings, three of the session's recommendations taken — D875's ruling (a) for every container; a resize writing px and `justify-self`/`align-self` `start`, `end` from the left or top edge (D905), the cells kept — and one declined: every drop writes `grid-column`/`grid-row` for the cell under the pointer, where the session had recommended reordering an auto-placed item by D877's machinery, so a dragged item becomes explicitly placed and D877's reorder does not apply in a grid. Track positions from taffy's `detailed_layout_info`, derived and never saved (D868); dragging a boundary is later, not declined. **The session's, stated with the plan and not objected to**: the preview widens `flex_relayout` into one pass over any laid container; grid placement on the one item record, `FlexItem` renamed — built as `LayoutItem` (D914), not the `Item` planned, which collides with the app's `menu::Item`; grid's alignment rows say `start`/`end`. *(Ruled 2026-09-27, record-only; **Resolved** as rulings, **not built** — step 4's model and engine built since, D914. §5.3c; `roadmap.md`'s open paragraph struck)*
-- **D914** — **Grid's model and engine: `Display::Grid`, one item record for both layouts, and what CSS refuses the operations refuse.** Container layout's step 4, the first of D913's four sub-steps. `Grid` — tracks as CSS's grammar (a `repeat()` holds sizes, so cannot nest), `AlignContent` on both axes because a grid's `normal` content distribution is `stretch`, and a **`justify-items` §5.3c's table lacked**, added once `align-items: start` alone left an item 100 wide across its column. `FlexItem` → `LayoutItem`, `SetFlexItem` → `SetLayoutItem`, gaining `justify_self`, `grid_column`, `grid_row`; `Display` no longer `Copy`, `LayoutView::display` borrowed. `OpError::BadLayout` at the operations; a file carrying such a value opens, its stored value kept and laid around. taffy's `grid` feature, one `FlexTree` per pass; the Scale tool scales px tracks. ⚠️ **Open, for the maintainer**: a shape fills its grid cell under the default, where CSS's `normal` puts a replaced element at `start`. *(Built and tested 2026-09-27, uncommitted when recorded; **Keep**, the session's — the shape-in-a-cell question **open**. Tests `tests/grid.rs`, eleven, and a third randomized run in `tests/resolve.rs`. D913 corrected; §5.3c, §2, §5.3, §5.6, §5.7, §5.9, §6.2; `roadmap.md` step 4's first sub-step struck)*
+- **D913** — **Grid's open questions answered before its code: text keeps its sizing mode, a resize writes size and self-alignment, a drag writes explicit lines, and the track editor is the inspector's list with read-only lines on the canvas.** The maintainer's rulings, three of the session's recommendations taken — D875's ruling (a) for every container; a resize writing px and `justify-self`/`align-self` `start`, `end` from the left or top edge (D905), the cells kept — and one declined: every drop writes `grid-column`/`grid-row` for the cell under the pointer, where the session had recommended reordering an auto-placed item by D877's machinery, so a dragged item becomes explicitly placed and D877's reorder does not apply in a grid. Track positions from taffy's `detailed_layout_info`, derived and never saved (D868); dragging a boundary is later, not declined. **The session's, stated with the plan and not objected to**: the preview widens `flex_relayout` into one pass over any laid container; grid placement on the one item record, `FlexItem` renamed — built as `LayoutItem` (D914), not the `Item` planned, which collides with the app's `menu::Item`; grid's alignment rows say `start`/`end`. *(Ruled 2026-09-27, record-only; **Resolved** as rulings, **not built** — step 4's model and engine built since, D914, and its preview and gestures, D916, which stores no track positions in `Resolved`. §5.3c; `roadmap.md`'s open paragraph struck)*
+- **D914** — **Grid's model and engine: `Display::Grid`, one item record for both layouts, and what CSS refuses the operations refuse.** Container layout's step 4, the first of D913's four sub-steps. `Grid` — tracks as CSS's grammar (a `repeat()` holds sizes, so cannot nest), `AlignContent` on both axes because a grid's `normal` content distribution is `stretch`, and a **`justify-items` §5.3c's table lacked**, added once `align-items: start` alone left an item 100 wide across its column. `FlexItem` → `LayoutItem`, `SetFlexItem` → `SetLayoutItem`, gaining `justify_self`, `grid_column`, `grid_row`; `Display` no longer `Copy`, `LayoutView::display` borrowed. `OpError::BadLayout` at the operations; a file carrying such a value opens, its stored value kept and laid around. taffy's `grid` feature, one `FlexTree` per pass; the Scale tool scales px tracks. ⚠️ **Open, for the maintainer**: a shape fills its grid cell under the default, where CSS's `normal` puts a replaced element at `start`. *(Built and tested 2026-09-27, uncommitted when recorded; **Keep**, the session's — the shape-in-a-cell question **open**, answered since by D915, and sub-step 2 built since, D916. Tests `tests/grid.rs`, eleven, and a third randomized run in `tests/resolve.rs`. D913 corrected; §5.3c, §2, §5.3, §5.6, §5.7, §5.9, §6.2; `roadmap.md` step 4's first sub-step struck)*
+- **D915** — **Grid's `normal`: a shape keeps its size at the start of its cell and a box stretches, as CSS does.** The maintainer's ruling, *"I'd lean into CSS parity as much as it makes sense"*, answering D914's open question. `Grid::justify_items` and `align_items` become `Option<AlignItems>`, `None` CSS's `normal` and the default, skipped in the file; under it a replaced item (`container::is_replaced`, D872) is held at `start` in its taffy style by `container::grid_held`, and text and a container with a layout stretch. `fit-content` is never stretched in a grid, D893's rule on both axes; an explicit `stretch` stretches a shape. Flex's `align_items` stays plain, its `normal` being `stretch`. The cards owe grid a `normal` entry. *(Ruled and built 2026-09-27, uncommitted when recorded; **Resolved**, answering D914. Test `normal_holds_a_shape_at_the_start_and_stretches_a_box`, two flips, one failing an assertion earlier than predicted. D914 amended; §5.3c; `roadmap.md` step 4's ⚠️ struck)*
+- **D916** — **Grid's preview and gestures: a resize holds on both axes, a drop writes the lines of its new cell, and a laid grid's tracks are derived when asked.** Step 4's second sub-step, built to D913's rulings. `build::grid_resize_held`, under `flex_holds` and `sized_flex_item`, turns a stretch released by a resize into `start`, or `end` from the left or top edge (`build::resized_edges`, which flex's D905 reading now shares); `build::grid_drop` moves the area by the tracks the item's centre crossed, span and spelling kept, nothing in its own cell; `build::layout_drop` is the canvas's one door. `container::laid_grid` re-runs the pass under taffy's `detailed_layout_info` — **nothing stored in `Resolved`**, a departure from D913's wording. The preview needed no change and is tested now. ⚠️ Several grid items dragged keep their cells, unruled; D913's *"cell under the pointer"* is read as the centre's. *(Built and tested 2026-09-27, uncommitted when recorded; **Keep**, the session's. Tests in `tests/grid.rs`, `tests/overrides.rs` and `canvas.rs`'s `flex_canvas_tests`, each flip at its predicted site. D913, D914 amended; §2, §3, §5.3c, §9.4; `roadmap.md` step 4's (2) struck)*
+- **D917** — **An auto-width text stretched narrower than its line wrapped, in flex and in grid; `container::flexed_text` now floors the fixed box at the line's width.** D875's ruling (a) says auto width never wraps, and `flexed_text` made a stretched label `Fixed` at the size handed back, on the claim — D875's and the function's doc — that such a box *"cannot wrap it, a grown box being at least as wide as its line"*: true only of a stretch that widens it. A cross-axis stretch, or a grid cell's, can give less. Measured before the repair, an `Inter` 12 label 161.65 wide on one line was laid `Fixed(30 × 100)` in a 30px grid column and `Fixed(30 × 14.40625)` in a 30-wide flex column. **Flex had it first**; grid inherited it through D913's first ruling, and under grid's `normal` text stretches (D915), so there it was the default case. The box keeps the line's width and overflows its slot from the start, `white-space: nowrap`; height, `AutoHeight` and `Fixed` unchanged. *(Found and fixed 2026-09-27, uncommitted when recorded; **Fixed**, the session's, a defect against D875's ruling (a) and D913's first ruling. Test `an_auto_width_label_stretched_narrower_keeps_its_line`, its flip at the predicted site and reaching the grid half alone. D875 corrected; §5.3c)*
 
 ---
 
@@ -20316,7 +20319,9 @@ layout.)* *(Nor is that true since D878: the Container card writes `SetDisplay`,
    max-content — and never below its widest word, `text::content_widths`' min-content. Fixed is
    fixed. `container::flexed_text` turns the size the container hands back into a kind: auto width
    stays auto unless the container grew or stretched it, when it becomes `Fixed` at that size — which
-   cannot wrap it, a grown box being at least as wide as its line; auto height becomes `AutoHeight`
+   cannot wrap it, a grown box being at least as wide as its line (*corrected 2026-09-27: true only of
+   a stretch that widens it — a cross-axis stretch can hand it less, and wrapped it; the box is floored
+   at its line's width since, D917*); auto height becomes `AutoHeight`
    at the given width, and `Fixed` only if the container also made it taller than its lines; fixed
    takes the size whole. ⚠️ **CSS's own default — auto-width text wrapping at whatever width the row
    settles on — was offered and turned down**, and the test's flip is that option.
@@ -21733,7 +21738,8 @@ builds — and stated its answer to the first with the plan rather than asking i
 4. **The track editor, this step, is the inspector's track list — the mockup's screen 04, *Grid
    container + grid item* — and read-only track lines drawn on the canvas over a selected grid
    container; the recommendation taken.** Track positions come from taffy's `detailed_layout_info`
-   feature, derived into `Resolved` and never saved: invariant 4, D868. **Dragging a track boundary on
+   feature, derived into `Resolved` and never saved: invariant 4, D868 — *corrected 2026-09-27: derived
+   on demand by re-running the pass, and stored nowhere, `Resolved` included (D916)*. **Dragging a track boundary on
    the canvas is later, not declined.** Declined for this step: draggable boundaries now, and the
    inspector alone. ⚠️ Core's manifest turns that feature off today — `default-features = false`, its
    comment naming *"the detailed-info reporting"* among what it drops — so step 4 enables it beside
@@ -21776,7 +21782,8 @@ reaches a document through a file or a test.
 `AlignContent` on both axes**, `justify-content` included: a grid container's `normal` content
 distribution behaves as `stretch` on both, so an `auto` track grows into the free space, and flex's
 `JustifyContent` has no `stretch` to say that with — both default to `Stretch`, and `justify_items`
-and `align_items` to `AlignItems::Stretch`. `Start` and `End` go to taffy as `FLEX_START`/`FLEX_END`,
+and `align_items` to `AlignItems::Stretch` (*superseded the same day: `Option<AlignItems>` since,
+`None` CSS's `normal` and the default — D915*). `Start` and `End` go to taffy as `FLEX_START`/`FLEX_END`,
 D909's mapping; taffy 0.14.0's grid reads the two pairs alike (read in its `compute/grid/alignment.rs`
 and `compute/common/alignment.rs`), a grid having no reversal for `flex-start` to follow. ⚠️ **The
 same file treats `baseline` as `start` in a grid** — taffy's own *TODO* — so an item aligned to the
@@ -21836,7 +21843,8 @@ grid nested in a flex row is laid in the row's pass —
 items 3 and 4. ⚠️ **Read, not tested: the preview already lays a grid.** `RenderOverrides::flex_relayout`
 runs `container::lay_out` at every layout root a touched node chains to, whatever its `display`, so a
 grid is re-laid in a gesture by construction — D913's *one pass over any laid container* — and no
-differential asserts it; sub-step 2 owes one.
+differential asserts it; sub-step 2 owes one. *(Both paid by D916: the feature is on, for
+`container::laid_grid`, and `tests/overrides.rs · a_grid_previews_as_it_commits` is the differential.)*
 
 **What else moved with it.** The Scale tool's `tools::scaled_flex` became **`scaled_layout`**, and
 scales a grid's gaps, padding and **px tracks** per axis — columns by `csx`, rows by `csy` — a `%` or
@@ -21850,7 +21858,8 @@ committing an empty transaction — and several keep their cells (`stays_in_flow
 drag in a grid moves nothing. **And `keep_flex_sizes` is partly flex's only**: `build::held`, growth
 and `align-self`, runs under a flex parent alone, but `sized_in_px` (D879, *"whatever the parent"*)
 and `kept_flow_translations` (any in-flow item) reach a grid item as they reach a flex one. D913's
-resize ruling — px and both self-alignments — is sub-step 2's.
+resize ruling — px and both self-alignments — is sub-step 2's. *(Built by D916: a drag in a grid
+writes lines, and `build::grid_resize_held` is the grid's half of the holds.)*
 
 ⚠️ **Open, for the maintainer: under the default a shape fills its grid cell.** Both item alignments
 default to `Stretch`, so a 20 × 20 rect auto-placed in a 100 × 50 cell is drawn 100 × 50
@@ -21865,6 +21874,8 @@ would stretch a shape anyway, a shape going to taffy at `auto` size and measured
 with flex for now**, which is the session's call and not a ruling. The alternative is a `normal`
 value, or reading a replaced leaf as `start` under the default in a grid. *Revisit when the
 maintainer rules* — before the cards, which would otherwise ship `Stretch` as the face of the default.
+*Ruled 2026-09-27, the same day, for CSS: D915 gives the model a `normal`, and under it a shape keeps
+its size at the start of its cell. The first test named above says `stretch` in so many words since.*
 
 **The evidence**, `ondin-core/tests/grid.rs`, eleven tests whose numbers can be checked by hand —
 tracks in px or in `fr` of a round remainder, and `start` on both axes wherever a stretch would muddy
@@ -21893,6 +21904,233 @@ the maintainer. ⚠️ Nothing of it reachable in the GUI. Recorded from the bri
 `compute/grid/alignment.rs` and `compute/common/alignment.rs`; flips not re-run. D913 corrected;
 `architecture.md` §2, §5.3, §5.3c, §5.6, §5.7, §5.9 and §6.2 amended; `roadmap.md` step 4's first
 sub-step struck)*
+
+**D915 — Grid's `normal`: a shape keeps its size at the start of its cell and a box stretches, as
+CSS does. *The maintainer's ruling, 2026-09-27, answering D914's open question; the mechanism the
+session's. Built and tested 2026-09-27, uncommitted when recorded.*** D914 left a shape filling its
+grid cell under the default: both item alignments defaulted to `Stretch`, handed to taffy as an
+explicit `STRETCH`, where CSS's `normal` holds a replaced element at `start` — and D872 made shapes
+replaced elements. It kept the stretch consistent with flex and put the question. The answer: *"I'd
+lean into CSS parity as much as it makes sense."*
+
+**The model gains a `normal`.** `Grid::justify_items` and `Grid::align_items` are
+`Option<AlignItems>`, `None` being CSS's `normal`, the default, and skipped in the file; `style_of`
+hands a `None` to taffy as its own `normal`. **Flex's `Flex::align_items` stays a plain
+`AlignItems`**: in a flex container `normal` behaves as `stretch` for every item, replaced or not —
+D872's ⚠️, which keeps that stretch — so there is nothing for a `None` to say there. The change
+supersedes D914's saved shape for the two fields: a value written `"Stretch"` still reads, as
+`Some(Stretch)`, but D914 skipped `Stretch` as the default, so a file of that shape that left them
+alone would now read `normal`. Free, on the session's word that grid is unpushed and no file carries
+one — and nothing in the app can author a grid yet, the Container card's `grid` cell still saying
+*not built yet* (D886).
+
+**What `normal` does, `container::grid_held`.** On an axis where the item's own self-alignment and
+the container's are both unset, a **replaced** item keeps its own size at the start of its area, and
+a **box** — text, a container with a layout — stretches across it, as a `div` does. taffy's `normal`
+cannot be left to do it: it stretches anything sized `auto` (read by D914, in its grid's
+`alignment.rs`), and a shape goes to taffy at `auto` and measured, so `FlexTree::push` writes `START`
+into such a child's taffy `justify_self` or `align_self` where `grid_held` says so. "Replaced" is
+`container::is_replaced` — anything but text and a container with a layout, D872's reading — and
+`push` reads the same answer off the `Leaf::Replaced` it has just built rather than asking twice.
+⚠️ **They are two spellings of one question**, and `build::grid_resize_held` (D916) asks the function
+while the layout reads the leaf. They differ in one case, read and not tested: a text node
+`TextParts::of` cannot read is a zero-size `Leaf::Replaced` to `push` and not replaced to
+`is_replaced`. *Keep them in step.*
+
+**`fit-content` is never stretched in a grid**, under `normal` or an explicit `stretch`: CSS
+stretches only an `auto` size, and taffy is handed `auto` for `FitContent`. That is D893's rule for
+flex's cross axis, carried to both of a grid's — so a laid group asked to hug across keeps its hug and
+still stretches down. **An explicit `Some(Stretch)` stretches a replaced item**, as CSS does; every
+other alignment is taffy's to apply.
+
+**The evidence**, `ondin-core/tests/grid.rs · normal_holds_a_shape_at_the_start_and_stretches_a_box`:
+two 100 × 50 cells; a 20 × 20 rect keeps its size at (0, 0) and a laid group hugging a 10 × 10 rect
+stretches to 100 × 50; set to `fit-content` across, the group keeps 10 and still stretches to 50;
+told `stretch` in so many words, the rect fills its cell and the hugging group still does not.
+**Flip runs**, as the test's doc records them, not re-run here: `grid_held` answering
+`(false, false)` — taffy's own `normal` — fails on *"a shape keeps its size under normal"*, the rect
+100 × 50, the predicted site; its `fit-content` clause dropped was predicted to fail on *"fit-content
+is not stretched"* and fails one assertion earlier, on *"fit-content hugs under normal"* at a width of
+100, since a box under `normal` is stretched too. **The other grid fixtures now say `Some(Start)` or
+`Some(Stretch)` in so many words**, so their hand-checked numbers do not move with the default; the
+randomized grid run's `rand_grid` (`tests/resolve.rs`) draws `None` for each of the two one time in
+six.
+
+**What it leaves the cards**, D913's third sub-step: grid's alignment rows need a `normal` entry, and
+it is the face of the default — the reason D914 wanted the ruling before the cards rather than after.
+
+*(Ruled 2026-09-27 by the maintainer, built and tested the same day, uncommitted when recorded;
+**Resolved**, answering D914's open question. Recorded from the brief and a read of `container.rs`'
+`Grid`, `is_replaced`, `style_of`'s grid arm, `FlexTree::push` and `grid_held`, `tests/grid.rs` and
+`tests/resolve.rs`' `rand_grid`; flips not re-run. D914 amended; `architecture.md` §5.3c amended;
+`roadmap.md` step 4's ⚠️ struck)*
+
+**D916 — Grid's preview and gestures: a resize holds on both axes, a drop writes the lines of its new
+cell, and a laid grid's tracks are derived when asked. *The session's; container layout's step 4, the
+second of D913's four sub-steps, built to D913's rulings. Built and tested 2026-09-27, uncommitted
+when recorded.*** D914 built grid's model and engine and left its gestures where flex's machinery put
+them: a stretched grid item's resize wrote its size and no hold, so the stretch took it straight back,
+and a drag moved nothing — `flex_reorder` answering `None` in a grid, the commit an empty
+transaction. This is D913's second and third rulings built, the track positions its fourth will need,
+and the preview differential D914 owed.
+
+**A resize holds, `build::grid_resize_held`** — D913's second ruling. `flex_holds` and
+`sized_flex_item` each gain a grid arm beside flex's `held`. On each axis the resize changed, if the
+item's **resolved** alignment stretches it — its own, else the container's, and under `normal` a box
+and not a replaced item (D915) — the self-alignment on that axis becomes `start`, or `end` where the
+resize moved the axis's low edge, left or top, and held its high one: D905's rule on both physical
+axes, a grid having no reversal for it to follow (D913's ⚠️). The resize writes the size itself, and
+the cells are kept. A shape resized under `normal` was never stretched, so no alignment is written. A
+laid group is a box and never replaced, so `sized_flex_item` says so outright. **The edge reading is
+factored out**: `build::resized_edges` answers, per physical axis, whether the low edge moved and the
+high one held, and the reverse, from the box in its parent's space before and after; flex's
+`resized_from_cross_start` now reads it through the flow — the down axis for a row, the across for a
+column, the pair swapped under `wrap-reverse` — its behaviour unchanged, flex's tests green as the
+brief reports. `set_preview` appends `flex_holds` (D904), so a grid's holds reach the gesture preview
+by the same door — read, since the differential below writes its hold by hand.
+`resizing_a_stretched_grid_item_holds_the_size_it_was_dragged_to`: two 100 × 50 cells told `stretch`;
+a right-handle drag to 60 keeps x 0–60 with `justify-self: start`, `align-self` untouched and the
+cells kept; a left-handle drag on the second item to 40 keeps its right edge at 200, with `end`.
+**Flip runs**, both predicted: `flex_holds`' grid arm deleted fails on *"the dragged width held"*,
+stretched back to 100; the edge ignored fails on *"a left-handle drag keeps its right edge"*, at x
+100–140. `under_normal_a_shape_needs_no_hold_and_a_box_does` has a resized shape's item left at its
+defaults, and a stretched laid group written px 60 and `justify-self: start` by `sized_flex_item`.
+
+**A laid grid's tracks, derived when asked — a departure from D913's wording.** taffy's
+`detailed_layout_info` is on in core's manifest, beside `grid`; taffy 0.14.0's own manifest lists the
+feature with no dependencies. `FlexTree` gains `want` and `grid` and implements
+`LayoutGridContainer::set_detailed_grid_info`, keeping the report for the wanted node — its last,
+which is the full layout its parent places it by, taffy reporting nothing from a sizing-only run.
+`container::laid_grid(view, id)` re-runs the pass from `id`'s layout root, climbing only while
+`parent_lays_out` and `in_flow`, and answers a `LaidGrid`: `columns` and `rows`, each a
+`LaidTracks` of `spans`, `before` and `explicit` — every track's start and end in the container's
+own space on the 1/64 grid, implicit ones included — and `areas`, each in-flow child's `[column
+start, column end, row start, row end]` as CSS line numbers. taffy numbers lines from the whole grid's first, so `before`,
+the implicit tracks ahead of the explicit grid that only an item at a negative line beyond it makes,
+is subtracted. **Items are matched to children by source order**: taffy sorts its items back into it
+before reporting (its `compute/grid/mod.rs`, the sort at line 602 and the report at 799), and `push`
+adds in-flow children in child order. `build::laid_grid(doc, id)` is the public door.
+**D913's item 4 said the positions are *"derived into `Resolved`"*; nothing is stored there.**
+`Resolved` keeps used geometry and not the passes that made it, and a stored map of tracks would be
+one more thing an incremental `update` has to keep equal to `rebuild` — D898's guard's whole subject —
+for a question asked by a drop and, later, by the canvas's lines, not by every frame of every
+document. Derived and never saved, invariant 4 and D868, holds either way. ⚠️ **Read, not tested:
+"the last report wins"** where a grid is a flex item whose parent's pass lays it out fully more than
+once. `a_laid_grid_reports_its_tracks_and_areas` reads the first test's grid back: columns 20–120,
+130–210 and 220–380, rows 20–70 and 80–120, the fourth item at column 1, row 2; a point in a gap goes
+to the nearer edge and one past the end to the end track.
+
+**A drop writes lines, `build::grid_drop`** — D913's third ruling. It reads the parent's `laid_grid`
+and moves the item's area by as many tracks as its centre crossed on each axis —
+`LaidTracks::index_at` before and after, the nearest track — so an item spanning two columns keeps
+both, and one grabbed off its centre is not snapped by half its span. Both axes are written, the one
+the drag left alone at the line it was laid at. **The span keeps the author's spelling**: an end
+given as a line moves with the start, and any other end is written as a span over two tracks or
+more and as `auto` over one. A start pushed before line 1 stops there, a negative line counting from
+the far end. **`None`
+when the centre stays in its tracks on both axes**, so a drop back into its own cell is no operation
+and no undo step — D877's rule for flex. ⚠️ **D913's ruling reads *"the cell under the pointer"*;
+what is built reads the dragged box's centre**, shifted by the drag, as D877's reorder does. For a
+one-track item grabbed at its centre the two agree; for a spanning item or an off-centre grab they do
+not, and the span is the reason for the centre. And under `normal` a shape sits at its cell's start,
+so its centre is not the cell's. The session's reading of the ruling; nothing records it put back to
+the maintainer. *Revisit if they meant the pointer.*
+
+**`build::layout_drop` is the canvas's one door** — a flex parent to `flex_reorder`, a grid parent to
+`grid_drop`. `canvas::flex_reorder_of` calls it, keeping flex's name while it serves both, so
+`move_preview_tx` adds the `SetLayoutItem` beside the drag's translation and the siblings reflow round
+the landing, and `move_tx` commits it alone — no `SetTransform`, D877's reason. The landing outline
+asks `flex_reorder_of` too, so it draws a grid item's new cell; read, not tested on the canvas.
+**Several items of one grid keep their cells**: `flex_reorder_many`'s `flow_index` answers `None`
+under a grid, so the multi-selection arm's `stays_in_flow` holds each in-flow item where it is. That
+is D913's recorded gap — what several grid items dragged together write — and it is **still not
+ruled**. `a_drop_writes_the_lines_of_the_cell_it_lands_in`: the first item, its centre dragged from
+(30, 30) to (230, 90), is written `3 / auto` and `2 / auto` and lands at (220, 80), its siblings
+flowing round it; a (20, 10) nudge is `None`. **Flip run**: the no-op guard removed fails on *"back in
+its own cell"*, predicted. `a_dropped_area_keeps_its_span_and_its_spelling`: `1 / span 2` dragged one
+column is `2 / span 2`, and `1 / 3` is `2 / 4`. **And through the app**, `canvas.rs`'
+`flex_canvas_tests::a_real_drag_in_a_grid_writes_the_cell_it_lands_in`, a real drag through
+`canvas_ui`: `a` written `3 / auto` and `2 / auto` and drawn at (200, 100), `b` back in the first
+cell, one undo step, no stored transform touched. **Flip run**: `flex_reorder_of` asking
+`flex_reorder` as before fails on *"a lands in column 3, row 2"*, `a` at (0, 0), predicted. ⚠️ **That
+test's first cut aimed at the wrong cell**: a move's anchor is the pointer where the move *begins*,
+the first of `drag`'s eight steps, not the press, so the centre travels 7/8 of the pointer's way. Its
+doc says so; the next canvas test in a grid should read it first.
+
+**The preview needed no change.** `RenderOverrides::flex_relayout` already laid a grid, as D914 read;
+it is tested now. `ondin-render/tests/overrides.rs · a_grid_previews_as_it_commits` is the
+differential — a drop's lines reflowing the three auto-placed siblings, the frame resized reflowing
+its `fr` columns, a stretched item resized with its hold, and flex turned back into the grid.
+**Flip run**: `PreviewView::item` answering the document's item rather than the preview's fails on
+*"a drop writing lines"*, predicted. `a_dragged_grid_item_lands_in_its_new_cell`: the first rect
+carried off by a translation while its lines put it in column 3, row 2 lands at world (700, 550), its
+own 20 × 20 — D877's indicator, in a grid. `build::is_flex_item`'s and `kept_flow_translations`' docs
+already said they answer for a grid (D914), so a grid item's stored translation is kept under a
+resize's shift as a flex item's is.
+
+*(Built and tested 2026-09-27, uncommitted when recorded; **Keep**, the session's, built to D913's
+rulings — the several-item grid drop **open**, and D913's *"derived into `Resolved`"* departed from,
+with a reason. ⚠️ Not verified in the GUI; gates not reported to this record. Recorded from the
+brief and a read of `container.rs`' `is_replaced`, `LaidTracks`, `LaidGrid`, `laid_grid`, `FlexTree`
+and `set_detailed_grid_info`, `build.rs`' `flex_holds`, `resized_edges`, `resized_from_cross_start`,
+`grid_resize_held`, `sized_flex_item`, `flow_index`, `layout_drop`, `laid_grid` and `grid_drop`, core's
+manifest, `canvas.rs`' `flex_reorder_of`, `move_preview_tx`, `move_tx` and the grid test, the new
+tests in `tests/grid.rs` and `tests/overrides.rs`, and taffy 0.14.0's manifest and
+`compute/grid/mod.rs`; flips as the tests' docs record them, not re-run. D913 corrected, D914
+amended; `architecture.md` §2, §3, §5.3c and §9.4 amended; `roadmap.md` step 4's (2) struck)*
+
+**D917 — An auto-width text stretched narrower than its line wrapped, in flex and in grid;
+`container::flexed_text` now floors the fixed box at the line's width. *The session's; a defect
+against D875's ruling (a) and D913's first ruling. Found, measured and fixed 2026-09-27, uncommitted
+when recorded.*** D875's ruling (a) is that auto-width text **never wraps**, `white-space: nowrap`'s
+reading, and D913's first ruling carried it to grid — *"one rule for every container"*.
+`flexed_text` is where the rule is kept after taffy has placed the item: an auto-width label the
+container grew or stretched becomes `Fixed` at the size handed back, and D875's body and the
+function's own doc both said that box *"cannot wrap it, a grown box being at least as wide as its
+line"*. **True only of a stretch that makes it wider.** On a row's main axis the measure answers
+min-content with the one-line box, so a row too narrow for a label overflows rather than folding it
+(D875); a stretch across the cross axis, or across a grid cell, hands the text whatever the slot is,
+and that can be less than its line.
+
+**Found by reading, then measured.** The gap was raised, read and not measured, when D916 was
+recorded; a probe then put numbers on it. An `Inter` 12 label, *"a label wider than its column"*,
+161.65 wide on one line: in a 30px grid column it was laid as `TextSizing::Fixed(30 × 100)` — a
+30-wide box that wraps it, and 100 tall because the single `auto` row is stretched to the frame's
+height by grid's `normal` content distribution, which is `stretch` (D914). In a 30-wide flex
+**column** — `direction: Column`, `align-items` at its default `Stretch` — it was `Fixed(30 ×
+14.40625)`: one line tall and 30 wide, the text wrapping out of its own box. **Flex had it too, so
+it predates grid**; grid inherited it through D913's first ruling rather than introducing it. And in
+a grid it is the default case, not a corner: under `normal` a replaced item is held at `start` but
+text is a box and stretches (D915), so every auto-width label in a column narrower than its line was
+wrapped. This repair is what keeps a stretched label from wrapping there.
+
+**The repair**, in `flexed_text`'s `TextSizing::Auto` arm: where the size given differs from the
+text's own box, the fixed box is `Size::new(size.width.max(line_width), size.height)` — never
+narrower than its line, so it overflows its slot rather than wrapping, CSS's `white-space: nowrap`,
+which is what D875(a) already calls auto width. It sits at the slot's start and overflows to the
+right. **Not changed**: the height, which a stretch may still make taller than the line, harmlessly;
+`AutoHeight` and `Fixed` text; and the arm where the text's box cannot be read, which still takes the
+size whole (read in the code, not in the brief). `flexed_text`'s doc now says *"never narrower than
+its line"*, and a 🚨 comment on the arm names the sentence it replaced. ⚠️ **The `max` is
+load-bearing and reads like a redundant clamp**: taking the plain width given is the version this
+entry fixes, and the test below is what fails.
+
+**The evidence**, `ondin-core/tests/grid.rs · an_auto_width_label_stretched_narrower_keeps_its_line`,
+a grid half and a flex half: the label in a 200 × 100 frame given one 30px column, its item
+alignments left at `normal`, has a `Fixed` width equal to its line and sits at x 0, overflowing its
+cell; the frame resized to 30 × 100 and made a flex column, the width is the line's again. **Flip
+run**, as the test's doc records it, not re-run here: the floor removed fails on *"grid: one line"*
+at a width of 30, the predicted site. ⚠️ **The flex half is not reached under that flip**, the grid
+assertion failing first, so no flip of its own bites on it; its evidence that the defect existed is
+the probe's pre-repair `Fixed(30 × 14.40625)` above. A flip that reaches flex alone would need the
+two halves split.
+
+*(Found 2026-09-27 — raised when D916 was recorded, then measured with a probe — and fixed the same
+day, uncommitted when recorded; **Fixed**, the session's, a defect against D875's ruling (a) and
+D913's first ruling. Gates reported green: fmt, `cargo test --workspace`, clippy over the workspace
+and per package, the doc gate and `check --release`. Recorded from the brief and a read of
+`container.rs`' `flexed_text` and `tests/grid.rs`' test and its `label` and `grid` fixtures; the
+probe's numbers the brief's, the flip not re-run. D875 corrected; `architecture.md` §5.3c amended)*
 
 **D898 — The randomized `update`/`rebuild` guard authors layout inputs, and compares a laid group's
 box. *The session's; built 2026-09-27, committed as `da5b652`. Entry reconstructed 2026-09-27 from

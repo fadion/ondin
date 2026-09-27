@@ -3800,15 +3800,12 @@ impl OndinApp {
         // translation, so a typed position would move the free members and leave
         // the laid-out ones in their slots, silently. A partial edit that says
         // nothing is worse than a field that says why it is off.
-        let laid_out =
-            ondin_core::build::outermost(&self.session.doc, self.session.selection.ids())
-                .into_iter()
-                .filter(|id| ondin_core::build::is_flex_item(&self.session.doc, *id))
-                .count();
+        let members = ondin_core::build::outermost(&self.session.doc, self.session.selection.ids());
+        let laid_out = laid_out_xy(&self.session.doc, &members);
         self.panel(ui, "Transform", Some(action), |app, ui| {
             let fw = (ui.available_width() - ui::CARD_COL_GAP) / 2.0;
             let row = egui::vec2(fw, 28.0);
-            let xy = ui::disable_unless(ui, laid_out == 0, |ui| {
+            let xy = ui::disable_unless(ui, laid_out.is_none(), |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
                     app.multi_number(
@@ -3827,18 +3824,14 @@ impl OndinApp {
                     );
                 })
             });
-            if laid_out > 0 {
+            if let Some(why) = laid_out {
                 // Beside the disabled scope, which reports no hover of its own.
                 ui.interact(
                     xy.response.rect,
                     ui.id().with("multi-xy-laid-out"),
                     egui::Sense::hover(),
                 )
-                .on_hover_text(format!(
-                    "{laid_out} of these {} placed by a container's layout — drag them on \
-                     the canvas to reorder",
-                    if laid_out == 1 { "is" } else { "are" }
-                ));
+                .on_hover_text(why);
             }
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
@@ -12433,6 +12426,43 @@ impl InsetPlacement {
             Pin::Top | Pin::Bottom => self.frame.height,
         }
     }
+}
+
+/// Whether dragging `members` on the canvas reorders them — they are all in-flow
+/// items of **one** container, which is what moves as a block (§15 D902). Over a
+/// mixed selection, or items of two containers, each in-flow item holds its slot
+/// and nothing reorders; the multi-selection Transform card's X/Y tooltip must not
+/// promise it does (§15 D912).
+fn drags_as_a_block(doc: &ondin_core::Document, members: &[NodeId]) -> bool {
+    let parent = |id: &NodeId| doc.get(*id).and_then(|n| n.parent());
+    !members.is_empty()
+        && members
+            .iter()
+            .all(|id| ondin_core::build::is_flex_item(doc, *id))
+        && members.windows(2).all(|w| parent(&w[0]) == parent(&w[1]))
+}
+
+/// Why the multi-selection Transform card's X and Y are off — `None` when they
+/// are on, which is when no member is placed by its container (§15 D903). Its
+/// answer is the whole of the card's decision, the gate and the hover both, so a
+/// test of it is a test of what the card says (§15 D912): a tooltip's text never
+/// reaches a headless frame.
+fn laid_out_xy(doc: &ondin_core::Document, members: &[NodeId]) -> Option<String> {
+    let laid_out = members
+        .iter()
+        .filter(|id| ondin_core::build::is_flex_item(doc, **id))
+        .count();
+    (laid_out > 0).then(|| {
+        format!(
+            "{laid_out} of these {} placed by a container's layout — {}",
+            if laid_out == 1 { "is" } else { "are" },
+            if drags_as_a_block(doc, members) {
+                "drag them on the canvas to reorder"
+            } else {
+                "select a container's items on their own to reorder them by dragging"
+            }
+        )
+    })
 }
 
 /// The inset `insets` holds for `edge`.
@@ -26544,5 +26574,101 @@ mod multi_xy_flex_tests {
             "nothing moved"
         );
         assert_eq!(app.session.history.undo_depth(), depth, "and no step");
+    }
+
+    /// **The X/Y tooltip promises a reorder only where a drag makes one** (§15
+    /// D912) — `drags_as_a_block`, the decision, and `laid_out_xy`, the text the
+    /// card hangs on its gate and hover, both asserted here since a tooltip's text
+    /// never reaches a headless frame (`CLAUDE.md`). Two items of one row drag as a
+    /// block; an item with a free rect beside it, or items of two rows, do not —
+    /// each in-flow item holds its slot (§15 D902) — and the tooltip over them said
+    /// *"drag them on the canvas to reorder"* all the same.
+    ///
+    /// **Flip runs**: the same-container clause dropped fails on *"items of two
+    /// rows"*, true — the predicted site. The in-flow clause dropped was predicted
+    /// to fail on *"an item and a free rect"* and **did not bite**: the pair have
+    /// two parents, so the other clause refuses them. It fails only on *"two free
+    /// rects"*, one parent and no layout — the case added for it. And the wiring:
+    /// `laid_out_xy` asking the opposite of `drags_as_a_block` fails on *"one row's
+    /// items are told to drag"* — predicted. The card takes its gate and its hover
+    /// from `laid_out_xy` alone, so that is the wiring the hover has.
+    #[test]
+    fn only_one_containers_items_are_told_to_drag_to_reorder() {
+        use ondin_core::container::{Display, Flex};
+        let mut ids = ondin_core::IdSource::new(0xAE);
+        let root = ids.mint();
+        let (row1, row2, a1, a2, b1, free, free2) = (
+            ids.mint(),
+            ids.mint(),
+            ids.mint(),
+            ids.mint(),
+            ids.mint(),
+            ids.mint(),
+            ids.mint(),
+        );
+        let node = |id, parent, index, kind| Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind,
+            transform: None,
+            name: None,
+        };
+        let rect = || NodeKind::Rect {
+            size: Size::new(20.0, 20.0),
+            corner_radii: RoundedRectRadii::default(),
+        };
+        let frame = || NodeKind::Artboard {
+            size: Size::new(200.0, 100.0),
+        };
+        let flex = |id| Operation::SetDisplay {
+            id,
+            display: Some(Display::Flex(Flex::default())),
+        };
+        let mut doc = ondin_core::Document::new(root);
+        doc.apply(&Transaction(vec![
+            node(row1, root, 0, frame()),
+            node(row2, root, 1, frame()),
+            node(free, root, 2, rect()),
+            node(free2, root, 3, rect()),
+            node(a1, row1, 0, rect()),
+            node(a2, row1, 1, rect()),
+            node(b1, row2, 0, rect()),
+            flex(row1),
+            flex(row2),
+        ]))
+        .unwrap();
+        assert!(drags_as_a_block(&doc, &[a1, a2]), "one row's items");
+        assert!(drags_as_a_block(&doc, &[a1]), "one item");
+        assert!(
+            !drags_as_a_block(&doc, &[a1, free]),
+            "an item and a free rect"
+        );
+        assert!(!drags_as_a_block(&doc, &[a1, b1]), "items of two rows");
+        assert!(
+            !drags_as_a_block(&doc, &[free, free2]),
+            "two free rects, one parent and no layout"
+        );
+        assert!(!drags_as_a_block(&doc, &[]), "nothing");
+
+        // And what the card says, through the function it calls for its gate and
+        // its hover.
+        let said = |m: &[NodeId]| laid_out_xy(&doc, m);
+        assert_eq!(
+            said(&[a1, a2]).as_deref(),
+            Some(
+                "2 of these are placed by a container's layout — drag them on the canvas to reorder"
+            ),
+            "one row's items are told to drag"
+        );
+        assert_eq!(
+            said(&[a1, free]).as_deref(),
+            Some(
+                "1 of these is placed by a container's layout — select a container's items on \
+                 their own to reorder them by dragging"
+            ),
+            "a mixed selection is not"
+        );
+        assert_eq!(said(&[free, free2]), None, "no laid member: X and Y are on");
     }
 }

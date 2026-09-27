@@ -2787,8 +2787,9 @@ impl OndinApp {
     /// its place in the flow is, so a drag that stays in the container can only
     /// mean *"put it there in the row"*. One leaving its frame moves as it always
     /// has, landing placed by its transform in its new parent, out of the flow it
-    /// left; with several layers selected, an in-flow item keeps its slot
-    /// ([`Self::stays_in_flow`]) and the rest move.
+    /// left. Several layers are [`Self::flex_block_reorder_of`]'s — a block when
+    /// they are all items of one container (§15 D902); otherwise an in-flow item
+    /// keeps its slot ([`Self::stays_in_flow`]) and the rest move.
     fn flex_reorder_of(&self, delta: Vec2) -> Option<(NodeId, Option<Operation>)> {
         let (doc, res) = (&self.session.doc, &self.session.resolved);
         let [id] = build::outermost(doc, self.session.selection.ids())[..] else {
@@ -2798,6 +2799,25 @@ impl OndinApp {
             return None;
         }
         Some((id, build::flex_reorder(doc, res, id, delta)))
+    }
+
+    /// [`Self::flex_reorder_of`] for **several** selected layers (§15 D902): when
+    /// every one is an in-flow item of the same flex container and none leaves it,
+    /// the move is a reorder of the block — `build::flex_reorder_many`'s ops,
+    /// empty when it lands where it was. Anything else — items of two containers,
+    /// in-flow items with free layers — keeps the rule [`Self::stays_in_flow`]
+    /// states: each in-flow item keeps its slot and the rest move.
+    fn flex_block_reorder_of(&self, delta: Vec2) -> Option<Vec<Operation>> {
+        let (doc, res) = (&self.session.doc, &self.session.resolved);
+        let ids = build::outermost(doc, self.session.selection.ids());
+        if ids.len() < 2
+            || ids
+                .iter()
+                .any(|id| self.move_destination(*id, delta).is_some())
+        {
+            return None;
+        }
+        build::flex_reorder_many(doc, res, &ids, delta)
     }
 
     /// The transaction a move of the selection by `delta` **previews** — what
@@ -2810,10 +2830,12 @@ impl OndinApp {
     /// - **one in-flow flex item** keeps that translation — the preview's flex pass
     ///   skips a layer the transaction drags — and gains the reorder its release
     ///   commits, so its siblings open the slot it will drop into (§15 D877);
-    /// - **several layers** lose the translation of every in-flow item that stays
-    ///   in its flow ([`Self::stays_in_flow`]), which keeps its slot on release and
-    ///   so keeps it in the drag — it used to follow the pointer and snap back, with
-    ///   nothing saying it would (§15 D877's amendment).
+    /// - **several items of one flex container** keep their translations too and
+    ///   gain the block's reorder ([`Self::flex_block_reorder_of`], §15 D902);
+    /// - **any other several layers** lose the translation of every in-flow item
+    ///   that stays in its flow ([`Self::stays_in_flow`]), which keeps its slot on
+    ///   release and so keeps it in the drag — it used to follow the pointer and
+    ///   snap back, with nothing saying it would (§15 D877's amendment).
     fn move_preview_tx(&self, delta: Vec2) -> Option<Transaction> {
         let mut tx = build::move_by_world(
             &self.session.doc,
@@ -2825,10 +2847,15 @@ impl OndinApp {
         match self.flex_reorder_of(delta) {
             Some((_, Some(reorder))) => tx.0.push(reorder),
             Some((_, None)) => {}
-            None => tx.0.retain(|op| match op {
-                Operation::SetTransform { id, .. } => !self.stays_in_flow(*id, delta),
-                _ => true,
-            }),
+            // Several items of one container: all under the hand, and the block's
+            // reorder so the siblings open the gap it will drop into (§15 D902).
+            None => match self.flex_block_reorder_of(delta) {
+                Some(reorders) => tx.0.extend(reorders),
+                None => tx.0.retain(|op| match op {
+                    Operation::SetTransform { id, .. } => !self.stays_in_flow(*id, delta),
+                    _ => true,
+                }),
+            },
         }
         Some(tx)
     }
@@ -2869,6 +2896,10 @@ impl OndinApp {
         // empty transaction, and so no undo step.
         if let Some((_, reorder)) = self.flex_reorder_of(delta) {
             return Transaction(reorder.into_iter().collect());
+        }
+        // Several items of one container move as a block (§15 D902).
+        if let Some(reorders) = self.flex_block_reorder_of(delta) {
+            return Transaction(reorders);
         }
         let (doc, res) = (&self.session.doc, &self.session.resolved);
         let moved = Affine::translate(delta);
@@ -2924,7 +2955,8 @@ impl OndinApp {
                 // translation is stored for it** (§15 D877) — the single-item arm's
                 // reason: its container places it, so the number would be drawn
                 // nowhere until the layout was taken away, and then it would jump.
-                // Reordering several at once is not built; they snap back.
+                // Several items of *one* container never reach here — they are a
+                // block, reordered above (§15 D902); this is a mixed selection.
                 None if self.stays_in_flow(id, delta) => {}
                 None => ops.push(Operation::SetTransform {
                     id,
@@ -22764,16 +22796,16 @@ mod flex_drag_tests {
     /// Dragged past its neighbour's centre, the first item's release is one
     /// `Reorder` — no `SetTransform`, since the translation that carried it under
     /// the pointer is not where it is drawn. Dropped short of the neighbour it is
-    /// an empty transaction, so no undo step. Two items selected keep their slots —
-    /// reordering several is not built — and store no translation either. And one
-    /// dragged well below the frame leaves it, by the frame rule, which a reorder
-    /// must not swallow.
+    /// an empty transaction, so no undo step. Two items selected move as a block
+    /// since §15 D902 — here dropped short of their neighbour, so nothing is
+    /// committed and no translation is stored; the block past its neighbour is
+    /// `flex_canvas_tests`' subject. And one dragged well below the frame leaves
+    /// it, by the frame rule, which a reorder must not swallow.
     ///
     /// **Flip run**, `move_tx`'s reorder arm deleted: fails on *"one reorder"*
-    /// with a `SetTransform` — the predicted site. The multi-item arm deleted
-    /// instead: fails on *"two items keep their slots"* with two. And
-    /// `move_preview_tx`'s `retain` deleted: fails on *"two items: they stay in
-    /// their slots in the drag"* with two `SetTransform`s.
+    /// with a `SetTransform` — the predicted site. (Until §15 D902 two items kept
+    /// their slots and this asserted that; the flips recorded against that rule —
+    /// the multi-item arm, and `move_preview_tx`'s `retain` — went with it.)
     #[test]
     fn moving_a_flex_item_commits_a_reorder_and_nothing_else() {
         let ctx = egui::Context::default();
@@ -22834,7 +22866,8 @@ mod flex_drag_tests {
         let tx = app.move_tx(Vec2::new(70.0, 0.0));
         assert!(
             tx.0.is_empty(),
-            "two items keep their slots, and no translation is stored: {tx:?}"
+            "two items dropped short of their neighbour: nothing, and no translation \
+             is stored: {tx:?}"
         );
 
         app.session.selection.set_one(a);
@@ -22847,7 +22880,7 @@ mod flex_drag_tests {
 
         // **And the preview draws what the release commits** (§15 D877's
         // amendment): one item follows the pointer and carries its reorder; two
-        // items stay in their slots, no translation drawn for either.
+        // items of one container follow it as a block (§15 D902).
         app.session.selection.set_one(a);
         let tx = app
             .move_preview_tx(Vec2::new(70.0, 0.0))
@@ -22865,11 +22898,320 @@ mod flex_drag_tests {
         let tx = app
             .move_preview_tx(Vec2::new(70.0, 0.0))
             .expect("a preview");
-        assert!(
-            !tx.0
-                .iter()
-                .any(|op| matches!(op, Operation::SetTransform { .. })),
-            "two items: they stay in their slots in the drag as on release: {tx:?}"
+        assert_eq!(
+            tx.0.iter()
+                .filter(|op| matches!(op, Operation::SetTransform { .. }))
+                .count(),
+            2,
+            "two items: both under the hand, as a block: {tx:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod flex_canvas_tests {
+    //! **The app reads where layout draws a layer, end to end** (§15 D901) — the
+    //! routing tests §15 D874 and D877 left owed. `ondin-export/tests/insets.rs`
+    //! proves render and export draw used geometry; these prove the canvas's own
+    //! readers do: a click selects a flex item and a pinned layer where they are
+    //! drawn and not where they are stored, snapping measures their drawn edges,
+    //! and a real drag through `canvas_ui` — press, `update_drag`, release —
+    //! reorders the row.
+    //!
+    //! Plain backticks throughout, per §15 D319 — a `#[cfg(test)]` module.
+
+    use super::*;
+    use crate::app::OndinApp;
+    use ondin_core::container::{AlignItems, Display, Flex};
+    use ondin_core::kurbo::Size;
+    use ondin_core::{Document, IdSource, Operation, Transaction};
+
+    const RECT: egui::Rect = egui::Rect {
+        min: egui::Pos2::ZERO,
+        max: egui::Pos2::new(800.0, 600.0),
+    };
+    const PPP: f32 = 1.0;
+
+    /// A 400 × 200 frame at the origin laid out as a row — padding 20, gap 10,
+    /// items to the start — of a 40 × 30, a 60 × 30 and a 20 × 30, **all stored at
+    /// (300, 150)**, so anything reading the stored place instead of the drawn one
+    /// shows. Drawn: `a` at (20, 20)–(60, 50), `b` at (70, 20)–(130, 50), the third
+    /// at (140, 20)–(160, 50) — the sibling a dragged block has to pass. The
+    /// camera on the frame's centre, so world and screen differ only by a shift.
+    fn app_with_a_row(ctx: &egui::Context) -> (OndinApp, NodeId, NodeId, NodeId) {
+        let mut app = OndinApp::headless(ctx);
+        let mut ids = IdSource::new(0xAE);
+        let root = ids.mint();
+        let (row, a, b, c) = (ids.mint(), ids.mint(), ids.mint(), ids.mint());
+        let rect = |id, index, w| Operation::CreateNode {
+            id,
+            parent: row,
+            index,
+            kind: NodeKind::Rect {
+                size: Size::new(w, 30.0),
+                corner_radii: Default::default(),
+            },
+            transform: Some(Affine::translate((300.0, 150.0))),
+            name: None,
+        };
+        let mut doc = Document::new(root);
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: row,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(400.0, 200.0),
+                },
+                transform: Some(Affine::IDENTITY),
+                name: None,
+            },
+            rect(a, 0, 40.0),
+            rect(b, 1, 60.0),
+            rect(c, 2, 20.0),
+            Operation::SetDisplay {
+                id: row,
+                display: Some(Display::Flex(Flex {
+                    column_gap: 10.0,
+                    padding: [20.0; 4],
+                    align_items: AlignItems::Start,
+                    ..Default::default()
+                })),
+            },
+        ]))
+        .expect("the row");
+        app.session.adopt_document(doc, None);
+        app.session.camera.center = Point::new(200.0, 100.0);
+        app.session.camera.zoom = 1.0;
+        // Two frames before anything is measured: `to_screen` reads the canvas's
+        // size, which the canvas learns by drawing, and a point computed before
+        // that lands 400 × 300 off — the first draft of these tests clicked at
+        // (−159.5, −64.5) and selected nothing.
+        for _ in 0..2 {
+            frame(ctx, &mut app, Vec::new());
+        }
+        (app, row, a, b)
+    }
+
+    /// One frame of the whole canvas, with `events` delivered to it, a tenth of
+    /// a second after the last — egui tells a click from a press held by the clock.
+    fn frame(ctx: &egui::Context, app: &mut OndinApp, events: Vec<egui::Event>) {
+        let time = ctx.input(|i| i.time) + 0.1;
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(RECT),
+                time: Some(time),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                app.canvas_ui(ui);
+            },
+        );
+    }
+
+    fn button(at: egui::Pos2, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        }
+    }
+
+    /// Press at world `from`, drag to world `to` in eight steps, release — each in
+    /// the frames egui needs to see a press, a drag and a release.
+    fn drag(ctx: &egui::Context, app: &mut OndinApp, from: Point, to: Point) {
+        let at = |app: &OndinApp, w: Point| app.to_screen(w, RECT, PPP);
+        let start = at(app, from);
+        frame(ctx, app, vec![egui::Event::PointerMoved(start)]);
+        frame(ctx, app, vec![button(start, true)]);
+        for step in 1..=8 {
+            let t = step as f64 / 8.0;
+            let w = from + (to - from) * t;
+            let p = at(app, w);
+            frame(ctx, app, vec![egui::Event::PointerMoved(p)]);
+        }
+        let end = at(app, to);
+        frame(ctx, app, vec![button(end, false)]);
+        frame(ctx, app, Vec::new());
+    }
+
+    /// **A click selects a flex item where it is drawn, and nothing at the place
+    /// it is stored.** A press and release on `a`'s drawn centre selects `a`; one on
+    /// its stored place, (320, 165), selects nothing — the frame's empty interior,
+    /// which an occupied frame does not answer (§15 D22).
+    ///
+    /// **Flip run**, `ondin_core::hit_test` reading `node.transform()` instead of
+    /// the used local — not run: hit-testing reads `Resolved`'s world transforms,
+    /// which have been composed from used geometry since §15 D868, and there is no
+    /// second spelling in the app to flip. The stored-place half is what would
+    /// catch a regression to the stored transform.
+    #[test]
+    fn a_click_selects_a_flex_item_where_it_is_drawn() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, frame_id, a, _b) = app_with_a_row(&ctx);
+        let click = |app: &mut OndinApp, w: Point| {
+            let p = app.to_screen(w, RECT, PPP);
+            frame(&ctx, app, vec![egui::Event::PointerMoved(p)]);
+            frame(&ctx, app, vec![button(p, true)]);
+            frame(&ctx, app, vec![button(p, false)]);
+            frame(&ctx, app, Vec::new());
+        };
+        click(&mut app, Point::new(40.0, 35.0));
+        assert_eq!(app.session.selection.ids(), &[a], "drawn there: selected");
+        click(&mut app, Point::new(320.0, 165.0));
+        assert!(
+            app.session.selection.ids().is_empty(),
+            "stored there: nothing — the click is on the frame's empty interior, \
+             which an occupied frame does not answer (§15 D22)"
+        );
+        let _ = frame_id;
+    }
+
+    /// **A pinned layer is hit where its insets draw it** (§15 D874): `b` pinned
+    /// to the frame's right edge leaves the row and is drawn at x 340–400, its y
+    /// its stored 150 (only the right edge is pinned); a click there selects it,
+    /// and nothing of it is left in the row's slot.
+    #[test]
+    fn a_click_selects_a_pinned_layer_where_its_insets_draw_it() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, _frame, _a, b) = app_with_a_row(&ctx);
+        app.session.commit(Transaction(vec![Operation::SetInsets {
+            id: b,
+            insets: ondin_core::Insets {
+                right: Some(ondin_core::LengthPct::Px(0.0)),
+                ..Default::default()
+            },
+        }]));
+        assert_eq!(
+            app.session.resolved.world_bounds(b).map(|r| r.x0),
+            Some(340.0),
+            "the fixture: pinned to the right edge"
+        );
+        let click = |app: &mut OndinApp, w: Point| {
+            let p = app.to_screen(w, RECT, PPP);
+            frame(&ctx, app, vec![egui::Event::PointerMoved(p)]);
+            frame(&ctx, app, vec![button(p, true)]);
+            frame(&ctx, app, vec![button(p, false)]);
+            frame(&ctx, app, Vec::new());
+        };
+        click(&mut app, Point::new(370.0, 165.0));
+        assert_eq!(app.session.selection.ids(), &[b], "where the pin draws it");
+        click(&mut app, Point::new(100.0, 35.0));
+        assert!(
+            app.session.selection.ids().is_empty(),
+            "and not in the row's old slot"
+        );
+    }
+
+    /// **Snapping measures a flex item's drawn edges** — `snap::targets` for a
+    /// layer moving elsewhere offers `a`'s drawn box, (20, 20)–(60, 50), and
+    /// nothing at its stored place.
+    #[test]
+    fn snapping_measures_a_flex_items_drawn_edges() {
+        let ctx = egui::Context::default();
+        let (app, frame_id, a, b) = app_with_a_row(&ctx);
+        let doc = &app.session.doc;
+        let res = &app.session.resolved;
+        let targets = crate::snap::targets(
+            doc,
+            res,
+            &[b],
+            ondin_core::kurbo::Rect::new(-100.0, -100.0, 600.0, 400.0),
+            100,
+        );
+        assert!(
+            targets.contains(&ondin_core::kurbo::Rect::new(20.0, 20.0, 60.0, 50.0)),
+            "a's drawn box is a target: {targets:?}"
+        );
+        assert!(
+            !targets.iter().any(|r| r.x0 == 300.0 && r.y0 == 150.0),
+            "and nothing where it is stored: {targets:?}"
+        );
+        let _ = (frame_id, a);
+    }
+
+    /// **A real drag reorders the row** (§15 D877) — pressed on `b`'s drawn centre
+    /// and dragged left past `a`'s, through `canvas_ui`, `update_drag` and the
+    /// release: `b` comes first, **as one undo step**, and its stored transform is
+    /// untouched, the reorder being the whole commit. Mid-drag the canvas has a
+    /// preview up. The app's flex tests stopped at `move_tx` until this.
+    ///
+    /// **Flip run**, `move_tx`'s reorder arm deleted: fails on *"b comes first"*,
+    /// the order unchanged — the predicted site.
+    #[test]
+    fn a_real_drag_reorders_the_row() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, frame_id, a, b) = app_with_a_row(&ctx);
+        let depth = app.session.history.undo_depth();
+        let from = Point::new(100.0, 35.0);
+        let to = Point::new(22.0, 35.0);
+        let start = app.to_screen(from, RECT, PPP);
+        frame(&ctx, &mut app, vec![egui::Event::PointerMoved(start)]);
+        frame(&ctx, &mut app, vec![button(start, true)]);
+        for step in 1..=8 {
+            let w = from + (to - from) * (step as f64 / 8.0);
+            let p = app.to_screen(w, RECT, PPP);
+            frame(&ctx, &mut app, vec![egui::Event::PointerMoved(p)]);
+        }
+        assert!(
+            app.session.has_gesture_preview(),
+            "mid-drag, a preview is up"
+        );
+        let end = app.to_screen(to, RECT, PPP);
+        frame(&ctx, &mut app, vec![button(end, false)]);
+        frame(&ctx, &mut app, Vec::new());
+        assert_eq!(
+            app.session.doc.get(frame_id).unwrap().children()[..2],
+            [b, a],
+            "b comes first"
+        );
+        assert_eq!(app.session.history.undo_depth(), depth + 1, "one step");
+        assert_eq!(
+            app.session.doc.get(b).unwrap().transform(),
+            Affine::translate((300.0, 150.0)),
+            "and its stored transform is untouched"
+        );
+    }
+
+    /// **Two items dragged together reorder as a block** (§15 D902) — `a` and `b`
+    /// selected, pressed on `a` and dragged 120 right through the real canvas:
+    /// the block's centre passes the third item's, so it lands after it, `a` then
+    /// `b` — one undo step, neither stored transform touched. Until D902 each kept
+    /// its slot and the drag did nothing.
+    ///
+    /// **Flip run**, `move_tx`'s block arm deleted: fails on *"the pair lands after
+    /// the third, in order"*, the row unchanged — the predicted site.
+    #[test]
+    fn two_items_dragged_together_reorder_as_a_block() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, frame_id, a, b) = app_with_a_row(&ctx);
+        let third = app.session.doc.get(frame_id).unwrap().children()[2];
+        app.session.selection.set(vec![a, b]);
+        let depth = app.session.history.undo_depth();
+        drag(
+            &ctx,
+            &mut app,
+            Point::new(40.0, 35.0),
+            Point::new(160.0, 35.0),
+        );
+        assert_eq!(
+            app.session.doc.get(frame_id).unwrap().children(),
+            &[third, a, b],
+            "the pair lands after the third, in order"
+        );
+        assert_eq!(app.session.history.undo_depth(), depth + 1, "one step");
+        for id in [a, b] {
+            assert_eq!(
+                app.session.doc.get(id).unwrap().transform(),
+                Affine::translate((300.0, 150.0)),
+                "and no stored transform touched"
+            );
+        }
     }
 }

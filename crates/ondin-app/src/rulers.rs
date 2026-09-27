@@ -3751,4 +3751,50 @@ mod origin_tests {
             "nor a frame selected with something else"
         );
     }
+
+    /// **The rulers' band spans where a flex item is drawn, not where it is
+    /// stored** (§15 D901, one of the routing tests §15 D874 left owed). A 40 × 30
+    /// rect stored at (300, 150) is the first item of a row with padding 20 in a
+    /// frame at (100, 60), so it is drawn at (120, 80)–(160, 110); selected, the
+    /// band reads that.
+    #[test]
+    fn the_band_spans_where_a_flex_item_is_drawn() {
+        use ondin_core::container::{AlignItems, Display, Flex};
+        let ctx = egui::Context::default();
+        let (mut app, frame) = app_with_a_frame(
+            &ctx,
+            Size::new(400.0, 200.0),
+            Some(Affine::translate((100.0, 60.0))),
+        );
+        let item = app.session.ids.mint();
+        app.session
+            .try_commit(Transaction(vec![
+                Operation::CreateNode {
+                    id: item,
+                    parent: frame,
+                    index: 0,
+                    kind: NodeKind::Rect {
+                        size: Size::new(40.0, 30.0),
+                        corner_radii: Default::default(),
+                    },
+                    transform: Some(Affine::translate((300.0, 150.0))),
+                    name: None,
+                },
+                Operation::SetDisplay {
+                    id: frame,
+                    display: Some(Display::Flex(Flex {
+                        padding: [20.0; 4],
+                        align_items: AlignItems::Start,
+                        ..Default::default()
+                    })),
+                },
+            ]))
+            .expect("the row");
+        app.session.selection.set(vec![item]);
+        assert_eq!(
+            app.selection_extent(),
+            Some(((120.0, 160.0), (80.0, 110.0))),
+            "the band is where the item is drawn"
+        );
+    }
 }

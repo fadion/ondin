@@ -3681,8 +3681,13 @@ fn push_offset(doc: &Document, res: &Resolved, id: NodeId, delta: Vec2, ops: &mu
 /// So a resize that changes an in-flow item's **main-axis** size also writes
 /// `flex-grow: 0` and `flex-shrink: 0`; one that changes the **cross** size of an
 /// item its container stretches also writes `align-self: start`, since in CSS an
-/// explicit cross size is what stops a stretch. A layer whose item properties the
-/// transaction sets itself is left to it.
+/// explicit cross size is what stops a stretch — or `align-self: end` when the
+/// resize held the cross axis's end edge and moved its start, a row's item dragged
+/// by its top (§15 D905), so the edge the user did not touch is the one that stays.
+/// A layer whose item properties the transaction sets itself is left to it.
+///
+/// The item half is [`flex_holds`], which the gesture preview applies as well
+/// (§15 D904); this adds [`kept_flow_translations`], which the preview must not.
 ///
 /// **And a resize writes the size in px, whatever keyword was there** (§15 D879):
 /// a `SetGeometry` that changes a layer's size on an axis whose `width` or
@@ -3701,6 +3706,26 @@ fn push_offset(doc: &Document, res: &Resolved, id: NodeId, delta: Vec2, ops: &mu
 /// compute in drawn geometry and write what they want drawn; this is the one place
 /// that turns a resize into what makes it stick.
 pub fn keep_flex_sizes(doc: &Document, res: &Resolved, tx: Transaction) -> Transaction {
+    let holds = flex_holds(doc, res, &tx);
+    let mut out = kept_flow_translations(doc, tx);
+    out.0.extend(holds);
+    out
+}
+
+/// The `SetFlexItem`s that make `tx`'s resizes hold — [`keep_flex_sizes`]' rules
+/// for growth, `align-self` and size keywords, and nothing else — in id order.
+///
+/// **Split out so the gesture preview can apply them** (§15 D904). The preview
+/// re-lays every flex container a transaction touches (`RenderOverrides`'
+/// `flex_relayout`), and it did so with the item's properties as stored: a
+/// stretched item being dragged shorter was stretched straight back every frame,
+/// and landed at the dragged height only on release, when the commit added
+/// `align-self`. A growing item dragged narrower, and a percentage-wide one, did
+/// the same on the main axis. The Transform card's H scrubbed against the same
+/// preview and so could not move at all. The preview must not take
+/// [`kept_flow_translations`] too: that drops a move's translation, and a move is
+/// what the preview draws.
+pub fn flex_holds(doc: &Document, res: &Resolved, tx: &Transaction) -> Vec<Operation> {
     use crate::container::{self, Display, LayoutView};
     let view = crate::resolve::DocView(doc);
     let explicit: FxHashSet<NodeId> =
@@ -3736,7 +3761,13 @@ pub fn keep_flex_sizes(doc: &Document, res: &Resolved, tx: Transaction) -> Trans
             && container::in_flow(&view, *id)
             && let Some(Display::Flex(flex)) = view.parent(*id).and_then(|p| view.display(p))
         {
-            item = held(&flex, item, now.size(), then.size());
+            // Where the box was and where the tool wants it, each in the parent's
+            // space: its slot, and the transform this edit writes for it — a
+            // left- or top-handle resize shifts the origin to hold the far edge.
+            let was = res.used_local(doc, *id).unwrap_or(Affine::IDENTITY);
+            let to = written_transform(tx, *id).unwrap_or(was);
+            let from_start = resized_from_cross_start(&flex, (was, now), (to, then));
+            item = held(&flex, item, now.size(), then.size(), from_start);
         }
         items.insert(*id, item);
     }
@@ -3745,11 +3776,49 @@ pub fn keep_flex_sizes(doc: &Document, res: &Resolved, tx: Transaction) -> Trans
         .filter(|(id, item)| doc.get(*id).is_some_and(|n| n.item() != item))
         .collect();
     ids.sort_by_key(|(id, _)| *id);
-    let mut out = kept_flow_translations(doc, tx);
-    for (id, item) in ids {
-        out.0.push(Operation::SetFlexItem { id, item });
-    }
-    out
+    ids.into_iter()
+        .map(|(id, item)| Operation::SetFlexItem { id, item })
+        .collect()
+}
+
+/// The last transform `tx` writes for `id`, if it writes one.
+fn written_transform(tx: &Transaction, id: NodeId) -> Option<Affine> {
+    tx.0.iter().rev().find_map(|op| match op {
+        Operation::SetTransform { id: i, transform } if *i == id => Some(*transform),
+        _ => None,
+    })
+}
+
+/// Whether a resize of an item laid out by `flex` **kept its cross-axis end edge
+/// and moved its start** — a row's item dragged by its top, a column's by its left
+/// (§15 D905). `was` and `now` are the item's box in its own space with the local
+/// transform placing it, before and after.
+///
+/// This decides between `align-self: start` and `end` when a resize releases a
+/// stretch: the edge the user held is the one the alignment keeps, so the item does
+/// not jump to the other side of its line on release. CSS's `start` and `end` —
+/// what [`crate::container::AlignItems`] maps to — are the physical top and bottom
+/// of a row's line (left and right of a column's) whatever `wrap-reverse` says, so
+/// the test is on the parent's axes and not on the flex lines' order.
+///
+/// Every other resize answers `false` — from the end edge, or about the centre,
+/// where both edges move and `start` is the rule it always was.
+fn resized_from_cross_start(
+    flex: &crate::container::Flex,
+    was: (Affine, kurbo::Rect),
+    now: (Affine, kurbo::Rect),
+) -> bool {
+    let a = was.0.transform_rect_bbox(was.1);
+    let b = now.0.transform_rect_bbox(now.1);
+    let (start, end) = if flex.direction.is_row() {
+        ((a.y0, b.y0), (a.y1, b.y1))
+    } else {
+        ((a.x0, b.x0), (a.x1, b.x1))
+    };
+    // A resize holds its anchor through a product of transforms, so "held" means
+    // to within rounding, not bit for bit.
+    let held = |(p, q): (f64, f64)| (p - q).abs() < 1e-6;
+    held(end) && !held(start)
 }
 
 /// `tx` with every `SetTransform` on an **in-flow flex item** keeping the item's
@@ -3839,12 +3908,16 @@ fn sized_in_px(
 
 /// `item` with growth stopped on whichever axes a resize from `from` to `to`
 /// changed, in a container laid out by `flex` — [`keep_flex_sizes`]' rule (§15
-/// D875), spelled once for it and for [`sized_flex_item`].
+/// D875), spelled once for it and for [`sized_flex_item`]. A released stretch
+/// aligns to the end when `from_start` — the resize moved the cross axis's start
+/// edge and held its end ([`resized_from_cross_start`], §15 D905) — and to the
+/// start otherwise.
 fn held(
     flex: &crate::container::Flex,
     mut item: crate::container::FlexItem,
     from: kurbo::Size,
     to: kurbo::Size,
+    from_start: bool,
 ) -> crate::container::FlexItem {
     use crate::container::AlignItems;
     let dw = (from.width - to.width).abs() > 1e-9;
@@ -3863,7 +3936,10 @@ fn held(
         None => flex.align_items == AlignItems::Stretch,
     };
     if cross_changed && stretched {
-        item.align_self = Some(AlignItems::Start);
+        item.align_self = Some(match from_start {
+            true => AlignItems::End,
+            false => AlignItems::Start,
+        });
     }
     item
 }
@@ -3879,12 +3955,17 @@ fn held(
 /// hugging (§15 D879) — and **its growth is stopped here rather than by
 /// `keep_flex_sizes`**, which leaves a transaction's own `SetFlexItem` alone.
 ///
+/// `to` is the local transform the same edit writes for the group, if it writes
+/// one — a left- or top-handle resize shifts the origin to hold the far edge — and
+/// is what tells a released stretch which edge to keep (§15 D905).
+///
 /// `None` when `id` is not a group with a layout, or nothing changes.
 pub fn sized_flex_item(
     doc: &Document,
     res: &Resolved,
     id: NodeId,
     size: kurbo::Size,
+    to: Option<Affine>,
 ) -> Option<crate::container::FlexItem> {
     use crate::container::{self, Dimension, Display, LayoutView};
     let node = doc.get(id)?;
@@ -3909,7 +3990,16 @@ pub fn sized_flex_item(
         && let Some(Display::Flex(flex)) = node.parent().and_then(|p| view.display(p))
         && let Some(now) = now
     {
-        item = held(&flex, item, now, size);
+        let was = res.used_local(doc, id).unwrap_or(Affine::IDENTITY);
+        let from_start = resized_from_cross_start(
+            &flex,
+            (was, kurbo::Rect::from_origin_size(kurbo::Point::ZERO, now)),
+            (
+                to.unwrap_or(was),
+                kurbo::Rect::from_origin_size(kurbo::Point::ZERO, size),
+            ),
+        );
+        item = held(&flex, item, now, size, from_start);
     }
     (item != *node.item()).then_some(item)
 }

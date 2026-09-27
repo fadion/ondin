@@ -218,6 +218,80 @@ fn resizing_a_growing_item_holds_the_size_it_was_dragged_to() {
     );
 }
 
+/// **A stretched item dragged by its top keeps its bottom** (§15 D905): the
+/// released stretch aligns to the end of the line, not the start, so the edge the
+/// user did not touch is where it lands. Dragged by its bottom it aligns to the
+/// start as before; a laid group resized by its top does the same as a shape
+/// (`build::sized_flex_item`'s `to`). The top-handle resize is written as the tool
+/// writes it — the size, and the slot's transform shifted down by what the height
+/// lost (`tools::resize_geometry`).
+///
+/// **Flip run**, `resized_from_cross_start` answering `false`: fails on *"the
+/// bottom held"*, the rect at y 20..90 — the predicted site.
+#[test]
+fn a_stretched_item_dragged_by_its_top_aligns_to_the_end() {
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(400.0, 200.0), (0.0, 0.0));
+    let top = s.add(f, rect(40.0, 30.0), (0.0, 0.0));
+    let bottom = s.add(f, rect(40.0, 30.0), (0.0, 0.0));
+    let g = s.add(f, NodeKind::Group, (0.0, 0.0));
+    s.add(g, rect(20.0, 20.0), (0.0, 0.0));
+    s.display(
+        f,
+        Some(Display::Flex(Flex {
+            column_gap: 10.0,
+            padding: [20.0; 4],
+            ..Default::default()
+        })),
+    );
+    s.display(g, row());
+    assert_eq!(s.bounds(top).height(), 160.0, "stretched across");
+
+    let slot = s.res.used_local(&s.doc, top).unwrap();
+    s.commit(vec![
+        Operation::SetGeometry {
+            id: top,
+            geometry: GeometryPatch::Size(Size::new(40.0, 70.0)),
+        },
+        Operation::SetTransform {
+            id: top,
+            transform: slot * Affine::translate((0.0, 90.0)),
+        },
+    ]);
+    assert_eq!(
+        (s.bounds(top).y0, s.bounds(top).y1),
+        (110.0, 180.0),
+        "the bottom held"
+    );
+    assert_eq!(
+        s.doc.get(top).unwrap().item().align_self,
+        Some(AlignItems::End)
+    );
+
+    s.resize(bottom, 40.0, 70.0);
+    assert_eq!(
+        (s.bounds(bottom).y0, s.bounds(bottom).y1),
+        (20.0, 90.0),
+        "dragged by its bottom, the top held"
+    );
+    assert_eq!(
+        s.doc.get(bottom).unwrap().item().align_self,
+        Some(AlignItems::Start)
+    );
+
+    let slot = s.res.used_local(&s.doc, g).unwrap();
+    let to = slot * Affine::translate((0.0, 60.0));
+    let item = ondin_core::build::sized_flex_item(
+        &s.doc,
+        &s.res,
+        g,
+        Size::new(s.bounds(g).width(), 100.0),
+        Some(to),
+    )
+    .expect("a group with a layout takes a size");
+    assert_eq!(item.align_self, Some(AlignItems::End), "and a laid group");
+}
+
 /// A group with a layout is a box: its bounds are padding plus items plus gaps,
 /// and it grows when an item is added.
 #[test]
@@ -272,7 +346,7 @@ fn resizing_a_growing_group_with_a_layout_holds_its_box() {
     assert_eq!(s.bounds(g).width(), 360.0, "grown to fill");
     assert_eq!(s.bounds(g).height(), 160.0, "and stretched across");
 
-    let item = ondin_core::build::sized_flex_item(&s.doc, &s.res, g, Size::new(150.0, 70.0))
+    let item = ondin_core::build::sized_flex_item(&s.doc, &s.res, g, Size::new(150.0, 70.0), None)
         .expect("a group with a layout takes a size");
     s.commit(vec![Operation::SetFlexItem { id: g, item }]);
     assert_eq!(s.bounds(g).width(), 150.0, "the dragged width held");
@@ -696,8 +770,9 @@ fn a_laid_group_resized_along_one_axis_keeps_hugging_along_the_other() {
     let hugged = s.bounds(g).height();
     assert_eq!(hugged, 70.0, "the fixture hugs: 20 + 30 + 20");
 
-    let item = ondin_core::build::sized_flex_item(&s.doc, &s.res, g, Size::new(200.0, hugged))
-        .expect("a group with a layout takes a size");
+    let item =
+        ondin_core::build::sized_flex_item(&s.doc, &s.res, g, Size::new(200.0, hugged), None)
+            .expect("a group with a layout takes a size");
     s.commit(vec![Operation::SetFlexItem { id: g, item }]);
     let item = *s.doc.get(g).unwrap().item();
     assert_eq!(item.width, Dimension::Px(200.0));

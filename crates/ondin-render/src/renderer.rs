@@ -724,8 +724,21 @@ impl RenderOverrides {
             // A root keeps where its parent puts it; an item goes where its
             // container laid it — its stored transform when that is where, stated
             // outright so a committed placement elsewhere does not show through.
+            //
+            // ⚠️ **"Stored" is what the pass read, which is this preview's transform
+            // where it has one** (`PreviewView::local`), not the document's.
+            // `item_placed` answers `local: None` when the slot is exactly that, and
+            // reading the document's here put the item at its committed transform
+            // instead. Nothing met it while a resized item's slot could not equal the
+            // shifted origin its tool writes; one aligned to the end of its line
+            // after a top-handle resize is laid exactly there, and previewed at its
+            // stored (300, 150) — found by the test for that resize (§15 D905).
             if !root {
-                self.entry(id).transform = Some(placed.local.unwrap_or_else(|| node.transform()));
+                let specified = self
+                    .get(id)
+                    .and_then(|o| o.transform)
+                    .unwrap_or_else(|| node.transform());
+                self.entry(id).transform = Some(placed.local.unwrap_or(specified));
             }
             let base = self
                 .get(id)

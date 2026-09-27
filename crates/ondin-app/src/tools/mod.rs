@@ -1702,7 +1702,16 @@ fn scale_geometry(
             NodeKind::Group if node.display().is_some() => {
                 if let Some(now) = res.used_frame(id) {
                     let size = Size::new((now.width * csx).max(1.0), (now.height * csy).max(1.0));
-                    if let Some(item) = ondin_core::build::sized_flex_item(doc, res, id, size) {
+                    // The transform this resize wrote for the group, pushed before its
+                    // geometry by every caller that moves the origin — which edge it
+                    // held decides a released stretch's alignment (§15 D905).
+                    let to = ops.iter().rev().find_map(|op| match op {
+                        Operation::SetTransform { id: i, transform } if *i == id => {
+                            Some(*transform)
+                        }
+                        _ => None,
+                    });
+                    if let Some(item) = ondin_core::build::sized_flex_item(doc, res, id, size, to) {
                         ops.push(Operation::SetFlexItem { id, item });
                     }
                 }

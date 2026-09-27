@@ -2557,6 +2557,40 @@ mod tests {
         app.inspector_transform(ui, id, world, size);
     }
 
+    /// **A stretched item's H scrubs, and the preview follows it** (§15 D904) —
+    /// `a`, stretched to the row's 160, its H pressed on its digits and dragged 80
+    /// points, through the real card and the real valve. It lands taller, out of
+    /// the stretch, as one step.
+    ///
+    /// The field reads its size back through the preview, which re-lays the row on
+    /// every frame of the scrub; with the item still `align-self: stretch` there,
+    /// the preview put it straight back to 160, so each frame's scrub started from
+    /// 160 again and the release committed 160. Reported as "it doesn't let me
+    /// update the height in Transform".
+    ///
+    /// **Flip run**, `set_preview` without the holds: fails on *"the height
+    /// landed"* at 160 — the predicted site.
+    #[test]
+    fn a_stretched_items_height_scrubs_in_the_transform_card() {
+        let s = scene();
+        let a = s.a;
+        let mut p = Panel::new(s.app, transform_card);
+        p.app.session.selection.set(vec![a]);
+        assert_eq!(drawn(&p.app, a).height(), 160.0, "the fixture stretches");
+        let depth = p.app.session.history.undo_depth();
+
+        let at = p.run("160");
+        p.scrub(at);
+        let h = drawn(&p.app, a).height();
+        assert!(h > 170.0, "the height landed: {h}, from 160 by 80 points");
+        assert_eq!(
+            p.app.session.doc.get(a).unwrap().item().align_self,
+            Some(AlignItems::Start),
+            "out of the stretch"
+        );
+        assert_eq!(p.app.session.history.undo_depth(), depth + 1, "as one step");
+    }
+
     /// **The sizing menu opens under the unit that was clicked** (§15 D907) — W's
     /// `px`, at the right-hand end of the field, clicked; the menu's `%` row is
     /// found beneath it, its text within a few points of the unit's. It opened
@@ -2627,6 +2661,49 @@ mod tests {
         assert!(
             left >= 7.0 && right >= 7.0,
             "room either side of the text: {left} and {right}"
+        );
+    }
+
+    /// **A stretched item dragged by its top handle previews as it lands** —
+    /// shorter, its bottom held at the row's (§15 D904, D905). The preview used to
+    /// stretch it straight back until the release; and the release, aligning it to
+    /// the start, moved it to the top of the row — away from the edge the user held.
+    ///
+    /// **Flip runs**, each failing on *"the preview follows the handle"*:
+    /// `set_preview` without the holds, the preview still 20..180;
+    /// `resized_from_cross_start` answering `false`, at 20..90 — the holds are in
+    /// the preview and aligned to the start, which is the jump the release made;
+    /// and `RenderOverrides`' `flex_relayout` falling back to the document's
+    /// transform where `item_placed` answers `local: None`, at 150..220 — the rect's
+    /// stored y, since the end-aligned slot is exactly the tool's shifted origin.
+    #[test]
+    fn a_stretched_item_dragged_by_its_top_previews_as_it_lands() {
+        let mut s = scene();
+        let tx = crate::tools::resize_layer(
+            &s.app.session.doc,
+            &s.app.session.resolved,
+            s.a,
+            crate::preview::Handle::Top,
+            ondin_core::kurbo::Point::new(40.0, 110.0),
+            crate::tools::Resize::default(),
+        );
+        s.app.session.set_preview(&tx);
+        let seen = s.app.session.preview_world_bounds(s.a).expect("measured");
+        assert_eq!(
+            (seen.y0.round(), seen.y1.round()),
+            (110.0, 180.0),
+            "the preview follows the handle"
+        );
+        s.app.session.commit(tx);
+        let landed = drawn(&s.app, s.a);
+        assert_eq!(
+            (landed.y0.round(), landed.y1.round()),
+            (110.0, 180.0),
+            "and lands there"
+        );
+        assert_eq!(
+            s.app.session.doc.get(s.a).unwrap().item().align_self,
+            Some(AlignItems::End)
         );
     }
 

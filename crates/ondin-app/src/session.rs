@@ -534,8 +534,9 @@ pub struct EditorSession {
 /// Item card's receipt (§15 D880).
 ///
 /// A resize of an in-flow item writes `flex-grow: 0`, `flex-shrink: 0` and, on a
-/// stretched cross axis, `align-self: flex-start` (`build::keep_flex_sizes`, §15
-/// D875), none of which the user typed. The card names them and offers Undo.
+/// stretched cross axis, `align-self: start` — or `end`, dragged by the cross
+/// axis's start edge (`build::keep_flex_sizes`, §15 D875, D905) — none of which the
+/// user typed. The card names them and offers Undo.
 ///
 /// **Its Undo is the whole step, never the flips alone.** The flips are what make
 /// the resize hold, so undoing them and keeping the size would hand the space back
@@ -909,16 +910,19 @@ impl EditorSession {
     /// inspector valves. It is spelled here rather than at them for D109's own
     /// reason — *"add no third spelling"*.
     pub fn set_preview(&mut self, tx: &Transaction) {
-        let composed;
-        let tx = match &self.session_preview {
-            Some(session) => {
-                let mut ops = session.0.clone();
-                ops.extend(tx.0.iter().cloned());
-                composed = Transaction(ops);
-                &composed
-            }
-            None => tx,
+        // **A resized flex item holds its size in the preview as the commit will
+        // make it** (§15 D904): the growth, `align-self` and size keyword the
+        // commit door adds (`build::keep_flex_sizes`), without which the preview's
+        // re-layout stretched or grew the item straight back every frame.
+        let holds = ondin_core::build::flex_holds(&self.doc, &self.resolved, tx);
+        let mut ops = match &self.session_preview {
+            Some(session) => session.0.clone(),
+            None => Vec::new(),
         };
+        ops.extend(tx.0.iter().cloned());
+        ops.extend(holds);
+        let composed = Transaction(ops);
+        let tx = &composed;
         self.overrides =
             RenderOverrides::from_transaction(&self.doc, &self.resolved, tx).unwrap_or_default();
         self.preview_holds_gesture = true;

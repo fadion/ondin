@@ -86,8 +86,8 @@
   designed**: CSS flexbox, CSS grid and absolute insets (§5.3c, §15 D867, D871) — insets on frames
   built 2026-09-24, inspector card included (§15 D874); flex built the same day — its model, engine
   and preview, an item's reorder by drag, a laid group's resize, and the Container and Item cards
-  (§15 D875, D877, D878); grid built 2026-09-27 but for its canvas track lines (§15 D914, D916,
-  D920). "v1" in
+  (§15 D875, D877, D878); grid built 2026-09-27, its canvas track lines the next day (§15 D914,
+  D916, D920, D921). "v1" in
   this document names the phase in which the basic editing tools were finished, not a release tag,
   and that phase is over. *Persistent* constraints in §13's sense — live relationships between
   arbitrary properties, a dependency graph — are not that feature and stay on this list.
@@ -1103,7 +1103,7 @@ pub fn next_grid_color(existing: &[LayoutGrid]) -> Color;    // the first of GRI
   `+` steps: `LayoutGrid::new` carries the plain default, which is what a loaded file or a fixture
   should get.
 
-### 5.3c Container layout — flexbox, grid and insets (steps 1–3 built, step 4 begun; §15 D867–D920)
+### 5.3c Container layout — flexbox, grid and insets (steps 1–4 built; §15 D867–D921)
 
 > **Mostly design ahead of code**, in the sense §12 and §13 are, and it sits here rather than at the
 > end because what it changes is the node model. **Built as of 2026-09-24**: the used-geometry
@@ -1112,8 +1112,8 @@ pub fn next_grid_color(existing: &[LayoutGrid]) -> Color;    // the first of GRI
 > D875): its model, engine, layout pass and preview, a laid group's resize, an item's reorder by drag
 > (§15 D877), and the inspector's Container and Item cards (§15 D878–D889); frames sit inside groups
 > since the same day (§15 D876). **Grid's model, engine, preview, gestures and cards are built**
-> (step 4's first three parts, §15 D914, D916 and D920, 2026-09-27); its canvas lines are not, and
-> components are not.
+> (step 4's first three parts, §15 D914, D916 and D920, 2026-09-27), **and its canvas track lines**
+> (the fourth, §15 D921, 2026-09-28); components are not.
 > Every other passage of this document still describes `HEAD`; where one states a rule this design
 > will change,
 > it carries a forward pointer here instead of being rewritten. **When a step below lands, this
@@ -1376,8 +1376,8 @@ D874), `ondin-export/tests/insets.rs` proving the SVG, PNG and snapshot writers 
 included — reorder by drag (§15 D877) and the inspector cards (§15 D878), none of the app side yet
 looked at on screen;
 (4) grid, with the track editor — its model and engine, preview and gestures, and cards **built
-2026-09-27** (§15 D914, D916, D920), its canvas lines not; (5) components and overrides, on the same
-pipeline.
+2026-09-27** (§15 D914, D916, D920), its canvas track lines **2026-09-28** (§15 D921), none of it yet
+looked at on screen; (5) components and overrides, on the same pipeline.
 
 **Grid's open questions were answered before its code** (§15 D913, 2026-09-27; the model, engine,
 preview and gestures are built since, below):
@@ -1446,6 +1446,26 @@ D918's amendment).
 and answers each axis's tracks in the container's space and every in-flow item's area as CSS line
 numbers. §15 D913 said *"derived into `Resolved`"*; `Resolved` keeps used geometry and not the
 passes, so a stored map of tracks would be one more thing `update` has to keep equal to `rebuild`.
+
+**Grid's track lines on the canvas** (§15 D921, the session's, built to §15 D913's fourth ruling and
+one container past it). `OndinApp::draw_grid_tracks` draws every track edge as a 1px `SELECT_DIM`
+line across the other axis's run of tracks — the container's own box where that axis has none —
+**dashed where a track of the template has the edge and dotted where only implicit tracks do**, an
+edge two tracks share drawn once and dashed if either is explicit; the space between neighbouring
+tracks is a band of `color::GRID_GAP` across the same run — the gap, and whatever `space-between` and
+its kin hand out there, taffy placing the tracks apart by both: a band is space between two tracks
+where nothing is laid, whatever made it (§15 D921's amendment). The tracks are the preview's —
+`RenderOverrides::laid_grid`, `container::laid_grid` over the preview's view, equal to
+`build::laid_grid` with nothing patched — and the container's box and world transform are read
+through the preview too, so a resize re-lays the lines with the box rather than the half-previewing
+overlay of §15 D391. **Drawn for every selected grid container, and during a move for every selected
+layer's parent that is a grid**, since the drop writes a cell (§15 D916); not for a hidden container.
+Under an Alt-drag a selected container's lines ride the copy the pointer carries, and a moving item's
+container, which is not being copied, keeps its lines where it is.
+**Hidden wherever `canvas::chrome_hidden` hides the selection's chrome** — the inspector's edit hold
+(§15 D128) included, so a gap scrubbed in the inspector takes the lines away for the length of the
+scrub; open for the maintainer's look. Over the artwork, the layout grids and the frame labels, under
+the hover outline and the selection chrome.
 
 ### 5.4 Text node
 
@@ -2914,8 +2934,9 @@ end of one JSON file keep both, which is the whole reason the table sits where i
   and right padding and the column gap by the x factor and top and bottom padding and the row gap by
   the y, for a frame as well as a group — each is a length along a named axis, and the mean would
   leave a card's insides out of proportion. **A grid's px tracks go the same way** (§15 D914),
-  columns by x and rows by y; a `%` or `fr` track is a share and scales by itself. ⚠️ No test reaches
-  the grid arm.
+  columns by x and rows by y; a `%` or `fr` track is a share and scales by itself. The grid arm is
+  pinned by `tools`' `a_grid_scales_its_tracks_gaps_and_padding_by_their_own_axis` (§15 D919); this
+  sentence said *"no test reaches the grid arm"* until 2026-09-28, a batch after the test landed.
 
 ### 5.7 Operations
 
@@ -8061,7 +8082,12 @@ that item's landing alone. An item the move is taking out of its frame would oth
 the slot it is leaving, a promise the release does not keep; a multi-selection gets no outline either
 (§15 D877's amendment) — a block of items that will reorder included (§15 D902), and a grid block
 (§15 D918). A grid item's move
-is outlined by the same filter, in the cell its drop writes (§15 D916). ⚠️ **Read, not tested**: no test reaches the canvas's drawing.
+is outlined by the same filter, in the cell its drop writes (§15 D916). What the canvas paints is
+tested — the one item's slot, nothing for a departure or a block, a grid item's cell (§15 D901's
+amendment) — but the `*id == reordered` filter inside `draw_flex_landing` is not observable today:
+`flex_reorder_of` answers for one layer only, and that layer's is the only landing its preview records.
+While a grid item moves, its container's track lines are drawn too, under the hover outline, so the
+cells the drop writes are in view (§5.3c, §15 D921).
 
 **The artboard list the drop rule reads is memoized, and the key is `EditorSession::revision`** (§15
 D616). `OndinApp::artboards` was a full-document walk answering a question about four nodes, asked
@@ -8502,7 +8528,7 @@ hugging frame's hugged size into its own** (`inspector::baked_ops`), so nothing 
 card's unpin rule, for the same reason, and *Unpin and return to the layout* does the same. **A resize's flips come with
 a receipt** (§15 D880): the grow, shrink or `align-self` a resize changed on the user's behalf is
 outlined and named, with an Undo that takes the whole step back — and a grid item's `justify-self`
-and `align-self` named but not outlined (§15 D920). The fields read `DisplayNode::display`
+and `align-self` likewise, each row outlined while the receipt names it (§15 D920, D922). The fields read `DisplayNode::display`
 and `item`, which have overrides behind them, and commit through `layout::edited`'s latch (§9.3, §15
 D885). A number field over a disagreeing selection reads *"Mixed"* (§15 D892). Neither card has a
 header badge, by ruling (§15 D897): a badge is for a state a card has nowhere else to say. §15 D878

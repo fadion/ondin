@@ -1252,10 +1252,10 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D874** — **A pinned layer is placed by its CSS insets against its frame's used size, and every tool edits from where a layer is drawn, with one core function turning that into insets.** D867's step 2, model half and then the inspector card. **The maintainer's four rulings**: both insets on an axis **stretch** a layer with a size — 🚨 departing from CSS's replaced elements and so from D872 — and over-constrain one without; rotation, skew and flip turn about the **box centre**; centring is **`margin: auto`**, the only margin value; the inspector shows a **pin diagram** plus four px/% fields. **The session's**: 🚨 step 1's *edit from the document* (D868) is **reversed** — tools compute from used geometry and `build::keep_insets`, once at the top of `commit_inner`, appends the `SetInsets` that draws each pinned layer where the edit put it, dropping a write-back to where it already is, with `commit_inner` re-checking for empty because `changes_nothing` answers `false` there. `container.rs`, `Node::insets`, an additive `NodeDto` field with no schema bump, `Operation::SetInsets`; `resolve::used_geometry` places against the frame's **used** size, `update` sorting parents first before the used pass; `RenderOverrides::relayout` answers D868's preview question for insets alone. Stretch on sized kinds and `Text`; `Path`, `Line`, `Boolean` positioned only; `Group` and `Boolean` take none. **The card**, titled ***Position*** — the session's title, the maintainer having ruled out only *Constraints* — sits under Transform: a pin diagram whose struts pin an edge where it is, two `margin: auto` centre buttons, and four fields showing a pinned inset in its unit (a `px`/`%` suffix converting) or an unpinned edge's distance as `auto`, a field only clicked through pinning nothing. 🚨 Every pin, unpin and centre commit writes the drawn transform and, for a stretched layer, its drawn size into the stored values (`baked_placement`), so an unpinned axis stays where it is drawn. *(Built and tested 2026-09-24: the model half, then the card the same day. `ondin-export/tests/insets.rs` — pinned against baked, SVG, PNG and snapshot, each writer's flip failing only its own test — pays step 1's cross-crate debt for render and export; the model half added no app test; the card's `mod inset_card_tests`, five on a headless app through the real commit path, is the first app test of insets. **Two defects found by reading the model half, both fixed before the card shipped**: a non-size geometry patch — a corner radius — un-stretched a stretched layer, now `GeometryPatch::resizes`, wildcard-free, read by `keep_insets` and `relayout` (flip: `true` for `CornerRadius` rewrites `right` to 190); and `with_edge`'s unpin moved a layer whose stored placement was stale, now `baked_placement` (flip: removing it puts the layer at 40 against 240 and shrinks a half-unpinned stretch to 100 wide against 300). ⚠️ **Not verified in the GUI.** `container.rs`' *"Four rulings"* corrected to three and a decision. D867, D868, D871, D872 amended; §1, §5.3, §5.3c, §5.6, §5.7, §5.8, §5.9, §5.10, §6.2, §9.3, §9.4; `roadmap.md`'s step 2 struck. **Amended 2026-09-26**: a laid group's children take the card and `keep_insets` too (D887); the diagram is a square and the centre buttons end their axis's rows (D888). **Amended 2026-09-27**: the card is the mockup's screen 07, D888's square gone, and an unpinned field reads `auto` in its digits' place — the convention above reversed (D890))*
 - **D875** — **A flex container is laid out by taffy over Ondin's own nodes, text keeps each sizing mode's meaning in it, and dragging an item's edge stops its growth.** D867's step 3, its first half. **The maintainer's rulings**: auto-width text never wraps (`white-space: nowrap`), auto height wraps at the width it is given with its stored width as the preferred one, fixed is fixed (`container::flexed_text`); a resize writes `flex-grow`/`flex-shrink` 0 on the main axis and `align-self: start` across a stretch — `end` when dragged by the cross start, ruled since, D905 — (`build::keep_flex_sizes`, beside `keep_insets` in `commit_inner`, and in the preview since D904); frames and groups become containers together — the group half built, a frame *under* a group D870's, built the same day as D876; results on the 1/64 px grid (D873 decided). **The session's**: a hidden layer leaves the flow, `display: none` and not `visibility: hidden` — ruled since, D881 — as do a mask and a pinned child (`container::in_flow`); the engine in `container.rs`, `FlexTree` implementing taffy's low-level traits per pass — no mirror tree, and no cache kept between passes; `update` collecting `affected` from each dirty node's `chain_root`, 🚨 the first hop counting for a child *leaving* the flow; `RenderOverrides::flex_relayout`; an in-flow item turning about its box centre with its stored translation ignored in flow — ruled since, D896. ⚠️ `atomic_box` measures a group or boolean with no layout by its **specified** children's union, so layout nested inside one is not reflected — closed for a nested layout, D899. *(Built and tested 2026-09-24, committed 2026-09-24 (session 34); **step 3 unfinished** — nothing in the app gave a container a layout until the Container card, D878, which finished it; a resize writes px over a size keyword since D879. **Amended the same day**: a group with a layout is resized by its box, `build::sized_flex_item` writing `FlexItem.width`/`height` px and stopping growth through `build::held`, the rule `keep_flex_sizes` now shares; the Scale tool takes its contents too, and `tools::scaled_flex` scales any flex container's padding and gaps per axis — session defaults. `container::flex_tests` 7, `tests/flex.rs` 8, two preview differentials; the amendment's two tests, `tools` and `tests/flex.rs`. D867, D868, D869, D872, D873 amended; §1, §2, §3, §5.3, §5.3c, §5.6, §5.7, §5.8, §5.9, §5.10, §6.2 and §9.3; `roadmap.md`'s *owed* and *open* paragraphs narrowed, and step 3's item 3 struck by the amendment)*
 - **D876** — **A frame may sit in a group and never under a boolean or a mask, a card in a row is a rung of the row's chain, and the Scale tool takes a nested frame's contents with it.** D870 built, and the door it opened closed: a group can carry a frame into an operand or a mask at any depth with every pair legal, so an ancestor rule sits beside `can_parent`. **The maintainer's rulings**: (i) a frame with a boolean or mask ancestor is refused at the model level — `document::bars_frames`, `Document::frame_may_sit_under` and `holds_a_frame`, asked by `op_create_node`, `op_insert_subtree`, `op_reparent`, `op_set_mask` and the loader's check (7), each answering `ArtboardPlacement`; (ii) `query::group_chain` continues through a frame; (iii) the Scale tool on a group scales a nested frame's contents. **The session's defaults, revisitable**: "mask ancestor" is the mask's own subtree, a frame as masked content allowed; `build::group` takes frames, so `mask_target` prefers members `build::can_be_mask` accepts and `mask` refuses a target holding a frame; `boolean` and — 🚨 the one nothing downstream would catch, since it deletes its members — `flatten_union` refuse a member holding a frame; a non-clipping frame's ink is its box ∪ its children's, a clipping one's its box; the Scale recursion in `scale_subtree`, descendants only, so a frame scaled directly keeps its box-only behaviour; frames between groups are rungs, trailing frames trimmed unless the walk stopped at `inside`, and `id == inside` answers `[]`; `hover_target` calls `pick_at_pointer` itself; `pick_leaf` keeps an occupied frame with a group above it; `move_destination` fences a layer to its group's frames. ⚠️ `renderer::frame_barred` spells the barrier a second time, `bars_frames` being `pub(crate)`. **Amended the same day, at the maintainer's request**: *Use as mask* in the context menu dims with `mask_action`'s sentence wherever the verb would refuse (`menu::Context::mask_refused`, filled by `OndinApp::mask_refusal`) — a lone group holding a frame had been offered live and refused after the click; the row's fixture test flip-checked, `menu_context`'s assignment reached by none. *(Rulings 2026-09-24 by the maintainer; built and tested 2026-09-24, committed 2026-09-24 (session 34), every new test flip-checked — among them the randomized `update`/`rebuild` guard now creating card frames under groups, failing at seed 1 with the ink arm deleted from one pass. ⚠️ Not verified in the GUI; stepped into a card in a row, its background still takes the card, so D22's marquee is not started there — read, not tested. One more accumulated doc-comment theft repaired, `move_tx`'s doc on `move_destination`, and `flex_relayout`'s from session 33. D870, D62, D22, D839, D875 amended; §5.3, §5.3c, §5.6, §5.7, §5.7a, §5.9, §5.10, §5.11, §9.4; `context-menus.md` §4 (twice), §5.1; `roadmap.md`'s step 3 items 1–2 and *owed* paragraph)*
-- **D877** — **Dragging one item inside a flex container reorders it rather than moving it; the preview represents a reorder, and the slot the item will drop into is outlined.** D867's step 3, the marker's item 4. An in-flow item is placed by its container (D875), so the `SetTransform` a move commits is drawn nowhere and surfaces only when the layout is removed; what a drag can change is the item's place in the flow. `build::flex_reorder` counts the dragged box's centre against every other in-flow sibling's used box in reading order — on its line by main-axis centre, backwards under `row-reverse`/`column-reverse`, on another line by cross centre — out-of-flow siblings keeping their place. `RenderOverrides` represents `Reorder` as a per-parent child order, read by all three readers of an order — the scene walk, `PreviewView::children` and `operand_children`, `reevaluate_booleans` seeding from every reordered parent — and records each dragged item's layout slot (`landings`), which `canvas::draw_flex_landing` dashes for the one item `flex_reorder_of` answers. The commit is the `Reorder` alone. **All the session's defaults, none ruled**: ⚠️ `wrap-reverse` read as `wrap` — read since, D883; one layer leaving its frame moves as before; several move by their transforms except an in-flow item, which stores nothing and snaps back — reordering several is not built (*Revisit*) — built since for items of one container, D902. **Amended the same day**: both *Fix* verdicts closed — `operand_children` reading the order, and the landing drawn only for the reordered item (read, not tested) — and the multi-selection's stored translation dropped. **Amended again, at the maintainer's request**: the resize measured storing the slot, shifted, and every `SetTransform` on an in-flow item now keeps its linear part and the stored translation at the commit door (`build::kept_flow_translations`, in `keep_flex_sizes`; exempt where the same edit takes the item out of the flow, a write left unchanged dropped); `flex_relayout` re-lays a resized item rather than treating its `SetTransform` as a drag; and a multi-selection's in-flow items stay in their slots during the drag (`canvas::stays_in_flow`, asked by `move_tx` and `move_preview_tx`). ⚠️ Open and unmeasured: a rotation of an in-flow item about a non-centre pivot still previews at the tool's transform — *answered 2026-09-27 (D896): a turn is re-laid, and a differential says preview and commit agree*. *(Built and tested 2026-09-24, committed 2026-09-24 (session 34), every new test flip-checked, one predicted flip site wrong and recorded. ⚠️ Not verified in the GUI. One accumulated doc-comment theft repaired, `canvas::quad_of`'s summary on `selection_quad`. D875, D94 amended; §5.3c, §6.2, §9.3, §9.4; `roadmap.md`'s step 3 item 4, and the marker rewritten as a handoff)*
+- **D877** — **Dragging one item inside a flex container reorders it rather than moving it; the preview represents a reorder, and the slot the item will drop into is outlined.** D867's step 3, the marker's item 4. An in-flow item is placed by its container (D875), so the `SetTransform` a move commits is drawn nowhere and surfaces only when the layout is removed; what a drag can change is the item's place in the flow. `build::flex_reorder` counts the dragged box's centre against every other in-flow sibling's used box in reading order — on its line by main-axis centre, backwards under `row-reverse`/`column-reverse`, on another line by cross centre — out-of-flow siblings keeping their place. `RenderOverrides` represents `Reorder` as a per-parent child order, read by all three readers of an order — the scene walk, `PreviewView::children` and `operand_children`, `reevaluate_booleans` seeding from every reordered parent — and records each dragged item's layout slot (`landings`), which `canvas::draw_flex_landing` dashes for the one item `flex_reorder_of` answers. The commit is the `Reorder` alone. **All the session's defaults, none ruled**: ⚠️ `wrap-reverse` read as `wrap` — read since, D883; one layer leaving its frame moves as before; several move by their transforms except an in-flow item, which stores nothing and snaps back — reordering several is not built (*Revisit*) — built since for items of one container, D902. **Amended the same day**: both *Fix* verdicts closed — `operand_children` reading the order, and the landing drawn only for the reordered item (read, not tested — what the canvas paints tested since, D901's amendment, the `*id == reordered` filter itself unobservable) — and the multi-selection's stored translation dropped. **Amended again, at the maintainer's request**: the resize measured storing the slot, shifted, and every `SetTransform` on an in-flow item now keeps its linear part and the stored translation at the commit door (`build::kept_flow_translations`, in `keep_flex_sizes`; exempt where the same edit takes the item out of the flow, a write left unchanged dropped); `flex_relayout` re-lays a resized item rather than treating its `SetTransform` as a drag; and a multi-selection's in-flow items stay in their slots during the drag (`canvas::stays_in_flow`, asked by `move_tx` and `move_preview_tx`). ⚠️ Open and unmeasured: a rotation of an in-flow item about a non-centre pivot still previews at the tool's transform — *answered 2026-09-27 (D896): a turn is re-laid, and a differential says preview and commit agree*. *(Built and tested 2026-09-24, committed 2026-09-24 (session 34), every new test flip-checked, one predicted flip site wrong and recorded. ⚠️ Not verified in the GUI. One accumulated doc-comment theft repaired, `canvas::quad_of`'s summary on `selection_quad`. D875, D94 amended; §5.3c, §6.2, §9.3, §9.4; `roadmap.md`'s step 3 item 4, and the marker rewritten as a handoff)*
 - **D878** — **The Container and Item cards, built from the maintainer's mockup, and where they are not the mockup.** D867's step 3, the marker's item 5 and the last of the step. `panels/layout.rs`: **Container** — `display`, and under `flex` direction, wrap, three alignments, two gaps and padding — for any selected frame or group; **Item** — grow, shrink, basis, `align-self` and four limits, or why the layer is out of the flow and the button that brings it back — for any child of a laid container. The cards run from the layer in its parent to its children: Frame templates, Align, Transform, Position, Item, Container, Layout grid — ⚠️ the grid moved down from beside Frame templates. The mockup's pictures are painted on its 16-unit grid and turned by transpose and mirror, not its `rot`, which puts align-start's wall on the wrong side in a column. **New behaviour**: `display: none` from the card keeps every child where it is drawn and a hugging frame its hugged size (`inspector::baked_ops`, the Position card's unpin rule), and *Unpin insets* does the same. The other departures are the app's conventions and widgets winning: `display` as the first row, `grid` a disabled cell (enabled since, D920), a resolved number beside a keyword unit, no header badges, no cell tooltips — reversed since, D886. 🚨 **Except the mixed state**: a number shows a dash, copying `typography::mixed_text` — which widens §15 D130's departure against D636's *"not a precedent"*, and against the mockup, which reads *"Mixed"* too. *(Built and tested 2026-09-24, uncommitted when recorded; **Keep** every departure but that one — ***Fix*** the mixed dash by D636's route. Seven tests in `layout.rs`. ⚠️ Not verified in the GUI. D867, D869, D875 amended; §1, §5.3c, §9.3, §9.4; `roadmap.md`'s step 3 item 5 struck. **Amended 2026-09-26**: every number field committed nothing until D885; labels in sentence case, D884; the out-of-flow block reworded, D889. **Amended 2026-09-27**: the Position card has a header badge and these two still none, and the resolved-number convention's precedent is reversed there — which wins is open, D890. **Amended again the same day, by the maintainer's rulings**: item 3's number fields read *Mixed* (D892), and its segmented rows and unit dash settled by D892's amendment the same day, closing it; item 6 reversed for the Item card's basis and limits (D895); item 7 ruled, no badges (D897))*
 - **D879** — **W and H offer only the sizing modes that differ for the layer, and a resize writes px over a size keyword.** `container::style_of` tells three of CSS's four apart per kind — a frame's `auto` is its stored size and `fit-content` hugs; a laid group's `auto` and `fit-content` both hug; a leaf's size is its measure — so `layout::size_modes` offers px, fit-content for a frame with a layout, auto for a laid group, and `%` for any in-flow kind layout can resize; fewer than two is no menu. A mode picked moves nothing (`size_mode_tx`, `%` of the parent's content box to 0.1%); the proportion lock stands aside while a side is a keyword or `%`. **Core**: `keep_flex_sizes` sets `width`/`height` back to `auto` on every axis a resizing `SetGeometry` changed, whatever the parent (`sized_in_px`). A laid group's W and H reach `build::sized_flex_item` through `resize_box_to` — read for this entry — which writes only the axes the resize changed (both, until the same session). ⚠️ **Not CSS**: taffy gets `auto` for `FitContent`, so a fit-content frame in a stretching parent stretches — ***reversed 2026-09-27 by the maintainer's ruling*** (D893), such an item now `flex-start` across the line. *(Built and tested 2026-09-24, uncommitted when recorded; **Keep**, the stretch flagged for the maintainer — who ruled for CSS, D893. Tests `a_resize_writes_px_over_a_size_keyword` and `a_laid_group_resized_along_one_axis_keeps_hugging_along_the_other` in core, `the_size_menu_offers_only_modes_that_differ_for_the_kind` and `a_mode_picked_from_the_size_menu_moves_nothing`. D875 amended; §5.3c, §9.3, §9.4)*
-- **D880** — **A resize that stops an item's growth leaves a receipt in the Item card, with an Undo that is the whole step.** The maintainer's ruling 1 of three. `commit_inner` reads the grow, shrink and `align-self` flips `keep_flex_sizes` added off the transaction (`growth_held`) into a `FlexReceipt`; the card outlines the fields and names the flips. Undo takes the whole step, the flips being what make the resize hold. Valid while `EditorSession::revision` and `History::undo_depth` are where the commit left them — 🚨 the depth because undo and redo do not bump the revision (D616's amendment); a run commit leaves none. *(Ruled 2026-09-24, built and tested the same day, uncommitted when recorded; **Resolved.** Test `a_resize_leaves_a_receipt_until_anything_else_is_committed`, the depth dropped red at *"an undo takes it away"*. ⚠️ Its redo half rests on the same defect, and D616's *Fix* turns it red — decide the redo then. §5.3c, §9.4)*
+- **D880** — **A resize that stops an item's growth leaves a receipt in the Item card, with an Undo that is the whole step.** The maintainer's ruling 1 of three. `commit_inner` reads the grow, shrink and `align-self` flips `keep_flex_sizes` added off the transaction (`growth_held`) into a `FlexReceipt` — and a grid item's `justify-self` since D922; the card outlines the fields and names the flips. Undo takes the whole step, the flips being what make the resize hold. Valid while `EditorSession::revision` and `History::undo_depth` are where the commit left them — 🚨 the depth because undo and redo do not bump the revision (D616's amendment); a run commit leaves none. *(Ruled 2026-09-24, built and tested the same day, uncommitted when recorded; **Resolved.** Test `a_resize_leaves_a_receipt_until_anything_else_is_committed`, the depth dropped red at *"an undo takes it away"*. ⚠️ Its redo half rests on the same defect, and D616's *Fix* turns it red — decide the redo then. §5.3c, §9.4)*
 - **D881** — **A hidden layer leaves the flow: ruled.** The maintainer's ruling 2, D875's (e) promoted from the session's default — `display: none`'s reading, the eye closing the row up — once the Item card came to say so in words. *(Ruled 2026-09-24; **Resolved**, record-only — no line of code changed, cited on `container::in_flow`'s doc. D875 amended; §5.3c)*
 - **D882** — **An in-flow item's X and Y are inert.** The maintainer's ruling 3, and a consequence of D877's second amendment: `kept_flow_translations` drops a typed translation at the commit door, so a live field would take a number and commit nothing. Disabled in place, the reason on hover. ⚠️ **The multi-selection Transform card's X and Y are still live**, and in-flow members of the set silently keep their slots — closed 2026-09-27, D903. *(Ruled 2026-09-24, built the same day, uncommitted when recorded and not tested; **Keep**, the multi card an open gap. §9.4)*
 - **D883** — **`flex_reorder` reads `wrap-reverse`: the first line is the bottom one, so a lower line comes first.** D877 read it as `wrap` — *"Fix when a control can set it"* — and the Container card's wrap control can. *(Fixed and tested 2026-09-24, uncommitted when recorded; **Resolved.** Test `wrap_reverse_reorders_with_its_lines_read_bottom_up`, the arm dropped answering `Some(1)`. D877 amended; §5.3c)*
@@ -1276,8 +1276,8 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D898** — **The randomized `update`/`rebuild` guard authors layout inputs, and compares a laid group's box.** *A reconstruction, written 2026-09-27 from its citation sites and its commit.* A second run, `incremental_update_equals_rebuild_over_random_layout_ops`, adds random `SetDisplay`, `SetFlexItem` and `SetInsets` to the op mix, the first run's seeds left drawing what they always did; `assert_resolved_matches_rebuild` compares `used_frame` in both. Its first run found D899 at seed 7. ⚠️ Blind, like the first, to a defect `update` and `rebuild` share. *(Built 2026-09-27, committed as `da5b652`; **Keep**. D868, D875 amended; §5.9; `roadmap.md`'s *owed* item struck)*
 - **D899** — **An edit inside a plain group in a flex row reflows the row, and a layout nested in a plain group is measured by its layout.** *A reconstruction, written 2026-09-27 from its citation sites and its commits.* `container::chain_root` climbs through a `Group` or `Boolean` with no layout, `root` moving only on a hop into a layout; `atomic_box` measures a container with a layout by `lay_out`, closing D875's ⚠️. The climb carries past a laid group nested in a plain one, so the preview's `flex_relayout` re-laid the row and not that group, and D900's `laid_group_box` found no box for it — read, not run, when written. *(Found by D898, fixed and tested 2026-09-27, committed as `da5b652` and `ddb4e57`; **Resolved**. ⚠️ This line carried a ***Fix*** for the nested root until D910 and D911 measured and fixed both halves the same day. D875 amended; §5.3c, §5.9, §6.2)*
 - **D900** — **`build::keep_insets` pins a laid group's child against the box the edit leaves, not the committed one.** *A reconstruction, written 2026-09-27 from its citation sites and its commit.* D887's unmeasured Scale-tool case, measured: a child pinned bottom-right of a doubled group was re-pinned against the old box and drawn 60 off its corner along x and 30 along y. `build::laid_group_box` runs the group's layout over the document after the edit. It answered `None` for a laid group behind a plain group in a flex row (D899), or hidden, or a mask, and the child snapped back on release — D887's defect, for those; read, not run, when written. *(Fixed and tested 2026-09-27, committed as `6dd96c9`; **Resolved**. ⚠️ This line carried a ***Fix*** for the nesting until D910 measured and fixed it the same day. D887 amended; §5.3c; `roadmap.md`'s *owed* item struck)*
-- **D901** — **The app reads where layout draws a layer, end to end: the routing tests flex owed.** *A reconstruction, written 2026-09-27 from its citation sites and its commits.* A click through the real canvas selects a flex item and a pinned layer where they are drawn; snapping's targets and the rulers' band are drawn boxes; a real press, drag and release through `canvas_ui` reorders a row as one step; the Item card's grow and basis land under a real scrub. Two owed tests landed under other numbers: D887's preview half and where a rotated in-flow item is drawn. *(Tested 2026-09-27, committed as `91c4143` and `c27d9bc`; **Resolved**, what the canvas draws still untested. D874, D875, D877, D885, D887, D896 amended; §5.3c, §5.9; `roadmap.md`'s *owed* paragraph narrowed)*
-- **D902** — **Several items of one flex container drag as a block, reordering together to where the block's centre falls and keeping their order.** *A reconstruction, written 2026-09-27 from its citation sites and its commits.* D877's *Revisit* answered — `build::flex_reorder_many`, sharing `flex_reorder`'s reading order as `flow_index`, its ops derived by walking the target order; `canvas::flex_block_reorder_of` in `move_tx` and `move_preview_tx`. A mixed selection keeps D877's rule. ⚠️ No ruling by the maintainer is recorded; the block draws no landing outline; the mixed arm is reached by no test since. *(Built and tested 2026-09-27, committed as `6ca1838` and `91c4143`; **Keep**, the session's. D877 amended; §5.3c, §9.4)*
+- **D901** — **The app reads where layout draws a layer, end to end: the routing tests flex owed.** *A reconstruction, written 2026-09-27 from its citation sites and its commits.* A click through the real canvas selects a flex item and a pinned layer where they are drawn; snapping's targets and the rulers' band are drawn boxes; a real press, drag and release through `canvas_ui` reorders a row as one step; the Item card's grow and basis land under a real scrub. Two owed tests landed under other numbers: D887's preview half and where a rotated in-flow item is drawn. *(Tested 2026-09-27, committed as `91c4143` and `c27d9bc`; **Resolved**, what the canvas draws still untested. D874, D875, D877, D885, D887, D896 amended; §5.3c, §5.9; `roadmap.md`'s *owed* paragraph narrowed. **Amended 2026-09-28**: the rest owed tested, so flex owes no test — the landing outline as painted (the one-item gate, a departure, a flex and a grid block, a grid item's cell), a mixed selection's move, and a laid group's resize through `canvas_ui`, whose flip failed a step earlier than predicted; ⚠️ the `*id == reordered` filter is unobservable while `flex_reorder_of` answers for one layer only. `roadmap.md`'s *owed* paragraph struck)*
+- **D902** — **Several items of one flex container drag as a block, reordering together to where the block's centre falls and keeping their order.** *A reconstruction, written 2026-09-27 from its citation sites and its commits.* D877's *Revisit* answered — `build::flex_reorder_many`, sharing `flex_reorder`'s reading order as `flow_index`, its ops derived by walking the target order; `canvas::flex_block_reorder_of` in `move_tx` and `move_preview_tx`. A mixed selection keeps D877's rule. ⚠️ No ruling by the maintainer is recorded; the block draws no landing outline; the mixed arm is reached by no test since — both tested 2026-09-28, D901's amendment. *(Built and tested 2026-09-27, committed as `6ca1838` and `91c4143`; **Keep**, the session's. D877 amended; §5.3c, §9.4)*
 - **D903** — **The multi-selection Transform card's X and Y are inert while any member is placed by its container.** *A reconstruction, written 2026-09-27 from its citation sites and its commit.* D882's rule for the single card, and its open gap closed: a typed or scrubbed position moved the free members of a mixed selection and left the laid-out ones in their slots, saying nothing. Disabled, the reason on hover. The hover's *"drag them on the canvas to reorder"* reordered nothing over the mixed selection it was shown for, until D912 made it say so only where the drag reorders. Landed with a test driving D894's `toggle_centre` call. *(Fixed and tested 2026-09-27, committed as `5cd226c`; **Resolved**. D882, D894 amended; §5.3c, §9.4)*
 - **D904** — **The gesture preview holds a resized flex item as the commit will.** `set_preview` built its overrides from the gesture's transaction alone, and `flex_relayout` re-lays every touched chain with the items' properties as stored — so a stretched item dragged shorter was stretched back every frame and landed only on release, when `keep_flex_sizes` added the holds; the Transform card's H, reading back through the preview, scrubbed from 160 every frame and committed 160. `keep_flex_sizes`' item half is `build::flex_holds`, and `set_preview` appends it — 🚨 never `kept_flow_translations`, which drops a move's translation. *(Reported and fixed 2026-09-27, uncommitted when recorded; **Resolved.** Test `a_stretched_items_height_scrubs_in_the_transform_card`, the holds dropped failing at *"the height landed"*, 160. D875, D877 amended; §5.3c, §6.2, §9.3)*
 - **D905** — **A stretched item resized from its cross-start edge aligns to the end.** The maintainer's ruling, amending D875's (b): dragged by its bottom it takes `align-self: start` as before; by its top — a column's by its left — `end`, so the edge the user held is the one that stays. `build::resized_from_cross_start` compares the box in the parent's space before and after, on the parent's axes; a laid group's resize passes its written transform (`sized_flex_item`'s `to`). And a preview defect it found: `flex_relayout` fell back to the *document's* transform where `item_placed` answered `local: None`, which is measured against the preview's own. *(Ruled 2026-09-27, built and tested the same day, uncommitted when recorded; **Resolved.** Tests `a_stretched_item_dragged_by_its_top_aligns_to_the_end` and `a_stretched_item_dragged_by_its_top_previews_as_it_lands`. The cards' *Flex start*/*Flex end* and their mirrored pictures disagreed with the engine's physical `start`/`end` under the reversals — read here, measured and fixed by D909, which moves this rule's edges with `wrap-reverse`: there a row's top is the cross end. `landing_of`'s like fallback, flagged here, is D908. D875, D880 amended; §5.3c, §6.2, §9.3)*
@@ -1288,14 +1288,16 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D910** — **`build::laid_group_box` measures a laid group by its own pass where its chain root's does not reach it.** A laid group inside a plain group that is a flex item (D899), or one hidden or made a mask, is a layout root of its own that the chain root's pass never places; the `None` made `keep_insets` skip its pinned children, and a moved one snapped back — measured at (60, 50) with its insets unchanged, where it lands at (40, 40). The repair D900 asked for. *(Fixed and tested 2026-09-27, uncommitted when recorded; **Fixed**. Test `a_pinned_child_of_a_laid_group_in_a_plain_group_moves_where_dragged`; the hidden and mask cases amended the same day, `a_pinned_child_of_a_laid_group_out_of_the_flow_moves_where_dragged`, each biting on its own. D899, D900 amended; §5.3c; `roadmap.md`'s *owed* item struck)*
 - **D911** — **The gesture preview lays out every layout root from a touched node up to its chain root.** `flex_relayout` laid out the chain root alone, and since D899 that root can sit above a plain group whose laid group is a root of its own, un-laid in the preview: a nested column's second rect previewed 20 wide at y 50 against the commit's 40 wide at y 70. `chain_root`'s doc now says it is the topmost root, not the only one. The repair D899 asked for. *(Fixed and tested 2026-09-27, uncommitted when recorded; **Fixed**. Test `a_layout_nested_in_a_plain_group_previews_as_it_commits`. D899 amended; §5.3c, §6.2; `roadmap.md`'s *owed* item struck)*
 - **D912** — **The multi card's X/Y tooltip promises a reorder only where a drag makes one.** D903's hover said *"drag them on the canvas to reorder"* over any selection with an in-flow member, and a mixed selection's drag reorders nothing (D902). `inspector::drags_as_a_block` — every outermost member an in-flow item of one container — chooses that tail; otherwise *"select a container's items on their own to reorder them by dragging"*. Amended the same day: `inspector::laid_out_xy` answers the card's gate and hover both, its strings asserted; the card's call to it is read. *(Fixed and tested 2026-09-27, uncommitted when recorded; **Fixed**. Test `only_one_containers_items_are_told_to_drag_to_reorder`, one flip not biting until a case was added. D903 amended; §9.4)*
-- **D913** — **Grid's open questions answered before its code: text keeps its sizing mode, a resize writes size and self-alignment, a drag writes explicit lines, and the track editor is the inspector's list with read-only lines on the canvas.** The maintainer's rulings, three of the session's recommendations taken — D875's ruling (a) for every container; a resize writing px and `justify-self`/`align-self` `start`, `end` from the left or top edge (D905), the cells kept — and one declined: every drop writes `grid-column`/`grid-row` for the cell under the pointer, where the session had recommended reordering an auto-placed item by D877's machinery, so a dragged item becomes explicitly placed and D877's reorder does not apply in a grid. Track positions from taffy's `detailed_layout_info`, derived and never saved (D868); dragging a boundary is later, not declined. **The session's, stated with the plan and not objected to**: the preview widens `flex_relayout` into one pass over any laid container; grid placement on the one item record, `FlexItem` renamed — built as `LayoutItem` (D914), not the `Item` planned, which collides with the app's `menu::Item`; grid's alignment rows say `start`/`end`. *(Ruled 2026-09-27, record-only; **Resolved** as rulings, **not built** — step 4's model and engine built since, D914, its preview and gestures, D916, which stores no track positions in `Resolved`, and the inspector's track list, D920. §5.3c; `roadmap.md`'s open paragraph struck)*
+- **D913** — **Grid's open questions answered before its code: text keeps its sizing mode, a resize writes size and self-alignment, a drag writes explicit lines, and the track editor is the inspector's list with read-only lines on the canvas.** The maintainer's rulings, three of the session's recommendations taken — D875's ruling (a) for every container; a resize writing px and `justify-self`/`align-self` `start`, `end` from the left or top edge (D905), the cells kept — and one declined: every drop writes `grid-column`/`grid-row` for the cell under the pointer, where the session had recommended reordering an auto-placed item by D877's machinery, so a dragged item becomes explicitly placed and D877's reorder does not apply in a grid. Track positions from taffy's `detailed_layout_info`, derived and never saved (D868); dragging a boundary is later, not declined. **The session's, stated with the plan and not objected to**: the preview widens `flex_relayout` into one pass over any laid container; grid placement on the one item record, `FlexItem` renamed — built as `LayoutItem` (D914), not the `Item` planned, which collides with the app's `menu::Item`; grid's alignment rows say `start`/`end`. *(Ruled 2026-09-27, record-only; **Resolved** as rulings, **not built** — step 4's model and engine built since, D914, its preview and gestures, D916, which stores no track positions in `Resolved`, the inspector's track list, D920, and the canvas lines, D921. §5.3c; `roadmap.md`'s open paragraph struck)*
 - **D914** — **Grid's model and engine: `Display::Grid`, one item record for both layouts, and what CSS refuses the operations refuse.** Container layout's step 4, the first of D913's four sub-steps. `Grid` — tracks as CSS's grammar (a `repeat()` holds sizes, so cannot nest), `AlignContent` on both axes because a grid's `normal` content distribution is `stretch`, and a **`justify-items` §5.3c's table lacked**, added once `align-items: start` alone left an item 100 wide across its column. `FlexItem` → `LayoutItem`, `SetFlexItem` → `SetLayoutItem`, gaining `justify_self`, `grid_column`, `grid_row`; `Display` no longer `Copy`, `LayoutView::display` borrowed. `OpError::BadLayout` at the operations; a file carrying such a value opens, its stored value kept and laid around. taffy's `grid` feature, one `FlexTree` per pass; the Scale tool scales px tracks. ⚠️ **Open, for the maintainer**: a shape fills its grid cell under the default, where CSS's `normal` puts a replaced element at `start`. *(Built and tested 2026-09-27, uncommitted when recorded; **Keep**, the session's — the shape-in-a-cell question **open**, answered since by D915, and sub-step 2 built since, D916, and sub-step 3, D920; the two readings it left untested tested since, D919. Tests `tests/grid.rs`, eleven, and a third randomized run in `tests/resolve.rs`. D913 corrected; §5.3c, §2, §5.3, §5.6, §5.7, §5.9, §6.2; `roadmap.md` step 4's first sub-step struck)*
 - **D915** — **Grid's `normal`: a shape keeps its size at the start of its cell and a box stretches, as CSS does.** The maintainer's ruling, *"I'd lean into CSS parity as much as it makes sense"*, answering D914's open question. `Grid::justify_items` and `align_items` become `Option<AlignItems>`, `None` CSS's `normal` and the default, skipped in the file; under it a replaced item (`container::is_replaced`, D872) is held at `start` in its taffy style by `container::grid_held`, and text and a container with a layout stretch. `fit-content` is never stretched in a grid, D893's rule on both axes; an explicit `stretch` stretches a shape. Flex's `align_items` stays plain, its `normal` being `stretch`. The cards owe grid a `normal` entry — drawn since, D920. *(Ruled and built 2026-09-27, uncommitted when recorded; **Resolved**, answering D914. Test `normal_holds_a_shape_at_the_start_and_stretches_a_box`, two flips, one failing an assertion earlier than predicted. D914 amended; §5.3c; `roadmap.md` step 4's ⚠️ struck)*
-- **D916** — **Grid's preview and gestures: a resize holds on both axes, a drop writes the lines of its new cell, and a laid grid's tracks are derived when asked.** Step 4's second sub-step, built to D913's rulings. `build::grid_resize_held`, under `flex_holds` and `sized_flex_item`, turns a stretch released by a resize into `start`, or `end` from the left or top edge (`build::resized_edges`, which flex's D905 reading now shares); `build::grid_drop` moves the area by the tracks the item's centre crossed, span and spelling kept, nothing in its own cell; `build::layout_drop` is the canvas's one door. `container::laid_grid` re-runs the pass under taffy's `detailed_layout_info` — **nothing stored in `Resolved`**, a departure from D913's wording. The preview needed no change and is tested now. Several grid items dragged kept their cells, unruled, until D918; D913's *"cell under the pointer"* is read as the centre's — kept, amended 2026-09-27: D877's reading, and a pointer reading would snap a spanning or off-centre grab on release. *(Built and tested 2026-09-27, uncommitted when recorded; **Keep**, the session's. Tests in `tests/grid.rs`, `tests/overrides.rs` and `canvas.rs`'s `flex_canvas_tests`, each flip at its predicted site. D913, D914 amended; §2, §3, §5.3c, §9.4; `roadmap.md` step 4's (2) struck)*
+- **D916** — **Grid's preview and gestures: a resize holds on both axes, a drop writes the lines of its new cell, and a laid grid's tracks are derived when asked.** Step 4's second sub-step, built to D913's rulings. `build::grid_resize_held`, under `flex_holds` and `sized_flex_item`, turns a stretch released by a resize into `start`, or `end` from the left or top edge (`build::resized_edges`, which flex's D905 reading now shares); `build::grid_drop` moves the area by the tracks the item's centre crossed, span and spelling kept, nothing in its own cell; `build::layout_drop` is the canvas's one door. `container::laid_grid` re-runs the pass under taffy's `detailed_layout_info` — **nothing stored in `Resolved`**, a departure from D913's wording. The preview needed no change and is tested now. Several grid items dragged kept their cells, unruled, until D918; D913's *"cell under the pointer"* is read as the centre's — kept, amended 2026-09-27: D877's reading, and a pointer reading would snap a spanning or off-centre grab on release. `laid_grid` keeps a grid's last report — tested 2026-09-28, amended: a parent's measure can lay a grid out in full, taffy's flex baseline step, so the first report is the measure's. *(Built and tested 2026-09-27, uncommitted when recorded; **Keep**, the session's. Tests in `tests/grid.rs`, `tests/overrides.rs` and `canvas.rs`'s `flex_canvas_tests`, each flip at its predicted site. D913, D914 amended; §2, §3, §5.3c, §9.4; `roadmap.md` step 4's (2) struck)*
 - **D917** — **An auto-width text stretched narrower than its line wrapped, in flex and in grid; `container::flexed_text` now floors the fixed box at the line's width.** D875's ruling (a) says auto width never wraps, and `flexed_text` made a stretched label `Fixed` at the size handed back, on the claim — D875's and the function's doc — that such a box *"cannot wrap it, a grown box being at least as wide as its line"*: true only of a stretch that widens it. A cross-axis stretch, or a grid cell's, can give less. Measured before the repair, an `Inter` 12 label 161.65 wide on one line was laid `Fixed(30 × 100)` in a 30px grid column and `Fixed(30 × 14.40625)` in a 30-wide flex column. **Flex had it first**; grid inherited it through D913's first ruling, and under grid's `normal` text stretches (D915), so there it was the default case. The box keeps the line's width and overflows its slot from the start, `white-space: nowrap`; height, `AutoHeight` and `Fixed` unchanged. Amended the same day: a text pinned on both edges still wraps (D874), on purpose — pinning is the author choosing a width, a container's stretch is not; and the unreadable-box arm is unreachable. *(Found and fixed 2026-09-27, uncommitted when recorded; **Fixed**, the session's, a defect against D875's ruling (a) and D913's first ruling. Test `an_auto_width_label_stretched_narrower_keeps_its_line`, its flip at the predicted site and reaching the grid half alone. D875 corrected, D874 amended; §5.3c)*
 - **D918** — **Several items of one grid dragged together move as a block.** `build::grid_drop_many` shifts every item's area by the tracks the centre of the block's union box crossed — D902's reading carried to grid — writing each explicit lines, span and spelling kept (D916); a negative shift is clamped to the leading item's room, so a block pushed towards the grid's first track stops there whole rather than reshuffling — and, amended the same day, a start before the explicit grid is written with the negative line that names it rather than clamped to 1, which had moved an item on an axis the drag left alone. `grid_drop` is its block of one; `build::layout_drop_many` sends several to it or to `flex_reorder_many` by the parent's `display`, and `canvas::flex_block_reorder_of` asks that, so preview and commit both carry it. The session's, under the maintainer's delegation, not a ruling. *(Built and tested 2026-09-27, uncommitted when recorded; **Keep**, answering D913's and D916's open question. Tests `several_items_of_a_grid_move_as_a_block`, its first cut unable to reach the clamp, and `two_grid_items_dragged_together_move_as_a_block`, each flip at its predicted site. D913, D916 amended; §5.3c, §9.4; `roadmap.md` step 4's ⚠️ struck)*
 - **D919** — **What grid's first sub-steps left, closed: at most 1000 explicit tracks on an axis, D914's two untested readings tested, and no `baseline` in grid's cards.** `container::MAX_TRACKS`: `Grid::is_valid` refuses a template past it on either axis (`track_count`, saturating, a repeat counting its tracks `repeat` times), and `template` lays a file's to it — CSS lets a user agent clamp an overly large grid, and a `u16` count times a few entries would have taffy allocate millions. Per axis, not per repeat: a thousand entries each `repeat(1000, …)` pass a per-repeat cap. ⚠️ `layout::MAX_TRACKS`, 10 000, is the layout grids' (D488) — two constants, one name. `scaled_layout`'s grid arm and every refused value a file can carry are now tested. `baseline` is left out of the cards because taffy 0.14.0's grid reads it as `start`; the model keeps it. The session's, under the maintainer's delegation. *(Built and tested 2026-09-27, uncommitted when recorded; **Keep**. Tests `values_css_refuses_are_refused` widened, `every_value_css_refuses_is_read_around_in_a_file` and `a_grid_scales_its_tracks_gaps_and_padding_by_their_own_axis`, each flip at its predicted site. D914 amended; §5.3c)*
-- **D920** — **Grid's cards: the `grid` cell enabled, two track lists each with a CSS line, grid's four alignments, and an item's lines typed as CSS.** Step 4's third sub-step, the mockup's screen 04, in `panels/layout/grid.rs`. Picking flex or grid over the other keeps the padding and the gaps. A track list is a row per entry — grip, kind menu, fields, cross — and a CSS line that applies on a defocus that commits and never on `Escape` (D841), a parse error or a refused list shown in red and nothing committed. Grid's rows say *Start*/*End*, lead the items rows with *Normal* (D915), draw `justify-items` (D914) and offer no `baseline` (D919); `grid-column`/`grid-row` are typed CSS. Core gains `parse_tracks`/`tracks_css` and `parse_placement`/`placement_css`. The session's, under the maintainer's delegation. ~~⚠️ `breadth_field`'s doc claims D906's rule, and the field draws a `–` unit under a keyword.~~ Amended the same day: the dash dropped (D906's rule), a refusal shown only while the field reads what it refused, an unreadable line said rather than dropped, a stale grip drag ended. *(Built and tested 2026-09-27, uncommitted when recorded; **Keep**, the dash ***Fix*** — fixed the same day. Tests in `layout.rs`, `layout/grid.rs` and `tests/grid.rs`, the flips at their predicted sites; the grip drag not driven. ⚠️ Not verified in the GUI. D878, D886, D913, D914, D915 amended; §1, §5.3c, §9.3, §9.4; `roadmap.md` step 4's (3) struck)*
+- **D920** — **Grid's cards: the `grid` cell enabled, two track lists each with a CSS line, grid's four alignments, and an item's lines typed as CSS.** Step 4's third sub-step, the mockup's screen 04, in `panels/layout/grid.rs`. Picking flex or grid over the other keeps the padding and the gaps. A track list is a row per entry — grip, kind menu, fields, cross — and a CSS line that applies on a defocus that commits and never on `Escape` (D841), a parse error or a refused list shown in red and nothing committed. Grid's rows say *Start*/*End*, lead the items rows with *Normal* (D915), draw `justify-items` (D914) and offer no `baseline` (D919); `grid-column`/`grid-row` are typed CSS. Core gains `parse_tracks`/`tracks_css` and `parse_placement`/`placement_css`. The session's, under the maintainer's delegation. ~~⚠️ `breadth_field`'s doc claims D906's rule, and the field draws a `–` unit under a keyword.~~ Amended the same day: the dash dropped (D906's rule), a refusal shown only while the field reads what it refused, an unreadable line said rather than dropped, a stale grip drag ended. *(Built and tested 2026-09-27, uncommitted when recorded; **Keep**, the dash ***Fix*** — fixed the same day. Tests in `layout.rs`, `layout/grid.rs` and `tests/grid.rs`, the flips at their predicted sites; the grip drag not driven — driven since, with the refusal's lifetime and the stale drag's clean-up, amended 2026-09-28. ⚠️ Not verified in the GUI. D878, D886, D913, D914, D915 amended; §1, §5.3c, §9.3, §9.4; `roadmap.md` step 4's (3) struck. ⚠️ Its receipt *"names `justify self` too"* only beside an `align-self` flip — a `justify-self` flip alone made no receipt until D922)*
+- **D921** — **Grid's canvas track lines: every edge a 1px `SELECT_DIM` line, dashed where the template has it and dotted where only implicit tracks do, every gap a `GRID_GAP` band, read off the preview, and drawn for a moving item's grid as well as a selected one.** Step 4's last sub-step, settling what D913's fourth ruling and the roadmap's handoff left: the look, an edge shared drawn once and dashed if either track is explicit; the preview's tracks from the new `RenderOverrides::laid_grid`, box and transform read through the preview too — D391's lesson; and, past the ruling, every selected layer's grid parent during a move, unfiltered, since a drop writes a cell (D916). Hidden with the selection's chrome, the inspector's edit hold (D128) included — so a gap scrub hides them, open for the maintainer's look, and the two docs naming a scrub as what re-lays them describe nothing visible today. One layout pass per drawn container per frame, uncached, not measured. ~~⚠️ The Alt-drag offset also shifts a moving item's container, which stays put — read, not measured.~~ Amended the same day, before commit: the Alt-drag offset rides only a selected container, a moving item's staying put; the two docs naming a scrub corrected; and a band drawn wherever tracks stand apart, a `space-between` share as well as a gap — measured and kept. The session's under the maintainer's delegation of 2026-09-28, not rulings. *(Built and tested 2026-09-28, committed as `09df61c`; **Keep**, the scrub's hiding **open**, the Alt-drag offset ***Fix*** — ***Fixed*** before commit, so it never shipped. Tests `canvas.rs · grid_track_tests`, three, three flips at their predicted sites; the `chrome_hidden` gate, the dashes as drawn and a move or rotation of the container not tested. ⚠️ Not verified in the GUI. D913 amended; §1, §5.3c, §9.4; `roadmap.md` step 4's (4) struck)*
+- **D922** — **A grid item resized across alone left no receipt, and a receipt naming a grid item's self-alignment outlined neither row.** `session::growth_held` built `FlexReceipt::held` from grow, shrink and `align-self` flips only, so a width resize releasing a stretch to `justify-self: start` or `end` (`build::grid_resize_held`, D913's second ruling) changed the Item card in silence; D920's *"justify self"* words could appear only beside an `align-self` flip, and `grid_item_rows` was handed no flags, so neither self-alignment row was outlined where flex's is (D880). `growth_held` counts `justify_self`; `grid_item_rows` takes `flipped: [bool; 2]` and strokes each row 1px in `color::ACCENT` while the receipt names it. Found building D920's named-and-left-alone item, whose premise was the milder half. *(Found and fixed 2026-09-28, uncommitted when recorded; **Fixed**, the session's. Test `panels::layout::tests · a_grid_items_resize_receipt_outlines_the_row_it_names`, two flips at their predicted sites. ⚠️ Not verified in the GUI. D880, D920 amended; §9.4; `roadmap.md`'s handoff item 4 narrowed)*
 
 ---
 
@@ -20516,7 +20518,8 @@ a_group_with_a_layout_is_resized_by_its_box`, a hugging 60×30 row dragged to tw
 `scaled_flex` deleted fails the Scale half on *"the padding"*; and `tests/flex.rs ·
 resizing_a_growing_group_with_a_layout_holds_its_box`, the `held` call deleted failing on *"the dragged
 width held"* at 360. With D877's, the first app tests of flex. D869's amendment listed the resize as not built; it
-is, and D869 carries a line. *(Built and tested 2026-09-24, committed 2026-09-24 (session 34); recorded
+is, and D869 carries a line. *(Driven through the canvas since, 2026-09-28 — D901's amendment; the
+`laid_group` flip there fails a step earlier than here, in the preview.)* *(Built and tested 2026-09-24, committed 2026-09-24 (session 34); recorded
 from the brief and a read of `build.rs`' `keep_flex_sizes`, `held` and `sized_flex_item` and
 `tools/mod.rs`' `resize_layer`, `scale_geometry`'s group arm, `scale_scalars`' fork and `scaled_flex`,
 with the tests' docs for the flips — not re-run. `architecture.md` §5.3c and §5.6 amended;
@@ -20663,6 +20666,9 @@ does any item of a multi-selection; a drag that would drop the item back where i
 slot, which is what the release does. The preview still records a landing for every dragged in-flow
 item — the filter is the canvas's, and `landings()` is unchanged. ⚠️ **Not tested**: no test reaches the
 canvas's drawing, so the filter is read, as the defect it closes was. ⚠️ Not verified in the GUI.
+*(What the canvas paints is tested since, 2026-09-28 — D901's amendment — the one-item rule by the
+`flex_reorder_of` gate, and the `*id == reordered` filter behind it unobservable today, as that
+amendment says.)*
 
 **A multi-selection stores no translation for an in-flow item.** `move_tx`'s per-layer loop has an arm
 for a layer `move_destination` keeps in its parent and `build::is_flex_item` answers for, and it pushes
@@ -20999,7 +21005,8 @@ recommendations … for all 3"*.
 after `keep_flex_sizes` reads the flips it added off the transaction it hands back, before it is
 applied (`growth_held`): a `SetFlexItem` on an item the edit did not set, and only grow, shrink and
 `align-self` — a keyword going back to `auto` (D879) is the resize itself, and W and H already show
-it. They are kept as `FlexReceipt { held, revision, depth }`, and the card outlines each flipped field
+it. *(And a grid item's `justify-self` since D922: until then a grid item resized across alone left no
+receipt.)* They are kept as `FlexReceipt { held, revision, depth }`, and the card outlines each flipped field
 in the accent and says *"Resizing set flex-grow: 0 and …"* — *"flex grow to 0"* since D884 — with an
 **Undo**.
 
@@ -21748,7 +21755,8 @@ builds — and stated its answer to the first with the plan rather than asking i
    container; the recommendation taken.** Track positions come from taffy's `detailed_layout_info`
    feature, derived into `Resolved` and never saved: invariant 4, D868 — *corrected 2026-09-27: derived
    on demand by re-running the pass, and stored nowhere, `Resolved` included (D916)*. *(The track list
-   built 2026-09-27, D920; the canvas lines not yet.)* **Dragging a track boundary on
+   built 2026-09-27, D920; the canvas lines 2026-09-28, D921, drawn during an item's move as well.)*
+   **Dragging a track boundary on
    the canvas is later, not declined.** Declined for this step: draggable boundaries now, and the
    inspector alone. ⚠️ Core's manifest turns that feature off today — `default-features = false`, its
    comment naming *"the detailed-info reporting"* among what it drops — so step 4 enables it beside
@@ -22028,7 +22036,8 @@ one more thing an incremental `update` has to keep equal to `rebuild` — D898's
 for a question asked by a drop and, later, by the canvas's lines, not by every frame of every
 document. Derived and never saved, invariant 4 and D868, holds either way. ⚠️ **Read, not tested:
 "the last report wins"** where a grid is a flex item whose parent's pass lays it out fully more than
-once. `a_laid_grid_reports_its_tracks_and_areas` reads the first test's grid back: columns 20–120,
+once. *(Tested 2026-09-28, and the "more than once" found to come from inside a measure — the second
+amendment below.)* `a_laid_grid_reports_its_tracks_and_areas` reads the first test's grid back: columns 20–120,
 130–210 and 220–380, rows 20–70 and 80–120, the fourth item at column 1, row 2; a point in a gap goes
 to the nearer edge and one past the end to the end track.
 
@@ -22047,13 +22056,14 @@ one-track item grabbed at its centre the two agree; for a spanning item or an of
 not, and the span is the reason for the centre. And under `normal` a shape sits at its cell's start,
 so its centre is not the cell's. The session's reading of the ruling; nothing records it put back to
 the maintainer. *Revisit if they meant the pointer.* *(Kept as the centre 2026-09-27, the session's
-call under the maintainer's delegation — the amendment below.)*
+call under the maintainer's delegation — the first amendment below.)*
 
 **`build::layout_drop` is the canvas's one door** — a flex parent to `flex_reorder`, a grid parent to
 `grid_drop`. `canvas::flex_reorder_of` calls it, keeping flex's name while it serves both, so
 `move_preview_tx` adds the `SetLayoutItem` beside the drag's translation and the siblings reflow round
 the landing, and `move_tx` commits it alone — no `SetTransform`, D877's reason. The landing outline
 asks `flex_reorder_of` too, so it draws a grid item's new cell; read, not tested on the canvas.
+*(Painted and tested since, 2026-09-28 — D901's amendment.)*
 **Several items of one grid keep their cells**: `flex_reorder_many`'s `flow_index` answers `None`
 under a grid, so the multi-selection arm's `stays_in_flow` holds each in-flow item where it is. That
 is D913's recorded gap — what several grid items dragged together write — and it is **still not
@@ -22094,9 +22104,26 @@ where it was drawn under the hand — the reason the span paragraph above alread
 centre. For a one-track item grabbed at its centre the two readings agree. No code changed; the
 several-item gap closed the same day is D918's.
 
+**Amended 2026-09-28: "the last report wins" is tested, and "more than once" happens inside a
+measure.** `ondin-core/tests/grid.rs · a_grid_laid_out_twice_reports_its_last_layout`, committed as
+`f682119`: a grid `g`, `1fr 1fr` and `grow: 1`, in a hugging flex row `f` — `width: fit-content`,
+`grow: 1`, `align-items: baseline`, with a second item beside `g` — in a 600-wide flex row `o`. taffy's
+flex baseline step (`calculate_children_base_lines`) runs `RunMode::PerformLayout` on the items even
+while `o` is only *measuring* `f`, so `g` is fully laid at its own 100 wide first and at 580 later, once
+`f` has grown to 600; the report is the second, columns 0–290 and 290–580. **Flip run**,
+`set_detailed_grid_info` keeping the first report: fails on *"the columns of the layout that placed
+it"* with 0–50 and 50–100, the measure's — the predicted site. ⚠️ **The mechanism corrects the
+paragraph above as much as it confirms it**: *"taffy reporting nothing from a sizing-only run"* is true
+of the node's own run, but a parent's sizing run can lay a child out in full, and that is how a grid is
+laid more than once in one pass. The last report is still the full layout its parent places it by,
+which is why keeping the last is right; *do not "optimise" it to the first*. *(Recorded from the brief
+and a read of the test and its doc; the flip as the doc records it, not re-run, and taffy's baseline
+step as the brief reports it, not read.)*
+
 *(Built and tested 2026-09-27, uncommitted when recorded; **Keep**, the session's, built to D913's
 rulings — the several-item grid drop **open**, answered since by D918; D913's pointer read as the
-centre, kept by the amendment; and D913's *"derived into `Resolved`"* departed from, with a reason. ⚠️ Not verified in the GUI; gates not reported to this record. Recorded from the
+centre, kept by the first amendment; and D913's *"derived into `Resolved`"* departed from, with a
+reason; "the last report wins" tested since, the second. ⚠️ Not verified in the GUI; gates not reported to this record. Recorded from the
 brief and a read of `container.rs`' `is_replaced`, `LaidTracks`, `LaidGrid`, `laid_grid`, `FlexTree`
 and `set_detailed_grid_info`, `build.rs`' `flex_holds`, `resized_edges`, `resized_from_cross_start`,
 `grid_resize_held`, `sized_flex_item`, `flow_index`, `layout_drop`, `laid_grid` and `grid_drop`, core's
@@ -22241,6 +22268,7 @@ alone — one transaction, no `SetTransform`, D877's reason — and `move_previe
 every item's translation, the block under the hand and its siblings reflowing round the cells it will
 land in. ⚠️ **No landing outline**: `draw_flex_landing` draws for the one item `flex_reorder_of`
 answers for, so a grid block is outlined no more than a flex block is (D902's ⚠️). Read, not tested.
+*(Tested 2026-09-28, D901's amendment.)*
 
 **The evidence.** `ondin-core/tests/grid.rs · several_items_of_a_grid_move_as_a_block`: in the first
 test's grid, `a` and `b` drawn at (20, 20) and (130, 20), their union's centre at (85, 30), dragged
@@ -22409,12 +22437,14 @@ a grid, `grid-column` and `grid-row` are two CSS fields each, start and end, typ
 — `auto`, `2`, `-1`, `span 2` — under the CSS line's commit rule; then `justify-self` and
 `align-self`, whose *Auto* reads what the container's items row resolves to (*Auto · Normal*). The
 size limits and the resize receipt are both layouts'; the receipt names `justify self` too, with
-grid's *start* and *end*. **The mockup draws a line as a chevron combo**; a typed field was chosen
+grid's *start* and *end*. *(True only where `align-self` flipped in the same resize: a `justify-self`
+flip alone — a grid item resized across — made no receipt at all until D922.)* **The mockup draws a line as a chevron combo**; a typed field was chosen
 because a line is a number *or* a span, and one field that reads both is shorter than two that each
 read half. ⚠️ **Read, not tested: a line that does not parse is dropped without a word** — the field
 goes back to what it showed, where the track list's CSS line says why. ⚠️ **And the receipt names a
 grid item's flips without outlining its fields**, where D880's outlines flex's: `grid_item_rows` is
-not handed them.
+not handed them. *(Fixed by D922, which found the worse half: a `justify-self` flip alone was never
+a receipt.)*
 
 ⚠️ **`breadth_field`'s doc and the field disagree, and the disagreement is with D906.** The doc says
 a keyword stands in the digits *"with no unit (§15 D906's rule)"*; the field draws a `–` as its unit
@@ -22445,7 +22475,8 @@ above are repaired.** *(The session's.)*
   `flex_item_rows` a dead `let _`.
 
 ⚠️ **Read, not tested**: the refusal's lifetime and the drag's clean-up are not driven by a test; the
-refusal's first appearance is (`the_css_line_applies_on_enter_and_never_on_escape`). Gates green
+refusal's first appearance is (`the_css_line_applies_on_enter_and_never_on_escape`). *(Both driven
+since, 2026-09-28 — the second amendment below.)* Gates green
 after: fmt, `cargo test --workspace -j 4` (37 binaries), clippy over the workspace and per package,
 the doc gate, `check --release`. §5.3c's gestures sentence that still said a drop's start *"stopped
 at line 1"* was brought up to D918's amendment in the same pass.
@@ -22462,14 +22493,36 @@ reason shown and no undo step; **flip run**, `css_field` committing on a bare `l
 item's card has no *Flex grow*, its *Justify self* reads *Auto · Normal*, and `2` then `span 2` land
 as `2 / span 2`. In `layout/grid.rs`, `a_picked_kind_keeps_what_means_the_same` and
 `a_grip_drop_moves_the_entry_to_its_slot` pin the conversion and the reorder's arithmetic; **the grip
-drag itself is driven by no test**. In core, `tests/grid.rs`' `a_track_list_reads_and_writes_as_css`
+drag itself is driven by no test** *(driven since — the second amendment below)*. In core,
+`tests/grid.rs`' `a_track_list_reads_and_writes_as_css`
 — the mockup's own line, `200px 1fr minmax(100px, 2fr) repeat(3, auto)`, parsed to its four entries
 and written back the same — `what_is_not_a_track_list_is_an_error` and
 `a_placement_reads_and_writes_as_css`.
 
+**Amended 2026-09-28: the three things above left read and not tested are driven through the card**,
+in `layout.rs`' tests, committed as `f682119`. `a_track_rows_grip_drag_reorders_the_list` — the first
+of `100px 1fr`'s grips dragged below the second row's middle draws the insertion line while the button
+is held, and on release lands it last, `1fr 100px`, as one undo step, the line gone with the drag.
+**Flip run**, the list's `released |= grip.drag_stopped()` dropped, so the release never reaches the
+commit: fails on *"dropped last"* with the list as it was, predicted.
+`a_grip_drag_let_go_elsewhere_draws_nothing_later` is the first amendment's stale-drag clean-up — a
+drag begun on a grip, the selection changed to an item with the button still down and let go there,
+the frame selected again, and then a press on nothing draws no insertion line and reorders nothing.
+**Flip run**, the clean-up's `remove::<TrackDrag>` dropped: fails on *"no line follows a later
+press"*, the stale drag's line drawn under the new press, predicted — the symptom the first amendment
+read. `a_refusal_lasts_until_the_list_or_the_field_moves_on` is the first amendment's refusal
+lifetime — `100` refused,
+then a `+` changing the list takes the reason away; refused again, then the field clicked into, and it
+goes too. **Two flip runs**, each at its predicted site: `refusal` answering whatever was stored, its
+`about == shown` test dropped, fails on *"a `+` makes it about a list that is gone"*; `css_field`'s
+removal on `gained_focus` dropped fails on *"gone once the field is engaged again"*. *(Recorded from
+the brief and a read of the three tests and their docs; flips as the docs record them, not re-run.)*
+And one reading of this entry was wrong in a way none of its tests could see: the Item card's
+receipt for a grid item — D922.
+
 *(Built and tested 2026-09-27, uncommitted when recorded; **Keep**, the session's under the
 maintainer's delegation — the breadth field's dash ***Fix***, against D906, fixed the same day (the
-amendment above). ⚠️ **Not verified in the
+first amendment above). ⚠️ **Not verified in the
 GUI**: nothing in these cards has been seen on screen, and the maintainer is asked to look. Gates
 reported green: fmt, `cargo test --workspace -j 4` over 37 binaries, clippy over the workspace and
 per package, the doc gate and `check --release`. Recorded from the brief and a read of
@@ -22480,7 +22533,185 @@ per package, the doc gate and `check --release`. Recorded from the brief and a r
 re-run. `converted`'s doc and its test's, which called `%` a share yet sent it to the minimum and
 named a `minmax()`'s first size where the code takes its maximum, corrected. D878, D886, D913, D914
 and D915 amended; `architecture.md` §1, §5.3c, §9.3 and §9.4 amended; `roadmap.md` step 4's (3)
-struck)*
+struck. **Amended 2026-09-28**: the grip drag, the refusal's lifetime and the stale drag's clean-up
+driven through the card; the receipt paragraph's *"names `justify self` too"* corrected by D922;
+`roadmap.md`'s handoff items 3 and 4 narrowed)*
+
+**D921 — Grid's canvas track lines: every edge a 1px line, dashed where the template has it and
+dotted where only implicit tracks do, every gap a faint band, read off the preview, and drawn for a
+moving item's grid as well as a selected one. *The session's, under the maintainer's delegation of
+2026-09-28; container layout's step 4, the last of D913's four sub-steps — not rulings. Built and
+tested 2026-09-28, uncommitted when recorded; committed as `09df61c` with the amendment's Alt-drag
+fix.*** D913's fourth ruling took *"read-only track lines drawn on the canvas
+over a selected grid container"* and said no more. `roadmap.md`'s handoff marker for the sub-step left
+three questions the session's to settle and record: what the lines look like, whether implicit tracks
+draw differently from explicit ones, and whether they follow a gesture's preview — `build::laid_grid`
+reading the committed document, and *"the preview has no track report yet"*. Each is settled below,
+and the lines are drawn over one more container than the ruling names.
+
+**What they look like** (`OndinApp::draw_grid_tracks`, its arithmetic in `OndinApp::track_lines` and
+`struct TrackLines`). Every track edge is a 1px `color::SELECT_DIM` line across the other axis's run of
+tracks — the first track's start to the last track's end, or the container's own box where that axis
+has no tracks — and every gap between two neighbouring tracks is a band of `color::GRID_GAP` across the
+same run. `GRID_GAP` is new, `select_a(30)`: the selection hue, fainter than `SELECT_DIM`, because a gap
+is the one part of a grid nothing is laid in and the artwork under it should still read. **An edge two
+tracks share is drawn once**, so a grid with no gap has one line between its tracks rather than two on
+top of each other.
+
+**Explicit and implicit differ by the dash.** Dashed at 4/3 — the flex landing outline's dash (D877) —
+where a track of the template has the edge; dotted at 1.5/2.5 where only implicit tracks do,
+`LaidTracks::before` and `explicit` (D916) saying which tracks are which. **A shared edge is dashed**:
+the merge ORs the mark in, so the edge between the last explicit track and the first implicit one is
+dashed whichever of the two reached it first. ⚠️ **The OR is load-bearing** — a merge that keeps the
+first track's mark looks as right and dots the template's leading edge whenever an implicit track
+sits *before* it, which only an item at a negative line beyond the explicit grid makes; the third test
+below pins it at exactly that case.
+
+**They follow the preview.** `ondin_render::RenderOverrides::laid_grid(doc, id)` is new:
+`container::laid_grid` run over the renderer's private `PreviewView`, so it answers the layout the
+gesture is drawing, and with nothing patched it is `build::laid_grid`'s answer. That is the track
+report the handoff said the preview lacked, and it is the lines' one source. The container's box and
+world transform are read through the preview as well — `preview_local_box` and
+`preview_world_transform` — so **both halves move together**: D391's lesson, where the layout grids
+took a frame's size from the preview and its transform from the committed resolve, and a frame dragged
+away left its bands standing. A resize of the container re-lays an `fr` column against the box being
+dragged. ⚠️ **Only a resize is tested**; a move or a rotation of the container is read, not tested —
+D391's own warning is that a resize is the gesture a half-previewing overlay gets right.
+
+**Over which containers — past D913's ruling.** Every selected grid container, as ruled; **and, while a
+move (`Drag::Move`) is in flight, the parent of every selected layer, where that parent is a grid.** A
+grid drop writes a cell (D916), so the cells are what the drag is aimed at. *This is an extension of
+D913's "over a selected grid container", the session's and not ruled.* The parent is **not
+filtered**: an out-of-flow child of a grid, moved, draws its parent's lines although its drop writes
+no cell. A container hidden, itself or up its chain (`shown_visible`, which reads the preview's
+eye), draws nothing. Drawn after `draw_frame_labels` and before `draw_hover_outline` in `draw_canvas`: over the
+artwork, §5.3b's layout grids and the frame labels, under everything that answers the pointer.
+
+**Hidden with the selection's chrome.** `draw_grid_tracks` returns first thing where
+`canvas::chrome_hidden` is true — the pen holding a path, a path or an image being edited, and the
+inspector's value-edit hold (D128). So **scrubbing a grid's gap or a track in the inspector takes the
+lines away for the length of the scrub**, as it takes the selection box. The consistency is chosen:
+the lines are chrome, and D128 takes the chrome off the artwork being judged. **The obvious argument
+the other way is open for the maintainer's look**: during a scrub of a gap or a track the lines *are*
+the feedback, where the tracks are going being the thing judged. ⚠️ **And it makes a half of the
+preview-following unobservable today**: `RenderOverrides::laid_grid`'s doc names *"a gap being
+scrubbed"* beside a resize, and `draw_grid_tracks`' doc *"a resize or a scrub"*, as what re-lays the
+lines — but an ink-changing inspector edit engages the hold (`edit_note`), so while a gap is scrubbed
+nothing is drawn to re-lay. Only a canvas gesture shows it. *Revisit with the hold*: if the
+maintainer wants the lines through a scrub, the scrub half becomes true; if not, those two docs owe
+the correction. *(Both docs corrected the same day, ahead of the ruling — the amendment below.)*
+
+**The Alt-drag offset.** `draw_grid_tracks` shifts every subject's lines by `alt_clone_offset`, the
+vector the selection chrome rides an Alt-drag's copy by — right for a selected grid container being
+copied, whose copy is what the pointer carries. ⚠️ **Read, not tested, and probably wrong for the other
+subject**: during an Alt-drag of a grid *item*, the container is added as the item's parent and is not
+what is being copied — it stays where it is — yet its lines are shifted by the same vector, so they
+would slide off the container with the drag. *Fix* by offsetting only a subject the copy carries, or
+say here why not; measure first, since nothing has driven it. *(Fixed and tested the same day, before
+commit — the amendment below.)*
+
+**Cost.** `laid_grid` re-runs a layout pass from the container's layout root, per drawn container per
+frame, with no cache — D916's "derived when asked", now asked every frame. Only a selected grid, or a
+moving item's grid, is asked. *Not measured.*
+
+**The evidence**, `canvas.rs · grid_track_tests`, through `OndinApp::headless`:
+`a_selected_grid_draws_its_column_edges_and_gap` — a 400 × 200 frame with `100px 1fr` columns, gap 10
+and padding 20, draws nothing unselected, then lines at 20, 120, 130 and 380 of its own space and one
+band once selected; its item selected draws nothing at rest, and its container's four lines under a
+`Drag::Move`. `the_lines_follow_a_resize_preview` — the frame previewed at 600 wide moves the last line
+to 580; **flip run**, `draw_grid_tracks` reading `build::laid_grid` rather than the preview's, fails on
+*"the fr column's end follows the drag"* with the line still at 380, predicted.
+`track_lines_merge_edges_and_mark_the_explicit_ones` — `track_lines` alone, on rows with an implicit
+track before the template's two and one after, and columns with two gaps: each edge once, the explicit
+marks, the three bands; **flip run**, the merge keeping the first track's mark, fails on *"an edge an
+explicit track shares is dashed"* at y 20, predicted. **Not tested**: ~~the Alt-drag offset;~~ the
+`chrome_hidden` gate; dotted against dashed as drawn — only `track_lines`' flag is asserted, the test
+counting segments and bands, not dashes. *(The Alt-drag offset tested since — the amendment below.)*
+
+**Amended 2026-09-28, the same day, before commit: the Alt-drag offset fixed, the two docs corrected,
+and what a band covers measured.** *(The session's, under the same delegation.)*
+- **The offset rides only a subject in the selection.** `draw_grid_tracks` applies
+  `alt_clone_offset` to a container the selection holds — the one whose copy the pointer carries —
+  and none to a moving item's container, which stays where it is, its lines with it. The *Fix* above
+  is closed, and it was committed with the feature in `09df61c`, so the wrong offset never shipped.
+  `a_selected_grid_draws_its_column_edges_and_gap` gains the case: with `alt_clone` set to a copy
+  carried 50 right under `Drag::Move`, a selected item's container draws its lines exactly where it
+  drew them with no copy, and the container itself selected draws them 50 right. **Flip run**, the offset applied to every
+  subject as the first cut did: fails on *"an item's container stays"*, its lines 50 right — the
+  predicted site.
+- **The two docs that named a scrub are corrected**, the ruling still open.
+  `RenderOverrides::laid_grid`'s doc names only a resize as what re-lays the lines;
+  `draw_grid_tracks`' says an inspector scrub's edit hold hides them for its length, and that whether
+  they should stay up for one is this entry's open question.
+- **A band is the space between two tracks, not only the gap.** taffy places tracks apart by what
+  `justify-content` and `align-content` distribute as well as by the gap: measured, `50px 50px 50px`
+  in 400 under `space-between`, gap 10, lays at 0–50, 175–225 and 350–400, so the space between is
+  drawn as two 125-wide `GRID_GAP` bands. **Kept on purpose**: a band means *space between two tracks
+  where nothing is laid*, whatever made it, and `track_lines`' doc says so with the measurement. The
+  measurement is not a test.
+
+Gates green over `09df61c`: fmt, `cargo test --workspace` (2604 passed, 0 failed, 32 ignored), clippy
+over the workspace and per package (app, render, core), the doc gate and `check --release -p
+ondin-app` — not the release test run, not the GPU tests.
+
+*(Built and tested 2026-09-28, uncommitted when recorded, committed as `09df61c`; **Keep**, the
+session's under the maintainer's delegation of 2026-09-28 — the move's container an extension of
+D913's fourth ruling, the scrub's hiding **open** for the maintainer's look, and the Alt-drag offset on
+a moving item's container ***Fix***, read and not measured — ***Fixed*** the same day before commit,
+the amendment above. ⚠️ Not verified in the GUI; gates as the amendment reports them.
+Recorded from the brief and a read of `renderer.rs`' `laid_grid`, `canvas.rs`' `TrackLines`,
+`draw_grid_tracks`, `track_lines`, `chrome_hidden`, `shown_visible`, `alt_clone_offset`, the call in
+`draw_canvas` and `grid_track_tests`, `theme.rs`' `GRID_GAP`, `app.rs`' `edit_note` and
+`ChromeHold::holding`, and `container.rs`' `LaidTracks` and `laid_grid`; flips as the tests' docs
+record them, not re-run. D913 amended; `architecture.md` §1, §5.3c and §9.4 amended; `roadmap.md`
+step 4's (4) and the handoff's item 2 struck. The amendment from the brief and a read of
+`draw_grid_tracks` and `track_lines` with their docs, `laid_grid`'s doc and the Alt-drag case of the
+first test; the measurement, the gates and the flip as the brief reports them. `architecture.md`
+§5.3c amended again; `roadmap.md`'s handoff item 3 narrowed)*
+
+**D922 — A grid item resized across alone left no receipt, and a receipt naming a grid item's
+self-alignment outlined neither row. *The session's, under the maintainer's delegation of
+2026-09-28; a defect against D880's receipt as D920 carried it to grid. Found and fixed 2026-09-28,
+uncommitted when recorded.*** D880's receipt is the Item card's account of what a resize set on the
+user's behalf — the fields outlined in the accent, the flips named, an Undo that is the whole step —
+so that the card's values do not change under a drag with nothing to say why. D913's second ruling
+has a grid resize release a stretch by writing `justify-self` or `align-self` `start`, or `end` from
+the left or top edge (`build::grid_resize_held`, D916), and D920 recorded that the receipt *"names
+`justify self` too, with grid's* start *and* end*"*, with a ⚠️ that a grid item's fields were named and
+not outlined.
+
+**The receipt was never made for the axis grid adds.** `session::growth_held` builds
+`FlexReceipt::held` from the `SetLayoutItem`s the edit did not set itself, and counted a change of
+grow, shrink or `align-self` — flex's three, D880's list — and nothing else. A grid item whose width
+resize released a stretch changes `justify-self` alone, so it was **no receipt at all**: its *Justify
+self* row changed under the drag in silence, which is the one thing D880 exists to prevent. The words
+D920 added for it could appear only when `align-self` flipped in the same resize — an item stretched
+on both axes and resized on both — and even then `grid_item_rows` was handed no flags, so neither
+self-alignment row was outlined, where flex's `align-self` row always is (D880). **D920's *"names
+`justify self` too"* was true of that case only**, and its ⚠️ saw the missing outline and not the
+missing receipt. Found by building the item the handoff marker listed as named and left alone — *"a
+grid item's resize receipt names `justify self` but outlines no field (D920)"* — the truth being
+worse: under a width-only resize there was no receipt to name it.
+
+**The repair.** `growth_held` counts `justify_self` beside the three, its doc saying why the term is
+there. `grid_item_rows` takes `flipped: [bool; 2]`, justify then align, as `flex_item_rows` takes its
+three, and strokes each self-alignment row 1px in `color::ACCENT` while the receipt names it —
+`flex_item_rows`' treatment. `item_rows` hands it the justify and align flips it reads off the
+receipt.
+
+**The evidence**, `panels::layout::tests · a_grid_items_resize_receipt_outlines_the_row_it_names`:
+`grid_scene`'s `a` set to `justify-self: stretch` by hand, then committed 50 wide at its own height —
+the receipt holding `justify-self: start` is asserted as the fixture — reads *"Resizing set justify
+self to start."*, and its *Justify self* row is stroked in the accent and its *Align self* row is not.
+**Flip runs**, each at its predicted site: `grid_item_rows` handed `[false, false]` fails on *"the
+justify row outlined"*; `growth_held`'s `justify_self` term dropped — the code as it was — fails on *"a
+receipt"*.
+
+*(Found and fixed 2026-09-28, uncommitted when recorded; **Fixed**, the session's. ⚠️ Not verified in
+the GUI; gates not reported to this record. Recorded from the brief and a read of `session.rs`'
+`growth_held` and its doc, `layout.rs`' `item_rows` receipt and the test with its doc, and
+`layout/grid.rs`' `grid_item_rows` and its doc; flips as the test's doc records them, not re-run. D880
+and D920 amended; `architecture.md` §9.4 amended; `roadmap.md`'s handoff item 4 narrowed)*
 
 **D898 — The randomized `update`/`rebuild` guard authors layout inputs, and compares a laid group's
 box. *The session's; built 2026-09-27, committed as `da5b652`. Entry reconstructed 2026-09-27 from
@@ -22707,6 +22938,54 @@ instead fails at (−10, 20)–(20, 60), the predicted site.
 ⚠️ **Still owed**: what the canvas *draws* from the preview — the landing outline among it, whose
 filter is read and not tested (D877's amendment); a laid group's resize, tested at the transaction
 and never through the canvas; and a mixed selection's move, which since D902 no test reaches.
+*(All three tested since, 2026-09-28 — the amendment below.)*
+
+**Amended 2026-09-28: the three things still owed are tested, so flex owes no test.** Four more in
+`canvas::flex_canvas_tests`, uncommitted when recorded, each through `OndinApp::headless`.
+**What the canvas paints**, not what `landings()` records:
+`the_landing_outline_is_drawn_for_a_reorder_and_not_for_a_departure` and
+`a_block_draws_no_landing_outline_and_a_grid_item_its_cell` read the outline off the shapes a real
+held drag through `canvas_ui` paints — the 1.5-wide `color::SELECT` segments, which only
+`draw_flex_landing` draws. `a` dragged past `b` in the row is outlined at its slot after it, (90, 20)–
+(130, 50); `a` dragged wholly out of the frame outlines nothing, **while the preview still records a
+landing for it** — asserted, so the case is the one D877's amendment's filter exists for; a flex block
+and a grid block (D902, D918) outline nothing, a preview up in each; and one grid item dragged to
+column 3, row 2 outlines its cell, (200, 100)–(220, 120), the start of that cell under `normal` (D916).
+**One flip covers both tests**: `draw_flex_landing` outlining every landing the preview records, the
+`flex_reorder_of` gate dropped, fails on *"nothing for an item leaving its frame"* — the predicted site
+— and the block test on *"no outline for a flex block"*. ⚠️ **What this does not test is the
+`*id == reordered` filter.** `flex_reorder_of` answers `Some` only for a single outermost selected
+layer, and the landings a single-item preview records are that item's alone, so the filter selects
+from a list that holds nothing else; the early return on `flex_reorder_of` is what does the work, and
+the filter is unobservable today. *Do not read these tests as pinning it.*
+
+**A mixed selection's move**, `a_mixed_selection_moves_the_free_layer_and_keeps_the_item_in_flow` —
+D902's arm, reached by no test since the block: `a` and a free rect at (500, 300) on the canvas, moved
+30 right. The preview and the commit each carry the rect's `SetTransform` and not `a`'s; after the
+commit the rect is at 530, and `a` is still first in the row, drawn at (20, 20), its stored transform
+untouched. **Two flip runs**, each at its predicted site: `stays_in_flow` answering `false` fails on
+*"the preview leaves a in its slot"*; `move_tx`'s own `stays_in_flow` arm disabled, the preview's left
+alone, fails on *"and so does the commit"*.
+
+**A laid group's resize through the canvas**, `a_laid_group_resized_through_the_canvas_sets_its_box` —
+D875's amendment, tested at the transaction by `tools`' `a_group_with_a_layout_is_resized_by_its_box`:
+a flex row `Group` at (100, 100), padding 5, gap 10, two 20 × 20 rects, hugging 60 × 30, its
+bottom-right handle pressed and dragged to (220, 160) through `canvas_ui`. Mid-drag the preview is
+(100, 100)–(220, 160); on release the group is `Px(120)` × `Px(60)`, laid out at that size from the
+same top-left, its rects unscaled, one undo step. **Flip run**, `resize_layer`'s `laid_group` routing
+deleted: predicted to fail on *"the box"*, and **failed earlier**, on *"the preview follows the
+handle"* at (100, 100)–(200, 150) — the rects scaled and the group re-hugging them short of the handle
+before the release is reached. The prose records the site it actually failed at.
+
+⚠️ **A fixture trap, recorded in the helper's doc**: `flex_canvas_tests::fresh()` makes a context per
+held drag, because a second press on a context whose button is still down starts nothing. The first
+cut's fixture checks failed on it.
+
+*(Tested 2026-09-28, uncommitted when recorded; **Resolved**, the three owed items closed and the
+landing filter's own line named as unobservable. Recorded from the brief and a read of the four tests,
+their docs, `fresh`, `held`, `landing_outline` and `outlines`, and `canvas.rs`' `draw_flex_landing`
+and `flex_reorder_of`; flips as the tests' docs record them, not re-run. D875, D877, D902, D908, D916
+and D918 amended; `architecture.md` §9.4 amended; `roadmap.md`'s *owed* paragraph struck)*
 
 *(Tested 2026-09-27, committed as `91c4143` and `c27d9bc`; **Resolved**. Recorded from a read of
 `canvas.rs`' `flex_canvas_tests`, `rulers.rs`' test, `layout.rs`' `Panel` and both scrub tests,
@@ -22750,13 +23029,14 @@ in the drag and on release (`stays_in_flow`), the rest moving.
 
 ⚠️ **The block gets no landing outline.** `draw_flex_landing` draws only the item `flex_reorder_of`
 answers for, which is one layer; the preview still records a landing for each dragged item. Read, not
-tested — no test reaches the canvas's drawing.
+tested — no test reaches the canvas's drawing. *(Tested 2026-09-28, D901's amendment.)*
 
 ⚠️ **The mixed selection's arm is now reached by no test.** `canvas::flex_drag_tests ·
 moving_a_flex_item_commits_a_reorder_and_nothing_else` asserted that two items kept their slots, and
 now asserts the block; its doc says the flips recorded against the old rule — the multi-item arm and
 `move_preview_tx`'s `retain` — went with it. Both are still live for a mixed selection, and no test in
-`ondin-app` calls `move_tx` or `move_preview_tx` on one.
+`ondin-app` calls `move_tx` or `move_preview_tx` on one. *(One does since, 2026-09-28, both flips
+biting — D901's amendment.)*
 
 **The evidence.** `tests/flex.rs · several_items_dragged_together_reorder_as_a_block`: a row of four
 20-wide rects at x 20, 50, 80 and 110; `a` and `c`, not adjacent, dragged 80 right land after `d` as
@@ -22777,7 +23057,8 @@ landing outline and the mixed arm's test open. ⚠️ Not verified in the GUI. R
 `build.rs`' `flex_reorder`, `flex_reorder_many` and `flow_index`, `canvas.rs`' `flex_reorder_of`,
 `flex_block_reorder_of`, `move_preview_tx`, `stays_in_flow`, `move_tx` and `draw_flex_landing`, the
 three tests and their docs, and the two commits' messages. D877 amended; `architecture.md` §5.3c and
-§9.4 amended)*
+§9.4 amended. **Amended 2026-09-28**: the landing outline and the mixed arm both tested, D901's
+amendment)*
 
 **D903 — The multi-selection Transform card's X and Y are inert while any member is placed by its
 container. *The session's, carrying the maintainer's D882 to the multi card. Fixed and tested
@@ -23077,7 +23358,8 @@ the slot by the edge snap the original premise named. Found by reading `snap_rec
 fixture; the test now turns shapes off, and its doc says why. *Do not turn them back on to make the
 test "realistic"*: it would still pass, and prove the other route. And it reads the landing the
 outline is drawn from, not the outline: `draw_flex_landing`'s one-item filter and its painting are
-still D877's amendment's *read, not tested*.
+still D877's amendment's *read, not tested*. *(The painting tested since, 2026-09-28 — D901's
+amendment.)*
 
 *(Measured and fixed 2026-09-27, uncommitted when recorded; **Fixed**; driven through the canvas the
 same day. ⚠️ Not verified in the GUI. Recorded from the brief and a read of `renderer.rs`' `landing_of`

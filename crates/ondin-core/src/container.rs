@@ -1649,7 +1649,11 @@ struct FlexTree<'v> {
     measured: rustc_hash::FxHashMap<(usize, u32), taffy::Size<f32>>,
     /// The grid container whose tracks this pass was asked for ([`laid_grid`]),
     /// and what taffy reported for it — kept from its **last** full layout, which
-    /// is the one its parent places it by.
+    /// is the one its parent places it by. ⚠️ **Not the first**: a parent's
+    /// *measure* can lay the grid out in full at another size — taffy's flex
+    /// baseline step does, for an item of a hugging row — so the first report can
+    /// be of a width the grid never has (`tests/grid.rs`'
+    /// `a_grid_laid_out_twice_reports_its_last_layout`, §15 D916's amendment).
     want: Option<crate::NodeId>,
     grid: Option<taffy::DetailedGridInfo<String>>,
 }

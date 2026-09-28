@@ -9797,6 +9797,10 @@ impl OndinApp {
             return;
         };
         let (_, _, ov) = self.session.render_inputs();
+        // ⚠️ The filter is defensive and nothing can observe it today: a single
+        // outermost layer is all `flex_reorder_of` answers for, and its landing is
+        // the only one such a preview records. The gate above is what the tests
+        // pin (§15 D901's amendment).
         for (_, world, bx) in ov.landings().iter().filter(|(id, _, _)| *id == reordered) {
             let corners = [
                 Point::new(bx.x0, bx.y0),

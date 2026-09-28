@@ -921,6 +921,11 @@ impl OndinApp {
     /// The Item card's rows for an item of a grid (§15 D920): its lines, then
     /// `justify-self` and `align-self`, each `auto` reading what the container's
     /// items row resolves to. Where flex has grow, shrink and basis.
+    ///
+    /// `flipped` is justify, align: the two self-alignments the last resize's
+    /// receipt names, each accented while it does, as flex's are (§15 D880) —
+    /// the receipt said *"justify self"* over a row nothing marked until §15
+    /// D922.
     pub(super) fn grid_item_rows(
         &mut self,
         ui: &mut egui::Ui,
@@ -928,6 +933,7 @@ impl OndinApp {
         items: &[LayoutItem],
         parent: &Grid,
         full: f32,
+        flipped: [bool; 2],
     ) {
         let gap = ui::CARD_COL_GAP;
         let side = ui::CONTROL_H;
@@ -1001,10 +1007,11 @@ impl OndinApp {
         }
 
         // --- the self-alignments ----------------------------------------------------
-        for (salt, label, across) in [
-            ("grid-justify-self", "Justify self", true),
-            ("grid-align-self", "Align self", false),
+        for (salt, label, across, flipped) in [
+            ("grid-justify-self", "Justify self", true, flipped[0]),
+            ("grid-align-self", "Align self", false, flipped[1]),
         ] {
+            let at = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(full, side));
             let own = |i: &LayoutItem| if across { i.justify_self } else { i.align_self };
             let inherited = if across {
                 parent.justify_items
@@ -1037,6 +1044,14 @@ impl OndinApp {
                     }
                 });
                 self.commit_edit(tx);
+            }
+            if flipped {
+                ui.painter().rect_stroke(
+                    at,
+                    egui::CornerRadius::same(ui::BUTTON_R),
+                    egui::Stroke::new(1.0, color::ACCENT),
+                    egui::StrokeKind::Inside,
+                );
             }
         }
     }

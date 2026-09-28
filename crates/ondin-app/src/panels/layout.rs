@@ -1718,7 +1718,14 @@ impl OndinApp {
         // item has grow, shrink, basis and `align-self`** (§15 D920); the limits
         // and the receipt below are both layouts'.
         if let Some(grid) = &parent_grid {
-            self.grid_item_rows(ui, subjects, &items, grid, full);
+            self.grid_item_rows(
+                ui,
+                subjects,
+                &items,
+                grid,
+                full,
+                [flipped_justify, flipped_align],
+            );
         } else {
             self.flex_item_rows(
                 ui,
@@ -3342,5 +3349,65 @@ mod tests {
             p.runs(WHY).is_empty(),
             "gone once the field is engaged again"
         );
+    }
+
+    /// **A grid item's resize receipt outlines the row it names** (§15 D922) — `a`
+    /// set to `justify-self: stretch` by hand, then resized narrower: the
+    /// commit holds it with `start`, the receipt says *"justify self"*, and the
+    /// Item card strokes the Justify self row in the accent and not the Align
+    /// self row. Until D922 there was **no receipt at all** — `growth_held` read
+    /// grow, shrink and `align-self` and not `justify-self`, the one grid holds a
+    /// width with — and the row was not outlined had there been one; flex's
+    /// align-self row always was (§15 D880).
+    ///
+    /// **Flip runs**: `grid_item_rows` handed `[false, false]` fails on *"the
+    /// justify row outlined"*; `growth_held`'s `justify_self` term dropped, as
+    /// the code was, fails on *"a receipt"* — each the predicted site.
+    #[test]
+    fn a_grid_items_resize_receipt_outlines_the_row_it_names() {
+        let mut s = grid_scene();
+        set_item(&mut s.app, s.a, |i| {
+            i.justify_self = Some(AlignItems::Stretch)
+        });
+        let tall = drawn(&s.app, s.a).height();
+        s.app
+            .session
+            .commit(Transaction(vec![Operation::SetGeometry {
+                id: s.a,
+                geometry: GeometryPatch::Size(Size::new(50.0, tall)),
+            }]));
+        let receipt = s.app.session.flex_receipt().expect("a receipt");
+        assert_eq!(
+            receipt.held[0].2.justify_self,
+            Some(AlignItems::Start),
+            "the fixture: justify-self held"
+        );
+        let a = s.a;
+        let mut p = Panel::new(s.app, OndinApp::inspector_item);
+        p.app.session.selection.set(vec![a]);
+        let shapes = p.shapes();
+        let row = |head: &str| {
+            shapes
+                .iter()
+                .find_map(|cs| match &cs.shape {
+                    egui::epaint::Shape::Text(t) if t.galley.text().starts_with(head) => {
+                        Some(t.galley.rect.translate(t.pos.to_vec2()).center())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("no {head} row"))
+        };
+        let outlined = |at: egui::Pos2| {
+            shapes.iter().any(|cs| {
+                matches!(
+                    &cs.shape,
+                    egui::epaint::Shape::Rect(r)
+                        if r.stroke.color == color::ACCENT && r.rect.contains(at)
+                )
+            })
+        };
+        p.run("Resizing set justify self to start.");
+        assert!(outlined(row("Justify self")), "the justify row outlined");
+        assert!(!outlined(row("Align self")), "and not the align row");
     }
 }

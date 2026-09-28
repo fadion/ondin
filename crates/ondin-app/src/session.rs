@@ -1235,9 +1235,15 @@ impl EditorSession {
 
     /// The items whose growth `tx` stops that the edit did not set itself —
     /// [`FlexReceipt::held`], read off the transaction `keep_flex_sizes` handed
-    /// back, before it is applied. Only `flex-grow`, `flex-shrink` and
-    /// `align-self` count: a size keyword going back to `auto` is the resize
-    /// itself, shown in the Transform card's W and H (§15 D879).
+    /// back, before it is applied. Only `flex-grow`, `flex-shrink`, `align-self`
+    /// and a grid item's `justify-self` count: a size keyword going back to
+    /// `auto` is the resize itself, shown in the Transform card's W and H (§15
+    /// D879).
+    ///
+    /// ⚠️ **`justify-self` was missing until §15 D922**, so a grid item resized
+    /// across alone — the one axis a grid holds with it (§15 D913's second
+    /// ruling) — had its stretch released with no receipt at all, and the Item
+    /// card's words for it could only appear beside an `align-self` flip.
     fn growth_held(
         &self,
         tx: &Transaction,
@@ -1253,7 +1259,8 @@ impl EditorSession {
                     let was = *self.doc.get(*id)?.item();
                     (was.grow != item.grow
                         || was.shrink != item.shrink
-                        || was.align_self != item.align_self)
+                        || was.align_self != item.align_self
+                        || was.justify_self != item.justify_self)
                         .then_some((*id, was, *item))
                 }
                 _ => None,

@@ -23817,4 +23817,339 @@ mod flex_canvas_tests {
         }
         (app, a, b)
     }
+
+    /// A context with the theme in. **One per drag `held` leaves held**: a
+    /// second press on a context whose button is still down starts nothing.
+    fn fresh() -> egui::Context {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        ctx
+    }
+
+    /// Press at world `from` and drag to `to` in eight steps, **the button still
+    /// down** — what the whole canvas painted on the last step.
+    fn held(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        from: Point,
+        to: Point,
+    ) -> Vec<egui::epaint::ClippedShape> {
+        let start = app.to_screen(from, RECT, PPP);
+        frame(ctx, app, vec![egui::Event::PointerMoved(start)]);
+        frame(ctx, app, vec![button(start, true)]);
+        let mut shapes = Vec::new();
+        for step in 1..=8 {
+            let p = app.to_screen(from + (to - from) * (step as f64 / 8.0), RECT, PPP);
+            let time = ctx.input(|i| i.time) + 0.1;
+            shapes = ctx
+                .run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(RECT),
+                        time: Some(time),
+                        events: vec![egui::Event::PointerMoved(p)],
+                        ..Default::default()
+                    },
+                    |ui| app.canvas_ui(ui),
+                )
+                .shapes;
+        }
+        shapes
+    }
+
+    /// The screen box of the landing outline in `shapes` — the union of
+    /// `draw_flex_landing`'s dashes, the only 1.5-wide `SELECT` segments the
+    /// canvas draws — or `None` where it drew none.
+    fn landing_outline(shapes: &[egui::epaint::ClippedShape]) -> Option<egui::Rect> {
+        shapes
+            .iter()
+            .filter_map(|cs| match &cs.shape {
+                egui::Shape::LineSegment { points, stroke }
+                    if stroke.color == color::SELECT && stroke.width == 1.5 =>
+                {
+                    Some(egui::Rect::from_two_pos(points[0], points[1]))
+                }
+                _ => None,
+            })
+            .reduce(|a, b| a.union(b))
+    }
+
+    /// Whether `outline` is the world box `x0, y0, x1, y1` on screen.
+    fn outlines(app: &OndinApp, outline: Option<egui::Rect>, [x0, y0, x1, y1]: [f64; 4]) -> bool {
+        let want = egui::Rect::from_two_pos(
+            app.to_screen(Point::new(x0, y0), RECT, PPP),
+            app.to_screen(Point::new(x1, y1), RECT, PPP),
+        );
+        outline.is_some_and(|o| {
+            (o.min - want.min).length() < 0.01 && (o.max - want.max).length() < 0.01
+        })
+    }
+
+    /// **The canvas draws the landing outline for one item staying in its row,
+    /// and nothing for one leaving its frame** (§15 D877's amendment, whose
+    /// one-item rule was read and not tested — the tests above assert the
+    /// preview's `landings`, not what the canvas paints). `a` dragged past `b`
+    /// is outlined at its slot after it, (90, 20)–(130, 50); `a` dragged out of
+    /// the frame is still laid out there by the preview, which records a
+    /// landing for it, and the canvas outlines none.
+    ///
+    /// **Flip run**, `draw_flex_landing` outlining every landing the preview
+    /// records, `flex_reorder_of`'s gate dropped: fails on *"nothing for an item
+    /// leaving its frame"* — the predicted site — and the block test below on
+    /// its own outline.
+    #[test]
+    fn the_landing_outline_is_drawn_for_a_reorder_and_not_for_a_departure() {
+        let ctx = fresh();
+        let (mut app, _row, _a, _b) = app_with_a_row(&ctx);
+        let shapes = held(
+            &ctx,
+            &mut app,
+            Point::new(40.0, 35.0),
+            Point::new(125.0, 35.0),
+        );
+        assert!(
+            outlines(&app, landing_outline(&shapes), [90.0, 20.0, 130.0, 50.0]),
+            "a's slot after b: {:?}",
+            landing_outline(&shapes)
+        );
+
+        // Past the frame's right edge, `a` wholly outside it.
+        let ctx = fresh();
+        let (mut app, _row, a, _b) = app_with_a_row(&ctx);
+        let shapes = held(
+            &ctx,
+            &mut app,
+            Point::new(40.0, 35.0),
+            Point::new(520.0, 35.0),
+        );
+        let (_, _, ov) = app.session.render_inputs();
+        assert!(
+            ov.landings().iter().any(|(id, _, _)| *id == a),
+            "the fixture: the preview still lays a out in the row"
+        );
+        assert_eq!(
+            landing_outline(&shapes),
+            None,
+            "nothing for an item leaving its frame"
+        );
+    }
+
+    /// **A block of items draws no landing outline, in a flex row or in a grid**
+    /// (§15 D902, D918 — read and not tested), and **one grid item draws its
+    /// cell**: `a` dragged to column 3, row 2 is outlined at (200, 100)–(220,
+    /// 120), the start of that cell under `normal`; `a` and `b` dragged together
+    /// in the row, and in the grid, outline nothing while the preview is up.
+    ///
+    /// **Flip run**: the one above's, which fails here on *"no outline for a
+    /// flex block"*.
+    #[test]
+    fn a_block_draws_no_landing_outline_and_a_grid_item_its_cell() {
+        let ctx = fresh();
+        let (mut app, _a, _b) = app_with_a_grid(&ctx);
+        let shapes = held(
+            &ctx,
+            &mut app,
+            Point::new(10.0, 10.0),
+            Point::new(250.0, 150.0),
+        );
+        assert!(
+            outlines(&app, landing_outline(&shapes), [200.0, 100.0, 220.0, 120.0]),
+            "a's cell: {:?}",
+            landing_outline(&shapes)
+        );
+
+        let ctx = fresh();
+        let (mut app, _row, a, b) = app_with_a_row(&ctx);
+        app.session.selection.set(vec![a, b]);
+        let shapes = held(
+            &ctx,
+            &mut app,
+            Point::new(40.0, 35.0),
+            Point::new(160.0, 35.0),
+        );
+        assert!(app.session.has_gesture_preview(), "the fixture: a drag");
+        assert_eq!(
+            landing_outline(&shapes),
+            None,
+            "no outline for a flex block"
+        );
+
+        let ctx = fresh();
+        let (mut app, a, b) = app_with_a_grid(&ctx);
+        app.session.selection.set(vec![a, b]);
+        let shapes = held(
+            &ctx,
+            &mut app,
+            Point::new(10.0, 10.0),
+            Point::new(250.0, 150.0),
+        );
+        assert!(app.session.has_gesture_preview(), "the fixture: a drag");
+        assert_eq!(landing_outline(&shapes), None, "and none for a grid block");
+    }
+
+    /// **A mixed selection's move leaves the in-flow item in its slot and moves
+    /// the free layer**, in the preview and in the commit (`stays_in_flow`, §15
+    /// D877) — the arm no test had reached since several items of one container
+    /// became a block (§15 D902). `a` with a rect on the canvas at (500, 300),
+    /// moved 30 right: the preview carries the rect and not `a`; the commit
+    /// stores the rect at 530 and leaves `a` drawn at (20, 20), first in the row,
+    /// its stored transform untouched.
+    ///
+    /// **Flip runs**: `stays_in_flow` answering `false` fails on *"the preview
+    /// leaves a in its slot"*; `move_tx`'s own `stays_in_flow` arm disabled, the
+    /// preview's left alone, fails on *"and so does the commit"* — each the
+    /// predicted site.
+    #[test]
+    fn a_mixed_selection_moves_the_free_layer_and_keeps_the_item_in_flow() {
+        let ctx = fresh();
+        let (mut app, row, a, _b) = app_with_a_row(&ctx);
+        let free = NodeId::from_wire("ae:99").expect("an id past the row's");
+        app.session.commit(Transaction(vec![Operation::CreateNode {
+            id: free,
+            parent: app.session.doc.root(),
+            index: 1,
+            kind: NodeKind::Rect {
+                size: Size::new(20.0, 20.0),
+                corner_radii: Default::default(),
+            },
+            transform: Some(Affine::translate((500.0, 300.0))),
+            name: None,
+        }]));
+        app.session.selection.set(vec![a, free]);
+        let delta = Vec2::new(30.0, 0.0);
+        let moved = |tx: &Transaction| -> Vec<NodeId> {
+            tx.0.iter()
+                .filter_map(|op| match op {
+                    Operation::SetTransform { id, .. } => Some(*id),
+                    _ => None,
+                })
+                .collect()
+        };
+        let preview = app.move_preview_tx(delta).expect("a preview");
+        assert_eq!(
+            moved(&preview),
+            vec![free],
+            "the preview leaves a in its slot"
+        );
+        let tx = app.move_tx(delta);
+        assert_eq!(moved(&tx), vec![free], "and so does the commit");
+        app.session.commit(tx);
+        assert_eq!(
+            app.session.doc.get(free).unwrap().transform(),
+            Affine::translate((530.0, 300.0))
+        );
+        assert_eq!(app.session.doc.get(row).unwrap().children()[0], a);
+        assert_eq!(
+            app.session.resolved.world_bounds(a).unwrap().origin(),
+            Point::new(20.0, 20.0),
+            "a drawn in its slot"
+        );
+        assert_eq!(
+            app.session.doc.get(a).unwrap().transform(),
+            Affine::translate((300.0, 150.0))
+        );
+    }
+
+    /// **A laid group resized by its handle through the canvas sets its box**
+    /// (§15 D875's amendment, tested at the transaction by `tools`'
+    /// `a_group_with_a_layout_is_resized_by_its_box` and never driven until now):
+    /// a flex row `Group` at (100, 100) — padding 5, gap 10, two 20 × 20 rects, so
+    /// it hugs to 60 × 30 — selected, and its bottom-right handle pressed and
+    /// dragged to (220, 160) through `canvas_ui`. Mid-drag the preview draws the
+    /// box following the handle; on release it is `120px` × `60px`, laid out at
+    /// that size from the same top-left, its rects unscaled, one undo step.
+    ///
+    /// **Flip run**, `resize_layer`'s `laid_group` routing deleted, the group
+    /// scaled as a plain one: predicted to fail on *"the box"* at `(Auto,
+    /// Auto)`, and failed earlier, on *"the preview follows the handle"* — the
+    /// rects scaled and the group re-hugging them to (100, 100)–(200, 150),
+    /// short of the handle, before the release is ever reached.
+    #[test]
+    fn a_laid_group_resized_through_the_canvas_sets_its_box() {
+        use ondin_core::container::Dimension;
+        let ctx = fresh();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0xAF);
+        let root = ids.mint();
+        let (group, a, b) = (ids.mint(), ids.mint(), ids.mint());
+        let square = |id, index| Operation::CreateNode {
+            id,
+            parent: group,
+            index,
+            kind: NodeKind::Rect {
+                size: Size::new(20.0, 20.0),
+                corner_radii: Default::default(),
+            },
+            transform: None,
+            name: None,
+        };
+        let mut doc = Document::new(root);
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: group,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Group,
+                transform: Some(Affine::translate((100.0, 100.0))),
+                name: None,
+            },
+            square(a, 0),
+            square(b, 1),
+            Operation::SetDisplay {
+                id: group,
+                display: Some(Display::Flex(Flex {
+                    column_gap: 10.0,
+                    padding: [5.0; 4],
+                    ..Default::default()
+                })),
+            },
+        ]))
+        .expect("the group");
+        app.session.adopt_document(doc, None);
+        app.session.camera.center = Point::new(200.0, 100.0);
+        app.session.camera.zoom = 1.0;
+        app.session.selection.set(vec![group]);
+        for _ in 0..2 {
+            frame(&ctx, &mut app, Vec::new());
+        }
+        assert_eq!(
+            app.session.resolved.world_bounds(group),
+            Some(ondin_core::kurbo::Rect::new(100.0, 100.0, 160.0, 130.0)),
+            "the fixture hugs"
+        );
+        let depth = app.session.history.undo_depth();
+        let (from, to) = (Point::new(160.0, 130.0), Point::new(220.0, 160.0));
+        let start = app.to_screen(from, RECT, PPP);
+        frame(&ctx, &mut app, vec![egui::Event::PointerMoved(start)]);
+        frame(&ctx, &mut app, vec![button(start, true)]);
+        for step in 1..=8 {
+            let w = from + (to - from) * (step as f64 / 8.0);
+            let p = app.to_screen(w, RECT, PPP);
+            frame(&ctx, &mut app, vec![egui::Event::PointerMoved(p)]);
+        }
+        let seen = app.session.preview_world_bounds(group).expect("previewed");
+        assert_eq!(
+            (seen.x0, seen.y0, seen.x1, seen.y1),
+            (100.0, 100.0, 220.0, 160.0),
+            "the preview follows the handle"
+        );
+        let end = app.to_screen(to, RECT, PPP);
+        frame(&ctx, &mut app, vec![button(end, false)]);
+        frame(&ctx, &mut app, Vec::new());
+        let item = *app.session.doc.get(group).unwrap().item();
+        assert_eq!(
+            (item.width, item.height),
+            (Dimension::Px(120.0), Dimension::Px(60.0)),
+            "the box"
+        );
+        assert_eq!(
+            app.session.resolved.world_bounds(group),
+            Some(ondin_core::kurbo::Rect::new(100.0, 100.0, 220.0, 160.0)),
+            "laid out at it, from the same top-left"
+        );
+        let NodeKind::Rect { size, .. } = app.session.doc.get(a).unwrap().kind() else {
+            panic!("a rect");
+        };
+        assert_eq!(*size, Size::new(20.0, 20.0), "the rects unscaled");
+        assert_eq!(app.session.history.undo_depth(), depth + 1, "one step");
+    }
 }

@@ -9858,7 +9858,7 @@ impl OndinApp {
     /// microsecond an item, on a canvas that repaints only on input. A cache
     /// would need a key that moves with every change, and the session's revision
     /// does not move on undo (§15 D616's amendment), so it is the one thing here
-    /// that could draw stale lines (§15 D921's amendment).
+    /// that could draw stale lines (§15 D921's second amendment).
     fn draw_grid_tracks(&self, painter: &egui::Painter, rect: egui::Rect, ppp: f32) {
         if self.editing_in_place() {
             return;

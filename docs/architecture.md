@@ -1402,13 +1402,16 @@ record for both layouts**: `LayoutItem` carries `justify_self`, `grid_column` an
 flex's fields, each read under the parent's `display`, so lines written under flex take effect when
 the parent turns to grid. **What CSS refuses, the operations refuse** (`OpError::BadLayout`: a
 negative track, an `fr` minimum, `repeat(0, …)` or an empty repeat, line 0, `span 0`, and more than
-`container::MAX_TRACKS` — a thousand — explicit tracks on an axis, CSS letting a user agent clamp an
-overly large grid, §15 D919); a file carrying
+`container::MAX_TEMPLATE_TRACKS` — a thousand — explicit tracks on an axis, CSS letting a user agent
+clamp an overly large grid, §15 D919; not `layout::MAX_TRACKS`, the layout grids' cap, whose name it
+shared until §15 D924); a file carrying
 one opens, the value kept as written and read around by `container::style_of`, its template laid to
 the cap. `lay_out` is one
 `FlexTree` pass still, `compute_child_layout` sending a grid container to taffy's grid algorithm.
 ⚠️ **taffy's grid reads `baseline` as `start`** (its own *TODO*), so grid's cards do not offer it and
-the model keeps it for flex (§15 D914, D919). Grid's values have CSS text in core — `tracks_css` and
+the model keeps it for flex (§15 D914, D919); a grid that holds it anyway — from flex, or a file —
+reads *Baseline · Start* with Start's picture, on a lit row `glyph_combo` adds for a held value its
+list does not offer (§15 D923). Grid's values have CSS text in core — `tracks_css` and
 `parse_tracks`, `placement_css` and `parse_placement` — for the cards' typed fields; the parser reads,
 and `Grid::is_valid` judges at the operation (§15 D920).
 
@@ -1462,10 +1465,18 @@ overlay of §15 D391. **Drawn for every selected grid container, and during a mo
 layer's parent that is a grid**, since the drop writes a cell (§15 D916); not for a hidden container.
 Under an Alt-drag a selected container's lines ride the copy the pointer carries, and a moving item's
 container, which is not being copied, keeps its lines where it is.
-**Hidden wherever `canvas::chrome_hidden` hides the selection's chrome** — the inspector's edit hold
-(§15 D128) included, so a gap scrubbed in the inspector takes the lines away for the length of the
-scrub; open for the maintainer's look. Over the artwork, the layout grids and the frame labels, under
-the hover outline and the selection chrome.
+**Hidden wherever `canvas::chrome_hidden` hides the selection's chrome, but for one case** (§15
+D925): the pen, a path or an image edited in place (`canvas::editing_in_place`) hide them, and under
+the inspector's edit hold (§15 D128) a container's lines are hidden only while the preview restyles
+that container without touching its layout — a fill, an opacity. A gap, padding or track scrubbed in
+the inspector is a `SetDisplay` in the preview and keeps them, the lines being what is judged.
+⚠️ **Asked of the preview, not "shown only for a layout edit"**: the hold outlives the preview by its
+timeout after release, and that spelling blinked the lines off between a gap scrub's release and the
+hold's end; the cost is that after a fill scrub the lines are back a moment before the selection
+outline. Over the artwork, the layout grids and the frame labels, under the hover outline and the
+selection chrome. **Uncached**: each drawn container's layout pass re-runs every frame — measured at
+135 µs for 100 items and 1.0 ms for 1000 in release — because a cache would need a key that moves on
+undo, which the session's revision does not (§15 D921's second amendment, D616's).
 
 ### 5.4 Text node
 
@@ -8512,7 +8523,8 @@ with its track count and a `+`, a row per entry — a grip, a kind menu leading 
 fields, a cross — and under it the whole template as a CSS line, which applies on a defocus that
 commits and never on `Escape` and shows a parse error or a refused list in red; `justify-content`,
 `justify-items`, `align-items` and `align-content`, named *Start* and *End* rather than *Flex start*,
-the items rows leading with *Normal* (§15 D915) and none offering `baseline` (§15 D919); the gaps,
+the items rows leading with *Normal* (§15 D915) and none offering `baseline` (§15 D919) — a held
+one reading *Baseline · Start* on a lit row of its own (§15 D923); the gaps,
 columns first; and the padding. Switching between flex and grid keeps the padding and the gaps.
 *Item* has, in a flex container, grow and shrink, basis and `align-self`; in a grid, `grid-column` and
 `grid-row` typed as CSS, start and end, and `justify-self` and `align-self`; each self-alignment *Auto

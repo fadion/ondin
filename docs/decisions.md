@@ -1294,10 +1294,13 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D916** — **Grid's preview and gestures: a resize holds on both axes, a drop writes the lines of its new cell, and a laid grid's tracks are derived when asked.** Step 4's second sub-step, built to D913's rulings. `build::grid_resize_held`, under `flex_holds` and `sized_flex_item`, turns a stretch released by a resize into `start`, or `end` from the left or top edge (`build::resized_edges`, which flex's D905 reading now shares); `build::grid_drop` moves the area by the tracks the item's centre crossed, span and spelling kept, nothing in its own cell; `build::layout_drop` is the canvas's one door. `container::laid_grid` re-runs the pass under taffy's `detailed_layout_info` — **nothing stored in `Resolved`**, a departure from D913's wording. The preview needed no change and is tested now. Several grid items dragged kept their cells, unruled, until D918; D913's *"cell under the pointer"* is read as the centre's — kept, amended 2026-09-27: D877's reading, and a pointer reading would snap a spanning or off-centre grab on release. `laid_grid` keeps a grid's last report — tested 2026-09-28, amended: a parent's measure can lay a grid out in full, taffy's flex baseline step, so the first report is the measure's. *(Built and tested 2026-09-27, uncommitted when recorded; **Keep**, the session's. Tests in `tests/grid.rs`, `tests/overrides.rs` and `canvas.rs`'s `flex_canvas_tests`, each flip at its predicted site. D913, D914 amended; §2, §3, §5.3c, §9.4; `roadmap.md` step 4's (2) struck)*
 - **D917** — **An auto-width text stretched narrower than its line wrapped, in flex and in grid; `container::flexed_text` now floors the fixed box at the line's width.** D875's ruling (a) says auto width never wraps, and `flexed_text` made a stretched label `Fixed` at the size handed back, on the claim — D875's and the function's doc — that such a box *"cannot wrap it, a grown box being at least as wide as its line"*: true only of a stretch that widens it. A cross-axis stretch, or a grid cell's, can give less. Measured before the repair, an `Inter` 12 label 161.65 wide on one line was laid `Fixed(30 × 100)` in a 30px grid column and `Fixed(30 × 14.40625)` in a 30-wide flex column. **Flex had it first**; grid inherited it through D913's first ruling, and under grid's `normal` text stretches (D915), so there it was the default case. The box keeps the line's width and overflows its slot from the start, `white-space: nowrap`; height, `AutoHeight` and `Fixed` unchanged. Amended the same day: a text pinned on both edges still wraps (D874), on purpose — pinning is the author choosing a width, a container's stretch is not; and the unreadable-box arm is unreachable. *(Found and fixed 2026-09-27, uncommitted when recorded; **Fixed**, the session's, a defect against D875's ruling (a) and D913's first ruling. Test `an_auto_width_label_stretched_narrower_keeps_its_line`, its flip at the predicted site and reaching the grid half alone. D875 corrected, D874 amended; §5.3c)*
 - **D918** — **Several items of one grid dragged together move as a block.** `build::grid_drop_many` shifts every item's area by the tracks the centre of the block's union box crossed — D902's reading carried to grid — writing each explicit lines, span and spelling kept (D916); a negative shift is clamped to the leading item's room, so a block pushed towards the grid's first track stops there whole rather than reshuffling — and, amended the same day, a start before the explicit grid is written with the negative line that names it rather than clamped to 1, which had moved an item on an axis the drag left alone. `grid_drop` is its block of one; `build::layout_drop_many` sends several to it or to `flex_reorder_many` by the parent's `display`, and `canvas::flex_block_reorder_of` asks that, so preview and commit both carry it. The session's, under the maintainer's delegation, not a ruling. *(Built and tested 2026-09-27, uncommitted when recorded; **Keep**, answering D913's and D916's open question. Tests `several_items_of_a_grid_move_as_a_block`, its first cut unable to reach the clamp, and `two_grid_items_dragged_together_move_as_a_block`, each flip at its predicted site. D913, D916 amended; §5.3c, §9.4; `roadmap.md` step 4's ⚠️ struck)*
-- **D919** — **What grid's first sub-steps left, closed: at most 1000 explicit tracks on an axis, D914's two untested readings tested, and no `baseline` in grid's cards.** `container::MAX_TRACKS`: `Grid::is_valid` refuses a template past it on either axis (`track_count`, saturating, a repeat counting its tracks `repeat` times), and `template` lays a file's to it — CSS lets a user agent clamp an overly large grid, and a `u16` count times a few entries would have taffy allocate millions. Per axis, not per repeat: a thousand entries each `repeat(1000, …)` pass a per-repeat cap. ⚠️ `layout::MAX_TRACKS`, 10 000, is the layout grids' (D488) — two constants, one name. `scaled_layout`'s grid arm and every refused value a file can carry are now tested. `baseline` is left out of the cards because taffy 0.14.0's grid reads it as `start`; the model keeps it. The session's, under the maintainer's delegation. *(Built and tested 2026-09-27, uncommitted when recorded; **Keep**. Tests `values_css_refuses_are_refused` widened, `every_value_css_refuses_is_read_around_in_a_file` and `a_grid_scales_its_tracks_gaps_and_padding_by_their_own_axis`, each flip at its predicted site. D914 amended; §5.3c)*
+- **D919** — **What grid's first sub-steps left, closed: at most 1000 explicit tracks on an axis, D914's two untested readings tested, and no `baseline` in grid's cards.** `container::MAX_TRACKS`: `Grid::is_valid` refuses a template past it on either axis (`track_count`, saturating, a repeat counting its tracks `repeat` times), and `template` lays a file's to it — CSS lets a user agent clamp an overly large grid, and a `u16` count times a few entries would have taffy allocate millions. Per axis, not per repeat: a thousand entries each `repeat(1000, …)` pass a per-repeat cap. ⚠️ `layout::MAX_TRACKS`, 10 000, is the layout grids' (D488) — two constants, one name. `scaled_layout`'s grid arm and every refused value a file can carry are now tested. `baseline` is left out of the cards because taffy 0.14.0's grid reads it as `start`; the model keeps it. The session's, under the maintainer's delegation. *(Built and tested 2026-09-27, uncommitted when recorded; **Keep**. Tests `values_css_refuses_are_refused` widened, `every_value_css_refuses_is_read_around_in_a_file` and `a_grid_scales_its_tracks_gaps_and_padding_by_their_own_axis`, each flip at its predicted site. D914 amended; §5.3c. **Amended 2026-09-29**: the held `baseline`'s face answered by D923; `container::MAX_TRACKS` renamed `MAX_TEMPLATE_TRACKS` by D924)*
 - **D920** — **Grid's cards: the `grid` cell enabled, two track lists each with a CSS line, grid's four alignments, and an item's lines typed as CSS.** Step 4's third sub-step, the mockup's screen 04, in `panels/layout/grid.rs`. Picking flex or grid over the other keeps the padding and the gaps. A track list is a row per entry — grip, kind menu, fields, cross — and a CSS line that applies on a defocus that commits and never on `Escape` (D841), a parse error or a refused list shown in red and nothing committed. Grid's rows say *Start*/*End*, lead the items rows with *Normal* (D915), draw `justify-items` (D914) and offer no `baseline` (D919); `grid-column`/`grid-row` are typed CSS. Core gains `parse_tracks`/`tracks_css` and `parse_placement`/`placement_css`. The session's, under the maintainer's delegation. ~~⚠️ `breadth_field`'s doc claims D906's rule, and the field draws a `–` unit under a keyword.~~ Amended the same day: the dash dropped (D906's rule), a refusal shown only while the field reads what it refused, an unreadable line said rather than dropped, a stale grip drag ended. *(Built and tested 2026-09-27, uncommitted when recorded; **Keep**, the dash ***Fix*** — fixed the same day. Tests in `layout.rs`, `layout/grid.rs` and `tests/grid.rs`, the flips at their predicted sites; the grip drag not driven — driven since, with the refusal's lifetime and the stale drag's clean-up, amended 2026-09-28. ⚠️ Not verified in the GUI. D878, D886, D913, D914, D915 amended; §1, §5.3c, §9.3, §9.4; `roadmap.md` step 4's (3) struck. ⚠️ Its receipt *"names `justify self` too"* only beside an `align-self` flip — a `justify-self` flip alone made no receipt until D922)*
-- **D921** — **Grid's canvas track lines: every edge a 1px `SELECT_DIM` line, dashed where the template has it and dotted where only implicit tracks do, every gap a `GRID_GAP` band, read off the preview, and drawn for a moving item's grid as well as a selected one.** Step 4's last sub-step, settling what D913's fourth ruling and the roadmap's handoff left: the look, an edge shared drawn once and dashed if either track is explicit; the preview's tracks from the new `RenderOverrides::laid_grid`, box and transform read through the preview too — D391's lesson; and, past the ruling, every selected layer's grid parent during a move, unfiltered, since a drop writes a cell (D916). Hidden with the selection's chrome, the inspector's edit hold (D128) included — so a gap scrub hides them, open for the maintainer's look, and the two docs naming a scrub as what re-lays them describe nothing visible today. One layout pass per drawn container per frame, uncached, not measured. ~~⚠️ The Alt-drag offset also shifts a moving item's container, which stays put — read, not measured.~~ Amended the same day, before commit: the Alt-drag offset rides only a selected container, a moving item's staying put; the two docs naming a scrub corrected; and a band drawn wherever tracks stand apart, a `space-between` share as well as a gap — measured and kept. The session's under the maintainer's delegation of 2026-09-28, not rulings. *(Built and tested 2026-09-28, committed as `09df61c`; **Keep**, the scrub's hiding **open**, the Alt-drag offset ***Fix*** — ***Fixed*** before commit, so it never shipped. Tests `canvas.rs · grid_track_tests`, three, three flips at their predicted sites; the `chrome_hidden` gate, the dashes as drawn and a move or rotation of the container not tested. ⚠️ Not verified in the GUI. D913 amended; §1, §5.3c, §9.4; `roadmap.md` step 4's (4) struck)*
+- **D921** — **Grid's canvas track lines: every edge a 1px `SELECT_DIM` line, dashed where the template has it and dotted where only implicit tracks do, every gap a `GRID_GAP` band, read off the preview, and drawn for a moving item's grid as well as a selected one.** Step 4's last sub-step, settling what D913's fourth ruling and the roadmap's handoff left: the look, an edge shared drawn once and dashed if either track is explicit; the preview's tracks from the new `RenderOverrides::laid_grid`, box and transform read through the preview too — D391's lesson; and, past the ruling, every selected layer's grid parent during a move, unfiltered, since a drop writes a cell (D916). Hidden with the selection's chrome, the inspector's edit hold (D128) included — so a gap scrub hides them, open for the maintainer's look, and the two docs naming a scrub as what re-lays them describe nothing visible today. One layout pass per drawn container per frame, uncached, not measured. ~~⚠️ The Alt-drag offset also shifts a moving item's container, which stays put — read, not measured.~~ Amended the same day, before commit: the Alt-drag offset rides only a selected container, a moving item's staying put; the two docs naming a scrub corrected; and a band drawn wherever tracks stand apart, a `space-between` share as well as a gap — measured and kept. The session's under the maintainer's delegation of 2026-09-28, not rulings. *(Built and tested 2026-09-28, committed as `09df61c`; **Keep**, the scrub's hiding **open**, the Alt-drag offset ***Fix*** — ***Fixed*** before commit, so it never shipped. Tests `canvas.rs · grid_track_tests`, three, three flips at their predicted sites; the `chrome_hidden` gate, the dashes as drawn and a move or rotation of the container not tested — all three tested since, amended 2026-09-29, the gate as D925's test. ⚠️ Not verified in the GUI. D913 amended; §1, §5.3c, §9.4; `roadmap.md` step 4's (4) struck. **Amended 2026-09-29**: the scrub's hiding answered by D925; the cost measured, 135 µs for 100 items and 1.0 ms for 1000 per call in release, and kept uncached, a cache's key being the revision that undo does not move (D616's amendment); `roadmap.md`'s handoff item 3 struck)*
 - **D922** — **A grid item resized across alone left no receipt, and a receipt naming a grid item's self-alignment outlined neither row.** `session::growth_held` built `FlexReceipt::held` from grow, shrink and `align-self` flips only, so a width resize releasing a stretch to `justify-self: start` or `end` (`build::grid_resize_held`, D913's second ruling) changed the Item card in silence; D920's *"justify self"* words could appear only beside an `align-self` flip, and `grid_item_rows` was handed no flags, so neither self-alignment row was outlined where flex's is (D880). `growth_held` counts `justify_self`; `grid_item_rows` takes `flipped: [bool; 2]` and strokes each row 1px in `color::ACCENT` while the receipt names it. Found building D920's named-and-left-alone item, whose premise was the milder half. *(Found and fixed 2026-09-28, uncommitted when recorded; **Fixed**, the session's. Test `panels::layout::tests · a_grid_items_resize_receipt_outlines_the_row_it_names`, two flips at their predicted sites. ⚠️ Not verified in the GUI. D880, D920 amended; §9.4; `roadmap.md`'s handoff item 4 narrowed)*
+- **D923** — **A `baseline` a grid holds reads *Baseline · Start* with Start's picture, on a lit row of its own.** Grid's menus leave `baseline` out (D919) and a grid can still hold it — an item's flex `align-self: baseline` survives picking *Grid*, and a file can carry one — so the face read *Baseline* over a list with nothing lit. `panels::layout::glyph_combo` gives a held value `options` does not offer a lit row of its own, last — general, and inert for flex, whose menus offer every value; grid's `items_name` names `baseline` *Baseline · Start*, the face's *Auto · Normal* form, and `items_glyph` draws it as `start`. ⚠️ An `auto` item under a container holding `baseline` reads *Auto · Baseline · Start* — accurate, long, not tested. *(Built and tested 2026-09-29, uncommitted when recorded; **Keep**, the session's, answering D919's ⚠️. Test `panels::layout::tests · a_held_baseline_in_a_grid_reads_as_start_on_a_lit_row`, two flips at their predicted sites. ⚠️ Not verified in the GUI. D919 amended; §5.3c, §9.4; `roadmap.md`'s handoff item 4's `baseline` half struck)*
+- **D924** — **`container::MAX_TRACKS` is `container::MAX_TEMPLATE_TRACKS`, so two unrelated caps no longer share a name.** D919 named the CSS grid's cap on a template's explicit tracks, a thousand, as §5.3b's layout grids' `layout::MAX_TRACKS`, 10 000 (D488), already was, and left the collision with a ⚠️. The CSS grid's is renamed; `layout::MAX_TRACKS` keeps its name and gains a ⚠️ naming the other. Record and rename only, no behaviour changed. *(Renamed 2026-09-29, uncommitted when recorded; **Resolved**, the session's, answering D919's ⚠️. `values_css_refuses_are_refused` still pins the cap, its doc and message renamed. D919 amended with pointers, its text left as written; §5.3c; `roadmap.md`'s handoff item 4 struck)*
+- **D925** — **Grid's track lines stay up through an inspector scrub of their own container's layout, and go for any other edit held on it.** D921 hid them under the edit hold (D128) with the rest of the selection's chrome, and left open whether a gap scrub should keep them, the lines being the feedback. Under the hold a grid's lines are now hidden only while the preview restyles that container without touching its layout — `display` absent from its override; a `SetDisplay` preview keeps them. `chrome_hidden` is split into `editing_in_place()` — the pen, a path or an image edited — `||` the hold, one list still. ⚠️ **Not "shown only for a layout edit"**: the hold outlives the preview by its timeout, and that spelling blinked the lines off between a gap scrub's release and the hold's end. The asymmetry kept: after a fill scrub the lines are back a moment before the selection outline. *(Built and tested 2026-09-29, uncommitted when recorded; **Keep**, the session's, answering D921's open question. Test `canvas::grid_track_tests · a_layout_scrub_keeps_the_lines_and_any_other_hides_them`, two flips at their predicted sites. ⚠️ Not verified in the GUI. D921 amended; §5.3c; `roadmap.md`'s handoff item 1's question answered)*
 
 ---
 
@@ -22309,9 +22312,10 @@ alone while building D914–D918, and the delegation the one D916's amendment re
 your judgement … I'd lean into CSS parity as much as it makes sense"*). Three items, each the
 session's call.
 
-**A template makes at most `container::MAX_TRACKS`, a thousand, explicit tracks on an axis.** A
-`repeat()` count is a `u16`, so one entry can ask for 65 535 tracks and a few entries a few times
-that, which taffy would allocate — from a file, or, since D920, from a pasted CSS line. CSS allows for
+**A template makes at most `container::MAX_TRACKS`, a thousand, explicit tracks on an axis.**
+*(Renamed `container::MAX_TEMPLATE_TRACKS` by D924; the name here is the one this entry was written
+against.)* A `repeat()` count is a `u16`, so one entry can ask for 65 535 tracks and a few entries a
+few times that, which taffy would allocate — from a file, or, since D920, from a pasted CSS line. CSS allows for
 exactly this: a user agent may clamp an overly large grid (*"Clamping Overly Large Grids"*, CSS
 Grid). `Grid::is_valid` refuses a template past the cap on either axis, so `op_set_display` answers
 `OpError::BadLayout`, D914's door; the count is `container::track_count` — saturating, a repeat
@@ -22326,7 +22330,7 @@ templates, `repeat(1001, auto)` and `repeat(300, auto auto) repeat(401, auto)` �
 only together — and accepts `repeat(1000, auto)`, exactly the cap. ⚠️ **Two constants have this
 name**: `layout::MAX_TRACKS`, 10 000, is §5.3b's layout grids' (D488), and this is the CSS grid
 container's — §5.3c's *"'Grid' names two unrelated things"* arriving in an identifier. Each is read
-only in its own module.
+only in its own module. *(One name no longer: this one is `MAX_TEMPLATE_TRACKS` since D924.)*
 
 **The tests the list owed.** D914 left two readings reached by nothing: `tools::scaled_layout`'s grid
 arm, and `style_of`'s reading of every refused value but the zero-count repeat.
@@ -22354,7 +22358,8 @@ rows. **The model keeps the value**: flex honours it, an item's record keeps bot
 properties (D914), and a grid carrying it — from a file, or from an item whose parent turned from
 flex to grid — lays it as `start`. ⚠️ **Read, not tested: such a value still reads *Baseline* on its
 row's face**, no row lit in the menu, since `glyph_combo` names whatever value it is shown; picking a
-row replaces it. *Revisit when taffy's grid aligns to a baseline.*
+row replaces it. *Revisit when taffy's grid aligns to a baseline.* *(Answered 2026-09-29 by D923: the
+face reads* Baseline · Start *with Start's picture, and the list lights a row of its own saying so.)*
 
 *(Built and tested 2026-09-27, uncommitted when recorded; **Keep**, the session's under the
 maintainer's delegation. Gates reported green: fmt, `cargo test --workspace -j 4` over 37 binaries,
@@ -22362,7 +22367,9 @@ clippy over the workspace and per package, the doc gate and `check --release`. R
 brief and a read of `container.rs`' `Grid::is_valid`, `MAX_TRACKS`, `track_count` and `template`,
 core's `layout.rs`' `MAX_TRACKS`, `tests/grid.rs`' two tests and `reopened`, the `tools/mod.rs` test, and
 `layout/grid.rs`' `SELF` and `ITEMS` with `glyph_combo`'s face in `panels/layout.rs`; flips as the
-tests' docs record them, not re-run. D914 amended; `architecture.md` §5.3c amended)*
+tests' docs record them, not re-run. D914 amended; `architecture.md` §5.3c amended. **Amended
+2026-09-29**: the `baseline` face answered by D923, and the constant renamed by D924 — pointers only,
+this entry's text left as written)*
 
 **D920 — Grid's cards: the `grid` cell enabled, two track lists each with a CSS line, grid's four
 alignments, and an item's lines typed as CSS. *The session's; container layout's step 4, the third
@@ -22576,7 +22583,8 @@ world transform are read through the preview as well — `preview_local_box` and
 took a frame's size from the preview and its transform from the committed resolve, and a frame dragged
 away left its bands standing. A resize of the container re-lays an `fr` column against the box being
 dragged. ⚠️ **Only a resize is tested**; a move or a rotation of the container is read, not tested —
-D391's own warning is that a resize is the gesture a half-previewing overlay gets right.
+D391's own warning is that a resize is the gesture a half-previewing overlay gets right. *(Both tested
+since — the second amendment below.)*
 
 **Over which containers — past D913's ruling.** Every selected grid container, as ruled; **and, while a
 move (`Drag::Move`) is in flight, the parent of every selected layer, where that parent is a grid.** A
@@ -22599,7 +22607,9 @@ scrubbed"* beside a resize, and `draw_grid_tracks`' doc *"a resize or a scrub"*,
 lines — but an ink-changing inspector edit engages the hold (`edit_note`), so while a gap is scrubbed
 nothing is drawn to re-lay. Only a canvas gesture shows it. *Revisit with the hold*: if the
 maintainer wants the lines through a scrub, the scrub half becomes true; if not, those two docs owe
-the correction. *(Both docs corrected the same day, ahead of the ruling — the amendment below.)*
+the correction. *(Both docs corrected the same day, ahead of the ruling — the amendment below. The
+question answered 2026-09-29 by D925: a scrub of the container's own layout keeps the lines, any
+other edit held on it hides them.)*
 
 **The Alt-drag offset.** `draw_grid_tracks` shifts every subject's lines by `alt_clone_offset`, the
 vector the selection chrome rides an Alt-drag's copy by — right for a selected grid container being
@@ -22612,7 +22622,8 @@ commit — the amendment below.)*
 
 **Cost.** `laid_grid` re-runs a layout pass from the container's layout root, per drawn container per
 frame, with no cache — D916's "derived when asked", now asked every frame. Only a selected grid, or a
-moving item's grid, is asked. *Not measured.*
+moving item's grid, is asked. *Not measured.* *(Measured since, and the cache declined on the
+measurement — the second amendment below.)*
 
 **The evidence**, `canvas.rs · grid_track_tests`, through `OndinApp::headless`:
 `a_selected_grid_draws_its_column_edges_and_gap` — a 400 × 200 frame with `100px 1fr` columns, gap 10
@@ -22626,7 +22637,8 @@ track before the template's two and one after, and columns with two gaps: each e
 marks, the three bands; **flip run**, the merge keeping the first track's mark, fails on *"an edge an
 explicit track shares is dashed"* at y 20, predicted. **Not tested**: ~~the Alt-drag offset;~~ the
 `chrome_hidden` gate; dotted against dashed as drawn — only `track_lines`' flag is asserted, the test
-counting segments and bands, not dashes. *(The Alt-drag offset tested since — the amendment below.)*
+counting segments and bands, not dashes. *(The Alt-drag offset tested since — the amendment below;
+the gate and the dashes as drawn since 2026-09-29 — the second amendment.)*
 
 **Amended 2026-09-28, the same day, before commit: the Alt-drag offset fixed, the two docs corrected,
 and what a band covers measured.** *(The session's, under the same delegation.)*
@@ -22654,6 +22666,32 @@ Gates green over `09df61c`: fmt, `cargo test --workspace` (2604 passed, 0 failed
 over the workspace and per package (app, render, core), the doc gate and `check --release -p
 ondin-app` — not the release test run, not the GPU tests.
 
+**Amended 2026-09-29: the three things left untested are driven, and the cost is measured.** *(The
+session's, under the maintainer's delegation of the day — "Let's wrap up what's left, including what
+you left alone".)*
+- **The container moved and turned.** `the_lines_follow_their_container_moved_and_turned`: the frame
+  previewed 50 right puts every column edge 50 right on screen; previewed a quarter turn about its
+  origin, no upright line is left where a column edge stood, and four level lines lie at 20, 120, 130
+  and 380 down — the column edges, laid across. **Flip run**, `draw_grid_tracks` reading
+  `resolved.world_transform` for the container rather than the preview's: fails on *"moved 50
+  right"*, the edges where they were — the predicted site. That is D391's half-previewing overlay,
+  pinned from the gesture a resize could not reach.
+- **The dashes as drawn.** `explicit_edges_are_dashed_and_implicit_ones_dotted`: over the fixture's
+  two template columns and the one implicit row its item makes, the longest piece of an upright line
+  is 4, the dash, and of a level one 1.5, the dot. **Flip run**, the dash and the dot swapped: fails
+  on *"the columns dashed"* at 1.5 — predicted. It reads the segments painted, where
+  `track_lines_merge_edges_and_mark_the_explicit_ones` reads only the flag.
+- **The `chrome_hidden` gate** is D925's test, `a_layout_scrub_keeps_the_lines_and_any_other_hides_them`
+  — the gate changed shape as it was tested, the scrub question answered with it.
+- **The cost, measured, and the cache declined on it.** In release, rects in a grid of `1fr` tracks,
+  one `laid_grid` call takes **135 µs for 100 items and 1.0 ms for 1000** — linear, about a
+  microsecond an item; in debug about 1 ms for 100. **Kept uncached, on purpose**: a cache needs a key
+  that moves with every change, and the one the session has, `EditorSession::revision`, does not move
+  on undo or redo (D616's amendment) — so a cache is the one way these lines could be drawn stale.
+  `draw_grid_tracks`' doc says so, with the figures, and
+  cites this amendment. ⚠️ **An item count, not a text-heavy grid**: a label's measurement is memoised
+  per pass (D872), and a grid of labels is not what was measured.
+
 *(Built and tested 2026-09-28, uncommitted when recorded, committed as `09df61c`; **Keep**, the
 session's under the maintainer's delegation of 2026-09-28 — the move's container an extension of
 D913's fourth ruling, the scrub's hiding **open** for the maintainer's look, and the Alt-drag offset on
@@ -22667,7 +22705,11 @@ record them, not re-run. D913 amended; `architecture.md` §1, §5.3c and §9.4 a
 step 4's (4) and the handoff's item 2 struck. The amendment from the brief and a read of
 `draw_grid_tracks` and `track_lines` with their docs, `laid_grid`'s doc and the Alt-drag case of the
 first test; the measurement, the gates and the flip as the brief reports them. `architecture.md`
-§5.3c amended again; `roadmap.md`'s handoff item 3 narrowed)*
+§5.3c amended again; `roadmap.md`'s handoff item 3 narrowed. **The second amendment** (2026-09-29,
+uncommitted when recorded) from the brief and a read of the two tests with their docs, D925's, and
+`draw_grid_tracks`' doc; the flips and the measurement as the brief and the docs report them, not
+re-run, and the debug figure the brief's alone. The scrub's hiding, **open** above, answered by
+D925; `roadmap.md`'s handoff item 3 struck)*
 
 **D922 — A grid item resized across alone left no receipt, and a receipt naming a grid item's
 self-alignment outlined neither row. *The session's, under the maintainer's delegation of
@@ -22712,6 +22754,128 @@ the GUI; gates not reported to this record. Recorded from the brief and a read o
 `growth_held` and its doc, `layout.rs`' `item_rows` receipt and the test with its doc, and
 `layout/grid.rs`' `grid_item_rows` and its doc; flips as the test's doc records them, not re-run. D880
 and D920 amended; `architecture.md` §9.4 amended; `roadmap.md`'s handoff item 4 narrowed)*
+
+**D923 — A `baseline` a grid holds reads *Baseline · Start* with Start's picture, on a lit row of its
+own. *The session's, under the maintainer's delegation of 2026-09-29 — not a ruling. Built and
+tested 2026-09-29, uncommitted when recorded.*** The maintainer, that day: *"Let's wrap up what's
+left, including what you left alone"* — and this is one of the two things D919 named and left alone.
+Grid's cards do not offer `baseline`, taffy 0.14's grid reading it as `start` (D919), but the model
+keeps the value and a grid can still hold it: an item's `align-self: baseline`, set under a flex row,
+survives the frame being picked *Grid* — the item record keeps both layouts' properties (D914) — and
+a file can carry one. D919's ⚠️ read what followed and did not test it: `glyph_combo` names whatever
+value it is shown, so the face read *Baseline* — a behaviour grid does not draw — over a list in which
+nothing was lit.
+
+**The repair has a general half and a grid half.** `panels::layout::glyph_combo` gives a held value
+that `options` does not offer a row of its own, **last and lit**, so the list always lights what the
+face names; its doc says so. It is general and not grid's, and inert for flex, whose menus offer
+every value. Grid's `items_name` then names `baseline` ***Baseline · Start*** — what is held, then
+what grid draws for it, the form of the face's *Auto · Normal* — and `items_glyph` gives it `start`'s
+picture. So the face and the lit row both say what the item holds and what it looks like, and the
+plain *Start* row sits above them unlit. Picking any other row replaces the value, as before.
+`layout/grid.rs`' module doc says how a held one reads, beside why the cards offer none.
+
+⚠️ **Read, not tested: the items rows reach the same arm.** `justify-items` and `align-items` pass
+`items_name` and `items_glyph` too, so a grid container holding `baseline` gets the same face and lit
+row, and an item at `auto` under it reads ***Auto · Baseline · Start*** on its self-alignment's face —
+accurate, and long, and not measured against the field's width. D919's *Revisit when taffy's grid
+aligns to a baseline* stands; this arm is part of what it would revisit.
+
+**The evidence**, `panels::layout::tests · a_held_baseline_in_a_grid_reads_as_start_on_a_lit_row`:
+the flex scene's `a` given `align-self: baseline`, the frame switched to grid by `set_display`, and
+`a` selected — a run reads *Align selfBaseline · Start*, the combo's label and face being one galley;
+opened, the row *Baseline · Start* lies inside a rect filled with the theme's `selection.bg_fill`,
+and the plain *Start* row does not. **Flip runs**, each at its predicted site: `glyph_combo`'s held
+row dropped fails on *"a row for "Baseline · Start""*; `items_name`'s `baseline` arm dropped fails
+at the face, no run reading *Align selfBaseline · Start*.
+
+*(Built and tested 2026-09-29, uncommitted when recorded; **Keep**, the session's under the
+maintainer's delegation, answering D919's ⚠️. ⚠️ Not verified in the GUI; gates not reported to this
+record. Recorded from the brief and a read of `glyph_combo` and its doc, `layout/grid.rs`' module doc,
+`SELF`, `ITEMS`, `items_name`, `items_glyph` and their three callers, and the test with its doc;
+flips as the test's doc records them, not re-run. D919 amended; `architecture.md` §5.3c and §9.4
+amended; `roadmap.md`'s handoff item 4's `baseline` half struck)*
+
+**D924 — `container::MAX_TRACKS` is `container::MAX_TEMPLATE_TRACKS`: two unrelated caps no longer
+share a name. *The session's, under the maintainer's delegation of 2026-09-29. Renamed 2026-09-29,
+uncommitted when recorded; no behaviour changed.*** D919 gave the CSS grid container's cap — at most
+a thousand explicit tracks a template makes on an axis, refused at the operation and laid to when a
+file carries more — the name `MAX_TRACKS`, which `layout::MAX_TRACKS` already had: 10 000, the most
+bands one of §5.3b's layout grids draws, clamped in `layout::tracks` (D488). D919 recorded the
+collision with a ⚠️ — *"§5.3c's 'Grid' names two unrelated things arriving in an identifier"* — and
+left it, each constant read only in its own module. It is the second of the two things D919 named and
+left alone, and the day's delegation took it.
+
+**The CSS grid's is renamed; the layout grids' keeps its name**, the older of the two. The sites:
+`container.rs`' constant and its doc, which now says it was called `MAX_TRACKS` too until this entry;
+`Grid::is_valid` and its doc; `template` and its doc; and in `tests/grid.rs`,
+`values_css_refuses_are_refused`'s doc and the `expect` message on the template of exactly the cap.
+`layout::MAX_TRACKS` gains a ⚠️ naming the other. ⚠️ **They are not one cap under two names, and
+nothing should make them one**: a `usize` against a `u32`, a thousand against ten thousand, a count of
+a template's explicit tracks refused at the operation against a count of drawn bands clamped in
+`layout::tracks`.
+`architecture.md` §5.3c's live passage names the new constant; D919's body keeps the old name, as the
+record of what it built, with a pointer here at each place a reader would grep for it.
+
+*(Renamed 2026-09-29, uncommitted when recorded; **Resolved**, the session's under the maintainer's
+delegation, answering D919's ⚠️ — record and rename, nothing laid differently. The cap stays pinned
+by `values_css_refuses_are_refused`, which accepts exactly `repeat(1000, auto)`. Gates not reported to
+this record. Recorded from the brief and a read of `container.rs`' constant, `Grid::is_valid` and
+`template` with their docs, `layout.rs`' `MAX_TRACKS` and its doc, and `tests/grid.rs`' two sites; a
+search of `crates/` finds no `MAX_TRACKS` meaning the container's left. D919 amended; `architecture.md`
+§5.3c amended; `roadmap.md`'s handoff item 4 struck)*
+
+**D925 — Grid's track lines stay up through an inspector scrub of their own container's layout, and
+go for any other edit held on it. *The session's, under the maintainer's delegation of 2026-09-29 —
+not a ruling; it answers D921's open question. Built and tested 2026-09-29, uncommitted when
+recorded.*** D921 drew the lines only where `canvas::chrome_hidden` let the selection's chrome be
+drawn — so the pen, a path or an image edited in place, and the inspector's edit hold (D128) all took
+them away, and a gap scrubbed in the inspector hid them for the length of the scrub. It chose that for
+consistency — the lines are chrome, and D128 takes the chrome off the artwork being judged — and left
+the argument the other way for the maintainer's look: during a scrub of a gap or a track, **the lines
+are the feedback**, where the tracks are going being the very thing judged. The day's delegation took
+the question.
+
+**The rule.** Under the edit hold, a grid's lines are hidden only while the preview restyles **that
+container** without touching its layout — `ov.get(id).is_some_and(|o| o.display.is_none())`, a fill
+or an opacity. A scrub of the container's gap, padding or tracks is a `SetDisplay` in the preview and
+keeps them. The three reasons that edit in place still hide them: `chrome_hidden` is split into
+`editing_in_place()` — the pen, an edited path, an edited image — `||` `chrome_hold.holding()`, and
+`draw_grid_tracks` returns on the first and asks the second per container. **Still one list**:
+`chrome_hidden` means what it meant to every other caller, and D128's account — the hold is a third
+*term* beside the others and owns only *when* — stands. ⚠️ **Read, not tested**: because the
+question is asked of each container, a hold whose preview restyles only some *other* node — a layer
+selected with the grid, say — leaves the grid's lines up while the selection box is away.
+
+**Why not the obvious spelling, "under the hold, show them only for a layout edit".** The hold
+outlives the preview: its count starts when the button comes up (D128, §9.4), and the preview is
+cleared on release. So that spelling blinked the lines off between a gap scrub's release and the
+hold's end — gone for a beat after the very edit that was meant to keep them. The rule asks the
+opposite question — *is the preview restyling this container, and not its layout?* — so a hold with
+nothing previewed draws them. ⚠️ **That is the load-bearing detail**, and the tidy rewrite would put
+the blink back; the test's last step, the preview cleared with the hold still on, pins it. **What it
+costs, kept and said in `draw_grid_tracks`' doc**: the same tail runs the other way after a fill
+scrub — the lines are back as the preview clears, a moment before the selection outline, which waits
+out the hold.
+
+**The evidence**, `canvas::grid_track_tests · a_layout_scrub_keeps_the_lines_and_any_other_hides_them`:
+the fixture's grid selected and the hold set to `ChromeHold::Scrubbing`; a `SetDisplay` preview with
+the column gap at 40 keeps the lines, the second column now starting at 160; a `SetOpacity` preview at
+0.5 draws no line and no band; the preview cleared with the hold still on brings the four lines back,
+as after a scrub's release. **Flip runs**, each at its predicted site: the hold hiding every subject,
+as `chrome_hidden` did before, fails on *"a gap scrub keeps them"*; the hold ignored altogether fails
+on *"an opacity scrub hides them"*. **Not tested**: a fill rather than an opacity, a padding or a track
+rather than a gap — each the same branch — and the `editing_in_place` return, which this test does
+not reach. It is also D921's owed test of the `chrome_hidden` gate, the gate having changed shape as
+it was tested (D921's second amendment).
+
+*(Built and tested 2026-09-29, uncommitted when recorded; **Keep**, the session's under the
+maintainer's delegation, answering D921's open question. ⚠️ Not verified in the GUI — and the look
+the question was held for is still owed, with the rest of flex and grid's. Gates not reported to this
+record. Recorded from the brief and a read of `canvas.rs`' `chrome_hidden`, `editing_in_place` and
+`draw_grid_tracks` with their docs, and the test with its doc; flips as the test's doc records them,
+not re-run. D921 amended; `architecture.md` §5.3c amended; `roadmap.md`'s handoff item 1's question
+answered and struck from it)*
 
 **D898 — The randomized `update`/`rebuild` guard authors layout inputs, and compares a laid group's
 box. *The session's; built 2026-09-27, committed as `da5b652`. Entry reconstructed 2026-09-27 from

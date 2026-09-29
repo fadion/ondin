@@ -736,11 +736,12 @@ impl Grid {
     /// operation, not at the door) without its repair: D492's loader drops a bad
     /// export spec, and nothing here is rewritten at load.
     ///
-    /// **And no more than [`MAX_TRACKS`] explicit tracks on an axis** (§15 D919).
+    /// **And no more than [`MAX_TEMPLATE_TRACKS`] explicit tracks on an axis**
+    /// (§15 D919).
     pub fn is_valid(&self) -> bool {
         self.columns.iter().chain(&self.rows).all(Track::is_valid)
-            && track_count(&self.columns) <= MAX_TRACKS
-            && track_count(&self.rows) <= MAX_TRACKS
+            && track_count(&self.columns) <= MAX_TEMPLATE_TRACKS
+            && track_count(&self.rows) <= MAX_TEMPLATE_TRACKS
     }
 }
 
@@ -750,7 +751,12 @@ impl Grid {
 /// what a `repeat(65535, …)` — the most a `u16` count asks for — times a few
 /// entries would make taffy allocate. The operation refuses a template over it;
 /// a file's is laid to it ([`template`]).
-pub const MAX_TRACKS: usize = 1000;
+///
+/// **Not `layout::MAX_TRACKS`**, the most bands one of §5.3b's layout grids
+/// draws (§15 D488). This was called `MAX_TRACKS` too until §15 D924 — two
+/// unrelated caps, one name, in the one project where "grid" already means two
+/// things.
+pub const MAX_TEMPLATE_TRACKS: usize = 1000;
 
 /// How many explicit tracks `tracks` makes, saturating — a repeat counts its
 /// tracks `repeat` times. The Container card's *N tracks*.
@@ -2051,12 +2057,13 @@ fn content_alignment(a: AlignContent) -> taffy::AlignContent {
 /// A track list for taffy. **Reads what CSS would refuse without refusing it**
 /// ([`Grid::is_valid`]'s reason — a file can carry one): a negative number is
 /// read as 0, a `minmax()` whose min is `fr` as `auto` at that end, and an empty
-/// or zero-count `repeat()` as nothing. **And the list stops at [`MAX_TRACKS`]**
-/// (§15 D919): a repeat that would pass it repeats as many whole times as fit,
-/// and what follows is laid only as far as there is room — a multi-track
-/// repeat can leave a remainder a later single track still fits in.
+/// or zero-count `repeat()` as nothing. **And the list stops at
+/// [`MAX_TEMPLATE_TRACKS`]** (§15 D919): a repeat that would pass it repeats as
+/// many whole times as fit, and what follows is laid only as far as there is
+/// room — a multi-track repeat can leave a remainder a later single track still
+/// fits in.
 fn template(tracks: &[Track]) -> Vec<taffy::GridTemplateComponent<String>> {
-    let mut room = MAX_TRACKS;
+    let mut room = MAX_TEMPLATE_TRACKS;
     let mut out = Vec::new();
     for t in tracks {
         match t {

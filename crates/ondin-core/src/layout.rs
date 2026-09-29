@@ -226,6 +226,10 @@ impl GridAlign {
 /// frame, in units of the frame's extent, and a count is a number of allocations.
 /// Under `Stretch` a track is `extent / n`, which is positive and finite for every
 /// `n` there is.
+///
+/// ⚠️ **A layout grid's cap, not a CSS grid's** — that one is
+/// `container::MAX_TEMPLATE_TRACKS`, a thousand explicit tracks a template makes,
+/// which shared this name until §15 D924.
 pub const MAX_TRACKS: u32 = 10_000;
 
 /// One set of columns or rows over a frame.

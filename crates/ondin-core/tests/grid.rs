@@ -573,9 +573,9 @@ fn grid_lines_written_under_flex_take_effect_under_grid() {
 
 /// **What CSS refuses, the operations refuse** (`OpError::BadLayout`, §15 D914):
 /// a negative track, an `fr` minimum, `repeat(0, …)`, an empty repeat, line 0
-/// and `span 0` — and a template past `MAX_TRACKS` (§15 D919), one repeat at 1001
-/// and two entries whose repeats only pass it together — and nothing is changed
-/// by any of them.
+/// and `span 0` — and a template past `MAX_TEMPLATE_TRACKS` (§15 D919), one
+/// repeat at 1001 and two entries whose repeats only pass it together — and
+/// nothing is changed by any of them.
 #[test]
 fn values_css_refuses_are_refused() {
     let mut s = Scene::new();
@@ -619,7 +619,7 @@ fn values_css_refuses_are_refused() {
         id: f,
         display: Some(Display::Grid(grid(vec![at_the_cap], vec![]))),
     }])
-    .expect("exactly MAX_TRACKS is accepted");
+    .expect("exactly MAX_TEMPLATE_TRACKS is accepted");
     s.display(f, None);
     for t in bad_tracks {
         let r = s.try_commit(vec![Operation::SetDisplay {

@@ -20,7 +20,9 @@
 //!   (§15 D915).
 //! - **No `baseline`**: taffy's grid reads it as `start` (its own TODO), so a card
 //!   offering it would name a behaviour nothing draws (§15 D919). The model keeps
-//!   the value, which flex honours.
+//!   the value, which flex honours — and a grid **holding** it, carried from flex
+//!   or a file, reads *Baseline · Start* with Start's picture, on a row of its own
+//!   that is lit: what is held, then what is drawn (§15 D923).
 //! - **Every line is typed as CSS** — `auto`, `2`, `-1`, `span 2` — because a line
 //!   is a number *or* a span, and one field that reads both is shorter than two
 //!   that each read half.
@@ -64,20 +66,27 @@ const FLOW_TIPS: [&str; 2] = [
     "Column — auto-placed items fill each column before the next",
 ];
 
-/// An item alignment as the grid rows name it: `normal` for none set.
+/// An item alignment as the grid rows name it: `normal` for none set, and a held
+/// `baseline` as what it is and what grid draws for it — *Baseline · Start*, the
+/// face's *Auto · Normal* form (§15 D923).
 fn items_name(a: Option<AlignItems>) -> &'static str {
     match a {
         None => "Normal",
         Some(AlignItems::Start) => "Start",
         Some(AlignItems::End) => "End",
+        Some(AlignItems::Baseline) => "Baseline · Start",
         Some(a) => align_name(a),
     }
 }
 
 /// `normal`'s picture is `stretch`'s, which is what it does to every box; a
-/// shape it holds at the start is the exception the tooltip names.
+/// shape it holds at the start is the exception the tooltip names. A held
+/// `baseline` wears `start`'s, which is what taffy's grid draws (§15 D923).
 fn items_glyph(a: Option<AlignItems>) -> Glyph {
-    Glyph::Align(a.unwrap_or(AlignItems::Stretch))
+    match a {
+        Some(AlignItems::Baseline) => Glyph::Align(AlignItems::Start),
+        a => Glyph::Align(a.unwrap_or(AlignItems::Stretch)),
+    }
 }
 
 /// A content distribution as the grid rows name it — *Start*, *End*.

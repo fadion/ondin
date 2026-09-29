@@ -777,6 +777,11 @@ pub(crate) fn size_field(
 /// the stroke-alignment combo's rule, which is that mixed is a report and not a
 /// value. `auto` is an extra first row whose face reads `Auto · <inherited>`
 /// (`align-self`), with the inherited value's picture.
+///
+/// **A held value `options` does not offer gets a lit row of its own, last** (§15
+/// D923), so the list always lights what the face names — grid's menus leave
+/// `baseline` out (§15 D919) and a grid can still hold it, from flex or a file,
+/// and the face read *Baseline* over a list with nothing lit.
 #[allow(clippy::too_many_arguments)]
 fn glyph_combo<T: Copy + PartialEq>(
     ui: &mut egui::Ui,
@@ -843,10 +848,15 @@ fn glyph_combo<T: Copy + PartialEq>(
                     ui::menu_rows(ui);
                     ui.spacing_mut().button_padding.y = 2.0;
                     let row_pad = ui.spacing().button_padding.x;
+                    let held = match shown {
+                        Some(Some(v)) if !options.contains(&v) => Some(Some(v)),
+                        _ => None,
+                    };
                     let rows = auto
                         .map(|_| None)
                         .into_iter()
-                        .chain(options.iter().map(|o| Some(*o)));
+                        .chain(options.iter().map(|o| Some(*o)))
+                        .chain(held);
                     for row in rows {
                         let mut text = egui::text::LayoutJob::default();
                         text.append(
@@ -3409,5 +3419,55 @@ mod tests {
         p.run("Resizing set justify self to start.");
         assert!(outlined(row("Justify self")), "the justify row outlined");
         assert!(!outlined(row("Align self")), "and not the align row");
+    }
+
+    /// **A grid item holding `baseline` reads *Baseline · Start*, and its list
+    /// lights a row saying so** (§15 D923) — `a`'s `align-self: baseline`, which a
+    /// flex row gave it before the frame became a grid, and which grid's menus do
+    /// not offer (§15 D919). The face names what is held and what taffy draws for
+    /// it; opened, the list has a row reading the same, and that row is the
+    /// selected one. Before D923 the face read *Baseline* over a list with nothing
+    /// lit.
+    ///
+    /// **Flip runs**: `glyph_combo`'s held row dropped fails at *"a row for
+    /// \"Baseline · Start\""*; `items_name`'s `baseline` arm dropped fails at the
+    /// face, no run reading *Align selfBaseline · Start* — each the predicted
+    /// site.
+    #[test]
+    fn a_held_baseline_in_a_grid_reads_as_start_on_a_lit_row() {
+        let mut s = scene();
+        set_item(&mut s.app, s.a, |i| {
+            i.align_self = Some(AlignItems::Baseline)
+        });
+        s.app.set_display(&[s.frame], 2);
+        let a = s.a;
+        let mut p = Panel::new(s.app, OndinApp::inspector_item);
+        p.app.session.selection.set(vec![a]);
+        // A glyph combo's label and face are one galley.
+        let face = p.run("Align selfBaseline · Start");
+        p.click(face);
+        let shapes = p.shapes();
+        let row = |text: &str| {
+            shapes
+                .iter()
+                .find_map(|cs| match &cs.shape {
+                    egui::epaint::Shape::Text(t) if t.galley.text() == text => {
+                        Some(t.galley.rect.translate(t.pos.to_vec2()).center())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("a row for {text:?}"))
+        };
+        let fill = p.ctx.style_of(egui::Theme::Dark).visuals.selection.bg_fill;
+        let lit = |at: egui::Pos2| {
+            shapes.iter().any(|cs| {
+                matches!(
+                    &cs.shape,
+                    egui::epaint::Shape::Rect(r) if r.fill == fill && r.rect.contains(at)
+                )
+            })
+        };
+        assert!(lit(row("Baseline · Start")), "the held value's row is lit");
+        assert!(!lit(row("Start")), "and the plain Start row is not");
     }
 }

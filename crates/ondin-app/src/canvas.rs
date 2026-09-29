@@ -8063,11 +8063,18 @@ impl OndinApp {
     /// which is the whole reason this function exists: the list of things that hide
     /// is the same whatever the reason, and `ChromeHold` owns only the question of
     /// *when*.
+    ///
+    /// Split into [`Self::editing_in_place`] and the hold for one caller,
+    /// [`Self::draw_grid_tracks`], which keeps a grid's lines up through a scrub
+    /// of that grid's own layout (§15 D925) — the two reasons stay one list.
     fn chrome_hidden(&self) -> bool {
-        self.pen.is_some()
-            || self.edited_path().is_some()
-            || self.edited_image().is_some()
-            || self.chrome_hold.holding()
+        self.editing_in_place() || self.chrome_hold.holding()
+    }
+
+    /// The first two of [`Self::chrome_hidden`]'s reasons: a path or an image
+    /// being edited on the canvas, the pen's included.
+    fn editing_in_place(&self) -> bool {
+        self.pen.is_some() || self.edited_path().is_some() || self.edited_image().is_some()
     }
 
     /// Outline whatever the pointer is over but has not selected.
@@ -9831,16 +9838,32 @@ impl OndinApp {
     /// ([`ondin_render::RenderOverrides::laid_grid`]), so a resize on the canvas
     /// re-lays the lines with the box; under the hover outline and the selection
     /// chrome, and gone wherever [`Self::chrome_hidden`] takes the selection's —
-    /// an inspector scrub included, whose edit hold hides them for its length
-    /// (§15 D128; whether they should stay up for one is D921's open question).
+    /// **but for one case: an inspector edit of the container's own layout**
+    /// (§15 D925, answering D921's open question). The edit hold (§15 D128) takes
+    /// the chrome off the artwork being judged, and a gap, a padding or a track
+    /// being scrubbed is judged *by* the lines. So under a hold they are hidden
+    /// only while the preview restyles the container **without** touching its
+    /// layout — a fill, an opacity — and a gap scrub keeps them throughout. ⚠️ The
+    /// hold outlives the preview once the button is up (its timeout), and the
+    /// lines do not wait for it: after a fill scrub they are back a moment before
+    /// the selection outline is.
     ///
     /// ⚠️ **Not §5.3b's layout grids** ([`Self::draw_layout_grids`]) — those are
     /// a frame's own columns, chrome with no effect on anything, and they stay
     /// under the frame labels; these are where a CSS grid laid its items.
+    ///
+    /// **Uncached, on purpose**: each drawn container re-runs its layout pass
+    /// every frame. Measured 2026-09-29 in release, rects in a grid of `1fr`
+    /// tracks: 135 µs for 100 items, 1.0 ms for 1000 — linear, about a
+    /// microsecond an item, on a canvas that repaints only on input. A cache
+    /// would need a key that moves with every change, and the session's revision
+    /// does not move on undo (§15 D616's amendment), so it is the one thing here
+    /// that could draw stale lines (§15 D921's amendment).
     fn draw_grid_tracks(&self, painter: &egui::Painter, rect: egui::Rect, ppp: f32) {
-        if self.chrome_hidden() {
+        if self.editing_in_place() {
             return;
         }
+        let held = self.chrome_hold.holding();
         let (doc, _, ov) = self.session.render_inputs();
         let mut subjects: Vec<NodeId> = self.session.selection.ids().to_vec();
         if matches!(self.drag, Drag::Move { .. }) {
@@ -9859,6 +9882,14 @@ impl OndinApp {
         let copied = self.alt_clone_offset(rect, ppp);
         for id in subjects {
             if !self.shown_visible(id) {
+                continue;
+            }
+            // Under an edit hold, hidden only while the preview is restyling this
+            // container and not its layout. Not "shown only for a layout edit":
+            // the hold outlives the preview by its timeout once the button is up,
+            // and that spelling blinked the lines off between a gap scrub's
+            // release and the hold's end.
+            if held && ov.get(id).is_some_and(|o| o.display.is_none()) {
                 continue;
             }
             let offset = match self.session.selection.ids().contains(&id) {
@@ -14525,6 +14556,156 @@ mod grid_track_tests {
                 KRect::new(20.0, 70.0, 380.0, 80.0),
             ]
         );
+    }
+
+    /// Every segment the overlay drew, as its two screen ends.
+    fn segments(app: &OndinApp, ctx: &egui::Context) -> Vec<[egui::Pos2; 2]> {
+        ctx.run_ui(Default::default(), |ui| {
+            app.draw_grid_tracks(ui.painter(), AREA, 1.0);
+        })
+        .shapes
+        .into_iter()
+        .filter_map(|c| match c.shape {
+            egui::Shape::LineSegment { points, .. } => Some(points),
+            _ => None,
+        })
+        .collect()
+    }
+
+    /// **The lines follow their container moved and turned in the preview** —
+    /// the frame dragged 50 right puts the column edges 50 right, and the frame
+    /// turned a quarter about its origin lays them across: no upright line is
+    /// left where a column edge stood, and the four are level, at 20, 120, 130
+    /// and 380 down.
+    ///
+    /// **Flip run**, `draw_grid_tracks` reading `resolved.world_transform` for the
+    /// container instead of the preview's: fails on *"moved 50 right"*, the
+    /// edges where they were — the predicted site.
+    #[test]
+    fn the_lines_follow_their_container_moved_and_turned() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, frame) = app_with_grid(&ctx);
+        app.session.selection.set(vec![frame]);
+        let at_rest = drawn(&app, &ctx).0;
+        app.session
+            .set_preview(&Transaction(vec![Operation::SetTransform {
+                id: frame,
+                transform: Affine::translate((50.0, 0.0)),
+            }]));
+        let moved = drawn(&app, &ctx).0;
+        let shift = screen_x(&app, 70.0) - screen_x(&app, 20.0);
+        assert_eq!(moved.len(), 4);
+        for (m, r) in moved.iter().zip(&at_rest) {
+            assert!((m - (r + shift)).abs() < 0.01, "moved 50 right: {moved:?}");
+        }
+
+        app.session
+            .set_preview(&Transaction(vec![Operation::SetTransform {
+                id: frame,
+                transform: Affine::rotate(std::f64::consts::FRAC_PI_2),
+            }]));
+        // Upright now are the row's edges, turned; none sits where a column was.
+        let upright = drawn(&app, &ctx).0;
+        assert!(
+            at_rest
+                .iter()
+                .all(|c| upright.iter().all(|u| (u - c).abs() > 0.01)),
+            "no column edge left upright: {upright:?}"
+        );
+        let y = |v: f64| app.to_screen(Point::new(0.0, v), AREA, 1.0).y;
+        let mut across: Vec<f32> = Vec::new();
+        for [a, b] in segments(&app, &ctx) {
+            if (a.y - b.y).abs() < 0.01 && !across.iter().any(|v| (v - a.y).abs() < 0.01) {
+                across.push(a.y);
+            }
+        }
+        for want in [20.0, 120.0, 130.0, 380.0] {
+            assert!(
+                across.iter().any(|v| (v - y(want)).abs() < 0.01),
+                "a column edge laid across at {want}: {across:?}"
+            );
+        }
+    }
+
+    /// **Explicit edges are drawn dashed and implicit ones dotted** — the
+    /// fixture's two template columns against the one implicit row its item
+    /// makes: the longest piece of an upright line is a 4-point dash, of a
+    /// level one a 1.5-point dot.
+    ///
+    /// **Flip run**, the dash and the dot swapped: fails on *"the columns
+    /// dashed"* at 1.5 — the predicted site.
+    #[test]
+    fn explicit_edges_are_dashed_and_implicit_ones_dotted() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, frame) = app_with_grid(&ctx);
+        app.session.selection.set(vec![frame]);
+        let (mut upright, mut level) = (0.0_f32, 0.0_f32);
+        for [a, b] in segments(&app, &ctx) {
+            let length = (b - a).length();
+            if (a.x - b.x).abs() < 0.01 {
+                upright = upright.max(length);
+            } else {
+                level = level.max(length);
+            }
+        }
+        assert!(
+            (upright - 4.0).abs() < 0.01,
+            "the columns dashed: {upright}"
+        );
+        assert!(
+            (level - 1.5).abs() < 0.01,
+            "the implicit row dotted: {level}"
+        );
+    }
+
+    /// **Under an inspector edit's hold, the lines stay for a scrub of the
+    /// container's own layout and go for any other** (§15 D925): a gap
+    /// previewed at 40 keeps them — the second column now from 160 — an opacity
+    /// previewed hides them, and with the hold still on and no preview, as
+    /// after a scrub's release, they are back.
+    ///
+    /// **Flip runs**: the hold hiding every subject, as `chrome_hidden` did
+    /// before D925, fails on *"a gap scrub keeps them"*; the hold ignored
+    /// altogether fails on *"an opacity scrub hides them"* — each the predicted
+    /// site.
+    #[test]
+    fn a_layout_scrub_keeps_the_lines_and_any_other_hides_them() {
+        use crate::app::ChromeHold;
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, frame) = app_with_grid(&ctx);
+        app.session.selection.set(vec![frame]);
+        app.chrome_hold = ChromeHold::Scrubbing;
+        let Some(Display::Grid(g)) = app.session.doc.get(frame).unwrap().display().cloned() else {
+            panic!("the fixture's grid");
+        };
+        app.session
+            .set_preview(&Transaction(vec![Operation::SetDisplay {
+                id: frame,
+                display: Some(Display::Grid(Grid {
+                    column_gap: 40.0,
+                    ..g
+                })),
+            }]));
+        let xs = drawn(&app, &ctx).0;
+        assert!(
+            xs.iter().any(|x| (x - screen_x(&app, 160.0)).abs() < 0.01),
+            "a gap scrub keeps them: {xs:?}"
+        );
+        app.session
+            .set_preview(&Transaction(vec![Operation::SetOpacity {
+                id: frame,
+                opacity: 0.5,
+            }]));
+        assert_eq!(
+            drawn(&app, &ctx),
+            (Vec::new(), 0),
+            "an opacity scrub hides them"
+        );
+        app.session.clear_gesture_preview();
+        assert_eq!(drawn(&app, &ctx).0.len(), 4, "and they are back on release");
     }
 }
 

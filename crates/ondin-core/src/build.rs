@@ -4283,10 +4283,11 @@ pub fn laid_grid(doc: &Document, id: NodeId) -> Option<crate::container::LaidGri
 /// axes are written, the one the drag left alone at the line it was laid at.
 /// **The span keeps the author's spelling**: an end given as a line moves with the
 /// start, one given as a span stays a span, and a one-track area is `start / auto`.
-/// A drop's start lands on a track the grid already has — the nearest, past
-/// either end — though a span carried to the last track runs on into implicit
-/// ones, as CSS's would; an area in a leading implicit track (only a negative
-/// line makes one) keeps the negative line that names it ([`grid_drop_many`]).
+/// A drop lands its whole area on tracks the grid already has — the nearest,
+/// past either end, a span stopped where its end meets the last laid track (§15
+/// D927; it used to run on into an implicit one, which `fr` tracks size to
+/// nothing); an area in a leading implicit track (only a negative line makes
+/// one) keeps the negative line that names it ([`grid_drop_many`]).
 ///
 /// `None` when the centre stays in its tracks on both axes — a drop back into its
 /// own cell is no operation at all, so no undo step (§15 D877's rule for flex) —

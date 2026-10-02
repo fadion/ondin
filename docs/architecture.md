@@ -1103,7 +1103,7 @@ pub fn next_grid_color(existing: &[LayoutGrid]) -> Color;    // the first of GRI
   `+` steps: `LayoutGrid::new` carries the plain default, which is what a loaded file or a fixture
   should get.
 
-### 5.3c Container layout — flexbox, grid and insets (steps 1–4 built; §15 D867–D921)
+### 5.3c Container layout — flexbox, grid and insets (steps 1–4 built; §15 D867–D927)
 
 > **Mostly design ahead of code**, in the sense §12 and §13 are, and it sits here rather than at the
 > end because what it changes is the node model. **Built as of 2026-09-24**: the used-geometry
@@ -1343,7 +1343,9 @@ other in-flow sibling's used box in reading order — on its line by main-axis c
 `row-reverse`/`column-reverse`; on another line by cross centre — and out-of-flow siblings keep their
 place. Child order being flow order and paint order, the item's z-order moves with it. Under
 `wrap-reverse` the first line is the bottom one of a row, so a lower line comes first (§15 D883). One
-layer leaving its frame moves by its transform as before.
+layer leaving its frame moves by its transform as before — **and an in-flow item leaves only once the
+pointer is out of its container**, the area rule deciding past that: its box is where the layout put
+it, which an overflowing row or line can put mostly outside a fixed frame (§15 D926).
 **Several in-flow items of one container, none leaving it, reorder as a block** (§15 D902, the
 session's): `build::flex_reorder_many` reads the centre of their union against the other siblings by
 the same reading order — `build::flow_index`, shared with `flex_reorder` — and moves them there in
@@ -1442,7 +1444,10 @@ move as a block** (§15 D918, the session's): `build::grid_drop_many` moves ever
 tracks the centre of their union crossed, writing each explicit lines, so the arrangement is kept; a
 block pushed towards the grid's first track stops there whole, its shift clamped to its leading item's
 room, and a start before the explicit grid is written with the negative line that names it (§15
-D918's amendment).
+D918's amendment). **Towards the last laid track the same**: the shift stops where the trailing area's
+end meets it, so a drag makes no track past either end, and an item spanning two dropped on the last
+column lands on the last two rather than hanging into an implicit one an `fr` grid sizes to nothing
+(§15 D927).
 `grid_drop` is its block of one, and `build::layout_drop_many` — `flex_reorder_many` or
 `grid_drop_many` by the parent's `display` — is what `canvas::flex_block_reorder_of` asks. **The tracks are derived when asked, and stored nowhere**: `container::laid_grid`, public as
 `build::laid_grid`, re-runs the pass from the grid's layout root under taffy's `detailed_layout_info`
@@ -8077,7 +8082,11 @@ selected. Frame membership follows the artwork silently (§15 D20), and until th
 nothing at all about a reparent that changes what clips the layer and where it sits in the tree. What
 keeps it honest is that the adoption decision was **extracted** rather than reproduced —
 `OndinApp::move_destination`, split out of `move_tx`, asked by the outline and by the commit with the
-same snapped delta — so the outline cannot promise a frame the release does not deliver. Only frames
+same snapped delta — so the outline cannot promise a frame the release does not deliver. ⚠️ **And with
+the same drag in place**: for an in-flow item the function reads the pointer off `Drag::Move`'s anchor
+(§15 D926), so `finish_drag` puts the drag back around the transaction it builds, having taken it — a
+release built without it asked of the item's centre what every previewed frame asked of the pointer,
+and committed a move the preview had not shown. Only frames
 are outlined: leaving one for the root is equally a reparent, but the canvas is not a box that can be
 outlined, and a layer coming *out* of a frame already reads as leaving the box it is visibly
 departing.
@@ -10363,7 +10372,8 @@ release. The Alt-drag copy gets the same treatment (`escape_clip_ghosts`), since
 original's parent and was clipped by exactly the same edge.
 
 **It is set exactly when the release would reparent**, through the same `move_destination` /
-`frame_covering` the drop uses — a frame keeps a layer while it covers more than half of it. That is what
+`frame_covering` the drop uses — a frame keeps a layer while it covers more than half of it, and an
+in-flow item of its layout while the pointer is inside it (§15 D926). That is what
 makes the drawing worth trusting: still clipped means dropping it stays in the frame, drawing in full
 means dropping it takes it out. A threshold invented for the renderer would make the picture a guess about
 its own gesture.
@@ -11191,7 +11201,11 @@ test, the limits on which layers hop, and why it commits as one transaction with
 with a group above it hops only between the frames inside that group** (`canvas::group_fence`, §15
 D876): an icon on a card in a row may move to the next card, and dragged out of every card it stays
 where it is rather than falling out of the row onto the page. A loose layer may still drop into a
-card in a group.
+card in a group. **An in-flow item of a layout leaves only once the pointer is out of its container**
+(`canvas::move_destination`, §15 D926), the area rule deciding past that: its box is where the layout
+put it, and a grid's rows or a flex line overflowing a fixed frame put it mostly outside at rest — so
+by area alone one item of a dragged block left and the other stayed, by how far down the pointer went.
+The pointer is the one thing every item of a block shares.
 
 Creation reads the same way. `canvas::draw_target` gives a new layer the topmost frame that actually
 **contains** the press and the document root when no frame does, so a shape, a text node or a path

@@ -2396,10 +2396,22 @@ impl OndinApp {
                     // committed here is the one that has been previewed all
                     // along, at the delta of the release.
                     self.sync_alt_clone(alt);
+                    // **Built with the drag back in place** (§15 D926): whether an
+                    // in-flow item leaves its layout is read off the pointer —
+                    // this drag's anchor carried by the delta (`move_pointer`) —
+                    // and with the drag already taken, the release asked of the
+                    // item's centre what every previewed frame had asked of the
+                    // pointer, and committed a different move from the one shown.
+                    self.drag = Drag::Move { anchor };
+                    let built = match &self.alt_clone {
+                        Some(_) => self.clone_tx(delta),
+                        None => self.move_tx(delta),
+                    };
+                    self.drag = Drag::None;
                     match &self.alt_clone {
                         Some(clone) => {
                             let roots: Vec<NodeId> = clone.copies.iter().map(|c| c.root).collect();
-                            let tx = self.clone_tx(delta);
+                            let tx = built;
                             if self.session.commit(tx) {
                                 // The copy is what the user is holding, so it is
                                 // what stays selected — the original goes back to
@@ -2408,8 +2420,7 @@ impl OndinApp {
                             }
                         }
                         None => {
-                            let tx = self.move_tx(delta);
-                            self.session.commit(tx);
+                            self.session.commit(built);
                         }
                     }
                 }
@@ -2708,6 +2719,10 @@ impl OndinApp {
     /// anchored on its `fn` line, by the look of it; found by reading the run
     /// while editing the rule below.
     ///
+    /// An in-flow item of a laid-out frame stays while the **pointer** is inside
+    /// the frame, whatever share of its box is (§15 D926); past that, and for
+    /// every other layer, the frame covering most of the moved box decides.
+    ///
     /// Only layers whose parent is the root or a frame can hop. Something
     /// inside a group was put there deliberately, and having it fall out of the
     /// group because the group straddles a frame edge is nobody's intent — which
@@ -2741,6 +2756,20 @@ impl OndinApp {
             return None;
         }
         let landed = res.world_bounds(id)? + delta;
+        // **An in-flow item leaves its layout only when the pointer does** (§15
+        // D926, the maintainer's test 2 of 2026-10-02). Its box is where the
+        // layout put it, not where the user did, and a grid's rows or a flex
+        // line can overflow a fixed frame: an item drawn mostly past the frame's
+        // edge was "leaving" at rest by the half-area rule below, so a drag a
+        // little downward took one item of a block out while the other stayed —
+        // the block split by the height of the pointer. The pointer is the one
+        // thing the user aims, and every item of a block shares it.
+        if build::is_flex_item(doc, id)
+            && let Some(p) = parent
+            && self.pointer_in(p, self.move_pointer(id, delta)?)
+        {
+            return None;
+        }
         // **And a layer in a frame inside a group stays inside that group** (§15
         // D876) — the rule above, one level further out. Frames can sit in groups
         // now, so a parent that is a frame no longer means "not in a group": an
@@ -2770,12 +2799,39 @@ impl OndinApp {
         (Some(destination) != parent).then_some(destination)
     }
 
+    /// Where the pointer is in world space for a move of `id` by `delta`: the
+    /// move's anchor carried by the delta while a move drag is under way, else —
+    /// a move asked for with no drag, as a test asks — the middle of `id`'s box
+    /// carried the same way, where a pointer that grabbed it would most likely be.
+    fn move_pointer(&self, id: NodeId, delta: Vec2) -> Option<Point> {
+        match self.drag {
+            Drag::Move { anchor } => Some(anchor + delta),
+            _ => Some(self.session.resolved.world_bounds(id)?.center() + delta),
+        }
+    }
+
+    /// Whether world point `at` is inside container `id`'s own box, through its
+    /// world transform — so a rotated container answers for its turned box, not
+    /// the upright region it covers. The committed box: the container is not what
+    /// is being moved.
+    fn pointer_in(&self, id: NodeId, at: Point) -> bool {
+        let (doc, res) = (&self.session.doc, &self.session.resolved);
+        let (Some(local), Some(world)) =
+            (ondin_core::local_box(doc, res, id), res.world_transform(id))
+        else {
+            return false;
+        };
+        local.contains(world.inverse() * at)
+    }
+
     /// Which of the moving layers this `delta` would take out of the frame they
     /// are in — the ones the preview must therefore draw unclipped.
     ///
     /// **The same question the release asks**, through the same function
     /// ([`Self::move_destination`], and `frame_covering` under it: a frame keeps a
-    /// layer while it covers more than half of it). That is the whole point of
+    /// layer while it covers more than half of it — and keeps an in-flow item of
+    /// its layout while the pointer is inside it, §15 D926). That is the whole
+    /// point of
     /// routing it here rather than inventing a threshold for the renderer — while
     /// the shape is still clipped, dropping it keeps it in the frame; the moment it
     /// draws in full, dropping it takes it out. A second rule would make the
@@ -24336,5 +24392,100 @@ mod flex_canvas_tests {
         };
         assert_eq!(*size, Size::new(20.0, 20.0), "the rects unscaled");
         assert_eq!(app.session.history.undo_depth(), depth + 1, "one step");
+    }
+
+    /// **A block in a grid whose rows overflow its frame moves whole, wherever
+    /// in the frame the pointer is** (§15 D926, the maintainer's test 2 of
+    /// 2026-10-02). A 300 × 200 frame of three `1fr` columns holds four 20 × 150
+    /// rects, so its two auto rows are 300 tall and the fourth, `b`, sits in row 2
+    /// from y 150 — a third inside the frame at rest. `a` and `b` are selected and
+    /// dragged one column right and a little down, the pointer well inside the
+    /// frame: both land in column 2, in their own rows, and neither leaves.
+    ///
+    /// The half-area rule alone had `b` "leaving" by its box, so the block path
+    /// declined and `b` was carried out of the grid under the hand while `a`
+    /// kept its cell — which way it went turned on the pointer's height.
+    ///
+    /// **Flip runs**, each predicted to fail on *"b stays in the grid"*, `b`
+    /// reparented to the canvas: `move_destination`'s pointer test dropped; and
+    /// `finish_drag` building the commit with the drag already cleared, as it
+    /// did when the pointer rule was first written — the preview then showed the
+    /// block moving whole and the release took `b` out, which is the case this
+    /// test was red on before that line moved.
+    #[test]
+    fn a_block_whose_rows_overflow_the_frame_moves_whole() {
+        use ondin_core::container::{Grid, GridPlacement};
+        let ctx = fresh();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0xB0);
+        let root = ids.mint();
+        let grid = ids.mint();
+        let items: Vec<NodeId> = (0..4).map(|_| ids.mint()).collect();
+        let mut ops = vec![Operation::CreateNode {
+            id: grid,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(300.0, 200.0),
+            },
+            transform: Some(Affine::IDENTITY),
+            name: None,
+        }];
+        for (index, id) in items.iter().enumerate() {
+            ops.push(Operation::CreateNode {
+                id: *id,
+                parent: grid,
+                index,
+                kind: NodeKind::Rect {
+                    size: Size::new(20.0, 150.0),
+                    corner_radii: Default::default(),
+                },
+                transform: None,
+                name: None,
+            });
+        }
+        ops.push(Operation::SetDisplay {
+            id: grid,
+            display: Some(Display::Grid(Grid {
+                columns: ondin_core::container::parse_tracks("1fr 1fr 1fr").unwrap(),
+                ..Default::default()
+            })),
+        });
+        let mut doc = Document::new(root);
+        doc.apply(&Transaction(ops)).expect("the grid");
+        app.session.adopt_document(doc, None);
+        app.session.camera.center = Point::new(150.0, 150.0);
+        app.session.camera.zoom = 1.0;
+        for _ in 0..2 {
+            frame(&ctx, &mut app, Vec::new());
+        }
+        let (a, b) = (items[0], items[3]);
+        let bounds = |app: &OndinApp, id| app.session.resolved.world_bounds(id).unwrap();
+        assert_eq!(
+            bounds(&app, b).y0,
+            150.0,
+            "the fixture: b in row 2, mostly clipped"
+        );
+        app.session.selection.set(vec![a, b]);
+        drag(
+            &ctx,
+            &mut app,
+            Point::new(10.0, 75.0),
+            Point::new(125.0, 95.0),
+        );
+        assert_eq!(
+            app.session.doc.get(b).unwrap().parent(),
+            Some(grid),
+            "b stays in the grid"
+        );
+        for id in [a, b] {
+            assert_eq!(
+                app.session.doc.get(id).unwrap().item().grid_column.start,
+                GridPlacement::Line(2),
+                "both in column 2"
+            );
+        }
+        assert_eq!(bounds(&app, a).origin(), Point::new(100.0, 0.0));
+        assert_eq!(bounds(&app, b).origin(), Point::new(100.0, 150.0));
     }
 }

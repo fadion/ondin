@@ -1158,6 +1158,66 @@ fn a_grid_laid_out_twice_reports_its_last_layout() {
     );
 }
 
+/// **A spanning item dropped on the last column stops with its span inside the
+/// grid** (§15 D927, the maintainer's test 1 of 2026-10-02): over three `1fr`
+/// columns, `a` spanning two is dropped with its centre on the third and lands
+/// as `2 / span 2` — the last two columns — where it used to be written
+/// `3 / span 2` and hang into an implicit fourth column the `fr` tracks size to
+/// nothing, drawn spanning one. A drop that has room is not clamped: `b` alone
+/// to the third column is `3`.
+///
+/// **Flip run**, the forward half of `grid_drop_many`'s `room` answering `by`
+/// unclamped: fails on *"the span kept inside"* with line 3 — the predicted
+/// site.
+#[test]
+fn a_spanning_item_dropped_on_the_last_column_keeps_its_span_inside() {
+    use ondin_core::kurbo::Vec2;
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(300.0, 100.0), (0.0, 0.0));
+    let a = s.add(f, rect(20.0, 20.0), (0.0, 0.0));
+    let b = s.add(f, rect(20.0, 20.0), (0.0, 0.0));
+    s.display(
+        f,
+        Some(Display::Grid(grid(vec![fr(1.0), fr(1.0), fr(1.0)], vec![]))),
+    );
+    s.item(a, |i| i.grid_column.end = GridPlacement::Span(2));
+    assert_eq!(
+        s.bounds(b).x0,
+        200.0,
+        "the fixture: b after a's two columns"
+    );
+
+    let op = ondin_core::build::grid_drop(&s.doc, &s.res, a, Vec2::new(250.0, 0.0))
+        .expect("a drop to the last column");
+    s.commit(vec![op]);
+    let lines = s.doc.get(a).unwrap().item().grid_column;
+    assert_eq!(
+        (lines.start, lines.end),
+        (GridPlacement::Line(2), GridPlacement::Span(2)),
+        "the span kept inside"
+    );
+    assert_eq!(s.bounds(a).x0, 100.0, "drawn from the second column");
+
+    let (mut s, f2) = {
+        let mut s = Scene::new();
+        let f2 = s.add(s.root, frame(300.0, 100.0), (0.0, 0.0));
+        s.display(
+            f2,
+            Some(Display::Grid(grid(vec![fr(1.0), fr(1.0), fr(1.0)], vec![]))),
+        );
+        (s, f2)
+    };
+    let b = s.add(f2, rect(20.0, 20.0), (0.0, 0.0));
+    let op = ondin_core::build::grid_drop(&s.doc, &s.res, b, Vec2::new(250.0, 0.0))
+        .expect("a drop to the last column");
+    s.commit(vec![op]);
+    assert_eq!(
+        s.doc.get(b).unwrap().item().grid_column.start,
+        GridPlacement::Line(3),
+        "room to spare, no clamp"
+    );
+}
+
 /// An auto-width label, `Inter` 12.
 fn label(content: &str) -> NodeKind {
     NodeKind::Text {

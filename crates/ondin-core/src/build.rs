@@ -4303,6 +4303,11 @@ pub fn grid_drop(doc: &Document, res: &Resolved, id: NodeId, delta: Vec2) -> Opt
 /// first track stops there **whole**, its shift clamped to the leftmost (topmost)
 /// item's room, so the drag cannot reshuffle it; an area in a leading implicit
 /// track is written with the negative line that names it, not moved to line 1.
+/// **And towards its last track the same way** (§15 D927): the shift stops where
+/// the rightmost (bottommost) area's end meets the last laid track, so an item
+/// spanning two dropped on the last column lands on the last two rather than
+/// hanging into a new implicit track — one an `fr` grid sizes to nothing, so the
+/// item read `3 / span 2` and was drawn spanning one.
 ///
 /// `Some` of no operations when the centre stays in its tracks — the block lands
 /// where it was; `None` when the items are not all in-flow items of one grid.
@@ -4337,26 +4342,21 @@ pub fn grid_drop_many(
     let shift = |tracks: &container::LaidTracks, a: f64, b: f64| -> Option<i32> {
         Some(tracks.index_at(b)? as i32 - tracks.index_at(a)? as i32)
     };
-    // Stopped whole at the grid's first track: no further back than the block's
-    // first item has room for, so the block cannot reshuffle against the edge.
-    let room = |by: i32, tracks: &container::LaidTracks, starts: &mut dyn Iterator<Item = i32>| {
-        let first = starts.min().unwrap_or(1);
+    // Stopped whole at either end of the laid tracks: no further back than the
+    // block's first area has room for, no further on than its last area's end
+    // has — so the block cannot reshuffle against an edge, nor hang past one.
+    let room = |by: i32, tracks: &container::LaidTracks, axis: usize| {
+        let first = areas.iter().map(|(_, a)| a[axis]).min().unwrap_or(1);
+        let last = areas.iter().map(|(_, a)| a[axis + 1]).max().unwrap_or(1);
+        let end = tracks.line_of(tracks.spans.len().saturating_sub(1)) + 1;
         if by < 0 {
             by.max((tracks.line_of(0) - first).min(0))
         } else {
-            by
+            by.min((end - last).max(0))
         }
     };
-    let dc = room(
-        shift(&grid.columns, was.x, now.x)?,
-        &grid.columns,
-        &mut areas.iter().map(|(_, a)| a[0]),
-    );
-    let dr = room(
-        shift(&grid.rows, was.y, now.y)?,
-        &grid.rows,
-        &mut areas.iter().map(|(_, a)| a[2]),
-    );
+    let dc = room(shift(&grid.columns, was.x, now.x)?, &grid.columns, 0);
+    let dr = room(shift(&grid.rows, was.y, now.y)?, &grid.rows, 2);
     if dc == 0 && dr == 0 {
         return Some(Vec::new());
     }

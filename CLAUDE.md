@@ -8,7 +8,7 @@ documents, and is untracked.
 | --- | --- |
 | `docs/architecture.md` | The design and the invariants. **Source of truth.** ~13,000 lines. |
 | `docs/decisions.md` | **§15** — every deviation from that design, **D1–D912** with no gaps, each with a verdict. ~53,500 lines. |
-| `docs/roadmap.md` | Open work, decided non-goals, parked decisions, post-v1. **Every `Now` section is clear as of 2026-09-23** — *Files, library and storage* reopened and closed that day (the cover cache's lifecycle, §15 D863–D864); what is left is *Later* and §0. **`Next · Container layout`** (flexbox, CSS grid and insets — `architecture.md` §5.3c, §15 D867–D883): steps 1–3 built and committed — step 3's cards (D878–D883), the maintainer's first-look fixes (D884–D891) and six rulings on what flex had left (D892–D897) all landed in session 36. Session 37 (D904–D912): a resize's holds in the preview, a top-edge resize aligning to the end, `Start`/`End` made `flex-start`/`flex-end` as the cards always drew (D909), and a layout nested in a plain group laid by both the preview and `keep_insets`. **Flex owes nothing** — its owed tests landed in session 39 (D901's amendment). **Step 4, grid, is built** (sessions 38–40, D913–D925): model and engine, preview and gestures, the cards, and the canvas track lines (D921), all committed; session 40 closed what was left beside them — a held `baseline` (D923), the two `MAX_TRACKS` (D924), the lines through a layout scrub (D925, D921's open question answered by the session and not ruled), and the last track-line tests. **Grid and flex owe nothing but the maintainer's first look at both together** — the handoff marker under step 4 carries it. |
+| `docs/roadmap.md` | Open work, decided non-goals, parked decisions, post-v1. **Every `Now` section is clear as of 2026-09-23** — *Files, library and storage* reopened and closed that day (the cover cache's lifecycle, §15 D863–D864); what is left is *Later* and §0. **`Next · Container layout`** (flexbox, CSS grid and insets — `architecture.md` §5.3c, §15 D867–D883): steps 1–3 built and committed — step 3's cards (D878–D883), the maintainer's first-look fixes (D884–D891) and six rulings on what flex had left (D892–D897) all landed in session 36. Session 37 (D904–D912): a resize's holds in the preview, a top-edge resize aligning to the end, `Start`/`End` made `flex-start`/`flex-end` as the cards always drew (D909), and a layout nested in a plain group laid by both the preview and `keep_insets`. **Flex owes nothing** — its owed tests landed in session 39 (D901's amendment). **Step 4, grid, is built** (sessions 38–40, D913–D925): model and engine, preview and gestures, the cards, and the canvas track lines (D921), all committed; session 40 closed what was left beside them — a held `baseline` (D923), the two `MAX_TRACKS` (D924), the lines through a layout scrub (D925, D921's open question answered by the session and not ruled), and the last track-line tests. **The maintainer looked on 2026-10-02** over a ten-item list of the riskiest flex and grid cases and found two, both fixed that day (session 41): an in-flow item now leaves its layout by the pointer rather than by its box (D926), and a grid drop stops whole at the last track (D927). **Steps 1–4 owe nothing; next is step 5, components and overrides — not designed.** |
 | `docs/shortcuts.md` | The whole keymap — bound, unbound and agreed. |
 | `docs/context-menus.md` | The context-menu spec and its own deviation ledger. |
 | `docs/vm.md` | The language behind Command Mode. Nothing here is built. |
@@ -67,9 +67,16 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 925 index rows, 925 body headings, next free
-D926** (measured at the close of session 40) — but trust the procedure over any number written
+anywhere cited either. **The live figures: 927 index rows, 927 body headings, next free
+D928** (measured at the close of session 41) — but trust the procedure over any number written
 down here, including that one. **No block is reserved**: the next session reserves its own.
+⚠️ **Session 41 reserved D926–D937 and spent two** — D926 (an in-flow item leaves its layout
+by the pointer) and D927 (a grid drop stopped whole at the last track). 🚨 **D927 was typed into
+a comment a minute before the block was reserved** — the warning below, again; the negative grep
+run straight after found it as the only site, so nothing collided, but the order was wrong. The
+closing negative grep over **D928–D937 found zero sites in `crates/` or `docs/`** and they are
+released. Census: 827 distinct numbers cited from `.rs`, `.toml` and `.wgsl` under `crates/`,
+none unresolved — two arrivals (D926, D927) and no departures against `d4e98fe`.
 ⚠️ **Session 40 reserved D923–D934 and spent three** — D923 (a `baseline` a grid holds, read as
 start on a lit row), D924 (`container::MAX_TRACKS` renamed `MAX_TEMPLATE_TRACKS`), D925 (the
 track lines kept through a scrub of their own container's layout). The closing negative grep

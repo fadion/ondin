@@ -36,7 +36,8 @@ use ondin_core::container::{
     placement_css, track_count, track_size_css, tracks_css,
 };
 
-/// A grid item's self-alignments, in the card — `baseline` left out (§15 D919).
+/// A grid item's `justify-self`, in the card — `baseline` left out, the inline
+/// axis treating it as `start` (§15 D919, D939); `align-self` is [`ALIGN_SELF`].
 const SELF: [Option<AlignItems>; 4] = [
     Some(AlignItems::Stretch),
     Some(AlignItems::Start),
@@ -44,8 +45,8 @@ const SELF: [Option<AlignItems>; 4] = [
     Some(AlignItems::Center),
 ];
 
-/// A grid container's `justify-items` and `align-items`: `normal` first, the
-/// default (§15 D915), then [`SELF`]'s four.
+/// A grid container's `justify-items`: `normal` first, the default (§15 D915),
+/// then [`SELF`]'s four; `align-items` is [`ALIGN_ITEMS`].
 const ITEMS: [Option<AlignItems>; 5] = [
     None,
     Some(AlignItems::Stretch),
@@ -361,10 +362,16 @@ fn breadth_field(
     // the hidden number there is 0, so a typed `0` never moved it and
     // `minmax(0, 1fr)` — CSS's idiom for an `fr` track that may shrink below its
     // content — could not be typed. A click in and out types nothing, so D885's
-    // rule holds.
+    // rule holds. **Only what can be part of a number counts**: a letter typed
+    // over `auto` leaves the hidden 0 in place, and counting it wrote `0px`.
     let keystroke = word.is_some()
         && resp.has_focus()
-        && ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Text(_))));
+        && ui.input(|i| {
+            i.events.iter().any(|e| {
+                matches!(e, egui::Event::Text(t)
+                    if !t.is_empty() && t.chars().all(|c| c.is_ascii_digit() || c == '.'))
+            })
+        });
     let typed = edited(&resp, v != start || keystroke).then(|| match kind {
         Kind::Percent => TrackBreadth::Percent(v.max(0.0)),
         Kind::Fr => TrackBreadth::Fr(v.max(0.0)),

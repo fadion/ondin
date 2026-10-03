@@ -3227,7 +3227,7 @@ mod tests {
     /// undo step with nothing drawn differently, and a label that stopped growing
     /// with its words.
     ///
-    /// **Flip run**, the `v == drawn` arm deleted: fails on *"still auto"*,
+    /// **Flip run**, the W/H arm's `_ if !typed` guard deleted: fails on *"still auto"*,
     /// `AutoHeight(…)` against `Auto`, the predicted site.
     #[test]
     fn a_click_through_w_commits_nothing() {
@@ -3845,13 +3845,22 @@ mod tests {
     /// committed.
     ///
     /// **Flip run**, the keystroke clause deleted: fails on *"minmax(0, 1fr)"*,
-    /// the template unchanged, the predicted site.
+    /// the template unchanged, the predicted site. And a letter typed over the
+    /// keyword writes nothing: the first cut counted any keystroke, and `x` then
+    /// wrote the hidden 0 as `0px` — `arch-scribe`'s reading, measured; the clause
+    /// accepting any character fails on *"a letter is no number"*.
     #[test]
     fn zero_typed_over_a_keyword_lands() {
         let s = grid_with_columns("minmax(auto, 1fr)");
         let frame_id = s.frame;
         let mut p = Panel::new(s.app, OndinApp::inspector_container);
         p.app.session.selection.set(vec![frame_id]);
+        p.retype("auto", "x", egui::Key::Enter);
+        assert_eq!(
+            ondin_core::container::tracks_css(&grid_of(&p.app, frame_id).columns),
+            "minmax(auto, 1fr)",
+            "a letter is no number: nothing written"
+        );
         p.retype("auto", "0", egui::Key::Enter);
         assert_eq!(
             ondin_core::container::tracks_css(&grid_of(&p.app, frame_id).columns),

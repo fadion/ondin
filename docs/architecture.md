@@ -6114,7 +6114,8 @@ that is a track rather than a box.
 **And the hover ground is one name, `theme::color::HOVER` (52, 52, 54), read by four places that have
 to agree** (§15 D484). Two of them are `theme::install`'s `w.hovered` fills, which is what egui itself
 paints for every stock widget; the other two are hand-rolled — `ui::icon_button_padded` for the tool
-rail and top bar, `ui::button_face` for the field-row family — plus `inspector::template_cell`. ⚠️ **It
+rail and top bar, `ui::button_face` for the field-row family — plus `inspector::template_cell`, and
+since §15 D963 `ui::menu_head`, whose hover is `icon_button_padded`'s on purpose. ⚠️ **It
 was a literal at all four and named at none until 2026-09-07**, so a change to any one of them would
 have split the hover into a stock grey and a hand-rolled one with every gate green, and `CARD_BORDER`'s
 (53, 53, 54) sat one level away in `theme::color` where a reader would have looked for it.
@@ -6945,7 +6946,8 @@ overwrite. `DragValue` does the same.
 to `ComboBox::icon`). egui paints a filled triangle in `fg_stroke.color` — the *interaction* colour, so
 it brightened on hover and went full white with the popup open, which made the arrows the loudest thing
 in a panel of dropdowns. The replacement is the Phosphor caret at 13pt in `text::DIM` — the same ink the
-menu heads' caret uses, so one dim covers every "there is more here" in the app — fixed through every
+menu heads' caret rests in (it lights with its head since §15 D963), so one dim covers every "there is
+more here" in the app — fixed through every
 state. `Style` has no field for a combo's icon, so this cannot be a theme default: **a new `ComboBox`
 owes the `.icon(ui::combo_chevron)` call**, and nothing but review catches one that forgets.
 ⚠️ **The check is two greps and a comparison, not a number in a comment** (§15 D665): count
@@ -10736,8 +10738,11 @@ boundaries" only has a useful answer when they are far enough apart to see, whil
 be whole" is true at every zoom or none.
 
 **The top bar's right cluster carries two dropdowns**, between undo/redo and the zoom readout: **View**
-(an eye and a caret) and **Snap** (a magnet and a caret), each a 160pt column of `ui::MENU_ITEM_H`
-checkable rows — 24 since 2026-08-20, the same constant the context menus allocate against (§15 D262).
+(an eye and a caret) and **Snap** (a magnet and a caret). Each head, the zoom readout's too, is one
+`ui::menu_head`, and it answers the pointer as the icon buttons beside it do — the `HOVER` ground on
+its whole 26pt rect at radius 5, mark and caret in `TEXT` — and holds that while its own menu is
+open (§15 D963). Each menu is a 160pt column of `ui::MENU_ITEM_H` checkable rows — 24 since
+2026-08-20, the same constant the context menus allocate against (§15 D262).
 `ui::menu_check` is that row, drawn in the `ui::menu_frame` every floating dropdown shares.
 Its 13pt accent tick keeps its column whether or not it is showing, so labels stay in one line down
 the menu instead of shuffling left as things are switched off, and "off" is a dimmer label as well as

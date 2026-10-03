@@ -7943,6 +7943,7 @@ impl OndinApp {
                 .size(11.5)
                 .color(theme::text::MUTED),
             TOP_GAP,
+            self.open_menu == TopMenu::Zoom,
         )
         .on_hover_text("Zoom");
         if head.clicked() {
@@ -8102,6 +8103,7 @@ impl OndinApp {
                 ui,
                 theme::icon_text(glyph, 16.0, theme::text::MUTED),
                 TOP_GAP,
+                self.open_menu == which,
             )
             .on_hover_text(tip);
             if head.clicked() {

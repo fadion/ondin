@@ -67,8 +67,8 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 962 index rows, 962 body headings, next free
-D963** (measured at the close of session 44) — but trust the procedure over any number written
+anywhere cited either. **The live figures: 963 index rows, 963 body headings, next free
+D964** (measured at the close of session 44) — but trust the procedure over any number written
 down here, including that one. **No block is reserved**: the next session reserves its own.
 ⚠️ **Session 44 reserved D958–D969 and spent three** — D958 (present mode's hover strip),
 D959 (local dates on Linux and macOS through `localtime_r`), D960 (§5.4a's network rule scoped
@@ -83,12 +83,18 @@ moment of the grep, and this paragraph had to be rewritten for it.** D961 is the
 the top bars' mark; D962–D966 grepped to zero and were released — and the maintainer's next look
 needed one more, so **a third block, D962–D967, was reserved and grep-checked *before* any
 citation this time**. D962 is the save dot, the top bar's open and save buttons removed, and the
-library's mark-to-name gap. D963–D967 grep to zero and are released. ⚠️ **The census's own
+library's mark-to-name gap. D963–D967 grepped to zero and were released — and a **fourth block,
+D963–D968**, was reserved for the next look (the menu heads' hover, held while open), spent D963,
+and released D964–D968 at zero sites. 🚨 **Its record was written by two hands at once**:
+`arch-scribe`, resumed by a follow-up message after its report, and the delegating session,
+amending the same entry by `Edit`. Neither overwrote the other only because `Edit` refuses a
+stale file — **a follow-up `SendMessage` to a finished agent restarts it**, so edit the same file
+yourself only after its second report. ⚠️ **The census's own
 `comm` misfired once at this close**: the index was compared in `sort -n` order, and `comm` printed
 seven hundred "unresolved" numbers plus *"file 2 is not in sorted order"*. Byte-order both sides
-(`LC_ALL=C sort -u`) — `sort -n` is for the order check, never for `comm`. Census: 861 distinct
-numbers cited from `.rs`, `.toml` and `.wgsl` under `crates/`, none unresolved — five arrivals
-(D958–D962) and no departures against `17ca12a`.
+(`LC_ALL=C sort -u`) — `sort -n` is for the order check, never for `comm`. Census: 862 distinct
+numbers cited from `.rs`, `.toml` and `.wgsl` under `crates/`, none unresolved — six arrivals
+(D958–D963) and no departures against `17ca12a`.
 ⚠️ **Session 43 reserved D952–D963 and spent six** — D952 (the window's own chrome), D953
 (the GUI subsystem and the `ondin.com` twin), D954 (auto-update and the log file), D955 (CI),
 D956 (the Release workflow and Linux packages), D957 (the apt/dnf repository on Pages and

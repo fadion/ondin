@@ -523,7 +523,8 @@ const HEAD_H: f32 = 26.0;
 const HEAD_PAD: f32 = 5.0;
 
 /// The head of a top-bar dropdown — a mark, `gap` points, then a caret —
-/// sensed as **one** rect.
+/// sensed as **one** rect. Lit like an [`icon_button`] under the pointer, and
+/// held lit while `open` says its menu is up (§15 D963).
 ///
 /// Hand-painted, rather than two `ui.label`s with their responses unioned. That
 /// is what this replaced, and it was clickable only in the empty band *above and
@@ -535,7 +536,7 @@ const HEAD_PAD: f32 = 5.0;
 /// The same trap as §15 D35 wearing different clothes: two things claiming one
 /// region, and the one that looks clickable losing. The fix is the same in
 /// spirit — have only one claimant.
-pub fn menu_head(ui: &mut egui::Ui, lead: egui::RichText, gap: f32) -> egui::Response {
+pub fn menu_head(ui: &mut egui::Ui, lead: egui::RichText, gap: f32, open: bool) -> egui::Response {
     let lay = |ui: &egui::Ui, text: egui::RichText| {
         egui::WidgetText::from(text).into_galley(
             ui,
@@ -564,13 +565,30 @@ pub fn menu_head(ui: &mut egui::Ui, lead: egui::RichText, gap: f32) -> egui::Res
     let at = |g: &std::sync::Arc<egui::Galley>, x: f32| {
         egui::pos2(x, rect.center().y - g.size().y / 2.0)
     };
+    // **The hover is `icon_button`'s, exactly** (§15 D963): the `HOVER` ground
+    // on the same 5-point radius and both marks brightened to `TEXT`. These
+    // heads sit in one cluster with undo, redo and Settings, which are icon
+    // buttons, and every control in the app answers the pointer — so a head
+    // that lit nothing read as the one control in the bar that was not one.
+    // The whole rect lights, mark and caret together, because it is one target.
+    //
+    // **And it stays lit while its menu is `open`**, the maintainer's ruling:
+    // the menu hangs off the head, and a head that went dark the moment the
+    // pointer moved down into its own menu read as having let go of it.
+    let lit = open || resp.hovered();
+    if lit {
+        p.rect_filled(rect, egui::CornerRadius::same(5), theme::color::HOVER);
+    }
+    let ink_of = |g: &std::sync::Arc<egui::Galley>, pos: egui::Pos2| {
+        if lit {
+            p.galley_with_override_text_color(pos, g.clone(), color::TEXT);
+        } else {
+            p.galley(pos, g.clone(), egui::Color32::PLACEHOLDER);
+        }
+    };
     let ink = rect.left() + HEAD_PAD;
-    p.galley(at(&lead, ink), lead.clone(), egui::Color32::PLACEHOLDER);
-    p.galley(
-        at(&caret, ink + lead.size().x + gap),
-        caret,
-        egui::Color32::PLACEHOLDER,
-    );
+    ink_of(&lead, at(&lead, ink));
+    ink_of(&caret, at(&caret, ink + lead.size().x + gap));
     resp
 }
 
@@ -5738,6 +5756,7 @@ mod head_tests {
                 ui,
                 crate::theme::icon_text(icon::EYE, 16.0, theme::text::MUTED),
                 1.0,
+                false,
             )
             .rect;
         });
@@ -5762,10 +5781,87 @@ mod head_tests {
                 ui,
                 crate::theme::icon_text(icon::EYE, 16.0, theme::text::MUTED),
                 1.0,
+                false,
             )
             .clicked();
         });
         assert!(clicked, "a press on the glyph did not reach the head");
+    }
+
+    /// **A menu head answers the pointer the way an icon button does, and
+    /// stays lit while its menu is open** (§15 D963): under the pointer, or
+    /// with `open`, it paints the `HOVER` ground and draws its mark and caret
+    /// in `TEXT`; at rest and closed it paints no ground and leaves both marks
+    /// their own colours.
+    ///
+    /// **Flip runs**: `open` ignored fails on *"an open head stays lit with the
+    /// pointer away"*, predicted. The ground's fill dropped fails there too,
+    /// `(0, 2)` against `(1, 2)` — the open case comes first now, and catches
+    /// the missing ground before the hovered case is reached. Run before the
+    /// open case existed, the same flip failed on *"a hovered head paints the
+    /// HOVER ground"*; `arch-scribe` predicted the move and the re-run agreed.
+    #[test]
+    fn a_menu_head_lights_under_the_pointer_like_an_icon_button() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let head = |ui: &mut egui::Ui, open: bool| {
+            menu_head(
+                ui,
+                crate::theme::icon_text(icon::EYE, 16.0, theme::text::MUTED),
+                5.0,
+                open,
+            )
+        };
+        // (ground fills, text runs drawn in TEXT, text runs) for one frame.
+        let frame = |ctx: &egui::Context, raw: egui::RawInput, open: bool| {
+            let mut rect = egui::Rect::NOTHING;
+            let out = ctx.run_ui(raw, |ui| rect = head(ui, open).rect);
+            let (mut grounds, mut lit, mut texts) = (0, 0, 0);
+            for cs in &out.shapes {
+                match &cs.shape {
+                    egui::Shape::Rect(r) if r.fill == theme::color::HOVER => grounds += 1,
+                    egui::Shape::Text(t) => {
+                        texts += 1;
+                        if t.override_text_color == Some(color::TEXT) {
+                            lit += 1;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            (rect, grounds, lit, texts)
+        };
+
+        let (rect, grounds, lit, texts) = frame(&ctx, Default::default(), false);
+        assert_eq!(texts, 2, "the fixture draws a mark and a caret");
+        assert_eq!((grounds, lit), (0, 0), "a head at rest lights nothing");
+
+        // Open, with the pointer nowhere near it — down in its menu, say.
+        let (_, grounds, lit, _) = frame(&ctx, Default::default(), true);
+        assert_eq!(
+            (grounds, lit),
+            (1, 2),
+            "an open head stays lit with the pointer away"
+        );
+
+        // The pointer over it, then a frame for the hover to be read back.
+        let over = egui::RawInput {
+            events: vec![egui::Event::PointerMoved(rect.center())],
+            ..Default::default()
+        };
+        let _ = frame(&ctx, over, false);
+        let (_, grounds, lit, _) = frame(&ctx, Default::default(), false);
+        assert_eq!(grounds, 1, "a hovered head paints the HOVER ground");
+        assert_eq!(lit, 2, "and draws its mark and its caret in TEXT");
+
+        // And closed with the pointer gone, it goes dark again.
+        let away = egui::RawInput {
+            events: vec![egui::Event::PointerGone],
+            ..Default::default()
+        };
+        let _ = frame(&ctx, away, false);
+        let (_, grounds, lit, _) = frame(&ctx, Default::default(), false);
+        assert_eq!((grounds, lit), (0, 0), "closed and left, it goes dark");
     }
 
     /// **A card's eyebrow takes the arrow, not an I-beam.**
@@ -5848,6 +5944,7 @@ mod head_tests {
                     ui,
                     crate::theme::icon_text(icon::EYE, 16.0, theme::text::MUTED),
                     gap,
+                    false,
                 )
                 .rect
                 .width();
@@ -5885,6 +5982,7 @@ mod head_tests {
                     ui,
                     crate::theme::icon_text(icon::EYE, GLYPH, theme::text::MUTED),
                     5.0,
+                    false,
                 );
             });
         });
@@ -5954,7 +6052,7 @@ mod head_tests {
             let out = ctx.run_ui(Default::default(), |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 5.0;
-                    menu_head(ui, egui::RichText::new("100%").size(11.5), 5.0);
+                    menu_head(ui, egui::RichText::new("100%").size(11.5), 5.0, false);
                     column = ui.scope(|ui| rule(ui, 16.0)).response.rect;
                 });
             });

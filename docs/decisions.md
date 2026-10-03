@@ -1338,6 +1338,7 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D960** — **§5.4a's network rule is the web-font source's, and the auto-updater is outside it.** D954's ***Fix***, ruled by the maintainer: *"anything new that reaches the network must either be startable only while the switch is on, or hold a cancel flag"* read as covering the updater, which answers to `ONDIN_NO_UPDATE_CHECK` alone and holds no flag. The rule governs font traffic; the updater's one gate is the environment variable. D720 wrote the rule in the font section with a one-module grep as its enumeration, so this is a scope, not an exemption. ⚠️ **The Settings caption reads wider** — *"Nothing is downloaded and no request is made"*, written for a user on a metered connection — and is false of the app whenever the updater runs — **ruled and fixed the same day**, the maintainer's wording: *"… no font request is made."* *(Ruled 2026-10-03, session 44; **Resolved**, the maintainer's ruling, closing D954's ***Fix***; the caption ***Fix***, its wording, **ruled and *Fixed***. Record-only, its number planted on `update::OPT_OUT_VAR` and cited from the caption's comment in `settings.rs`. D720, D954 amended; §5.4a, §9.1)*
 - **D961** — **The app's icon set is Schemaic's, and its 64 is the top bars' brand mark.** The maintainer replaced `icons/` with Schemaic's set — `icon.ico` (16–256), `icon.png` (512), `icon-64.png`, `icon-1024.png`, RGBA on a transparent ground — deleting the `convertico-Ondin` files and the store squares, which broke the build. Wired as Schemaic uses it: `build.rs` the `.ico`; `window_icon` the 512, was the 256; the `.icns` from the 1024, 16 to 512@2x; Velopack's `--icon` the `.ico` on Windows and the 512 on Linux; one hicolor icon, the 512, in the packages and `install.sh`'s AppImage route, where there were six; the Pages site the 512. **The top bars' placeholder** — an `ACCENT_900` square with a `DIAMOND` — is `ui::logo` painting the 64 into the same 26pt slot, uploaded once with mipmaps and kept in egui's temp memory; the editor's mark keeps its click-through, its hover a `color::HOVER` fill behind the artwork where the square lightened. ⚠️ An AppImage installed before this keeps a stale 256 icon its uninstall line does not name. *(Built and tested 2026-10-03, not yet committed; **Keep**, the maintainer's set and ruling, the wiring the session's after Schemaic; closing D956's ⚠️. Tests `window_icon_is_the_ondin_mark_at_the_size_windows_scales_from` and `ui::logo_tests::the_logo_is_the_64px_mark_and_uploads_once`, the `insert_temp` removed failing on *"the texture is kept"*, predicted. Typed into two comments before its block was reserved, the only sites. 🚨 Not seen on a real window, nor on Linux or macOS. D956 amended; §9.1)*
 - **D962** — **The editor's top bar: a save dot, no open or save buttons, and the library's mark-to-name gap on both screens.** Three rulings from screenshots of D961's mark. `OndinApp::save_pill` is `save_dot`: a 7pt dot after the document name, no ground, no text — `color::UNSAVED` (`DANGER`'s value under its own name, since a dirty document is not a destructive click) while `saved_ago` is `None`, a write in flight included, and `color::SAVED` `#45b070`, the app's first green, once the file matches; D393's two colours kept, amber and accent become red and green. ⚠️ **The dot sits at its 14pt hover target's *left* edge**, so the gap to the name is the row's 8pt spacing rather than 8 + 3.5. The folder and disk buttons are gone — `Ctrl+O`, `Ctrl+S` (the same `finish_text_first` and `save_file(true)`), autosave and the mark's click-through are unchanged — so D365's doors are two and `Ctrl+W` D383's third. The mark-to-name gap is the library's 12 on both screens, the editor setting it just before placing its mark — 🚨 a first repair set 8 *after* the library's mark was placed and changed nothing, egui spacing an item when it is placed; `the_mark_and_the_name_are_as_far_apart_on_both_screens` measures both, its flip failing 12 against 8. *(Built 2026-10-03, session 44, not yet committed; **Keep**, the maintainer's rulings. **The tooltip is the session's, not the ruling's, and removable** — `save_label`'s sentence on hover; removing it orphans `save_label`, D678's ladder and three tests. The pill's twenty-second repaint is dropped; a still-held tooltip may read a minute stale, accepted. ⚠️ **`SAVED`'s first pick, `#6bc48a`, claimed a like lightness and measured 0.75 OKLCH against `DANGER`'s 0.68**; replaced the same session by `#45b070`, computed to `DANGER`'s lightness and chroma; *Revisit if* either state reads louder. The gap is pinned by `the_mark_and_the_name_are_as_far_apart_on_both_screens`; nothing pins the dot or the buttons' absence. 🚨 Not seen on a real window. D365, D383, D393 amended; §9.1, §9.4, §9.5; `shortcuts.md` §8)*
+- **D963** — **The top bar's menu heads answer the pointer as its icon buttons do, and stay lit while their menu is open.** The maintainer's ruling, from a screenshot: undo, redo and Settings lit under the pointer and the rest of the top-right cluster did not, against *"a policy of 'everything needs to have a hover effect'"*. The three that did not — View, Snap and the zoom readout — are `ui::menu_head`, which painted its mark and caret and nothing else. It now takes `icon_button_padded`'s hover exactly: `color::HOVER` over its whole 26pt allocation at radius 5, the lead and the caret drawn in `color::TEXT`. The bar's own icon buttons are the precedent, not `menu_check`'s `text_a(20)` fill, which is a row inside an open menu rather than a head in the bar. ⚠️ **`galley_with_override_text_color`, not `galley`'s colour argument**: both galleys bake their resting colours, and that argument is a fallback the tessellator only uses on `PLACEHOLDER`. **Held lit while its menu is open**, the maintainer's second ruling: `menu_head`'s `open`, from `open_menu`. **The policy is written nowhere in the record**; D246 and D381 are its nearest precedents. *(Built and tested 2026-10-03, session 44, not yet committed; **Keep**, the maintainer's two rulings — **the ground is the session's**, beyond the maintainer's fallback of *"a simple lighter color … on the icon/text"*. Test `ui::head_tests::a_menu_head_lights_under_the_pointer_like_an_icon_button`, `open` ignored failing on *"an open head stays lit with the pointer away"*, predicted; the fill dropped failed on *"a hovered head paints the HOVER ground"* when run, before the open case was added ahead of it, and re-run after, on the open case with `(0, 2)` as predicted. 🚨 Not seen on a real window. §9.1, §9.2, §9.4)*
 
 ---
 
@@ -25257,6 +25258,83 @@ site and its comment, the `Action::Save` and `Action::Open` arms, `UNSAVED` and 
 from the brief. The colour measurement is this entry's, computed from the hex values. D365, D383 and
 D393 amended; `architecture.md` §9.1, §9.4 and §9.5 amended; `shortcuts.md` §8 amended; nothing
 struck from `roadmap.md`, which held no entry for any of it)*
+
+**D963 — The top bar's menu heads answer the pointer as its icon buttons do, and stay lit while
+their menu is open. *Built and tested 2026-10-03, session 44, not yet committed; Keep — the
+maintainer's two rulings, the precedent the session's. Not seen on a real window.***
+
+The maintainer, from a screenshot of the editor's top-right cluster: *"settings and undo/redo have a
+hover effect while the rest of the top-right buttons don't. Since we have a policy of 'everything
+needs to have a hover effect', we need to. Not sure if we have a precedent of hover effect on menus.
+If we do, let's use that. If we don't, a simple lighter color on hover on the icon/text is fine."*
+
+**The three that lit nothing were one function.** View (the eye), Snap (the magnet) and the zoom
+readout are each a `ui::menu_head`, which painted its mark and its caret and nothing else, in every
+state. Their neighbours — undo and redo at 26pt, Settings at 28 — are `ui::icon_button`, which under
+the pointer paints `theme::color::HOVER` on a 5-point radius and draws its glyph in `color::TEXT`. So
+the cluster alternated controls that answered the pointer with controls that did not, and the ones
+that did not were the three that open something.
+
+**The precedent is the bar's icon buttons, not the menus'.** The one hover a menu has is
+`ui::menu_check`'s — a `text_a(20)` fill on radius 4 — and that is a row *inside* an open dropdown,
+not a head in the bar. A head sits in one cluster with icon buttons, at their 26pt height and, since
+D44's `HEAD_PAD`, in their optical box: five points of slack either side of its ink, as a 16pt glyph
+has in a 26pt square. So `menu_head` takes `icon_button_padded`'s hover exactly — when
+`resp.hovered()`, `HOVER` over its whole allocation with `CornerRadius::same(5)`, and both the lead
+(the glyph, or the zoom's percentage) and the caret drawn in `TEXT`. At rest it paints as it did, no
+ground and each galley in its own colour. Mark and caret light together because the head is one
+target, which is the whole of `menu_head`'s reason to exist (its doc, after D35). **The ground is the
+session's and not the ruling's**: the maintainer's fallback was *"a simple lighter color … on the
+icon/text"*, and the session took the neighbours' hover whole rather than half of it. Dropping the
+`rect_filled` leaves exactly that fallback. **And it stays lit while its menu is open** — the
+maintainer's second ruling, the same turn: *"Keep the same hover effect while the menu is open."*
+`menu_head` takes a fourth parameter, `open`, and lights on `open || resp.hovered()`; `zoom_control`
+passes `open_menu == TopMenu::Zoom` and the View/Snap loop `open_menu == which`. The menu hangs off
+its head, and a head that went dark the moment the pointer moved down into its own menu read as
+having let go of it. The open state is the hover's look, not Settings' — an icon button takes
+`ACCENT_800` and an accent stroke while its modal is up; a head with its menu open looks hovered.
+
+⚠️ **`galley_with_override_text_color`, not `Painter::galley`'s colour argument — the line a tidier
+editor would "simplify".** Both galleys bake their resting colour (`text::MUTED` for the lead,
+`text::DIM` for the caret), and `galley`'s colour is a *fallback* the tessellator substitutes only
+where a section left `Color32::PLACEHOLDER` — the trap §9.4's length-field unit paragraph records,
+where a hover was computed, handed over and dropped. epaint 0.35's `tessellate_text` applies an
+override to every glyph vertex whatever the galley baked, so the override is the spelling that moves
+the ink. ⚠️ **And `HEAD_PAD` is the ground's margin now as well as the ink's**: narrow it and the lit
+ground's edge comes in against the glyph, where an icon button's sits five points clear.
+
+**The policy is the maintainer's word, and the record does not state it.** Nothing in
+`architecture.md` or this section says every control answers the pointer; the comment on `menu_head`
+that says so cites this entry. Its nearest precedents are two controls found inert to the pointer and
+fixed as defects — D246, the layer row's eye, lock and caret, and D381, the filled buttons in every
+modal. *Revisit if* the maintainer wants it written as a rule in §9.1: stated there, it is a claim
+about every control in the chrome, and nothing here has checked the rest against it.
+
+**The evidence.** `ui::head_tests::a_menu_head_lights_under_the_pointer_like_an_icon_button` draws the
+eye head at rest and asserts two text runs — the fixture does draw a mark and a caret — with no
+`HOVER` rect and no run overridden to `TEXT`; then, with `open` and the pointer nowhere near, one
+`HOVER` rect and both runs overridden; then closed, a `PointerMoved` to its centre and one frame more
+for the hover to be read back (interaction state being last frame's, D96), the same again; and after
+`PointerGone`, closed, the head dark again. **Flips**: `open` ignored (`(open && false) || hovered`)
+fails on *"an open head stays lit with the pointer away"*, the predicted site. The fill disabled
+(`if hovered && false`) failed on *"a hovered head paints the HOVER ground"*, as predicted — ⚠️ **but
+that run was made before the open case was added, and the open case now sits ahead of the hover
+case and asserts a ground too**, so `arch-scribe` predicted the same mutation would fail one
+assertion sooner, on *"an open head stays lit…"* with `(0, 2)`. **Re-run (`if lit && false`), it
+did exactly that** — `left: (0, 2)`, `right: (1, 2)` — and the test's doc now names that site and
+the history. ⚠️ It reads each `TextShape`'s override rather
+than tessellated ink, which is sound because the override is what the tessellator honours; a return
+to the fallback spelling would leave the override unset and fail the first lit case — reasoned, not
+run. Beside it, `cargo test -p ondin-app` green at 1484, clippy under `-D warnings`, the doc gate and
+`check --release` green.
+
+*(Built and tested 2026-10-03, session 44, not yet committed; **Keep**, the maintainer's two rulings; the
+icon-button precedent and its ground the session's, the ground removable to the maintainer's own
+fallback. 🚨 **Not seen on a real window.** Recorded from the brief and a read of `menu_head` and its
+test, `menu_check`, `icon_button_padded`, `settings_button`, both call sites in `app.rs`, D44, D246
+and D381; the override's behaviour from epaint 0.35's `tessellate_text`. No §15 entry amended;
+`architecture.md` §9.1, §9.2 and §9.4 amended; nothing struck from `roadmap.md`, which held no entry
+for it)*
 
 **D898 — The randomized `update`/`rebuild` guard authors layout inputs, and compares a laid group's
 box. *The session's; built 2026-09-27, committed as `da5b652`. Entry reconstructed 2026-09-27 from

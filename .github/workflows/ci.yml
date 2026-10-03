@@ -1,0 +1,126 @@
+name: CI
+
+# Runs on every push to main and on pull requests (§15 D955). Lints on Linux,
+# builds and tests on Linux, Windows and macOS, and runs clippy again on the
+# last two for the code only they compile.
+#
+# **It is the first time most of this tree is compiled anywhere but Windows.**
+# Until it existed, Ondin was built and tested on one Windows machine, and
+# CLAUDE.md recorded four decision functions behind `cfg(not(windows))` and
+# `cfg(target_os = "macos")` that no gate had ever compiled. The macOS and Linux
+# legs are that gate.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same branch or PR cancels the older run in flight.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    name: Lint (fmt + clippy + doc + licenses)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # `apt-get update` has hung on GitHub's runners for an hour at a time
+      # (Schemaic's v0.16.0 release, and a CI run a release later) while other
+      # jobs in the same run sailed through: a stalled mirror or a held dpkg lock
+      # does not fail, it sits, and a job's default timeout is six hours. So it is
+      # bounded twice — `timeout` turns each stall into a quick failure the loop
+      # retries, and `timeout-minutes` is the backstop if every attempt stalls.
+      - name: Install Linux GUI build dependencies
+        timeout-minutes: 8
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if sudo timeout 120 apt-get update -o Acquire::Retries=3; then
+              break
+            fi
+            echo "::warning::apt-get update stalled or failed (attempt $attempt of 3), retrying"
+            sleep 5
+          done
+          sudo timeout 300 apt-get install -y libxkbcommon-dev libwayland-dev libxcb1-dev libx11-dev pkg-config
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Formatting
+        run: cargo fmt --all -- --check
+      - name: Clippy (warnings = errors)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      # **Per package as well, because `--workspace` and `-p` compile different
+      # code**: feature unification changes a dependency's layout, so a lint can
+      # print under one spelling and not the other (CLAUDE.md, *Clippy*).
+      - name: Clippy per package (warnings = errors)
+        run: |
+          set -euo pipefail
+          for p in ondin-core ondin-render ondin-export ondin-mcp ondin-app; do
+            cargo clippy -p "$p" --all-targets -- -D warnings
+          done
+      # The gate that checks the record against the code: each crate root denies
+      # broken intra-doc links, and `--document-private-items` is what makes it
+      # read the private items, which here is most of them (CLAUDE.md, *The doc
+      # gate*).
+      - name: Rustdoc
+        run: cargo doc --workspace --no-deps --document-private-items
+      # **Licenses only.** `cargo deny check` would also run `advisories`, which
+      # is deliberately red on two quick-xml entries that reach no shipped build
+      # and cannot be updated from here — `deny.toml` carries the analysis.
+      - name: License policy
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses
+
+  test:
+    name: Build & test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # `macos-latest` is Apple Silicon, the only macOS target Ondin ships.
+        # Nobody developing this has a Mac, so this leg *is* the macOS compiler:
+        # without it a break there surfaces first during a tagged release, after
+        # the tag is pushed. `fail-fast: false` keeps a macOS failure from
+        # cancelling the legs someone is watching.
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v5
+      # Bounded and retried, for the reason on the lint job's copy of this step.
+      - name: Install Linux GUI build dependencies
+        if: runner.os == 'Linux'
+        timeout-minutes: 8
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if sudo timeout 120 apt-get update -o Acquire::Retries=3; then
+              break
+            fi
+            echo "::warning::apt-get update stalled or failed (attempt $attempt of 3), retrying"
+            sleep 5
+          done
+          sudo timeout 300 apt-get install -y libxkbcommon-dev libwayland-dev libxcb1-dev libx11-dev pkg-config
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      # The lint job runs on Linux, where `cfg(windows)` and
+      # `cfg(target_os = "macos")` code is never compiled — so clippy runs again
+      # here for the code only these hosts see. Linux is skipped: the lint job
+      # covers it.
+      - name: Clippy (warnings = errors)
+        if: runner.os != 'Linux'
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace
+      # **The one gate that runs anything under the release cfg** (§15 D597):
+      # every other step compiles with `debug_assertions` on, and egui reads that
+      # cfg on our behalf — one test went red under it with nobody looking.
+      - name: Test (release)
+        run: cargo test --workspace --release

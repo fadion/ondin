@@ -1341,6 +1341,7 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D963** — **The top bar's menu heads answer the pointer as its icon buttons do, and stay lit while their menu is open.** The maintainer's ruling, from a screenshot: undo, redo and Settings lit under the pointer and the rest of the top-right cluster did not, against *"a policy of 'everything needs to have a hover effect'"*. The three that did not — View, Snap and the zoom readout — are `ui::menu_head`, which painted its mark and caret and nothing else. It now takes `icon_button_padded`'s hover exactly: `color::HOVER` over its whole 26pt allocation at radius 5, the lead and the caret drawn in `color::TEXT`. The bar's own icon buttons are the precedent, not `menu_check`'s `text_a(20)` fill, which is a row inside an open menu rather than a head in the bar. ⚠️ **`galley_with_override_text_color`, not `galley`'s colour argument**: both galleys bake their resting colours, and that argument is a fallback the tessellator only uses on `PLACEHOLDER`. **Held lit while its menu is open**, the maintainer's second ruling: `menu_head`'s `open`, from `open_menu`. **The policy is written nowhere in the record**; D246 and D381 are its nearest precedents. *(Built and tested 2026-10-03, session 44, not yet committed; **Keep**, the maintainer's two rulings — **the ground is the session's**, beyond the maintainer's fallback of *"a simple lighter color … on the icon/text"*. Test `ui::head_tests::a_menu_head_lights_under_the_pointer_like_an_icon_button`, `open` ignored failing on *"an open head stays lit with the pointer away"*, predicted; the fill dropped failed on *"a hovered head paints the HOVER ground"* when run, before the open case was added ahead of it, and re-run after, on the open case with `(0, 2)` as predicted. 🚨 Not seen on a real window. §9.1, §9.2, §9.4)*
 - **D964** — **The library's card grid fits its columns to the window, and no card is wider than 300 points.** The maintainer's ruling, from a screenshot of a very wide window's four cards a row, each stretched past 500pt: *"a max-width (up to 300px they seem to look fine) and a 'responsive' design"*. `GRID_COLS = 4` — the design's `repeat(4,1fr)`, its doc arguing *"fixed rather than fitted"* because a grid that reflows makes one library look different on two monitors, an argument the record carried nowhere else — is `CARD_MAX_W` 300 and `GRID_GAP` 14: `grid_cols` is the fewest columns that keep every card at the ceiling, `card_width` fills the row exactly, so a wider window adds a column rather than a gutter, and *Recent*'s project row lays with the same pair. Heights unchanged; the 120pt floor gone. `↓` steps `DashboardState::grid_cols`, written by `file_grid` and read by `dashboard_keys` before the grid is drawn — last frame's count — through `arrow_target`'s new parameter, `0` reading as one. ⚠️ **No minimum width but a column's arrival**: an `n + 1`th column drops each card to `(300n − 14)/(n + 1)`, 143 at the step from one to two. 🚨 **D864's 128 is no longer twice a screen of file cards** — about 72 at a 1,600pt body, 132 past 3,126 — and its recency guard holds there as on *Recent*. *(Built and tested 2026-10-03, session 44, not yet committed; **Keep**, the maintainer's ruling, the two monitors' difference the accepted cost; *Revisit if* the step's narrow cards read too narrow. Tests `the_grid_adds_columns_rather_than_stretching_cards` — `floor` for `ceil` predicted to fail at 1,600 and failing first at 900, 443pt cards, the loop running narrowest first — and `the_arrows_step_a_row_of_the_grid_as_laid`, the fixed 4 restored failing on *"down is a row of six"*, predicted. 🚨 Not seen on a real window. D374, D376, D864 amended; §9.5; `shortcuts.md` §8a)*
 - **D965** — **The file card's caption band is 46 points, not 42.** The maintainer's ruling, from a screenshot of one card: *"The last seen text has less padding bottom than the title has padding top … maybe 3-4px (not measured)."* `dashboard::CARD_CAPTION_H` 42 → 46. The name stays centred 15 below the thumbnail and the date 31, so all four points go under the date: its line box ended ~4.5 above the card's edge against the name's ~7.5 below the thumbnail, and ends ~8.5 above it now — arithmetic from the centres and the 12.5/11pt sizes, not measured ink. The ⋮ stays centred at +22. ⚠️ `file_card` and `new_file_card` both allocate `CARD_THUMB_H + CARD_CAPTION_H`, so the dashed *New file* card grows too, its plus and label 2 lower, placed from its centre; project cards do not. Rows are 176 apart, were 172. *(Built and tested 2026-10-03, session 44, not yet committed; **Keep**, the maintainer's ruling and upper figure. **Nothing pins the height** — no test written. D864's ~twelve rows to a 2,160pt window hold at 176, so no cover figure moves. Typed into three comments before its block was reserved, the only sites. 🚨 Not seen on a real window. D374, D376, D864 amended)*
+- **D966** — **The library's Settings sits `TOP_GAP` from the update pill, as the editor's does.** The maintainer's ruling, from the forced pill on both screens: *"Let's make them equal (keeping the editor's distance)."* The editor's cluster spaces every item `app::TOP_GAP`, 5; the library's spaces at 12. `TOP_GAP` is `pub(crate)`, and `dashboard_top_bar` sets it immediately before allocating Settings and 12 again before the chip — ⚠️ **on Settings, not the pill**, egui spacing an item when it is placed (D962's mechanism) — and only when `updater.state().label().is_some()`, `chip`'s own test; with no pill the status dot keeps the row's 12. *(Built and tested 2026-10-03, session 44, not yet committed; **Keep**, the maintainer's ruling. Test `settings_sits_as_far_from_the_update_pill_on_both_screens` over the `#[cfg(test)]` `Updater::ready`, the pill found as the outline around its *RESTART* label — a first draft took the search field's and read 4643; the library's Settings at 12 again failing *"the library's gap 12 against the editor's 5"*, predicted. Nothing pins the no-pill 12. `the_forced_update_chip_is_off_in_a_committed_tree` red only for the working tree's temporary forced chip, not this change. Typed into two comments before its block was reserved, the fourth time this session, the only sites. 🚨 Not seen on a real window. §9.1)*
 
 ---
 
@@ -25464,6 +25465,47 @@ test, `menu_check`, `icon_button_padded`, `settings_button`, both call sites in 
 and D381; the override's behaviour from epaint 0.35's `tessellate_text`. No §15 entry amended;
 `architecture.md` §9.1, §9.2 and §9.4 amended; nothing struck from `roadmap.md`, which held no entry
 for it)*
+
+**D966 — The library's Settings sits `TOP_GAP` from the update pill, as the editor's does. *Built and
+tested 2026-10-03, session 44, not yet committed; Keep — the maintainer's ruling. Not seen on a real
+window.***
+
+The maintainer, after seeing the forced update pill on both screens: *"The [restart pill] -> settings
+icon distance in the dashboard is bigger than in the editor. Let's make them equal (keeping the
+editor's distance)."*
+
+The editor's right cluster spaces every item `app::TOP_GAP`, 5 points, so its Settings sat 5 from the
+pill; the library's, in `dashboard_top_bar`, spaces at 12, so its sat 12. `TOP_GAP` is `pub(crate)`
+now, and `dashboard_top_bar` sets its row's spacing to it immediately before allocating Settings and
+to 12 again immediately after, before `update::chip`, so the gap on the pill's far side is unchanged.
+⚠️ **The gap is set on Settings, not on the pill — the line a tidier editor would move down beside
+the chip.** egui adds an item's spacing when the item is placed, so the gap between two neighbours is
+the one current when the first of them went down, and in a `right_to_left` row that is Settings: the
+mechanism D962's first repair fell into for the mark gap. ⚠️ **And only when the pill will be
+drawn**: the condition is `self.updater.state().label().is_some()`, which is `chip`'s own test for
+drawing anything, *Updating… N%* as well as *Restart to update*. With no pill the status dot comes next
+after Settings and keeps the row's 12, so the two tests must stay the same test.
+
+**The evidence.** `update::Updater::ready(version)` is a `#[cfg(test)]` constructor holding the state
+`FORCE_UPDATE_CHIP` pins, and as inert. `app::library_wiring_tests::settings_sits_as_far_from_the_update_pill_on_both_screens`
+draws both bars over `Updater::ready("9.9.9")` and measures from the painted shapes: the pill's
+outline — the stroked rect containing the *RESTART* label — to the left edge of Settings'
+`SETTINGS_BOX`, centred on its `SLIDERS` glyph; the editor's must be `TOP_GAP` and the library's equal
+to it. ⚠️ **A first draft took the library's search-field outline for the pill and read 4643**; the
+label's containment is the fix. **Flip**: the library's Settings placed at its row's 12 again fails on
+*"the library's gap 12 against the editor's 5"*, as predicted. Only *Ready* is drawn; nothing pins the
+no-pill 12 or the *Updating…* state. App tests green but
+`update::tests::the_forced_update_chip_is_off_in_a_committed_tree`, red only because the working tree
+holds the forced chip for the maintainer to look at — temporary, and not this change; clippy under
+`-D warnings`, the doc gate and `check --release` green. D966 was typed into two comments, `TOP_GAP`'s
+doc and the Settings comment in `dashboard.rs`, before session 44's block was reserved — the fourth
+time this session; the negative grep run straight after found those two and nothing else.
+
+*(Built and tested 2026-10-03, session 44, not yet committed; **Keep**, the maintainer's ruling, the
+editor's 5 kept. 🚨 **Not seen on a real window.** Recorded from the brief and a read of `TOP_GAP`,
+the editor's cluster in `top_bar`, `dashboard_top_bar`'s right cluster, `UpdateState::label`,
+`update::chip`, `Updater::ready` and the test. No §15 entry amended; `architecture.md` §9.1 amended;
+nothing struck from `roadmap.md`, which held no entry for it)*
 
 **D898 — The randomized `update`/`rebuild` guard authors layout inputs, and compares a laid group's
 box. *The session's; built 2026-09-27, committed as `da5b652`. Entry reconstructed 2026-09-27 from

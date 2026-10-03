@@ -849,7 +849,16 @@ impl OndinApp {
                         // button, of which four are about a document that is not
                         // open.
                         //
-                        // The editor's settings button, size for size.
+                        // The editor's settings button, size for size — and, with
+                        // the update pill beside it, the editor's gap to the pill,
+                        // `TOP_GAP` rather than this row's 12 (§15 D966). egui adds
+                        // an item's gap when the item is placed, so the gap to the
+                        // pill is set here, on Settings, and only when the pill
+                        // will be drawn: with none, the status dot comes next and
+                        // keeps the row's 12.
+                        let pill = self.updater.state().label().is_some();
+                        ui.spacing_mut().item_spacing.x =
+                            if pill { crate::app::TOP_GAP } else { 12.0 };
                         if icon_button(
                             ui,
                             icon::SLIDERS,
@@ -865,6 +874,8 @@ impl OndinApp {
                             self.library_settings =
                                 Some(LibrarySettings::from_prefs(&self.prefs, &self.library.root));
                         }
+                        // The row's own 12 again, for the gap after the pill.
+                        ui.spacing_mut().item_spacing.x = 12.0;
                         // The update offer, as the editor's bar has it (§15 D954).
                         if crate::update::chip(ui, self.updater.state()) {
                             self.updater.apply();

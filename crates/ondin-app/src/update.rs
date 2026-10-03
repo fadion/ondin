@@ -246,6 +246,20 @@ impl Updater {
         &self.state
     }
 
+    /// An updater holding a staged update and nothing behind it — what
+    /// `FORCE_UPDATE_CHIP` does, for a test that needs the chip drawn. Inert:
+    /// nothing is staged, so a click applies nothing. Plain backticks: this
+    /// item is `cfg(test)`, so the doc gate cannot see it (§15 D319).
+    #[cfg(test)]
+    pub(crate) fn ready(version: &str) -> Self {
+        Self {
+            state: UpdateState::Ready {
+                version: version.to_owned(),
+            },
+            ..Self::default()
+        }
+    }
+
     /// Take what the workers sent and start a round that is due. Once a frame.
     pub(crate) fn poll(&mut self) {
         let Some(live) = &mut self.live else {

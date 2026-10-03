@@ -6211,7 +6211,8 @@ along that edge stays above it (§15 D958, §9.4).
 
 **And it updates itself (§15 D954).** A Velopack install checks this repository's GitHub Releases at
 startup and every three hours, downloads what is newer without asking, and offers *Restart to update*
-in a chip beside Settings in both top bars; `ONDIN_NO_UPDATE_CHECK` stops it contacting GitHub at all.
+in a chip beside Settings in both top bars, 5 points from it on both (`app::TOP_GAP`, §15 D966);
+`ONDIN_NO_UPDATE_CHECK` stops it contacting GitHub at all.
 The web-font switch does not: §5.4a's network rule is the font source's, and the updater is outside
 it (§15 D960).
 A portable archive, a `.deb` or `.rpm` and a `cargo` build are not Velopack installs and never check,

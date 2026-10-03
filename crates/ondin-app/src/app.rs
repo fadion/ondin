@@ -7527,7 +7527,10 @@ const MENU_PAD: f32 = 5.0;
 /// the zoom readout always used before its caret, and the icon heads asking for
 /// less made the cluster's gaps unequal in the one place the eye compares them
 /// (§15). The rules get [`TOP_RULE_GAP`] on top of this.
-const TOP_GAP: f32 = 5.0;
+///
+/// The library's bar reads it for one gap, Settings to the update pill, so the
+/// pair sits alike on both screens (§15 D966).
+pub(crate) const TOP_GAP: f32 = 5.0;
 
 /// Extra space on each side of a rule, over and above [`TOP_GAP`].
 ///
@@ -15386,6 +15389,68 @@ mod library_wiring_tests {
         assert!(
             (library - 12.0).abs() < 0.5,
             "the library's gap is 12: {library}"
+        );
+        assert!(
+            (library - editor).abs() < 0.5,
+            "the library's gap {library} against the editor's {editor}"
+        );
+    }
+
+    /// **Settings sits as far from the update pill on both screens** (§15
+    /// D966): `TOP_GAP`, the editor's. Measured from the painted shapes — the
+    /// pill's outline, the stroked rect around its *RESTART* label, to the left
+    /// of Settings' 28-point box, centred on its glyph. Only the *Ready* pill is
+    /// drawn here; the *Updating…* one gets the same gap and nothing pins it.
+    ///
+    /// **Flip run**: the library's Settings placed at its row's 12 again fails
+    /// on the equality, *"the library's gap 12 against the editor's 5"*,
+    /// predicted.
+    #[test]
+    fn settings_sits_as_far_from_the_update_pill_on_both_screens() {
+        fn gap(shapes: &[egui::epaint::ClippedShape]) -> f32 {
+            let mut outlines = Vec::new();
+            let mut label = None;
+            let mut settings = None;
+            for cs in shapes {
+                match &cs.shape {
+                    egui::Shape::Rect(r) if r.stroke.width > 0.0 => outlines.push(r.rect),
+                    egui::Shape::Text(t) if t.galley.text().contains("RESTART") => {
+                        label = Some(t.pos + t.galley.size() / 2.0);
+                    }
+                    egui::Shape::Text(t) if t.galley.text() == crate::theme::icon::SLIDERS => {
+                        settings = Some(t.pos.x + t.galley.size().x / 2.0);
+                    }
+                    _ => {}
+                }
+            }
+            // The pill is the outline around its own label — the library's
+            // bar strokes its search field too, and a first draft of this
+            // probe took that for the pill and read a gap of 4643.
+            let label = label.expect("the update pill's label was painted");
+            let pill = outlines
+                .into_iter()
+                .find(|r| r.contains(label))
+                .expect("the update pill was painted");
+            let settings = settings.expect("Settings was painted");
+            (settings - crate::settings::SETTINGS_BOX / 2.0) - pill.right()
+        }
+
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = app_at(&ctx, temp_root("pill-gap"));
+        app.updater = crate::update::Updater::ready("9.9.9");
+        let mut editor = Vec::new();
+        let mut library = Vec::new();
+        for _ in 0..3 {
+            editor = ctx.run_ui(Default::default(), |ui| app.top_bar(ui)).shapes;
+            library = ctx
+                .run_ui(Default::default(), |ui| app.dashboard_ui(ui))
+                .shapes;
+        }
+        let (editor, library) = (gap(&editor), gap(&library));
+        assert!(
+            (editor - crate::app::TOP_GAP).abs() < 0.5,
+            "the editor's gap is TOP_GAP: {editor}"
         );
         assert!(
             (library - editor).abs() < 0.5,

@@ -1451,10 +1451,12 @@ thing is open:
 - **The package repositories have no signing key** (§15 D957). The maintainer generates one —
   RSA-4096, no expiry — sets `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE` as repository secrets, enables
   Pages with its source set to *GitHub Actions*, and writes the key's 40-hex fingerprint into
-  `install.sh`'s `KEY_FINGERPRINT` line and onto a line of its own in the root `README.md`;
-  `packaging/repo/README.md` has the commands. **Until then every tagged Release run ends red**:
-  `pages.yml` fails, while the Release's own assets publish, and `install.sh` refuses its apt and dnf
-  routes on the placeholder `REPLACE_WITH_THE_REPOSITORY_KEY_FINGERPRINT`.
+  `install.sh`'s `KEY_FINGERPRINT` line and over the root `README.md`'s placeholder line, alone in a
+  code block under *Adding the repository by hand*; `packaging/repo/README.md` has the commands. Both
+  hold the same placeholder, `REPLACE_WITH_THE_REPOSITORY_KEY_FINGERPRINT`, and `pages.yml` wants the
+  fingerprint as the whole of a `README.md` line (`grep -qx`). **Until then every tagged Release run
+  ends red**: `pages.yml` fails, while the Release's own assets publish, and `install.sh` refuses its
+  apt and dnf routes on the placeholder.
 
 ## Next · Container layout (flexbox, grid, absolute insets)
 

@@ -516,11 +516,13 @@ fn shared<T: Copy + PartialEq, S>(all: &[S], f: impl Fn(&S) -> T) -> Option<T> {
 /// D878's *Fix* verdict on it — the maintainer's ruling that the layout cards
 /// follow D130 before grid copies them. The unit beside a mixed sizing mode
 /// reads a dash ([`size_field`]), and **that dash is not a mixed marker**: the
-/// digits already say "Mixed", and the dash says *no single unit* — the same
-/// meaning §15 D895 gives it beside a keyword, Webflow's unit slot. Room was never
-/// the reason (`ui::Suffix` is laid out to its text and holds *fit content*); an
-/// earlier line here said it was. The mixed segment rows use `ui::segment_mixed`,
-/// one of D130's two dashes (§15 D892).
+/// digits already say "Mixed", and the dash says *no single unit*. It is the only
+/// dash a size field's unit still draws — §15 D895 put the same one beside a
+/// keyword, and §15 D906 took the unit away there altogether, the keyword in the
+/// digits already saying how the size is set (the release review's
+/// `[R2-L8-06]`). Room was never the reason (`ui::Suffix` is laid out to its text
+/// and holds *fit content*); an earlier line here said it was. The mixed segment
+/// rows use `ui::segment_mixed`, one of D130's two dashes (§15 D892).
 fn mixed_if(d: egui::DragValue<'_>, mixed: bool) -> egui::DragValue<'_> {
     if mixed {
         return d.custom_formatter(|_, _| ui::MIXED_WORD.into());
@@ -2254,7 +2256,8 @@ type Limit = (
     fn(&mut LayoutItem, Dimension),
 );
 
-/// `first`'s padding on `side`, or zero — the fallback a mixed field starts from.
+/// The first subject's padding on `side` — `paddings[0][side]` — or zero where
+/// there is none: the number a mixed padding field starts a scrub from.
 fn first_or_zero(paddings: &[[f64; 4]], side: usize) -> f64 {
     paddings.first().map_or(0.0, |p| p[side])
 }
@@ -2284,6 +2287,12 @@ fn pinned_edges(insets: &ondin_core::Insets) -> String {
 
 #[cfg(test)]
 mod tests {
+    //! The Container and Item cards, flex's rows and grid's, driven whole through
+    //! the `Panel` harness — and the pure pieces beside them.
+    //!
+    //! Plain backticks throughout, per §15 D319 — `cargo doc` builds without the
+    //! `test` cfg, so a link here is checked by nothing (the release review's
+    //! `[R2-L8-04]`).
     use super::*;
     use ondin_core::kurbo::{Affine, Rect, RoundedRectRadii};
     use ondin_core::{Document, GeometryPatch, IdSource, Insets, LengthPct};
@@ -2828,7 +2837,10 @@ mod tests {
     ///
     /// **Flip run**, the anchor's converted value written to every subject: fails
     /// on *"b keeps its own"*, `Px(90)` — `a`'s 25% of 360 — against 160, the
-    /// predicted site.
+    /// predicted site. **And it is what pins the px row's conversion**, which the
+    /// release review's `[X6.2-L6-01]` found unpinned before D943: the row writing
+    /// `Px(0.0)` in `dimension_row` — a pick that would collapse the item — fails
+    /// on the same line, `Px(0.0)` against 160.
     #[test]
     fn a_unit_picked_over_a_mixed_selection_converts_each_item() {
         let mut s = scene();
@@ -3085,7 +3097,7 @@ mod tests {
         app.inspector_transform(ui, id, world, size);
     }
 
-    /// [`transform_card`] for a text node, whose W/H read its box through the
+    /// `transform_card` for a text node, whose W/H read its box through the
     /// preview (`preview_local_box`), as `inspector_single` hands them — the
     /// committed box would hand the field back the size the edit is replacing.
     fn text_transform_card(app: &mut OndinApp, ui: &mut egui::Ui) {
@@ -3553,9 +3565,154 @@ mod tests {
         draw(&mut s.app, vec![s.frame]);
     }
 
+    /// Where the run reading `text` is on the row whose label reads `label` —
+    /// level with it and right of it.
+    fn on_row(p: &mut Panel, label: &str, text: &str) -> egui::Pos2 {
+        let row = p.run(label);
+        p.runs(text)
+            .into_iter()
+            .find(|r| (r.y - row.y).abs() < 6.0 && r.x > row.x)
+            .unwrap_or_else(|| panic!("no {text:?} on the {label} row"))
+    }
+
+    /// **Each size limit's field writes its own limit** (`limit_rows`, the release
+    /// review's `[X6.2-L6-01]`): the *Min / max* disclosure opened by a click, and
+    /// a number typed over each row's `auto` — 30, 120, 20 and 140 — lands in the
+    /// limit that row names and in no other. Nothing in the suite had typed into a
+    /// limit, so a `Max width` row writing `min_width` passed it whole.
+    ///
+    /// **Flip run**, the `Max width` row's setter writing `min_width`: fails on
+    /// *"each limit its own number"*, `[Px(120), Auto, …]` — the predicted site.
+    #[test]
+    fn each_limit_field_writes_its_own_limit() {
+        let s = scene();
+        let a = s.a;
+        let mut p = Panel::new(s.app, OndinApp::inspector_item);
+        p.app.session.selection.set(vec![a]);
+        let at = p.run("Min / max");
+        p.click(at);
+        for (label, typed) in [
+            ("Min width", "30"),
+            ("Max width", "120"),
+            ("Min height", "20"),
+            ("Max height", "140"),
+        ] {
+            let at = on_row(&mut p, label, "auto");
+            type_number(&mut p, at, typed);
+        }
+        let item = *p.app.session.doc.get(a).unwrap().item();
+        assert_eq!(
+            [
+                item.min_width,
+                item.max_width,
+                item.min_height,
+                item.max_height
+            ],
+            [
+                Dimension::Px(30.0),
+                Dimension::Px(120.0),
+                Dimension::Px(20.0),
+                Dimension::Px(140.0)
+            ],
+            "each limit its own number"
+        );
+    }
+
+    /// **The first gap field is the gap between items** — `column-gap` in a row,
+    /// `row-gap` in a column (`flex_rows`, the mockup's rule in the comment above
+    /// its `gap_row` call; `[X6.2-L6-01]`). Read off where each field's CSS name
+    /// is painted, the scene's row first and then the same frame turned into a
+    /// column.
+    ///
+    /// **Flip run**, `gap_row` handed `column_first: true` whatever the direction:
+    /// fails on *"a column: row-gap first"* — the predicted site.
+    #[test]
+    fn a_columns_first_gap_field_is_row_gap() {
+        let s = scene();
+        let frame_id = s.frame;
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        p.app.session.selection.set(vec![frame_id]);
+        let (column_gap, row_gap) = (p.run("Column gap"), p.run("Row gap"));
+        assert!(
+            column_gap.x < row_gap.x,
+            "a row: column-gap first, {column_gap:?} against {row_gap:?}"
+        );
+        let tx = p
+            .app
+            .flex_tx(&[frame_id], |f| f.direction = FlexDirection::Column);
+        p.app.session.commit(tx);
+        let (column_gap, row_gap) = (p.run("Column gap"), p.run("Row gap"));
+        assert!(
+            row_gap.x < column_gap.x,
+            "a column: row-gap first, {row_gap:?} against {column_gap:?}"
+        );
+    }
+
+    /// **Padding that differs side to side opens the four side fields by
+    /// itself** (`padding_rows`, `[X6.2-L6-01]`), so the two paired fields never
+    /// stand for a pair they do not describe: closed over the scene's even 20,
+    /// and open over 4, 8, 12, 16 with no click — each side's field reading its
+    /// own side. `each_card_offers_itself_for_what_it_describes` drew this state
+    /// and asserted nothing about it.
+    ///
+    /// **Flip run**, `open = asked` (the `uneven` term dropped): fails on
+    /// *"uneven: open by itself"*, `[0, 0, 0, 0]` — the predicted site.
+    #[test]
+    fn uneven_padding_opens_the_side_fields_by_itself() {
+        let s = scene();
+        let frame_id = s.frame;
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        p.app.session.selection.set(vec![frame_id]);
+        let sides = |p: &mut Panel| ["L", "R", "T", "B"].map(|l| p.runs(l).len());
+        assert_eq!(sides(&mut p), [0; 4], "even: closed");
+        let tx = p
+            .app
+            .flex_tx(&[frame_id], |f| f.padding = [4.0, 8.0, 12.0, 16.0]);
+        p.app.session.commit(tx);
+        assert_eq!(sides(&mut p), [1; 4], "uneven: open by itself");
+        for (letter, value) in [("L", "16"), ("R", "8"), ("T", "4"), ("B", "12")] {
+            on_row(&mut p, letter, value);
+        }
+    }
+
+    /// **An *Align items* pick writes the value picked, and nothing else**
+    /// (`flex_rows`, `[X6.2-L6-01]`): the combo opened from its face and its
+    /// *Center* row clicked — `align-items: center`, the rest of the layout as it
+    /// was. No test had picked from a Container combo.
+    ///
+    /// **Flip run**, the pick writing `AlignItems::Start` whatever was clicked:
+    /// fails on *"align-items, and nothing else"*, `Start` against `Center` — the
+    /// predicted site.
+    #[test]
+    fn an_align_items_pick_writes_the_value_picked() {
+        let s = scene();
+        let frame_id = s.frame;
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        p.app.session.selection.set(vec![frame_id]);
+        let flex = |app: &OndinApp| match app.session.doc.get(frame_id).unwrap().display() {
+            Some(Display::Flex(f)) => *f,
+            _ => panic!("the fixture lost its flex layout"),
+        };
+        let before = flex(&p.app);
+        assert_eq!(before.align_items, AlignItems::Stretch, "the fixture");
+        // A glyph combo's label and face are one galley.
+        let face = p.run("Align itemsStretch");
+        p.click(face);
+        let row = p.run("Center");
+        p.click(row);
+        assert_eq!(
+            flex(&p.app),
+            Flex {
+                align_items: AlignItems::Center,
+                ..before
+            },
+            "align-items, and nothing else"
+        );
+    }
+
     // --- grid's rows (§15 D920) -------------------------------------------------
 
-    /// [`scene`] with the frame's row turned into a grid of `100px 1fr` columns —
+    /// `scene` with the frame's row turned into a grid of `100px 1fr` columns —
     /// its gap 10 and padding 20 kept, as picking *Grid* keeps them.
     fn grid_scene() -> Scene {
         let mut s = scene();
@@ -4123,5 +4280,184 @@ mod tests {
         };
         assert!(lit(row("Baseline · Start")), "the held value's row is lit");
         assert!(!lit(row("Start")), "and the plain Start row is not");
+    }
+
+    /// The glyph combo whose face begins with `label` opened, and its row reading
+    /// exactly `pick` clicked — a combo's label and face are one galley, so no
+    /// face reads `pick` alone and the open list's row is the only run that does.
+    fn pick_combo(p: &mut Panel, label: &str, pick: &str) {
+        let face = p
+            .shapes()
+            .iter()
+            .find_map(|cs| match &cs.shape {
+                egui::epaint::Shape::Text(t) if t.galley.text().starts_with(label) => {
+                    Some(t.galley.rect.translate(t.pos.to_vec2()).center())
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no {label} combo"));
+        p.click(face);
+        let row = p.run(pick);
+        p.click(row);
+    }
+
+    /// **A list CSS does not accept is refused under the line, with CSS's
+    /// reason, and writes nothing** (`track_list`'s `is_valid` gate, the release
+    /// review's `[X6.3-L6-01]`): `minmax(1fr, 1fr)` parses — and an `fr` minimum
+    /// is one CSS refuses. Without the gate it reached the operation, which
+    /// refused it too, but as the status line's *Edit failed* with nothing under
+    /// the field.
+    ///
+    /// **Flip run**, the gate's `is_valid()` forced `true`: fails on *"the reason,
+    /// under the line"*, 0 against 1 — the predicted site; the list and the undo
+    /// depth hold either way, the document refusing it a second time.
+    #[test]
+    fn a_list_css_does_not_accept_is_refused_under_the_line() {
+        const WHY: &str = "CSS does not accept that list";
+        let s = grid_scene();
+        let frame_id = s.frame;
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        p.app.session.selection.set(vec![frame_id]);
+        let depth = p.app.session.history.undo_depth();
+        p.retype("100px 1fr", "minmax(1fr, 1fr)", egui::Key::Enter);
+        assert_eq!(columns_css(&p.app, frame_id), "100px 1fr", "the list stays");
+        assert_eq!(p.app.session.history.undo_depth(), depth, "with no step");
+        assert_eq!(p.runs(WHY).len(), 1, "the reason, under the line");
+    }
+
+    /// **A number typed into a track keeps the track's kind** (`track_fields`,
+    /// `[X6.3-L6-01]`): `100px 1fr`'s `1` retyped `3` is `3fr`, and its `100`
+    /// retyped `120` is `120px` — the unit beside each field is the kind's, and
+    /// typing changes the number under it.
+    ///
+    /// **Flip run**, the typed number always landing as `TrackBreadth::Px`: fails
+    /// on *"still a share"*, `100px 3px` — the predicted site.
+    #[test]
+    fn a_track_number_typed_keeps_the_tracks_kind() {
+        let s = grid_scene();
+        let frame_id = s.frame;
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        p.app.session.selection.set(vec![frame_id]);
+        p.retype("1", "3", egui::Key::Enter);
+        assert_eq!(columns_css(&p.app, frame_id), "100px 3fr", "still a share");
+        p.retype("100", "120", egui::Key::Enter);
+        assert_eq!(columns_css(&p.app, frame_id), "120px 3fr", "still a length");
+    }
+
+    /// **Each `minmax()` field writes its own end** (`track_fields`,
+    /// `[X6.3-L6-01]`): `minmax(100px, 1fr)`'s minimum retyped `150`, then its
+    /// maximum `2` — `minmax(150px, 2fr)`, each end the one its field shows.
+    ///
+    /// **Flip run**, the ends' `to` closure reading `!is_min`: fails on *"the
+    /// minimum"* — the predicted site — but at `minmax(100px, 100px)`, not the
+    /// predicted `minmax(100px, 150px)`. The field reads its number back through
+    /// the valve's preview, which under the flip moved the maximum and left the
+    /// minimum at 100, so the committing frame held 100 again — read from the
+    /// code, not instrumented. (The same flip also fails
+    /// `zero_typed_over_a_keyword_lands`, whose `auto` is a minimum too.)
+    #[test]
+    fn a_minmax_field_writes_its_own_end() {
+        let s = grid_with_columns("minmax(100px, 1fr)");
+        let frame_id = s.frame;
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        p.app.session.selection.set(vec![frame_id]);
+        p.retype("100", "150", egui::Key::Enter);
+        assert_eq!(
+            columns_css(&p.app, frame_id),
+            "minmax(150px, 1fr)",
+            "the minimum"
+        );
+        p.retype("1", "2", egui::Key::Enter);
+        assert_eq!(
+            columns_css(&p.app, frame_id),
+            "minmax(150px, 2fr)",
+            "the maximum"
+        );
+    }
+
+    /// **A `repeat()`'s count and its track each take what is typed into them**
+    /// (`track_fields`, `[X6.3-L6-01]`): `repeat(2, 1fr)`'s count retyped `3`,
+    /// then its track's `1` retyped `2` — `repeat(3, 2fr)`.
+    ///
+    /// **Flip run**, the count's commit writing `repeat: *repeat` (the count it
+    /// had): fails on *"the count"*, `repeat(2, 1fr)` — the predicted site.
+    #[test]
+    fn a_repeats_count_and_track_take_what_is_typed() {
+        let s = grid_with_columns("repeat(2, 1fr)");
+        let frame_id = s.frame;
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        p.app.session.selection.set(vec![frame_id]);
+        p.retype("2", "3", egui::Key::Enter);
+        assert_eq!(columns_css(&p.app, frame_id), "repeat(3, 1fr)", "the count");
+        p.retype("1", "2", egui::Key::Enter);
+        assert_eq!(columns_css(&p.app, frame_id), "repeat(3, 2fr)", "the track");
+    }
+
+    /// **Each of the grid Container's picks writes the property it names, and
+    /// nothing else** (`grid_container_rows`, `[X6.3-L6-01]`): *Column* on the
+    /// auto-flow row, then *Center* from each of the four alignment combos — each
+    /// step asserted against the whole grid, the one field changed. No test had
+    /// picked any of them.
+    ///
+    /// **Flip runs**, each failing at its own step, the predicted site: the
+    /// auto-flow cell writing `Row` whatever was clicked fails on *"auto-flow"*;
+    /// the *Justify items* pick writing `align_items` fails on
+    /// *"justify-items"*.
+    #[test]
+    fn each_grid_container_pick_writes_the_property_it_names() {
+        let s = grid_scene();
+        let frame_id = s.frame;
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        p.app.session.selection.set(vec![frame_id]);
+        let mut want = grid_of(&p.app, frame_id);
+        let at = p.run("Column");
+        p.click(at);
+        want.auto_flow = ondin_core::container::GridAutoFlow::Column;
+        assert_eq!(grid_of(&p.app, frame_id), want, "auto-flow");
+        pick_combo(&mut p, "Justify content", "Center");
+        want.justify_content = AlignContent::Center;
+        assert_eq!(grid_of(&p.app, frame_id), want, "justify-content");
+        pick_combo(&mut p, "Justify items", "Center");
+        want.justify_items = Some(AlignItems::Center);
+        assert_eq!(grid_of(&p.app, frame_id), want, "justify-items");
+        pick_combo(&mut p, "Align items", "Center");
+        want.align_items = Some(AlignItems::Center);
+        assert_eq!(grid_of(&p.app, frame_id), want, "align-items");
+        pick_combo(&mut p, "Align content", "Center");
+        want.align_content = AlignContent::Center;
+        assert_eq!(grid_of(&p.app, frame_id), want, "align-content");
+    }
+
+    /// **A grid item's two self-alignments each write their own axis**
+    /// (`grid_item_rows`, `[X6.3-L6-01]`): *End* picked from *Justify self* sets
+    /// `justify-self` and leaves `align-self` unset; *Center* from *Align self*
+    /// then sets `align-self` and leaves `justify-self` at `end`.
+    ///
+    /// **Flip run**, the two picks' writes swapped (*Justify self* writing
+    /// `align_self` and *Align self* `justify_self`): fails on *"justify-self takes
+    /// it"*, `(None, Some(End))` — the predicted site.
+    #[test]
+    fn a_grid_items_self_picks_write_their_own_axis() {
+        let s = grid_scene();
+        let a = s.a;
+        let mut p = Panel::new(s.app, OndinApp::inspector_item);
+        p.app.session.selection.set(vec![a]);
+        let selves = |app: &OndinApp| {
+            let item = app.session.doc.get(a).unwrap().item();
+            (item.justify_self, item.align_self)
+        };
+        assert_eq!(selves(&p.app), (None, None), "the fixture");
+        pick_combo(&mut p, "Justify self", "End");
+        assert_eq!(
+            selves(&p.app),
+            (Some(AlignItems::End), None),
+            "justify-self takes it"
+        );
+        pick_combo(&mut p, "Align self", "Center");
+        assert_eq!(
+            selves(&p.app),
+            (Some(AlignItems::End), Some(AlignItems::Center)),
+            "align-self takes its own"
+        );
     }
 }

@@ -141,6 +141,71 @@ fn assert_preview_matches_commit(doc: &Document, tx: &Transaction, what: &str) {
     assert_eq!(previewed, committed, "{what}: preview diverged from commit");
 }
 
+/// **`assert_preview_matches_commit` through the doors the app uses** (the
+/// release review's `[X4.2-L6-01]`): the preview built from `tx` plus
+/// `build::flex_holds`, as `session::set_preview` builds it, and the commit made
+/// of `build::keep_flex_sizes(build::keep_insets(tx))`, as `session::commit_inner`
+/// makes it. Returns the committed document, so a caller can also ask whether
+/// the hold held.
+///
+/// **The plain harness commits the raw transaction, which the app never does.**
+/// The commit door drops an in-flow item's translation, adds the hold that keeps
+/// a resize (with `align-` or `justify-self: end` for a start-edge handle, §15
+/// D905, D913) and rewrites a pinned layer's placement as insets (§15 D874); the
+/// preview takes only the hold. So a change making `flex_holds` and
+/// `keep_flex_sizes` disagree, or the preview drawing a resized pinned layer
+/// anywhere but where `keep_insets` pins it, passed every test that goes through
+/// the plain harness.
+///
+/// ⚠️ **Not for a plain move of an in-flow item**: the preview draws the drag
+/// where the pointer has it and the commit drops its translation, by design
+/// (§15 D877) — the landing outline is that gesture's check.
+fn assert_preview_matches_commit_through_the_doors(
+    doc: &Document,
+    tx: &Transaction,
+    what: &str,
+) -> Document {
+    let res = Resolved::rebuild(doc);
+    let mut shown = tx.0.clone();
+    shown.extend(build::flex_holds(doc, &res, tx));
+    let overrides = RenderOverrides::from_transaction(doc, &res, &Transaction(shown))
+        .unwrap_or_else(|| panic!("{what}: not representable"));
+    let previewed = record(doc, &res, &overrides);
+
+    let landed = build::keep_flex_sizes(doc, &res, build::keep_insets(doc, &res, tx.clone()));
+    let mut committed_doc = doc.clone();
+    committed_doc.apply(&landed).expect("transaction applies");
+    let committed_res = Resolved::rebuild(&committed_doc);
+    let committed = record(&committed_doc, &committed_res, &RenderOverrides::default());
+
+    assert_eq!(previewed, committed, "{what}: preview diverged from commit");
+    committed_doc
+}
+
+/// The transaction a resize handle writes for `id`, unrotated, with its start
+/// edges moved `left` across and `top` down and its far edges held: the **used**
+/// box shrunk by that much, and the used transform shifted by it — which is what
+/// the tools compute from (§15 D874), slot and stretch included.
+fn start_edge_resize(doc: &Document, id: NodeId, left: f64, top: f64) -> Transaction {
+    let res = Resolved::rebuild(doc);
+    let size = res
+        .used_kind(doc, id)
+        .and_then(|k| ondin_core::geometry::local_bounds(k, None))
+        .expect("a sized kind")
+        .size();
+    let local = res.used_local(doc, id).expect("a placed node");
+    Transaction(vec![
+        Operation::SetGeometry {
+            id,
+            geometry: GeometryPatch::Size(Size::new(size.width - left, size.height - top)),
+        },
+        Operation::SetTransform {
+            id,
+            transform: local * Affine::translate((left, top)),
+        },
+    ])
+}
+
 struct Fixture {
     doc: Document,
     ids: IdSource,
@@ -3658,5 +3723,223 @@ fn a_resize_previews_nested_layouts_as_its_commit_lays_them() {
         &doc,
         &resize(sibling, 120.0, 30.0),
         "(d) a sibling shrinks a grown frame",
+    );
+}
+
+/// **A stretched, growing flex item resized from its left, its top and its
+/// top-left corner previews as its commit, through the doors** (the release
+/// review's `[X4.2-L6-01]`) — a 400 × 200 row, padding 20 and gap 10, of three
+/// 40 × 30 rects under the default `align-items: stretch`, the middle one growing
+/// to 260 × 160. Each resize writes the shifted slot beside its size, which the
+/// commit door drops; the hold stops the growth (§15 D875) and, for the top
+/// handle, aligns the item to the end so its bottom stays (§15 D905).
+///
+/// `a_left_handle_resize_of_a_flex_item_previews_as_its_commit` checks the same
+/// shape through the plain harness, against a commit that keeps the
+/// `SetTransform` the app's commit drops, on an item with no stretch or growth
+/// to hold.
+///
+/// **Flip run**, `build::keep_flex_sizes` leaving out the holds it appends: fails
+/// on *"from its left: preview diverged from commit"* — the commit grows the item
+/// back to 260 while the preview holds it at 230 — the predicted site. The grid
+/// test beside this one fails the same way. Every test that uses the plain
+/// harness stays green, which is the finding.
+#[test]
+fn a_stretched_flex_item_resized_from_its_start_edges_previews_as_it_commits() {
+    use ondin_core::container::{Display, Flex};
+    let mut ids = IdSource::new(0xAF);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let frame = painted(
+        &mut doc,
+        &mut ids,
+        root,
+        sized_frame(400.0, 200.0),
+        (0.0, 0.0),
+    );
+    let rects: Vec<NodeId> = (0..3)
+        .map(|_| {
+            painted(
+                &mut doc,
+                &mut ids,
+                frame,
+                sized_rect(40.0, 30.0),
+                (250.0, 250.0),
+            )
+        })
+        .collect();
+    let middle = rects[1];
+    let mut item = *doc.get(middle).unwrap().item();
+    item.grow = 1.0;
+    doc.apply(&Transaction(vec![
+        Operation::SetDisplay {
+            id: frame,
+            display: Some(Display::Flex(Flex {
+                column_gap: 10.0,
+                padding: [20.0; 4],
+                ..Default::default()
+            })),
+        },
+        Operation::SetLayoutItem { id: middle, item },
+    ]))
+    .unwrap();
+    assert_eq!(
+        Resolved::rebuild(&doc).world_bounds(middle).unwrap(),
+        Rect::new(70.0, 20.0, 330.0, 180.0),
+        "the fixture: the middle rect grown to 260 and stretched to 160"
+    );
+    for (what, left, top, held) in [
+        (
+            "from its left",
+            30.0,
+            0.0,
+            Rect::new(70.0, 20.0, 300.0, 180.0),
+        ),
+        (
+            "from its top",
+            0.0,
+            40.0,
+            Rect::new(70.0, 60.0, 330.0, 180.0),
+        ),
+        (
+            "from its top-left",
+            30.0,
+            40.0,
+            Rect::new(70.0, 60.0, 300.0, 180.0),
+        ),
+    ] {
+        let committed = assert_preview_matches_commit_through_the_doors(
+            &doc,
+            &start_edge_resize(&doc, middle, left, top),
+            what,
+        );
+        assert_eq!(
+            Resolved::rebuild(&committed).world_bounds(middle).unwrap(),
+            held,
+            "{what}: the hold held"
+        );
+    }
+}
+
+/// **A stretched grid item resized from its left, its top and its top-left
+/// corner previews as its commit, through the doors** (the release review's
+/// `[X4.2-L6-01]`) — `grid_fixture`'s first rect, given `justify-self` and
+/// `align-self: stretch` so it fills its 100 × 50 cell. The hold is grid's
+/// (§15 D913's second ruling), with D905's end edge on both axes: a start-edge
+/// resize writes `end`, so the far edges stay at 600 and 550. Until this, those
+/// holds were pinned at commit in `ondin-core`'s `tests/grid.rs` and in no
+/// preview; `a_grid_previews_as_it_commits` writes a right-edge hold by hand.
+///
+/// **Flip run**, `build::keep_flex_sizes` leaving out the holds it appends: fails
+/// on *"from its left: preview diverged from commit"*, the predicted site.
+///
+/// **Flip run**, `build::flex_holds`' grid arm answering the item unchanged (the
+/// finding's own flip): fails on *"from its left: the hold held"*, the item
+/// stretched back to its cell at 500–600. ⚠️ **The differential does not
+/// bite on it, and cannot**: `keep_flex_sizes` takes its holds from
+/// `flex_holds`, so the preview and the commit both lose the hold and still
+/// agree. That is why each case also asserts the committed box. The finding
+/// expected the parity check alone to catch this flip.
+#[test]
+fn a_stretched_grid_item_resized_from_its_start_edges_previews_as_it_commits() {
+    use ondin_core::container::{AlignItems, LayoutItem};
+    let (mut doc, _frame, [first, ..]) = grid_fixture();
+    doc.apply(&Transaction(vec![Operation::SetLayoutItem {
+        id: first,
+        item: LayoutItem {
+            justify_self: Some(AlignItems::Stretch),
+            align_self: Some(AlignItems::Stretch),
+            ..LayoutItem::default()
+        },
+    }]))
+    .unwrap();
+    assert_eq!(
+        Resolved::rebuild(&doc).world_bounds(first).unwrap(),
+        Rect::new(500.0, 500.0, 600.0, 550.0),
+        "the fixture: the first rect stretched over its 100 × 50 cell"
+    );
+    for (what, left, top, held) in [
+        (
+            "from its left",
+            30.0,
+            0.0,
+            Rect::new(530.0, 500.0, 600.0, 550.0),
+        ),
+        (
+            "from its top",
+            0.0,
+            20.0,
+            Rect::new(500.0, 520.0, 600.0, 550.0),
+        ),
+        (
+            "from its top-left",
+            30.0,
+            20.0,
+            Rect::new(530.0, 520.0, 600.0, 550.0),
+        ),
+    ] {
+        let committed = assert_preview_matches_commit_through_the_doors(
+            &doc,
+            &start_edge_resize(&doc, first, left, top),
+            what,
+        );
+        assert_eq!(
+            Resolved::rebuild(&committed).world_bounds(first).unwrap(),
+            held,
+            "{what}: the hold held"
+        );
+    }
+}
+
+/// **A pinned layer resized from its left, and one moved, previews as its
+/// commit, through the doors** (the release review's `[X4.2-L6-01]`) —
+/// `pinned_fixture`'s layer stretched between `left: 10` and `right: 10`, its left
+/// edge dragged 30 in; then its right-pinned sibling moved. The preview draws
+/// each where the tool's own ops put it, since `relayout` skips a layer the
+/// transaction places. The commit turns them into insets through
+/// `build::keep_insets` (§15 D874). Each case also asserts the committed box.
+///
+/// **Flip run**, `build::keep_insets` returning its transaction untouched: fails
+/// on *"a stretched pinned layer resized from its left: preview diverged from
+/// commit"*, the predicted site. The old insets stretch the layer back to 280 at
+/// x 10.
+///
+/// **Flip run**, `RenderOverrides::relayout` no longer skipping a layer the
+/// transaction places: fails at the same site the other way round, with the
+/// *preview* re-pinned at 280 by the old insets and the commit at 250 from x 40.
+/// No other test in this file fails on that flip, so this is that skip's only
+/// pin here.
+#[test]
+fn a_pinned_layer_resized_or_moved_previews_as_it_commits() {
+    let (doc, frame, _) = pinned_fixture();
+    let kids = doc.get(frame).unwrap().children().to_vec();
+    let (right, wide) = (kids[0], kids[1]);
+    assert_eq!(
+        Resolved::rebuild(&doc).world_bounds(wide).unwrap(),
+        Rect::new(10.0, 60.0, 290.0, 100.0),
+        "the fixture: the layer stretched between its two insets"
+    );
+    let committed = assert_preview_matches_commit_through_the_doors(
+        &doc,
+        &start_edge_resize(&doc, wide, 30.0, 0.0),
+        "a stretched pinned layer resized from its left",
+    );
+    assert_eq!(
+        Resolved::rebuild(&committed).world_bounds(wide).unwrap(),
+        Rect::new(40.0, 60.0, 290.0, 100.0),
+        "re-pinned where it was dropped"
+    );
+    let committed = assert_preview_matches_commit_through_the_doors(
+        &doc,
+        &Transaction(vec![Operation::SetTransform {
+            id: right,
+            transform: Affine::translate((150.0, 10.0)),
+        }]),
+        "a right-pinned layer moved",
+    );
+    assert_eq!(
+        Resolved::rebuild(&committed).world_bounds(right).unwrap(),
+        Rect::new(150.0, 10.0, 250.0, 50.0),
+        "re-pinned where it was moved"
     );
 }

@@ -1213,7 +1213,9 @@ rulings, the maintainer's:
   `fit-content` frame, re-lays without it and shrinks, and `inspector::kept_in_place` re-derives
   the new insets against the box the container has *after* the edit — a scratch document resolved
   once, exact because an out-of-flow layer does not size its container — so the layer stays put,
-  a negative inset if need be. A full resolve per such click; a typed inset does not take it.
+  a negative inset if need be. A full resolve per such click; a typed inset does not take it, though
+  one that takes an in-flow item out of its flow writes its drawn placement first, so the axis it does
+  not pin stays where it is drawn (§15 D932).
 
 **What stretches** is a kind whose size is a field — `Rect`, `Ellipse`, `Polygon`, `Star`,
 `Artboard`, and `Text`, whose stretched width is a wrap width (`AutoHeight(w)`, a `Fixed` box keeping
@@ -1243,8 +1245,10 @@ intrinsic size its children's union bounds — ⚠️ through their **specified*
 never wraps (`white-space: nowrap`), auto height wraps at the width it is given — its stored width
 the preferred one, never below its widest word — and fixed is fixed; `container::flexed_text` turns
 the size a container gives back into a kind, an auto-width box never narrower than its line, so a
-stretch that gives less overflows the slot from its start rather than wrapping (§15 D917). Min-content is `text::content_widths`, and taffy's
-repeated questions share a per-pass memo keyed by node and width. ⚠️ CSS's default
+stretch that gives less overflows the slot from its start rather than wrapping (§15 D917). Min-content is `text::content_widths` —
+parley's widths plus the widest paragraph's own edges, its start edge, a positive first-line indent
+and its end indent, since core places every line itself and parley knows none of them (§15 D931) —
+and taffy's repeated questions share a per-pass memo keyed by node and width. ⚠️ CSS's default
 `align-items: stretch` stretches a replaced element's cross size too, and that is kept; a UI that
 wants otherwise creates containers with an explicit alignment, which is a default and not a
 deviation. That is flex's default; a grid's is CSS's `normal`, which holds a replaced element at
@@ -1360,7 +1364,9 @@ land in (§6.2, §9.4).
 every container property in the table above but grid's; *Item* sets an in-flow item's grow, shrink,
 basis, `align-self` and limits, or says why a layer is out of the flow and puts it back. A layout
 taken away with `display: none` from the Container card leaves every child where it is drawn and a
-hugging frame the size it hugged to, the Position card's unpin rule. The Transform card's W and H
+hugging frame the size it hugged to, the Position card's unpin rule — every child, a laid group's
+pinned ones included with their insets kept, and a child container with a layout of its own at the
+size this one gave it (`build::baked`, §15 D929). The Transform card's W and H
 offer the sizing modes that differ for the layer (§15 D879), and an in-flow item's X and Y are inert
 (§15 D882) — the multi card's too, while any member is in flow (§15 D903). A sizing field shows a
 number where the number is a real size of the layer — W and H —
@@ -1480,8 +1486,10 @@ timeout after release, and that spelling blinked the lines off between a gap scr
 hold's end; the cost is that after a fill scrub the lines are back a moment before the selection
 outline. Over the artwork, the layout grids and the frame labels, under the hover outline and the
 selection chrome. **Uncached**: each drawn container's layout pass re-runs every frame — measured at
-135 µs for 100 items and 1.0 ms for 1000 in release — because a cache would need a key that moves on
-undo, which the session's revision does not (§15 D921's second amendment, D616's).
+135 µs for 100 items and 1.0 ms for 1000 in release. The reason given was that a cache would need a
+key that moves on undo, which the session's revision did not (§15 D921's second amendment, D616's);
+it does since §15 D928, so that reason is gone, and whether a cache is worth it now has not been
+asked again.
 
 ### 5.4 Text node
 
@@ -3221,11 +3229,13 @@ pub fn local_for_world(doc, res, id, world: Affine) -> Affine;      // the one w
 pub fn place_at_world(doc, res, id, world) -> Result<Transaction>;  // §8.4's adapter
 pub fn move_by_world(doc, res, ids, delta) -> Result<Transaction>;
 pub fn reparent_preserving_world(doc, res, id, new_parent, index) -> Result<Transaction>;
-pub fn group(doc, ids: &mut IdSource, members) -> Result<(Transaction, NodeId)>;
-pub fn mask(doc, ids, members, key: Option<NodeId>) -> Result<(Transaction, NodeId)>; // wraps 2+ in a
-                                              // group, flags one as the mask; returns what to select
-pub fn ungroup(doc, id) -> Result<Transaction>;
-pub fn ungroup_all(doc, ids) -> Result<Transaction>;  // several, ONE tx — simulated, not concatenated
+pub fn baked(doc, res, id) -> Vec<Operation>;  // store where it is drawn — before leaving a layout
+pub fn baked_ops(id, node, local: Affine, kind) -> Vec<Operation>; // the transform + size half of it
+pub fn group(doc, res, ids: &mut IdSource, members) -> Result<(Transaction, NodeId)>;
+pub fn mask(doc, res, ids, members, key: Option<NodeId>) -> Result<(Transaction, NodeId)>; // wraps 2+
+                                              // in a group, flags one as the mask; returns what to select
+pub fn ungroup(doc, res, id) -> Result<Transaction>;
+pub fn ungroup_all(doc, res, ids) -> Result<Transaction>; // several, ONE tx — simulated, not concatenated
 pub fn outermost(doc, ids) -> Vec<NodeId>;   // members with no ancestor in the set
 pub fn guides_of(doc, ids) -> Vec<Operation>; // the RemoveGuides a delete owes — FIRST in the tx, §5.7
 pub fn image_ids_in(nodes: &[Node]) -> Vec<ImageId>;  // sorted, unique, hidden fills included
@@ -3280,7 +3290,16 @@ Two properties every one of these upholds, both of which a naive implementation 
 
 - **A structural edit must not move anything on screen.** Plain `Reparent` keeps the *local*
   transform, so it teleports the node by the difference between the two parents. `group`,
-  `ungroup` and `reparent_preserving_world` all re-project.
+  `ungroup` and `reparent_preserving_world` all re-project. **And a layer a layout places is not
+  where its stored values say** — an in-flow item's stored transform is where it goes back to on
+  leaving, a stretched one's stored size not its drawn size (§5.3c) — so every door that takes a
+  layer out of a layout, `group`, `frame`, `boolean`, `mask` and `ungroup`, writes it where it is
+  drawn first: `baked`, the used transform and kind, plus the drawn size of a container with a
+  layout of its own that its own pass would size otherwise (§15 D929). They wrapped by the stored
+  values until then, and a flex row's members, grouped, landed stacked at their creation point. ⚠️
+  **Two moves are the layout's answer and kept**: masking a pair in a flow moves it whole into the
+  first slot, a masked group's box being its content's; and *Display → none* on a laid group that is
+  itself an item changes the box its parent places (§15 D929).
 - **An edit must apply to a node exactly once.** When a multi-selection contains both a group and
   something inside it, operating on each independently moves the inner node twice. `outermost`
   filters covered descendants and every multi-node *transform* builder routes through it.
@@ -3293,7 +3312,10 @@ already spliced, and a container nested inside an earlier one has a different pa
 local transform by the time its turn comes. That is the rule `layers::plan_layer_move` and
 `insert_subtrees` already follow, paying a whole `Document` clone rather than a map of child lists
 because an ungroup rewrites transforms as well as parentage; the clone is skipped for the
-single-container case, which is every ungroup but a multi-selection. ⚠️ **Concatenating against the
+single-container case, which is every ungroup but a multi-selection. A `Resolved` advances with
+it, since `ungroup` folds from where things are drawn (§15 D929): the caller's for the first
+container, then one rebuild over the advanced document and an incremental update per step.
+⚠️ **Concatenating against the
 original does not merely interleave, and the obvious assertion cannot see it**: measured, the second
 container's children land at stale indices *inside* the run the first splice made and the last child
 is pushed off the end, while **every world position is still right**, because the wrong indices still
@@ -8114,11 +8136,11 @@ D616). `OndinApp::artboards` was a full-document walk answering a question about
 once per selected root per call, so a twenty-layer move spent 6.07 ms of a 16.7 ms frame before
 anything was drawn. `OndinApp::with_frames` fills `FrameIndex` — the frames, their world boxes and a
 walk counter — whenever the revision has moved. **The rule that keeps it correct is that nothing may
-add, remove or move an artboard without a commit**: `revision` is bumped by `commit_inner` and by
-`adopt_document`, and by nothing else. 🚨 **Undo and redo do not go through `commit_inner` and do not
-bump it** — this sentence said they did — so an undo or a redo that moves a frame leaves the memo
-stale until the next commit, which breaks the rule from inside (§15 D616's amendment, *Fix*, not
-repaired). A gesture in flight
+add, remove or move an artboard without a commit, an undo or a redo**: `revision` is bumped by
+`commit_inner`, by `undo` and `redo`, and by `adopt_document`, and by nothing else. 🚨 **Undo and redo
+do not go through `commit_inner` and bump it themselves since §15 D928**; until then they did not bump
+it at all — this sentence said they went through `commit_inner` — so an undo or a redo that moved a
+frame left the memo stale until the next commit (§15 D616's amendment). A gesture in flight
 deliberately does not bump it — these are the *committed* world bounds, which is what the drop rule
 has always been defined against.
 
@@ -8493,9 +8515,12 @@ edge is pinned, dashed and faint where not, and solid in the canvas's measure re
 struts. It takes a click anywhere in the band between the layer's edge and the well's, and pins or
 unpins that edge where it is (`container::with_edge`). **Four fields** beside it, L/R over T/B: a
 pinned inset in its own unit, with an accent edge and a clickable `px`/`%` suffix that converts
-without moving anything, committed directly; an unpinned edge reads `auto` where its number would be,
-its current distance still the value underneath — so a scrub starts where the edge is — and typing or
-dragging pins it in px through the valve. **Outside a layout the top and left are held by default**
+without moving anything, committed directly — over several layers, each one's own distance against
+its own container, and a layer without that edge pinned left alone, a unit switch converting a pin
+and never making one (`inset_flip_ops`, §15 D932); an unpinned edge reads `auto` where its number
+would be, its current distance still the value underneath — so a scrub starts where the edge is — and
+typing or dragging pins it in px through the valve, an in-flow item's drawn placement written first so
+the axis it does not pin stays put (`typed_inset_ops`, §15 D932). **Outside a layout the top and left are held by default**
 (§15 D871, D891): an axis with neither inset keeps its offset from the container's top-left through a
 resize, as a pin at that distance would, so the card shows it as held — the strut solid accent, the
 field the distance with no unit and no accent edge, the layer accent — without writing an inset.
@@ -8544,9 +8569,14 @@ for a layer the flow skips it says why instead, in words — *Absolutely positio
 hold it, *Hidden*, or a mask (§15 D889) — with one button that puts back every subject out for that
 reason. Labels and values are CSS's names, written in sentence case — *Justify content*, *Flex start*
 — with a unit beside a number left lower case (§15 D867, D884). 🚨 **`display: none`
-from the card writes every in-flow child's drawn transform and size into its stored values, and a
-hugging frame's hugged size into its own** (`inspector::baked_ops`), so nothing moves: the Position
-card's unpin rule, for the same reason, and *Unpin and return to the layout* does the same. **A resize's flips come with
+from the card writes every child's drawn transform and size into its stored values, and a
+hugging frame's hugged size into its own** (`build::baked`, `build::baked_ops`), so nothing moves:
+the Position card's unpin rule, for the same reason, and *Unpin and return to the layout* does the
+same. **Every
+child, not only the in-flow ones** (§15 D929): a laid group's pinned children are placed against a box
+the group has no longer, so they are written where they are drawn too, their insets kept — inert under
+a plain group, live again if the layout comes back — and a child container with a layout of its own
+keeps the size this one gave it. **A resize's flips come with
 a receipt** (§15 D880): the grow, shrink or `align-self` a resize changed on the user's behalf is
 outlined and named, with an Undo that takes the whole step back — and a grid item's `justify-self`
 and `align-self` likewise, each row outlined while the receipt names it (§15 D920, D922). The fields read `DisplayNode::display`
@@ -10105,7 +10135,9 @@ the alignment clip, the resolved dash pattern — reads it through `svg::outline
 
 **Release is `build::ungroup`, and its body needed nothing added.** The operands were never destroyed —
 that is what non-destructive means — so dissolving the container is the identical splice a group needs, with
-the transform folded into each child so nothing moves. `Ctrl+Shift+G` and the identity row's Ungroup
+the transform folded into each child so nothing moves — the *used* transforms, since §15 D929, which
+outside a layout are the stored ones, so a boolean that is no flex or grid item releases by the
+arithmetic it always did. `Ctrl+Shift+G` and the identity row's Ungroup
 action both reach it. The one asymmetry is paint, deliberately: the boolean's own fill and stroke governed
 the result and go away with it, while each operand's own paint — inert while it was consumed — comes back
 into view. `build::boolean` giving the container the *bottom* operand's paint is what makes that round trip
@@ -10139,8 +10171,11 @@ pins that, because "the inverse captures the subtree" is load-bearing here rathe
 **`build::outline` is the other verb, and it is *Flatten*'s sibling rather than a mode of it**
 (§15 D230). One shape becomes the `Path` its own outline traces: a rect, an ellipse, a polygon, a star,
 a line, or a `Path` whose per-anchor radii are still in the model and get **baked into the geometry**.
-It needs no `Resolved` at all — `geometry::local_path` is a pure function of the node's kind — which is
-the whole difference in cost between the two operations. `build::can_outline` is the predicate, and it
+It needs no evaluated outline — `geometry::local_path` is a pure function of the node's kind — which is
+the whole difference in cost between the two operations. **It takes a `Resolved` for one lookup**, the
+kind the shape is drawn at (§15 D930): a shape a flex or grid container stretches, or two insets pin
+on both sides, is drawn at a size its stored kind does not hold, and a path cannot stretch, so the size
+it is cut at is the size it keeps. This said *"It needs no `Resolved` at all"* until then. `build::can_outline` is the predicate, and it
 is a question about *state* on exactly one kind: `round_corners` returns a path untouched when **no
 radius is `> 0`**, so a path with nothing to bake answers no and the menu row is **present and dimmed**
 rather than absent. ⚠️ **That is not the same test as *every radius is `<= 0`*, and the difference is
@@ -10154,9 +10189,9 @@ refused for the reasons above.
 **`build::outline_text` is the third verb, and text's refusal above is exactly why it is a third**
 (§15 D260). A `Text` layer becomes the `Path` its **glyphs** trace — the context menu's *Convert to
 path*, Affinity's *Convert Text to Curves*. Every other kind's outline is a pure function of its own
-geometry; a text node's is a **shaped** thing, so this one takes a `Resolved` where `outline` needs
-none — the same difference in cost that separates `flatten` from `outline`, arriving at a third door
-for the same reason. The outlining itself is not new and is not here: `ondin_core::text::outline`
+geometry; a text node's is a **shaped** thing, so this one takes a `Resolved` for its layout where
+`outline` takes one only for a size — the same difference in cost that separates `flatten` from
+`outline`, arriving at a third door for the same reason. The outlining itself is not new and is not here: `ondin_core::text::outline`
 (§5.4, §6.3, §15 D145) builds the path from the cached layout, and the glyph coordinates it produces
 are **already node-local** — the same ones the render walk hands a backend — so the conversion has
 nothing to transform on the way out. `build::can_outline_text` is the predicate and it **asks
@@ -10181,7 +10216,11 @@ the operation for an `Exclude` (§15 D239), and this body's whole job is to thro
 until 2026-08-31 a flattened exclusion handed back the same concatenated subpaths under the default
 non-zero rule, which is its **union**, every hole filled in. What is carried is the *effective* rule, one
 line for two cases: the derived one, and the stored one an outlined compound `Path` would otherwise lose
-the same way. *Lock* and the **proportion
+the same way. **And so is the layer's place in a layout** (§15 D930): its insets when authored and its
+item properties when not the default — container layout put the three fields on `Node` and this list
+was not extended, so an outlined pinned layer came back in the flow and an outlined grid item lost its
+cell. ⚠️ `display` is not carried, on purpose: a path holds no children. `flatten_union` carries none of
+it, a new layer inheriting only paint. *Lock* and the **proportion
 lock** are still dropped deliberately, the second because this operation's whole purpose is to stop the
 layer having an authored box for that constraint to be about (§15 D41). **Neither conversion has a
 chord** (`shortcuts.md`, *Deliberately unbound*): a one-way structural conversion is not worth a
@@ -12422,7 +12461,11 @@ bump per picture instead of a serialise; the write, the `mark_saved` and the exp
 the interval is not enough, `autosave_secs` being settable to 1. **The session goes clean from the
 worker's answer, not at queue time**: `EditorSession::finish_save` refuses if the revision has moved,
 because an edit made during the serialise means the file is already behind, and returns whether the
-save *counted* — which is what `export_on_save` re-exports on. While a write is in flight the pill says
+save *counted* — which is what `export_on_save` re-exports on. 🚨 **An undo or a redo is such an edit,
+and moves the revision only since §15 D928**: before it, one made while a write was in flight left the
+revision where it was, the session went clean over a file holding the other document, and the next
+`recovery_tick`, reading clean as *the disk holds the document*, deleted the crash snapshot — the one
+copy of the session's document on disk. While a write is in flight the pill says
 *Saving…* and its dot stays **amber**, a third label and deliberately not a third state: the document
 still differs from its file, which is the only thing the dot answers. ⚠️ **`Ctrl+S`, the walk to the
 dashboard, an open and the close-and-save arm stay synchronous, and that is a decision rather than a

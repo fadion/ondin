@@ -9911,9 +9911,11 @@ impl OndinApp {
     /// every frame. Measured 2026-09-29 in release, rects in a grid of `1fr`
     /// tracks: 135 µs for 100 items, 1.0 ms for 1000 — linear, about a
     /// microsecond an item, on a canvas that repaints only on input. A cache
-    /// would need a key that moves with every change, and the session's revision
-    /// does not move on undo (§15 D616's amendment), so it is the one thing here
-    /// that could draw stale lines (§15 D921's second amendment).
+    /// would need a key that moves with every change, and these lines are read
+    /// off the **preview**, which does not move the session's revision. The other
+    /// reason this gave — that undo did not move it either (§15 D616's amendment,
+    /// D921's second) — went with §15 D928, and whether a cache is worth it now
+    /// has not been asked again.
     fn draw_grid_tracks(&self, painter: &egui::Painter, rect: egui::Rect, ppp: f32) {
         if self.editing_in_place() {
             return;
@@ -17988,8 +17990,9 @@ mod headless_app_tests {
     /// ⚠️ **The second half is the one that could go wrong.** A memo keyed on a
     /// revision is only correct if the revision moves when the artboards do, so
     /// the commit assertion is not a formality — it is the whole invalidation
-    /// rule, asserted. `EditorSession::revision` is bumped by `commit_inner`,
-    /// which undo and redo also go through, and by `adopt_document`.
+    /// rule, asserted. `EditorSession::revision` is bumped by `commit_inner`, by
+    /// `undo` and `redo` (which do not go through it, and bump it themselves since
+    /// §15 D928), and by `adopt_document`.
     ///
     /// ⚠️ **Flip-check, run, and both bite at their predicted sites.** Dropping
     /// the `index.at != Some(revision)` guard so the walk always runs fails the

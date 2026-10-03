@@ -388,7 +388,8 @@ pub fn reparent_preserving_world(
 /// **The one spelling of "keep it where it is drawn"**, for every edit that
 /// takes a layer out of whatever was placing it: the structural verbs through
 /// [`baked`], and in the app a Position pin changed (`OndinApp::baked_placement`),
-/// an Item card's *Unpin insets* and a container's layout set to `none` (§15
+/// the Item card's *Unpin and return to the layout* and a container's layout set
+/// to `none` (§15
 /// D878) — and, its `SetGeometry` half alone, W's or H's `px` picked from the
 /// sizing menu, which fixes a hugged or percentage size where it is drawn
 /// (`size_mode_tx`, §15 D879). One function because the kind-to-patch table is a
@@ -1367,9 +1368,9 @@ pub fn outline(
 /// **A third verb rather than an arm of [`outline`], and the reason is the one
 /// [`can_outline`] gave for refusing text**: every other kind's outline is a pure
 /// function of its own geometry, and a text node's is a *shaped* thing. So this
-/// takes a [`Resolved`] where `outline` needs none — the same difference in cost
-/// that separates [`flatten`] from `outline`, arriving for the same reason at a
-/// third door.
+/// takes a [`Resolved`] for the shaping, where `outline` takes one only to look up
+/// the size a shape is drawn at (§15 D930) — the difference in cost that separates
+/// [`flatten`] from `outline`, arriving for the same reason at a third door.
 ///
 /// **The glyph outlining is not new and is not here.** `text::outline` has existed
 /// since outside-aligned type strokes did (§15 D145): it walks the layout's runs,

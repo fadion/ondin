@@ -1610,7 +1610,7 @@ impl OndinApp {
 
     /// The out-of-flow block's button: every subject out for `why`, back in the
     /// flow as one commit — pinned layers unpinned where they are drawn (their
-    /// transform and size kept, `inspector::baked_ops`), hidden ones shown, masks
+    /// transform and size kept, `build::baked_ops`), hidden ones shown, masks
     /// released. Each rejoins at its own place among its siblings.
     fn back_into_flow(&mut self, subjects: &[NodeId], why: OutOfFlow) {
         let same: Vec<NodeId> = subjects

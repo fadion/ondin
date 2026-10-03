@@ -1713,3 +1713,142 @@ fn a_drag_that_keeps_the_flow_order_is_no_reorder() {
         "a block dragged short of the next item"
     );
 }
+
+/// **A definite-size item resized from its top does not jump to the far side of
+/// its line** (§15 D935, the release review's `[X3.2-L1-01]`). In a stretching
+/// row a frame 100 tall is not stretched — its `auto` is its stored size,
+/// definite (D879) — and neither is a laid group 100px tall. Resized from the top
+/// to 70, each was written `align-self: end`, D905's rule for a stretched item,
+/// and jumped to the line's end, 110..180.
+///
+/// ⚠️ **The finding expected the bottom to hold at 120, and nothing can give
+/// that**: a definite item in a stretching line is placed at the line's start,
+/// as a start-aligned one is, so it keeps its top at 20 whichever handle resized
+/// it — 20..90, the ordinary behaviour of a start-aligned item, which is what
+/// D905 replaced for a *stretched* one only. Holding the bottom would need a
+/// keyword that moves it to the line's end, which is the jump.
+///
+/// **Flip run**, `stretched_across` asked of the keyword alone: fails on *"at
+/// the line's start"*, 110..180, the predicted site.
+#[test]
+fn a_definite_item_dragged_by_its_top_keeps_its_bottom() {
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(400.0, 200.0), (0.0, 0.0));
+    let card = s.add(f, frame(40.0, 100.0), (0.0, 0.0));
+    let g = s.add(f, NodeKind::Group, (0.0, 0.0));
+    s.add(g, rect(20.0, 20.0), (0.0, 0.0));
+    s.display(
+        f,
+        Some(Display::Flex(Flex {
+            column_gap: 10.0,
+            padding: [20.0; 4],
+            ..Default::default()
+        })),
+    );
+    s.display(g, row());
+    s.item(g, |i| {
+        i.height = ondin_core::container::Dimension::Px(100.0)
+    });
+    assert_eq!(
+        (s.bounds(card).y0, s.bounds(card).y1),
+        (20.0, 120.0),
+        "the fixture: not stretched"
+    );
+    let slot = s.res.used_local(&s.doc, card).unwrap();
+    s.commit(vec![
+        Operation::SetGeometry {
+            id: card,
+            geometry: GeometryPatch::Size(Size::new(40.0, 70.0)),
+        },
+        Operation::SetTransform {
+            id: card,
+            transform: slot * Affine::translate((0.0, 30.0)),
+        },
+    ]);
+    assert_eq!(
+        (s.bounds(card).y0, s.bounds(card).y1),
+        (20.0, 90.0),
+        "at the line's start"
+    );
+    assert_ne!(
+        s.doc.get(card).unwrap().item().align_self,
+        Some(AlignItems::End),
+        "and no keyword written for a stretch that was not there"
+    );
+
+    let slot = s.res.used_local(&s.doc, g).unwrap();
+    let item = ondin_core::build::sized_flex_item(
+        &s.doc,
+        &s.res,
+        g,
+        Size::new(s.bounds(g).width(), 70.0),
+        Some(slot * Affine::translate((0.0, 30.0))),
+    )
+    .expect("a group with a layout takes a size");
+    assert_ne!(
+        item.align_self,
+        Some(AlignItems::End),
+        "nor for the laid group"
+    );
+}
+
+/// **A resize below an item's `flex-basis` holds** (§15 D935, `[X4.1-L1-03]`):
+/// a 40-wide rect with `basis: 100px` is drawn 100 wide, and resized to 60 it
+/// stayed 100 — the basis decides the main size before growth does, and the
+/// commit cleared growth but left the basis. And **a point edit on a growing
+/// path leaves its growth alone** (`[X4.1-L1-04]`): a path never stretches, so
+/// growth only widens its slot, and stopping it jumped the sibling from x 340.
+///
+/// **Flip runs**: `held` keeping the basis fails on *"drawn at the size it was
+/// resized to"*, 100 against 60; the kind gate in `flex_holds` deleted fails on
+/// *"its growth kept"*, 0 against 1 — both the predicted sites.
+#[test]
+fn a_resize_clears_the_basis_and_a_point_edit_keeps_growth() {
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(400.0, 200.0), (0.0, 0.0));
+    let a = s.add(f, rect(40.0, 30.0), (0.0, 0.0));
+    s.add(f, rect(40.0, 30.0), (0.0, 0.0));
+    s.display(f, row());
+    s.item(a, |i| i.basis = ondin_core::container::Dimension::Px(100.0));
+    assert_eq!(s.bounds(a).width(), 100.0, "the fixture: at its basis");
+    s.resize(a, 60.0, 30.0);
+    assert_eq!(
+        s.bounds(a).width(),
+        60.0,
+        "drawn at the size it was resized to"
+    );
+
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(400.0, 200.0), (0.0, 0.0));
+    let mut path = ondin_core::kurbo::BezPath::new();
+    path.move_to((0.0, 0.0));
+    path.line_to((40.0, 0.0));
+    path.line_to((40.0, 30.0));
+    path.close_path();
+    let p = s.add(
+        f,
+        NodeKind::Path {
+            path: path.clone(),
+            corner_radii: Vec::new(),
+        },
+        (0.0, 0.0),
+    );
+    let b = s.add(f, rect(40.0, 30.0), (0.0, 0.0));
+    s.display(f, row());
+    s.item(p, |i| i.grow = 1.0);
+    let b0 = s.bounds(b);
+    let mut wider = ondin_core::kurbo::BezPath::new();
+    wider.move_to((0.0, 0.0));
+    wider.line_to((42.0, 0.0));
+    wider.line_to((40.0, 30.0));
+    wider.close_path();
+    s.commit(vec![Operation::SetGeometry {
+        id: p,
+        geometry: GeometryPatch::Path {
+            path: wider,
+            corner_radii: Vec::new(),
+        },
+    }]);
+    assert_eq!(s.doc.get(p).unwrap().item().grow, 1.0, "its growth kept");
+    assert_eq!(s.bounds(b), b0, "and its sibling where it was");
+}

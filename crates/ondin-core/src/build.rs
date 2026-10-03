@@ -3953,9 +3953,17 @@ pub fn flex_holds(doc: &Document, res: &Resolved, tx: &Transaction) -> Vec<Opera
             let to = written_transform(tx, *id).unwrap_or(was);
             let edges = resized_edges((was, now), (to, then));
             item = match display {
+                // **Only a kind whose drawn size follows the layout is held**
+                // (§15 D935): a path's points edited, a boolean's operator
+                // switched or a line's end moved on a growing item stopped its
+                // growth and jumped its siblings, when growth had only ever
+                // widened its slot — a path is not stretched, so there was no
+                // size to take back.
+                Display::Flex(_) if !container::can_stretch(used) => item,
                 Display::Flex(flex) => {
                     let from_start = resized_from_cross_start(flex, edges);
-                    held(flex, item, now.size(), then.size(), from_start)
+                    let stretched = stretched_across(flex, &view.item(*id), used, false);
+                    held(flex, item, now.size(), then.size(), from_start, stretched)
                 }
                 Display::Grid(grid) => grid_resize_held(
                     grid,
@@ -4165,20 +4173,62 @@ fn sized_in_px(
     item
 }
 
+/// Whether a flex item with `item` and `kind` is **drawn stretched across its
+/// line** — the question [`held`] asks before releasing a stretch (§15 D935).
+///
+/// The keyword is not enough: CSS stretches only an item whose cross size is
+/// `auto` (D893's reading), and a frame's `auto` is its stored size, definite
+/// and never stretched (D879). Asked of the keyword alone, a frame or a px-tall
+/// laid group in a stretching row, resized from its top, was written
+/// `align-self: end` and jumped to the far side of its line — D905's rule, right
+/// for an item that *is* stretched, whose line-end is its own bottom. A kind
+/// with no size to stretch ([`crate::container::can_stretch`]) is never
+/// stretched, and a group is only when it has a layout of its own.
+fn stretched_across(
+    flex: &crate::container::Flex,
+    item: &crate::container::LayoutItem,
+    kind: &NodeKind,
+    laid: bool,
+) -> bool {
+    use crate::container::{AlignItems, Dimension};
+    let across = if flex.direction.is_row() {
+        item.height
+    } else {
+        item.width
+    };
+    item.align_self.unwrap_or(flex.align_items) == AlignItems::Stretch
+        && across == Dimension::Auto
+        && match kind {
+            NodeKind::Artboard { .. } => false,
+            NodeKind::Group => laid,
+            k => crate::container::can_stretch(k),
+        }
+}
+
 /// `item` with growth stopped on whichever axes a resize from `from` to `to`
 /// changed, in a container laid out by `flex` — [`keep_flex_sizes`]' rule (§15
 /// D875), spelled once for it and for [`sized_flex_item`]. A released stretch
 /// aligns to the end when `from_start` — the resize moved the cross axis's start
 /// edge and held its end ([`resized_from_cross_start`], §15 D905) — and to the
-/// start otherwise.
+/// start otherwise; `stretched` is whether there was a stretch to release
+/// ([`stretched_across`], asked of the item as it was before the resize).
+///
+/// **A main-axis resize clears `flex-basis` too** (§15 D935): the basis decides
+/// the main size before growth does, so an item with `basis: 100px` resized to 60
+/// stayed 100 wide while the commit wrote the size and stopped its growth. With
+/// the basis `auto` the size the resize wrote is the basis — D875's *"set the
+/// width and stop growth"*, in CSS's terms. A px `min-` or `max-` is kept, and
+/// clamps the resize: it is a limit somebody set, and the preview applies these
+/// holds (§15 D904), so the drag is seen to stop at it.
 fn held(
     flex: &crate::container::Flex,
     mut item: crate::container::LayoutItem,
     from: kurbo::Size,
     to: kurbo::Size,
     from_start: bool,
+    stretched: bool,
 ) -> crate::container::LayoutItem {
-    use crate::container::AlignItems;
+    use crate::container::{AlignItems, Dimension};
     let dw = (from.width - to.width).abs() > 1e-9;
     let dh = (from.height - to.height).abs() > 1e-9;
     let (main_changed, cross_changed) = if flex.direction.is_row() {
@@ -4189,11 +4239,8 @@ fn held(
     if main_changed {
         item.grow = 0.0;
         item.shrink = 0.0;
+        item.basis = Dimension::Auto;
     }
-    let stretched = match item.align_self {
-        Some(a) => a == AlignItems::Stretch,
-        None => flex.align_items == AlignItems::Stretch,
-    };
     if cross_changed && stretched {
         item.align_self = Some(match from_start {
             true => AlignItems::End,
@@ -4258,9 +4305,14 @@ pub fn sized_flex_item(
             ),
         );
         item = match display {
-            Display::Flex(flex) => {
-                held(flex, item, now, size, resized_from_cross_start(flex, edges))
-            }
+            Display::Flex(flex) => held(
+                flex,
+                item,
+                now,
+                size,
+                resized_from_cross_start(flex, edges),
+                stretched_across(flex, node.item(), node.kind(), true),
+            ),
             // A group with a layout is a box, never replaced (§15 D915).
             Display::Grid(grid) => {
                 grid_resize_held(grid, item, false, (now, size), (edges[0].0, edges[1].0))

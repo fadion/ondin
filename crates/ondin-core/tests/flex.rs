@@ -1611,3 +1611,105 @@ fn a_flex_frame_stretched_by_its_insets_lays_out_in_its_drawn_width() {
     s.resize(outer, 600.0, 200.0);
     assert_eq!(s.bounds(r).x0, 550.0, "and it follows the frame");
 }
+
+/// **A drag in a single-line row reorders by the main axis alone, whatever the
+/// items' heights** (§15 D934, the release review's `[X4.1-L1-01]`). In a row
+/// aligned to the start, `a` is 20 tall and `b` 100: "same line" was asked of
+/// each sibling's own cross extent, and `a`'s 20..40 never holds `b`'s centre at
+/// 70, so `b` read `a` as a line above and could not be dropped before it however
+/// far it was dragged. And three equal items dragged with a 16 px vertical
+/// wobble — past half their height — landed first or last by the wobble's sign.
+///
+/// **Flip run**, the lines read per sibling again (`flow_index`'s band the
+/// sibling's own cross extent): fails on *"b before a"*, `None`, the predicted
+/// site.
+#[test]
+fn a_drag_in_one_line_reorders_by_the_main_axis_alone() {
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(400.0, 200.0), (0.0, 0.0));
+    s.add(f, rect(40.0, 20.0), (0.0, 0.0));
+    let b = s.add(f, rect(40.0, 100.0), (0.0, 0.0));
+    s.display(f, row());
+    for dx in [-50.0, -100.0, -300.0] {
+        assert_eq!(
+            ondin_core::build::flex_reorder(&s.doc, &s.res, b, Vec2::new(dx, 0.0)),
+            Some(Operation::Reorder { id: b, index: 0 }),
+            "b before a, dragged {dx}"
+        );
+    }
+
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(400.0, 200.0), (0.0, 0.0));
+    let [x, _, z] = [0; 3].map(|_| s.add(f, rect(40.0, 30.0), (0.0, 0.0)));
+    s.display(f, row());
+    for wobble in [16.0, -16.0] {
+        assert_eq!(
+            ondin_core::build::flex_reorder(&s.doc, &s.res, z, Vec2::new(-200.0, wobble)),
+            Some(Operation::Reorder { id: z, index: 0 }),
+            "the last dragged to the front lands first, wobble {wobble}"
+        );
+        assert_eq!(
+            ondin_core::build::flex_reorder(&s.doc, &s.res, x, Vec2::new(200.0, wobble)),
+            Some(Operation::Reorder { id: x, index: 2 }),
+            "the first dragged to the back lands last, wobble {wobble}"
+        );
+    }
+}
+
+/// **A drag that keeps an item's place in the flow is no reorder, beside a
+/// pinned or hidden sibling** (§15 D934, `[X4.1-L1-02]`). `[a, p, b]` with `p`
+/// pinned: `a` nudged 3 px is still first in the flow, but the index was the one
+/// just before the next in-flow sibling, `b` — so a `Reorder` past `p` was
+/// committed, painting `a` over the layer it was under, an undo step with nothing
+/// moved. The block form: `[a, h, b, c]` with `h` hidden, the block `[a, b]`
+/// dragged short of `c`, pulled `h` out from between them.
+///
+/// **Flip run**, `flex_reorder` comparing child-list indices again: fails on
+/// *"a nudge beside a pinned sibling"*, `Some(Reorder { a, 1 })`, the predicted
+/// site.
+#[test]
+fn a_drag_that_keeps_the_flow_order_is_no_reorder() {
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(400.0, 200.0), (0.0, 0.0));
+    let a = s.add(f, rect(40.0, 30.0), (0.0, 0.0));
+    let p = s.add(f, rect(100.0, 30.0), (0.0, 0.0));
+    let b = s.add(f, rect(40.0, 30.0), (0.0, 0.0));
+    s.display(f, row());
+    s.commit(vec![Operation::SetInsets {
+        id: p,
+        insets: ondin_core::Insets {
+            left: Some(ondin_core::LengthPct::Px(30.0)),
+            top: Some(ondin_core::LengthPct::Px(20.0)),
+            ..Default::default()
+        },
+    }]);
+    assert_eq!(
+        ondin_core::build::flex_reorder(&s.doc, &s.res, a, Vec2::new(3.0, 0.0)),
+        None,
+        "a nudge beside a pinned sibling"
+    );
+    assert_eq!(
+        ondin_core::build::flex_reorder_many(&s.doc, &s.res, &[a, b], Vec2::new(3.0, 0.0)),
+        Some(Vec::new()),
+        "a block nudged around a pinned sibling"
+    );
+
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(400.0, 200.0), (0.0, 0.0));
+    let [a, h, b, _] = [0; 4].map(|_| s.add(f, rect(40.0, 30.0), (0.0, 0.0)));
+    s.display(f, row());
+    s.commit(vec![Operation::SetVisible {
+        id: h,
+        visible: false,
+    }]);
+    assert_eq!(
+        ondin_core::build::flex_reorder(&s.doc, &s.res, a, Vec2::new(5.0, 0.0)),
+        None,
+        "a nudge beside a hidden sibling"
+    );
+    assert_eq!(
+        ondin_core::build::flex_reorder_many(&s.doc, &s.res, &[a, b], Vec2::new(20.0, 0.0)),
+        Some(Vec::new()),
+        "a block dragged short of the next item"
+    );
+}

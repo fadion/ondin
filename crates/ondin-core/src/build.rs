@@ -4303,9 +4303,19 @@ pub fn flex_reorder(doc: &Document, res: &Resolved, id: NodeId, delta: Vec2) -> 
         .filter(|c| *c != id)
         .collect();
     let at = res.world_bounds(id)?.center() + delta;
-    let index = flow_index(doc, res, parent, &others, at)?;
-    let now = doc.get(parent)?.children().iter().position(|c| *c == id)?;
-    (index != now).then_some(Operation::Reorder { id, index })
+    let (index, place) = flow_index(doc, res, parent, &others, at)?;
+    // **Where it lands in the flow, not in the child list, decides whether it
+    // moved** (§15 D934): the index is just before the next in-flow sibling, so
+    // a pinned or hidden sibling after the item made a nudge that kept its slot
+    // answer a `Reorder` past it — the paint order flipped and an undo step
+    // landed with nothing moved in the flow.
+    let view = crate::resolve::DocView(doc);
+    let was = others
+        .iter()
+        .take(doc.get(parent)?.children().iter().position(|c| *c == id)?)
+        .filter(|c| crate::container::in_flow(&view, **c))
+        .count();
+    (place != was).then_some(Operation::Reorder { id, index })
 }
 
 /// [`flex_reorder`] for **several items of one flex container dragged
@@ -4353,10 +4363,23 @@ pub fn flex_reorder_many(
         .reduce(|a, b| a.union(b))?
         .center()
         + delta;
-    let index = flow_index(doc, res, parent, &others, at)?;
+    let (index, _) = flow_index(doc, res, parent, &others, at)?;
     let mut target = others;
     for (k, id) in block.iter().enumerate() {
         target.insert(index + k, *id);
+    }
+    // **The flow order unchanged is no reorder** (§15 D934), whatever the child
+    // list would say: an out-of-flow sibling between the block's members was
+    // pulled out from between them on any drop, a nudge included.
+    let view = crate::resolve::DocView(doc);
+    let flow = |list: &[NodeId]| -> Vec<NodeId> {
+        list.iter()
+            .copied()
+            .filter(|c| crate::container::in_flow(&view, *c))
+            .collect()
+    };
+    if flow(&target) == flow(&children) {
+        return Some(Vec::new());
     }
     let mut now = children;
     let mut ops = Vec::new();
@@ -4374,13 +4397,29 @@ pub fn flex_reorder_many(
 /// Where in `parent`'s child list — `others`, the list with the dragged taken
 /// out — a dragged box whose centre is at world `at` lands: [`flex_reorder`]'s
 /// reading-order rule, shared with [`flex_reorder_many`] so the two cannot drift.
+/// Answers the child-list index and the **place in the flow** — how many in-flow
+/// siblings come before it — which is what says whether anything moved.
+///
+/// 🚨 **The lines are the laid lines, read off the flow** (§15 D934). A new line
+/// starts where an in-flow sibling's main-axis start runs back behind the end of
+/// the one before it, in flow order — which is how the engine fills them — and a
+/// line's cross extent is the union of its items'. So a `nowrap` row is one line
+/// by construction, and `wrap-reverse` needs no arm of its own: its first line is
+/// the first in the flow wherever it is drawn (§15 D883). The dragged centre's
+/// line is the one whose band holds it, else the nearest; it lands after every
+/// line before that one and among that line's items by main-axis centre.
+/// "Same line" was asked of each sibling's own cross extent, so in a row aligned
+/// to the start a 20-tall item never held a 100-tall one's centre: the taller
+/// item read every shorter one as a line above and could never be dropped before
+/// it, and a drag that wobbled past half an item's height landed first or last
+/// whatever its x.
 fn flow_index(
     doc: &Document,
     res: &Resolved,
     parent: NodeId,
     others: &[NodeId],
     at: Point,
-) -> Option<usize> {
+) -> Option<(usize, usize)> {
     use crate::container::{self, Display, FlexDirection};
     let view = crate::resolve::DocView(doc);
     // A grid's drop writes lines rather than reordering (§15 D913); not this.
@@ -4393,44 +4432,74 @@ fn flow_index(
         flex.direction,
         FlexDirection::RowReverse | FlexDirection::ColumnReverse
     );
-    let lines_reversed = flex.wrap == container::FlexWrap::WrapReverse;
+    let row = flex.direction.is_row();
     let (at_main, at_cross) = main_cross(flex.direction, at);
-    let flow: Vec<usize> = (0..others.len())
+    // Each in-flow sibling's index in `others`, its main extent and centre, and
+    // its cross extent — in flow order.
+    type Span = (f64, f64);
+    let items: Vec<(usize, Span, f64, Span)> = (0..others.len())
         .filter(|i| container::in_flow(&view, others[*i]))
-        .collect();
-    let before = flow
-        .iter()
-        .filter(|i| {
-            let s = others[**i];
-            let Some(bx) = crate::local_box(doc, res, s)
+        .filter_map(|i| {
+            let s = others[i];
+            let bx = crate::local_box(doc, res, s)
                 .zip(res.used_local(doc, s))
-                .map(|(b, t)| crate::geometry::transform_rect(t, b))
-            else {
-                return false;
-            };
-            let (lo, hi) = if flex.direction.is_row() {
-                (bx.y0, bx.y1)
+                .map(|(b, t)| crate::geometry::transform_rect(t, b))?;
+            let (main, cross) = if row {
+                ((bx.x0, bx.x1), (bx.y0, bx.y1))
             } else {
-                (bx.x0, bx.x1)
+                ((bx.y0, bx.y1), (bx.x0, bx.x1))
             };
-            let (s_main, s_cross) = main_cross(flex.direction, bx.center());
-            if (lo..=hi).contains(&at_cross) {
-                if reversed {
-                    s_main > at_main
-                } else {
-                    s_main < at_main
-                }
-            } else if lines_reversed {
-                s_cross > at_cross
-            } else {
-                s_cross < at_cross
-            }
+            Some((i, main, (main.0 + main.1) / 2.0, cross))
         })
-        .count();
-    Some(match flow.get(before) {
-        Some(i) => *i,
-        None => flow.last().map_or(0, |i| i + 1),
-    })
+        .collect();
+    // The lines, as runs of `items`: a new one where the main axis runs back.
+    let mut lines: Vec<(usize, usize, (f64, f64))> = Vec::new();
+    for (k, (_, main, _, cross)) in items.iter().enumerate() {
+        let wraps = k > 0
+            && {
+                let prev = items[k - 1].1;
+                if reversed {
+                    main.1 > prev.0 + 1e-6
+                } else {
+                    main.0 < prev.1 - 1e-6
+                }
+            }
+            && flex.wrap != container::FlexWrap::NoWrap;
+        match lines.last_mut() {
+            Some((_, end, band)) if !wraps => {
+                *end = k + 1;
+                *band = (band.0.min(cross.0), band.1.max(cross.1));
+            }
+            _ => lines.push((k, k + 1, *cross)),
+        }
+    }
+    // The line the centre falls on: the one whose band holds it, else the
+    // nearest band.
+    let distance = |band: (f64, f64)| (band.0 - at_cross).max(at_cross - band.1).max(0.0);
+    let before = match lines
+        .iter()
+        .min_by(|a, b| distance(a.2).total_cmp(&distance(b.2)))
+    {
+        Some(&(start, end, _)) => {
+            start
+                + items[start..end]
+                    .iter()
+                    .filter(|(_, _, centre, _)| {
+                        if reversed {
+                            *centre > at_main
+                        } else {
+                            *centre < at_main
+                        }
+                    })
+                    .count()
+        }
+        None => 0,
+    };
+    let index = match items.get(before) {
+        Some((i, ..)) => *i,
+        None => items.last().map_or(0, |(i, ..)| i + 1),
+    };
+    Some((index, before))
 }
 
 /// The operation dragging the laid-out item `id` by the world-space `delta`

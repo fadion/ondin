@@ -751,7 +751,10 @@ pub(crate) fn size_field(
                     let row = ui
                         .selectable_label(mode == Some(*m), m.label())
                         .on_hover_text(m.describe());
-                    if row.clicked() {
+                    // **The lit row picks nothing** (§15 D943): re-picking the
+                    // mode already set converted the drawn size into it — an edit,
+                    // and on a growing item a jump.
+                    if row.clicked() && mode != Some(*m) {
                         picked = Some(*m);
                     }
                 }
@@ -1744,14 +1747,13 @@ impl OndinApp {
                 subjects,
                 &items,
                 &parent_flex,
-                parent,
                 drawn,
                 [flipped_grow, flipped_shrink, flipped_align],
             );
         }
 
         // --- min / max ----------------------------------------------------------
-        self.limit_rows(ui, subjects, &items, first, parent, drawn, full);
+        self.limit_rows(ui, subjects, &items, first, drawn, full);
 
         // --- the receipt --------------------------------------------------------
         if let Some((_, now)) = receipt.first() {
@@ -1834,7 +1836,6 @@ impl OndinApp {
         subjects: &[NodeId],
         items: &[LayoutItem],
         parent_flex: &Flex,
-        parent: Option<NodeId>,
         drawn: Option<ondin_core::kurbo::Rect>,
         flipped: [bool; 3],
     ) {
@@ -1895,7 +1896,6 @@ impl OndinApp {
         // --- basis ------------------------------------------------------------
         let row = parent_flex.direction.is_row();
         let main = drawn.map(|b| if row { b.width() } else { b.height() });
-        let main_extent = parent.and_then(|p| self.content_extent(p, row));
         self.dimension_row(
             ui,
             subjects,
@@ -1905,7 +1905,7 @@ impl OndinApp {
             |i| i.basis,
             |i, d| i.basis = d,
             main,
-            main_extent,
+            row,
             &[SizeMode::Auto, SizeMode::Px, SizeMode::Percent],
         );
 
@@ -1940,7 +1940,6 @@ impl OndinApp {
         subjects: &[NodeId],
         items: &[LayoutItem],
         first: LayoutItem,
-        parent: Option<NodeId>,
         drawn: Option<ondin_core::kurbo::Rect>,
         full: f32,
     ) {
@@ -2008,7 +2007,6 @@ impl OndinApp {
             ];
             for (label, horizontal, get, put) in limits {
                 let along = drawn.map(|b| if horizontal { b.width() } else { b.height() });
-                let extent = parent.and_then(|p| self.content_extent(p, horizontal));
                 self.dimension_row(
                     ui,
                     subjects,
@@ -2018,7 +2016,7 @@ impl OndinApp {
                     get,
                     put,
                     along,
-                    extent,
+                    horizontal,
                     &[SizeMode::Auto, SizeMode::Px, SizeMode::Percent],
                 );
             }
@@ -2042,10 +2040,12 @@ impl OndinApp {
         (extent > 0.0).then_some(extent)
     }
 
-    /// One [`size_field`] row over a basis or a limit, full width: typing writes px
-    /// (or % while the mode is %), and a mode picked from the unit converts what is
-    /// drawn — `drawn` px, or `drawn` as a percentage of `extent` — so switching
-    /// the unit moves nothing.
+    /// One [`size_field`] row over a basis or a limit along an axis (`horizontal`),
+    /// full width: typing writes px (or % while the mode is %), and a mode picked
+    /// from the unit converts each subject's specified length in its own container
+    /// ([`specified_along`], §15 D943) — so switching the unit moves nothing.
+    /// `drawn` is the first subject's drawn length, where a scrub under a keyword
+    /// starts.
     #[allow(clippy::too_many_arguments)]
     fn dimension_row(
         &mut self,
@@ -2057,7 +2057,7 @@ impl OndinApp {
         get: impl Fn(&LayoutItem) -> Dimension,
         put: impl Fn(&mut LayoutItem, Dimension) + Copy,
         drawn: Option<f64>,
-        extent: Option<f64>,
+        horizontal: bool,
         modes: &[SizeMode],
     ) {
         let shown = shared(items, |i| get(i));
@@ -2077,18 +2077,40 @@ impl OndinApp {
             modes,
         );
         if let Some(m) = edit.picked {
-            let to = match m {
-                SizeMode::Auto => Some(Dimension::Auto),
-                SizeMode::FitContent => Some(Dimension::FitContent),
-                SizeMode::Px => drawn.map(Dimension::Px),
-                SizeMode::Percent => drawn
-                    .zip(extent)
-                    .map(|(d, e)| Dimension::Percent((d / e * 1000.0).round() / 10.0)),
-            };
-            if let Some(to) = to {
-                let tx = self.item_tx(subjects, |i| put(i, to));
-                self.commit_edit(tx);
-            }
+            // **Each subject's own value, converted in its own container** (§15
+            // D943, the release review's `[X6.2-L1-03]`) — the first subject's
+            // drawn size was converted once and written to every one, so a mixed
+            // `100px`/`160px` basis picked to px made both 100. And converted from
+            // what is **specified** (`specified_along`, `[X6.2-L1-01]`), not from
+            // what is drawn.
+            let doc = &self.session.doc;
+            let ops = subjects
+                .iter()
+                .filter_map(|id| {
+                    let node = doc.get(*id)?;
+                    let mut item = *node.item();
+                    let was = get(&item);
+                    let extent = node
+                        .parent()
+                        .and_then(|p| self.content_extent(p, horizontal));
+                    let drawn = self
+                        .session
+                        .preview_local_box(*id)
+                        .map(|b| if horizontal { b.width() } else { b.height() });
+                    let length = specified_along(node, was, horizontal, extent, drawn);
+                    let to = match m {
+                        SizeMode::Auto => Some(Dimension::Auto),
+                        SizeMode::FitContent => Some(Dimension::FitContent),
+                        SizeMode::Px => length.map(Dimension::Px),
+                        SizeMode::Percent => length
+                            .zip(extent)
+                            .map(|(d, e)| Dimension::Percent((d / e * 1000.0).round() / 10.0)),
+                    }?;
+                    put(&mut item, to);
+                    (item != *node.item()).then_some(Operation::SetLayoutItem { id: *id, item })
+                })
+                .collect();
+            self.commit_edit(Transaction(ops));
             return;
         }
         let tx = match edit.typed {
@@ -2127,10 +2149,40 @@ impl OndinApp {
             drawn.height
         };
         let mut ops = Vec::new();
+        // What the axis **specifies**, converted (§15 D943): for a grown or shrunk
+        // item the drawn size is the specified one plus the line's share, and a
+        // switch that wrote it back handed the share over twice.
+        let extent = node
+            .parent()
+            .and_then(|p| self.content_extent(p, horizontal));
+        let dim = if horizontal { item.width } else { item.height };
+        let length = specified_along(node, dim, horizontal, extent, Some(along)).unwrap_or(along);
         let to = match (mode, node.kind()) {
             // A group's px is its box; anything else's is its stored size, written
             // where it is drawn, with the keyword back to `auto`.
-            (SizeMode::Px, NodeKind::Group) => Dimension::Px(along),
+            (SizeMode::Px, NodeKind::Group) => Dimension::Px(length),
+            // **The picked axis only** (§15 D943, the release review's
+            // `[X6.2-L1-02]`): the stored size takes `length` on it and keeps its
+            // own on the other. The whole used size was written, so a stretched
+            // height became the stored one and outlived the stretch.
+            (SizeMode::Px, k)
+                if crate::tools::resizable_size(k).is_some()
+                    && !matches!(k, NodeKind::Text { .. }) =>
+            {
+                let stored = crate::tools::resizable_size(k).unwrap_or_default();
+                let size = if horizontal {
+                    Size::new(length, stored.height)
+                } else {
+                    Size::new(stored.width, length)
+                };
+                if size != stored {
+                    ops.push(Operation::SetGeometry {
+                        id,
+                        geometry: ondin_core::GeometryPatch::Size(size),
+                    });
+                }
+                Dimension::Auto
+            }
             (SizeMode::Px, _) => {
                 if let Some(kind) = self.session.resolved.used_kind(doc, id) {
                     ops.extend(
@@ -2142,13 +2194,10 @@ impl OndinApp {
                 Dimension::Auto
             }
             (SizeMode::Percent, _) => {
-                let Some(extent) = node
-                    .parent()
-                    .and_then(|p| self.content_extent(p, horizontal))
-                else {
+                let Some(extent) = extent else {
                     return Transaction(Vec::new());
                 };
-                Dimension::Percent((along / extent * 1000.0).round() / 10.0)
+                Dimension::Percent((length / extent * 1000.0).round() / 10.0)
             }
             (SizeMode::Auto, _) => Dimension::Auto,
             (SizeMode::FitContent, _) => Dimension::FitContent,
@@ -2162,6 +2211,37 @@ impl OndinApp {
             ops.push(Operation::SetLayoutItem { id, item });
         }
         Transaction(ops)
+    }
+}
+
+/// The length a size or a basis **specifies** along one axis, for a unit switch
+/// to convert (§15 D943): its own number — px as it is, a percentage of `extent` —
+/// and for `auto` the stored size a shape or a frame has (its CSS size, §15 D872);
+/// `drawn` only where nothing is specified, a keyword the layout resolves.
+///
+/// **Not the drawn size**, which D879 converted: for an item a flex line grew or
+/// shrank, the drawn size is the specified one plus the line's share, and writing
+/// it back as the specified size handed the item its share twice — a growing item
+/// picked from `px` to `%` jumped from 165 to 227 wide, its sibling squeezed. The
+/// specified length converts to itself, so the switch moves nothing, grown or not.
+fn specified_along(
+    node: &ondin_core::Node,
+    dim: Dimension,
+    horizontal: bool,
+    extent: Option<f64>,
+    drawn: Option<f64>,
+) -> Option<f64> {
+    match dim {
+        Dimension::Px(v) => Some(v),
+        Dimension::Percent(p) => extent.map(|e| p * e / 100.0),
+        // A text's `auto` is its content's, which only the layout knows.
+        Dimension::Auto => match node.kind() {
+            NodeKind::Text { .. } => drawn,
+            k => crate::tools::resizable_size(k)
+                .map(|s| if horizontal { s.width } else { s.height })
+                .or(drawn),
+        },
+        Dimension::FitContent => drawn,
     }
 }
 
@@ -2672,6 +2752,123 @@ mod tests {
             "drawn where it was, to the tenth of a percent: {}",
             drawn(&s.app, s.a).width()
         );
+    }
+
+    /// The unit at the right of the Item card's row labelled `label`, and the
+    /// menu row reading `pick` under it once it is clicked — then clicked.
+    fn pick_unit(p: &mut Panel, label: &str, pick: &str) {
+        let row = p.run(label);
+        let unit = ["px", "%", "–", "auto"]
+            .into_iter()
+            .flat_map(|u| p.runs(u))
+            .filter(|u| (u.y - row.y).abs() < 6.0 && u.x > row.x)
+            .max_by(|a, b| a.x.total_cmp(&b.x))
+            .expect("a unit on the row");
+        p.click(unit);
+        let choice = p
+            .runs(pick)
+            .into_iter()
+            .filter(|r| r.y > unit.y + 4.0)
+            .min_by(|a, b| a.y.total_cmp(&b.y))
+            .expect("the menu's row");
+        p.click(choice);
+    }
+
+    /// **A unit switch on a growing item moves nothing** (§15 D943, the release
+    /// review's `[X6.2-L1-01]`): `a` and `b` with `basis: 40px` and `60px` and
+    /// `grow: 1` are laid 165 and 185 wide. Picking `%` for `a`'s basis converted
+    /// its **drawn** 165 — the basis plus its share of the line — into `45.8%`, and
+    /// the line then added the share again: 227.4 wide, `b` squeezed. Now the
+    /// specified 40px converts, `11.1%`, and `a` stays 165. Re-picking the lit
+    /// unit is no edit at all.
+    ///
+    /// **Flip runs**: the pick converting the drawn length again fails on *"drawn
+    /// where it was"*, 227.4 against 165, the predicted site. ⚠️ **The lit-row
+    /// filter in `size_field` deleted does not bite**, though *"the lit row is no
+    /// step"* was predicted to fail: converting the *specified* 40px into px is
+    /// 40px, which changes nothing and so commits nothing. The filter is a second
+    /// guard over a cause the conversion already removed.
+    #[test]
+    fn a_unit_switch_on_a_growing_item_moves_nothing() {
+        let mut s = scene();
+        set_item(&mut s.app, s.a, |i| {
+            i.basis = Dimension::Px(40.0);
+            i.grow = 1.0;
+        });
+        set_item(&mut s.app, s.b, |i| {
+            i.basis = Dimension::Px(60.0);
+            i.grow = 1.0;
+        });
+        assert!(
+            (drawn(&s.app, s.a).width() - 165.0).abs() < 0.1,
+            "the fixture"
+        );
+        let a = s.a;
+        let mut p = Panel::new(s.app, OndinApp::inspector_item);
+        p.app.session.selection.set(vec![a]);
+        let depth = p.app.session.history.undo_depth();
+        pick_unit(&mut p, "Flex basis", "px");
+        assert_eq!(
+            p.app.session.history.undo_depth(),
+            depth,
+            "the lit row is no step"
+        );
+        pick_unit(&mut p, "Flex basis", "%");
+        assert!(
+            (drawn(&p.app, a).width() - 165.0).abs() < 0.2,
+            "drawn where it was: {}",
+            drawn(&p.app, a).width()
+        );
+    }
+
+    /// **A unit picked over a mixed selection converts each item's own value**
+    /// (§15 D943, `[X6.2-L1-03]`): `a`'s basis `25%` and `b`'s `160px`, both
+    /// selected, the unit reading `–`, `px` picked. The first item's value was
+    /// converted once and written to both, so `b` took `a`'s width.
+    ///
+    /// **Flip run**, the anchor's converted value written to every subject: fails
+    /// on *"b keeps its own"*, `Px(90)` — `a`'s 25% of 360 — against 160, the
+    /// predicted site.
+    #[test]
+    fn a_unit_picked_over_a_mixed_selection_converts_each_item() {
+        let mut s = scene();
+        set_item(&mut s.app, s.a, |i| i.basis = Dimension::Percent(25.0));
+        set_item(&mut s.app, s.b, |i| i.basis = Dimension::Px(160.0));
+        let (a, b) = (s.a, s.b);
+        let b0 = drawn(&s.app, b).width();
+        let mut p = Panel::new(s.app, OndinApp::inspector_item);
+        p.app.session.selection.set(vec![a, b]);
+        pick_unit(&mut p, "Flex basis", "px");
+        assert_eq!(
+            p.app.session.doc.get(b).unwrap().item().basis,
+            Dimension::Px(160.0),
+            "b keeps its own"
+        );
+        assert_eq!(drawn(&p.app, b).width(), b0, "and is drawn where it was");
+    }
+
+    /// **W's `px` writes the picked axis only** (§15 D943, `[X6.2-L1-02]`): `a` is
+    /// stored 40 × 30 and drawn 160 tall, stretched across the row; W's px wrote
+    /// the whole used size, 40 × 160, so the stretch outlived itself — with the
+    /// row set to `align-items: start`, `a` stayed 160 tall. Now the stored height
+    /// stays 30.
+    ///
+    /// **Flip run**, the whole used kind baked again: fails on *"the height
+    /// untouched"*, 160 against 30, the predicted site.
+    #[test]
+    fn a_px_pick_writes_the_picked_axis_only() {
+        let mut s = scene();
+        set_item(&mut s.app, s.a, |i| i.width = Dimension::Percent(10.0));
+        assert_eq!(drawn(&s.app, s.a).height(), 160.0, "the fixture stretches");
+        let tx = s
+            .app
+            .size_mode_tx(s.a, true, SizeMode::Px, drawn(&s.app, s.a).size());
+        s.app.session.commit(tx);
+        let NodeKind::Rect { size, .. } = s.app.session.doc.get(s.a).unwrap().kind() else {
+            unreachable!()
+        };
+        assert_eq!(size.height, 30.0, "the height untouched");
+        assert_eq!(size.width, 36.0, "the width the 10% specified, of 360");
     }
 
     /// **The out-of-flow block's buttons bring a layer back**, at its own place

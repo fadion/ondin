@@ -124,6 +124,18 @@ arboard = { version = "3.6.1", features = ["image-data"] }
 fontdb = "0.23.0"
 ureq = "3.3.0"
 dirs = "6.0.0"
+# Installer + auto-update (§15 D954). The `vpk` CLI builds the installers and
+# packages in `release.yml`; this crate is the in-process half — the startup
+# hook that services the installer's `--veloapp-*` re-invocations, and the
+# `UpdateManager` that polls this repository's GitHub Releases. Its API is
+# synchronous network and file I/O, so every call runs on a worker thread
+# (`ondin-app`'s `update`). It reaches TLS through `ureq` and `rustls` with
+# `ring`, the same stack the font download already compiles.
+velopack = "1.2"
+# The logging facade Velopack writes through, and the app's own log file
+# (`ondin-app`'s `logging`): a release build is a GUI-subsystem binary with no
+# stderr, so a failed update check is answerable only from a file.
+log = "0.4"
 # `GetCursorPos`, and nothing else. A Windows file drag carries no position at
 # any point — winit's `IDropTarget` is handed the cursor point by the OS and
 # discards it — so the desktop cursor is the only way that gesture can be aimed

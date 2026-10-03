@@ -751,6 +751,10 @@ pub struct OndinApp {
     pub(crate) name_edit: Option<(NodeId, String)>,
     /// System and web fonts, loaded into core on demand.
     pub(crate) fonts: FontService,
+    /// The background update check and the staged update it offers a restart
+    /// for (§15 D954). Inert unless [`Self::new`] started it — a headless app
+    /// makes no request, as its font service makes none.
+    pub(crate) updater: crate::update::Updater,
     /// Family names rasterized in their own face, for the picker's rows.
     pub(crate) previews: crate::fonts::FontPreviews,
     /// Pictures cut down to a layer row's square, for the layers tree and the
@@ -1902,6 +1906,7 @@ impl OndinApp {
             FontService::new(&cc.egui_ctx, prefs.web_fonts),
             prefs,
         );
+        app.updater = crate::update::Updater::start(&cc.egui_ctx);
         app.open_at_launch();
         app
     }
@@ -2126,6 +2131,7 @@ impl OndinApp {
             clipboard_stamp: None,
             name_edit: None,
             fonts,
+            updater: Default::default(),
             previews: crate::fonts::FontPreviews::default(),
             thumbs: crate::thumbs::ImageThumbs::default(),
             font_filter: String::new(),
@@ -2334,6 +2340,8 @@ impl eframe::App for OndinApp {
         // (§15 D952) — above the view branch, because both screens are the
         // same window.
         crate::chrome::resize_zones(&ctx, crate::chrome::Chrome::current());
+        // And the updater, for the same reason: it reports to both screens' bars.
+        self.updater.poll();
 
         // ⚠️ **The dashboard returns, and everything below it is the editor.**
         // Not a panel drawn over the canvas and not a branch late in the frame:
@@ -7887,6 +7895,12 @@ impl OndinApp {
                         // Rightmost in the cluster, because it is added first into a
                         // `right_to_left` row — which is where the design puts it.
                         self.settings_button(ui);
+                        // The update offer, beside the app's own button: it is
+                        // about the app, not the document (§15 D954).
+                        if crate::update::chip(ui, self.updater.state()) {
+                            self.finish_text_first();
+                            self.updater.apply();
+                        }
                         // The design's `margin-left:15px`, of which `TOP_GAP`
                         // supplies 5. The one gap in the cluster that is not the
                         // common one: everything to its left is *this document's*

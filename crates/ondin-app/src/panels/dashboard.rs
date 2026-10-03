@@ -831,6 +831,10 @@ impl OndinApp {
                             self.library_settings =
                                 Some(LibrarySettings::from_prefs(&self.prefs, &self.library.root));
                         }
+                        // The update offer, as the editor's bar has it (§15 D954).
+                        if crate::update::chip(ui, self.updater.state()) {
+                            self.updater.apply();
+                        }
                         // ⚠️ **The library's half of the status line, and it did
                         // not exist.** `EditorSession::status` had one production
                         // reader — the editor's top bar, which is below

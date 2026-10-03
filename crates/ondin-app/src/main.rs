@@ -61,6 +61,7 @@ mod input;
 // plain build is the gate that catches the *next* one — checked with a
 // throwaway `fn`, which the plain build duly reported.
 mod library;
+mod logging;
 mod measure;
 mod menu;
 mod panels;
@@ -74,6 +75,7 @@ mod theme;
 mod thumbs;
 mod tools;
 mod ui;
+mod update;
 mod view;
 
 use ondin_core::ExportScale;
@@ -133,6 +135,17 @@ impl ExportFormat {
             ExportFormat::Json => "json",
         }
     }
+}
+
+/// Whether `args` name one of the headless subcommands — an **allowlist on the
+/// first argument**, never "are there any arguments": Velopack's `--veloapp-*`
+/// re-invocations carry arguments too, and they are exactly what must *not* be
+/// taken for a command (§15 D954).
+fn cli_command(args: &[String]) -> bool {
+    matches!(
+        args.first().map(String::as_str),
+        Some("export" | "serve" | "mcp-proxy")
+    )
 }
 
 fn parse(args: &[String]) -> Result<Command, String> {
@@ -309,6 +322,20 @@ fn parse_export(args: &[String]) -> Result<Command, String> {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // **Velopack's hook, before anything else in a GUI launch** (§15 D954). The
+    // installer and the updater re-run this binary with `--veloapp-install`,
+    // `--veloapp-updated`, `--veloapp-uninstall` and the like; `run` services
+    // the flag and **ends the process**, so it has to come before `parse` —
+    // which would refuse the flag as an unknown subcommand and break every
+    // install. With no such flag it returns at once, having applied an update a
+    // previous session staged and never restarted for.
+    //
+    // **Not for a CLI command**, so a staged update cannot exit and relaunch the
+    // process in the middle of an `export` a script is waiting on.
+    if !cli_command(&args) {
+        logging::init();
+        velopack::VelopackApp::build().run();
+    }
     let result = match parse(&args) {
         Ok(Command::Gui) => run_gui().map_err(|e| format!("ondin gui failed: {e}")),
         Ok(Command::Export {
@@ -654,6 +681,31 @@ fn run_gui() -> eframe::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **Velopack's re-invocations are not commands** (§15 D954): the installer
+    /// runs the binary with `--veloapp-install` and the like, and those must
+    /// reach the hook — and a CLI command must not, or a staged update could
+    /// relaunch the process mid-export. An allowlist on the first argument.
+    #[test]
+    fn only_a_named_subcommand_skips_the_install_hook() {
+        let args = |s: &[&str]| s.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+        for cli in [
+            &["export", "a.ondin"][..],
+            &["serve", "a.ondin"],
+            &["mcp-proxy"],
+        ] {
+            assert!(cli_command(&args(cli)), "{cli:?}");
+        }
+        for gui in [
+            &[][..],
+            &["gui"],
+            &["--veloapp-install", "0.4.0"],
+            &["--veloapp-updated", "0.4.0"],
+            &["--veloapp-uninstall"],
+        ] {
+            assert!(!cli_command(&args(gui)), "{gui:?}");
+        }
+    }
 
     /// `window_icon` panics on a bad PNG, and the bytes are compiled in, so the
     /// panic is reachable only through a build — a wrong path, a re-exported

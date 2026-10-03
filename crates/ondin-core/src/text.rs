@@ -5011,10 +5011,32 @@ pub fn measure(parts: TextRef<'_>) -> Rect {
 /// reports a box 1 wide, not the widest word — so a text item could be squeezed
 /// below its longest word. parley computes both from the shaped layout; this is
 /// that, through the same shaping seam as [`layout`], so [`shapes`] counts it.
+///
+/// 🚨 **Plus the paragraph's own edges** (§15 D931): the start edge (indent and
+/// list level, [`ParagraphStyle::start_edge`]), a positive first-line or hanging
+/// indent, and the end indent — the widest such sum over the paragraphs. parley
+/// measures its shaped runs and knows none of them, since this module places
+/// every line itself ([`line_geometry`]); so a bulleted or indented text item
+/// shrunk to its min-content was laid narrower than its own breaker could fit its
+/// longest word into, and drew over the item beside it. CSS counts
+/// `text-indent` and inline padding toward min-content the same way. Taken as
+/// the widest paragraph's edges added to the widest word, wherever that word is
+/// — never narrower than the truth, and wider only when the two are in
+/// different paragraphs.
 pub fn content_widths(parts: TextRef<'_>) -> (f64, f64) {
     let shaped = shape(parts);
     let w = shaped.layout.calculate_content_widths();
-    (f64::from(w.min), f64::from(w.max))
+    let paras = Paragraphs::new(parts);
+    let font_size = parts.style.font_size;
+    let edges = (0..paragraph_starts(parts.content).len().max(1))
+        .map(|i| {
+            let style = paras.style(i);
+            style.start_edge(font_size)
+                + style.indent.resolve(font_size).max(0.0)
+                + style.indent_end.resolve(font_size)
+        })
+        .fold(0.0_f64, f64::max);
+    (f64::from(w.min) + edges, f64::from(w.max) + edges)
 }
 
 /// A family name shaped in the family it names — one row of the font picker.

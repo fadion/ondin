@@ -2943,6 +2943,57 @@ mod flex_tests {
         );
     }
 
+    /// **An indented paragraph's min-content counts its indent** (§15 D931, the
+    /// release review's `[X1-L1-02]`). A wrapping text with a 40 px start indent
+    /// beside a 20 × 20 rect in a 150-wide row is shrunk to its min-content; that
+    /// was parley's widest word alone, 177.58, while the breaker places every line
+    /// 40 px in — so the text's ink ran to 216.37 and the rect was laid at 177.58,
+    /// **inside it**. The assertion is the visible one: the next item starts at or
+    /// past the text's ink.
+    ///
+    /// **Flip run**, `content_widths` returning parley's figures alone: fails on
+    /// the one assertion, 177.58 against 216.37, the predicted site.
+    #[test]
+    fn an_indented_text_is_not_shrunk_into_its_neighbour() {
+        let paragraph = crate::typography::ParagraphStyle {
+            indent_start: crate::typography::Length::Px(40.0),
+            ..Default::default()
+        };
+        let text = NodeKind::Text {
+            content: "short extraordinarilylongword short".into(),
+            style: Box::default(),
+            spans: Default::default(),
+            para_spans: Default::default(),
+            paragraph,
+            block: Default::default(),
+            sizing: TextSizing::AutoHeight(500.0),
+            on_path: None,
+            on_path_flip: false,
+            on_path_offset: 0.0,
+        };
+        let mut v = View::default();
+        let f = v.add(None, frame(150.0, 400.0));
+        v.set(f, |n| n.display = Some(row(0.0, 0.0)));
+        let t = v.add(Some(f), text.clone());
+        let r = v.add(Some(f), rect(20.0, 20.0));
+        let out = lay_out(&v, f);
+        let (_, size) = laid(&out, t);
+        // The text drawn at the width it was laid at, as `flexed_text` gives it.
+        let mut at = text;
+        if let NodeKind::Text { sizing, .. } = &mut at {
+            *sizing = TextSizing::AutoHeight(size.width);
+        }
+        let ink = kurbo::Shape::bounding_box(&crate::text::outline(&crate::text::layout(
+            crate::node::TextRef::of(&at).unwrap(),
+        )));
+        assert!(
+            laid(&out, r).0.x >= ink.x1 - 1e-6,
+            "the rect at {} is inside the text's ink, which runs to {}",
+            laid(&out, r).0.x,
+            ink.x1
+        );
+    }
+
     /// A group with its own layout nested in a row is laid out in the same pass:
     /// its size comes from the row, its children from it.
     #[test]

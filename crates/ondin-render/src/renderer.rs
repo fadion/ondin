@@ -596,8 +596,15 @@ impl RenderOverrides {
         // Before the booleans, which read the transforms these can change — and the
         // flex pass before the insets one, so a pinned child is placed against the
         // box its container's layout has just given it.
-        out.flex_relayout(doc, res, tx);
+        let dragged = out.flex_relayout(doc, res, tx);
         out.relayout(doc, res, tx);
+        // The dragged items' landings last, once every container they sit in has
+        // been placed by both passes (§15 D945).
+        for (id, placed) in dragged {
+            if let Some(landing) = out.landing_of(doc, res, id, &placed) {
+                out.landing.push(landing);
+            }
+        }
         out.reevaluate_booleans(doc, res);
         Some(out)
     }
@@ -629,7 +636,12 @@ impl RenderOverrides {
     /// ⚠️ **This doc was missing and `relayout`'s sat here** until 2026-09-24:
     /// the function was inserted above `relayout` anchored on its `fn` line, which
     /// took the whole insets paragraph and left `relayout` with none.
-    fn flex_relayout(&mut self, doc: &Document, res: &Resolved, tx: &Transaction) {
+    fn flex_relayout(
+        &mut self,
+        doc: &Document,
+        res: &Resolved,
+        tx: &Transaction,
+    ) -> Vec<(NodeId, ondin_core::container::Placed)> {
         // A layer the tool drags carries its own `SetTransform`, which is where the
         // drag wants it drawn. A *resized* item is re-laid like its siblings: its
         // container can move it (centred, spaced) as its size changes — and that
@@ -748,17 +760,21 @@ impl RenderOverrides {
                 self.mark_moved(doc, id);
             }
         }
+        let mut landings = Vec::new();
         for (id, root, placed) in results {
             if dragged.contains(&id) {
                 // Where it will land, for the insertion indicator (§15 D877) — the
                 // answer this preview computes for it and does not draw it at.
-                if !root && let Some(landing) = self.landing_of(doc, res, id, &placed) {
-                    self.landing.push(landing);
+                // Handed back rather than composed here: its container may yet be
+                // moved by this loop or by the insets pass (§15 D945).
+                if !root {
+                    landings.push((id, placed));
                 }
                 continue;
             }
             self.apply_laid(doc, res, id, root, placed);
         }
+        landings
     }
 
     /// One result of a layout pass written into this preview: an item's slot and
@@ -833,7 +849,12 @@ impl RenderOverrides {
                     .or_else(|| ondin_core::local_box(doc, res, id))?
             }
         };
-        let parent_world = res.world_transform(node.parent()?)?;
+        // **The container where this preview draws it** (§15 D945, the release
+        // review's `[X4.2-L1-01]`): a reorder that grows or shrinks a hugging
+        // container moves it when an outer layout centres it, and the committed
+        // transform put the outline half the change away from the slot the
+        // siblings open.
+        let parent_world = self.world_transform(doc, res, node.parent()?)?;
         Some((id, parent_world * local, bx))
     }
 

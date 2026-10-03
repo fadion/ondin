@@ -2815,6 +2815,95 @@ fn a_flex_item_dragged_onto_its_slot_lands_there() {
     );
 }
 
+/// **A landing whose reorder moves its container lands where the commit puts
+/// it** (§15 D945, the release review's `[X4.2-L1-01]`): a 400 × 400 column
+/// centring a hugging wrap row 100 wide, of rects 60, 30, 60 and 30 wide — two
+/// lines. Dragging the 30 after the second 60 makes three lines, so the row grows
+/// and the column re-centres it 10 higher; the outline was composed with the
+/// row's *committed* world transform and sat 10 below the slot the siblings open.
+///
+/// **Flip run**, `landing_of` composing with `res.world_transform` again: fails
+/// on *"where the commit puts it"*, 10 low, the predicted site.
+#[test]
+fn a_landing_whose_reorder_moves_its_container_lands_where_the_commit_puts_it() {
+    use ondin_core::container::{
+        AlignItems, Dimension, Display, Flex, FlexDirection, FlexWrap, JustifyContent,
+    };
+    let mut ids = IdSource::new(1);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let column = painted(
+        &mut doc,
+        &mut ids,
+        root,
+        sized_frame(400.0, 400.0),
+        (0.0, 0.0),
+    );
+    let row = painted(
+        &mut doc,
+        &mut ids,
+        column,
+        sized_frame(100.0, 50.0),
+        (0.0, 0.0),
+    );
+    let rects: Vec<NodeId> = [60.0, 30.0, 60.0, 30.0]
+        .into_iter()
+        .map(|w| painted(&mut doc, &mut ids, row, sized_rect(w, 20.0), (0.0, 0.0)))
+        .collect();
+    let mut item = *doc.get(row).unwrap().item();
+    item.height = Dimension::FitContent;
+    doc.apply(&Transaction(vec![
+        Operation::SetDisplay {
+            id: column,
+            display: Some(Display::Flex(Flex {
+                direction: FlexDirection::Column,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..Default::default()
+            })),
+        },
+        Operation::SetDisplay {
+            id: row,
+            display: Some(Display::Flex(Flex {
+                wrap: FlexWrap::Wrap,
+                align_items: AlignItems::Start,
+                ..Default::default()
+            })),
+        },
+        Operation::SetLayoutItem { id: row, item },
+    ]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    let dragged = rects[1];
+    let reorder = Operation::Reorder {
+        id: dragged,
+        index: 3,
+    };
+    let tx = Transaction(vec![
+        Operation::SetTransform {
+            id: dragged,
+            transform: Affine::translate((900.0, 900.0)),
+        },
+        reorder.clone(),
+    ]);
+    let ov = RenderOverrides::from_transaction(&doc, &res, &tx).expect("representable");
+    let mut committed = doc.clone();
+    committed.apply(&Transaction(vec![reorder])).unwrap();
+    let landed = Resolved::rebuild(&committed).world_bounds(dragged).unwrap();
+    let was = res.world_bounds(row).unwrap();
+    assert!(
+        Resolved::rebuild(&committed).world_bounds(row).unwrap().y0 < was.y0,
+        "the fixture: the row grows and re-centres higher"
+    );
+    let landings = ov.landings();
+    assert_eq!(landings.len(), 1, "one landing");
+    assert_eq!(
+        landings[0].1.translation(),
+        landed.origin().to_vec2(),
+        "where the commit puts it"
+    );
+}
+
 /// **A layout nested in a plain group previews as it commits** (§15 D911) — a
 /// flex row holding a plain group, holding a laid column of two 20 × 20 rects;
 /// the first resized to 40 × 40.

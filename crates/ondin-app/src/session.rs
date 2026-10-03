@@ -498,10 +498,10 @@ pub struct EditorSession {
     /// The revision a write now in flight will put on disk, if one is
     /// (`library::writer`, §15 D393).
     ///
-    /// ⚠️ **This is a third state on the save pill and not a second spelling of
-    /// `dirty`.** While a write is in flight the document still differs from its
-    /// file — the bytes have not landed — so `dirty` stays `true` and the pill's
-    /// dot stays amber. What changes is only the sentence: *Saving…* rather than
+    /// ⚠️ **This is a third state of the save dot's tooltip and not a second
+    /// spelling of `dirty`.** While a write is in flight the document still differs
+    /// from its file — the bytes have not landed — so `dirty` stays `true` and the
+    /// dot stays red (§15 D962). What changes is only the sentence: *Saving…* rather than
     /// *Unsaved*, which are the same fact and very different news.
     ///
     /// **The revision is here rather than a `bool` because a write can be
@@ -515,7 +515,7 @@ pub struct EditorSession {
     run: Option<(&'static str, Instant)>,
     /// When the document last matched what is on disk. `None` for a document
     /// that has never been read from or written to a file — the top bar's save
-    /// pill reports that as "Unsaved", because nothing of it exists on disk.
+    /// dot reports that as red, because nothing of it exists on disk.
     saved_at: Option<Instant>,
     /// Bumped by every change to the document — a commit, an undo, a redo, a
     /// document adopted — and what a cache of something *derived from* the
@@ -1404,7 +1404,7 @@ impl EditorSession {
     /// ⚠️ **Deliberately one-way**, which is why it takes no argument and cannot
     /// clear the flag: [`Self::mark_saved`] is the only road back to clean, as it
     /// always was. Setting `dirty` is not the whole of it — `saved_at` goes too,
-    /// or the top bar's pill would say "Saved · just now" over a document that
+    /// or the top bar's save dot would go green over a document that
     /// differs from its file, which is the one sentence it must never be able to
     /// say (see [`Self::saved_ago`]).
     ///
@@ -1430,18 +1430,18 @@ impl EditorSession {
         // A synchronous save has just made whatever was in flight irrelevant —
         // it wrote the same path, later, from the same session. `save_file`
         // settles before it writes, so in practice there is nothing here to
-        // clear; clearing it anyway is what stops the pill sticking on *Saving…*
+        // clear; clearing it anyway is what stops the tooltip sticking on *Saving…*
         // if that order is ever changed.
         self.saving = None;
     }
 
-    /// A write of `at` has been queued: the pill says *Saving…* until it lands
+    /// A write of `at` has been queued: the save dot's tooltip says *Saving…* until it lands
     /// (`library::writer`, §15 D393).
     pub fn begin_save(&mut self, at: u64) {
         self.saving = Some(at);
     }
 
-    /// Whether a queued write is still in flight — the pill's third state.
+    /// Whether a queued write is still in flight — the save dot tooltip's third state.
     pub fn is_saving(&self) -> bool {
         self.saving.is_some()
     }
@@ -1450,7 +1450,7 @@ impl EditorSession {
     ///
     /// ⚠️ **Only `saving` clears, and it must.** The session stays dirty, which is
     /// the truth and is what makes the next interval try again — but without this
-    /// the pill sticks on *Saving…* for the rest of the session and
+    /// the tooltip sticks on *Saving…* for the rest of the session and
     /// `OndinApp::autosave_tick`'s `is_saving` gate never opens again, so one
     /// failed write turns autosave off silently. That is exactly the state this
     /// whole feature exists to avoid, arrived at from the other side, and it is
@@ -1483,7 +1483,7 @@ impl EditorSession {
     pub fn finish_save(&mut self, path: &std::path::Path, at: u64) -> bool {
         // ⚠️ **Cleared only for the write it is actually about.** A `take()` here
         // would let an older result end the *Saving…* of a newer write still in
-        // flight, which is the pill going quiet while the disk is still busy.
+        // flight, which is the tooltip going quiet while the disk is still busy.
         if self.saving != Some(at) {
             return false;
         }
@@ -1497,8 +1497,8 @@ impl EditorSession {
     }
 
     /// How long ago the document last matched its file, or `None` when it never
-    /// has (never saved) or no longer does (unsaved edits). The top bar's pill
-    /// renders exactly this distinction: `None` is "Unsaved".
+    /// has (never saved) or no longer does (unsaved edits). The top bar's save dot
+    /// renders exactly this distinction: `None` is red.
     pub fn saved_ago(&self) -> Option<std::time::Duration> {
         if self.dirty {
             return None;

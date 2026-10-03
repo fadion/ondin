@@ -254,6 +254,18 @@ pub mod color {
     /// other would make the amber icon read as a threat.
     pub const DANGER: Color32 = Color32::from_rgb(0xe0, 0x73, 0x6b);
 
+    /// The editor's save dot, red while the document differs from its file
+    /// (§15 D962). [`DANGER`]'s value under its own name: a dirty document is
+    /// not a click that destroys something, and the two must be free to part.
+    pub const UNSAVED: Color32 = DANGER;
+
+    /// The save dot once the file matches the document (§15 D962) — the app's
+    /// one green, **computed to [`DANGER`]'s OKLCH lightness and chroma** (0.68,
+    /// 0.137) at a green hue (154°), so neither state of the dot is louder than
+    /// the other. A first pick by eye, `#6bc48a`, claimed that and was 0.75
+    /// against 0.68 when measured; this is the measured one.
+    pub const SAVED: Color32 = Color32::from_rgb(0x45, 0xb0, 0x70);
+
     /// The three steps a *filled* destructive button needs, mirroring
     /// [`ACCENT_900`]/[`ACCENT_700`]/[`ACCENT_200`] — ground, border and ink for
     /// [`super::super::ui::FieldButton::Danger`].
@@ -791,8 +803,8 @@ pub mod icon {
     pub const GAUGE: &str = "\u{e628}";
     /// *Slashes in names make folders* — the Export menu's switch.
     ///
-    /// **Not [`FOLDER_OPEN`]**, which is the top bar's *Open* and the Export
-    /// menu's own *Show last export folder* two rows above it: that one is a
+    /// **Not [`FOLDER_OPEN`]**, which is the Export menu's own *Show last export
+    /// folder* two rows above it: that one is a
     /// folder being **entered**, and this is a folder being **made**.
     ///
     /// ⚠️ **The rule this used to cite says the opposite thing** (§15 D672,

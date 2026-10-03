@@ -2354,7 +2354,7 @@ impl eframe::App for OndinApp {
         // **Three things are given up by returning this early, and each is
         // deliberate**: the font poll, which the dashboard needs for nothing
         // (it neither shapes text with document fonts nor previews a family);
-        // `disk_results`, whose pill the editor's panels draw; and the two
+        // `disk_results`, whose save dot the editor's panels draw; and the two
         // ticks, one of which `go_to_dashboard` compensates by hand and says
         // so. ⚠️ **The close interception used to be a fourth and was not
         // deliberate** — it is above this return now (§15 D526).
@@ -2587,12 +2587,12 @@ impl eframe::App for OndinApp {
         }
 
         // **Whatever the background writer finished, before anything reads the
-        // state it changes.** One drain for both ticks and for the pill the
+        // state it changes.** One drain for both ticks and for the save dot the
         // panels draw — see [`OndinApp::disk_results`].
         self.disk_results();
         // **After the frame's edits have been applied, so an edit made this
         // frame can be the one that trips the interval.** Before the panels,
-        // because the save pill they draw should read the state this produced
+        // because the save dot they draw should read the state this produced
         // rather than last frame's.
         self.autosave_tick(&ctx);
         // ⚠️ **Still after it, but no longer for the reason it used to be.** This
@@ -2816,7 +2816,7 @@ impl OndinApp {
             Action::Open => self.go_to_dashboard(),
             // **The same two functions the dashboard's own buttons call.** `Ctrl+N`
             // is the *New file* card and `Ctrl+W` is the walk back that the brand
-            // mark, the folder button and `Ctrl+O` above already take — so neither
+            // mark and `Ctrl+O` above already take — so neither
             // chord needs a guard of its own: `new_library_document` files before
             // it opens, and `go_to_dashboard` autosaves, drops the crash snapshot
             // and re-scans.
@@ -5656,7 +5656,7 @@ impl OndinApp {
             self.session.fail(format!("Save failed: {e}"));
             return;
         }
-        // No status message: the pill goes to "Saved · just now" and the top bar
+        // No status message: the save dot goes green and the top bar
         // already names the file, so echoing the path was one more thing on
         // screen saying what two others said.
         self.session.mark_saved(path.clone());
@@ -5674,7 +5674,7 @@ impl OndinApp {
                     Ok(Some(_)) => self.session.info("Version saved"),
                     // A document with no id — one opened from outside the library
                     // — has no history to pin to. Silent: the save itself worked,
-                    // and the pill says so.
+                    // and the save dot says so.
                     Ok(None) => {}
                     Err(e) => self.session.fail(format!("Version failed: {e}")),
                 }
@@ -5747,7 +5747,7 @@ impl OndinApp {
     /// the same four gates and the clock; what leaves is the write, the
     /// `mark_saved` and the export, all of which move to the *result*
     /// ([`Self::apply_disk`]). The session therefore stays **dirty** across the
-    /// gap, with the pill reading *Saving…*, because until the bytes land that
+    /// gap, the save dot red and its tooltip *Saving…*, because until the bytes land that
     /// is simply true.
     ///
     /// ⚠️ **A fourth gate, `is_saving`, and it is not redundant with the clock.**
@@ -5953,9 +5953,9 @@ impl OndinApp {
                 // ⚠️ **No latch, unlike the snapshot's.** A snapshot failing is
                 // one standing condition worth saying once; a save failing is an
                 // event, and the session stays dirty, so the next interval tries
-                // again and the user needs to be told again. The pill is not
-                // enough on its own — it goes back to *Unsaved*, which is what it
-                // says when nothing has been attempted either.
+                // again and the user needs to be told again. The save dot is not
+                // enough on its own — it stays red, which is what it says when
+                // nothing has been attempted either.
                 Done::SaveFailed(e) => {
                     self.session.save_failed();
                     self.session.fail(format!("Save failed: {e}"));
@@ -6053,7 +6053,7 @@ impl OndinApp {
                 // ⚠️ Worth its own line, because *Recover* means something
                 // different here: there is no file to put the work back into, so
                 // what comes back is an untitled document the user still has to
-                // save. Saying so beats a person recovering, seeing "Unsaved" and
+                // save. Saying so beats a person recovering, seeing a red save dot and
                 // assuming the recovery failed.
                 ui.label(
                     egui::RichText::new(
@@ -6174,7 +6174,7 @@ impl OndinApp {
         self.session.adopt_document(doc, pending.target.clone());
         // **After `adopt_document`, which sets it clean.** A just-opened document
         // matches its file and that is the right default everywhere else; this one
-        // matches nothing on disk, and the pill has to say so.
+        // matches nothing on disk, and the save dot has to say so.
         self.session.mark_unsaved();
         self.reset_transient_state();
         self.ensure_document_fonts();
@@ -7463,12 +7463,13 @@ enum RecoverChoice {
     Later,
 }
 
-/// The save pill's text. `None` means there is nothing on disk matching the
+/// The save dot's tooltip — the save pill's text until §15 D962 took the pill
+/// down to its dot. `None` means there is nothing on disk matching the
 /// current state — either unsaved edits or a document never written at all.
 ///
-/// ⚠️ **`saving` is a third *label*, not a third state of the pill** (§15 D393).
+/// ⚠️ **`saving` is a third *label*, not a third state of the dot** (§15 D393).
 /// A write in flight is still a document that differs from its file, so `ago` is
-/// `None` underneath it and the dot stays amber; what the user gets is the
+/// `None` underneath it and the dot stays red; what the user gets is the
 /// difference between *nothing is happening about this* and *something is*. The
 /// dot is deliberately left alone: it answers "does the file match", which has
 /// not changed, and a third colour would be claiming otherwise.
@@ -7746,7 +7747,7 @@ impl OndinApp {
         }
     }
 
-    /// The top bar: brand mark, breadcrumb, save state, file/edit actions,
+    /// The top bar: brand mark, breadcrumb, save dot, edit actions,
     /// zoom readout and the Settings button — and, since §15 D952 and D954, the
     /// window's own title bar: the strip it is dragged by, the caption buttons at
     /// its right end, and the update chip beside Settings.
@@ -7802,8 +7803,16 @@ impl OndinApp {
                     // the drawn bitmaps on the canvas (§9.2, and `ui::value_field`
                     // states the rule at length). A hand here said nothing the
                     // brightening did not, and it was the loudest of the three.
+                    //
+                    // ⚠️ **12 points to the crumb, the library's gap, and set
+                    // *before* the mark is placed** (§15 D962): egui adds an
+                    // item's spacing when the item is placed, so the gap after
+                    // the mark is whatever the spacing is now. Back to the row's
+                    // 8 straight after, for the crumb's own parts and the dot.
+                    ui.spacing_mut().item_spacing.x = 12.0;
                     let (mark, mark_resp) =
                         ui.allocate_exact_size(egui::vec2(26.0, 26.0), egui::Sense::click());
+                    ui.spacing_mut().item_spacing.x = 8.0;
                     crate::ui::logo(ui, mark, mark_resp.hovered());
                     if mark_resp.on_hover_text("Library (Ctrl+O)").clicked() {
                         self.go_to_dashboard();
@@ -7821,48 +7830,21 @@ impl OndinApp {
                     // not changed — a crumb segment that goes nowhere does not
                     // belong.
                     //
-                    // The dirty state stays the save pill's job, so the name
+                    // The dirty state is the save dot's job, so the name
                     // carries no marker.
                     self.document_crumb(ui);
 
-                    // 10px from the name — 8 of it the row's own item spacing.
-                    ui.add_space(2.0);
-                    self.save_pill(ui);
+                    // Straight after the name, at the row's own 8-point spacing,
+                    // so it reads as the name's state (§15 D962).
+                    self.save_dot(ui);
                     self.status_text(ui);
 
-                    // File / edit actions.
-                    //
-                    // **Both changed meaning when the library landed, and the
-                    // tooltips are the only place a user finds that out.** The
-                    // folder no longer opens a file dialog — there are none — it
-                    // goes to the library, which is also what the brand mark does
-                    // and what `Ctrl+O` does. Three doors onto one screen is not
-                    // redundancy here: the mark is where a person looks for
-                    // "home", the folder is where they look for "open", and they
-                    // are now the same place.
-                    ui.add_space(6.0);
-                    if icon_button(ui, icon::FOLDER_OPEN, 28.0, 17.0, false, true)
-                        .on_hover_text("Library (Ctrl+O)")
-                        .clicked()
-                    {
-                        self.go_to_dashboard();
-                    }
-                    // Shift no longer does anything here: Save As is gone with
-                    // the dialogs (`input::Action::Save`). What the button does
-                    // instead is what the chord does — write, and pin a version.
-                    if icon_button(ui, icon::FLOPPY_DISK, 28.0, 17.0, false, true)
-                        .on_hover_text(if self.prefs.version_history {
-                            "Save a version (Ctrl+S)"
-                        } else {
-                            "Save (Ctrl+S)"
-                        })
-                        .clicked()
-                    {
-                        // The typed text first, or the version this pins is the
-                        // document without it (§15 D466).
-                        self.finish_text_first();
-                        self.save_file(true);
-                    }
+                    // ⚠️ **No open or save buttons here since §15 D962.** The
+                    // folder went to the library, which the brand mark and
+                    // `Ctrl+O` already do — a remnant of the file-dialog days —
+                    // and the disk wrote what `Ctrl+S` writes, with autosave
+                    // doing the rest. Both chords are unchanged.
+
                     // Right cluster, reading left to right in the design as
                     // undo/redo · View · Snap · zoom · Settings. Laid out
                     // `right_to_left`, so everything below is added in the
@@ -8356,70 +8338,48 @@ impl OndinApp {
         );
     }
 
-    /// The save pill next to the document name. It reports the save state and
-    /// nothing else: "Unsaved", "Saving…", or "Saved · 2m ago". The dot is amber
-    /// while there are unsaved edits, accent once the file matches disk.
+    /// **The save dot** beside the document name (§15 D962): red while the
+    /// document differs from its file, green once it matches. No background and
+    /// no text — the pill it replaces said "Unsaved", "Saving…" or
+    /// "Saved · 2m ago" in a tinted capsule, and the maintainer took it down to
+    /// its dot. The sentence survives as the dot's tooltip ([`save_label`]),
+    /// for whoever wants the time.
     ///
-    /// ⚠️ **Three labels and two dots, which is deliberate** (§15 D393). *Saving…*
-    /// is a queued write ([`EditorSession::is_saving`]), and the document still
-    /// differs from its file while one is in flight — so the dot stays amber and
-    /// only the sentence changes. The dot answers *does the file match*; a third
-    /// colour there would be answering a question nobody asked.
+    /// ⚠️ **Two colours, not three** (§15 D393). *Saving…* is a queued write
+    /// ([`EditorSession::is_saving`]), and the document still differs from its
+    /// file while one is in flight — so the dot stays red. It answers *does the
+    /// file match*; a third colour would be answering a question nobody asked.
     ///
-    /// Laid out by hand rather than with a `Frame`. In a horizontal layout that
-    /// centres its cross axis — which the top bar is — egui grows every item's
-    /// frame to the full row height, so a `Frame` here came out as a 46px-tall
-    /// slab behind an 11px label. Painting into an exactly-sized rect is the way
-    /// to get a pill that hugs its text.
-    fn save_pill(&self, ui: &mut egui::Ui) {
-        /// Padding around the label, and the gap to the state dot.
-        const PAD: egui::Vec2 = egui::vec2(9.0, 5.0);
-        const GAP: f32 = 6.0;
-        const DOT: f32 = 6.0;
+    /// The hover target is larger than the dot, so the tooltip does not need a
+    /// pixel-exact pointer — but the dot sits at its *left* edge, so the gap to
+    /// the name is the row's own 8 points rather than 8 plus half the target.
+    fn save_dot(&self, ui: &mut egui::Ui) {
+        const DOT: f32 = 7.0;
+        const HIT: f32 = 14.0;
 
         let ago = self.session.saved_ago();
-        let galley = ui.painter().layout_no_wrap(
-            save_label(self.session.is_saving(), ago),
-            egui::FontId::proportional(11.5),
-            theme::text::MUTED,
-        );
-        let (rect, _) = ui.allocate_exact_size(
-            egui::vec2(
-                PAD.x * 2.0 + DOT + GAP + galley.size().x,
-                galley.size().y + PAD.y * 2.0,
-            ),
-            egui::Sense::empty(),
-        );
-
-        let p = ui.painter();
-        p.rect_filled(rect, egui::CornerRadius::same(6), theme::color::text_a(13));
-        p.circle_filled(
-            egui::pos2(rect.left() + PAD.x + DOT * 0.5, rect.center().y),
+        let (rect, resp) = ui.allocate_exact_size(egui::vec2(HIT, HIT), egui::Sense::hover());
+        ui.painter().circle_filled(
+            egui::pos2(rect.left() + DOT * 0.5, rect.center().y),
             DOT * 0.5,
             match ago {
-                None => egui::Color32::from_rgb(206, 168, 96),
-                Some(_) => color::ACCENT_400,
+                None => color::UNSAVED,
+                Some(_) => color::SAVED,
             },
         );
-        p.galley(
-            egui::pos2(rect.left() + PAD.x + DOT + GAP, rect.top() + PAD.y),
-            galley,
-            theme::text::MUTED,
-        );
-
-        // "2m ago" goes stale on its own, with no input to trigger a repaint.
-        if ago.is_some() {
-            ui.ctx()
-                .request_repaint_after(std::time::Duration::from_secs(20));
+        // Built only while hovered: the tooltip is the one place the sentence
+        // is read, so nothing formats it on the frames nobody looks.
+        if resp.hovered() {
+            resp.on_hover_text(save_label(self.session.is_saving(), ago));
         }
     }
 
     /// Mode (when it is not the default) and the last status message. Kept
-    /// beside the save pill rather than inside it: a failed commit has to be
-    /// visible somewhere, and the pill says one thing only.
+    /// beside the save dot rather than in its tooltip: a failed commit has to be
+    /// visible somewhere, and the dot says one thing only.
     ///
     /// Nothing is drawn when there is nothing to report. The status line used to
-    /// open on "Ready" and echo the save path, both of which the pill and the
+    /// open on "Ready" and echo the save path, both of which the save dot and the
     /// title already carry — so the bar's default state is now empty and the
     /// text only appears when something actually happened.
     ///
@@ -9547,7 +9507,7 @@ mod tests {
     ///
     /// ⚠️ **The second assertion is the one worth having.** `saving` and a stale
     /// `ago` cannot both be live in the app — a queued write leaves the session
-    /// dirty, so `saved_ago` is `None` — but the pill is a pure function of two
+    /// dirty, so `saved_ago` is `None` — but the label is a pure function of two
     /// arguments and nothing at this level enforces that. Pinning the precedence
     /// says which one wins if the wiring ever hands it both, and *Saving…* is the
     /// answer: it is the newer fact.
@@ -13323,8 +13283,8 @@ mod library_wiring_tests {
         );
         assert!(
             app.session.is_dirty(),
-            "a queued write is not a saved document — the pill says Saving…, and \
-             the dot stays amber, because the bytes are not down"
+            "a queued write is not a saved document — the save dot's tooltip says \
+             Saving…, and the dot stays red, because the bytes are not down"
         );
 
         app.disk_settle();
@@ -13349,8 +13309,8 @@ mod library_wiring_tests {
     /// synchronous one could not.** The worker serialises a clone taken at queue
     /// time, so a commit landing during the serialise means the file will hold a
     /// document the session has already moved past. Marking it clean on arrival
-    /// would put *Saved · just now* over work that exists on disk nowhere — and
-    /// it would do it silently, since the pill is the only thing that would have
+    /// would turn the save dot green over work that exists on disk nowhere — and
+    /// it would do it silently, since the dot is the only thing that would have
     /// said otherwise.
     ///
     /// The third assertion is what makes the first two mean something: it reads
@@ -13523,7 +13483,7 @@ mod library_wiring_tests {
     /// in only one of two.** `begin_save` sets `saving`; the success path clears
     /// it in `finish_save`; the failure path did not, for as long as it took to
     /// write this test. The consequence is not a lost write — the session stays
-    /// dirty, correctly — but the pill sticking on *Saving…* for the rest of the
+    /// dirty, correctly — but the save dot's tooltip sticking on *Saving…* for the rest of the
     /// session and `autosave_tick`'s `is_saving` gate never opening again, which
     /// is autosave silently switching itself off after one bad write. That is the
     /// failure the whole feature exists to prevent, reached from the other side.
@@ -13560,8 +13520,8 @@ mod library_wiring_tests {
 
         assert!(
             !app.session.is_saving(),
-            "the pill is stuck on Saving… for the rest of the session, and the \
-             gate that reads it has just switched autosave off"
+            "the save dot's tooltip is stuck on Saving… for the rest of the \
+             session, and the gate that reads it has just switched autosave off"
         );
         assert!(
             app.session.is_dirty(),
@@ -13570,8 +13530,8 @@ mod library_wiring_tests {
         );
         assert!(
             app.session.status().text.contains("Save failed"),
-            "a save that did not happen has to say so — the pill going back to \
-             Unsaved is what it says when nothing was attempted either. It said \
+            "a save that did not happen has to say so — the save dot staying red \
+             is what it says when nothing was attempted either. It said \
              {:?}",
             app.session.status().text
         );
@@ -13611,8 +13571,8 @@ mod library_wiring_tests {
     ///
     /// ⚠️ **Flip-check, run: `drain`'s `Disconnected` arm reverted to a bare
     /// `break`** (i.e. back to `while let Ok(msg) = try_recv()`). Predicted the
-    /// `is_saving` assertion, and that is where it fails — *"the pill is stuck on
-    /// Saving… and autosave is off for the rest of the session"*. The last pair
+    /// `is_saving` assertion, and that is where it fails — *"the save dot's tooltip
+    /// is stuck on Saving… and autosave is off for the rest of the session"*. The last pair
     /// bites too, which is the pair that names the consequence rather than the
     /// state.
     ///
@@ -13649,9 +13609,10 @@ mod library_wiring_tests {
 
         assert!(
             !app.session.is_saving(),
-            "the pill is stuck on Saving… for the rest of the session, and the \
-             gate that reads it has switched autosave off — with no answer coming \
-             from anywhere, ever, because the thread that owed one is gone"
+            "the save dot's tooltip is stuck on Saving… for the rest of the \
+             session, and the gate that reads it has switched autosave off — with \
+             no answer coming from anywhere, ever, because the thread that owed \
+             one is gone"
         );
         assert!(
             app.session.status().text.contains("Save failed"),
@@ -13890,7 +13851,7 @@ mod library_wiring_tests {
             app.session.is_dirty(),
             "so the session has to say it does not match its file"
         );
-        assert_eq!(app.session.saved_ago(), None, "the pill reads Unsaved");
+        assert_eq!(app.session.saved_ago(), None, "the save dot reads red");
         assert_eq!(
             app.session.doc.meta().name.as_deref(),
             Some("Landing v5"),
@@ -15351,6 +15312,83 @@ mod library_wiring_tests {
         let fresh = app_at(&ctx, temp_root("title-fresh"));
         assert_eq!(fresh.session.document_title(), "Untitled");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **The name sits 12 points from the mark on both screens** (§15 D962,
+    /// the library's gap taken as the base at the maintainer's ruling),
+    /// measured from the painted shapes: the right edge of the logo's mesh —
+    /// the one mesh on a texture other than the font atlas — to the left of the
+    /// first text run beyond it on the same row.
+    ///
+    /// 🚨 **Written after a fix that did not work.** The library's row spaces its
+    /// items 12 and the editor's 8, and the first repair set 8 *between* the
+    /// library's mark and its name. egui adds an item's spacing when the item
+    /// is placed, at the spacing current then — so the gap after the mark had
+    /// already been fixed at 12, and the maintainer's screenshot still showed
+    /// it. **A gap belongs to the item before it**: the spacing has to be set
+    /// before the mark is allocated. This probe measured the editor at 8 and
+    /// the library at 12 against that repair, which is the screenshot.
+    ///
+    /// **Flip run**: the editor's mark allocated at its row's 8 again fails on
+    /// the equality, 12 against 8 — the reported symptom, the other way round.
+    #[test]
+    fn the_mark_and_the_name_are_as_far_apart_on_both_screens() {
+        fn gap(shapes: &[egui::epaint::ClippedShape]) -> f32 {
+            let font_atlas = egui::TextureId::default();
+            let mut logo = None;
+            let mut texts = Vec::new();
+            fn walk(
+                s: &egui::Shape,
+                atlas: egui::TextureId,
+                logo: &mut Option<egui::Rect>,
+                texts: &mut Vec<egui::Pos2>,
+            ) {
+                match s {
+                    egui::Shape::Mesh(m) if m.texture_id != atlas => {
+                        *logo = Some(m.calc_bounds());
+                    }
+                    egui::Shape::Text(t) => texts.push(t.pos),
+                    egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, atlas, logo, texts)),
+                    _ => {}
+                }
+            }
+            for cs in shapes {
+                walk(&cs.shape, font_atlas, &mut logo, &mut texts);
+            }
+            let logo = logo.expect("the logo was painted");
+            // On the logo's own row: the library's sidebar starts below the
+            // bar and its labels sit right of the logo too — a first draft of
+            // this probe measured one of those and reported a gap of 4.
+            let first = texts
+                .into_iter()
+                .filter(|p| p.x >= logo.max.x && p.y < logo.max.y)
+                .map(|p| p.x)
+                .fold(f32::INFINITY, f32::min);
+            first - logo.max.x
+        }
+
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = app_at(&ctx, temp_root("mark-gap"));
+        let mut editor = Vec::new();
+        let mut library = Vec::new();
+        // Several passes: the texture is uploaded on the first, and a
+        // horizontal row settles its sizes over the next.
+        for _ in 0..3 {
+            editor = ctx.run_ui(Default::default(), |ui| app.top_bar(ui)).shapes;
+            library = ctx
+                .run_ui(Default::default(), |ui| app.dashboard_ui(ui))
+                .shapes;
+        }
+        let (editor, library) = (gap(&editor), gap(&library));
+        assert!(
+            (library - 12.0).abs() < 0.5,
+            "the library's gap is 12: {library}"
+        );
+        assert!(
+            (library - editor).abs() < 0.5,
+            "the library's gap {library} against the editor's {editor}"
+        );
     }
 
     /// Every string the top bar painted this pass.

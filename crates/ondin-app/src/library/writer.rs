@@ -47,11 +47,11 @@
 //! about work the user already dealt with.
 //!
 //! **The queue is drained, not polled for a picture.** Nothing a job reports
-//! changes what is on screen by itself: a [`Done`] moves the save pill and the
+//! changes what is on screen by itself: a [`Done`] moves the save dot and the
 //! bookkeeping behind it. It still calls `request_repaint`, for
 //! `crate::fonts::FontService::new`'s reason — eframe here is reactive, and the
 //! frame that would otherwise read the result is one that has to happen for some
-//! other reason. The pill going from *Saving…* to *Saved · just now* is the one
+//! other reason. The save dot going from red to green is the one
 //! visible thing that would otherwise wait for a mouse to move.
 
 use super::{recovery, store};
@@ -284,7 +284,7 @@ impl Writer {
     /// `Some`, and `OndinApp::autosave_tick`'s `is_saving()` gate returns early on
     /// every subsequent frame — so no further document job is ever queued and
     /// [`Self::send`]'s failure report, which D392 names as the backstop, is never
-    /// reached. The pill reads *Saving…* forever while nothing is being saved.
+    /// reached. The save dot's tooltip reads *Saving…* forever while nothing is being saved.
     /// [`Self::settle`] has always noticed; `settle` runs only from `save_file`,
     /// `on_exit` and `relocate`, none of which happen on their own.
     pub fn drain(&mut self) -> Vec<Done> {

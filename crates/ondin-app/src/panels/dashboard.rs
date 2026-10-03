@@ -795,6 +795,8 @@ impl OndinApp {
                     let (mark, _) =
                         ui.allocate_exact_size(egui::vec2(26.0, 26.0), egui::Sense::empty());
                     crate::ui::logo(ui, mark, false);
+                    // 12 points from the mark — this row's spacing, and the
+                    // editor's bar matches it (§15 D962).
                     ui.label(
                         egui::RichText::new("Ondin")
                             .size(13.0)

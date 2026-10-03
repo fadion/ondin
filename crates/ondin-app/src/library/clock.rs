@@ -221,8 +221,8 @@ pub fn date_label(secs: u64) -> String {
 /// How long ago, in the dashboard's voice: `"2h ago"`, `"Yesterday"`,
 /// `"Last week"`.
 ///
-/// **Coarser than the editor's save pill on purpose** (`app::save_label`, which
-/// counts minutes for an hour and a half). That one is answering "did my last
+/// **Coarser than the editor's save dot's tooltip on purpose** (`app::save_label`,
+/// which counts minutes for three quarters of an hour). That one is answering "did my last
 /// edit make it to disk", where a minute matters; this one is answering "which
 /// of these forty files was I working on", where it does not — and forty rows
 /// each reading "47m ago" is a column of noise rather than a column of

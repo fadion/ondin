@@ -7966,7 +7966,9 @@ two together, by building the real frame and measuring it; the term-by-term test
 from the same arithmetic and agreed with `height` about a term neither of them had.
 `theme::color::DANGER` (`#e0736b`) is the design export's one red and
 sits on *Delete* alone, deliberately distinct from `WARN`: amber says a layer cannot be drawn as
-described, red says this click removes it.
+described, red says this click removes it. The editor's save dot shows the same value as
+`color::UNSAVED`, a constant of its own so that a dirty document and a destructive click can part
+(§15 D962).
 
 **Paste finally has a position.** `OndinApp::paste_at` centres the pasted layers on a world point,
 which is what *Paste here* means and what `shortcuts.md` §7 has owed since `Ctrl+V` was written with
@@ -12306,7 +12308,7 @@ while the library is up there is no tool, no selection to nudge and no canvas to
 is at the top of the frame on purpose: that makes it a property of the frame rather than a rule every
 panel has to keep. **Three things are given up by returning this
 early and each is deliberate**: the font poll, which the dashboard needs for nothing; `disk_results`,
-whose pill the editor's panels draw; and the two ticks, one of which `go_to_dashboard` compensates by
+whose save dot the editor's panels draw; and the two ticks, one of which `go_to_dashboard` compensates by
 hand and says so.
 
 ⚠️ **The close interception used to be a fourth and was not deliberate** (§15 D526).
@@ -12699,7 +12701,12 @@ title bar share `library::scan::display_name` so they cannot disagree about one 
 and never pins. Autosave is gated on `is_dirty` — an idle document must not rewrite its own bytes into
 a folder a sync client is watching — and never *creates* a file, because putting something in
 somebody's library on a timer is not the app's to do. There is no *Save As*: it asked where to put a
-file, and *Duplicate* (which mints a new document id) is what it was used for.
+file, and *Duplicate* (which mints a new document id) is what it was used for. **The save state is a
+dot beside the document name** (`OndinApp::save_dot`, §15 D962) — 7 points, no ground and no text,
+`color::UNSAVED` red until the file matches the document and `color::SAVED` green once it does —
+and the sentence the top bar's pill used to carry (*Unsaved*, *Saving…*, *Saved · 2m ago*) is the
+dot's tooltip. ⚠️ **The top bar has no open or save button since D962**: the library is the brand
+mark or `Ctrl+O`, and a manual save is `Ctrl+S`.
 
 ⚠️ **Autosave queues; `Ctrl+S` writes (§15 D393).** `autosave_tick` keeps its four gates and its clock
 and hands a `Document::clone` to the same worker the crash snapshot uses, so the frame pays a refcount
@@ -12712,9 +12719,10 @@ save *counted* — which is what `export_on_save` re-exports on. 🚨 **An undo 
 and moves the revision only since §15 D928**: before it, one made while a write was in flight left the
 revision where it was, the session went clean over a file holding the other document, and the next
 `recovery_tick`, reading clean as *the disk holds the document*, deleted the crash snapshot — the one
-copy of the session's document on disk. While a write is in flight the pill says
-*Saving…* and its dot stays **amber**, a third label and deliberately not a third state: the document
-still differs from its file, which is the only thing the dot answers. ⚠️ **`Ctrl+S`, the walk to the
+copy of the session's document on disk. While a write is in flight the save dot's tooltip says
+*Saving…* and the dot stays **red**, a third label and deliberately not a third state: the document
+still differs from its file, which is the only thing the dot answers (two colours since §15 D962, where
+the pill's were amber and accent). ⚠️ **`Ctrl+S`, the walk to the
 dashboard, an open and the close-and-save arm stay synchronous, and that is a decision rather than a
 remainder** — a pin is a *copy of the file*, so deferring only moves the cost, and the three
 transitions each read the result on the next line.

@@ -84,11 +84,13 @@ pub enum Action {
     /// re-scanned. Which makes it Figma's meaning of the chord rather than a
     /// second spelling of Alt+F4.
     ///
-    /// ⚠️ **It is therefore a fourth door onto the screen `Action::Open` already
-    /// opens, and that is the cost, stated.** The two verbs differ in what the
-    /// user is thinking rather than in where they arrive — "I am done with this"
-    /// against "take me to my files" — and a chord that does the right thing under
-    /// either intent is worth more than the tidiness of one door.
+    /// ⚠️ **It is therefore another door onto the screen `Action::Open` already
+    /// opens, and that is the cost, stated** — the third, beside it and the brand
+    /// mark, since §15 D962 took the top bar's folder button (it was the fourth). The
+    /// two verbs differ in what the user is thinking rather than in where they
+    /// arrive — "I am done with this" against "take me to my files" — and a chord
+    /// that does the right thing under either intent is worth more than the
+    /// tidiness of one door.
     CloseDocument,
     /// `Ctrl+,` — the Settings modal (`crate::settings`, §15 D330).
     ///

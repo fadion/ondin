@@ -3541,30 +3541,34 @@ mod tests {
         assert!(!outlined(row("Align self")), "and not the align row");
     }
 
-    /// **A grid item holding `baseline` reads *Baseline · Start*, and its list
-    /// lights a row saying so** (§15 D923) — `a`'s `align-self: baseline`, which a
-    /// flex row gave it before the frame became a grid, and which grid's menus do
-    /// not offer (§15 D919). The face names what is held and what taffy draws for
-    /// it; opened, the list has a row reading the same, and that row is the
-    /// selected one. Before D923 the face read *Baseline* over a list with nothing
-    /// lit.
+    /// **A grid item holding `baseline` across reads *Baseline · Start*, and its
+    /// list lights a row saying so** (§15 D923) — `a`'s `justify-self: baseline`,
+    /// carried from a file, which the justify rows do not offer: a grid treats it
+    /// as `start` on its inline axis. The face names what is held and what is
+    /// drawn; opened, the list has a row reading the same, and that row is the
+    /// selected one. **And `align-self: baseline` reads *Baseline*** — the block
+    /// axis draws it, so the align rows offer and name it plainly (§15 D939); this
+    /// test held it on the align row until then, on taffy's TODO's word.
     ///
     /// **Flip runs**: `glyph_combo`'s held row dropped fails at *"a row for
     /// \"Baseline · Start\""*; `items_name`'s `baseline` arm dropped fails at the
-    /// face, no run reading *Align selfBaseline · Start* — each the predicted
-    /// site.
+    /// face, no run reading *Justify selfBaseline · Start* — each the predicted
+    /// site. The align row's `align_items_name` arm dropped fails at *"Align
+    /// selfBaseline"*.
     #[test]
     fn a_held_baseline_in_a_grid_reads_as_start_on_a_lit_row() {
         let mut s = scene();
         set_item(&mut s.app, s.a, |i| {
-            i.align_self = Some(AlignItems::Baseline)
+            i.justify_self = Some(AlignItems::Baseline);
+            i.align_self = Some(AlignItems::Baseline);
         });
         s.app.set_display(&[s.frame], 2);
         let a = s.a;
         let mut p = Panel::new(s.app, OndinApp::inspector_item);
         p.app.session.selection.set(vec![a]);
+        p.run("Align selfBaseline");
         // A glyph combo's label and face are one galley.
-        let face = p.run("Align selfBaseline · Start");
+        let face = p.run("Justify selfBaseline · Start");
         p.click(face);
         let shapes = p.shapes();
         let row = |text: &str| {

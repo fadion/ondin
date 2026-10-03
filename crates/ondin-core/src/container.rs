@@ -1416,6 +1416,15 @@ pub trait LayoutView {
         let _ = id;
         crate::node::TextRef::of(kind).map(crate::text::content_widths)
     }
+    /// `id`'s first line's baseline drawn as `kind`, down from the top of its box
+    /// — what a text leaf reports to the engine for `baseline` alignment (§15
+    /// D939). `None` for a kind with no lines, which CSS synthesizes from the box's
+    /// bottom edge. [`Self::measured`]'s reason for being a method.
+    fn first_baseline(&self, id: crate::NodeId, kind: &NodeKind) -> Option<f64> {
+        let _ = id;
+        let layout = crate::text::layout(crate::node::TextRef::of(kind)?);
+        layout.baselines.first().map(|b| b - layout.origin.y)
+    }
 }
 
 /// Whether `kind` can be a layout container, flex or grid: a frame, or a group
@@ -2414,12 +2423,28 @@ impl taffy::LayoutPartialTree for FlexTree<'_> {
                 Leaf::Container => taffy::compute_flexbox_layout(tree, node, inputs),
                 _ => {
                     let style = tree.styles[index].clone();
-                    taffy::compute_leaf_layout(
+                    let mut out = taffy::compute_leaf_layout(
                         inputs,
                         &style,
                         |_, _| 0.0,
                         |known, available| tree.measure(index, known, available),
-                    )
+                    );
+                    // 🚨 **A text leaf reports its first baseline** (§15 D939): the
+                    // engine aligns `baseline` items by it, and a leaf that reports
+                    // none is aligned by its box's bottom edge — CSS's synthesized
+                    // baseline, right for a shape and wrong for type, where it put
+                    // a 12px label's letters ~3 px below a 24px one's. Read at the
+                    // size the leaf was laid at, the kind it is drawn as.
+                    if let Leaf::Text(kind) = &tree.leaves[index] {
+                        let id = tree.ids[index];
+                        let view = tree.view;
+                        let size = Size::new(f64::from(out.size.width), f64::from(out.size.height));
+                        let drawn = flexed_text(kind, size, &|k| view.measured(id, k));
+                        if let Some(b) = view.first_baseline(id, &drawn) {
+                            out.baselines.first = Some(b as f32);
+                        }
+                    }
+                    out
                 }
             }
         })

@@ -1531,3 +1531,66 @@ fn a_negative_layout_length_is_refused_and_read_as_zero() {
         "a file's negative gap is laid as zero"
     );
 }
+
+/// **`baseline` lines up text's first baselines, in a grid and in a flex row**
+/// (§15 D939, the release review's `[X3.3-L1-01]`). Two labels, 12 and 24 px
+/// Inter at a 1.2em line, side by side with `align-items: baseline`: a text leaf
+/// reported no baseline to the engine, which then aligned the boxes' bottom
+/// edges — the small label placed at y 14.40625, its letters about 3 px below
+/// the big one's. Asserted on what the user sees: each label's first baseline in
+/// world y, read off its own shaped layout, equal across the two. A shape keeps
+/// no baseline and is still aligned by its bottom, CSS's synthesized one.
+///
+/// **Flip run**, the leaf's `baselines.first` left unset: fails on the grid's
+/// *"letters on one line"*, the bottoms aligned instead — the predicted site.
+#[test]
+fn baseline_aligns_text_by_its_first_baseline() {
+    let label = |size: f64| NodeKind::Text {
+        content: "Label".into(),
+        style: Box::new(ondin_core::TextStyle {
+            font_family: "Inter".into(),
+            font_size: size,
+            line_height: Some(ondin_core::Length::Em(1.2)),
+            ..Default::default()
+        }),
+        spans: Default::default(),
+        para_spans: Default::default(),
+        paragraph: Default::default(),
+        block: Default::default(),
+        sizing: ondin_core::TextSizing::Auto,
+        on_path: None,
+        on_path_flip: false,
+        on_path_offset: 0.0,
+    };
+    let baseline = |s: &Scene, id: NodeId| {
+        let layout = s.res.text_layout(id).expect("shaped");
+        s.res.world_transform(id).unwrap().translation().y + layout.baselines[0]
+    };
+    for grid_layout in [true, false] {
+        let mut s = Scene::new();
+        let f = s.add(s.root, frame(400.0, 200.0), (0.0, 0.0));
+        let small = s.add(f, label(12.0), (0.0, 0.0));
+        let big = s.add(f, label(24.0), (0.0, 0.0));
+        s.display(
+            f,
+            Some(if grid_layout {
+                Display::Grid(Grid {
+                    align_items: Some(AlignItems::Baseline),
+                    justify_items: Some(AlignItems::Start),
+                    ..grid(vec![px(200.0), px(200.0)], vec![px(100.0)])
+                })
+            } else {
+                Display::Flex(Flex {
+                    align_items: AlignItems::Baseline,
+                    ..Default::default()
+                })
+            }),
+        );
+        let (a, b) = (baseline(&s, small), baseline(&s, big));
+        assert!(
+            (a - b).abs() < 1.0 / 64.0,
+            "letters on one line ({}): {a} against {b}",
+            if grid_layout { "grid" } else { "flex" }
+        );
+    }
+}

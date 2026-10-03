@@ -252,6 +252,23 @@ impl crate::container::LayoutView for UsedView<'_> {
         self.memo.borrow_mut().entry(id).or_default().widths = Some(w);
         w
     }
+    fn first_baseline(&self, id: NodeId, kind: &NodeKind) -> Option<f64> {
+        let key = sizing_key(kind)?;
+        if let Some(memo) = self.memo.borrow().get(&id)
+            && let Some((_, b)) = memo.baselines.iter().find(|(k, _)| *k == key)
+        {
+            return *b;
+        }
+        let layout = text::layout(crate::node::TextRef::of(kind)?);
+        let b = layout.baselines.first().map(|b| b - layout.origin.y);
+        self.memo
+            .borrow_mut()
+            .entry(id)
+            .or_default()
+            .baselines
+            .push((key, b));
+        b
+    }
 }
 
 /// One text node's measurements as the layout pass asked for them — its box at
@@ -271,6 +288,8 @@ impl crate::container::LayoutView for UsedView<'_> {
 struct TextMemo {
     boxes: Vec<(SizingKey, Option<Rect>)>,
     widths: Option<Option<(f64, f64)>>,
+    /// The first baseline at each sizing asked (§15 D939).
+    baselines: Vec<(SizingKey, Option<f64>)>,
 }
 
 /// A text sizing as a memo key: the variant and its numbers' bits.
@@ -890,6 +909,17 @@ impl Resolved {
     /// [`Self::remembered_text_box`] for the content widths.
     pub fn remembered_text_widths(&self, id: NodeId) -> Option<Option<(f64, f64)>> {
         self.text_memo.get(&id)?.widths
+    }
+
+    /// [`Self::remembered_text_box`] for the first baseline (§15 D939).
+    pub fn remembered_text_baseline(&self, id: NodeId, kind: &NodeKind) -> Option<Option<f64>> {
+        let key = sizing_key(kind)?;
+        self.text_memo
+            .get(&id)?
+            .baselines
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, b)| *b)
     }
 
     /// The box a group with a layout was given, in its own space from its origin

@@ -18,11 +18,14 @@
 //!   the one way to stop every item stretching sideways (§15 D914); the second is
 //!   CSS's default for both items rows, holding a shape at the start of its cell
 //!   (§15 D915).
-//! - **No `baseline`**: taffy's grid reads it as `start` (its own TODO), so a card
-//!   offering it would name a behaviour nothing draws (§15 D919). The model keeps
-//!   the value, which flex honours — and a grid **holding** it, carried from flex
-//!   or a file, reads *Baseline · Start* with Start's picture, on a row of its own
-//!   that is lit: what is held, then what is drawn (§15 D923).
+//! - **`baseline` on the align rows only**: a grid draws it on its block axis —
+//!   taffy shims a row's items to their first baselines, and Chrome agrees — and
+//!   treats it as `start` across, its own TODO being the inline axis's alone. So
+//!   `align-items` and `align-self` offer it and name it *Baseline* (§15 D939),
+//!   and the justify rows leave it out; a justify row **holding** it, carried
+//!   from a file, reads *Baseline · Start* with Start's picture, on a row of its
+//!   own that is lit: what is held, then what is drawn (§15 D923). Until D939 all
+//!   four rows left it out, on the TODO's word (§15 D919).
 //! - **Every line is typed as CSS** — `auto`, `2`, `-1`, `span 2` — because a line
 //!   is a number *or* a span, and one field that reads both is shorter than two
 //!   that each read half.
@@ -51,6 +54,29 @@ const ITEMS: [Option<AlignItems>; 5] = [
     Some(AlignItems::Center),
 ];
 
+/// [`ITEMS`] for `align-items` — **with `baseline`, which a grid draws on its
+/// block axis** (§15 D939): taffy shims a row's items to their first baselines
+/// before it aligns them, and since a text leaf reports its baseline that lines
+/// up letters. Only its inline axis treats `baseline` as `start`, so the justify
+/// rows go on leaving it out.
+const ALIGN_ITEMS: [Option<AlignItems>; 6] = [
+    None,
+    Some(AlignItems::Stretch),
+    Some(AlignItems::Start),
+    Some(AlignItems::End),
+    Some(AlignItems::Center),
+    Some(AlignItems::Baseline),
+];
+
+/// [`SELF`] for `align-self`, with `baseline` — [`ALIGN_ITEMS`]' reason.
+const ALIGN_SELF: [Option<AlignItems>; 5] = [
+    Some(AlignItems::Stretch),
+    Some(AlignItems::Start),
+    Some(AlignItems::End),
+    Some(AlignItems::Center),
+    Some(AlignItems::Baseline),
+];
+
 /// The pictures for the horizontal rows — `justify-*` — turned through the
 /// diagonal: every alignment picture is drawn for a row's cross axis, which is
 /// vertical, and a grid's `justify` runs across.
@@ -66,9 +92,10 @@ const FLOW_TIPS: [&str; 2] = [
     "Column — auto-placed items fill each column before the next",
 ];
 
-/// An item alignment as the grid rows name it: `normal` for none set, and a held
-/// `baseline` as what it is and what grid draws for it — *Baseline · Start*, the
-/// face's *Auto · Normal* form (§15 D923).
+/// An item alignment as the **justify** rows name it: `normal` for none set, and
+/// a held `baseline` as what it is and what grid draws for it across —
+/// *Baseline · Start*, the face's *Auto · Normal* form (§15 D923). The align rows
+/// name it plainly ([`align_items_name`]), the block axis drawing it (§15 D939).
 fn items_name(a: Option<AlignItems>) -> &'static str {
     match a {
         None => "Normal",
@@ -86,6 +113,25 @@ fn items_glyph(a: Option<AlignItems>) -> Glyph {
     match a {
         Some(AlignItems::Baseline) => Glyph::Align(AlignItems::Start),
         a => Glyph::Align(a.unwrap_or(AlignItems::Stretch)),
+    }
+}
+
+/// [`items_name`] for the **align** rows: `baseline` is *Baseline*, since a
+/// grid's block axis draws it (§15 D939). This read *Baseline · Start* on both
+/// axes, from taffy's TODO rather than from a layout — the TODO is the inline
+/// axis's alone, and Chrome draws the block axis the same way taffy does.
+fn align_items_name(a: Option<AlignItems>) -> &'static str {
+    match a {
+        Some(AlignItems::Baseline) => align_name(AlignItems::Baseline),
+        a => items_name(a),
+    }
+}
+
+/// [`items_glyph`] for the align rows: `baseline`'s own picture.
+fn align_items_glyph(a: Option<AlignItems>) -> Glyph {
+    match a {
+        Some(AlignItems::Baseline) => Glyph::Align(AlignItems::Baseline),
+        a => items_glyph(a),
     }
 }
 
@@ -517,9 +563,9 @@ impl OndinApp {
             "Align items",
             full,
             shared(grids, |g| Some(g.align_items)),
-            &ITEMS,
-            items_name,
-            items_glyph,
+            &ALIGN_ITEMS,
+            align_items_name,
+            align_items_glyph,
             |_| Orient::default(),
             None,
             true,
@@ -1036,9 +1082,15 @@ impl OndinApp {
                 label,
                 full,
                 shown,
-                &SELF,
-                items_name,
-                items_glyph,
+                if across { &SELF } else { &ALIGN_SELF },
+                if across { items_name } else { align_items_name },
+                move |a| {
+                    if across {
+                        items_glyph(a)
+                    } else {
+                        align_items_glyph(a)
+                    }
+                },
                 move |_| if across { ACROSS } else { Orient::default() },
                 Some(inherited),
                 true,

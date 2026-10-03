@@ -1732,6 +1732,15 @@ impl ondin_core::container::LayoutView for PreviewView<'_> {
         }
         ondin_core::node::TextRef::of(kind).map(ondin_core::text::content_widths)
     }
+    fn first_baseline(&self, id: NodeId, kind: &NodeKind) -> Option<f64> {
+        if self.ov.get(id).and_then(|o| o.kind.as_ref()).is_none()
+            && let Some(b) = self.res.remembered_text_baseline(id, kind)
+        {
+            return b;
+        }
+        let layout = ondin_core::text::layout(ondin_core::node::TextRef::of(kind)?);
+        layout.baselines.first().map(|b| b - layout.origin.y)
+    }
 }
 
 /// Whether an `InsertSubtree`'s `nodes` would put a frame under a boolean or a

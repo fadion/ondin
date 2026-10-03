@@ -633,6 +633,10 @@ impl RenderOverrides {
     /// items of a layout this preview *removes* are put back by their transforms —
     /// no pass roots at a container with no layout, so nothing else would.
     ///
+    /// **It hands back each dragged item's placement rather than composing its
+    /// landing**: `relayout` runs after it and may yet move the container, so the
+    /// landing is composed once that has run (§15 D945).
+    ///
     /// ⚠️ **This doc was missing and `relayout`'s sat here** until 2026-09-24:
     /// the function was inserted above `relayout` anchored on its `fn` line, which
     /// took the whole insets paragraph and left `relayout` with none.

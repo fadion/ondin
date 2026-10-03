@@ -2154,9 +2154,12 @@ impl OndinApp {
     }
 
     /// W's or H's sizing mode for layer `id` from the Transform card — the ops a
-    /// mode picked from the unit's menu writes (§15 D879). Each keeps the layer at
-    /// the size it is drawn: `px` fixes the drawn size, `%` converts it against the
-    /// container's content box, and a keyword hands the size to the layout.
+    /// mode picked from the unit's menu writes (§15 D879). Each converts what the
+    /// axis **specifies** rather than the size it is drawn ([`specified_along`],
+    /// §15 D943): `px` writes it on the picked axis only — for a kind
+    /// `resizable_size` reads; text and the rest still go through `baked_ops`'
+    /// whole used kind — `%` converts it against the container's content box, and
+    /// a keyword hands the size to the layout.
     pub(super) fn size_mode_tx(
         &self,
         id: NodeId,

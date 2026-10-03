@@ -2862,7 +2862,9 @@ impl OndinApp {
     /// **The same question the release asks**, through the same function
     /// ([`Self::move_destination`], and `frame_covering` under it: a frame keeps a
     /// layer while it covers more than half of it — and keeps an in-flow item of
-    /// its layout while the pointer is inside it, §15 D926). That is the whole
+    /// its layout while the pointer is inside it, §15 D926, or, pressed outside it
+    /// on its overflow, while its box meets it, a frame inside the layout taking
+    /// it first, §15 D944). That is the whole
     /// point of routing it here rather than inventing a threshold for the renderer — while
     /// the shape is still clipped, dropping it keeps it in the frame; the moment it
     /// draws in full, dropping it takes it out. A second rule would make the

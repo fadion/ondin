@@ -591,10 +591,16 @@ fn geometry(kind: &NodeKind) -> Geometry {
         // The resolved outline, as the SVG writer emits — the snapshot is the
         // AI-handoff surface and a shape described unrounded there is a shape
         // described wrong (§15 D119).
+        //
+        // 🚨 **"As the SVG writer emits" was true of the outline and not of its
+        // numbers** until §15 D968: this was `BezPath::to_svg`, full `f64`
+        // precision, where the writer rounds to four places — so the 16th digit
+        // was whatever the platform's math library made of the corner rounding,
+        // and the snapshot golden failed on Linux and macOS. `svg::path_d` is the
+        // writer's own spelling; a ten-thousandth of a point is below anything a
+        // reader of the snapshot can act on.
         NodeKind::Path { .. } => Geometry::Path {
-            svg: ondin_core::geometry::local_path(kind)
-                .unwrap_or_default()
-                .to_svg(),
+            svg: crate::svg::path_d(&ondin_core::geometry::local_path(kind).unwrap_or_default()),
         },
         NodeKind::Text {
             content,

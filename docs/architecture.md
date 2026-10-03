@@ -13277,7 +13277,10 @@ live on the canvas, participate in shared undo, and survive save/load.
   `ONDIN_UPDATE_GOLDENS=1 cargo test -p ondin-export --test goldens` — a diff to read before
   committing, not a rubber stamp. The fixture is that file's own, not the shared `common::fixture()`,
   which covers eight kinds and carries two dozen substring assertions; an exhaustive `match` over
-  `NodeKind` breaks the compile when a variant is added. `.gitattributes` marks the directory `-text`
+  `NodeKind` breaks the compile when a variant is added. ⚠️ **Byte-exact across platforms only because
+  no file carries a full-precision float from transcendental arithmetic**: the JSON snapshot's path
+  did, and its 16th digit differed between Windows and Linux/macOS, so since §15 D968 it is written
+  through the SVG writer's four-place `path_d`. `.gitattributes` marks the directory `-text`
   so a checkout cannot fail the comparison on line endings, and pins every `.rs` to LF, because
   `goldens.rs` and `theme.rs` each have a test that splits its own source on `"\n}\n"` — a CRLF
   checkout failed the second on CI's Windows runner (§15 D967). Every *other* export test still asserts on

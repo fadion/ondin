@@ -22,3 +22,7 @@ crates/ondin-export/tests/goldens/** -text
 # brace it could not find — the first CI run, 2026-10-03 (§15 D967). The blobs
 # are LF already, so this changes no file, only what a checkout writes.
 *.rs text eol=lf
+# And Markdown, for the same reason one level out: `ondin-mcp`'s tool-list test
+# reads `docs/architecture.md` and splits on `"\n### 8.4 Tools\n"`, which the
+# second CI run found unfound on a CRLF checkout.
+*.md text eol=lf

@@ -1343,6 +1343,7 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D965** — **The file card's caption band is 46 points, not 42.** The maintainer's ruling, from a screenshot of one card: *"The last seen text has less padding bottom than the title has padding top … maybe 3-4px (not measured)."* `dashboard::CARD_CAPTION_H` 42 → 46. The name stays centred 15 below the thumbnail and the date 31, so all four points go under the date: its line box ended ~4.5 above the card's edge against the name's ~7.5 below the thumbnail, and ends ~8.5 above it now — arithmetic from the centres and the 12.5/11pt sizes, not measured ink. The ⋮ stays centred at +22. ⚠️ `file_card` and `new_file_card` both allocate `CARD_THUMB_H + CARD_CAPTION_H`, so the dashed *New file* card grows too, its plus and label 2 lower, placed from its centre; project cards do not. Rows are 176 apart, were 172. *(Built and tested 2026-10-03, session 44, not yet committed; **Keep**, the maintainer's ruling and upper figure. **Nothing pins the height** — no test written. D864's ~twelve rows to a 2,160pt window hold at 176, so no cover figure moves. Typed into three comments before its block was reserved, the only sites. 🚨 Not seen on a real window. D374, D376, D864 amended)*
 - **D966** — **The library's Settings sits `TOP_GAP` from the update pill, as the editor's does.** The maintainer's ruling, from the forced pill on both screens: *"Let's make them equal (keeping the editor's distance)."* The editor's cluster spaces every item `app::TOP_GAP`, 5; the library's spaces at 12. `TOP_GAP` is `pub(crate)`, and `dashboard_top_bar` sets it immediately before allocating Settings and 12 again before the chip — ⚠️ **on Settings, not the pill**, egui spacing an item when it is placed (D962's mechanism) — and only when `updater.state().label().is_some()`, `chip`'s own test; with no pill the status dot keeps the row's 12. *(Built and tested 2026-10-03, session 44, not yet committed; **Keep**, the maintainer's ruling. Test `settings_sits_as_far_from_the_update_pill_on_both_screens` over the `#[cfg(test)]` `Updater::ready`, the pill found as the outline around its *RESTART* label — a first draft took the search field's and read 4643; the library's Settings at 12 again failing *"the library's gap 12 against the editor's 5"*, predicted. Nothing pins the no-pill 12. `the_forced_update_chip_is_off_in_a_committed_tree` red only for the working tree's temporary forced chip, not this change. Typed into two comments before its block was reserved, the fourth time this session, the only sites. 🚨 Not seen on a real window. §9.1)*
 - **D967** — **What the first CI run off Windows found: four tests that assumed Windows, a guard that did, and a search whose order was the folder's.** The first push, 2026-10-03 (`bb3ea31..e65d118`, run 37156274426): lint green on Linux, build and test red on all three legs — 1 failure on Windows, 3 on Linux, 9 on macOS, each a test that had only ever run on Windows, none in the session's new code. (1) `theme`'s icon-catalogue test splits its own source on `"\n}\n"` and the Windows runner checks out CRLF: `.gitattributes` gains `*.rs text eol=lf`, every blob already LF, closing D858's *Fix*. (2) A read-only destination does not refuse a rename on Unix, where the directory governs: the `atomic` tests' `lock`/`unlock` make the parent `0o555` there, so on Unix they stage a refused *create*, and the cleanup flip, D715's `map_err` flip and D480's headline flip bite on Windows only. (3) `is_folder_stem` asked `Path::components`, for which `\` is an ordinary character on Unix, so `sub\dir`, `C:\Users\Public` and `\\server\share` passed — it refuses any `\` on every platform now. (4) APFS refuses a name that is not UTF-8 (`EILSEQ`), so five D809/D848 tests are `ignore`d on macOS. (5) **A real defect**: the search's file matches were in directory-read order, alphabetical on NTFS and not on APFS, so an unsteered `Enter` opened a different document by platform — **the maintainer's ruling, most recently edited first, ties by name**, sorted by `Library::sort_entries(…, Sort::Edited)` before the `SEARCH_MAX` cap. *(Fixed and tested 2026-10-04, session 44, not yet committed; **Keep**, the search order the maintainer's ruling and the rest the session's. Its block, D967–D972, was reserved and grep-checked clean before any citation was typed. Search test over set mtimes; the sort removed fails on *"the most recently edited document is the one Enter opens"* on Windows, predicted, and its tie assertion is the macOS half, reasoned from the CI run. Windows gates green, 1,487 app tests. 🚨 **No fix verified on Linux or macOS** until the next CI run; the Unix lock never compiled here. D382, D420, D480, D706, D715, D732, D809, D848, D858, D952, D955, D959 amended; §1, §9.5, §10, §11)*
+- **D968** — **The JSON snapshot writes a path the way the SVG writer does: four decimal places.** CI's second run reached two targets the first never did. Windows: `ondin-mcp`'s tool-list test reads `docs/architecture.md` on a CRLF checkout — `.gitattributes` gains `*.md text eol=lf`, every Markdown blob already LF. Linux and macOS: `every-kind.json` differed in one path's 16th digit (`13.98114035132503` against `…5028`), the platforms' math libraries rounding the corner arithmetic's last bit apart, while the SVG golden — rounded to four places by `svg::fmt` — passed everywhere. The snapshot's path was `BezPath::to_svg`, full `f64`, though its comment said *"as the SVG writer emits"* (D119). **The maintainer's ruling, of rounding or a tolerant golden: rounding** — the snapshot's path is `svg::path_d`, now `pub(crate)`, and the golden stays byte-exact (§11). One line of the golden changed. ⚠️ `path_d`'s doc had opened with `fmt`'s summary line, a doc-comment theft; restored to `fmt`. *(Built and tested 2026-10-04, session 44; **Keep**, the maintainer's ruling; block D968–D973 reserved and grep-checked before any citation. Workspace tests, debug and `--release`, green on Windows. 🚨 Not verified on Linux or macOS until CI's third run. §11)*
 
 ---
 
@@ -25641,6 +25642,41 @@ fix's Linux or macOS behaviour is verified until CI's next run.** Recorded from 
 `Library::sort_entries` and the search test. D382, D420, D480, D706, D715, D732, D809, D848, D858,
 D952, D955 and D959 amended; `architecture.md` §1, §9.5 in five places, §10 and §11 amended;
 `roadmap.md`'s *Now · Distribution* preamble corrected, nothing struck — it held no item this closes)*
+
+**D968 — The JSON snapshot writes a path the way the SVG writer does: four decimal places.
+*Built and tested 2026-10-04, session 44; Keep — the maintainer's ruling.***
+
+CI's second run (`e65d118..afc12b4`, run 37157824810) got the app crate green on all three legs and
+reached two targets the first never did, `cargo test` stopping at the first failing one. Windows failed
+`ondin-mcp`'s tool-list test, which reads `docs/architecture.md` and splits on `"\n### 8.4 Tools\n"` —
+the CRLF checkout again, one directory out from D967's: `.gitattributes` gains `*.md text eol=lf`, all
+21 committed Markdown files already LF (`git ls-files --eol`), so no file changes.
+
+**Linux and macOS failed the snapshot golden, and that one was a decision.** `every-kind.json` differed
+in one path's coordinates in the 16th significant digit — `13.98114035132503` on Windows, where the
+golden was generated, against `13.981140351325028` — the platforms' math libraries rounding the corner
+arithmetic's last bit differently. The SVG golden carries the same outline and passed everywhere,
+because the writer rounds every number through `svg::fmt` to four places. The snapshot's comment said
+its path was *"the resolved outline, as the SVG writer emits"* (D119), and it was — as an outline; its
+numbers were `BezPath::to_svg`'s full `f64`. **Offered rounding the snapshot or a tolerant golden
+comparison, the maintainer chose rounding**: the snapshot's path is `svg::path_d`, now `pub(crate)`,
+so the two writers spell one outline one way, and a ten-thousandth of a point is below anything a
+reader of the snapshot — `ondin export --json` today, an agent over MCP later — can act on. The golden
+stays a byte comparison (§11), which is the half of the choice the tolerant comparison would have
+given up. Regenerated with `ONDIN_UPDATE_GOLDENS=1`: exactly one line of `every-kind.json` changed,
+the path, and nothing else in the workspace moved.
+
+⚠️ **A doc-comment theft, found on the way and repaired with it.** `path_d`'s doc opened *"Format a
+float compactly: integers without a decimal point, else trimmed."* — `fmt`'s summary, which had no doc
+of its own: an item inserted above `fmt` and anchored on it took the line, CLAUDE.md's first habit
+exactly. It is back on `fmt`.
+
+**The evidence.** On Windows, `cargo test --workspace` 40 targets green, and `--release` too — the
+step CI's two runs never reached — clippy `-D warnings` for the workspace and `ondin-export`, the doc
+gate and fmt. Nothing new is asserted: the golden is the test, and it now holds four places on every
+leg by construction. 🚨 **Not verified on Linux or macOS until CI's third run.** *(Built and tested
+2026-10-04, session 44; **Keep**, the maintainer's ruling between the two; its block, D968–D973,
+reserved and grep-checked before any citation was typed. §11 amended)*
 
 **D898 — The randomized `update`/`rebuild` guard authors layout inputs, and compares a laid group's
 box. *The session's; built 2026-09-27, committed as `da5b652`. Entry reconstructed 2026-09-27 from

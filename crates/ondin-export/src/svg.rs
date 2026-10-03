@@ -2912,14 +2912,19 @@ fn opacity_attr(opacity: f32) -> String {
     }
 }
 
-/// Format a float compactly: integers without a decimal point, else trimmed.
 /// A `d` attribute, with coordinates rounded the way every other number in the
 /// file is.
 ///
 /// `BezPath::to_svg` prints full `f64` precision, which is merely verbose for a
 /// hand-drawn path but genuinely unreadable for a flattened rounded rect —
 /// tangent points there come out as `-0.0000000000000008881784197001252`.
-fn path_d(path: &ondin_core::kurbo::BezPath) -> String {
+///
+/// **And the JSON snapshot's path is this string too** (§15 D968), so the two
+/// writers describe one outline in one spelling. Full precision there carried
+/// the platform's math library into the 16th digit — `13.98114035132503` on
+/// Windows, `…5028` on Linux and macOS — and the snapshot golden, compared byte
+/// for byte, failed on every leg but the one it was generated on.
+pub(crate) fn path_d(path: &ondin_core::kurbo::BezPath) -> String {
     use ondin_core::kurbo::PathEl;
     let p = |pt: ondin_core::kurbo::Point| format!("{},{}", fmt(pt.x), fmt(pt.y));
     let mut out = String::new();
@@ -2940,6 +2945,7 @@ fn path_d(path: &ondin_core::kurbo::BezPath) -> String {
     out
 }
 
+/// Format a float compactly: integers without a decimal point, else trimmed.
 fn fmt(v: f64) -> String {
     // **A number that is not a number is written as `0`** (§15 D508,
     // `[S8.1-L1-03]`). Every number in this writer comes through here, and both

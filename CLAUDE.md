@@ -67,8 +67,8 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 967 index rows, 967 body headings, next free
-D968** (measured at the close of session 44) — but trust the procedure over any number written
+anywhere cited either. **The live figures: 968 index rows, 968 body headings, next free
+D969** (measured at the close of session 44) — but trust the procedure over any number written
 down here, including that one. **No block is reserved**: the next session reserves its own.
 ⚠️ **Session 44 reserved D958–D969 and spent three** — D958 (present mode's hover strip),
 D959 (local dates on Linux and macOS through `localtime_r`), D960 (§5.4a's network rule scoped
@@ -94,7 +94,12 @@ D966–D970 grepped to zero and were released — and **D966 then went the same 
 (two comments before a seventh block, D966–D971; the grep found only those). D966 is the library's
 Settings-to-update-pill gap; D967–D971 grepped to zero and were released. Then **D967–D972 was
 reserved as the first act of the next request — before any edit, the lesson below applied** — and
-spent D967 on what the first CI run off Windows found; D968–D972 grep to zero and are released. ⚠️ **The pattern is the
+spent D967 on what the first CI run off Windows found; D968–D972 grepped to zero and were released,
+and **D968–D973** was reserved the same way for the second run's findings, spent D968 (the snapshot's
+path at four places), and released D969–D973 at zero sites. ⚠️ **`cargo test` stops at the first
+failing target**, so each CI run can only show the failures *up to* the first red crate — the second
+run's two were in crates the first never reached. Run `cargo test --workspace --release` locally
+before pushing a CI fix; it is the step neither run reached. ⚠️ **The pattern is the
 lesson**: every one of the four came on the first edit of a new request after a commit had
 released the previous block — **reserve as the first act of a request, not of a session.** 🚨 **Its record was written by two hands at once**:
 `arch-scribe`, resumed by a follow-up message after its report, and the delegating session,
@@ -103,9 +108,9 @@ stale file — **a follow-up `SendMessage` to a finished agent restarts it**, so
 yourself only after its second report. ⚠️ **The census's own
 `comm` misfired once at this close**: the index was compared in `sort -n` order, and `comm` printed
 seven hundred "unresolved" numbers plus *"file 2 is not in sorted order"*. Byte-order both sides
-(`LC_ALL=C sort -u`) — `sort -n` is for the order check, never for `comm`. Census: 866 distinct
-numbers cited from `.rs`, `.toml` and `.wgsl` under `crates/`, none unresolved — ten arrivals
-(D958–D967) and no departures against `17ca12a`.
+(`LC_ALL=C sort -u`) — `sort -n` is for the order check, never for `comm`. Census: 867 distinct
+numbers cited from `.rs`, `.toml` and `.wgsl` under `crates/`, none unresolved — eleven arrivals
+(D958–D968) and no departures against `17ca12a`.
 ⚠️ **Session 43 reserved D952–D963 and spent six** — D952 (the window's own chrome), D953
 (the GUI subsystem and the `ondin.com` twin), D954 (auto-update and the log file), D955 (CI),
 D956 (the Release workflow and Linux packages), D957 (the apt/dnf repository on Pages and

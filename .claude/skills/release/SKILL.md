@@ -173,9 +173,23 @@ failed (`gh run view <id> --log-failed`) and ask. **Never delete or re-push a ta
 unprompted** — an installed copy may already have seen the feed.
 
 ⚠️ **The `pages` job is part of that run**, so a repository publish failure makes
-the run red even though the Release itself is complete. Its usual cause is the
-signing key (`GPG_PRIVATE_KEY`, `packaging/repo/README.md`); it is repaired by
-running the **Pages** workflow again from the Actions tab, not by re-tagging.
+the run red even though the Release itself is complete. Read the job before
+guessing. **A job that failed in about two seconds with no steps** was refused by
+the `github-pages` environment's deployment rule — the annotation reads *"Tag … is
+not allowed to deploy to github-pages due to environment protection rules"*.
+v0.4.0's first publish hit exactly this; the environment now carries a `v*` tag
+rule beside `main`, and `packaging/repo/README.md` §3 has the command if it is
+ever lost. `gh run view --log-failed` prints *"log not found"* for such a job, so
+read the annotations instead:
+
+```bash
+gh api repos/fadion/ondin/check-runs/<job-id>/annotations --jq ".[].message"
+```
+
+A job that ran and failed in its steps is usually the signing key
+(`GPG_PRIVATE_KEY`, `packaging/repo/README.md`). Either way it is repaired by
+running the **Pages** workflow again from the Actions tab, on `main` — not by
+re-tagging.
 
 Then **check the assets**, which the workflow's conclusion does not prove — two of
 its publish steps tolerate missing files by design:

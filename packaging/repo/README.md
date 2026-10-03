@@ -162,6 +162,19 @@ gh api -X POST repos/fadion/ondin/pages -f build_type=workflow
 
 Or Settings → Pages → Build and deployment → Source → **GitHub Actions**.
 
+Then let a tag deploy. Switching the source creates a `github-pages` environment
+that accepts **`main` only**, and the publish a release triggers runs on the
+*tag*, so it is refused before a step runs — with the release itself complete
+beside it. That is what v0.4.0's first publish hit; it was published by running
+**Pages** from `main` and the rule added afterwards:
+
+```bash
+gh api -X POST repos/fadion/ondin/environments/github-pages/deployment-branch-policies -f name='v*' -f type=tag
+```
+
+Or Settings → Environments → `github-pages` → Deployment branches and tags → add
+the tag rule `v*`.
+
 ### 4. First publish
 
 The workflow runs itself after the next tagged release, called from

@@ -2939,9 +2939,10 @@ mod tests {
     /// the text arm — `baked_ops` over the used kind, not the picked axis only —
     /// as left alone; read, it looked as though an auto-width label would be
     /// baked back to `Auto` and unwrap. It is not: `baked_ops` keeps the stored
-    /// mode at the drawn extents (`gesture_text_sizing`, §15 D940, D942), which
-    /// for `Auto` drawn at a fixed width is `AutoHeight`. Every other kind that
-    /// reaches the arm offers `px` alone, lit, so nothing picks it there.
+    /// mode at the drawn extents (`ondin_core::build::kept_text_mode`, §15 D940),
+    /// which for `Auto` drawn at a fixed width is `AutoHeight`. Every other kind
+    /// that reaches the arm — a line, a path, a boolean — offers `px` alone, and
+    /// `size_modes` with fewer than two modes draws no menu, so nothing picks it.
     ///
     /// **Flip run**, text routed through the shapes' picked-axis arm: fails on
     /// *"W's px: the width the axis specified"* with `Auto` — the label

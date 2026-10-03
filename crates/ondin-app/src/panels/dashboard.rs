@@ -9381,6 +9381,82 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// **The cover pass runs once a frame, before any card asks** (§15 D947,
+    /// pinning D864's *"runs before any card asks"*). The test above pins that
+    /// `dashboard_ui` makes the call; this pins *where*.
+    ///
+    /// What each wrong version costs, reasoned from D864's arithmetic rather than
+    /// observed — `pass` advances `Covers`' own clock and then evicts, a card's
+    /// `get` stamps its cover with that clock, and the guard keeps a cover while
+    /// `seen + 1 >= pass`. Before the cards, a cover drawn on the last frame
+    /// carries `pass − 1` when this frame evicts, and is kept. **Twice a frame**,
+    /// the second call sees last frame's covers two ticks old and lets them go
+    /// before any card has asked again, so a screen showing more than the cap
+    /// churns — the burst the guard exists to stop. **Below the cards**, the
+    /// guard's *"the one before"* half lands on the frame being drawn rather than
+    /// the last one, and an answer only the pass takes (the list view's, §15
+    /// D863) is taken after the rows that would show it.
+    ///
+    /// 🚨 **Neither wrong version turned a single test red before this one.**
+    /// Measured: the call moved below the modals at the end of `dashboard_ui`,
+    /// and the call made twice in its own place, each left all 1,455 of
+    /// `ondin-app`'s tests green. Nothing a test can read off `Covers` differs
+    /// until more than `MAX_RESIDENT_COVERS` are resident, so the frame's calls
+    /// are **counted** through `Covers::take_calls` — `ondin-export`'s
+    /// `svg::def_count_tests` precedent, counting rather than timing — and no
+    /// clock or worker answer enters the assertion.
+    ///
+    /// Three documents in the grid, four frames to let the layout settle, then
+    /// one frame read alone.
+    ///
+    /// **Flip run**, `dashboard_ui`'s `self.covers.pass(ui.ctx())` moved from above
+    /// the drop handling to below `library_settings_modal`: fails on *"the pass
+    /// runs before any card asks"*, with `["get", "get", "get", "pass"]` — the
+    /// predicted site.
+    ///
+    /// **Flip run**, `dashboard_ui`'s `self.covers.pass(ui.ctx())` made twice in
+    /// its own place: fails on *"one cover pass a frame"*, 2 against 1, with
+    /// `["pass", "pass", "get", "get", "get"]` — the predicted site.
+    #[test]
+    fn the_cover_pass_runs_once_a_frame_before_any_card_asks() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, root) = app(&ctx, "pass-order");
+        for name in ["Pass A", "Pass B", "Pass C"] {
+            let mut doc = ondin_core::Document::new(app.session.ids.mint());
+            store::file_document(&root, None, name, &mut doc).unwrap();
+        }
+        app.library.refresh();
+        app.dash.nav = Nav::All;
+        let _ = galleys(&mut app, &ctx);
+
+        let _ = app.covers.take_calls();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::pos2(0.0, 0.0), SCREEN)),
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input, |ui| app.dashboard_ui(ui));
+        let calls = app.covers.take_calls();
+
+        assert!(
+            calls.iter().filter(|c| **c == "get").count() >= 3,
+            "the fixture: the three cards on screen each ask for a cover — or the \
+             order below is about nothing; got {calls:?}"
+        );
+        assert_eq!(
+            calls.iter().filter(|c| **c == "pass").count(),
+            1,
+            "one cover pass a frame; got {calls:?}"
+        );
+        assert_eq!(
+            calls.first(),
+            Some(&"pass"),
+            "the pass runs before any card asks; got {calls:?}"
+        );
+        app.covers.settle(&ctx);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// **All four of `remember_search`'s decisions, and the rows they feed**
     /// (§15 D619, `[S20.1-L6-05]`).
     ///

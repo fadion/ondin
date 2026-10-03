@@ -204,6 +204,18 @@ pub struct Covers {
     /// number, because what ages a cover is the *dashboard* being drawn without
     /// asking for it; a pass spent in the editor is not evidence of anything.
     pass: u64,
+    /// Every `pass` and `get` call, in order — `"pass"` or `"get"` — for the
+    /// dashboard's test that the pass runs **once a frame and before any card
+    /// asks** (§15 D947). That is a question about *where* `dashboard_ui` makes
+    /// the call, and nothing `Covers` holds can answer it: moving the call below
+    /// the cards, or making it twice, leaves every map and stamp a test can read
+    /// looking ordinary until more than `MAX_RESIDENT_COVERS` are resident. So it
+    /// is counted, as `ondin-export`'s `svg::def_count_tests` counts rather than
+    /// times.
+    ///
+    /// Plain backticks: this field is `cfg(test)` (§15 D319).
+    #[cfg(test)]
+    calls: Vec<&'static str>,
 }
 
 impl Default for Covers {
@@ -214,6 +226,8 @@ impl Default for Covers {
             render: None,
             dir: covers_dir(),
             pass: 0,
+            #[cfg(test)]
+            calls: Vec::new(),
         }
     }
 }
@@ -354,6 +368,8 @@ impl Covers {
     /// "later" is answered by the worker, which requests a repaint when it
     /// sends, so later arrives — this function requests none itself.
     pub fn get(&mut self, ctx: &egui::Context, entry: &Entry) -> Option<&egui::TextureHandle> {
+        #[cfg(test)]
+        self.calls.push("get");
         self.drain(ctx);
         let key = key(entry)?;
         let now = self.pass;
@@ -412,8 +428,12 @@ impl Covers {
     /// a pass that uploaded nothing. `get` keeps its own call because it is a
     /// `try_recv` and a caller that forgets this one still gets its covers.
     ///
-    /// **And the eviction** (§15 D864): see [`MAX_RESIDENT_COVERS`].
+    /// **And the eviction** (§15 D864): see [`MAX_RESIDENT_COVERS`]. Its recency
+    /// guard holds only if this runs **once a frame, before any card asks** — the
+    /// dashboard's one call, which a test pins by counting (§15 D947).
     pub fn pass(&mut self, ctx: &egui::Context) {
+        #[cfg(test)]
+        self.calls.push("pass");
         self.pass += 1;
         self.drain(ctx);
         self.evict(MAX_RESIDENT_COVERS);
@@ -591,6 +611,16 @@ impl Covers {
     #[cfg(test)]
     pub(crate) fn asked_for(&self, entry: &Entry) -> bool {
         key(entry).is_some_and(|k| self.queued.contains(&k) || self.covers.contains_key(&k))
+    }
+
+    /// The `pass` and `get` calls since the last time this was asked, in order,
+    /// and a fresh log — so a test draws one frame and reads that frame alone
+    /// (§15 D947).
+    ///
+    /// Plain backticks: this item is `cfg(test)` (§15 D319).
+    #[cfg(test)]
+    pub(crate) fn take_calls(&mut self) -> Vec<&'static str> {
+        std::mem::take(&mut self.calls)
     }
 
     /// Whether this document has been **found unloadable** — `io::load` was run

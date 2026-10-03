@@ -12541,8 +12541,11 @@ mistyped, which is a second surprise. The sentence saying so is asserted on the 
 `GetDynamicTimeZoneInformation` plus `SystemTimeToTzSpecificLocalTimeEx`, the `Ex` because the
 year-by-year rules hang off the zone's registry key, so a stamp from last July and one from January
 come back an hour apart as they should. The relative labels beside it ("2h ago", "Yesterday") are
-differences between two instants and have no timezone in them at all. Off Windows the offset is zero,
-i.e. UTC, which is what every date in the app read until 2026-08-28.
+differences between two instants and have no timezone in them at all. **Linux and macOS convert as
+well since §15 D959**: `localtime_r`'s `tm_gmtoff` is the offset for that instant from the tz
+database, in the zone `TZ` or `/etc/localtime` names — never yet compiled, and not verified until
+CI's Linux and macOS legs are green. On any other host the offset is zero, i.e. UTC, which is what
+every date in the app read until 2026-08-28.
 
 ⚠️ **A record that could not be read is never written over by the defaults that read produced** (§15
 D418). Three files the app reads at startup carry a latch — `Prefs::unreadable`,

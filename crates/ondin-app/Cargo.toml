@@ -56,6 +56,11 @@ serde_json.workspace = true
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true
 
+# The same question on the two Unix platforms that ship: the library's local
+# dates, through `localtime_r` (`library::clock::local_offset`, §15 D959).
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+libc.workspace = true
+
 # `build.rs` only. The app icon is two separate things and this is the half that
 # is not code: the resource compiler writes the `.ico` into `ondin.exe` itself,
 # where Explorer reads it. The *window's* icon is `main::window_icon`, decoded

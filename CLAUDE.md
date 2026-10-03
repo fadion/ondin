@@ -1225,7 +1225,17 @@ The real census cannot be scoped to its own answer:
 grep -rhoE 'cfg\(([a-z_]+)' crates/ --include=*.rs | sort | uniq -c
 ```
 
-Last run (2026-09-24, close of session 34, over its commits): **379 `test`, 7 `windows`, 3
+Last run (2026-10-03, close of session 44, against `17ca12a`): **404 `test`, 6 `windows`, 3
+`unix`, 3 `panic`, 3 `not`, 3 `debug_assertions`, 3 `any`, 2 `target_os`, 2 `all`, 1 `debug`.**
+`test` rose by 2, both `ui::logo_tests` (§15 D961) — the attribute and its module doc's own
+`` `cfg(test)` ``, prose being source to this sieve; ⚠️ this line first read 402, measured before that
+module existed. The tail's one change against `17ca12a` is the new `3 any` row, all in
+`library::clock` (§15 D959); the
+sieve takes only the first word after `cfg(`, so `cfg(any(target_os = …))` counts as `any`, and
+its `not(any(…))` fallback replaced the old `not(windows)` twin one for one. ⚠️ **`windows` was
+already 6 at `17ca12a`**, so the 7 below is a session-34 reading that moved unrecorded somewhere
+in sessions 35–43 — not itemised, and not this session's. Before that (2026-09-24, close of
+session 34, over its commits): **379 `test`, 7 `windows`, 3
 `unix`, 3 `panic`, 3 `not`, 3 `debug_assertions`, 2 `target_os`, 2 `all`, 1 `debug`.** The tail did
 not move across sessions 33–34; `test` rose by 9 over the two, test modules for flex, frames under
 groups and the drag (not itemised — a count, not a set). Before that (2026-09-23, close of session
@@ -1263,10 +1273,14 @@ stale four times before the session that measured it had ended.* Every figure in
 reading, and the reading is over the moment it is taken.
 
 ⚠️ **So it is the first of a class, and the rest of the class has no gate at all.**
-`canvas::os_cursor_desktop_px` and `library::clock::local_offset` each have a
-`#[cfg(not(windows))]` twin, `library::store`'s permissions arm a `cfg(unix)` one, and `panels::show_in_file_browser`
+`canvas::os_cursor_desktop_px` has a `#[cfg(not(windows))]` twin, `library::clock::local_offset`
+a `cfg(any(target_os = "linux", target_os = "macos"))` arm calling `localtime_r` (§15 D959 —
+real logic since 2026-10-03, no longer a stub) plus a fallback for every other host,
+`library::store`'s permissions arm a `cfg(unix)` one, and `panels::show_in_file_browser`
 has a `#[cfg(target_os = "macos")]` arm — **four decision functions this machine never
-compiles**, in either profile, under any local gate. A rename, a signature change or a
+compiles**, in either profile, under any local gate. ⚠️ **`local_offset`'s fallback arm
+compiles nowhere at all**, CI included: no leg builds for a host that is neither Windows,
+Linux nor macOS. A rename, a signature change or a
 `rust-mechanic` sweep passes straight over them here. ⚠️ **Since 2026-10-03 CI is that gate**
 (`.github/workflows/ci.yml`, §15 D955): its Linux and macOS legs compile, lint and test
 every one of them — **written before either leg had run once**; the first push is the

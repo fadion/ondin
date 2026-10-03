@@ -7,14 +7,15 @@
 //! here, so there is one answer to "what year is 1774483200" rather than one per
 //! column.
 //!
-//! ⚠️ **The civil date is local time on Windows and UTC everywhere else**, and
-//! that split is the whole of [`local_offset`]. It read UTC everywhere until
-//! 2026-08-28, which named the wrong day for a few hours either side of
-//! midnight — accepted at the time because converting correctly needs the zone's
-//! *history* (a stamp from last July has a different offset from one from
-//! January, so today's offset is not enough) and every way of getting that
-//! looked like a dependency. It is not: Windows keeps the history and answers
-//! for a given instant, in one call this app was already linked against.
+//! ⚠️ **The civil date is local time on Windows, Linux and macOS**, and that is
+//! the whole of [`local_offset`]. It read UTC everywhere until 2026-08-28, which
+//! named the wrong day for a few hours either side of midnight — accepted at the
+//! time because converting correctly needs the zone's *history* (a stamp from
+//! last July has a different offset from one from January, so today's offset is
+//! not enough) and every way of getting that looked like a dependency. It is
+//! not: Windows keeps the history and answers for a given instant, in one call
+//! this app was already linked against — and so does every Unix libc, which is
+//! how the other two caught up on 2026-10-03 (§15 D959).
 //!
 //! The relative labels people actually read — "2h ago", "Yesterday" — are
 //! differences between two instants and have no timezone in them at all, which
@@ -71,6 +72,11 @@ pub fn civil_from_unix(secs: u64) -> (i64, u32, u32) {
 /// about this arithmetic that holds on any machine in any zone.
 ///
 /// Midnight of that date; the caller adds the time of day.
+///
+/// ⚠️ **Windows and the tests only**: the Unix arm reads its offset in seconds
+/// and never needs the calendar back, so compiled there this was dead code,
+/// and CI's Linux and macOS clippy legs deny warnings (§15 D959).
+#[cfg(any(windows, test))]
 fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
     let y = if m <= 2 { y - 1 } else { y };
     let era = if y >= 0 { y } else { y - 399 } / 400;
@@ -98,11 +104,17 @@ fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
 /// database — the trade `library::clock`'s module note recorded as "a dependency
 /// or a platform call" and then did not take.
 ///
-/// **Zero off Windows**, i.e. UTC, which is what the whole file did before. ⚠️
-/// **That is now a shipped gap, not a placeholder**: since §15 D956 the Linux and
-/// macOS builds are released, and their library dates read in UTC. Written when
-/// the app was Windows-only; the repair is a `localtime_r` call in this arm,
-/// which only CI can compile (`docs/roadmap.md`, *Now · Distribution*).
+/// **Linux and macOS know too** (§15 D959): `localtime_r` converts through the
+/// tz database the system keeps, and the `tm` it fills carries `tm_gmtoff` —
+/// the offset in force at that instant, summer time and old rules included —
+/// so there is no calendar to come back down from. The zone is the process's
+/// own: `TZ` if it is set, `/etc/localtime` if not. Until this arm was
+/// written they answered UTC — caught before §15 D956's first Linux or macOS
+/// build was published, so no user saw it.
+///
+/// **Zero on any other host**, i.e. UTC — BSDs and the rest build as Linux
+/// elsewhere in the app, but this arm names the two platforms that are
+/// released and tested, not every `tm` that happens to have the field.
 pub fn local_offset(secs: u64) -> i64 {
     #[cfg(windows)]
     {
@@ -156,7 +168,27 @@ pub fn local_offset(secs: u64) -> i64 {
             local_secs - secs as i64
         }
     }
-    #[cfg(not(windows))]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        // A stamp past `time_t`'s range is the same broken clock as one past
+        // the Windows arm's `u16` year, and gets the same answer.
+        let Ok(t) = libc::time_t::try_from(secs) else {
+            return 0;
+        };
+        // SAFETY: `localtime_r` reads the one `time_t` we hand it and writes
+        // the one `tm` we own, both on the stack; it keeps neither pointer.
+        // Null is its failure, and leaves nothing to read. It initialises the
+        // zone from `TZ` itself on glibc, musl and Apple's libc alike, so no
+        // `tzset` is called first.
+        unsafe {
+            let mut tm: libc::tm = std::mem::zeroed();
+            if libc::localtime_r(&t, &mut tm).is_null() {
+                return 0;
+            }
+            tm.tm_gmtoff as i64
+        }
+    }
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
     {
         let _ = secs;
         0
@@ -267,9 +299,9 @@ mod tests {
     /// there is no way to ask Windows for a zone this process is not in. So the
     /// shape is: read the offset, then assert what it *implies*. On a machine set
     /// to UTC neither arm has anything to check and the test says so out loud
-    /// rather than passing quietly on nothing — `local_offset` returning 0 is
-    /// also what the non-Windows build does, so a green run there is the same
-    /// green run.
+    /// rather than passing quietly on nothing — and CI's runners are at UTC, so
+    /// there it checks nothing either way. That is why the Unix arm has a test
+    /// of its own that picks its zone (`the_unix_offset_is_the_zones_for_the_instant`).
     ///
     /// Flip-check, run on a machine at UTC+1: making `date_label` ignore the
     /// offset fails at *"23:30 UTC is already tomorrow"* with "26 Mar 2026"
@@ -341,6 +373,55 @@ mod tests {
             old % 900,
             0,
             "every zone offset ever used is a quarter hour"
+        );
+    }
+
+    /// **On Linux and macOS the offset is the zone's, for the instant** — run
+    /// in a zone chosen by the test rather than the one the machine is in.
+    ///
+    /// The two tests above are written around the machine's own zone, and CI's
+    /// runners are at UTC, where both pass on an arm that returns 0 — which is
+    /// what this arm was before §15 D959. So the test runs
+    /// itself again in a child process with `TZ` set to Central European
+    /// time, written as a POSIX rule (`CET-1CEST,M3.5.0,M10.5.0/3`) so it needs
+    /// no tz database on the runner, and the child asserts January's hour and
+    /// July's two. A child and not `std::env::set_var`, which is `unsafe` in
+    /// this edition for the reason that matters here: the other tests are
+    /// reading the environment on other threads.
+    ///
+    /// ⚠️ **Never run on this repository's own machine** — it is Windows, and
+    /// this is the arm only CI compiles. The spawn was checked there with the
+    /// `cfg` lifted, where the Windows arm ignores `TZ` and the machine happens
+    /// to be at Central European time: green, and red with the child's January
+    /// expectation changed to 7200, so the parent does see the child fail.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn the_unix_offset_is_the_zones_for_the_instant() {
+        const CHILD: &str = "ONDIN_CLOCK_TZ_CHILD";
+        const NAME: &str = "library::clock::tests::the_unix_offset_is_the_zones_for_the_instant";
+        if std::env::var_os(CHILD).is_some() {
+            // 2026-01-15 and 2026-07-15, midnight UTC; then July 2006.
+            assert_eq!(local_offset(1_768_435_200), 3_600, "January, CET");
+            assert_eq!(local_offset(1_784_073_600), 7_200, "July, CEST");
+            assert_eq!(local_offset(1_152_921_600), 7_200, "July 2006, CEST");
+            return;
+        }
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([NAME, "--exact", "--test-threads=1"])
+            .env(CHILD, "1")
+            .env("TZ", "CET-1CEST,M3.5.0,M10.5.0/3")
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success(),
+            "the child failed:\n{stdout}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        // And it ran the test, rather than matching nothing and passing.
+        assert!(
+            stdout.contains("1 passed"),
+            "the child ran nothing:\n{stdout}"
         );
     }
 

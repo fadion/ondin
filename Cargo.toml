@@ -136,6 +136,11 @@ velopack = "1.2"
 # (`ondin-app`'s `logging`): a release build is a GUI-subsystem binary with no
 # stderr, so a failed update check is answerable only from a file.
 log = "0.4"
+# `localtime_r` and `tm_gmtoff`, for the library's local dates on Linux and macOS
+# (`library::clock::local_offset`, §15 D959) — the Unix half of what `windows-sys`
+# below does on Windows. Already compiled on both through `wgpu-hal`, `dirs` and
+# `velopack` among others, so this declares an edge rather than a tree.
+libc = "0.2"
 # `GetCursorPos`, and nothing else. A Windows file drag carries no position at
 # any point — winit's `IDropTarget` is handed the cursor point by the OS and
 # discards it — so the desktop cursor is the only way that gesture can be aimed

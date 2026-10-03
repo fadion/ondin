@@ -2679,6 +2679,7 @@ dependencies = [
  "egui-wgpu",
  "fontdb",
  "image",
+ "libc",
  "log",
  "ondin-core",
  "ondin-export",

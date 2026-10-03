@@ -776,11 +776,14 @@ impl OndinApp {
 
     /// Brand mark, name, and the Settings door.
     fn dashboard_top_bar(&mut self, ui: &mut egui::Ui, act: &mut Option<Act>) {
+        let chrome = crate::chrome::Chrome::current();
         egui::Panel::top("library-topbar")
             .exact_size(TOP_H)
             .resizable(false)
-            .frame(ui::panel_frame(color::TOPBAR, 14, 0))
+            .frame(crate::chrome::bar_frame(color::TOPBAR, 14.0, chrome))
             .show(ui, |ui| {
+                // The window's title bar, as the editor's is (§15 D952).
+                crate::chrome::drag_strip(ui, crate::chrome::bar_rect(ui, 14.0, chrome));
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 12.0;
                     // The same mark as the editor's, at rest rather than as a
@@ -811,6 +814,9 @@ impl OndinApp {
                     );
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // The window's own buttons first, rightmost (§15 D952).
+                        crate::chrome::caption_buttons(ui, chrome);
+                        crate::chrome::after_buttons(ui, 14.0, 12.0);
                         // ⚠️ **Its own modal, not the editor's.** The two settings
                         // screens answer different questions — where the library
                         // lives and how it opens, against how the editor behaves

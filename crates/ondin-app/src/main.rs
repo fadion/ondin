@@ -32,6 +32,7 @@
 mod app;
 mod atomic;
 mod canvas;
+mod chrome;
 mod cursor;
 mod expr;
 mod fonts;
@@ -624,10 +625,14 @@ fn window_icon() -> eframe::egui::IconData {
 fn run_gui() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         renderer: eframe::Renderer::Wgpu,
-        viewport: eframe::egui::ViewportBuilder::default()
-            .with_inner_size([1200.0, 800.0])
-            .with_title("Ondin")
-            .with_icon(window_icon()),
+        // The system's title bar off, or made transparent on macOS, with the
+        // app drawing what that host leaves to it (`chrome`, §15 D952).
+        viewport: chrome::Chrome::current().viewport(
+            eframe::egui::ViewportBuilder::default()
+                .with_inner_size([1200.0, 800.0])
+                .with_title("Ondin")
+                .with_icon(window_icon()),
+        ),
         ..Default::default()
     };
     eframe::run_native(

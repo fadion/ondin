@@ -2330,6 +2330,11 @@ impl eframe::App for OndinApp {
         self.handle_close_request(&ctx);
         self.close_confirmation(&ctx);
 
+        // The window's resize edges, on a host whose window has none of its own
+        // (§15 D952) — above the view branch, because both screens are the
+        // same window.
+        crate::chrome::resize_zones(&ctx, crate::chrome::Chrome::current());
+
         // ⚠️ **The dashboard returns, and everything below it is the editor.**
         // Not a panel drawn over the canvas and not a branch late in the frame:
         // while the library is up there is no tool, no selection to nudge and no
@@ -7748,11 +7753,16 @@ impl OndinApp {
     /// text session"*. **The whole-tree length ranking cannot see this one** — the
     /// merged run is 44 lines against a floor in the fifties.
     fn top_bar(&mut self, ui: &mut egui::Ui) {
+        let chrome = crate::chrome::Chrome::current();
         egui::Panel::top("topbar")
             .exact_size(TOP_BAR_H)
             .resizable(false)
-            .frame(panel_frame(color::TOPBAR, 14, 0))
+            .frame(crate::chrome::bar_frame(color::TOPBAR, 14.0, chrome))
             .show(ui, |ui| {
+                // The bar is the window's title bar too (§15 D952): its empty
+                // parts drag the window, laid first so every control added below
+                // keeps its own clicks.
+                crate::chrome::drag_strip(ui, crate::chrome::bar_rect(ui, 14.0, chrome));
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
 
@@ -7867,6 +7877,12 @@ impl OndinApp {
                         // rather than as `add_space` between each pair, which is
                         // how a cluster ends up with six nearly-equal gaps.
                         ui.spacing_mut().item_spacing.x = TOP_GAP;
+
+                        // The window's own buttons, hard against the right edge
+                        // where the system's were, then the bar's 14 points of
+                        // margin before its own content (§15 D952).
+                        crate::chrome::caption_buttons(ui, chrome);
+                        crate::chrome::after_buttons(ui, 14.0, TOP_GAP);
 
                         // Rightmost in the cluster, because it is added first into a
                         // `right_to_left` row — which is where the design puts it.

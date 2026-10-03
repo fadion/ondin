@@ -160,6 +160,11 @@ pub(crate) struct Updater {
     state: UpdateState,
     /// The asset a round staged, taken by a click on the chip.
     staged: Option<VelopackAsset>,
+    /// Whether Velopack's updater has been launched and is waiting for this
+    /// process to exit. A close the user then cancels — the unsaved-work
+    /// question answered *Cancel* — leaves the offer standing, and the next
+    /// click must close again rather than do nothing (§15 D954's amendment).
+    handed_over: bool,
     /// `None` for an updater that never checks — a headless app's.
     live: Option<Live>,
 }
@@ -182,6 +187,7 @@ impl Default for Updater {
         Self {
             state: UpdateState::Idle,
             staged: None,
+            handed_over: false,
             live: None,
         }
     }
@@ -221,6 +227,7 @@ impl Updater {
         Self {
             state: UpdateState::Idle,
             staged: None,
+            handed_over: false,
             live: Some(Live {
                 ctx: ctx.clone(),
                 tx,
@@ -269,6 +276,7 @@ impl Updater {
                     // process on the spot and would skip the close request — the
                     // unsaved-work question and the recovery snapshot. The
                     // updater just launched is waiting for this process to go.
+                    self.handed_over = true;
                     live.ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
                 Msg::Handover(Err(e), asset) => {
@@ -295,6 +303,12 @@ impl Updater {
     /// cloned** — a second click while the first is handing over is then a
     /// no-op rather than a second updater racing the first for the same files.
     pub(crate) fn apply(&mut self) {
+        // Handed over already and the close was cancelled: the updater is still
+        // waiting, so the restart is only the close again.
+        if let (Some(live), true) = (&self.live, self.handed_over) {
+            live.ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        }
         let (Some(live), Some(asset)) = (&self.live, self.staged.take()) else {
             return;
         };
@@ -602,6 +616,55 @@ mod tests {
         );
         let (_, idle) = run(&UpdateState::Idle, Vec::new());
         assert!(idle.width() <= 0.0, "nothing drawn while idle: {idle:?}");
+    }
+
+    /// **After the handover, a cancelled close leaves the chip working**: the
+    /// updater launched closes the window, the user cancels at the unsaved-work
+    /// question, the chip still offers the restart — and a click on it closes
+    /// again, rather than finding nothing staged and doing nothing while
+    /// Velopack's updater waits on (§15 D954's amendment, found reading `apply`).
+    ///
+    /// **Flip run**, the `handed_over` arm of `apply` removed: fails on *"the
+    /// second click closes again"*, 0 closes — the predicted site.
+    #[test]
+    fn a_cancelled_close_after_the_handover_leaves_the_restart_working() {
+        let ctx = egui::Context::default();
+        let (tx, rx) = channel();
+        let (progress, _ticks) = channel();
+        let mut u = Updater {
+            state: UpdateState::Ready {
+                version: "0.4.0".into(),
+            },
+            staged: None,
+            handed_over: false,
+            live: Some(Live {
+                ctx: ctx.clone(),
+                tx: tx.clone(),
+                rx,
+                progress,
+                next: None,
+            }),
+        };
+        let closes = |out: egui::FullOutput| {
+            out.viewport_output
+                .get(&egui::ViewportId::ROOT)
+                .map_or(0, |v| {
+                    v.commands
+                        .iter()
+                        .filter(|c| matches!(c, egui::ViewportCommand::Close))
+                        .count()
+                })
+        };
+        tx.send(Msg::Handover(Ok(()), VelopackAsset::default()))
+            .unwrap();
+        let first = closes(ctx.run_ui(Default::default(), |_| u.poll()));
+        assert_eq!(first, 1, "the handover closes the window");
+        assert!(
+            u.state().is_actionable(),
+            "a cancelled close leaves the offer up"
+        );
+        let again = closes(ctx.run_ui(Default::default(), |_| u.apply()));
+        assert_eq!(again, 1, "the second click closes again");
     }
 
     /// A headless app's updater never checks and never stages anything, so a

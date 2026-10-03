@@ -11162,6 +11162,75 @@ mod valve_arm_tests {
              with"
         );
     }
+
+    /// **The leading chord does not rewrite a stored out-of-range line height
+    /// either** (§15 D840, `[X7-L6-02]`) — the tracking test above's twin, on the
+    /// arm beside it, in both units. A stored 1500% (`Em(15.0)`, legal, and a
+    /// file may hold one) is left alone by `Alt`+`↑` and walked back by
+    /// `Alt`+`↓`; so is a stored `Px(300.0)` at 20pt, against a 200 cap.
+    ///
+    /// **Why it is owed**: `a_held_leading_chord_stops_at_the_fields_ends` starts
+    /// at the seeded value and never leaves the range, and inside the range
+    /// `stepped_into` *is* `clamp` — so a bare clamp on either leading arm, the
+    /// repair D840 rejected, left the whole app suite green.
+    ///
+    /// **Flip runs**: the `(Em, Em)` arm a bare `clamp` fails on *"the increase
+    /// key leaves a stored 1500%"* with `Em(10.0)`; the `(Px, Px)` arm a bare
+    /// `clamp` fails on *"and a stored 300px"* with `Px(200.0)` — each the
+    /// predicted site.
+    #[test]
+    fn a_chord_does_not_rewrite_a_stored_out_of_range_leading() {
+        let (_ctx, mut app, id) = app_with_text();
+        app.begin_edit_text(Some(id), None);
+        let leading = |app: &OndinApp| {
+            let subject = TypeSubject::of(app, id).expect("a subject");
+            match subject.shown(CharAttrKind::LineHeight) {
+                CharAttr::LineHeight(v) => v,
+                other => panic!("the line-height slot answered {other:?}"),
+            }
+        };
+        let store = |app: &mut OndinApp, v: Length| {
+            let subject = TypeSubject::of(app, id).expect("a subject");
+            app.apply_char_attrs(&subject, vec![CharAttr::LineHeight(Some(v))]);
+        };
+
+        store(&mut app, Length::Em(15.0));
+        assert_eq!(
+            leading(&app),
+            Some(Length::Em(15.0)),
+            "the fixture must reach the state: a line height well outside the \
+             field's range"
+        );
+        app.text_chord(TextChord::Leading(1));
+        assert_eq!(
+            leading(&app),
+            Some(Length::Em(15.0)),
+            "the increase key leaves a stored 1500% — it asked for more and \
+             there is no more"
+        );
+        app.text_chord(TextChord::Leading(-1));
+        assert!(
+            matches!(leading(&app), Some(Length::Em(v)) if v < 15.0 && v > 10.0),
+            "and the decrease key walks it one step back toward the range, got {:?}",
+            leading(&app)
+        );
+
+        let cap = *Bounds::LINE_HEIGHT.px(20.0).end();
+        assert_eq!(cap, 200.0, "the fixture: 1000% of 20pt");
+        store(&mut app, Length::Px(300.0));
+        app.text_chord(TextChord::Leading(1));
+        assert_eq!(
+            leading(&app),
+            Some(Length::Px(300.0)),
+            "and a stored 300px is left alone by the increase key too"
+        );
+        app.text_chord(TextChord::Leading(-1));
+        assert!(
+            matches!(leading(&app), Some(Length::Px(v)) if v < 300.0 && v > cap),
+            "and walked one step back, got {:?}",
+            leading(&app)
+        );
+    }
 }
 
 #[cfg(test)]

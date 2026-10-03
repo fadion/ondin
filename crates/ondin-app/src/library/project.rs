@@ -113,9 +113,20 @@ fn is_false(b: &bool) -> bool {
 /// Checked with `Path::components` rather than by looking for `/` and `\`,
 /// because that answers the Windows cases a substring search misses: a drive
 /// prefix (`C:\Users\Public`), a UNC root, and `.`/`..` in any position.
+///
+/// 🚨 **And a backslash is refused outright, on every platform** (§15 D967).
+/// `components` answers for the platform it runs on, and on Linux and macOS
+/// `\` is an ordinary character — so `sub\dir`, `C:\Users\Public` and
+/// `\\server\share` were each one `Normal` component there and passed, which
+/// the first CI run off Windows found. Each stays inside the library on that
+/// machine, but the library is a folder the design invites the user to sync,
+/// and the same record read on Windows is a nested path or a drive. A stem is
+/// a name that means one thing everywhere the library goes.
 pub fn is_folder_stem(s: &str) -> bool {
     let mut parts = Path::new(s).components();
-    matches!(parts.next(), Some(std::path::Component::Normal(_))) && parts.next().is_none()
+    !s.contains('\\')
+        && matches!(parts.next(), Some(std::path::Component::Normal(_)))
+        && parts.next().is_none()
 }
 
 impl Project {

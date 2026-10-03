@@ -336,9 +336,11 @@ pub fn unnameable(root: &Path) -> Vec<PathBuf> {
 /// platform.
 ///
 /// ⚠️ **`#[cfg(unix)]` is compiled by nothing on this machine** — only CI's Linux
-/// and macOS legs reach it (§15 D955) — so the arm below is written to be read
-/// rather than trusted until those legs have run it, and the Windows one is what
-/// the measurement behind D809 was taken on.
+/// and macOS legs reach it (§15 D955). **CI's first run, 2026-10-03, ran it**
+/// (§15 D967): Linux accepts the name and every test built on it passed; macOS
+/// does not — APFS answers `EILSEQ`, *Illegal byte sequence*, for a name that is
+/// not UTF-8 — so the case cannot arise there and those tests are `ignore`d on
+/// macOS by name, each carrying the reason.
 ///
 /// Plain backticks throughout: this item is `#[cfg(test)]`, so `cargo doc` never
 /// builds it and an intra-doc link here would resolve against nothing and be
@@ -817,6 +819,10 @@ mod tests {
     /// `unnameable.push` fails at that same assertion with an **empty** left side,
     /// which is the honest tell for the two being different faults.
     #[test]
+    #[cfg_attr(
+        target_os = "macos",
+        ignore = "APFS refuses a name that is not UTF-8, so the case cannot arise (§15 D967)"
+    )]
     fn a_document_with_a_non_unicode_filename_is_not_listed_and_is_reported() {
         let root = temp_root("unnameable");
         write_doc(&root.join("landing-v4.ondin"), named("Landing v4", None));

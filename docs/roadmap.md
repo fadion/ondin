@@ -1444,9 +1444,9 @@ snapping with its labels, §15 D198, D200.)
 
 **Built 2026-10-03 and not yet run** (§15 D952–D957): the window's own chrome, the GUI-subsystem
 build and its console twin, auto-update, CI, the tag-built release and the Linux package
-repositories. Nothing has been pushed, so neither workflow has executed — the first CI run is the
-first compile of most of the tree on Linux or macOS — and the chrome has not been seen on a real
-window. Those are the release skill's first phases and the maintainer's look, not items here.
+repositories. CI first ran on 2026-10-03, compiling the tree on Linux and macOS for the first time
+and failing thirteen times on tests that had only ever run on Windows, all fixed and not yet re-run
+(§15 D967); the Release workflow has not run, and the chrome has not been seen on a real window. Those are the release skill's first phases and the maintainer's look, not items here.
 **Nothing is open here as of 2026-10-03.** The one item — the package repositories had no signing
 key — closed the day it opened: the maintainer generated the key, set both secrets and turned Pages
 on, and its fingerprint is in `install.sh` and `README.md` (§15 D957's second amendment, which has

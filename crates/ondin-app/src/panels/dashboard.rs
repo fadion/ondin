@@ -1179,16 +1179,27 @@ impl OndinApp {
                 .map(|p| (p.id.clone(), p.name.clone(), p.color.clone()))
                 .collect()
         };
+        // 🚨 **Most recently edited first, ties by name** (§15 D967, the
+        // maintainer's ruling). `Library::entries` is in directory-read order,
+        // which is alphabetical on NTFS and not on APFS — so the file matches,
+        // and the document an unsteered `Enter` opens, used to differ by
+        // platform: searching *alp* opened *Alpine* on macOS and *Alpha* on
+        // Windows, which the first CI run off Windows caught. Sorted before the
+        // cap, so the cap keeps the newest rather than whichever the folder
+        // listed first.
         let files: Vec<Entry> = if needle.is_empty() {
             Vec::new()
         } else {
-            self.library
+            let mut found: Vec<Entry> = self
+                .library
                 .entries
                 .iter()
                 .filter(|e| e.display_name().to_lowercase().contains(&needle))
-                .take(SEARCH_MAX)
                 .cloned()
-                .collect()
+                .collect();
+            self.library.sort_entries(&mut found, Sort::Edited);
+            found.truncate(SEARCH_MAX);
+            found
         };
         let rows = recents.len() + projects.len() + files.len();
         if rows == 0 && !needle.is_empty() {
@@ -10356,6 +10367,13 @@ mod tests {
     /// invisible to a probe, because what it costs is the *caret* jumping to the end
     /// of the query inside a widget whose text this test never reads. Recorded
     /// rather than asserted: see §15 D382.
+    ///
+    /// **Flip-check, run: the file matches' `sort_entries` removed** (§15 D967)
+    /// fails on *"the most recently edited document is the one Enter opens"* on
+    /// Windows, where the folder lists *Alpha* first. The tie assertion after it
+    /// is the macOS half: there the folder's order is not by name, and only the
+    /// sort's name tiebreak puts *Alpha* first — so it is the one that would
+    /// fail there without the sort, by reasoning from the CI run, not re-run.
     #[test]
     fn the_search_arrows_move_the_highlight_and_enter_takes_the_row_it_is_on() {
         let ctx = egui::Context::default();
@@ -10406,15 +10424,41 @@ mod tests {
             "a project row opens no document"
         );
 
-        // And with nothing steered, Enter still takes the first document.
-        app.dash.search = Some("alp".into());
-        app.dash.search_row = None;
-        let _ = galleys(&mut app, &ctx);
-        press(&mut app, &ctx, egui::Key::Enter);
+        // And with nothing steered, Enter still takes the first document — the
+        // most recently edited (§15 D967). The stamps are set rather than left to
+        // the two writes above, which can land either side of a second: the
+        // first CI run off Windows had *Alpine* first by directory order alone,
+        // and a test that hoped for one order would have flaked on the other.
+        let stamp = |path: &std::path::Path, secs: u64| {
+            std::fs::File::options()
+                .write(true)
+                .open(path)
+                .unwrap()
+                .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs))
+                .unwrap();
+        };
+        let enter_opens = |app: &mut OndinApp| {
+            app.library.refresh();
+            app.dash.search = Some("alp".into());
+            app.dash.search_row = None;
+            let _ = galleys(app, &ctx);
+            press(app, &ctx, egui::Key::Enter);
+            app.session.path.clone()
+        };
+        // *Alpine* edited later: it is first, though *Alpha* sorts first by name.
+        stamp(&paths[0], 1_700_000_000);
+        stamp(&paths[1], 1_700_086_400);
         assert_eq!(
-            app.session.path.as_deref(),
+            enter_opens(&mut app).as_deref(),
+            Some(paths[1].as_path()),
+            "the most recently edited document is the one Enter opens"
+        );
+        // The same second: the name decides, so no folder's order can.
+        stamp(&paths[1], 1_700_000_000);
+        assert_eq!(
+            enter_opens(&mut app).as_deref(),
             Some(paths[0].as_path()),
-            "which is the rule Enter had before the arrows existed"
+            "and a tie goes to the name, whatever order the folder lists them in"
         );
         let _ = std::fs::remove_dir_all(&root);
     }

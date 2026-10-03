@@ -110,7 +110,9 @@
   above.)
 - Web, mobile. ~~macOS~~ **is a release target since 2026-10-03, Apple Silicon only, at the
   maintainer's direction** (§15 D952, D956) — but nobody developing Ondin has a Mac: CI's macOS leg
-  is its only compiler, and neither it nor the release workflow has yet run (§15 D955).
+  is its only compiler, and neither it nor the release workflow has yet run (§15 D955). CI first ran
+  on 2026-10-03, and its macOS leg failed nine tests that had only ever run on Windows (§15 D967); the
+  release workflow has still not run.
 
 ### Non-goals
 
@@ -12442,7 +12444,10 @@ that project is written outside the library, *Move to project* renames a documen
 permanently, and `rename_folder` — which `fs::rename`s `root.join(old)` with `old` taken straight off
 the file — moves whatever `"../../../Users/<you>/Documents"` names *into* the library under a slug.
 Checked with `Path::components` rather than by looking for separators, so a drive prefix, a UNC root
-and `.`/`..` in any position are all caught. Enforced in `Projects::read`, the single reader — which
+and `.`/`..` in any position are all caught — on Windows. ⚠️ **`components` answers for the platform
+it runs on**, and on Linux and macOS `\` is an ordinary character, so `sub\dir` and `C:\Users\Public`
+passed there as one component — a nested path or a drive once the synced library is read on Windows.
+**Any `\` is refused, on every platform** (§15 D967); `naming::slug` never produces one. Enforced in `Projects::read`, the single reader — which
 is also the door `relocate::merge_projects` adopts another library's records through, so pointing
 *Change base folder* at a received directory is the delivery route and it needs no local attacker. A
 bad value is **dropped rather than refusing the file**, the same trade `DocumentMeta::sanitized` makes:
@@ -12521,8 +12526,9 @@ changed while assuming the other still covers it.
 ⚠️ **There is a third rule and it is a *skip* rather than a filter: a filename that is not valid
 Unicode cannot be an `Entry`** (§15 D809). `file_name().to_str()` answers `None` for it — reproduced on
 this machine, a lone UTF-16 surrogate being a legal code unit that is not a scalar value, which
-`std::fs::write` accepts on NTFS — and there is no honest label to draw for a name that is not text, so
-the document stays out of the list. **What it must not do is stay behind.** `scan::unnameable(root)`
+`std::fs::write` accepts on NTFS, as Linux accepts bytes that are not UTF-8; macOS's APFS refuses such
+a name (`EILSEQ`), so there the case cannot arise (§15 D967) — and there is no honest label to draw for
+a name that is not text, so the document stays out of the list. **What it must not do is stay behind.** `scan::unnameable(root)`
 reports those paths, running the **same `collect`** as the scan so the two cannot come to disagree
 about either rule above, and `library::relocate` carries each across by its own `OsStr` name: no
 re-derivation, there being no `&str` to derive from, and so a name already taken at the destination is
@@ -12570,8 +12576,8 @@ year-by-year rules hang off the zone's registry key, so a stamp from last July a
 come back an hour apart as they should. The relative labels beside it ("2h ago", "Yesterday") are
 differences between two instants and have no timezone in them at all. **Linux and macOS convert as
 well since §15 D959**: `localtime_r`'s `tm_gmtoff` is the offset for that instant from the tz
-database, in the zone `TZ` or `/etc/localtime` names — never yet compiled, and not verified until
-CI's Linux and macOS legs are green. On any other host the offset is zero, i.e. UTC, which is what
+database, in the zone `TZ` or `/etc/localtime` names — compiled by CI's first run on both, and its
+test passing there (§15 D967). On any other host the offset is zero, i.e. UTC, which is what
 every date in the app read until 2026-08-28.
 
 ⚠️ **A record that could not be read is never written over by the defaults that read produced** (§15
@@ -12768,7 +12774,10 @@ directory-wide sweep on `*.writing` alone would delete a user's own `draft.writi
 folder.
 ⚠️ **The other direction of that promise is the one nothing asserted until §15 D480**: a write that
 fails leaves the destination holding the complete old contents and takes its temp file with it, and
-`a_failed_write_leaves_the_old_file_intact` is where that is pinned. ⚠️ **"That fails" means at any of
+`a_failed_write_leaves_the_old_file_intact` is where that is pinned — **on Windows**: a read-only
+destination refuses a rename there and not on Unix, where the directory governs it, so on Linux and
+macOS the test refuses the temp's creation through a read-only directory and never reaches the rename
+(§15 D967). ⚠️ **"That fails" means at any of
 the four steps, and until 2026-09-09 it meant the rename alone** (§15 D706): the cleanup sat in the
 `rename` error arm, so a failure at `File::create`, `write_all` or `sync_all` returned through `?` and
 left the temp — **and disk-full, the reason the cleanup exists, surfaces at `write_all`**. It is one
@@ -13035,7 +13044,10 @@ threw the keyboard cursor away, leaving the next `Enter` or `Delete` doing nothi
 says the overlay closes *instead*, and this was the one row the code disagreed with. ⚠️ **`DashboardState::search_row` distinguishes `None` from `Some(0)`**:
 unsteered, the highlight sits on the first *document* match, which is where `Enter` has always gone, and
 the recents and project groups above it change length as the query does — so the default is recomputed
-rather than remembered.
+rather than remembered. **The file matches are most recently edited first, ties by name** (§15 D967,
+the maintainer's ruling) — `Library::sort_entries` with `Sort::Edited`, applied **before** the
+`SEARCH_MAX` cap so the cap keeps the newest. Until 2026-10-04 they were in directory-read order, by
+name on NTFS and not on APFS, so the document `Enter` opened differed by platform.
 
 **A modal marks the focused control only once a key has moved the focus (§15 D382)** — CSS's
 `:focus-visible`, which egui has no equivalent of. `ui::focus_ring` paints an accent hairline
@@ -13211,7 +13223,9 @@ tool list, no handlers, no socket.
 **M0 — Scaffold.** Five crates compile with module stubs, trait signatures, dependency rules.
 Versions pinned (verify §2 table against latest). CI: build + clippy + fmt + forbidden-dep check.
 ✅ `cargo build` + `cargo test` green. ⚠️ **The CI half was not built until 2026-10-03** (§15 D955) —
-every gate until then a hand run on one Windows machine — and it has not yet run.
+every gate until then a hand run on one Windows machine. It first ran on 2026-10-03 (§15 D967): lint
+green, and the three test legs red on thirteen failures, every one a test that had only ever run on
+Windows — fixed, and not yet re-run.
 
 **M1 — Core model + ops + history + IO.** §5 minus Resolved. Includes the Text node model (layout
 comes in M2).
@@ -13264,7 +13278,9 @@ live on the canvas, participate in shared undo, and survive save/load.
   committing, not a rubber stamp. The fixture is that file's own, not the shared `common::fixture()`,
   which covers eight kinds and carries two dozen substring assertions; an exhaustive `match` over
   `NodeKind` breaks the compile when a variant is added. `.gitattributes` marks the directory `-text`
-  so a checkout cannot fail the comparison on line endings. Every *other* export test still asserts on
+  so a checkout cannot fail the comparison on line endings, and pins every `.rs` to LF, because
+  `goldens.rs` and `theme.rs` each have a test that splits its own source on `"\n}\n"` — a CRLF
+  checkout failed the second on CI's Windows runner (§15 D967). Every *other* export test still asserts on
   substrings and in-process measurements, which is what the goldens are there to complement: they
   catch a value that merely *changed*. ⚠️ **The complement has a shape worth naming, and one day in
   2026-09-08 showed both halves of it.** §15 D593 made SVG export linear in its def count and changed

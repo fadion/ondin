@@ -14,3 +14,11 @@ crates/ondin-export/tests/goldens/** -text
 *.xml text eol=lf
 *.yml text eol=lf
 *.in text eol=lf
+
+# Rust sources, because some tests read their own source (`include_str!` in
+# `theme.rs`'s icon catalogue test and `goldens.rs`' arm scan) and split it on
+# `"\n}\n"`-shaped markers. GitHub's Windows runners check out with
+# `core.autocrlf=true`, which gave the catalogue test a CRLF `theme.rs` and a
+# brace it could not find — the first CI run, 2026-10-03 (§15 D967). The blobs
+# are LF already, so this changes no file, only what a checkout writes.
+*.rs text eol=lf

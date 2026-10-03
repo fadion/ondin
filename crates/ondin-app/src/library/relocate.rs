@@ -1015,6 +1015,10 @@ mod tests {
     /// Ordering the loss before the tally is what puts the right sentence in the
     /// failure message.
     #[test]
+    #[cfg_attr(
+        target_os = "macos",
+        ignore = "APFS refuses a name that is not UTF-8, so the case cannot arise (§15 D967)"
+    )]
     fn a_document_with_a_non_unicode_filename_is_carried_across_and_counted() {
         let from = temp("odd-name-from");
         let to = temp("odd-name-to");
@@ -1078,6 +1082,10 @@ mod tests {
     /// migration is ever asked; its `!hidden` term removed fails at *"the hidden
     /// one is not a project"*, with `stray` in the listing.
     #[test]
+    #[cfg_attr(
+        target_os = "macos",
+        ignore = "APFS refuses a name that is not UTF-8, so the case cannot arise (§15 D967)"
+    )]
     fn a_document_in_a_non_unicode_project_folder_is_carried_across_and_counted() {
         let from = temp("odd-folder-from");
         let to = temp("odd-folder-to");
@@ -1141,6 +1149,10 @@ mod tests {
     /// predicting the wrong site. **Flip-check, run**: the `target.exists()` term
     /// removed fails at *"the file already there is untouched"*.
     #[test]
+    #[cfg_attr(
+        target_os = "macos",
+        ignore = "APFS refuses a name that is not UTF-8, so the case cannot arise (§15 D967)"
+    )]
     fn an_unnameable_file_does_not_overwrite_one_already_at_the_destination() {
         let from = temp("odd-collide-from");
         let to = temp("odd-collide-to");
@@ -1186,6 +1198,10 @@ mod tests {
     /// **Flip-check, run**: the `Some(None)` arm restored to dropping the
     /// extension fails at *"a bad extension is not dropped"*.
     #[test]
+    #[cfg_attr(
+        target_os = "macos",
+        ignore = "APFS refuses a name that is not UTF-8, so the case cannot arise (§15 D967)"
+    )]
     fn a_trash_collision_on_a_name_that_is_not_text_keeps_the_file_findable() {
         let from = temp("odd-trash-from");
         let to = temp("odd-trash-to");

@@ -362,6 +362,54 @@ mod tests {
         dir
     }
 
+    /// Make `write(path, …)` fail, the way each platform refuses a replace —
+    /// and `unlock` undoes it, before the cleanup.
+    ///
+    /// 🚨 **Not the same fixture on both, and it was one until CI first ran
+    /// off Windows** (2026-10-03, §15 D967). On Windows a read-only
+    /// *destination* refuses the rename. On Linux and macOS it does not: a
+    /// rename is governed by the **directory's** write permission, and
+    /// replacing a read-only file that way is how editors there have always
+    /// saved — so the read-only fixture let the write through and both tests
+    /// failed. There the directory is made read-only instead, which refuses the
+    /// temp file's creation, a step earlier. ⚠️ **Root ignores both**, so these
+    /// tests assume an ordinary user, which every CI runner is.
+    fn lock(path: &Path) {
+        #[cfg(windows)]
+        {
+            let mut perms = std::fs::metadata(path).unwrap().permissions();
+            perms.set_readonly(true);
+            std::fs::set_permissions(path, perms).unwrap();
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let dir = path.parent().unwrap();
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        }
+    }
+
+    /// Undo `lock`: the file writable again on Windows, the directory on
+    /// Linux and macOS, so the temp root can be removed.
+    fn unlock(path: &Path) {
+        #[cfg(windows)]
+        // `set_readonly(false)` is what clippy warns about — it grants
+        // *everyone* write on Unix — and this arm is Windows', where the flag is
+        // one bit on a file this test made.
+        #[allow(clippy::permissions_set_readonly_false)]
+        {
+            let mut perms = std::fs::metadata(path).unwrap().permissions();
+            perms.set_readonly(false);
+            std::fs::set_permissions(path, perms).unwrap();
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let dir = path.parent().unwrap();
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+
     /// A write replaces the file, leaves no temp behind, and makes the parent
     /// directory it needs.
     ///
@@ -647,13 +695,20 @@ mod tests {
     /// green, and every save then has a window in which the user's document does
     /// not exist at all.
     ///
-    /// **Read-only is the lock, because it is portable and it is one line.** The
+    /// **Read-only is the lock on Windows, where it is one line.** The
     /// destination is made read-only, so the rename onto it is refused; the
     /// alternative measured for `[S1.2-L6-05]` — holding the file open with
     /// `share_mode(FILE_SHARE_READ)`, no `DELETE` — produces the same
-    /// `PermissionDenied` and needs `std::os::windows`.
+    /// `PermissionDenied` and needs `std::os::windows`. 🚨 **It was called
+    /// portable here and is not** (§15 D967): on Linux and macOS a read-only file
+    /// is replaced by a rename like any other, so `lock` makes the *directory*
+    /// read-only there, which refuses the temp file's `create` — and the rename,
+    /// and every flip aimed at it, is then never reached. **On Linux and macOS
+    /// this test only shows that a refused create leaves the old file whole**;
+    /// the headline promise below is pinned on Windows alone.
     ///
-    /// ⚠️ **Flip-check, run: `let _ = std::fs::remove_file(path);` inserted above
+    /// ⚠️ **Flip-check, run (on Windows; it cannot bite elsewhere, the rename
+    /// being unreached): `let _ = std::fs::remove_file(path);` inserted above
     /// the `rename`.** Fails on the content assertion with `NEW` against `OLD`,
     /// and **both tests above stay green** — which is the measurement that says
     /// this test is not a restatement of them.
@@ -687,9 +742,7 @@ mod tests {
         let path = root.join("doc.ondin");
         write(&path, b"OLD").unwrap();
 
-        let mut perms = std::fs::metadata(&path).unwrap().permissions();
-        perms.set_readonly(true);
-        std::fs::set_permissions(&path, perms).unwrap();
+        lock(&path);
 
         let result = write(&path, b"NEW");
         assert_eq!(
@@ -711,26 +764,23 @@ mod tests {
         // one** (§15 D706). The cleanup used to live in the `rename` error arm,
         // which is the arm this fixture stages; it is a common `if
         // result.is_err()` now, so `File::create`, `write_all` and `sync_all`
-        // are covered by construction. **They are not covered by a test, and
-        // saying so is the point** — a read-only *destination* is the only
-        // failure this module can stage portably, and the three earlier arms
-        // want a full disk or a revoked ACL. Writable-with-difficulty rather
-        // than written, which is a queue rather than a fact.
+        // are covered by construction. **On Windows they are not covered by a
+        // test, and saying so is the point** — a read-only *destination* is the
+        // failure staged there, and the three earlier arms want a full disk or a
+        // revoked ACL. Writable-with-difficulty rather than written, which is a
+        // queue rather than a fact. ⚠️ **On Linux and macOS it is the reverse**
+        // (§15 D967): `lock`'s read-only directory refuses the `File::create`
+        // arm and never reaches the rename.
         //
         // ⚠️ **Flip, run:** disabling the cleanup fails this line, and this line
         // alone — the content and `is_err` assertions above stay green, which is
         // what says the temp-file question is asked here and nowhere else.
 
-        // Clear the flag before the cleanup. `set_readonly(false)` is what clippy
-        // warns about — it grants *everyone* write on Unix — and it is right about
-        // production code and wrong about a temp file this test made two lines ago
-        // on a platform where the flag is one bit.
-        #[allow(clippy::permissions_set_readonly_false)]
-        {
-            let mut perms = std::fs::metadata(&path).unwrap().permissions();
-            perms.set_readonly(false);
-            std::fs::set_permissions(&path, perms).unwrap();
-        }
+        // ⚠️ **On Linux and macOS this line cannot fail**: `lock` refuses the
+        // temp file's creation there, so no temp ever exists to be left, and the
+        // flip above bites on Windows only.
+
+        unlock(&path);
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -773,15 +823,18 @@ mod tests {
     /// as unattributable as it was. *A sketch written against the mechanism that
     /// was reachable when it was written is not a sketch of the fix once another
     /// entry has closed that mechanism.*
+    ///
+    /// ⚠️ **That flip bites on Windows only** (§15 D967). On Linux and macOS
+    /// `lock` refuses the temp file's *creation*, whose error names the temp —
+    /// `doc.ondin.<pid>-<n>.writing`, which carries the destination's name — so
+    /// the assertions hold there on the `create` arm and never reach the rename.
     #[test]
     fn a_refused_write_names_the_file_it_could_not_write() {
         let root = temp_root("named-error");
         let path = root.join("doc.ondin");
         write(&path, b"OLD").unwrap();
 
-        let mut perms = std::fs::metadata(&path).unwrap().permissions();
-        perms.set_readonly(true);
-        std::fs::set_permissions(&path, perms).unwrap();
+        lock(&path);
 
         let err = write(&path, b"NEW").expect_err("the fixture has to refuse the write");
         let text = err.to_string();
@@ -796,12 +849,7 @@ mod tests {
              wants to classify this cannot"
         );
 
-        #[allow(clippy::permissions_set_readonly_false)]
-        {
-            let mut perms = std::fs::metadata(&path).unwrap().permissions();
-            perms.set_readonly(false);
-            std::fs::set_permissions(&path, perms).unwrap();
-        }
+        unlock(&path);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -47,9 +47,12 @@ because the previous run's output is never read.
 
 ## One-time setup
 
-**Nothing here works until this is done**, and the failure is loud on purpose:
+**Done on 2026-10-03** — the key exists, both secrets are set, Pages is on, and
+the fingerprint (`456BA115B1DA8E1DBF93299454AC6F3C915023EA`) is in both files.
+The steps stay here because they are also the procedure for **rotating** the
+key. Without them nothing here works, and the failure is loud on purpose:
 `pages.yml` refuses to publish without the key, and `install.sh` refuses its
-repository routes while it still carries the placeholder fingerprint.
+repository routes while it carries anything but a fingerprint.
 
 ### 1. The signing key
 

@@ -62,19 +62,18 @@ KEYRING="/usr/share/keyrings/ondin-archive-keyring.gpg"
 # rpm uninstall instructions end in `rpm -e gpg-pubkey-<id>`, derived from
 # this constant so the two cannot drift.
 #
-# **PLACEHOLDER — replace before the repositories are announced.** Ondin has
-# no repository signing key yet. Once the maintainer generates one
-# (packaging/repo/README.md, "The signing key"), its 40-hex fingerprint goes on
-# this line, in exactly this form and with nothing after the quote — pages.yml
-# matches the whole line — and on a line of its own in the top-level README.md.
-# Until then `require_fingerprint_configured` refuses the apt and dnf routes
-# outright rather than install a key nothing has checked, and pages.yml refuses
-# to publish the site.
+# **The repository signing key's fingerprint**, generated 2026-10-03
+# (packaging/repo/README.md, "The signing key"; §15 D957). It sits on this
+# line in exactly this form, with nothing after the quote — pages.yml matches
+# the whole line — and on a line of its own in the top-level README.md. While
+# this held a placeholder, `require_fingerprint_configured` refused the apt and
+# dnf routes outright rather than install a key nothing had checked, and it
+# still refuses anything that is not forty upper-case hex digits.
 #
 # **Rotating the key means editing this constant and README.md's copy together**,
 # and saying so in the release notes: an installed machine keeps the old key
 # until someone re-runs this. `packaging/repo/README.md` carries that procedure.
-KEY_FINGERPRINT="REPLACE_WITH_THE_REPOSITORY_KEY_FINGERPRINT"
+KEY_FINGERPRINT="456BA115B1DA8E1DBF93299454AC6F3C915023EA"
 
 if [ -t 1 ]; then
     RED=$'\033[0;31m'

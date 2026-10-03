@@ -206,9 +206,10 @@ jobs:
       # After the build rather than beside the step above, because the built
       # value is what there is to compare against.
       #
-      # Until the maintainer writes the fingerprint into README.md and
-      # install.sh (packaging/repo/README.md, "The fingerprint, in exactly two
-      # files"), this step fails every publish. That is intended.
+      # Both copies were written on 2026-10-03, when the key was generated
+      # (packaging/repo/README.md, "The fingerprint, in exactly two files").
+      # A rotation that misses either fails this step, and the publish with
+      # it. That is intended.
       - name: Check the published key fingerprint agrees with the README
         run: |
           set -euo pipefail

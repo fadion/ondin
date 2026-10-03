@@ -119,7 +119,7 @@ The first `dnf install` asks to import the signing key. Check that it matches
 this fingerprint before you accept:
 
 ```
-REPLACE_WITH_THE_REPOSITORY_KEY_FINGERPRINT
+456BA115B1DA8E1DBF93299454AC6F3C915023EA
 ```
 
 #### Release files

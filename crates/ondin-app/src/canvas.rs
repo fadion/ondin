@@ -24012,6 +24012,48 @@ mod flex_canvas_tests {
         frame(ctx, app, Vec::new());
     }
 
+    /// `drag` with Alt held from the press to the release — an Alt-drag, which
+    /// carries a copy and leaves the original (§15 D40). Alt is held as a
+    /// modifier on every frame's input, as egui reports it, and let go on the
+    /// frame after the release.
+    fn alt_drag(ctx: &egui::Context, app: &mut OndinApp, from: Point, to: Point) {
+        let alt = egui::Modifiers {
+            alt: true,
+            ..Default::default()
+        };
+        let held = |ctx: &egui::Context, app: &mut OndinApp, events: Vec<egui::Event>| {
+            let time = ctx.input(|i| i.time) + 0.1;
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(RECT),
+                    time: Some(time),
+                    modifiers: alt,
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.canvas_ui(ui),
+            );
+        };
+        let press = |at: egui::Pos2, pressed: bool| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: alt,
+        };
+        let at = |app: &OndinApp, w: Point| app.to_screen(w, RECT, PPP);
+        let start = at(app, from);
+        held(ctx, app, vec![egui::Event::PointerMoved(start)]);
+        held(ctx, app, vec![press(start, true)]);
+        for step in 1..=8 {
+            let w = from + (to - from) * (step as f64 / 8.0);
+            let p = at(app, w);
+            held(ctx, app, vec![egui::Event::PointerMoved(p)]);
+        }
+        let end = at(app, to);
+        held(ctx, app, vec![press(end, false)]);
+        frame(ctx, app, Vec::new());
+    }
+
     /// **A click selects a flex item where it is drawn, and nothing at the place
     /// it is stored.** A press and release on `a`'s drawn centre selects `a`; one on
     /// its stored place, (320, 165), selects nothing — the frame's empty interior,
@@ -25085,6 +25127,182 @@ mod flex_canvas_tests {
                 ondin_core::kurbo::Rect::new(-200.0, -200.0, 400.0, 400.0)
             ),
             "and one around it all"
+        );
+    }
+
+    /// A 200 × 100 row at the origin holding two 50 × 30 rects, `a` then `b`,
+    /// laid at x 0 and 50; `a` selected.
+    fn two_in_a_row(ctx: &egui::Context, seed: u64) -> (OndinApp, NodeId, NodeId, NodeId, NodeId) {
+        let mut ids = IdSource::new(seed);
+        let (root, row, a, b) = (ids.mint(), ids.mint(), ids.mint(), ids.mint());
+        let mut app = canvas_over(
+            ctx,
+            root,
+            vec![
+                frame_op(row, root, 0, 200.0, 100.0, Affine::IDENTITY),
+                rect_op(a, row, 0, 50.0, 30.0),
+                rect_op(b, row, 1, 50.0, 30.0),
+                Operation::SetDisplay {
+                    id: row,
+                    display: Some(Display::Flex(Flex {
+                        align_items: AlignItems::Start,
+                        ..Default::default()
+                    })),
+                },
+            ],
+            Point::new(100.0, 100.0),
+        );
+        app.session.selection.set(vec![a]);
+        (app, root, row, a, b)
+    }
+
+    /// **A lone in-flow item pressed inside its container leaves it when the
+    /// pointer does, and stays while the pointer is in** (§15 D926, D950 — the
+    /// case D944 recorded as untested): `a` pressed at its centre and dragged 45
+    /// down stays in the row, first, the pointer still inside the 100-tall row;
+    /// dragged to (100, 250), well below it, it lands on the root.
+    ///
+    /// **Flip run**, `pointer_in` answering `true` whatever the point: fails on
+    /// *"dragged clear, it leaves"* with the row — the predicted site.
+    #[test]
+    fn a_lone_item_pressed_inside_leaves_when_the_pointer_does() {
+        let ctx = fresh();
+        let (mut app, _root, row, a, b) = two_in_a_row(&ctx, 0xBD);
+        drag(
+            &ctx,
+            &mut app,
+            Point::new(25.0, 15.0),
+            Point::new(25.0, 60.0),
+        );
+        assert_eq!(
+            app.session.doc.get(row).unwrap().children(),
+            &[a, b],
+            "pointer inside: it stays, first"
+        );
+
+        let ctx = fresh();
+        let (mut app, root, _row, a, _b) = two_in_a_row(&ctx, 0xBD);
+        drag(
+            &ctx,
+            &mut app,
+            Point::new(25.0, 15.0),
+            Point::new(100.0, 250.0),
+        );
+        assert_eq!(
+            app.session.doc.get(a).unwrap().parent(),
+            Some(root),
+            "dragged clear, it leaves"
+        );
+    }
+
+    /// **An Alt-drag of an in-flow item leaves the original in its slot and puts
+    /// the copy where a move would put the item** (§15 D40, D926, D950 — the
+    /// other case D944 recorded as untested): the copy of `a` dragged 45 down
+    /// joins the row just after `a`, the pointer still in it; dragged clear, the
+    /// copy lands on the root and `a` keeps its slot.
+    ///
+    /// **Flip run**, `clone_tx` placing every copy in its source's parent (no
+    /// `move_destination`): predicted to fail on *"the copy dragged clear lands
+    /// on the root"*, and fails one assertion sooner, on *"the original keeps its
+    /// slot"* — the copy sitting in the row beside it, three children.
+    #[test]
+    fn an_alt_drag_copies_an_in_flow_item_where_a_move_would_put_it() {
+        let ctx = fresh();
+        let (mut app, root, row, a, b) = two_in_a_row(&ctx, 0xBE);
+        alt_drag(
+            &ctx,
+            &mut app,
+            Point::new(25.0, 15.0),
+            Point::new(25.0, 60.0),
+        );
+        let children = app.session.doc.get(row).unwrap().children().to_vec();
+        assert_eq!(children.len(), 3, "a copy in the row: {children:?}");
+        assert_eq!(
+            (children[0], children[2]),
+            (a, b),
+            "the copy just after a, a in its slot"
+        );
+        assert_eq!(
+            app.session.doc.get(root).unwrap().children(),
+            &[row],
+            "nothing on the root"
+        );
+
+        let ctx = fresh();
+        let (mut app, root, row, a, b) = two_in_a_row(&ctx, 0xBE);
+        alt_drag(
+            &ctx,
+            &mut app,
+            Point::new(25.0, 15.0),
+            Point::new(100.0, 250.0),
+        );
+        assert_eq!(
+            app.session.doc.get(row).unwrap().children(),
+            &[a, b],
+            "the original keeps its slot"
+        );
+        assert_eq!(
+            app.session.doc.get(root).unwrap().children().len(),
+            2,
+            "the copy dragged clear lands on the root"
+        );
+    }
+
+    /// **An Alt-drag's copy kept in a grid is laid into a cell on release**
+    /// (§15 D950, measuring what `architecture.md` §6.2 had only read): a 300 ×
+    /// 100 frame laid as three `100px` columns holds `a` in the first cell; its
+    /// copy dragged 20 right and 10 down stays in the grid — the pointer is in it
+    /// — and is auto-placed into the next cell, drawn from x 100, not where it
+    /// was dropped. A ghost is not in the layout's tree, so the preview showed it
+    /// at the pointer; the release is what places it.
+    ///
+    /// The drop alone would put the copy at (20, 10), `a`'s place carried by the
+    /// drag, so *"auto-placed after a"* at (100, 0) tells the laid copy from the
+    /// dropped one by itself. **Flip run**, `clone_tx`'s insert index forced to 0
+    /// (the copy before `a`): predicted to fail on *"auto-placed after a"*, and
+    /// fails one assertion sooner, on *"a first"*.
+    #[test]
+    fn an_alt_drag_copy_kept_in_a_grid_is_laid_into_a_cell_on_release() {
+        let ctx = fresh();
+        let mut ids = IdSource::new(0xBF);
+        let (root, grid, a) = (ids.mint(), ids.mint(), ids.mint());
+        let mut app = canvas_over(
+            &ctx,
+            root,
+            vec![
+                frame_op(grid, root, 0, 300.0, 100.0, Affine::IDENTITY),
+                rect_op(a, grid, 0, 40.0, 40.0),
+                Operation::SetDisplay {
+                    id: grid,
+                    display: Some(Display::Grid(ondin_core::container::Grid {
+                        columns: ondin_core::container::parse_tracks("100px 100px 100px").unwrap(),
+                        ..Default::default()
+                    })),
+                },
+            ],
+            Point::new(150.0, 50.0),
+        );
+        app.session.selection.set(vec![a]);
+        alt_drag(
+            &ctx,
+            &mut app,
+            Point::new(20.0, 20.0),
+            Point::new(40.0, 30.0),
+        );
+        let children = app.session.doc.get(grid).unwrap().children().to_vec();
+        assert_eq!(children.len(), 2, "the copy in the grid: {children:?}");
+        assert_eq!(children[0], a, "a first");
+        let copy = children[1];
+        let at = app.session.resolved.world_bounds(copy).unwrap();
+        assert_eq!(
+            (at.x0, at.y0),
+            (100.0, 0.0),
+            "auto-placed after a, in the second cell"
+        );
+        assert_eq!(
+            app.session.resolved.world_bounds(a).unwrap().x0,
+            0.0,
+            "a where it was"
         );
     }
 }

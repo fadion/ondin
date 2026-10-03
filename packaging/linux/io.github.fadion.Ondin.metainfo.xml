@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AppStream metadata: what GNOME Software and KDE Discover render for an
+  installed .deb or .rpm. Without it Ondin appears in a software centre as a
+  bare package name, with no icon or summary.
+
+  The reverse-DNS id follows the convention for a project with no domain of its
+  own: io.github.<owner>.<App>. It is also what Flathub would require, so
+  choosing it now costs nothing and keeps that door open. It must stay in step
+  with the .desktop file's name, the installed icon's name and the window's own
+  app id (`chrome::APP_ID`); the <launchable> below is the link between the
+  first two.
+
+  The <release> line is rewritten at package time by stage-payload.sh, which
+  both the .deb and the .rpm are built through, so the version here only has to
+  be valid, not current. Keep it in exactly this one-line form: the rewrite is a
+  `sed` over it, and stage-payload.sh refuses a payload where it matched nothing.
+-->
+<component type="desktop-application">
+  <id>io.github.fadion.Ondin</id>
+
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+
+  <name>Ondin</name>
+  <summary>Native 2D design tool with a GPU canvas and CSS-style layout</summary>
+
+  <developer id="io.github.fadion">
+    <name>Ondin contributors</name>
+  </developer>
+
+  <description>
+    <p>
+      Ondin is a native, open-source 2D design tool written in Rust. Multiple
+      artboards sit on an infinite, GPU-rendered canvas, holding a nested tree
+      of frames, shapes, paths and rich text.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Frames, shapes, paths and rich text in a nested layer tree</li>
+      <li>Boolean operations and masks</li>
+      <li>Multiple fills and strokes per layer, and a stack of effects</li>
+      <li>Flexbox and CSS grid layout for a frame's children</li>
+      <li>A project library that keeps documents together</li>
+      <li>SVG and PNG export</li>
+    </ul>
+    <p>
+      Ondin is early in its development: the v1 feature list is not complete.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">io.github.fadion.Ondin.desktop</launchable>
+
+  <url type="homepage">https://github.com/fadion/ondin</url>
+  <url type="bugtracker">https://github.com/fadion/ondin/issues</url>
+  <url type="vcs-browser">https://github.com/fadion/ondin</url>
+
+  <!--
+    No <screenshots> yet: Ondin has no screenshot checked in to point at. A
+    software centre shows the listing without one; add a <screenshot> here
+    (an absolute raw.githubusercontent.com URL to a PNG on `main`) once there is.
+  -->
+
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="0.3.0" date="2026-10-03"/>
+  </releases>
+</component>

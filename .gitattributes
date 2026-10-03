@@ -3,3 +3,14 @@
 # `core.autocrlf=true` fails the comparison for a reason that has nothing to do
 # with the exporter.
 crates/ondin-export/tests/goldens/** -text
+
+# Scripts and packaging metadata run or parsed on Linux and macOS (§15 D956):
+# LF whatever the checkout's `core.autocrlf`, or a CRLF `install.sh` piped into
+# bash fails on its first line, and a CRLF `.desktop` or spec is refused.
+*.sh text eol=lf
+*.py text eol=lf
+*.spec text eol=lf
+*.desktop text eol=lf
+*.xml text eol=lf
+*.yml text eol=lf
+*.in text eol=lf

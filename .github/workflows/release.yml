@@ -1,0 +1,399 @@
+name: Release
+
+# Fires on a version tag (§15 D956):
+#     git tag v0.4.0
+#     git push origin v0.4.0
+# Builds Ondin on Windows, Linux and macOS and attaches to the tag's GitHub
+# Release (created if it does not exist yet):
+#
+# - the self-updating installers Velopack builds — `Ondin-win-x64-Setup.exe`,
+#   `Ondin-linux-x64.AppImage`, `Ondin-osx-arm64-Setup.pkg` and `.dmg` — with the
+#   `.nupkg` and `releases.<channel>.json` feed every installed copy polls;
+# - portable archives, a `.zip` for Windows and a `.tar.gz` for Linux, which do
+#   not update themselves;
+# - a `.deb` and an `.rpm`, which the apt and dnf repositories on GitHub Pages
+#   carry forward (`pages.yml`, called at the end).
+#
+# Ported from Schemaic's `release.yml`, which has shipped through many releases;
+# the reasons below are its, kept because each one was paid for.
+#
+# `workflow_dispatch` runs everything *except* the publish steps, which are gated
+# on `github.ref_type == 'tag'`: a tag is the expensive way to discover a
+# packaging mistake, and a manual run builds and packs every leg with nothing at
+# stake.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+# The workflow creates the Release and uploads to it.
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    name: Release (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # `channel` is Velopack's, and **explicit and unique per os/rid**: left
+          # to its default, two platforms would each emit
+          # `Ondin-<version>-full.nupkg`, which two jobs cannot both upload to one
+          # Release — and worse, `GithubSource` resolves a package by file name
+          # across the Release's assets, so a Linux client could be handed the
+          # Windows package. Naming the channel puts it in every file name.
+          # **A channel is app identity: renaming one orphans every install.**
+          - os: ubuntu-latest
+            target: linux-x86_64
+            channel: linux-x64
+          - os: windows-latest
+            target: windows-x86_64
+            channel: win-x64
+          # Apple Silicon only. Intel Macs would need a channel of their own
+          # (`osx-x64`), which is why this one says `arm64`.
+          - os: macos-latest
+            target: macos-arm64
+            channel: osx-arm64
+    steps:
+      - uses: actions/checkout@v5
+
+      # The only guard a channel name has. Nothing in the Rust tree names one —
+      # `update.rs` leaves Velopack's `UpdateOptions` unset — so `cargo test`
+      # never sees these strings. It catches a typo, or a rename of a shipped
+      # channel in the matrix above; it cannot catch both edited together, and
+      # that friction is the point. Adding a platform: add its name here too.
+      - name: Check the Velopack channel is a known name
+        shell: bash
+        env:
+          CHANNEL: ${{ matrix.channel }}
+        run: |
+          set -euo pipefail
+          case "$CHANNEL" in
+            win-x64 | linux-x64 | osx-arm64) ;;
+            *)
+              echo "::error::Unknown Velopack channel '$CHANNEL'. Renaming a shipped channel orphans every install on it. Add a name for a new platform; never rename an existing one."
+              exit 1
+              ;;
+          esac
+
+      # The version every leg packs with, resolved once. **The tag and
+      # `[workspace.package] version` must agree**: the packages are named from
+      # the tag and the binary inside reports Cargo.toml, so tagging without the
+      # bump would publish a v$v installer around a binary that says otherwise.
+      # Without a tag (a dry run) the workspace version is packed.
+      - name: Resolve the package version
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo_v="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            v="${GITHUB_REF_NAME#v}"
+            if [ "$v" != "$cargo_v" ]; then
+              echo "::error::Tag v$v does not match [workspace.package] version $cargo_v in Cargo.toml. Bump the workspace version and re-tag."
+              exit 1
+            fi
+          else
+            v="$cargo_v"
+            echo "::notice::No tag; packing the workspace version $v as a dry run"
+          fi
+          echo "VPK_VERSION=$v" >> "$GITHUB_ENV"
+
+      # Bounded and retried (see `ci.yml`): a stalled mirror never fails on its
+      # own, and here a wedged job holds up a release halfway out the door.
+      # `rpm` provides `rpmbuild` for `packaging/linux/build-rpm.sh`; the spec
+      # compiles nothing, so a Debian-hosted rpmbuild is enough.
+      - name: Install Linux GUI build dependencies
+        if: runner.os == 'Linux'
+        timeout-minutes: 8
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if sudo timeout 120 apt-get update -o Acquire::Retries=3; then
+              break
+            fi
+            echo "::warning::apt-get update stalled or failed (attempt $attempt of 3), retrying"
+            sleep 5
+          done
+          sudo timeout 300 apt-get install -y libxkbcommon-dev libwayland-dev libxcb1-dev libx11-dev pkg-config rpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # Linux: linked against glibc 2.31 (Ubuntu 20.04, Debian 11) through
+      # cargo-zigbuild, so the binary runs on distributions older than the
+      # runner's glibc 2.39. glibc is not backward-compatible.
+      - name: Install Zig (Linux)
+        if: runner.os == 'Linux'
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.13.0
+      - name: Install cargo-zigbuild (Linux)
+        if: runner.os == 'Linux'
+        run: cargo install --locked cargo-zigbuild
+      - name: Build release binary (Linux, glibc 2.31)
+        if: runner.os == 'Linux'
+        run: cargo zigbuild --release -p ondin-app --bin ondin --target x86_64-unknown-linux-gnu.2.31
+
+      # **Two binaries on Windows** (§15 D953): `ondin.exe` is GUI-subsystem, so
+      # the window opens with no console and `ondin export …` at a prompt prints
+      # nothing; `ondin-cli` is its console twin, shipped as `ondin.com`.
+      - name: Build release binaries (Windows)
+        if: runner.os == 'Windows'
+        run: cargo build --release -p ondin-app --bin ondin --bin ondin-cli
+
+      # Native: the runner is Apple Silicon and `osx-arm64` the only channel.
+      - name: Build release binary (macOS, arm64)
+        if: runner.os == 'macOS'
+        run: cargo build --release -p ondin-app --bin ondin
+
+      # The binary beside the notices a distributed build must carry, then the
+      # portable archive. The notices are every bundled asset's license — Inter
+      # and the files under `licenses/` (`THIRD-PARTY-NOTICES.md` lists them).
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          mkdir dist
+          cp target/x86_64-unknown-linux-gnu/release/ondin dist/
+          cp LICENSE THIRD-PARTY-NOTICES.md README.md dist/
+          cp crates/ondin-core/assets/fonts/OFL.txt dist/Inter-OFL.txt
+          cp licenses/*.txt dist/
+          tar czf "ondin-${{ github.ref_name }}-${{ matrix.target }}.tar.gz" -C dist .
+
+      # ── Distribution packages ────────────────────────────────────────────
+      # A .deb and an .rpm around the same binary. An install under /usr/bin is
+      # not a Velopack install, so the in-app check correctly never runs there;
+      # what they buy is a desktop entry, icons, AppStream metadata, dependency
+      # resolution and a clean uninstall — and updates through the apt and dnf
+      # repositories `pages.yml` builds out of these very assets. Published
+      # unsigned here and signed there: a release must not be able to fail on a
+      # missing GPG key; a repository publish can.
+      - name: Build the .deb and .rpm (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          binary=target/x86_64-unknown-linux-gnu/release/ondin
+          bash packaging/linux/build-deb.sh "$VPK_VERSION" "$binary" dist-packages
+          bash packaging/linux/build-rpm.sh "$VPK_VERSION" "$binary" dist-packages
+          ls -l dist-packages
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          New-Item -ItemType Directory dist | Out-Null
+          Copy-Item target/release/ondin.exe dist/
+          # **Renamed to `.com`, and the extension is the whole mechanism.**
+          # `PATHEXT` is `.COM;.EXE;…`, so a bare `ondin` at a prompt resolves to
+          # the console twin while shortcuts and Explorer keep the GUI .exe.
+          Copy-Item target/release/ondin-cli.exe dist/ondin.com
+          Copy-Item LICENSE, THIRD-PARTY-NOTICES.md, README.md dist/
+          Copy-Item crates/ondin-core/assets/fonts/OFL.txt dist/Inter-OFL.txt
+          Copy-Item licenses/*.txt dist/
+          Compress-Archive -Path dist/* -DestinationPath "ondin-${{ github.ref_name }}-${{ matrix.target }}.zip"
+
+      # macOS gets no archive of its own: `vpk` builds the .app, and the .dmg
+      # below is the macOS deliverable. This stages only what the bundle holds.
+      - name: Stage the payload (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          mkdir dist
+          cp target/release/ondin dist/
+          cp LICENSE THIRD-PARTY-NOTICES.md README.md dist/
+          cp crates/ondin-core/assets/fonts/OFL.txt dist/Inter-OFL.txt
+          cp licenses/*.txt dist/
+
+      # `vpk` wants an .icns on macOS, and only macOS can build one. The PNGs
+      # stay the single source. ⚠️ **The largest is 256 px**, so the set stops at
+      # 256 (128@2x): there is no 512 or 1024 artwork to fill the top of the
+      # set, and a Retina Dock draws the 256 scaled up. A 1024 source would fix
+      # it — `icons/appstore.png` is store artwork on an opaque square and is
+      # deliberately not used.
+      - name: Build the .icns (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          src=icons/convertico-Ondin_256x256.png
+          mkdir -p icon.iconset
+          for sz in 16 32 128; do
+            sips -z $sz $sz "$src" --out "icon.iconset/icon_${sz}x${sz}.png" >/dev/null
+            sips -z $((sz * 2)) $((sz * 2)) "$src" --out "icon.iconset/icon_${sz}x${sz}@2x.png" >/dev/null
+          done
+          cp "$src" icon.iconset/icon_256x256.png
+          iconutil -c icns icon.iconset -o icon.icns
+          ls -l icon.icns
+
+      # ── Velopack: the self-updating artifacts ────────────────────────────
+      # A per-user Setup.exe that installs to %LocalAppData% with no UAC prompt,
+      # a self-updating AppImage, a macOS .pkg and .app, and the feed each
+      # installed copy polls (`update.rs`, §15 D954).
+      #
+      # **Unsigned, deliberately.** A self-signed certificate chains to no
+      # trusted root — SmartScreen still says "Unknown publisher" and no
+      # reputation accrues — so this ships honestly unsigned until a real
+      # certificate exists; adding one is a `--signParams` argument on `vpk
+      # pack`. Velopack's own integrity is HTTPS plus the size and hash in the
+      # feed, which signing does not change.
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Install the Velopack CLI
+        run: dotnet tool install -g vpk
+
+      # The previous release's feed, so `releases.<channel>.json` keeps its
+      # history. Non-fatal — the first release has no predecessor — and bounded:
+      # `--timeout` is in **minutes** and defaults to 30, which with
+      # `continue-on-error` would sit half an hour on an unreachable feed. Skipped
+      # without a tag, where the workspace version would be refused as "equal or
+      # greater" than the channel's latest.
+      - name: Fetch the previous release for the feed's history
+        if: github.ref_type == 'tag'
+        continue-on-error: true
+        run: vpk download github --repoUrl https://github.com/${{ github.repository }} --token ${{ secrets.GITHUB_TOKEN }} --channel ${{ matrix.channel }} --timeout 5
+
+      # `--packId` is the app's permanent identity: an installed copy only takes
+      # updates with the same id. `--noPortable` on Windows because the .zip
+      # above is the portable build already.
+      #
+      # **`--delta None` is a correctness choice, not a performance one.**
+      # Schemaic shipped deltas and the *second* consecutive update failed: a
+      # client that reaches version N through a delta holds a locally reassembled
+      # package that differs from the one CI built, and the delta for N+1 is
+      # computed against CI's copy. Full packages always verify, whatever route a
+      # client took.
+      - name: Package with Velopack (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          vpk pack `
+            --packId Ondin `
+            --packVersion $env:VPK_VERSION `
+            --packDir dist `
+            --mainExe ondin.exe `
+            --packTitle Ondin `
+            --packAuthors "Ondin contributors" `
+            --icon icons/convertico-Ondin.ico `
+            --channel ${{ matrix.channel }} `
+            --delta None `
+            --noPortable
+
+      # `--icon` is required on Linux and must be a PNG; `--categories` fills the
+      # AppImage's desktop entry, where Graphics is the freedesktop section a
+      # design tool belongs in.
+      - name: Package with Velopack (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          vpk pack \
+            --packId Ondin \
+            --packVersion "$VPK_VERSION" \
+            --packDir dist \
+            --mainExe ondin \
+            --packTitle Ondin \
+            --packAuthors "Ondin contributors" \
+            --icon icons/convertico-Ondin_256x256.png \
+            --categories Graphics \
+            --channel ${{ matrix.channel }} \
+            --delta None
+
+      # Unsigned and un-notarized, as the Windows installer is: Gatekeeper is the
+      # cost, and the README says how past it. `--bundleId` is the same reverse-DNS
+      # id the window, the desktop entry and AppStream use — one identity on every
+      # platform. No `--noPortable`: its zip is the one predictable place the
+      # finished .app can be found, which the .dmg step below unpacks.
+      - name: Package with Velopack (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          vpk pack \
+            --packId Ondin \
+            --packVersion "$VPK_VERSION" \
+            --packDir dist \
+            --mainExe ondin \
+            --packTitle Ondin \
+            --packAuthors "Ondin contributors" \
+            --icon icon.icns \
+            --bundleId io.github.fadion.Ondin \
+            --channel ${{ matrix.channel }} \
+            --delta None
+          # Named, not globbed, in the publish step, which tolerates unmatched
+          # files — so a name vpk changes would drop silently. This is where it
+          # shows.
+          ls -l Releases
+
+      # A .dmg — the app beside a link to /Applications — is what a Mac user
+      # expects from a download, and Velopack builds none. A dragged .app updates
+      # itself exactly as the .pkg's does: Velopack's locator works from "am I
+      # inside a .app", not from how the bundle arrived.
+      - name: Build the .dmg (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          rm -rf dmg-root && mkdir -p dmg-root
+          ditto -x -k "Releases/Ondin-${{ matrix.channel }}-Portable.zip" dmg-root
+          ln -s /Applications dmg-root/Applications
+          hdiutil create -volname Ondin -srcfolder dmg-root -ov -format UDZO \
+            "Releases/Ondin-${{ matrix.channel }}.dmg"
+          ls -l Releases
+
+      # Strict (no `fail_on_unmatched_files: false`), so a missing Linux or
+      # Windows archive fails the release. macOS builds no archive.
+      - name: Publish the portable archive
+        if: github.ref_type == 'tag' && runner.os != 'macOS'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ondin-${{ github.ref_name }}-${{ matrix.target }}.*
+
+      # Scoped to this version and channel: the fetch above leaves the previous
+      # release's .nupkg in `Releases/`, and a bare glob would re-attach it.
+      # `releases.<channel>.json` is the feed installed copies poll. No delta is
+      # listed — see `--delta None`. Each job names every platform's files and
+      # produces only its own, hence the tolerance.
+      - name: Publish the Velopack artifacts
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            Releases/Ondin-${{ matrix.channel }}-Setup.exe
+            Releases/Ondin-${{ matrix.channel }}.AppImage
+            Releases/Ondin-${{ matrix.channel }}-Setup.pkg
+            Releases/Ondin-${{ matrix.channel }}.dmg
+            Releases/Ondin-${{ env.VPK_VERSION }}-${{ matrix.channel }}-full.nupkg
+            Releases/releases.${{ matrix.channel }}.json
+          fail_on_unmatched_files: false
+
+      # Their names carry each format's own version convention
+      # (`ondin_0.4.0_amd64.deb`, `ondin-0.4.0-1.x86_64.rpm`).
+      - name: Publish the distribution packages
+        if: github.ref_type == 'tag' && runner.os == 'Linux'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist-packages/*.deb
+            dist-packages/*.rpm
+
+  # ── The Linux package repositories ──────────────────────────────────────
+  # Rebuilds the apt and dnf repositories on GitHub Pages from the release this
+  # run just published, so `apt upgrade` and `dnf upgrade` carry Ondin forward.
+  #
+  # **Called, not triggered.** A release created with `GITHUB_TOKEN` fires no
+  # `release` event, and a workflow listening for the tag would start beside
+  # this one, before any asset existed. `needs: release` is the only ordering
+  # that is true. A failure here retracts nothing — the Release is complete —
+  # and is repaired by running the Pages workflow again from the Actions tab.
+  pages:
+    name: Publish the Linux package repositories
+    needs: release
+    if: github.ref_type == 'tag'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/pages.yml
+    # The tag, so the site build refuses a repository that does not carry this
+    # release — a transient download failure would otherwise publish the
+    # previous five.
+    with:
+      expect_version: ${{ github.ref_name }}
+    secrets: inherit

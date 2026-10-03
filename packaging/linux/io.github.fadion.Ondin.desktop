@@ -1,0 +1,25 @@
+[Desktop Entry]
+Type=Application
+Name=Ondin
+GenericName=Vector Design Tool
+Comment=A 2D design tool for frames, shapes, paths, text and CSS-style layout
+Exec=ondin
+Icon=io.github.fadion.Ondin
+Terminal=false
+Categories=Graphics;VectorGraphics;
+Keywords=design;vector;graphics;illustration;drawing;UI;layout;flexbox;grid;SVG;
+# False on purpose: startup notification is a handshake, and the app has to
+# announce that it has finished launching. Nothing in Ondin consumes
+# DESKTOP_STARTUP_ID or calls winit's activation-token API, so declaring true
+# earns a busy cursor that spins until the desktop times it out - worse than no
+# feedback at all.
+StartupNotify=false
+# The window's application id - Wayland `app_id`, X11 `WM_CLASS` - is this
+# file's own name, io.github.fadion.Ondin (`chrome::APP_ID`, handed to eframe
+# through `ViewportBuilder::with_app_id`). egui-winit passes it to winit as
+# `with_name(app_id, "")`, which winit uses for the Wayland app id and for the
+# X11 class alike, so a shell matches the window to the entry whose name that
+# is, and that is what gives it the icon above. This line restates the same
+# value for shells that match on StartupWMClass alone; it is redundant with the
+# name match, not a second identity, and the two must not differ.
+StartupWMClass=io.github.fadion.Ondin

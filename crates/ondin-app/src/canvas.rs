@@ -2719,9 +2719,12 @@ impl OndinApp {
     /// anchored on its `fn` line, by the look of it; found by reading the run
     /// while editing the rule below.
     ///
-    /// An in-flow item of a laid-out frame stays while the **pointer** is inside
-    /// the frame, whatever share of its box is (§15 D926); past that, and for
-    /// every other layer, the frame covering most of the moved box decides.
+    /// An in-flow item of a laid-out frame drops into a frame **inside** that
+    /// container that covers most of its moved box; else stays while the
+    /// **pointer** is inside the container, whatever share of its box is (§15
+    /// D926) — or, pressed outside it on an overflowing part, while its box still
+    /// meets the container (§15 D944); past that, and for every other layer, the
+    /// frame covering most of the moved box decides.
     ///
     /// Only layers whose parent is the root or a frame can hop. Something
     /// inside a group was put there deliberately, and having it fall out of the
@@ -2766,9 +2769,38 @@ impl OndinApp {
         // thing the user aims, and every item of a block shares it.
         if build::is_flex_item(doc, id)
             && let Some(p) = parent
-            && self.pointer_in(p, self.move_pointer(id, delta)?)
         {
-            return None;
+            // **A frame inside the item's own container takes it by the half-area
+            // rule first** (§15 D944, the release review's `[X5.1-L1-01]`): such a
+            // frame lies inside the container, so the pointer over it is always
+            // "in the container", and the pointer test answered "stays" before any
+            // frame was asked — a badge could not be dragged into a card in its own
+            // row. The session's ruling under the maintainer's delegation: over a
+            // nested frame, into it, the rule every other layer drops by.
+            if let Some(nested) = self
+                .frame_covering(landed)
+                .filter(|d| *d != p && !ondin_core::is_within(doc, *d, id))
+                .filter(|d| ondin_core::is_within(doc, *d, p))
+            {
+                return Some(nested);
+            }
+            if self.pointer_in(p, self.move_pointer(id, delta)?) {
+                return None;
+            }
+            // **Pressed outside the container — on the part of the item that
+            // overflows it — it stays while its box still meets the container**
+            // (§15 D944, `[X5.1-L1-02]`): the pointer test assumed the press was
+            // inside, and a press on an overflowing item's far end left the
+            // container from the first pixel, which is the class D926 closed for
+            // the press inside. Only a drag that takes the item clear of its
+            // container takes it out.
+            let pressed_in = self.pointer_in(p, self.move_pointer(id, Vec2::ZERO)?);
+            let meets = |c: KRect| {
+                c.x0 < landed.x1 && landed.x0 < c.x1 && c.y0 < landed.y1 && landed.y0 < c.y1
+            };
+            if !pressed_in && res.world_bounds(p).is_some_and(meets) {
+                return None;
+            }
         }
         // **And a layer in a frame inside a group stays inside that group** (§15
         // D876) — the rule above, one level further out. Frames can sit in groups
@@ -24489,5 +24521,233 @@ mod flex_canvas_tests {
         }
         assert_eq!(bounds(&app, a).origin(), Point::new(100.0, 0.0));
         assert_eq!(bounds(&app, b).origin(), Point::new(100.0, 150.0));
+    }
+
+    /// A headless app over `ops` applied to a fresh document, the camera at
+    /// `centre` and zoom 1, settled.
+    fn canvas_over(
+        ctx: &egui::Context,
+        root: NodeId,
+        ops: Vec<Operation>,
+        centre: Point,
+    ) -> OndinApp {
+        let mut app = OndinApp::headless(ctx);
+        let mut doc = Document::new(root);
+        doc.apply(&Transaction(ops)).expect("the fixture");
+        app.session.adopt_document(doc, None);
+        app.session.camera.center = centre;
+        app.session.camera.zoom = 1.0;
+        for _ in 0..2 {
+            frame(ctx, &mut app, Vec::new());
+        }
+        app
+    }
+
+    fn rect_op(id: NodeId, parent: NodeId, index: usize, w: f64, h: f64) -> Operation {
+        Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind: NodeKind::Rect {
+                size: Size::new(w, h),
+                corner_radii: Default::default(),
+            },
+            transform: None,
+            name: None,
+        }
+    }
+
+    fn frame_op(id: NodeId, parent: NodeId, index: usize, w: f64, h: f64, at: Affine) -> Operation {
+        Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind: NodeKind::Artboard {
+                size: Size::new(w, h),
+            },
+            transform: Some(at),
+            name: None,
+        }
+    }
+
+    /// **An in-flow item dragged over a frame in its own container drops into it**
+    /// (§15 D944, the release review's `[X5.1-L1-01]`): a 400 × 200 row holds a
+    /// 150 × 150 card and a 30 × 30 badge at (180, 20); the badge dragged wholly
+    /// over the card. D926's pointer test answered "stays" first — the card lies
+    /// inside the row, so the pointer over it is in the row — and the badge could
+    /// not be dropped into a card beside it.
+    ///
+    /// **Flip run**, the nested-frame arm deleted: fails on *"into the card"*, the
+    /// row, the predicted site.
+    #[test]
+    fn an_in_flow_item_drops_into_a_frame_in_its_own_row() {
+        let ctx = fresh();
+        let mut ids = IdSource::new(0xBA);
+        let (root, row, card, badge) = (ids.mint(), ids.mint(), ids.mint(), ids.mint());
+        let mut app = canvas_over(
+            &ctx,
+            root,
+            vec![
+                frame_op(row, root, 0, 400.0, 200.0, Affine::IDENTITY),
+                frame_op(card, row, 0, 150.0, 150.0, Affine::IDENTITY),
+                rect_op(badge, row, 1, 30.0, 30.0),
+                Operation::SetDisplay {
+                    id: row,
+                    display: Some(Display::Flex(Flex {
+                        column_gap: 10.0,
+                        padding: [20.0; 4],
+                        align_items: AlignItems::Start,
+                        ..Default::default()
+                    })),
+                },
+            ],
+            Point::new(200.0, 100.0),
+        );
+        let at = app.session.resolved.world_bounds(badge).unwrap();
+        assert_eq!(at.origin(), Point::new(180.0, 20.0), "the fixture");
+        app.session.selection.set(vec![badge]);
+        drag(
+            &ctx,
+            &mut app,
+            Point::new(195.0, 35.0),
+            Point::new(95.0, 95.0),
+        );
+        assert_eq!(
+            app.session.doc.get(badge).unwrap().parent(),
+            Some(card),
+            "into the card"
+        );
+    }
+
+    /// **An item pressed on the part that overflows its container stays in it
+    /// for a small drag** (§15 D944, `[X5.1-L1-02]`): a 200 × 100 row holds two
+    /// 150 × 30 rects, so `b` runs from x 150 to 300, two thirds past the edge;
+    /// pressed at (250, 15) — outside the frame — and dragged 20 down. The pointer
+    /// was never in the container, so D926's test fell through to the half-area
+    /// rule, which had `b` "leaving" at rest, and the nudge took it out. Dragged
+    /// clear of the frame, it does leave — the control.
+    ///
+    /// **Flip run**, the pressed-outside clause deleted: fails on *"b stays"*, the
+    /// root, the predicted site.
+    #[test]
+    fn an_overflowing_item_pressed_outside_its_container_stays_for_a_nudge() {
+        let ctx = fresh();
+        let mut ids = IdSource::new(0xBB);
+        let (root, row, a, b) = (ids.mint(), ids.mint(), ids.mint(), ids.mint());
+        let build = |ctx: &egui::Context| {
+            canvas_over(
+                ctx,
+                root,
+                vec![
+                    frame_op(row, root, 0, 200.0, 100.0, Affine::IDENTITY),
+                    rect_op(a, row, 0, 150.0, 30.0),
+                    rect_op(b, row, 1, 150.0, 30.0),
+                    Operation::SetDisplay {
+                        id: row,
+                        display: Some(Display::Flex(Flex {
+                            align_items: AlignItems::Start,
+                            ..Default::default()
+                        })),
+                    },
+                ],
+                Point::new(150.0, 100.0),
+            )
+        };
+        let mut app = build(&ctx);
+        assert_eq!(
+            app.session.resolved.world_bounds(b).unwrap().x0,
+            150.0,
+            "the fixture: b overflows"
+        );
+        app.session.selection.set(vec![b]);
+        drag(
+            &ctx,
+            &mut app,
+            Point::new(250.0, 15.0),
+            Point::new(250.0, 35.0),
+        );
+        assert_eq!(
+            app.session.doc.get(b).unwrap().parent(),
+            Some(row),
+            "b stays"
+        );
+
+        let ctx = fresh();
+        let mut app = build(&ctx);
+        app.session.selection.set(vec![b]);
+        drag(
+            &ctx,
+            &mut app,
+            Point::new(250.0, 15.0),
+            Point::new(250.0, 215.0),
+        );
+        assert_eq!(
+            app.session.doc.get(b).unwrap().parent(),
+            Some(root),
+            "the control: dragged clear of the frame, it leaves"
+        );
+    }
+
+    /// **A rotated container answers for its turned box** (§15 D926's
+    /// `pointer_in`, the release review's `[X5.1-L6-01]`): a 200 × 100 row turned
+    /// 45° about its origin holds one 20 × 20 rect; a drag whose pointer stays
+    /// inside the turned box keeps it, and (138, 1) — inside the upright bounds
+    /// the turned box covers, outside the box itself — is not in the container.
+    ///
+    /// **Flip run**, `pointer_in` asking the upright world bounds: fails on *"the
+    /// corner outside the turned box is not in the container"*, the predicted
+    /// site.
+    #[test]
+    fn a_rotated_container_answers_for_its_turned_box() {
+        let ctx = fresh();
+        let mut ids = IdSource::new(0xBC);
+        let (root, row, a) = (ids.mint(), ids.mint(), ids.mint());
+        let turned = Affine::rotate(std::f64::consts::FRAC_PI_4);
+        let build = |ctx: &egui::Context| {
+            canvas_over(
+                ctx,
+                root,
+                vec![
+                    frame_op(row, root, 0, 200.0, 100.0, turned),
+                    rect_op(a, row, 0, 20.0, 20.0),
+                    Operation::SetDisplay {
+                        id: row,
+                        display: Some(Display::Flex(Flex {
+                            padding: [10.0; 4],
+                            align_items: AlignItems::Start,
+                            ..Default::default()
+                        })),
+                    },
+                ],
+                Point::new(0.0, 100.0),
+            )
+        };
+        // The item's centre, at (20, 20) in the row, in world.
+        let press = turned * Point::new(20.0, 20.0);
+        // Inside the turned box: (100, 50) in the row's own space.
+        let inside = turned * Point::new(100.0, 50.0);
+        // Inside the upright bounds of the turned box, outside the box itself:
+        // its world AABB runs x −70.7..141.4, y 0..212.1, and (138, 1) is past
+        // the box's top edge, the item's box around it mostly above y 0.
+        let corner = Point::new(138.0, 1.0);
+        assert!(
+            !ondin_core::kurbo::Rect::new(0.0, 0.0, 200.0, 100.0)
+                .contains(turned.inverse() * corner),
+            "the fixture: the corner is outside the turned box"
+        );
+        let mut app = build(&ctx);
+        app.session.selection.set(vec![a]);
+        drag(&ctx, &mut app, press, inside);
+        assert_eq!(app.session.doc.get(a).unwrap().parent(), Some(row), "kept");
+
+        // The corner asked of `pointer_in` directly: a drag cannot put the
+        // pointer on an exact point, move snapping adjusting its delta (a first
+        // draft dragged here and the item landed 17 px short, so the flip below
+        // passed for a reason that had nothing to do with it).
+        assert!(
+            !app.pointer_in(row, corner),
+            "the corner outside the turned box is not in the container"
+        );
+        assert!(app.pointer_in(row, inside), "the inside is");
     }
 }

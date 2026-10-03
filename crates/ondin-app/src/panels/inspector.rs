@@ -2872,6 +2872,12 @@ impl OndinApp {
             ondin_core::OpError::InvalidParent => {
                 "A boolean and its operands have to be in the same group"
             }
+            // §15 D876: a group holding a frame is no operand — an ordinary
+            // selection since frames group (D870), so it is not the arm below's.
+            // `mask_action`'s sentence, with this row's noun (`[R1-L2-04]`).
+            ondin_core::OpError::ArtboardPlacement => {
+                "A group holding a frame cannot be a boolean operand"
+            }
             // Anything else is a selection the panel should not have offered at
             // all — a deleted node, a root pick. The count sentence is the least
             // wrong thing to say about it and the control is dim either way.
@@ -15207,6 +15213,13 @@ mod mask_card_tests {
                 on_path_offset: 0.0,
             },
         );
+        let holder = t.add(root, NodeKind::Group);
+        t.add(
+            holder,
+            NodeKind::Artboard {
+                size: Size::new(100.0, 100.0),
+            },
+        );
         app.session.adopt_document(t.doc.clone(), None);
 
         let refusal = |app: &mut crate::app::OndinApp, sel: Vec<NodeId>| {
@@ -15231,8 +15244,16 @@ mod mask_card_tests {
             "two shapes in different parents — the case where the mask button in \
              the same row named the reason and this one did not"
         );
+        // §15 D876's refusal, which fell to the count sentence over two selected
+        // layers (`[R1-L2-04]`). **Flip run**, the arm removed: fails here with
+        // the count sentence — the predicted site.
+        assert_eq!(
+            refusal(&mut app, vec![holder, elsewhere]),
+            Some("A group holding a frame cannot be a boolean operand"),
+            "a group holding a frame beside a shape"
+        );
 
-        // ⚠️ **The control**, and it is what stops the three above being satisfied
+        // ⚠️ **The control**, and it is what stops the four above being satisfied
         // by a function that refuses everything with nicer words.
         app.session.selection.set(vec![a, b]);
         assert!(

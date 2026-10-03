@@ -813,9 +813,18 @@ impl OndinApp {
                         // — so joining them would put six sections behind one
                         // button, of which four are about a document that is not
                         // open.
-                        if icon_button(ui, icon::SLIDERS, 28.0, 17.0, false, true)
-                            .on_hover_text("Library settings")
-                            .clicked()
+                        //
+                        // The editor's settings button, size for size.
+                        if icon_button(
+                            ui,
+                            icon::SLIDERS,
+                            crate::settings::SETTINGS_BOX,
+                            crate::settings::SETTINGS_GLYPH,
+                            false,
+                            true,
+                        )
+                        .on_hover_text("Library settings")
+                        .clicked()
                             && !self.dash.menu_was_up
                         {
                             self.library_settings =

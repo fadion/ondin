@@ -181,15 +181,32 @@ impl Settings {
     }
 }
 
+/// The settings button's box and glyph, **on both screens** — the editor's
+/// [`OndinApp::settings_button`] and the library's, which opens its own modal
+/// from the same place in its own bar. They were spelled separately and had
+/// drifted a point apart (17 against 16), which the maintainer saw side by side;
+/// one pair of constants is what keeps them the same button.
+pub(crate) const SETTINGS_BOX: f32 = 28.0;
+/// The glyph inside [`SETTINGS_BOX`]: 16, the editor bar's icon size, which
+/// undo and redo use as well.
+pub(crate) const SETTINGS_GLYPH: f32 = 16.0;
+
 impl OndinApp {
     /// The top bar's rightmost control: the button that opens the modal.
     ///
     /// Drawn inside the top bar's `right_to_left` cluster, so it is added first to
     /// end up last.
     pub(crate) fn settings_button(&mut self, ui: &mut egui::Ui) {
-        if ui::icon_button(ui, icon::SLIDERS, 28.0, 16.0, self.settings.is_some(), true)
-            .on_hover_text("Settings")
-            .clicked()
+        if ui::icon_button(
+            ui,
+            icon::SLIDERS,
+            SETTINGS_BOX,
+            SETTINGS_GLYPH,
+            self.settings.is_some(),
+            true,
+        )
+        .on_hover_text("Settings")
+        .clicked()
         {
             self.toggle_settings(ui.ctx());
         }

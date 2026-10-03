@@ -872,7 +872,8 @@ Recorded so they are not re-argued, the way `shortcuts.md`'s *Deliberately unbou
   other two are not deferred and are still not rows**: effects were built on 2026-08-24 and are
   authored in the inspector's Effects card (§5.3a), and auto layout left §1's list on 2026-09-23 and
   is designed (§5.3c, §15 D867) — its absolute insets built on 2026-09-24 and authored in the
-  inspector's Position card (§15 D874), flex and grid not built. *This bullet said "Deferred in §1" of
+  inspector's Position card (§15 D874), flex and grid since, in the Container and Item cards (§15
+  D878, D920) — still no rows. *This bullet said "Deferred in §1" of
   all four until then, which had been false of effects for a month.*
 - **Paste to replace** (Figma). Attractive, and it needs a rule for what "replace" means when the
   clipboard and the target hold different numbers of layers. A candidate, not a v1 row.

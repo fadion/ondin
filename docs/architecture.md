@@ -988,7 +988,7 @@ pub fn escaped(bounds: Rect, escape: Insets, world: Affine) -> Rect;   // local 
 ### 5.3b Layout grids (`layout.rs`, §15 D385)
 
 *Not CSS grid.* These are chrome drawn over a frame; the grid **container** that places children is
-§5.3c's, designed and not built, and a different feature.
+§5.3c's, built since 2026-09-27 (§15 D914–D921), and a different feature.
 
 ```rust
 pub struct LayoutGrid {
@@ -1379,7 +1379,9 @@ order and paint order, the item's z-order moves with it. Under `wrap-reverse` th
 bottom one of a row, which the flow order says with no arm of its own (§15 D883, D934). One
 layer leaving its frame moves by its transform as before — **and an in-flow item leaves only once the
 pointer is out of its container**, the area rule deciding past that: its box is where the layout put
-it, which an overflowing row or line can put mostly outside a fixed frame (§15 D926).
+it, which an overflowing row or line can put mostly outside a fixed frame (§15 D926). A frame inside
+the container covering most of the moved box takes it first, and one pressed outside the container on
+its overflowing part stays while its box meets the container (§15 D944).
 **Several in-flow items of one container, none leaving it, reorder as a block** (§15 D902, the
 session's): `build::flex_reorder_many` reads the centre of their union against the other siblings by
 the same reading order — `build::flow_index`, shared with `flex_reorder` — and moves them there in
@@ -1415,11 +1417,12 @@ frames — the smallest visible feature that exercises the whole pipeline, and t
 used geometry reaches anything outside core — **built 2026-09-24**, inspector card included (§15
 D874), `ondin-export/tests/insets.rs` proving the SVG, PNG and snapshot writers draw it; (3) flex, with live reflow during gestures and reorder by drag —
 **built 2026-09-24** (§15 D875): the engine, the layout pass, live reflow, resize — a laid group's
-included — reorder by drag (§15 D877) and the inspector cards (§15 D878), none of the app side yet
-looked at on screen;
+included — reorder by drag (§15 D877) and the inspector cards (§15 D878), the cards looked at by the
+maintainer on 2026-09-26 (§15 D884–D891);
 (4) grid, with the track editor — its model and engine, preview and gestures, and cards **built
-2026-09-27** (§15 D914, D916, D920), its canvas track lines **2026-09-28** (§15 D921), none of it yet
-looked at on screen; (5) components and overrides, on the same pipeline.
+2026-09-27** (§15 D914, D916, D920), its canvas track lines **2026-09-28** (§15 D921); the riskiest
+flex and grid cases looked at by the maintainer on 2026-10-02 (§15 D926, D927); (5) components and
+overrides, on the same pipeline.
 
 **Grid's open questions were answered before its code** (§15 D913, 2026-09-27; the model, engine,
 preview and gestures are built since, below):
@@ -1522,6 +1525,15 @@ and the container's box and world transform are read
 through the preview too, so a resize re-lays the lines with the box rather than the half-previewing
 overlay of §15 D391. **Drawn for every selected grid container, and during a move for every selected
 layer's parent that is a grid**, since the drop writes a cell (§15 D916); not for a hidden container.
+**A moved item's container that is not itself selected is drawn as the drop reads it**, not as the
+preview lays it (§15 D946, the session's ruling under the maintainer's delegation):
+`build::drop_grid` — `container::laid_grid` through `CommittedView`, the function `grid_drop_many`
+lays through — in the container's committed box and place. The preview has the drop's
+`SetLayoutItem` in it already, and with a track sized by its content that moves the cells: three
+`auto` columns committed at 0, 253.3, 326.7 and 400 were drawn at 0, 73.3, 326.7 and 400 mid-drag, so
+the item's centre sat in a drawn column the drop did not write. Hit-testing the drop against the
+preview's grid instead would feed the drop's own result back into its hit-test. A selected container
+keeps the preview's, a resize or a scrub being what the lines are judged by there (§15 D921, D925).
 Under an Alt-drag a selected container's lines ride the copy the pointer carries, and a moving item's
 container, which is not being copied, keeps its lines where it is.
 **Hidden wherever `canvas::chrome_hidden` hides the selection's chrome, but for one case** (§15
@@ -1537,7 +1549,15 @@ selection chrome. **Uncached**: each drawn container's layout pass re-runs every
 135 µs for 100 items and 1.0 ms for 1000 in release. The reason given was that a cache would need a
 key that moves on undo, which the session's revision did not (§15 D921's second amendment, D616's);
 it does since §15 D928, so that reason is gone, and whether a cache is worth it now has not been
-asked again.
+asked again. ⚠️ **That figure is the layout pass, and the dashes were what cost** (§15 D946):
+`egui::Shape::dashed_line` emits a segment per dash over the whole length it is handed, so a line cost
+its screen length — 759,234 shapes and 46.8 ms a frame for one selected 12-column artboard at 256×,
+and 2.86 M shapes and 106 ms for a 1000-track grid wholly off screen, measured in release by the
+release review. `OndinApp::dashed_in_view` cuts each line to the view grown by one dash period, its
+start pulled back to a whole number of periods from the line's true start so the pattern holds still
+under a pan; a gap band outside the view is skipped, and so is a container whose box misses it.
+`track_lines` merges an edge with the last one only, the spans being laid in order — it searched every
+edge, quadratic in the track count.
 
 ### 5.4 Text node
 
@@ -4708,10 +4728,15 @@ pub trait ScenePainter {
   applies about the box centre in the slot (§15 D896); a pure move is still a drag. **A skipped item's slot is kept, not thrown
   away** (§15 D877): `RenderOverrides::landings` records where the layout puts each dragged item —
   its world transform there and its own box — and the canvas outlines, as the insertion indicator,
-  only the one item the release will reorder (§9.4). ⚠️ **A layout the preview takes away puts its
+  only the one item the release will reorder (§9.4). **The landing is composed once both passes
+  have run**, `flex_relayout` handing the dragged items' placements back and `relayout` running
+  before them, **through the container's world transform in this preview** (§15 D945): composed
+  with the committed one, a reorder that moved its container — a hugging row re-centred by an outer
+  layout — outlined a slot the siblings were not opening. ⚠️ **A layout the preview takes away puts its
   items back** at their stored transforms — a container with no layout roots no pass — which the
   preview/commit differential found. Ghosts are not in the view's tree, so a copy dragged into a flex
-  row is laid out on release. Grid will need its own answer.
+  row is laid out on release, and one dragged into a grid the same: `lay_out` lays both, and
+  `absorb`'s `SetDisplay` and `SetLayoutItem` arms leave a ghost unpatched — read, not measured.
   **`InsertSubtree`'s `index` is
   honoured**, and `scene::paint_node` interleaves ghosts among their parent's real children by it
   rather than drawing them last. Drawing last was the same z-order only while every caller appended;
@@ -4807,6 +4832,16 @@ pub trait ScenePainter {
   the sentence above true wherever it can be — not an optimisation, since the round trip through the
   base transform's inverse perturbs an untouched matrix in the fourteenth decimal and
   `assert_preview_matches_commit` compares exactly.
+
+  ⚠️ **That harness commits the raw transaction, which the app never does**, so it has a twin,
+  `assert_preview_matches_commit_through_the_doors`: the preview built from the transaction plus
+  `build::flex_holds`, as `session::set_preview` builds it, and the commit made of
+  `build::keep_flex_sizes(build::keep_insets(tx))`, as `commit_inner` makes it — a change making the
+  two doors disagree passed every test through the first (the release review's `[X4.2-L6-01]`,
+  `overrides.rs`). It returns the committed document, and each caller asserts **the hold held** as
+  well, because the parity check cannot see the hold go: `keep_flex_sizes` takes its holds from
+  `flex_holds`, so dropping one drops it from both sides alike. Not for a plain move of an in-flow
+  item, whose translation the commit drops by design; the landing outline is that gesture's check.
 
 ### 6.3 Backends
 
@@ -7934,8 +7969,11 @@ missing: a valve is asked every frame with a transaction built every frame, so `
 response beside the transaction — without it the resting X field renewed the hold for ever and the box
 vanished whenever the hand stopped. §15 D128.
 ⚠️ **The rule is enforced by a test rather than by a habit since 2026-09-09** (§15 D679):
-`only_the_layers_panel_commits_without_the_committer` reads the eight sources under `panels/` through
-`include_str!` and demands that the set spelling `self.session.commit` is exactly `["layers.rs"]`. It
+`only_the_layers_panel_commits_without_the_committer` reads the nine sources under `panels/` —
+`layout/grid.rs` among them, one directory down — through `include_str!` and demands that the set
+spelling `self.session.commit` is exactly `["layers.rs"]`, and lists `panels/` recursively to check that
+the hand-written list matches the tree: the listing was one level deep, so the grid cards joined unscanned
+with the gate green (the release review's `[R2-L6-01]`). It
 had been **false** — the guide card's Trash button (`inspector::remove_selected_guides`) committed
 directly, which nothing anywhere could have said. ⚠️ **What the test cannot see is the two exceptions
 named above**: both reach `session.commit` through an `OndinApp` method declared in `app.rs`, so the
@@ -8226,7 +8264,12 @@ tested — the one item's slot, nothing for a departure or a block, a grid item'
 amendment) — but the `*id == reordered` filter inside `draw_flex_landing` is not observable today:
 `flex_reorder_of` answers for one layer only, and that layer's is the only landing its preview records.
 While a grid item moves, its container's track lines are drawn too, under the hover outline, so the
-cells the drop writes are in view (§5.3c, §15 D921).
+cells the drop writes are in view (§5.3c, §15 D921) — **the grid the drop is aimed against**,
+`build::drop_grid`, committed and in its committed place, not the preview's, which has the drop in it
+already (§15 D946).
+And **the outline sits on the slot the siblings open even where the reorder moves its container** — a
+hugging row re-centred by an outer layout: the landing is composed through the container's world
+transform in the preview (§6.2, §15 D945).
 
 **The artboard list the drop rule reads is memoized, and the key is `EditorSession::revision`** (§15
 D616). `OndinApp::artboards` was a full-document walk answering a question about four nodes, asked
@@ -8469,7 +8512,11 @@ layer, where the Item card's unset basis and limits read their keyword in the di
 D895, the maintainer's ruling); the menu opens under the unit, its right edge under the unit's — hung
 off the field's response it opened under the prefix (`ui::value_field_unit`, §15 D907); picking
 a mode moves nothing
-(`layout::size_mode_tx`); typing writes px, or `%` while the mode is `%`; a click in and out writes
+(`layout::size_mode_tx`), converting what the axis **specifies** — a number as it is, `auto` as a
+shape's or frame's stored size, the drawn size only under a keyword — and not the drawn size, which on
+a grown item is the specified one plus the line's share; `px` writes the picked axis only, and the lit
+row picks nothing; the Item card's basis and limit menus convert the same way, each subject its own
+value in its own container (§15 D943); typing writes px, or `%` while the mode is `%`; a click in and out writes
 nothing in any mode, and a typed size keeps a text's stored sizing mode (§15 D940, §5.6, §9.3). **The proportion lock is
 disabled while either side is a keyword or `%`**, with the reason on hover. A laid group's typed W and
 H take `tools::resize_box_to`, as any box without an authored `size` does (above), and so reach
@@ -8645,7 +8692,7 @@ Layout grid: from the layer in its parent to its children, the order of the main
 a frame that is both an item and a container gets both. Each finds its own subjects
 (`item_subjects`, `container_subjects`) on `frame_subjects`' rule, so one call serves this and
 `inspector_multi`. *Container* opens with `display` as a segmented row — `none`, `flex` and `grid`,
-`grid` a disabled cell until the grid cards (§15 D920) — and under `flex` has direction and wrap, each
+each live, `grid` since the grid cards (§15 D920) — and under `flex` has direction and wrap, each
 cell of the three rows carrying a tooltip (`ui::segmented_tipped`, §15 D886); three
 dropdowns whose layout
 pictures turn with the container (`layout::Orient`, a transpose and a mirror, never a rotation), the
@@ -8662,7 +8709,8 @@ columns first; and the padding. Switching between flex and grid keeps the paddin
 *Item* has, in a flex container, grow and shrink, basis and `align-self`; in a grid, `grid-column` and
 `grid-row` typed as CSS, start and end, and `justify-self` and `align-self`, the second offering
 `baseline` as the align rows do (§15 D939); each self-alignment *Auto
-· \<inherited\>* while unset; and in either, four limits behind a *Min / max* disclosure,
+· \<inherited\>* while unset; and in either, four limits behind a *Min / max* disclosure, its
+closed summary counted per item and *Mixed* where the counts differ (§15 D892's amendment),
 a basis or limit left at a keyword reading it in the digits' place (§15 D895), with no unit beside it
 — typing or dragging a number is how to leave it (§15 D906);
 for a layer the flow skips it says why instead, in words — *Absolutely positioned* and which edges
@@ -8680,7 +8728,9 @@ keeps the size this one gave it. **A resize's flips come with
 a receipt** (§15 D880): the grow, shrink, basis or `align-self` a resize changed on the user's
 behalf is named and, but for the basis, outlined, with an Undo that takes the whole step back — the
 basis named since §15 D940 — and a grid item's `justify-self`
-and `align-self` likewise, each row outlined while the receipt names it (§15 D920, D922). The fields read `DisplayNode::display`
+and `align-self` likewise, each row outlined while the receipt names it (§15 D920, D922); each
+property is said from the items whose property changed, every distinct value once — *"justify self to
+start / end"* over two items held at opposite ends (§15 D880's amendment). The fields read `DisplayNode::display`
 and `item`, which have overrides behind them, and commit through `layout::edited`'s latch (§9.3, §15
 D885). A number field over a disagreeing selection reads *"Mixed"* (§15 D892). Neither card has a
 header badge, by ruling (§15 D897): a badge is for a state a card has nowhere else to say. §15 D878
@@ -10513,7 +10563,9 @@ original's parent and was clipped by exactly the same edge.
 
 **It is set exactly when the release would reparent**, through the same `move_destination` /
 `frame_covering` the drop uses — a frame keeps a layer while it covers more than half of it, and an
-in-flow item of its layout while the pointer is inside it (§15 D926). That is what
+in-flow item of its layout while the pointer is inside it (§15 D926), or, pressed outside it, while
+its box still meets it — a frame inside the layout covering most of the item taking it first (§15
+D944). That is what
 makes the drawing worth trusting: still clipped means dropping it stays in the frame, drawing in full
 means dropping it takes it out. A threshold invented for the renderer would make the picture a guess about
 its own gesture.
@@ -11345,7 +11397,12 @@ card in a group. **An in-flow item of a layout leaves only once the pointer is o
 (`canvas::move_destination`, §15 D926), the area rule deciding past that: its box is where the layout
 put it, and a grid's rows or a flex line overflowing a fixed frame put it mostly outside at rest — so
 by area alone one item of a dragged block left and the other stayed, by how far down the pointer went.
-The pointer is the one thing every item of a block shares.
+The pointer is the one thing every item of a block shares. **Two cases come before and after it**
+(§15 D944): a frame **inside** the item's own container that covers most of the moved box takes it
+first, by the area rule — the pointer over such a frame is always inside the container, so a badge
+could not be dropped into a card beside it in its own row; and an item pressed on the part that
+overflows its container, the pointer outside from the first pixel, stays while its moved box still
+meets the container's bounds.
 
 Creation reads the same way. `canvas::draw_target` gives a new layer the topmost frame that actually
 **contains** the press and the document root when no frame does, so a shape, a text node or a path

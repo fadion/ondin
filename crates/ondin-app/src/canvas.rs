@@ -881,6 +881,16 @@ struct TrackLines {
     gaps: Vec<KRect>,
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many grids `OndinApp::draw_grid_tracks` has laid on this thread — a
+    /// count rather than a clock, as `ondin-export`'s `svg::def_count_tests`
+    /// pins its scan (§15 D951). The container-wide cull saves a layout pass
+    /// and nothing a shape count can see, so this is what says it does. Plain
+    /// backticks: a `cfg(test)` item's doc is checked by nothing (§15 D319).
+    static GRIDS_LAID: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Where the pictures inside a pasted SVG go (`ondin_core::svg_in::ImageSink`).
 ///
 /// **The same three steps `OndinApp::load_image_bytes` takes**, and deliberately not
@@ -10048,31 +10058,36 @@ impl OndinApp {
             // drop already in: with a track sized by content the two put the
             // cells in different places, and the drawn one is what is aimed at
             // (§15 D946, `[X5.2-L1-01]`).
-            let laid = match selected {
-                true => ov.laid_grid(doc, res, id).and_then(|grid| {
-                    Some((
-                        grid,
-                        self.session.preview_local_box(id)?,
-                        self.session.preview_world_transform(id)?,
-                    ))
-                }),
-                false => ondin_core::build::drop_grid(doc, res, id).and_then(|grid| {
-                    Some((
-                        grid,
-                        ondin_core::local_box(doc, res, id)?,
-                        res.world_transform(id)?,
-                    ))
-                }),
+            let placed = match selected {
+                true => self
+                    .session
+                    .preview_local_box(id)
+                    .zip(self.session.preview_world_transform(id)),
+                false => ondin_core::local_box(doc, res, id).zip(res.world_transform(id)),
             };
-            let Some((grid, bx, world)) = laid else {
+            let Some((bx, world)) = placed else {
                 continue;
             };
             // Culled to the view: nothing for a container wholly off it, and
             // nothing of a band or a line outside it (§15 D946, `[X5.2-L4-01]`).
+            // **The container's cull comes before its layout pass** (§15 D951):
+            // after it, as it was, it saved only the track list and no shape
+            // count could see it; here it saves the pass, the cost this
+            // function's doc prices per item.
             let seen = |quad: [egui::Pos2; 4]| egui::Rect::from_points(&quad).intersects(rect);
             if !seen(self.local_quad(bx, world, rect, ppp).map(|p| p + offset)) {
                 continue;
             }
+            // A moved item's container is laid as the drop reads it (above).
+            let grid = match selected {
+                true => ov.laid_grid(doc, res, id),
+                false => ondin_core::build::drop_grid(doc, res, id),
+            };
+            let Some(grid) = grid else {
+                continue;
+            };
+            #[cfg(test)]
+            GRIDS_LAID.with(|n| n.set(n.get() + 1));
             let lines = Self::track_lines(&grid, bx);
             for band in lines.gaps {
                 let quad = self.local_quad(band, world, rect, ppp).map(|p| p + offset);
@@ -15047,10 +15062,12 @@ mod grid_track_tests {
     /// **Flip runs**: the cut dropped (`dashed_in_view` returning `[a, b]`) fails
     /// on *"a few hundred at 256×"* at 69,488 shapes; the pull-back dropped (the
     /// cut starting at `t0`) fails on *"whole periods from the top"* — each the
-    /// predicted site. ⚠️ **The container-wide cull does not bite**: with it
-    /// off, *"nothing off screen"* stays green, because every line is cut and
-    /// every band culled on its own. What it saves is building the track list
-    /// for a container wholly off the view, which no shape count can see.
+    /// predicted site. ⚠️ **The container-wide cull did not bite on the shape
+    /// count**: with it off, *"nothing off screen"* stays green, because every
+    /// line is cut and every band culled on its own. What it saves is the
+    /// container's layout pass — since §15 D951, when it moved ahead of the
+    /// pass — and that is counted (`GRIDS_LAID`): with the cull off, the test
+    /// fails on *"and no layout pass for it either"*, the predicted site.
     #[test]
     fn the_lines_are_cut_to_the_view_and_hold_their_dashes_still() {
         let ctx = egui::Context::default();
@@ -15095,8 +15112,14 @@ mod grid_track_tests {
         }
 
         app.session.camera.zoom = 1.0;
+        let laid = || GRIDS_LAID.with(|n| n.get());
+        let before = laid();
+        count(&app);
+        assert_eq!(laid(), before + 1, "the control: on screen, laid once");
         app.session.camera.center = Point::new(1.0e6, 1.0e6);
+        let before = laid();
         assert_eq!(count(&app), 0, "nothing off screen");
+        assert_eq!(laid(), before, "and no layout pass for it either");
     }
 }
 

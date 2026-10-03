@@ -2380,8 +2380,10 @@ mod tests {
     /// back; the next commit ends it.
     ///
     /// **Flip run**, the undo-depth half of `flex_receipt`'s test dropped: fails on
-    /// *"an undo takes it away"* — undo does not move the session's revision, so the
-    /// revision alone cannot see it — the predicted site.
+    /// *"an undo takes it away"* — undo does not move the session's commit count, so
+    /// the count alone cannot see it — the predicted site. And the receipt keying on
+    /// the *revision* instead, which undo and redo move since §15 D928: fails on
+    /// *"a redo puts the step back on top"*, the redo having moved it on.
     #[test]
     fn a_resize_leaves_a_receipt_until_anything_else_is_committed() {
         let mut s = scene();

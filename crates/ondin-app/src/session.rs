@@ -514,8 +514,11 @@ pub struct EditorSession {
     /// that has never been read from or written to a file — the top bar's save
     /// pill reports that as "Unsaved", because nothing of it exists on disk.
     saved_at: Option<Instant>,
-    /// Bumped by every commit — what a cache of something *derived from* the
-    /// document keys on to know it has gone stale.
+    /// Bumped by every change to the document — a commit, an undo, a redo, a
+    /// document adopted — and what a cache of something *derived from* the
+    /// document keys on to know it has gone stale. Undo and redo bump it since
+    /// §15 D928; before that `finish_save` read a save queued before an undo as
+    /// current.
     ///
     /// **Not `dirty`, which is a different question.** That one asks whether the
     /// document differs from the file and goes back to `false` on a save; this one
@@ -524,6 +527,11 @@ pub struct EditorSession {
     /// (§7): rendering a layer is far too expensive to do per frame and exactly
     /// cheap enough to do per edit.
     revision: u64,
+    /// How many commits this session has seen — `revision` without undo and
+    /// redo. [`FlexReceipt`] is its only reader: a redo puts the receipt's step
+    /// back on top of the history, which moves the revision and must not end the
+    /// receipt (§15 D880, D928).
+    commits: u64,
     /// What the last commit's resize did to flex items' growth — see
     /// [`FlexReceipt`] and [`Self::flex_receipt`], which is the only reader.
     flex_receipt: Option<FlexReceipt>,
@@ -542,9 +550,11 @@ pub struct EditorSession {
 /// the resize hold, so undoing them and keeping the size would hand the space back
 /// and the drag would snap — and they are one transaction with it anyway. So the
 /// receipt is only true while that step is the top of the history: it records the
-/// revision and the undo depth straight after the commit, and
+/// commit count and the undo depth straight after the commit, and
 /// [`EditorSession::flex_receipt`] answers `None` the moment either moves — the
-/// next commit, an undo, a merged run. Selection is not part of it: selecting
+/// next commit, an undo, a merged run. **The commit count, not the revision**,
+/// since §15 D928 made undo and redo move the revision: a redo puts this step
+/// back on top, and the receipt with it. Selection is not part of it: selecting
 /// something else and coming back finds the step still on top, and Undo still
 /// undoes exactly it.
 #[derive(Clone, Debug, PartialEq)]
@@ -555,7 +565,7 @@ pub struct FlexReceipt {
         ondin_core::container::LayoutItem,
         ondin_core::container::LayoutItem,
     )>,
-    revision: u64,
+    commit: u64,
     depth: usize,
 }
 
@@ -592,12 +602,13 @@ impl EditorSession {
             run: None,
             saved_at,
             revision: 0,
+            commits: 0,
             flex_receipt: None,
             status: Status::default(),
         }
     }
 
-    /// How many commits this session has seen — see the field.
+    /// How many times this session's document has changed — see the field.
     pub fn revision(&self) -> u64 {
         self.revision
     }
@@ -607,7 +618,7 @@ impl EditorSession {
     pub fn flex_receipt(&self) -> Option<&FlexReceipt> {
         self.flex_receipt
             .as_ref()
-            .filter(|r| r.revision == self.revision && r.depth == self.history.undo_depth())
+            .filter(|r| r.commit == self.commits && r.depth == self.history.undo_depth())
     }
 
     // --- rendering inputs -------------------------------------------------
@@ -1189,19 +1200,19 @@ impl EditorSession {
         // the only cheap answer is "something was committed since". Here rather
         // than at the call sites, so no commit has to remember.
         //
-        // 🚨 **Undo and redo do not come through this door and do not bump it.**
-        // This comment said *"an undo is a commit too, through the same door"*;
-        // `undo` and `redo` update the document directly, so every cache keyed on
-        // the revision — `FrameIndex`, the Export preview, the recovery gate,
-        // `finish_save` — is stale after one until the next commit. A defect,
-        // reported and not yet repaired (§15 D616's amendment); the receipt below
-        // reads the undo depth beside it for exactly this reason (§15 D880).
+        // ⚠️ **Undo and redo do not come through this door, and bump it
+        // themselves** (`Self::undo`, `Self::redo`, §15 D928). Until then they
+        // did not bump it at all, so every reader keyed on the revision —
+        // `FrameIndex`, the Export preview, the recovery gate, `finish_save` — was
+        // stale after one, and the last of those marked the session clean over a
+        // file that did not hold it (§15 D616's amendment).
         self.revision = self.revision.wrapping_add(1);
-        // Recorded after the bump, so the receipt names this revision; a run's
+        self.commits = self.commits.wrapping_add(1);
+        // Recorded after the bump, so the receipt names this commit; a run's
         // merged commit has no single step to undo and leaves none.
         self.flex_receipt = (!held.is_empty() && !run).then(|| FlexReceipt {
             held,
-            revision: self.revision,
+            commit: self.commits,
             depth: self.history.undo_depth(),
         });
         // **A commit makes any preview stale by definition**, so it goes here
@@ -1291,6 +1302,10 @@ impl EditorSession {
                 self.resolved.update(&self.doc, &dirty);
                 self.selection.retain_existing(&self.doc);
                 self.dirty = true;
+                // The document moved, so every reader keyed on the revision has
+                // to see it — `finish_save` above all, which otherwise marks the
+                // session clean over a save queued before the undo (§15 D928).
+                self.revision = self.revision.wrapping_add(1);
                 self.info("Undo");
                 true
             }
@@ -1313,6 +1328,9 @@ impl EditorSession {
                 self.resolved.update(&self.doc, &dirty);
                 self.selection.retain_existing(&self.doc);
                 self.dirty = true;
+                // As `Self::undo`. `commits` stays put, which is what lets a
+                // redo bring the step's receipt back (`FlexReceipt`).
+                self.revision = self.revision.wrapping_add(1);
                 self.info("Redo");
                 true
             }

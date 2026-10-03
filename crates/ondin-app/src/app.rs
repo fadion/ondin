@@ -481,9 +481,11 @@ mod in_flight_tests {
 /// anything is drawn.
 ///
 /// **Keyed on `EditorSession::revision`, which is an existing invalidation rule
-/// rather than a new one.** That counter is bumped by `commit_inner` — including
-/// undo and redo, which go through the same door — and by `adopt_document`, and
-/// those are exactly the events that can add, remove or move an artboard. A
+/// rather than a new one.** That counter is bumped by `commit_inner`, by `undo`
+/// and `redo` (which do not go through that door and bump it themselves since
+/// §15 D928 — before then an undo left this index stale until the next commit),
+/// and by `adopt_document`, and those are exactly the events that can add, remove
+/// or move an artboard. A
 /// gesture in flight does not bump it and must not: these are the **committed**
 /// world bounds, which is what `frame_covering` read before this and what the
 /// drop rule is defined against.
@@ -13359,6 +13361,102 @@ mod library_wiring_tests {
             "and the file really is the older one, which is what makes the \
              assertion above about staleness rather than about a failed write"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **An undo or a redo made while the save is in flight leaves the session
+    /// dirty, and the crash snapshot of it standing** (§15 D928) — the sibling
+    /// above, through the door it did not cover.
+    ///
+    /// 🚨 **This was data loss with no prompt.** `undo` and `redo` changed the
+    /// document without moving `revision`, so `finish_save`'s `revision == at`
+    /// read the file — which holds the rect — as the session, which does not. The
+    /// session went clean, so nothing offered to save it again and no close prompt
+    /// fired; then the next `recovery_tick` took the clean arm and **deleted the
+    /// snapshot**, which was the one copy of the session's real document on disk.
+    /// The safety net removed the thing it exists to keep (the release review's
+    /// `[R3-L5-01]`, measured there end to end).
+    ///
+    /// The snapshot is made *between* the undo and the save landing, which is the
+    /// window the review found: a snapshot falling due while an autosave is in
+    /// flight. The redo half is the mirror and runs the same sequence the other
+    /// way.
+    ///
+    /// **Flip-checked** by dropping the bump from `EditorSession::undo`: fails on
+    /// the revision assertion, the predicted site. With that assertion taken out
+    /// too, it fails on the `is_dirty` one — the false clean, before the snapshot
+    /// assertion is reached, which is the order the loss happens in.
+    #[test]
+    fn an_undo_during_a_save_leaves_the_session_dirty_and_the_snapshot_standing() {
+        use crate::library::recovery;
+        use ondin_core::kurbo::Size;
+        use ondin_core::{NodeKind, Operation, Transaction};
+
+        let ctx = egui::Context::default();
+        let root = temp_root("autosave-undone");
+        let mut app = app_with_a_photo(&ctx, root.clone());
+        app.save_file(false);
+        let path = app.session.path.clone().expect("filed");
+        let parent = app.session.doc.root();
+        let id = app.session.ids.mint();
+        assert!(app.session.commit(Transaction(vec![Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(10.0, 10.0),
+                corner_radii: Default::default(),
+            },
+            transform: None,
+            name: None,
+        }])));
+        let key = app.session.doc.meta().id.clone().expect("a filed document");
+        let snapshot = root
+            .join(recovery::RECOVERY_DIR)
+            .join(format!("{key}.ondin"));
+
+        for redo in [false, true] {
+            // The save is queued holding the document as it is now: with the
+            // rect on the undo pass, without it on the redo pass.
+            arm_autosave(&mut app);
+            app.autosave_tick(&ctx);
+            assert!(app.session.is_saving(), "the fixture must be mid-save");
+            let before = app.session.revision();
+            assert!(if redo {
+                app.session.redo()
+            } else {
+                app.session.undo()
+            });
+            assert_ne!(
+                app.session.revision(),
+                before,
+                "an undo or a redo is a new document as far as every cache is \
+                 concerned"
+            );
+            // The snapshot falls due inside the write's window.
+            app.recovery.last = None;
+            app.recovery_tick(&ctx);
+            app.disk_settle();
+            assert!(
+                app.session.is_dirty(),
+                "the file holds the document from before the {}, so a session \
+                 that says Saved is claiming work is on disk that is not",
+                if redo { "redo" } else { "undo" }
+            );
+            app.recovery_tick(&ctx);
+            app.disk_settle();
+            assert!(
+                snapshot.exists(),
+                "the snapshot is the only copy of the session's document on \
+                 disk, and a clean reading must not have deleted it"
+            );
+            let on_disk = ondin_core::io::load(&std::fs::read(&path).unwrap()).unwrap();
+            assert_eq!(
+                on_disk.get(id).is_some(),
+                !redo,
+                "and the file really is the other document"
+            );
+        }
         let _ = std::fs::remove_dir_all(&root);
     }
 

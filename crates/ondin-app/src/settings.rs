@@ -300,10 +300,15 @@ impl OndinApp {
             // deliberately — on a metered connection, or a machine that is not
             // supposed to talk to a CDN. A sentence they have to hover to find
             // is a sentence they will not read before flipping the switch.
+            // ⚠️ **"No *font* request"**, the maintainer's wording (§15 D960):
+            // the switch governs font traffic only, and the update check is
+            // the app's one other network source and answers to its own
+            // environment variable — so "no request" read as a promise the app
+            // did not keep.
             caption(
                 ui,
                 "Off is the fonts this machine has installed, plus Inter. \
-                     Nothing is downloaded and no request is made.",
+                     Nothing is downloaded and no font request is made.",
             );
             ui.add_space(ROW_GAP);
             self.font_cache_row(ui);

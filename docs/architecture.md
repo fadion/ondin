@@ -2160,18 +2160,20 @@ Architectural consequences:
   un-registers nothing, so the document on screen does not repaint; the cache is derived data and the
   cost is one re-download apiece. This is the row §14 carried as *"the cache's size is not visible
   anywhere"* and the roadmap carried as blocked on a surface that did not exist.
-- **The whole source is switchable, and off means no request.** With `prefs::Prefs::web_fonts` off,
-  the picker lists the machine's installed families plus the bundled Inter and nothing else, no
-  catalog is fetched — `FontService::new` does not spawn the catalog thread at all, so its receiver
-  is disconnected from the first `poll` and the service reports *no catalog, finally* rather than
-  *not yet* — and no face is downloaded. It is a real state and not a degraded one: neither setting
-  hides a family the other shows, which is what a curated middle tier would have done and is why the
-  three-way `Off | Popular | All` was rejected (§15 D330, which carries all three reasons). **Two
-  doors have to close, and the second is the one that is easy to miss**: `rebuild_families` leaves
-  the web names out of the picker's list, and `faces_of` refuses to dispatch a web face — because a
-  family name reaches `ensure` from a *document* saved on a machine where the switch was on, which
-  never goes near the picker. `FontService::set_web_fonts` moves it inside a session, and turning it
-  back on is a rebuild rather than a re-fetch whenever the catalog is still in memory.
+- **The whole source is switchable, and off means no request** — for fonts: the update check is the
+  app's one other network source, and the switch does not govern it (§15 D960). With
+  `prefs::Prefs::web_fonts` off, the picker lists the machine's installed families plus the bundled
+  Inter and nothing else, no catalog is fetched — `FontService::new` does not spawn the catalog
+  thread at all, so its receiver is disconnected from the first `poll` and the service reports *no
+  catalog, finally* rather than *not yet* — and no face is downloaded. It is a real state and not a
+  degraded one: neither setting hides a family the other shows, which is what a curated middle tier
+  would have done and is why the three-way `Off | Popular | All` was rejected (§15 D330, which
+  carries all three reasons). **Two doors have to close, and the second is the one that is easy to
+  miss**: `rebuild_families` leaves the web names out of the picker's list, and `faces_of` refuses
+  to dispatch a web face — because a family name reaches `ensure` from a *document* saved on a
+  machine where the switch was on, which never goes near the picker. `FontService::set_web_fonts`
+  moves it inside a session, and turning it back on is a rebuild rather than a re-fetch whenever the
+  catalog is still in memory.
   ⚠️ **A third door, and the one neither of those two can see: the fetch that is already out** (§15
   D720). Both doors above decide whether a *new* request starts, so a user who turned the switch off
   while `spawn_catalog` was inside `fetch_catalog` still had two calls reach `api.fontsource.org`,
@@ -2198,8 +2200,10 @@ Architectural consequences:
   D720): what the switch cannot stop is a request *already queued or already in flight* when it is
   turned off, and since the catalog fetch learnt to cancel this warm is the only one of those left.
   It read *"the one bounded hole"* while the catalog thread was a second and larger one, which is why
-  it is written as a rule — anything new that reaches the network must either be startable only while
-  the switch is on, or hold a cancel flag as `spawn_catalog` does.
+  it is written as a rule — anything new that reaches the network **for the web-font source** must
+  either be startable only while the switch is on, or hold a cancel flag as `spawn_catalog` does.
+  **The auto-updater is outside it** (§15 D960, the maintainer's ruling on D954's question): it is not
+  font traffic, and its one gate is `ONDIN_NO_UPDATE_CHECK` (§9.1).
 - Font embedding in `.ondin` files (for portability of non-Google local fonts) is deferred — parked
   in §14.
 
@@ -6195,6 +6199,8 @@ along that edge stays above it (§15 D958, §9.4).
 **And it updates itself (§15 D954).** A Velopack install checks this repository's GitHub Releases at
 startup and every three hours, downloads what is newer without asking, and offers *Restart to update*
 in a chip beside Settings in both top bars; `ONDIN_NO_UPDATE_CHECK` stops it contacting GitHub at all.
+The web-font switch does not: §5.4a's network rule is the font source's, and the updater is outside
+it (§15 D960).
 A portable archive, a `.deb` or `.rpm` and a `cargo` build are not Velopack installs and never check,
 a `.deb` or `.rpm` being updated by its package manager instead (§15 D957). The restart goes through the window's close
 request, so unsaved work is asked about first. A release build writes a log to

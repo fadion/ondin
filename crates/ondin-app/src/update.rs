@@ -34,6 +34,10 @@ use velopack::{UpdateCheck, UpdateManager, VelopackAsset};
 pub(crate) const RELEASE_REPO: &str = "https://github.com/fadion/ondin";
 
 /// Set to `1`, `true`, `yes` or `on` to stop the app contacting GitHub at all.
+///
+/// **The updater's only gate.** The *Load web fonts* switch does not govern it:
+/// §5.4a's rule that new network traffic answers to that switch is the font
+/// source's, and the updater is outside it (§15 D960).
 pub(crate) const OPT_OUT_VAR: &str = "ONDIN_NO_UPDATE_CHECK";
 
 /// How long to wait before asking the feed again. A round is two requests — the

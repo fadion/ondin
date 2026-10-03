@@ -546,7 +546,7 @@ fn mixed_if(d: egui::DragValue<'_>, mixed: bool) -> egui::DragValue<'_> {
 ///
 /// One accessor for the read and the write — `data_mut` inside `data_mut`
 /// deadlocks (`CLAUDE.md`).
-fn edited(resp: &egui::Response, moved: bool) -> bool {
+pub(crate) fn edited(resp: &egui::Response, moved: bool) -> bool {
     let engaged = resp.dragged() || resp.has_focus();
     let id = resp.id.with("layout-field-edited");
     resp.ctx.data_mut(|d| {
@@ -1715,6 +1715,9 @@ impl OndinApp {
             .unwrap_or_default();
         let flipped_grow = receipt.iter().any(|(w, n)| w.grow != n.grow);
         let flipped_shrink = receipt.iter().any(|(w, n)| w.shrink != n.shrink);
+        // A resize clears the basis with the growth (§15 D935): named, or a basis
+        // set by hand went with no word on an item whose growth was already 0.
+        let cleared_basis = receipt.iter().any(|(w, n)| w.basis != n.basis);
         let flipped_align = receipt.iter().any(|(w, n)| w.align_self != n.align_self);
         let flipped_justify = receipt
             .iter()
@@ -1761,6 +1764,9 @@ impl OndinApp {
                     "flex shrink to {}",
                     ui::number(2)(now.shrink, 0..=2)
                 ));
+            }
+            if cleared_basis {
+                said.push("flex basis to auto".to_owned());
             }
             // Mid-sentence, so lower-cased back from the menu's sentence case —
             // grid's names for a grid item (§15 D920).
@@ -2436,6 +2442,41 @@ mod tests {
         );
     }
 
+    /// **A resize that clears a basis says so** (§15 D935): `a` with `basis:
+    /// 100px` and no growth to stop, resized — the commit clears the basis, and the
+    /// receipt names it, where it counted grow, shrink and the self-alignments
+    /// only and so said nothing for an item whose growth was already 0.
+    ///
+    /// **Flip run**, `growth_held` without its basis clause: fails on *"a
+    /// receipt"*, `None`, the predicted site.
+    #[test]
+    fn a_resize_that_clears_the_basis_leaves_a_receipt_saying_so() {
+        let mut s = scene();
+        set_item(&mut s.app, s.a, |i| {
+            i.basis = Dimension::Px(100.0);
+            i.grow = 0.0;
+            i.shrink = 0.0;
+        });
+        s.app
+            .session
+            .commit(Transaction(vec![Operation::SetGeometry {
+                id: s.a,
+                // Along the row only: the height is the stretched 160 it is
+                // drawn at, so nothing but the basis can be named.
+                geometry: GeometryPatch::Size(Size::new(60.0, 160.0)),
+            }]));
+        let receipt = s.app.session.flex_receipt().expect("a receipt");
+        assert_eq!(
+            receipt.held[0].2.basis,
+            Dimension::Auto,
+            "the basis cleared"
+        );
+        let a = s.a;
+        let mut p = Panel::new(s.app, OndinApp::inspector_item);
+        p.app.session.selection.set(vec![a]);
+        p.run("Resizing set flex basis to auto.");
+    }
+
     /// **`display: none` keeps every child where it is drawn**, and a frame that
     /// hugged its children the size it hugged to (`OndinApp::set_display`, §15
     /// D878) — the rects are stored at (300, 150) and laid at the row's slots.
@@ -2845,6 +2886,165 @@ mod tests {
             _ => None,
         });
         app.inspector_transform(ui, id, world, size);
+    }
+
+    /// [`transform_card`] for a text node, whose W/H read its box through the
+    /// preview (`preview_local_box`), as `inspector_single` hands them — the
+    /// committed box would hand the field back the size the edit is replacing.
+    fn text_transform_card(app: &mut OndinApp, ui: &mut egui::Ui) {
+        let id = app.session.selection.ids()[0];
+        let world = app
+            .session
+            .preview_world_transform(id)
+            .unwrap_or_default()
+            .as_coeffs();
+        let size = app.session.preview_local_box(id).map(|b| b.size());
+        app.inspector_transform(ui, id, world, size);
+    }
+
+    /// A 300 × 300 flex column — `align-items` as given — holding an auto-width
+    /// label and, under it, a 50 × 30 rect. The label selected.
+    fn text_column(align: AlignItems) -> (Panel, NodeId, NodeId) {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0xCB);
+        let (root, frame, text, rect) = (ids.mint(), ids.mint(), ids.mint(), ids.mint());
+        let mut doc = Document::new(root);
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: frame,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(300.0, 300.0),
+                },
+                transform: Some(Affine::IDENTITY),
+                name: None,
+            },
+            Operation::CreateNode {
+                id: text,
+                parent: frame,
+                index: 0,
+                kind: NodeKind::Text {
+                    content: "several short words".into(),
+                    style: Box::default(),
+                    spans: Default::default(),
+                    para_spans: Default::default(),
+                    paragraph: Default::default(),
+                    block: Default::default(),
+                    sizing: ondin_core::TextSizing::Auto,
+                    on_path: None,
+                    on_path_flip: false,
+                    on_path_offset: 0.0,
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::CreateNode {
+                id: rect,
+                parent: frame,
+                index: 1,
+                kind: NodeKind::Rect {
+                    size: Size::new(50.0, 30.0),
+                    corner_radii: RoundedRectRadii::default(),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetDisplay {
+                id: frame,
+                display: Some(Display::Flex(Flex {
+                    direction: FlexDirection::Column,
+                    align_items: align,
+                    ..Default::default()
+                })),
+            },
+        ]))
+        .unwrap();
+        app.session.adopt_document(doc, None);
+        let mut p = Panel::new(app, text_transform_card);
+        p.app.session.selection.set(vec![text]);
+        (p, text, rect)
+    }
+
+    /// Click a number field at `at` — moved over, pressed and let go on frames of
+    /// their own, as a pointer does — type `text` a character a frame, and leave
+    /// it with `Enter`. An empty `text` is the click-through.
+    fn type_number(p: &mut Panel, at: egui::Pos2, text: &str) {
+        p.frame(vec![egui::Event::PointerMoved(at)]);
+        p.frame(vec![press(at, true)]);
+        p.frame(vec![press(at, false)]);
+        p.frame(Vec::new());
+        for ch in text.chars() {
+            p.frame(vec![egui::Event::Text(ch.to_string())]);
+        }
+        p.frame(vec![key(egui::Key::Enter)]);
+        for _ in 0..2 {
+            p.frame(Vec::new());
+        }
+    }
+
+    fn stored_sizing(app: &OndinApp, id: NodeId) -> ondin_core::TextSizing {
+        match app.session.doc.get(id).unwrap().kind() {
+            NodeKind::Text { sizing, .. } => *sizing,
+            k => panic!("not text: {k:?}"),
+        }
+    }
+
+    /// **A W typed into a stretched auto-width label keeps its mode** (§15 D940,
+    /// the release review's `[X5.1-L1-03]` / `[X6.1-L1-03]`): the label in a
+    /// stretching column is drawn as a 300-wide `Fixed` box, and typing 40 into W
+    /// read that `Fixed` as the mode and stored `Fixed(40 × 19)` — one line high,
+    /// its wrapped lines hanging over the rect. Unstretched, the same keystrokes
+    /// give `AutoHeight` at the width drawn and the rect moves down under the
+    /// lines; now both do.
+    ///
+    /// **Flip run**, `tools::gesture_text_sizing` answering the drawn sizing:
+    /// fails on *"the mode kept"*, a `Fixed` box, the predicted site.
+    #[test]
+    fn a_width_typed_into_a_stretched_label_keeps_its_mode() {
+        let (mut p, text, rect) = text_column(AlignItems::Stretch);
+        assert_eq!(drawn(&p.app, text).width(), 300.0, "the fixture stretches");
+        let at = p.run("300");
+        type_number(&mut p, at, "40");
+        // 40 asked, 53.73 drawn: a wrapping item is never narrower than its widest
+        // word in a flex line (§15 D872), and the field reads the preview back — the
+        // review's unstretched control stored the same 53.7.
+        assert!(
+            matches!(
+                stored_sizing(&p.app, text),
+                ondin_core::TextSizing::AutoHeight(w) if (w - 53.734375).abs() < 1e-3
+            ),
+            "the mode kept: {:?}",
+            stored_sizing(&p.app, text)
+        );
+        assert!(
+            drawn(&p.app, rect).y0 >= drawn(&p.app, text).y1 - 1e-6,
+            "and the rect sits under the wrapped lines"
+        );
+    }
+
+    /// **A click into W and out again commits nothing** (§15 D940, `[X6.1-L1-04]`)
+    /// — an unstretched auto-width label, W focused and left with `Enter`, no
+    /// number typed. It wrote the drawn width back as `AutoHeight(147.17)`: an
+    /// undo step with nothing drawn differently, and a label that stopped growing
+    /// with its words.
+    ///
+    /// **Flip run**, the `v == drawn` arm deleted: fails on *"still auto"*,
+    /// `AutoHeight(…)` against `Auto`, the predicted site.
+    #[test]
+    fn a_click_through_w_commits_nothing() {
+        let (mut p, text, _) = text_column(AlignItems::Start);
+        let depth = p.app.session.history.undo_depth();
+        let shown = crate::ui::number(2)(drawn(&p.app, text).width(), 0..=0);
+        let at = p.run(&shown);
+        type_number(&mut p, at, "");
+        assert_eq!(
+            stored_sizing(&p.app, text),
+            ondin_core::TextSizing::Auto,
+            "still auto"
+        );
+        assert_eq!(p.app.session.history.undo_depth(), depth, "and no step");
     }
 
     /// **A stretched item's H scrubs, and the preview follows it** (§15 D904) —

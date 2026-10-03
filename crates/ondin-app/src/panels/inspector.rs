@@ -4636,8 +4636,16 @@ impl OndinApp {
                 // The *mode*, not merely "is this text", because what a typed number
                 // means to a text layer depends on which of the three it is — see
                 // `size_tx`. `Some` is exactly the `is_text` test this replaces.
-                let sizing0 = match app.session.display_node(id).map(|n| n.kind()) {
-                    Some(NodeKind::Text { sizing, .. }) => Some(*sizing),
+                // **The stored mode at the drawn extents** (`tools::gesture_text_sizing`,
+                // §15 D940): the drawn kind of a text a layout stretched is a `Fixed`
+                // box whatever the node stores, and typing a W into it stored that.
+                let sizing0 = match (
+                    app.session.display_node(id).map(|n| n.kind().clone()),
+                    app.session.doc.get(id),
+                ) {
+                    (Some(NodeKind::Text { sizing, .. }), Some(node)) => {
+                        Some(tools::gesture_text_sizing(node, sizing))
+                    }
                     _ => None,
                 };
                 // **Two ways to write a box, chosen the way the canvas chooses.** A kind
@@ -4785,18 +4793,28 @@ impl OndinApp {
                                     Scrub::whole(0.5).range(1.0..=f64::MAX),
                                     |d| d.custom_formatter(ui::number(2)),
                                 );
-                                (r, true)
+                                // `size_field`'s latch (§15 D885): whether a number
+                                // moved at any point of this edit, held to its
+                                // committing frame.
+                                let moved = super::layout::edited(&r, v != drawn);
+                                (r, moved)
                             }
                         };
                         let tx = match mode {
                             Some((SizeMode::Percent, _)) if typed => percent_tx(app, horizontal, v),
-                            // A keyword's field shows the size it resolved to, and
-                            // a click in and out must not fix that size in px.
-                            Some((SizeMode::Percent | SizeMode::Auto | SizeMode::FitContent, _))
-                                if !typed =>
-                            {
-                                Transaction(Vec::new())
-                            }
+                            // **No number moved, nothing commits** — a keyword's field
+                            // shows the size it resolved to, and a click in and out
+                            // must not fix that size in px (§15 D879); and **any**
+                            // field, since §15 D940 (the release review's
+                            // `[X6.1-L1-04]`): a click in and out of a px W wrote the
+                            // drawn size back through `size_tx`, which for a rect
+                            // D428 absorbs and for a text is a *mode* change — an
+                            // `Auto` label became `AutoHeight` at its own width, an
+                            // undo step with nothing drawn differently. `typed` is
+                            // D885's latch, not "the number differs now": a typed
+                            // width the preview reads back clamped (a label's
+                            // min-content) is still an edit.
+                            _ if !typed => Transaction(Vec::new()),
                             _ if horizontal => {
                                 let want = paired(Size::new(v.max(1.0), size.height), true);
                                 // W authors the height only when the lock makes it

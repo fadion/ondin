@@ -406,6 +406,31 @@ pub fn resized_text_sizing(sizing: TextSizing, new_size: Size, authors_height: b
     }
 }
 
+/// The sizing a text gesture starts from — **the mode the node stores, at the
+/// extents it is drawn at** (§15 D940).
+///
+/// Tools compute from the used kind (§15 D874), and for a text a flex or grid
+/// container stretched or grew, the used kind is a `Fixed` box
+/// (`container::flexed_text`, D875, D917) whatever the node stores. A resize, a
+/// scale or a W typed into the inspector read that `Fixed` as the mode and kept
+/// it: an auto-width label in a stretching column, dragged narrower, became a
+/// one-line-high fixed box with its wrapped lines hanging over the next item —
+/// where the same drag outside the stretch gave `AutoHeight` and the lines
+/// pushed the item down. The mode is the user's choice and only the extents are
+/// the layout's, so the mode is read from `node`, and a stored `AutoHeight` takes
+/// the drawn width. `used` is the kind's sizing as drawn.
+pub fn gesture_text_sizing(node: &ondin_core::Node, used: TextSizing) -> TextSizing {
+    let NodeKind::Text { sizing: stored, .. } = node.kind() else {
+        return used;
+    };
+    match (*stored, used) {
+        (TextSizing::Auto, _) => TextSizing::Auto,
+        (TextSizing::AutoHeight(_), TextSizing::Fixed(s)) => TextSizing::AutoHeight(s.width),
+        (TextSizing::AutoHeight(w), TextSizing::Auto) => TextSizing::AutoHeight(w),
+        (_, used) => used,
+    }
+}
+
 /// The box a resize gesture produces, in the node's own local space.
 ///
 /// Split out from [`resize_to_handle`] because it is the whole of the geometry
@@ -648,7 +673,11 @@ pub fn resize_to_handle(
         }
         NodeKind::Text { sizing, .. } => {
             let (_, holds_y) = handle.anchored(size.width, size.height);
-            GeometryPatch::TextSizing(resized_text_sizing(*sizing, new_size, holds_y.is_some()))
+            GeometryPatch::TextSizing(resized_text_sizing(
+                gesture_text_sizing(node, *sizing),
+                new_size,
+                holds_y.is_some(),
+            ))
         }
         _ => GeometryPatch::Size(new_size),
     };
@@ -1655,7 +1684,7 @@ fn scale_geometry(
         return;
     }
     if let NodeKind::Text { sizing, .. } = res.used_kind_of(node) {
-        if let Some(sizing) = scaled_text_sizing(*sizing, csx, csy) {
+        if let Some(sizing) = scaled_text_sizing(gesture_text_sizing(node, *sizing), csx, csy) {
             ops.push(Operation::SetGeometry {
                 id,
                 geometry: GeometryPatch::TextSizing(sizing),

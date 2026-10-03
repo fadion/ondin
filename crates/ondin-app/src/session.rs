@@ -1246,8 +1246,9 @@ impl EditorSession {
 
     /// The items whose growth `tx` stops that the edit did not set itself —
     /// [`FlexReceipt::held`], read off the transaction `keep_flex_sizes` handed
-    /// back, before it is applied. Only `flex-grow`, `flex-shrink`, `align-self`
-    /// and a grid item's `justify-self` count: a size keyword going back to
+    /// back, before it is applied. Only `flex-grow`, `flex-shrink`, `flex-basis`
+    /// (cleared with the growth since §15 D935), `align-self` and a grid item's
+    /// `justify-self` count: a size keyword going back to
     /// `auto` is the resize itself, shown in the Transform card's W and H (§15
     /// D879).
     ///
@@ -1270,6 +1271,7 @@ impl EditorSession {
                     let was = *self.doc.get(*id)?.item();
                     (was.grow != item.grow
                         || was.shrink != item.shrink
+                        || was.basis != item.basis
                         || was.align_self != item.align_self
                         || was.justify_self != item.justify_self)
                         .then_some((*id, was, *item))

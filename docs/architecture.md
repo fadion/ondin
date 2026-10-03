@@ -6161,15 +6161,15 @@ goes with the row above* rather than *these are two controls* (§15 D274).
 **The app icon is two artefacts, not one (2026-08-20).** Source art lives in `icons/` at the
 repository root, and both halves are needed because neither reaches the other's surfaces:
 
-- **The window.** `main::window_icon` decodes `icons/convertico-Ondin_256x256.png` to RGBA and
-  hands it to `ViewportBuilder::with_icon`. This paints the taskbar button and Alt-Tab — and painted
+- **The window.** `main::window_icon` decodes `icons/icon.png` (512 × 512 since §15 D961) to RGBA
+  and hands it to `ViewportBuilder::with_icon`. This paints the taskbar button and Alt-Tab — and painted
   the title bar, until Windows and Linux lost the system's (§15 D952). It is not optional in the presence of the resource icon below: winit registers its
   window class with `hIcon: 0` and does **not** fall back to the executable's icon, so without
   this call a running Ondin shows the generic Windows application glyph. One size has to be
-  chosen, because `WM_SETICON` receives the same pixels for `ICON_BIG` and `ICON_SMALL`; 256 is
-  the largest the set offers, and the OS downscales.
+  chosen, because `WM_SETICON` receives the same pixels for `ICON_BIG` and `ICON_SMALL`; the 512
+  is the size Schemaic hands winit from the same icon set, and the OS downscales.
 - **The executable.** `crates/ondin-app/build.rs` runs `winresource` (a build dependency; it
-  shells out to the Windows SDK's `rc.exe`) to compile `icons/convertico-Ondin.ico` into
+  shells out to the Windows SDK's `rc.exe`) to compile `icons/icon.ico` into
   `ondin.exe`'s resource table, where Explorer, a pinned taskbar button and a file association
   read it — none of which have a window. It must be the `.ico` and not a PNG: a resource icon is
   a container Windows picks a size *out of*, and winit has no way to consume one. The same script
@@ -6180,6 +6180,18 @@ repository root, and both halves are needed because neither reaches the other's 
 The build script failure is fatal rather than a warning, on the grounds that the MSVC toolchain
 already requires the same SDK for `link.exe` — an icon missing on some machines and not others is
 the failure mode worth refusing.
+
+**The set is Schemaic's, and two more files of it are used (§15 D961).** `icons/icon-1024.png` is the
+source of the macOS `.icns` the Release workflow builds, 16 to 512@2x, and the Linux packages install
+`icons/icon.png` as their one hicolor icon, at `512x512`. `icons/icon-64.png` is compiled into the app
+as **the top bars' brand mark** on both screens, painted by `ui::logo` into the 26-point slot a
+placeholder — an accent square with a diamond glyph — used to fill; its texture is uploaded once and
+kept in egui's temp memory. The editor's mark is still the click-through to the library, and its
+hover affordance is a `color::HOVER` rounded fill behind the artwork, since the artwork's colours are
+its own. The name beside the mark sits 12 points from it on both screens — the library row's own
+spacing, which the editor's 8-point row widens to for that one gap by setting it *before* placing
+the mark, since egui spaces an item when it is placed — so the two bars line their names up
+(§15 D962).
 
 **The window draws its own title bar on Windows and Linux (2026-10-03, §15 D952).** Both open
 undecorated, and `chrome.rs` supplies what the system's frame did: `caption_buttons` — minimize,

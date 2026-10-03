@@ -187,9 +187,9 @@ repo_gpgcheck=1
 gpgkey=${BASE_URL}/ondin.asc
 EOF
 
-# The largest icon Ondin has; the page draws it at 42px and the browser tab
-# smaller still, so 256 is plenty and there is no larger one to prefer.
-cp "${REPO_ROOT}/icons/convertico-Ondin_256x256.png" "${OUT}/icon.png"
+# The 512 rather than the 64: the page draws it at 42px, which is 84 device
+# pixels on a 2x screen, past what the 64 has. Schemaic's site does the same.
+cp "${REPO_ROOT}/icons/icon.png" "${OUT}/icon.png"
 sed -e "s|__BASE_URL__|${BASE_URL}|g" \
     -e "s|__VERSION__|${latest_version}|g" \
     -e "s|__FINGERPRINT__|${fingerprint}|g" \

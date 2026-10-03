@@ -747,9 +747,9 @@ install_appimage() {
     local url dest bindir desktop_dir icon_dir tmp_desktop
     bindir="${HOME}/.local/bin"
     desktop_dir="${HOME}/.local/share/applications"
-    # 256 because it is the largest icon Ondin has (icons/), and the hicolor
-    # directory has to name the PNG's real size or the icon never resolves.
-    icon_dir="${HOME}/.local/share/icons/hicolor/256x256/apps"
+    # 512 because icons/icon.png is 512x512, and the hicolor directory has to
+    # name the PNG's real size or the icon never resolves.
+    icon_dir="${HOME}/.local/share/icons/hicolor/512x512/apps"
     dest="${bindir}/Ondin.AppImage"
 
     url="$(asset_url '/Ondin-linux-x64\.AppImage')"
@@ -762,7 +762,7 @@ install_appimage() {
     # The AppImage carries a .desktop of its own inside it, but nothing reads
     # that until the file is registered with the desktop; without these two the
     # app exists only as a path to type.
-    download_to "${RAW}/icons/convertico-Ondin_256x256.png" "${icon_dir}/${APP_ID}.png" || true
+    download_to "${RAW}/icons/icon.png" "${icon_dir}/${APP_ID}.png" || true
     tmp_desktop="$(mktemp)"
     fetch "${RAW}/packaging/linux/${APP_ID}.desktop" > "$tmp_desktop"
     # Drop whatever `Exec=` the upstream file carries and append ours, rather
@@ -927,7 +927,7 @@ case "$family" in
         # it behind.
         info "Uninstall: rm ~/.local/bin/Ondin.AppImage \\"
         info "              ~/.local/share/applications/${APP_ID}.desktop \\"
-        info "              ~/.local/share/icons/hicolor/256x256/apps/${APP_ID}.png"
+        info "              ~/.local/share/icons/hicolor/512x512/apps/${APP_ID}.png"
         ;;
     macos)
         info "Updates:   checked automatically; the app offers a restart when one is staged."

@@ -7780,8 +7780,10 @@ impl OndinApp {
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
 
-                    // Brand mark: accent-tinted rounded square with a diamond —
-                    // and, since the library landed, **the way back to it**.
+                    // Brand mark: the app's icon (`ui::logo`, §15 D961; until
+                    // then an accent-tinted square with a diamond standing in
+                    // for it) — and, since the library landed, **the way back
+                    // to it**.
                     //
                     // ⚠️ **It sensed nothing and now senses `click`** (spelled
                     // `Sense::hover()` at the time, which is the same value —
@@ -7789,7 +7791,9 @@ impl OndinApp {
                     // that does nothing and a mark that navigates look identical
                     // at rest, so the lift on hover and the tooltip are what tell
                     // the user it is a control. Both are owed together — dropping
-                    // either leaves a button nobody discovers.
+                    // either leaves a button nobody discovers. The lift is a
+                    // hover fill behind the artwork now, the artwork's colours
+                    // being its own.
                     //
                     // ⚠️ **The third affordance used to be a `PointingHand` and is
                     // gone** (§15 D371). The app shows the arrow over chrome, and
@@ -7800,29 +7804,7 @@ impl OndinApp {
                     // brightening did not, and it was the loudest of the three.
                     let (mark, mark_resp) =
                         ui.allocate_exact_size(egui::vec2(26.0, 26.0), egui::Sense::click());
-                    let lit = mark_resp.hovered();
-                    ui.painter().rect_filled(
-                        mark,
-                        egui::CornerRadius::same(7),
-                        if lit {
-                            color::ACCENT_800
-                        } else {
-                            color::ACCENT_900
-                        },
-                    );
-                    ui.painter().rect_stroke(
-                        mark,
-                        egui::CornerRadius::same(7),
-                        egui::Stroke::new(1.0, color::ACCENT_700),
-                        egui::StrokeKind::Inside,
-                    );
-                    ui.painter().text(
-                        mark.center(),
-                        egui::Align2::CENTER_CENTER,
-                        icon::DIAMOND,
-                        theme::icon_font(17.0),
-                        color::ACCENT,
-                    );
+                    crate::ui::logo(ui, mark, mark_resp.hovered());
                     if mark_resp.on_hover_text("Library (Ctrl+O)").clicked() {
                         self.go_to_dashboard();
                     }

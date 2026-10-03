@@ -207,23 +207,21 @@ jobs:
           cp crates/ondin-core/assets/fonts/OFL.txt dist/Inter-OFL.txt
           cp licenses/*.txt dist/
 
-      # `vpk` wants an .icns on macOS, and only macOS can build one. The PNGs
-      # stay the single source. ⚠️ **The largest is 256 px**, so the set stops at
-      # 256 (128@2x): there is no 512 or 1024 artwork to fill the top of the
-      # set, and a Retina Dock draws the 256 scaled up. A 1024 source would fix
-      # it — `icons/appstore.png` is store artwork on an opaque square and is
-      # deliberately not used.
+      # `vpk` wants an .icns on macOS, and only macOS can build one, so the PNG
+      # stays the single source rather than a second icon checked in beside it.
+      # The whole set up to 512@2x, so a Retina Dock draws artwork rather than an
+      # upscale — which is why the source is `icon-1024.png`: 512@2x consumes it
+      # whole. (Until 2026-10-03 the largest artwork was 256 and the set stopped
+      # at 128@2x.) Schemaic's step, on the same icon set.
       - name: Build the .icns (macOS)
         if: runner.os == 'macOS'
         run: |
           set -euo pipefail
-          src=icons/convertico-Ondin_256x256.png
           mkdir -p icon.iconset
-          for sz in 16 32 128; do
-            sips -z $sz $sz "$src" --out "icon.iconset/icon_${sz}x${sz}.png" >/dev/null
-            sips -z $((sz * 2)) $((sz * 2)) "$src" --out "icon.iconset/icon_${sz}x${sz}@2x.png" >/dev/null
+          for sz in 16 32 128 256 512; do
+            sips -z $sz $sz icons/icon-1024.png --out "icon.iconset/icon_${sz}x${sz}.png" >/dev/null
+            sips -z $((sz * 2)) $((sz * 2)) icons/icon-1024.png --out "icon.iconset/icon_${sz}x${sz}@2x.png" >/dev/null
           done
-          cp "$src" icon.iconset/icon_256x256.png
           iconutil -c icns icon.iconset -o icon.icns
           ls -l icon.icns
 
@@ -275,7 +273,7 @@ jobs:
             --mainExe ondin.exe `
             --packTitle Ondin `
             --packAuthors "Ondin contributors" `
-            --icon icons/convertico-Ondin.ico `
+            --icon icons/icon.ico `
             --channel ${{ matrix.channel }} `
             --delta None `
             --noPortable
@@ -293,7 +291,7 @@ jobs:
             --mainExe ondin \
             --packTitle Ondin \
             --packAuthors "Ondin contributors" \
-            --icon icons/convertico-Ondin_256x256.png \
+            --icon icons/icon.png \
             --categories Graphics \
             --channel ${{ matrix.channel }} \
             --delta None

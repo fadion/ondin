@@ -23,9 +23,10 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "${HERE}/../.." && pwd)"
 APP_ID="io.github.fadion.Ondin"
 
-# The hicolor sizes Ondin has artwork for. There is no 512: the largest PNG in
-# icons/ is 256x256, and a desktop scales down from the largest size it finds.
-ICON_SIZES="16 32 48 64 128 256"
+# The one hicolor icon: icons/icon.png, 512x512. A desktop scales down from the
+# largest size it finds, so one large PNG serves every size - Schemaic ships
+# the same icon set the same way.
+ICON="${REPO}/icons/icon.png"
 
 # The licence texts of the third-party material the binary embeds (Phosphor,
 # and egui's built-in fallback fonts - THIRD-PARTY-NOTICES.md has which is
@@ -40,10 +41,8 @@ required=("$BINARY" \
     "${REPO}/LICENSE" \
     "${REPO}/THIRD-PARTY-NOTICES.md" \
     "${REPO}/README.md" \
-    "${REPO}/crates/ondin-core/assets/fonts/OFL.txt")
-for n in $ICON_SIZES; do
-    required+=("${REPO}/icons/convertico-Ondin_${n}x${n}.png")
-done
+    "${REPO}/crates/ondin-core/assets/fonts/OFL.txt" \
+    "$ICON")
 for l in $LICENSE_FILES; do
     required+=("${REPO}/licenses/${l}")
 done
@@ -72,20 +71,17 @@ shopt -u nullglob
 mkdir -p "${ROOT}/usr/bin" \
     "${ROOT}/usr/share/applications" \
     "${ROOT}/usr/share/metainfo" \
+    "${ROOT}/usr/share/icons/hicolor/512x512/apps" \
     "${ROOT}/usr/share/doc/ondin"
 
 install -m 0755 "$BINARY" "${ROOT}/usr/bin/ondin"
 install -m 0644 "${HERE}/${APP_ID}.desktop" "${ROOT}/usr/share/applications/${APP_ID}.desktop"
 
-# Each PNG goes in the hicolor directory named for its own pixel size, which the
-# file name states (measured 2026-10-03: every one of the six is the size its
-# name says). A mismatch here is not a build error - the icon simply never
-# resolves at that size, and the app shows a generic one.
-for n in $ICON_SIZES; do
-    mkdir -p "${ROOT}/usr/share/icons/hicolor/${n}x${n}/apps"
-    install -m 0644 "${REPO}/icons/convertico-Ondin_${n}x${n}.png" \
-        "${ROOT}/usr/share/icons/hicolor/${n}x${n}/apps/${APP_ID}.png"
-done
+# icons/icon.png is 512x512 (measured 2026-10-03), which is the hicolor
+# directory it goes in. A mismatch here is not a build error - the icon simply
+# never resolves, and the app shows a generic one.
+install -m 0644 "$ICON" \
+    "${ROOT}/usr/share/icons/hicolor/512x512/apps/${APP_ID}.png"
 
 # The checked-in metainfo carries whatever version was current when it was last
 # touched; the package must state its own, or a software centre keeps offering

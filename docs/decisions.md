@@ -1331,11 +1331,12 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D953** — **A release `ondin.exe` is a GUI-subsystem binary, and `ondin.com` is its console twin.** v0.3.0's opened a console beside the window when launched from Explorer or the Start menu. `#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]`, release only; the cost is that `ondin export …` at a prompt has nowhere to print. `src/bin/ondin-cli.rs` runs the sibling `ondin` with the same arguments and inherited standard handles and exits with its status; it ships as `ondin.com`, which `PATHEXT` prefers to the `.exe` — `devenv.com`'s trick. **A launcher with no logic of its own, where Schemaic's twin is a CLI crate.** *(Built 2026-10-03, committed as `6fc61e8`; **Keep**, the session's at the maintainer's direction. Measured by the session, not tested: `ondin.com export` printed and exited 0, a missing file exited 1. §7, §9.2)*
 - **D954** — **The app checks GitHub Releases, downloads an update unasked, and offers a restart to apply it.** Ported from Schemaic: `velopack` 1.2 (1.2.161 in the lock) and `log` 0.4. `update.rs`'s decisions — `check_gate` (the opt-out `ONDIN_NO_UPDATE_CHECK` first; no Velopack install, no check), `UpdateState` (only *Downloading* and *Ready* show, only *Ready* is a button), `should_recheck`, `with_progress` — and `Updater`: worker threads reporting over a channel `poll` drains once a frame, a progress forwarder built once, a round at startup and every three hours. The chip sits beside Settings in both top bars. Apply is `wait_exit_then_apply_updates` then `ViewportCommand::Close`, not Velopack's restart-now, so the close request asks about unsaved work; a failed handover puts the offer back. `main` runs `VelopackApp::run` **before** `parse`, which would refuse `--veloapp-*`, and not for a CLI command (`cli_command`, an allowlist on the first argument). `logging.rs` writes `config_dir/ondin/ondin.log` — `info` for the `ondin`, `ondin::…` and `velopack…` targets, `warn` otherwise, rotated once past 1 MB, a panic hook — started from `main` alone. A headless app's `Updater::default()` is inert. ⚠️ **A cancelled close leaves the chip dead and the update armed** — read, not tried. ⚠️ **§5.4a's network rule reads as broken**: the updater answers to an environment variable, not the web-font switch, and holds no cancel flag — **ruled by D960**: the rule is the web-font source's and the updater is outside it. *(Built and tested 2026-10-03, committed as `90eba39`; **Keep**, the session's, ported from Schemaic at the maintainer's direction; the network rule ***Fix*** — its scope or the updater, not ruled at the time; **its scope, by D960**. Tests in `update::tests`, `logging::tests` and `main::tests`, flips at their predicted sites. 🚨 Never run against a real feed. §9.1, §9.2; §5.4a not amended)*
 - **D955** — **CI lints on Linux, and builds and tests on Linux, Windows and macOS.** `.github/workflows/ci.yml`: fmt, workspace and per-package clippy `-D warnings`, rustdoc `--document-private-items`, cargo-deny `check licenses` only (`advisories` deliberately red, `deny.toml`); a matrix running clippy again off Linux, then `cargo test --workspace` and `--release`; apt bounded and retried. The gate D732 said its platform arms wanted. 🚨 **Has not run** — nothing is pushed — and it is the first time most of the tree would compile anywhere but Windows. *(Built 2026-10-03, committed as `5bde584`; **Keep**, the session's at the maintainer's direction. D732 amended; §10)*
-- **D956** — **A tag builds, packs and publishes Windows, Linux and macOS, and the app's distribution identity never changes.** `release.yml`, ported from Schemaic: a `v*` tag, or a dispatch dry run that publishes nothing; channels `win-x64`, `linux-x64` and `osx-arm64` behind an allowlist step; the tag must equal the workspace version. Linux through cargo-zigbuild at glibc 2.31; Windows builds `ondin` and `ondin-cli` and ships `ondin.com`; a portable zip and tar.gz; a `.deb` and `.rpm` from `packaging/linux/` — one shared payload, hicolor 16–256, every `licenses/*.txt` with a guard against an unlisted one; `vpk pack --packId Ondin --delta None`, **deltas off for correctness**, Schemaic's second consecutive delta update having failed; a macOS `.icns` from the 256 PNG, the mark having no 512 or 1024, and a `.dmg`. **Unsigned, deliberately**, as Schemaic decided. `.gitattributes` pins LF on scripts and packaging metadata. The release skill rewritten to push, wait for CI, tag and check the assets; v0.3.0 was the last release built locally. **The identity values are `architecture.md` §4's twelfth invariant**, and `--packId` and the app id are guarded by nothing. ⚠️ `local_offset`'s `0` ships now, so a Linux or macOS date column reads UTC. *(Built 2026-10-03, committed as `8c5f5b9`, the skill as `2592ce1`; **Keep**, the session's, ported from Schemaic at the maintainer's direction; signing ***Revisit if*** a certificate exists. 🚨 Has not run. §1, §4, §9.1)*
+- **D956** — **A tag builds, packs and publishes Windows, Linux and macOS, and the app's distribution identity never changes.** `release.yml`, ported from Schemaic: a `v*` tag, or a dispatch dry run that publishes nothing; channels `win-x64`, `linux-x64` and `osx-arm64` behind an allowlist step; the tag must equal the workspace version. Linux through cargo-zigbuild at glibc 2.31; Windows builds `ondin` and `ondin-cli` and ships `ondin.com`; a portable zip and tar.gz; a `.deb` and `.rpm` from `packaging/linux/` — one shared payload, hicolor 16–256 (one 512 since D961), every `licenses/*.txt` with a guard against an unlisted one; `vpk pack --packId Ondin --delta None`, **deltas off for correctness**, Schemaic's second consecutive delta update having failed; a macOS `.icns` from the 256 PNG, the mark having no 512 or 1024 — **closed by D961**, the whole set from a 1024 — and a `.dmg`. **Unsigned, deliberately**, as Schemaic decided. `.gitattributes` pins LF on scripts and packaging metadata. The release skill rewritten to push, wait for CI, tag and check the assets; v0.3.0 was the last release built locally. **The identity values are `architecture.md` §4's twelfth invariant**, and `--packId` and the app id are guarded by nothing. ⚠️ `local_offset`'s `0` ships now, so a Linux or macOS date column reads UTC — **closed by D959**, `localtime_r` on both. *(Built 2026-10-03, committed as `8c5f5b9`, the skill as `2592ce1`; **Keep**, the session's, ported from Schemaic at the maintainer's direction; signing ***Revisit if*** a certificate exists. 🚨 Has not run. §1, §4, §9.1)*
 - **D957** — **Signed apt and dnf repositories on GitHub Pages, and an install script — not yet operational.** `pages.yml` rebuilds the site from the last five releases' `.deb` and `.rpm` with no gh-pages branch, is called by `release.yml` after every leg rather than triggered, fails closed with no key, compares the repositories' identity values across the files that carry them, and checks the built fingerprint against `install.sh` and `README.md`. Secrets `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE`; RSA-4096, no expiry. `install.sh` picks the macOS `.pkg`, the apt repository, the dnf/zypper one or the AppImage, pinning the key to `KEY_FINGERPRINT`; **asset names are anchored on the `/` and spelled out, where Schemaic's matched a suffix**. 🚨 **No key exists**: `KEY_FINGERPRINT` holds a placeholder `install.sh` fails closed on and `README.md` carries no fingerprint, so every tagged Release run ends red at Pages while its assets publish. *(Built 2026-10-03, committed as `be406b0`; **Keep**, the session's, ported from Schemaic at the maintainer's direction; the key **open**, the maintainer's — `roadmap.md`'s *Now · Distribution*. Not run. **Amended 2026-10-03**: the rewritten `README.md` carries the placeholder too, alone on its line under *Adding the repository by hand*)*
 - **D958** — **Present mode's way to the window's buttons is a slim strip at the top edge, on hover.** D952's ⚠️, ruled by the maintainer: present mode hid the top bar, which on Windows and Linux is the title bar, so the window could not be closed, moved, maximized or minimized with the mouse until Escape. `chrome::present_strip`, called from `OndinApp::ui`'s present-mode arm: a 32pt strip (`STRIP_H`, Windows 11's caption height) of the top bar's fill, a divider, `drag_strip` and `caption_buttons`; nothing on macOS. Revealed only when the pointer comes within `REVEAL`, 6pt, of the top edge with no button held — so arriving from the canvas below shows nothing and a drag to the top opens nothing — kept while the pointer is on it or a button is held, gone when it leaves. ⚠️ **`Order::Middle`, not `Foreground`**: on the resize zones' layer the strip sat above the North zone, and the edge that reveals it could no longer resize the window. *(Built and tested 2026-10-03, not yet committed; **Keep**, the maintainer's ruling, closing D952's ⚠️. Tests `the_present_strip_comes_out_at_the_top_edge_and_closes`, `a_held_button_does_not_bring_the_strip_out`, `the_top_edge_still_resizes_under_the_strip`; the edge band widened to the whole strip predicted on *"not from below"* and failing one assertion later, on *"the canvas keeps its click there"*; `!down` dropped and `Order::Foreground` each at the predicted site. Left alone: no way out of present mode on the strip, Escape the only one; macOS untouched. 🚨 Not seen on a real window. §9.1, §9.2, §9.4)*
 - **D959** — **Library dates are local time on Linux and macOS too, through `localtime_r`.** D956's ⚠️, ruled by the maintainer: `local_offset` answered `0` off Windows, so a Linux or macOS *Created* column would read UTC — about to ship, not shipped, no build for either having been published. A `cfg(any(target_os = "linux", target_os = "macos"))` arm returns `tm_gmtoff` from `libc::localtime_r` — the offset for that instant, history included, the zone `TZ`'s or `/etc/localtime`'s; out of `time_t` or a null return is `0`; no `tzset`. Any other host still `0`. `libc = "0.2"`, an edge both targets already compiled. 🚨 **`days_from_civil` was dead code on Linux and macOS**, so D955's `-D warnings` lint would have gone red on its first run regardless; `cfg(any(windows, test))` now. *(Built and tested 2026-10-03, not yet committed; **Keep**, the maintainer's ruling, closing D956's ⚠️. Test `the_unix_offset_is_the_zones_for_the_instant` re-runs itself as a child at `TZ=CET-1CEST,M3.5.0,M10.5.0/3` — CI's runners being at UTC, where D384's tests pass on a `0` — asserting 3600, 7200 and 7200 and that the child ran `1 passed`; a child because `set_var` is `unsafe` in edition 2024. Spawn checked on Windows with the cfg lifted, red with January at 7200. 🚨 **The Unix arm has never been compiled** — not verified until CI's Linux and macOS legs are green; the fallback arm compiles nowhere. Census: a new `3 any`, `target_os` and `not` unchanged. D384, D732, D955, D956 amended; §9.5)*
 - **D960** — **§5.4a's network rule is the web-font source's, and the auto-updater is outside it.** D954's ***Fix***, ruled by the maintainer: *"anything new that reaches the network must either be startable only while the switch is on, or hold a cancel flag"* read as covering the updater, which answers to `ONDIN_NO_UPDATE_CHECK` alone and holds no flag. The rule governs font traffic; the updater's one gate is the environment variable. D720 wrote the rule in the font section with a one-module grep as its enumeration, so this is a scope, not an exemption. ⚠️ **The Settings caption reads wider** — *"Nothing is downloaded and no request is made"*, written for a user on a metered connection — and is false of the app whenever the updater runs — **ruled and fixed the same day**, the maintainer's wording: *"… no font request is made."* *(Ruled 2026-10-03, session 44; **Resolved**, the maintainer's ruling, closing D954's ***Fix***; the caption ***Fix***, its wording, **ruled and *Fixed***. Record-only, its number planted on `update::OPT_OUT_VAR` and cited from the caption's comment in `settings.rs`. D720, D954 amended; §5.4a, §9.1)*
+- **D961** — **The app's icon set is Schemaic's, and its 64 is the top bars' brand mark.** The maintainer replaced `icons/` with Schemaic's set — `icon.ico` (16–256), `icon.png` (512), `icon-64.png`, `icon-1024.png`, RGBA on a transparent ground — deleting the `convertico-Ondin` files and the store squares, which broke the build. Wired as Schemaic uses it: `build.rs` the `.ico`; `window_icon` the 512, was the 256; the `.icns` from the 1024, 16 to 512@2x; Velopack's `--icon` the `.ico` on Windows and the 512 on Linux; one hicolor icon, the 512, in the packages and `install.sh`'s AppImage route, where there were six; the Pages site the 512. **The top bars' placeholder** — an `ACCENT_900` square with a `DIAMOND` — is `ui::logo` painting the 64 into the same 26pt slot, uploaded once with mipmaps and kept in egui's temp memory; the editor's mark keeps its click-through, its hover a `color::HOVER` fill behind the artwork where the square lightened. ⚠️ An AppImage installed before this keeps a stale 256 icon its uninstall line does not name. *(Built and tested 2026-10-03, not yet committed; **Keep**, the maintainer's set and ruling, the wiring the session's after Schemaic; closing D956's ⚠️. Tests `window_icon_is_the_ondin_mark_at_the_size_windows_scales_from` and `ui::logo_tests::the_logo_is_the_64px_mark_and_uploads_once`, the `insert_temp` removed failing on *"the texture is kept"*, predicted. Typed into two comments before its block was reserved, the only sites. 🚨 Not seen on a real window, nor on Linux or macOS. D956 amended; §9.1)*
 
 ---
 
@@ -24826,7 +24827,8 @@ installer named for one version would carry a binary reporting another.
   version, and refused if the rewrite missed), the hicolor icons at 16, 32, 48, 64, 128 and 256, and
   every licence text, named one by one, with a guard that fails on a text in `licenses/` the list does
   not name. An install under `/usr/bin` is not a Velopack install, so the in-app check never runs
-  there; its updates come from D957's repositories.
+  there; its updates come from D957's repositories. **Since D961 the icons are one**, `icons/icon.png`
+  at `512x512`, the six sizes having been files `icons/` no longer holds.
 - **Velopack's artifacts**: `vpk pack --packId Ondin --channel <channel> --delta None` — a per-user
   `Setup.exe`, a self-updating AppImage, a macOS `.pkg` and `.app` with `--bundleId
   io.github.fadion.Ondin` — after fetching the previous release's feed, non-fatally, so
@@ -24837,9 +24839,11 @@ installer named for one version would carry a binary reporting another.
   took. *Do not turn deltas on to save a download.*
 - **macOS's `.icns`** is built on the runner from the 256 PNG, and the set stops there — 128@2x —
   because the mark exists at no larger size; `icons/appstore.png` is an opaque 1024 store square and is
-  deliberately not used, so a Retina Dock draws the 256 scaled up. A **`.dmg`** — the `.app` beside a
-  link to `/Applications` — is built from `vpk`'s portable zip, Velopack building none; a dragged
-  `.app` updates itself as the `.pkg`'s does.
+  deliberately not used, so a Retina Dock draws the 256 scaled up. **Closed 2026-10-03 by D961**: the
+  maintainer replaced the set with Schemaic's, whose `icons/icon-1024.png` is the mark itself on a
+  transparent ground, and the `.icns` is built from it for the whole set, 16 to 512@2x. A **`.dmg`** —
+  the `.app` beside a link to `/Applications` — is built from `vpk`'s portable zip, Velopack building
+  none; a dragged `.app` updates itself as the `.pkg`'s does.
 
 **Unsigned, deliberately**, as Schemaic decided: a self-signed certificate chains to no trusted root,
 so SmartScreen still says *Unknown publisher* and no reputation accrues. Signing is a `--signParams`
@@ -25090,6 +25094,72 @@ the updater, and the caption's comment in `settings.rs` cites it too. Recorded f
 read of §5.4a, D720, D954, `update.rs`' opt-out, `prefetch_popular`'s doc and `settings.rs`' web-font
 row; the caption's amendment from the brief and a read of that row and its comment. D720 and D954
 amended; `architecture.md` §5.4a and §9.1 amended)*
+
+**D961 — The app's icon set is Schemaic's, and its 64 is the top bars' brand mark. *Built and tested
+2026-10-03, not yet committed; Keep — the maintainer's set and ruling, wired by the session after
+Schemaic. Not seen on a real window.***
+
+The maintainer replaced `icons/` with the set Schemaic uses: `icon.ico`, PNG-compressed entries at 16,
+24, 32, 48, 64, 96, 128 and 256; `icon.png` at 512 × 512; `icon-64.png`; and `icon-1024.png` — all
+RGBA on a transparent ground, measured by the session. Gone with it are `convertico-Ondin.ico`, the six
+`convertico-Ondin_*.png` sizes from 16 to 256, and `appstore.png` and `playstore.png`. **The build
+broke on the swap** — `main::window_icon`'s `include_bytes!` and `build.rs` both named deleted files —
+so the wiring was not optional, and it follows Schemaic's use of the identical set, file for file:
+
+- **The executable**: `build.rs` compiles `icons/icon.ico` into `ondin.exe`'s resource table.
+- **The window**: `main::window_icon` decodes `icons/icon.png`, the 512 where it was the 256 — the
+  size Schemaic hands winit from the same set; the OS downscales for everything below it.
+- **macOS**: the Release workflow builds the `.icns` from `icon-1024.png`, the whole set from 16 to
+  512 and each at @2x, so up to the 1024 itself. That closes D956's ⚠️, where the set stopped at
+  128@2x because the mark existed at no larger size and a Retina Dock drew the 256 scaled up.
+  Velopack's `--icon` is `icons/icon.ico` on Windows and `icons/icon.png` on Linux.
+- **Linux**: `packaging/linux/stage-payload.sh` installs **one** hicolor icon, `icon.png` at
+  `hicolor/512x512/apps`, where it installed six from 16 to 256; `ondin.spec`'s `%files` lists the 512
+  alone; `install.sh`'s AppImage route writes it to `~/.local/share/icons/hicolor/512x512/apps` and
+  its uninstall line names that path. A desktop scales down from the largest size it finds. ⚠️ **An
+  AppImage installed before this keeps its old 256 icon**, which the new uninstall line does not name —
+  a stale file, minor. Left alone: the `.ico`'s smaller entries could be extracted for hicolor 16–256,
+  and are not, Schemaic shipping the 512 alone.
+- **The Pages site**: `build-site.sh` copies `icons/icon.png`, since the page draws it at 42px, 84
+  device pixels at 2×, past what the 64 has.
+- `THIRD-PARTY-NOTICES.md`'s *Application icon* section names the four files.
+
+**And the 64 replaces the placeholder in the top bars, at the maintainer's asking** — *"the generic
+placeholder in the top-left"*. Both screens' mark, the editor's in `OndinApp::top_bar` and the
+library's in `dashboard_top_bar`, was a stand-in: an `ACCENT_900` rounded square with an `ACCENT_700`
+border and Phosphor's `DIAMOND` in `ACCENT`. `ui::logo(ui, rect, lit)` paints `icons/icon-64.png`,
+compiled in, into the same 26 × 26 pt allocation. It decodes through
+`eframe::icon_data::from_png_bytes`, `window_icon`'s decoder, so a bad file is the same panic in the
+same place; uploads once with linear filtering and linear mipmaps — 64 pixels for a 26-point mark
+leaves a 2× display artwork to sample, and below that the mipmaps take it; and keeps the handle in
+egui's temp memory under `Id::new("ondin-logo")`, so both screens and every frame share one texture.
+
+⚠️ **The editor's mark is still a control, and its hover changed kind.** It is the click-through to
+the library (D365), and what says so is the hover and the tooltip — two of D365's three affordances
+since D371 took the hand. The hover was the square's fill lightening from `ACCENT_900` to
+`ACCENT_800`; the artwork's colours are its own now, so it is a `color::HOVER` rounded fill behind the
+artwork, grown 3pt with a radius of 7. The tooltip is unchanged. *Do not drop the fill as decoration*:
+at rest a mark that navigates and a mark that does nothing look the same, which is D365's whole
+argument. The library's mark draws at rest, with no fill — this is the library, so it goes nowhere.
+
+**The evidence.** `main`'s `window_icon_is_the_ondin_mark_at_the_size_windows_scales_from` asserts
+512 × 512 and the artwork — alpha 0 at (0, 0) and at (256, 256), the coil's hollow middle, and 255 at
+(60, 300) and (256, 470) — so a blank buffer and an opaque square each fail, and the size is what
+tells the file from its 64 and 1024 siblings. `ui::logo_tests::the_logo_is_the_64px_mark_and_uploads_once`
+asserts 64 × 64, a transparent corner and middle and ink at (7, 37), then draws three frames and
+asserts one texture id across them. **Flip**: the `insert_temp` that keeps the handle removed fails on
+*"the texture is kept"*, the predicted site.
+
+*(Built and tested 2026-10-03, not yet committed; **Keep**, the maintainer's set and the maintainer's
+ruling on the mark, the wiring the session's after Schemaic; closing D956's ⚠️. 🚨 **Not seen on a real
+window, and nothing of it seen on Linux or macOS** — the `.icns`, the hicolor icon and the AppImage's
+are untried until a tag runs D956's legs. ⚠️ The number was typed into two code comments, `app.rs`'s
+top bar and `ui.rs`'s `LOGO_PNG`, before its block was reserved; the negative grep found those two as
+the only sites, so nothing collided, but the order was wrong. Recorded from the brief and a read of
+`ui::logo` with its test, both call sites, `window_icon` with its test, `build.rs`' doc,
+`release.yml`'s `.icns` step and `--icon` lines, `stage-payload.sh`, `ondin.spec`, `install.sh`'s
+AppImage route, `build-site.sh` and the notices; the placeholder's colours and the old hover from the
+brief. D956 amended; `architecture.md` §9.1 amended)*
 
 **D898 — The randomized `update`/`rebuild` guard authors layout inputs, and compares a laid group's
 box. *The session's; built 2026-09-27, committed as `da5b652`. Entry reconstructed 2026-09-27 from

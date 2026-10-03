@@ -91,12 +91,7 @@ cp -a %{_sourcedir}/payload/. %{buildroot}/
 %{_bindir}/ondin
 %{_datadir}/applications/%{appid}.desktop
 %{_datadir}/metainfo/%{appid}.metainfo.xml
-%{_datadir}/icons/hicolor/16x16/apps/%{appid}.png
-%{_datadir}/icons/hicolor/32x32/apps/%{appid}.png
-%{_datadir}/icons/hicolor/48x48/apps/%{appid}.png
-%{_datadir}/icons/hicolor/64x64/apps/%{appid}.png
-%{_datadir}/icons/hicolor/128x128/apps/%{appid}.png
-%{_datadir}/icons/hicolor/256x256/apps/%{appid}.png
+%{_datadir}/icons/hicolor/512x512/apps/%{appid}.png
 
 %changelog
 # Intentionally empty. The release notes on the GitHub Release are the

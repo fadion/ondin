@@ -4672,6 +4672,87 @@ pub fn parse_hex(s: &str) -> Option<[u8; 3]> {
     }
 }
 
+/// The app's mark, `icons/icon-64.png`, compiled in — the top bars' brand mark
+/// on both screens (§15 D961). 64 pixels for a mark drawn at 26 points, so a 2×
+/// display still has artwork to sample from; below that it is mipmapped.
+static LOGO_PNG: &[u8] = include_bytes!("../../../icons/icon-64.png");
+
+/// **The app's mark, painted into `rect`**, with the rounded hover fill behind it
+/// when `lit` — the one affordance the editor's mark has left to say it is a
+/// control, now that its colours are the artwork's.
+///
+/// The texture is uploaded on the first call and kept in egui's memory, so
+/// both screens and every frame share one. Decoded with eframe's own icon
+/// decoder, the same one `main::window_icon` goes through, so a bad file is
+/// the same panic in the same place, and `main`'s test pins the 512 beside it.
+pub(crate) fn logo(ui: &egui::Ui, rect: egui::Rect, lit: bool) {
+    let id = egui::Id::new("ondin-logo");
+    // Read into a local: two `Context` accessors nested deadlock (CLAUDE.md).
+    let cached = ui.ctx().data(|d| d.get_temp::<egui::TextureHandle>(id));
+    let texture = cached.unwrap_or_else(|| {
+        let icon = eframe::icon_data::from_png_bytes(LOGO_PNG)
+            .expect("the bundled logo is not a valid PNG");
+        let image = egui::ColorImage::from_rgba_unmultiplied(
+            [icon.width as usize, icon.height as usize],
+            &icon.rgba,
+        );
+        let options =
+            egui::TextureOptions::LINEAR.with_mipmap_mode(Some(egui::TextureFilter::Linear));
+        let handle = ui.ctx().load_texture("ondin-logo", image, options);
+        ui.ctx().data_mut(|d| d.insert_temp(id, handle.clone()));
+        handle
+    });
+    if lit {
+        ui.painter()
+            .rect_filled(rect.expand(3.0), egui::CornerRadius::same(7), color::HOVER);
+    }
+    let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+    ui.painter()
+        .image(texture.id(), rect, uv, egui::Color32::WHITE);
+}
+
+#[cfg(test)]
+mod logo_tests {
+    //! Plain backticks in this module's prose: `cargo doc` cannot see a
+    //! `cfg(test)` module, so a link here is checked by nothing (§15 D319).
+    use super::*;
+
+    /// **The mark is the 64-pixel artwork with a transparent ground**, and the
+    /// texture is uploaded once however many frames draw it.
+    ///
+    /// The size pins the file — `icon.png` and `icon-1024.png` beside it are
+    /// the same artwork — and the corner and the middle of the coil pin that it
+    /// is the mark and not an opaque square.
+    ///
+    /// **Flip run**, the `insert_temp` that keeps the handle removed: fails on
+    /// *"the texture is kept"* — the predicted site.
+    #[test]
+    fn the_logo_is_the_64px_mark_and_uploads_once() {
+        let icon = eframe::icon_data::from_png_bytes(LOGO_PNG).unwrap();
+        assert_eq!((icon.width, icon.height), (64, 64));
+        let alpha_at = |x: usize, y: usize| icon.rgba[(y * 64 + x) * 4 + 3];
+        assert_eq!(alpha_at(0, 0), 0, "a transparent corner");
+        assert_eq!(alpha_at(32, 32), 0, "a transparent middle");
+        assert_eq!(alpha_at(7, 37), 255, "solid ink on the coil");
+
+        let ctx = egui::Context::default();
+        let rect = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(26.0, 26.0));
+        let mut ids = Vec::new();
+        for _ in 0..3 {
+            let _ = ctx.run_ui(Default::default(), |ui| {
+                logo(ui, rect, false);
+                ids.push(
+                    ui.ctx()
+                        .data(|d| d.get_temp::<egui::TextureHandle>(egui::Id::new("ondin-logo")))
+                        .map(|t| t.id()),
+                );
+            });
+        }
+        assert!(ids[0].is_some(), "the texture is kept");
+        assert!(ids.iter().all(|i| *i == ids[0]), "and reused: {ids:?}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

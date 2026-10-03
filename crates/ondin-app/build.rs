@@ -11,8 +11,8 @@
 //! It has to be the `.ico` and not one of the PNGs beside it, because a resource
 //! icon is a *container*: Windows picks the entry matching the size it is about
 //! to draw — 16 in a details view, 32 or 48 on the desktop, 256 in the large-icon
-//! view — instead of scaling one bitmap to all of them. `convertico-Ondin.ico`
-//! carries 16/32/48/64/128/256.
+//! view — instead of scaling one bitmap to all of them. `icons/icon.ico`
+//! carries 16/24/32/48/64/96/128/256.
 //!
 //! `winresource` locates the SDK's `rc.exe` through the registry. That is the
 //! same Windows SDK the MSVC Rust toolchain already needs for `link.exe`, so a
@@ -30,10 +30,10 @@ fn main() {
     #[cfg(windows)]
     {
         // Relative to `CARGO_MANIFEST_DIR`, which is this crate's root. The icons
-        // live at the repository root rather than under `assets/` because two of
-        // them (`appstore.png`, `playstore.png`) are store artwork the build never
-        // touches; `src/main.rs` reaches for the same folder the same way.
-        const ICO: &str = "../../icons/convertico-Ondin.ico";
+        // live at the repository root because the release workflow and the Linux
+        // packaging read them too; `src/main.rs` reaches for the same folder the
+        // same way.
+        const ICO: &str = "../../icons/icon.ico";
         println!("cargo:rerun-if-changed={ICO}");
 
         winresource::WindowsResource::new()

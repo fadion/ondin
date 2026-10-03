@@ -72,10 +72,11 @@ subsection, at the cost of the fallback coverage.
 
 ### Application icon
 
-`icons/convertico-Ondin.ico` is compiled into `ondin.exe` as a Win32 resource by
-`crates/ondin-app/build.rs`, and `icons/convertico-Ondin_256x256.png` is embedded
-as the runtime window icon. Both are original project artwork and are covered by
-Ondin's own MIT license.
+`icons/icon.ico` is compiled into `ondin.exe` as a Win32 resource by
+`crates/ondin-app/build.rs`, `icons/icon.png` is embedded as the runtime window
+icon and `icons/icon-64.png` as the top bar's mark, and `icons/icon-1024.png` is
+the source of the macOS `.icns`. All are original project artwork and are
+covered by Ondin's own MIT license.
 
 ## Rust dependencies (statically linked)
 

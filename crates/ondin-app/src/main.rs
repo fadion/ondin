@@ -649,12 +649,14 @@ fn export_all_report(
 /// window class with `hIcon: 0` rather than falling back to the executable's.
 ///
 /// One size has to be chosen here, since `WM_SETICON` gets the same pixels for
-/// `ICON_BIG` and `ICON_SMALL` and Windows scales for everything below it. 256 is
-/// the largest the set offers, so it is the one that has something left to give
-/// at 200% display scaling; the cost is that the 16px copies are an 8× downscale
-/// done by the OS rather than the artwork drawn at that size.
+/// `ICON_BIG` and `ICON_SMALL` and Windows scales for everything below it.
+/// `icons/icon.png` is 512, the size Schemaic hands winit from the same icon
+/// set, so it has something left to give at any display scaling; the cost is
+/// that the 16px copies are a downscale done by the OS rather than the artwork
+/// drawn at that size. (The 1024 is for the macOS `.icns` alone, and the 64 is
+/// the top bar's mark.)
 fn window_icon() -> eframe::egui::IconData {
-    static PNG: &[u8] = include_bytes!("../../../icons/convertico-Ondin_256x256.png");
+    static PNG: &[u8] = include_bytes!("../../../icons/icon.png");
     // Compiled in, so this either works on every run or on none. The test below
     // holds the "every" end, which is what makes the panic honest.
     eframe::icon_data::from_png_bytes(PNG).expect("the bundled window icon is not a valid PNG")
@@ -715,19 +717,21 @@ mod tests {
     /// gate that catches it before a user does.
     ///
     /// It asserts the *artwork*, not just that something decoded: a transparent
-    /// corner and an opaque point on the ring. A blank buffer passes neither, and
-    /// `appstore.png` — the obvious wrong file to reach for, and the one sitting
-    /// beside it — is an opaque 1024px square, so it fails both.
+    /// corner and middle, and opaque points on the coil. A blank buffer passes
+    /// none of the opaque ones, and an opaque square fails the transparent ones.
+    /// The size pins the file: `icon-64.png` and `icon-1024.png` sit beside it
+    /// and are the same artwork, so only the 512 tells them apart.
     #[test]
     fn window_icon_is_the_ondin_mark_at_the_size_windows_scales_from() {
         let icon = window_icon();
-        assert_eq!((icon.width, icon.height), (256, 256));
-        assert_eq!(icon.rgba.len(), 256 * 256 * 4);
+        assert_eq!((icon.width, icon.height), (512, 512));
+        assert_eq!(icon.rgba.len(), 512 * 512 * 4);
 
-        let alpha_at = |x: usize, y: usize| icon.rgba[(y * 256 + x) * 4 + 3];
-        assert_eq!(alpha_at(0, 0), 0, "the rounded mark must not fill its box");
-        assert_eq!(alpha_at(128, 128), 0, "the O is a ring, not a disc");
-        assert_eq!(alpha_at(128, 32), 255, "the top of the ring is solid ink");
+        let alpha_at = |x: usize, y: usize| icon.rgba[(y * 512 + x) * 4 + 3];
+        assert_eq!(alpha_at(0, 0), 0, "the mark must not fill its box");
+        assert_eq!(alpha_at(256, 256), 0, "the coil is a ring, not a disc");
+        assert_eq!(alpha_at(60, 300), 255, "the left of the coil is solid ink");
+        assert_eq!(alpha_at(256, 470), 255, "and so is its bottom");
     }
 
     #[test]

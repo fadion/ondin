@@ -794,21 +794,7 @@ impl OndinApp {
                     // clickable one read as "back here".
                     let (mark, _) =
                         ui.allocate_exact_size(egui::vec2(26.0, 26.0), egui::Sense::empty());
-                    let p = ui.painter();
-                    p.rect_filled(mark, egui::CornerRadius::same(7), color::ACCENT_900);
-                    p.rect_stroke(
-                        mark,
-                        egui::CornerRadius::same(7),
-                        egui::Stroke::new(1.0, color::ACCENT_700),
-                        egui::StrokeKind::Inside,
-                    );
-                    p.text(
-                        mark.center(),
-                        egui::Align2::CENTER_CENTER,
-                        icon::DIAMOND,
-                        theme::icon_font(17.0),
-                        color::ACCENT,
-                    );
+                    crate::ui::logo(ui, mark, false);
                     ui.label(
                         egui::RichText::new("Ondin")
                             .size(13.0)

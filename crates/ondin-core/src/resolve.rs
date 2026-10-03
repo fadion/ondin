@@ -183,6 +183,49 @@ impl crate::container::LayoutView for DocView<'_> {
     }
 }
 
+/// [`DocView`] with one answer from the used geometry filled so far: the box a
+/// pinned child is placed against ([`frame_box`]). What [`place_node`] lays a
+/// root out through, so a frame pinned inside a frame that is itself stretched
+/// is laid at the stretched parent's width (§15 D933). Every other answer is the
+/// document's.
+struct UsedView<'a> {
+    doc: &'a Document,
+    used: &'a FxHashMap<NodeId, Used>,
+}
+
+impl crate::container::LayoutView for UsedView<'_> {
+    fn parent(&self, id: NodeId) -> Option<NodeId> {
+        DocView(self.doc).parent(id)
+    }
+    fn children(&self, id: NodeId) -> Vec<NodeId> {
+        DocView(self.doc).children(id)
+    }
+    fn kind(&self, id: NodeId) -> Option<NodeKind> {
+        DocView(self.doc).kind(id)
+    }
+    fn display(&self, id: NodeId) -> Option<&crate::container::Display> {
+        self.doc.get(id).and_then(|n| n.display())
+    }
+    fn item(&self, id: NodeId) -> crate::container::LayoutItem {
+        DocView(self.doc).item(id)
+    }
+    fn insets(&self, id: NodeId) -> crate::container::Insets {
+        DocView(self.doc).insets(id)
+    }
+    fn visible(&self, id: NodeId) -> bool {
+        DocView(self.doc).visible(id)
+    }
+    fn mask(&self, id: NodeId) -> bool {
+        DocView(self.doc).mask(id)
+    }
+    fn local(&self, id: NodeId) -> Affine {
+        DocView(self.doc).local(id)
+    }
+    fn parent_box(&self, id: NodeId) -> Option<kurbo::Size> {
+        frame_box(self.used, self.doc.get(self.doc.get(id)?.parent()?)?)
+    }
+}
+
 /// The box a pinned child is placed against: its parent frame's used size, or
 /// the laid-out box of a group with a layout. `None` for a parent with no edges.
 fn frame_box(used: &FxHashMap<NodeId, Used>, parent: &Node) -> Option<kurbo::Size> {
@@ -296,7 +339,7 @@ fn place_node(
     id: NodeId,
 ) -> Option<Used> {
     if crate::container::is_layout_root(&DocView(doc), id) {
-        for l in crate::container::lay_out(&DocView(doc), id) {
+        for l in crate::container::lay_out(&UsedView { doc, used }, id) {
             laid.insert(l.id, l);
         }
     }

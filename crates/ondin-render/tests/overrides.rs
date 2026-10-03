@@ -3255,3 +3255,279 @@ fn a_dragged_grid_item_lands_in_its_new_cell() {
     assert_eq!(world.translation(), Vec2::new(700.0, 550.0), "its new cell");
     assert_eq!(bx.size(), Size::new(20.0, 20.0), "its own box");
 }
+
+/// A painted node under `parent`, stored at `at` — the nested-layout tests'
+/// builder. Every node is filled, so the differential has ink to compare.
+fn painted(
+    doc: &mut Document,
+    ids: &mut IdSource,
+    parent: NodeId,
+    kind: NodeKind,
+    at: (f64, f64),
+) -> NodeId {
+    let id = ids.mint();
+    let index = doc.get(parent).unwrap().children().len();
+    let mut ops = vec![Operation::CreateNode {
+        id,
+        parent,
+        index,
+        kind: kind.clone(),
+        transform: Some(Affine::translate(at)),
+        name: None,
+    }];
+    if !matches!(kind, NodeKind::Group) {
+        ops.push(Operation::SetFills {
+            id,
+            fills: vec![Fill {
+                brush: Brush::Solid(Color::from_rgba8(60, 120, 200, 255)),
+                visible: true,
+            }],
+        });
+    }
+    doc.apply(&Transaction(ops)).unwrap();
+    id
+}
+
+fn sized_frame(w: f64, h: f64) -> NodeKind {
+    NodeKind::Artboard {
+        size: Size::new(w, h),
+    }
+}
+
+fn sized_rect(w: f64, h: f64) -> NodeKind {
+    NodeKind::Rect {
+        size: Size::new(w, h),
+        corner_radii: RoundedRectRadii::default(),
+    }
+}
+
+/// **A frame resize previews the flex frames inside it as its commit lays them**
+/// (§15 D933, the release review's `[X4.2-L2-01]`). `RenderOverrides::relayout`
+/// re-placed every child of the resized frame, and for one with no insets and no
+/// preview of its own it fell back to the *stored* transform and kind — which,
+/// for a layout root that hugs or an item laid in its flow, are places nobody has
+/// been drawn at since the layout was set. So:
+///
+/// - (a) a hugging row inside a plain frame previewed at its stored 300 × 100,
+///   its three rects piled at their stored (250, 250);
+/// - (b) a row pinned `left: 20; right: 20` with `justify-content: end`, laid in
+///   the width it is drawn at since D933's commit half, previewed piled too;
+/// - (c) a flex frame resized while it holds a pinned flex frame of its own;
+/// - (d) no frame resized at all: a sibling rect resized in a row shrinks a grown
+///   plain frame, which holds a hugging row.
+///
+/// Each case as its own document, each through `assert_preview_matches_commit`.
+///
+/// **Flip runs**: `relayout`'s skip back to *"a layer whose kind this preview
+/// changed"* only fails on (a) at the hugging frame's fill, 300 × 100 against
+/// 160 × 50, the predicted site; its pinned-root pass switched off fails on (b),
+/// the row's items piled where (a) is now right.
+#[test]
+fn a_resize_previews_nested_layouts_as_its_commit_lays_them() {
+    use ondin_core::container::{AlignItems, Dimension, Display, Flex, JustifyContent};
+    let row = |justify| {
+        Some(Display::Flex(Flex {
+            column_gap: 10.0,
+            padding: [10.0; 4],
+            justify_content: justify,
+            align_items: AlignItems::Start,
+            ..Default::default()
+        }))
+    };
+    let three = |doc: &mut Document, ids: &mut IdSource, f: NodeId| {
+        for _ in 0..3 {
+            painted(doc, ids, f, sized_rect(40.0, 30.0), (250.0, 250.0));
+        }
+    };
+    let hug = |doc: &mut Document, f: NodeId| {
+        let mut item = *doc.get(f).unwrap().item();
+        item.width = Dimension::FitContent;
+        item.height = Dimension::FitContent;
+        doc.apply(&Transaction(vec![Operation::SetLayoutItem { id: f, item }]))
+            .unwrap();
+    };
+    let setup = |doc: &mut Document, ops: Vec<Operation>| doc.apply(&Transaction(ops)).unwrap();
+    let resize = |id, w, h| {
+        Transaction(vec![Operation::SetGeometry {
+            id,
+            geometry: GeometryPatch::Size(Size::new(w, h)),
+        }])
+    };
+
+    // (a)
+    let mut ids = IdSource::new(1);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let outer = painted(
+        &mut doc,
+        &mut ids,
+        root,
+        sized_frame(600.0, 400.0),
+        (0.0, 0.0),
+    );
+    let inner = painted(
+        &mut doc,
+        &mut ids,
+        outer,
+        sized_frame(300.0, 100.0),
+        (20.0, 20.0),
+    );
+    three(&mut doc, &mut ids, inner);
+    hug(&mut doc, inner);
+    setup(
+        &mut doc,
+        vec![Operation::SetDisplay {
+            id: inner,
+            display: row(JustifyContent::Start),
+        }],
+    );
+    assert_preview_matches_commit(&doc, &resize(outer, 700.0, 400.0), "(a) a hugging row");
+
+    // (b)
+    let mut ids = IdSource::new(1);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let outer = painted(
+        &mut doc,
+        &mut ids,
+        root,
+        sized_frame(600.0, 400.0),
+        (0.0, 0.0),
+    );
+    let inner = painted(
+        &mut doc,
+        &mut ids,
+        outer,
+        sized_frame(300.0, 100.0),
+        (20.0, 20.0),
+    );
+    three(&mut doc, &mut ids, inner);
+    setup(
+        &mut doc,
+        vec![
+            Operation::SetDisplay {
+                id: inner,
+                display: row(JustifyContent::End),
+            },
+            Operation::SetInsets {
+                id: inner,
+                insets: ondin_core::Insets {
+                    left: Some(ondin_core::LengthPct::Px(20.0)),
+                    right: Some(ondin_core::LengthPct::Px(20.0)),
+                    ..Default::default()
+                },
+            },
+        ],
+    );
+    assert_preview_matches_commit(&doc, &resize(outer, 700.0, 400.0), "(b) a pinned row");
+
+    // (c)
+    let mut ids = IdSource::new(1);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let outer = painted(
+        &mut doc,
+        &mut ids,
+        root,
+        sized_frame(600.0, 400.0),
+        (0.0, 0.0),
+    );
+    painted(
+        &mut doc,
+        &mut ids,
+        outer,
+        sized_rect(40.0, 30.0),
+        (0.0, 0.0),
+    );
+    let inner = painted(
+        &mut doc,
+        &mut ids,
+        outer,
+        sized_frame(100.0, 60.0),
+        (0.0, 0.0),
+    );
+    three(&mut doc, &mut ids, inner);
+    hug(&mut doc, inner);
+    setup(
+        &mut doc,
+        vec![
+            Operation::SetDisplay {
+                id: outer,
+                display: row(JustifyContent::Start),
+            },
+            Operation::SetDisplay {
+                id: inner,
+                display: row(JustifyContent::Start),
+            },
+            Operation::SetInsets {
+                id: inner,
+                insets: ondin_core::Insets {
+                    top: Some(ondin_core::LengthPct::Px(10.0)),
+                    right: Some(ondin_core::LengthPct::Px(10.0)),
+                    ..Default::default()
+                },
+            },
+        ],
+    );
+    assert_preview_matches_commit(
+        &doc,
+        &resize(outer, 700.0, 400.0),
+        "(c) a pinned row in a resized row",
+    );
+
+    // (d)
+    let mut ids = IdSource::new(1);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let outer = painted(
+        &mut doc,
+        &mut ids,
+        root,
+        sized_frame(600.0, 400.0),
+        (0.0, 0.0),
+    );
+    let sibling = painted(
+        &mut doc,
+        &mut ids,
+        outer,
+        sized_rect(40.0, 30.0),
+        (0.0, 0.0),
+    );
+    let grown = painted(
+        &mut doc,
+        &mut ids,
+        outer,
+        sized_frame(100.0, 100.0),
+        (0.0, 0.0),
+    );
+    let inner = painted(
+        &mut doc,
+        &mut ids,
+        grown,
+        sized_frame(100.0, 60.0),
+        (5.0, 5.0),
+    );
+    three(&mut doc, &mut ids, inner);
+    hug(&mut doc, inner);
+    let mut item = *doc.get(grown).unwrap().item();
+    item.grow = 1.0;
+    setup(
+        &mut doc,
+        vec![
+            Operation::SetDisplay {
+                id: outer,
+                display: row(JustifyContent::Start),
+            },
+            Operation::SetDisplay {
+                id: inner,
+                display: row(JustifyContent::Start),
+            },
+            Operation::SetLayoutItem { id: grown, item },
+        ],
+    );
+    assert_preview_matches_commit(
+        &doc,
+        &resize(sibling, 120.0, 30.0),
+        "(d) a sibling shrinks a grown frame",
+    );
+}

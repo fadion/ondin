@@ -1571,3 +1571,43 @@ fn outlining_a_laid_layer_leaves_it_where_it_is_drawn() {
     s.commit(tx.0);
     assert_eq!(s.bounds(path), was, "the stretched one");
 }
+
+/// **A flex frame stretched by its own insets lays its items out in the width
+/// it is drawn at** (§15 D933, the release review's `[X3.1-L1-01]`). A 500 × 200
+/// frame holds a 200 × 100 row with `justify-content: end` and one 50 × 50 rect,
+/// pinned `left: 0; right: 0` — drawn 500 wide, CSS's absolutely positioned
+/// container between two insets. The pass ran at the stored 200, so the rect sat
+/// at 150..200, the end of a box nobody can see, where CSS puts it at 450..500;
+/// and it stayed there when the outer frame grew to 600. `update` stays equal to
+/// `rebuild` across both, the harness's own check.
+///
+/// **Flip run**, `lay_out` returning its first pass whatever `pinned_size`
+/// says: fails on *"the end of the drawn width"*, x0 150 against 450, the
+/// predicted site.
+#[test]
+fn a_flex_frame_stretched_by_its_insets_lays_out_in_its_drawn_width() {
+    let mut s = Scene::new();
+    let outer = s.add(s.root, frame(500.0, 200.0), (0.0, 0.0));
+    let inner = s.add(outer, frame(200.0, 100.0), (0.0, 0.0));
+    let r = s.add(inner, rect(50.0, 50.0), (0.0, 0.0));
+    s.display(
+        inner,
+        Some(Display::Flex(Flex {
+            justify_content: ondin_core::container::JustifyContent::End,
+            align_items: AlignItems::Start,
+            ..Default::default()
+        })),
+    );
+    s.commit(vec![Operation::SetInsets {
+        id: inner,
+        insets: ondin_core::Insets {
+            left: Some(ondin_core::LengthPct::Px(0.0)),
+            right: Some(ondin_core::LengthPct::Px(0.0)),
+            ..Default::default()
+        },
+    }]);
+    assert_eq!(s.bounds(inner).width(), 500.0, "the fixture: stretched");
+    assert_eq!(s.bounds(r).x0, 450.0, "the end of the drawn width");
+    s.resize(outer, 600.0, 200.0);
+    assert_eq!(s.bounds(r).x0, 550.0, "and it follows the frame");
+}

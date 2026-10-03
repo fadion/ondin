@@ -314,8 +314,13 @@ impl RenderOverrides {
     /// than the one on disk — the half-previewing shape
     /// §15 D391 found in the layout grids, where the box re-flowed and its bands
     /// stayed put.
-    pub fn laid_grid(&self, doc: &Document, id: NodeId) -> Option<ondin_core::container::LaidGrid> {
-        ondin_core::container::laid_grid(&PreviewView { doc, ov: self }, id)
+    pub fn laid_grid(
+        &self,
+        doc: &Document,
+        res: &Resolved,
+        id: NodeId,
+    ) -> Option<ondin_core::container::LaidGrid> {
+        ondin_core::container::laid_grid(&PreviewView { doc, ov: self, res }, id)
     }
 
     /// The ground this preview asks for, if it touches the ground at all.
@@ -669,7 +674,7 @@ impl RenderOverrides {
                 })
                 .collect();
         let results = {
-            let view = PreviewView { doc, ov: self };
+            let view = PreviewView { doc, ov: self, res };
             // **Every layout root from a touched node up to its chain root**, not the
             // chain root alone (§15 D911). The chain climbs through a plain group to
             // the flex container it is an item of (§15 D899), and that container's
@@ -750,41 +755,55 @@ impl RenderOverrides {
                 }
                 continue;
             }
-            let Some(node) = doc.get(id) else { continue };
-            // A root keeps where its parent puts it; an item goes where its
-            // container laid it — its stored transform when that is where, stated
-            // outright so a committed placement elsewhere does not show through.
-            //
-            // ⚠️ **"Stored" is what the pass read, which is this preview's transform
-            // where it has one** (`PreviewView::local`), not the document's.
-            // `item_placed` answers `local: None` when the slot is exactly that, and
-            // reading the document's here put the item at its committed transform
-            // instead. Nothing met it while a resized item's slot could not equal the
-            // shifted origin its tool writes; one aligned to the end of its line
-            // after a top-handle resize is laid exactly there, and previewed at its
-            // stored (300, 150) — found by the test for that resize (§15 D905).
-            if !root {
-                let specified = self
-                    .get(id)
-                    .and_then(|o| o.transform)
-                    .unwrap_or_else(|| node.transform());
-                self.entry(id).transform = Some(placed.local.unwrap_or(specified));
-            }
-            let base = self
-                .get(id)
-                .and_then(|o| o.kind.clone())
-                .unwrap_or_else(|| node.kind().clone());
-            let kind = placed.kind.unwrap_or(base);
-            let now = self
-                .get(id)
-                .and_then(|o| o.kind.clone())
-                .or_else(|| res.used_kind(doc, id).cloned());
-            if now.as_ref() != Some(&kind) {
-                self.set_kind(doc, res, id, kind);
-            }
-            self.entry(id).frame = placed.frame;
-            self.mark_moved(doc, id);
+            self.apply_laid(doc, res, id, root, placed);
         }
+    }
+
+    /// One result of a layout pass written into this preview: an item's slot and
+    /// size, a root's size — [`Self::flex_relayout`]'s, and [`Self::relayout`]'s
+    /// for a pinned root it re-lays (§15 D933).
+    fn apply_laid(
+        &mut self,
+        doc: &Document,
+        res: &Resolved,
+        id: NodeId,
+        root: bool,
+        placed: ondin_core::container::Placed,
+    ) {
+        let Some(node) = doc.get(id) else { return };
+        // A root keeps where its parent puts it; an item goes where its
+        // container laid it — its stored transform when that is where, stated
+        // outright so a committed placement elsewhere does not show through.
+        //
+        // ⚠️ **"Stored" is what the pass read, which is this preview's transform
+        // where it has one** (`PreviewView::local`), not the document's.
+        // `item_placed` answers `local: None` when the slot is exactly that, and
+        // reading the document's here put the item at its committed transform
+        // instead. Nothing met it while a resized item's slot could not equal the
+        // shifted origin its tool writes; one aligned to the end of its line
+        // after a top-handle resize is laid exactly there, and previewed at its
+        // stored (300, 150) — found by the test for that resize (§15 D905).
+        if !root {
+            let specified = self
+                .get(id)
+                .and_then(|o| o.transform)
+                .unwrap_or_else(|| node.transform());
+            self.entry(id).transform = Some(placed.local.unwrap_or(specified));
+        }
+        let base = self
+            .get(id)
+            .and_then(|o| o.kind.clone())
+            .unwrap_or_else(|| node.kind().clone());
+        let kind = placed.kind.unwrap_or(base);
+        let now = self
+            .get(id)
+            .and_then(|o| o.kind.clone())
+            .or_else(|| res.used_kind(doc, id).cloned());
+        if now.as_ref() != Some(&kind) {
+            self.set_kind(doc, res, id, kind);
+        }
+        self.entry(id).frame = placed.frame;
+        self.mark_moved(doc, id);
     }
 
     /// A dragged flex item's landing — its world transform and own box where its
@@ -900,14 +919,65 @@ impl RenderOverrides {
             // The kind this preview has given it — a new corner radius, say — else
             // the document's; either way at its specified size, which `place`
             // stretches from.
-            let base = self
+            let mut base = self
                 .get(id)
                 .and_then(|o| o.kind.clone())
                 .unwrap_or_else(|| node.kind().clone());
-            // A layer with no insets whose kind this preview changed is not this
-            // pass's business: it is drawn with that kind where it is.
-            if !insets.is_authored() && self.get(id).is_some_and(|o| o.insets.is_none()) {
+            // **A layer with no insets is not this pass's business** unless this
+            // preview unpinned it (§15 D933): with its kind changed it is drawn
+            // with that kind where it is, and **untouched it is drawn where the
+            // commit drew it**. This skipped only the first, so an untouched child
+            // of a resized frame fell through to `place`, which answers `None` for
+            // no insets, and was re-placed at its *stored* transform and kind — a
+            // layout root that hugs drawn at its stored size, and every item it lays
+            // piled at its stored transform, all snapping into place on release.
+            if !insets.is_authored() && self.get(id).is_none_or(|o| o.insets.is_none()) {
                 continue;
+            }
+            // **A pinned layout root is laid out again**, at the size its insets
+            // give it against the box this preview draws its parent at, and its
+            // items placed from that pass (§15 D933) — `Resolved`'s order, which
+            // lays a root before placing it. Its own size is the base `place`
+            // stretches from, as `resolve::root_used`'s is; the stored size was
+            // used, so a hugging root previewed at the size it was typed at.
+            let laid: Vec<(NodeId, bool, ondin_core::container::Placed)> = {
+                let view = PreviewView { doc, ov: self, res };
+                if insets.is_authored() && ondin_core::container::is_layout_root(&view, id) {
+                    ondin_core::container::lay_out(&view, id)
+                        .into_iter()
+                        .map(|l| {
+                            let placed = if l.id == id {
+                                let (kind, frame) =
+                                    ondin_core::container::root_sized(&view, id, l.size);
+                                ondin_core::container::Placed {
+                                    local: None,
+                                    kind,
+                                    frame,
+                                }
+                            } else {
+                                ondin_core::container::item_placed(&view, l.id, l.slot, l.size)
+                                    .unwrap_or(ondin_core::container::Placed {
+                                        local: None,
+                                        kind: None,
+                                        frame: None,
+                                    })
+                            };
+                            (l.id, l.id == id, placed)
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                }
+            };
+            if let Some((_, _, own)) = laid.iter().find(|(l, root, _)| *root && *l == id)
+                && let Some(kind) = &own.kind
+            {
+                base = kind.clone();
+            }
+            for (l, root, placed) in laid {
+                if !root {
+                    self.apply_laid(doc, res, l, false, placed);
+                }
             }
             let (local, kind) =
                 match ondin_core::container::place(&insets, size, node.transform(), &base) {
@@ -1551,9 +1621,16 @@ impl RenderOverrides {
 /// **Ghosts are not in the tree it describes**: a copy being Alt-dragged into a
 /// flex container is laid out on release, and until then its siblings do not make
 /// room for it.
+///
+/// **Its one used answer is the box a pinned root is stretched against**
+/// ([`LayoutView::parent_box`](ondin_core::container::LayoutView::parent_box),
+/// §15 D933): the parent's size as this preview draws it, else as `res` says it
+/// is drawn — so a frame pinned inside a frame being resized is laid at the width
+/// the commit will lay it at.
 struct PreviewView<'a> {
     doc: &'a Document,
     ov: &'a RenderOverrides,
+    res: &'a Resolved,
 }
 
 impl ondin_core::container::LayoutView for PreviewView<'_> {
@@ -1604,6 +1681,18 @@ impl ondin_core::container::LayoutView for PreviewView<'_> {
             .and_then(|o| o.transform)
             .or_else(|| self.doc.get(id).map(|n| n.transform()))
             .unwrap_or_default()
+    }
+    fn parent_box(&self, id: NodeId) -> Option<kurbo::Size> {
+        let parent = self.doc.get(id)?.parent()?;
+        let over = self.ov.get(parent);
+        match over.and_then(|o| o.kind.as_ref()) {
+            Some(NodeKind::Artboard { size }) => Some(*size),
+            _ => match self.res.used_kind(self.doc, parent)? {
+                NodeKind::Artboard { size } => Some(*size),
+                NodeKind::Group => over.and_then(|o| o.frame).or(self.res.used_frame(parent)),
+                _ => None,
+            },
+        }
     }
 }
 

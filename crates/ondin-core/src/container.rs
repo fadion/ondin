@@ -1279,6 +1279,21 @@ pub trait LayoutView {
     fn visible(&self, id: crate::NodeId) -> bool;
     fn mask(&self, id: crate::NodeId) -> bool;
     fn local(&self, id: crate::NodeId) -> Affine;
+    /// The box a pinned child of `id`'s parent is placed against — the parent
+    /// frame's **used** size, or a laid group's box — `None` for a parent with no
+    /// edges. What [`lay_out`] stretches a pinned layout root to (§15 D933).
+    ///
+    /// The default reads the parent's stored frame size, which is its used size
+    /// unless something laid out or stretched the parent itself; a view that knows
+    /// the used geometry (`Resolved`'s pass, the renderer's preview) answers from
+    /// it, and must, or a frame nested in a stretched frame is laid at the wrong
+    /// width.
+    fn parent_box(&self, id: crate::NodeId) -> Option<Size> {
+        match self.kind(self.parent(id)?)? {
+            NodeKind::Artboard { size } => Some(size),
+            _ => None,
+        }
+    }
 }
 
 /// Whether `kind` can be a layout container, flex or grid: a frame, or a group
@@ -1485,11 +1500,66 @@ pub struct Laid {
 /// D913's first ruling); a group or a boolean without a layout
 /// as one atomic box, its children's union. Results come back on the 1/64 px grid
 /// ([`quantize`]).
+///
+/// 🚨 **A root pinned by two insets on an axis is laid at the size they give it**
+/// (§15 D933) — CSS's absolutely positioned container, as wide as the space
+/// between its insets, its items justified in that width. The pass ran at the
+/// stored size and [`place`] stretched the box afterwards, so a header pinned left
+/// and right was drawn across the page with its items laid where they were at the
+/// width it was first drawn at, while its own pinned children followed the
+/// stretched edge. So the root is laid once at its own size, placed against
+/// [`LayoutView::parent_box`] the way `Resolved` will place it, and laid again at
+/// the placed size where the two differ. **Stretch wins over hug**: a root asked
+/// to hug (`fit-content`) and pinned on both sides is laid at the stretched size,
+/// which is the size [`place`] has always drawn it at (§15 D874's both-insets
+/// rule) — CSS's `fit-content` would keep the hug, and the difference is recorded
+/// there.
 pub fn lay_out(view: &dyn LayoutView, root: crate::NodeId) -> Vec<Laid> {
+    let out = lay_out_at(view, root, None);
+    match pinned_size(view, root, &out) {
+        Some(size) => lay_out_at(view, root, Some(size)),
+        None => out,
+    }
+}
+
+/// The size a pinned layout root's insets stretch it to, where that differs from
+/// the size its own pass in `out` gave it — [`lay_out`]'s second pass, or `None`.
+fn pinned_size(view: &dyn LayoutView, root: crate::NodeId, out: &[Laid]) -> Option<Size> {
+    let insets = view.insets(root);
+    if !insets.is_authored() {
+        return None;
+    }
+    let frame = view.parent_box(root)?;
+    let own = out.iter().find(|l| l.id == root)?.size;
+    let (kind, _) = root_sized(view, root, own);
+    let kind = match kind {
+        Some(k) => k,
+        None => view.kind(root)?,
+    };
+    let (_, placed) = place(&insets, frame, view.local(root), &kind)?;
+    match placed? {
+        NodeKind::Artboard { size }
+            if !near(size.width, own.width) || !near(size.height, own.height) =>
+        {
+            Some(size)
+        }
+        _ => None,
+    }
+}
+
+/// [`lay_out`]'s pass, with the root at `size` when given — a definite size on
+/// both axes, which is what an absolutely positioned box between two insets is.
+fn lay_out_at(view: &dyn LayoutView, root: crate::NodeId, size: Option<Size>) -> Vec<Laid> {
     let mut tree = FlexTree::new(view);
     let Some(r) = tree.push(root) else {
         return Vec::new();
     };
+    if let Some(size) = size {
+        tree.styles[r].size = taffy::Size {
+            width: taffy::Dimension::length(size.width as f32),
+            height: taffy::Dimension::length(size.height as f32),
+        };
+    }
     taffy::compute_root_layout(
         &mut tree,
         taffy::NodeId::from(r),
@@ -1576,9 +1646,23 @@ pub fn laid_grid(view: &dyn LayoutView, id: crate::NodeId) -> Option<LaidGrid> {
     while parent_lays_out(view, root) && in_flow(view, root) {
         root = view.parent(root)?;
     }
+    // At the size [`lay_out`] lays the root at — a pinned root's stretched size
+    // (§15 D933) — or the tracks drawn on the canvas and the cells a drop picks
+    // are a grid the commit never lays.
+    let size = if view.insets(root).is_authored() {
+        pinned_size(view, root, &lay_out_at(view, root, None))
+    } else {
+        None
+    };
     let mut tree = FlexTree::new(view);
     tree.want = Some(id);
     let r = tree.push(root)?;
+    if let Some(size) = size {
+        tree.styles[r].size = taffy::Size {
+            width: taffy::Dimension::length(size.width as f32),
+            height: taffy::Dimension::length(size.height as f32),
+        };
+    }
     taffy::compute_root_layout(
         &mut tree,
         taffy::NodeId::from(r),

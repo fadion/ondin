@@ -9919,7 +9919,7 @@ impl OndinApp {
             return;
         }
         let held = self.chrome_hold.holding();
-        let (doc, _, ov) = self.session.render_inputs();
+        let (doc, res, ov) = self.session.render_inputs();
         let mut subjects: Vec<NodeId> = self.session.selection.ids().to_vec();
         if matches!(self.drag, Drag::Move { .. }) {
             for id in self.session.selection.ids() {
@@ -9951,7 +9951,7 @@ impl OndinApp {
                 true => copied,
                 false => egui::Vec2::ZERO,
             };
-            let Some(grid) = ov.laid_grid(doc, id) else {
+            let Some(grid) = ov.laid_grid(doc, res, id) else {
                 continue;
             };
             let (Some(bx), Some(world)) = (

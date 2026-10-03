@@ -9921,9 +9921,13 @@ impl OndinApp {
     ///
     /// **For every selected grid container, and for the container of a layer
     /// being moved**, whose drop writes a cell and so wants the cells in view
-    /// while it is aimed (§15 D916's drop). From the preview
-    /// ([`ondin_render::RenderOverrides::laid_grid`]), so a resize on the canvas
-    /// re-lays the lines with the box; under the hover outline and the selection
+    /// while it is aimed (§15 D916's drop). A selected container's from the
+    /// preview ([`ondin_render::RenderOverrides::laid_grid`]), so a resize on the
+    /// canvas re-lays the lines with the box; **a moved item's container's from
+    /// the grid the drop reads** ([`ondin_core::build::drop_grid`], §15 D946) —
+    /// the preview's has the drop already in it, and with a track sized by its
+    /// content that moves the cells out from under the pointer aiming at them.
+    /// Under the hover outline and the selection
     /// chrome, and gone wherever [`Self::chrome_hidden`] takes the selection's —
     /// **but for one case: an inspector edit of the container's own layout**
     /// (§15 D925, answering D921's open question). The edit hold (§15 D128) takes
@@ -9947,7 +9951,11 @@ impl OndinApp {
     /// off the **preview**, which does not move the session's revision. The other
     /// reason this gave — that undo did not move it either (§15 D616's amendment,
     /// D921's second) — went with §15 D928, and whether a cache is worth it now
-    /// has not been asked again.
+    /// has not been asked again. ⚠️ **That figure is the layout pass only**, and
+    /// it was not the cost that dominated: the dashes were, a segment per dash
+    /// over each line's whole screen length, growing with the zoom and paid in
+    /// full off screen. They are cut to the view now
+    /// ([`Self::dashed_in_view`], §15 D946).
     fn draw_grid_tracks(&self, painter: &egui::Painter, rect: egui::Rect, ppp: f32) {
         if self.editing_in_place() {
             return;
@@ -9981,22 +9989,47 @@ impl OndinApp {
             if held && ov.get(id).is_some_and(|o| o.display.is_none()) {
                 continue;
             }
-            let offset = match self.session.selection.ids().contains(&id) {
+            let selected = self.session.selection.ids().contains(&id);
+            let offset = match selected {
                 true => copied,
                 false => egui::Vec2::ZERO,
             };
-            let Some(grid) = ov.laid_grid(doc, res, id) else {
+            // A moved item's container is drawn as the drop reads it — committed,
+            // in its committed place — and not as the preview lays it with the
+            // drop already in: with a track sized by content the two put the
+            // cells in different places, and the drawn one is what is aimed at
+            // (§15 D946, `[X5.2-L1-01]`).
+            let laid = match selected {
+                true => ov.laid_grid(doc, res, id).and_then(|grid| {
+                    Some((
+                        grid,
+                        self.session.preview_local_box(id)?,
+                        self.session.preview_world_transform(id)?,
+                    ))
+                }),
+                false => ondin_core::build::drop_grid(doc, res, id).and_then(|grid| {
+                    Some((
+                        grid,
+                        ondin_core::local_box(doc, res, id)?,
+                        res.world_transform(id)?,
+                    ))
+                }),
+            };
+            let Some((grid, bx, world)) = laid else {
                 continue;
             };
-            let (Some(bx), Some(world)) = (
-                self.session.preview_local_box(id),
-                self.session.preview_world_transform(id),
-            ) else {
+            // Culled to the view: nothing for a container wholly off it, and
+            // nothing of a band or a line outside it (§15 D946, `[X5.2-L4-01]`).
+            let seen = |quad: [egui::Pos2; 4]| egui::Rect::from_points(&quad).intersects(rect);
+            if !seen(self.local_quad(bx, world, rect, ppp).map(|p| p + offset)) {
                 continue;
-            };
+            }
             let lines = Self::track_lines(&grid, bx);
             for band in lines.gaps {
                 let quad = self.local_quad(band, world, rect, ppp).map(|p| p + offset);
+                if !seen(quad) {
+                    continue;
+                }
                 painter.add(egui::Shape::convex_polygon(
                     quad.to_vec(),
                     color::GRID_GAP,
@@ -10005,9 +10038,11 @@ impl OndinApp {
             }
             let stroke = egui::Stroke::new(1.0, color::SELECT_DIM);
             for (a, b, explicit) in lines.lines {
-                let ends = [a, b].map(|p| self.to_screen(world * p, rect, ppp) + offset);
+                let [a, b] = [a, b].map(|p| self.to_screen(world * p, rect, ppp) + offset);
                 let (dash, gap) = if explicit { (4.0, 3.0) } else { (1.5, 2.5) };
-                painter.extend(egui::Shape::dashed_line(&ends, stroke, dash, gap));
+                if let Some(ends) = Self::dashed_in_view(a, b, rect, dash + gap) {
+                    painter.extend(egui::Shape::dashed_line(&ends, stroke, dash, gap));
+                }
             }
         }
     }
@@ -10030,13 +10065,16 @@ impl OndinApp {
             (Some(first), Some(last)) => (first.0, last.1),
             _ => (lo, hi),
         };
+        // The spans are laid in order, so an edge can only coincide with the one
+        // before it — a look at the last rather than a search of every edge, which
+        // was quadratic in the track count (`[X5.2-L4-01]`'s aside).
         let edges = |t: &LaidTracks| {
             let first = usize::from(t.before);
             let explicit = first..first + usize::from(t.explicit);
             let mut out: Vec<(f64, bool)> = Vec::new();
             for (i, (a, b)) in t.spans.iter().enumerate() {
                 for v in [*a, *b] {
-                    match out.iter_mut().find(|(w, _)| (w - v).abs() < 1e-6) {
+                    match out.last_mut().filter(|(w, _)| (w - v).abs() < 1e-6) {
                         Some(edge) => edge.1 |= explicit.contains(&i),
                         None => out.push((v, explicit.contains(&i))),
                     }
@@ -10073,6 +10111,59 @@ impl OndinApp {
                 .map(|(a, b)| KRect::new(x0, a, x1, b)),
         );
         out
+    }
+
+    /// The part of the screen segment `a`→`b` worth dashing in `view`, for
+    /// [`Self::draw_grid_tracks`]: cut to the view grown by one dash `period` on
+    /// every side, its start pulled back to a whole number of periods from `a`.
+    /// `None` where the segment misses that.
+    ///
+    /// **`dashed_line` emits a segment per dash over the whole length it is
+    /// handed**, so an uncut line costs its screen length — 759,234 shapes and
+    /// 47 ms a frame for one selected 12-column artboard at 256×, and 2.86 M for a
+    /// 1000-track grid wholly off screen (`[X5.2-L4-01]`, measured in release).
+    /// Cut, a line costs the view's length at most, whatever the zoom.
+    ///
+    /// **The pull-back is what keeps the pattern still under a pan**: dashes start
+    /// at `a` and every period after it, so a cut that started where the view
+    /// edge happened to fall would slide the pattern along the line with the
+    /// camera. The period of slack makes up for the pull-back and for a dash
+    /// running past the cut at the far end, both off the visible view.
+    fn dashed_in_view(
+        a: egui::Pos2,
+        b: egui::Pos2,
+        view: egui::Rect,
+        period: f32,
+    ) -> Option<[egui::Pos2; 2]> {
+        let view = view.expand(period);
+        let d = b - a;
+        // Liang–Barsky: the parameters at which the segment enters and leaves.
+        let (mut t0, mut t1) = (0.0_f32, 1.0_f32);
+        for (p, q) in [
+            (-d.x, a.x - view.min.x),
+            (d.x, view.max.x - a.x),
+            (-d.y, a.y - view.min.y),
+            (d.y, view.max.y - a.y),
+        ] {
+            if p == 0.0 {
+                if q < 0.0 {
+                    return None;
+                }
+            } else if p < 0.0 {
+                t0 = t0.max(q / p);
+            } else {
+                t1 = t1.min(q / p);
+            }
+        }
+        if t0 > t1 {
+            return None;
+        }
+        let length = d.length();
+        if length <= 0.0 {
+            return Some([a, b]);
+        }
+        let start = (t0 * length / period).floor() * period / length;
+        Some([a + d * start, a + d * t1])
     }
 
     /// The selection outline for `id`, from the **preview** layer so it tracks a
@@ -14467,6 +14558,10 @@ mod grid_track_tests {
         ]))
         .expect("build the fixture");
         app.session.adopt_document(doc, None);
+        // The canvas the size of `AREA`, so the frame is on it: the lines are
+        // cut to the view (§15 D946), and a headless app's 1×1 canvas put every
+        // one of them off it.
+        app.canvas_px = (800, 600);
         (app, frame)
     }
 
@@ -14663,7 +14758,8 @@ mod grid_track_tests {
 
     /// **The lines follow their container moved and turned in the preview** —
     /// the frame dragged 50 right puts the column edges 50 right, and the frame
-    /// turned a quarter about its origin lays them across: no upright line is
+    /// turned a quarter about its origin (and carried into view) lays them
+    /// across: no upright line is
     /// left where a column edge stood, and the four are level, at 20, 120, 130
     /// and 380 down.
     ///
@@ -14692,7 +14788,11 @@ mod grid_track_tests {
         app.session
             .set_preview(&Transaction(vec![Operation::SetTransform {
                 id: frame,
-                transform: Affine::rotate(std::f64::consts::FRAC_PI_2),
+                // Turned about its origin and carried 305 right, to stay in
+                // view — the lines are cut to it (§15 D946) — and to put the
+                // turned row edges, at 285 and 125, off every column edge.
+                transform: Affine::translate((305.0, 0.0))
+                    * Affine::rotate(std::f64::consts::FRAC_PI_2),
             }]));
         // Upright now are the row's edges, turned; none sits where a column was.
         let upright = drawn(&app, &ctx).0;
@@ -14795,6 +14895,159 @@ mod grid_track_tests {
         );
         app.session.clear_gesture_preview();
         assert_eq!(drawn(&app, &ctx).0.len(), 4, "and they are back on release");
+    }
+
+    /// **While an item is moved, its container's lines are the grid the drop is
+    /// aimed against** (§15 D946, `[X5.2-L1-01]`): a 400×100 frame laid as
+    /// `auto auto auto` over a 200-wide `a` and two 20-wide items has columns at
+    /// 0, 253.3, 326.7 and 400. `b`, auto-placed in the second, dragged 110 left
+    /// puts its centre at 153 — in the first column, which is where the drop
+    /// writes it. The preview, the drop already in, lays `b` first and `a` second,
+    /// at 0, 73.3, 326.7, 400: there the centre sits in the drawn *second*.
+    ///
+    /// **Flip run**, the container read from `ov.laid_grid` as before: fails on
+    /// *"the drawn column under the centre is the one the drop writes"*, column
+    /// 1 drawn under it — the predicted site.
+    #[test]
+    fn a_moved_items_lines_are_the_grid_its_drop_reads() {
+        use ondin_core::container::parse_tracks;
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = ondin_core::IdSource::new(1);
+        let root = ids.mint();
+        let frame = ids.mint();
+        let mut doc = Document::new(root);
+        let mut ops = vec![Operation::CreateNode {
+            id: frame,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(400.0, 100.0),
+            },
+            transform: None,
+            name: None,
+        }];
+        let mut items = Vec::new();
+        for (i, w) in [200.0, 20.0, 20.0].into_iter().enumerate() {
+            let id = ids.mint();
+            items.push(id);
+            ops.push(Operation::CreateNode {
+                id,
+                parent: frame,
+                index: i,
+                kind: NodeKind::Rect {
+                    size: Size::new(w, 20.0),
+                    corner_radii: Default::default(),
+                },
+                transform: None,
+                name: None,
+            });
+        }
+        ops.push(Operation::SetDisplay {
+            id: frame,
+            display: Some(Display::Grid(Grid {
+                columns: parse_tracks("auto auto auto").unwrap(),
+                ..Default::default()
+            })),
+        });
+        doc.apply(&Transaction(ops)).expect("build the fixture");
+        app.session.adopt_document(doc, None);
+        app.canvas_px = (800, 600);
+        let b = items[1];
+        let centre = app.session.resolved.world_bounds(b).unwrap().center();
+        assert!(
+            (centre.x - 263.33).abs() < 0.01,
+            "b in the second: {centre:?}"
+        );
+
+        let delta = Vec2::new(-110.0, 0.0);
+        app.session.selection.set(vec![b]);
+        let preview = app.move_preview_tx(delta).expect("a preview");
+        app.session.set_preview(&preview);
+        app.drag = Drag::Move {
+            anchor: Point::ZERO,
+        };
+        let xs = drawn(&app, &ctx).0;
+        assert_eq!(xs.len(), 4, "three columns' edges: {xs:?}");
+        let cx = screen_x(&app, centre.x + delta.x);
+        let under = xs.windows(2).position(|w| w[0] <= cx && cx < w[1]);
+        assert_eq!(
+            under,
+            Some(0),
+            "the drawn column under the centre is the one the drop writes: {xs:?} at {cx}"
+        );
+
+        app.session.clear_gesture_preview();
+        app.drag = Drag::None;
+        let tx = app.move_tx(delta);
+        app.session.commit(tx);
+        let laid = ondin_core::build::laid_grid(&app.session.doc, frame).unwrap();
+        let area = laid.areas.iter().find(|(n, _)| *n == b).unwrap().1;
+        assert_eq!(area[0], 1, "and the drop wrote the first column");
+    }
+
+    /// **A grid's lines cost what is on screen, not what is drawn** (§15 D946,
+    /// `[X5.2-L4-01]`): the fixture at 256× draws a few hundred dashes where an
+    /// uncut line drew one per dash over its whole length, and with the camera a
+    /// million units away it draws nothing at all. **And the pattern holds still
+    /// under a pan**: every dash of the first column edge starts a whole number
+    /// of periods from the line's true top, at two pans a fraction of a period
+    /// apart.
+    ///
+    /// **Flip runs**: the cut dropped (`dashed_in_view` returning `[a, b]`) fails
+    /// on *"a few hundred at 256×"* at 69,488 shapes; the pull-back dropped (the
+    /// cut starting at `t0`) fails on *"whole periods from the top"* — each the
+    /// predicted site. ⚠️ **The container-wide cull does not bite**: with it
+    /// off, *"nothing off screen"* stays green, because every line is cut and
+    /// every band culled on its own. What it saves is building the track list
+    /// for a container wholly off the view, which no shape count can see.
+    #[test]
+    fn the_lines_are_cut_to_the_view_and_hold_their_dashes_still() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, frame) = app_with_grid(&ctx);
+        app.session.selection.set(vec![frame]);
+        let count = |app: &OndinApp| {
+            ctx.run_ui(Default::default(), |ui| {
+                app.draw_grid_tracks(ui.painter(), AREA, 1.0);
+            })
+            .shapes
+            .len()
+        };
+        app.session.camera.zoom = 256.0;
+        app.session.camera.center = Point::new(20.0, 100.0);
+        let zoomed = count(&app);
+        assert!(
+            zoomed > 0 && zoomed < 1500,
+            "a few hundred at 256×: {zoomed}"
+        );
+
+        // The first column edge, x 20, runs down from the row's top.
+        let grid = ondin_core::build::laid_grid(&app.session.doc, frame).unwrap();
+        let top = grid.rows.spans[0].0;
+        for pan in [0.0, 0.0013] {
+            app.session.camera.center = Point::new(20.0, 100.0 + pan);
+            let from = app.to_screen(Point::new(20.0, top), AREA, 1.0);
+            let starts: Vec<f32> = segments(&app, &ctx)
+                .into_iter()
+                .filter(|[a, b]| (a.x - from.x).abs() < 0.01 && (b.x - from.x).abs() < 0.01)
+                .map(|[a, b]| a.y.min(b.y))
+                .collect();
+            assert!(starts.len() > 10, "the edge is drawn: {starts:?}");
+            for s in starts {
+                let periods = (s - from.y) / 7.0;
+                assert!(
+                    (periods - periods.round()).abs() < 0.01,
+                    "whole periods from the top at pan {pan}: {s} from {}",
+                    from.y
+                );
+            }
+        }
+
+        app.session.camera.zoom = 1.0;
+        app.session.camera.center = Point::new(1.0e6, 1.0e6);
+        assert_eq!(count(&app), 0, "nothing off screen");
     }
 }
 

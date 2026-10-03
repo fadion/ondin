@@ -4611,11 +4611,21 @@ pub fn layout_drop(doc: &Document, res: &Resolved, id: NodeId, delta: Vec2) -> O
 /// The committed document's grid container `id` as its pass lays it — its
 /// tracks and its items' areas ([`crate::container::laid_grid`], §15 D916). The
 /// public door, for tests — the canvas's track lines read the preview's
-/// (`RenderOverrides::laid_grid`, §15 D921), and a drop lays through the committed
-/// geometry (`grid_drop_many`, §15 D942). Laid through the stored document, so a
+/// (`RenderOverrides::laid_grid`, §15 D921), and a drop, and the lines under a
+/// moved item, lay through the committed geometry ([`drop_grid`], §15 D942,
+/// D946). Laid through the stored document, so a
 /// grid pinned in a parent drawn at another size is laid at the stored one.
 pub fn laid_grid(doc: &Document, id: NodeId) -> Option<crate::container::LaidGrid> {
     crate::container::laid_grid(&crate::resolve::DocView(doc), id)
+}
+
+/// The grid container `id` **as a drop into it is aimed against** — laid through
+/// the committed geometry, so a pinned grid is laid at the width it is drawn at
+/// (§15 D942), and read in its committed place. [`grid_drop_many`]'s grid, and the
+/// grid the canvas draws under a moved item while the drop is aimed (§15 D946):
+/// one function, so the cell drawn under the pointer is the cell the drop writes.
+pub fn drop_grid(doc: &Document, res: &Resolved, id: NodeId) -> Option<crate::container::LaidGrid> {
+    crate::container::laid_grid(&crate::resolve::CommittedView { doc, res }, id)
 }
 
 /// The `SetLayoutItem` that dragging the grid item `id` by the world-space
@@ -4676,9 +4686,9 @@ pub fn grid_drop_many(
         return None;
     }
     // Through the committed geometry, so a pinned grid is laid at the width it is
-    // drawn at — the grid the commit lays (§15 D933's residue, closed by D942).
-    let view = crate::resolve::CommittedView { doc, res };
-    let grid = container::laid_grid(&view, parent)?;
+    // drawn at — the grid the commit lays (§15 D933's residue, closed by D942) —
+    // and the one the canvas draws while the drop is aimed (§15 D946).
+    let grid = drop_grid(doc, res, parent)?;
     let areas: Vec<(NodeId, [i32; 4])> = ids
         .iter()
         .map(|id| Some((*id, grid.areas.iter().find(|(n, _)| n == id)?.1)))

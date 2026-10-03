@@ -26,6 +26,15 @@
 //! modules and the densest doc comments, and it is where the gate found a
 //! paragraph asserting a contrast between two functions that had stopped being
 //! true (`panels::export::export_menu_popup`).
+//!
+//! **A GUI-subsystem binary on Windows in a release build** (§15 D953), so a
+//! launch from the Start menu, a shortcut or Explorer opens the window and no
+//! console beside it. Such a process has no console of its own to print to, so
+//! `ondin export …` typed at a prompt is reached through the console twin,
+//! `ondin-cli` (shipped as `ondin.com`, which `PATHEXT` prefers over the `.exe`),
+//! which runs this binary with its own standard handles. A debug build keeps the
+//! console, where `eprintln!` is read.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #![deny(rustdoc::broken_intra_doc_links, rustdoc::invalid_html_tags)]
 #![allow(rustdoc::private_intra_doc_links)]
 

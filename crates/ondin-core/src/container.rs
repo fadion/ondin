@@ -21,10 +21,15 @@
 //!   element at its intrinsic size there, and §15 D872 made shapes replaced
 //!   elements; this is the one place that ruling gives way, because pinning both
 //!   edges and not stretching is not what anyone pinning both edges means. A kind
-//!   that cannot stretch is over-constrained the CSS way: the end inset is ignored.
+//!   that cannot stretch is over-constrained the CSS way: the end inset is ignored
+//!   when placing — and stored true all the same, the position the moment the
+//!   start goes (§15 D938).
 //! - **`margin: auto` on an axis with both insets centres** the child (or pushes
 //!   it, with one side auto) at its own size instead of stretching it — CSS's
-//!   absolute-centring idiom, and the only margin value supported yet.
+//!   absolute-centring idiom, and the only margin value supported yet. A child
+//!   bigger than the space is centred on it too, overflowing both ways — Figma's
+//!   reading, where CSS 2.1 puts it at the start inset: a recorded deviation (§15
+//!   D938).
 //! - **Rotation, skew and flip turn about the box centre**, CSS's default
 //!   `transform-origin`: layout places the unrotated box and the node's linear
 //!   transform is applied around its middle.
@@ -1368,8 +1373,12 @@ pub fn quantize(v: f32) -> f64 {
 /// document by `Resolved`, and from a preview's overrides by `RenderOverrides`,
 /// so the two run one layout rather than two (`boolean::Operands`' shape).
 ///
-/// Every answer is a **specified** value — the kind with its stored size, the
-/// transform as typed — because layout is what turns specified into used.
+/// Every answer but three is a **specified** value — the kind with its stored
+/// size, the transform as typed — because layout is what turns specified into
+/// used. The three: [`Self::parent_box`], the *used* box a pinned root is
+/// stretched against (§15 D933); and [`Self::measured`] and
+/// [`Self::content_widths`], a text's measurements, which a view may answer from
+/// a memo of the same answers (§15 D936).
 pub trait LayoutView {
     fn parent(&self, id: crate::NodeId) -> Option<crate::NodeId>;
     fn children(&self, id: crate::NodeId) -> Vec<crate::NodeId>;
@@ -1856,7 +1865,8 @@ enum Leaf {
 ///
 /// **Built per pass and dropped after**, not kept between commits: the document
 /// is the one tree, and the incremental part is `Resolved`'s — which containers it
-/// re-lays at all.
+/// re-lays at all, and the text measurements it remembers across commits, which a
+/// pass asks for through the view (§15 D936).
 struct FlexTree<'v> {
     view: &'v dyn LayoutView,
     ids: Vec<crate::NodeId>,
@@ -1867,7 +1877,8 @@ struct FlexTree<'v> {
     layouts: Vec<taffy::Layout>,
     /// Text measurements already made this pass, keyed by node and the width
     /// asked about — the memo §15 D872 owed: taffy asks a text node the same
-    /// question several times a pass, and each answer is a parley shape.
+    /// question several times a pass, and each answer was a parley shape (now the
+    /// view's, which `Resolved`'s remembers across passes, §15 D936).
     measured: rustc_hash::FxHashMap<(usize, u32), taffy::Size<f32>>,
     /// The grid container whose tracks this pass was asked for ([`laid_grid`]),
     /// and what taffy reported for it — kept from its **last** full layout, which

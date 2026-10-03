@@ -3900,12 +3900,15 @@ fn push_offset(doc: &Document, res: &Resolved, id: NodeId, delta: Vec2, ops: &mu
 /// a resize tool's own `SetGeometry` already sets the size — but in a flex row a
 /// growing or shrinking item would take the space back and the drag would snap.
 /// So a resize that changes an in-flow item's **main-axis** size also writes
-/// `flex-grow: 0` and `flex-shrink: 0`; one that changes the **cross** size of an
-/// item its container stretches also writes `align-self: start`, since in CSS an
+/// `flex-grow: 0`, `flex-shrink: 0` and `flex-basis: auto` (§15 D935); one that
+/// changes the **cross** size of an item its container draws stretched — the
+/// keyword, an `auto` cross size and a kind a stretch sizes ([`stretched_across`])
+/// — also writes `align-self: start`, since in CSS an
 /// explicit cross size is what stops a stretch — or `align-self: end` when the
 /// resize held the cross axis's end edge and moved its start, a row's item dragged
 /// by its top (§15 D905), so the edge the user did not touch is the one that stays.
-/// A layer whose item properties the transaction sets itself is left to it.
+/// A kind the layout never sizes — a path, a boolean, a line — holds nothing (§15
+/// D935). A layer whose item properties the transaction sets itself is left to it.
 ///
 /// The item half is [`flex_holds`], which the gesture preview applies as well
 /// (§15 D904); this adds [`kept_flow_translations`], which the preview must not.
@@ -4367,14 +4370,13 @@ pub fn sized_flex_item(
 /// translation dropped on it is undone by the next layout pass; what the drag
 /// can change is the item's place in the flow, which is its place among its
 /// siblings. So the dragged box's centre is read against every other in-flow
-/// sibling's used box, in the container's own space, in **reading order**: a
-/// sibling on the centre's line (its cross-axis extent spans the centre) comes
-/// before it when its main-axis centre does, and one on another line when that
-/// line does — which is what makes a wrapping row reorder by line, then along it.
-/// `row-reverse` and `column-reverse` read the main axis backwards, and
-/// `wrap-reverse` the cross axis: its first line is the one at the bottom of a row
-/// (the right of a column), so a line further *down* comes first (§15 D883 — read as
-/// `wrap` until the Container card made the value reachable, §15 D878).
+/// sibling's used box, in the container's own space, in **reading order**: the
+/// laid lines, in flow order, and the centre's line is the one whose band holds
+/// it — a wrapping row reorders by line, then along it ([`flow_index`], §15 D934;
+/// it asked each sibling's own cross extent until then). `row-reverse` and
+/// `column-reverse` read the main axis backwards; `wrap-reverse` needs nothing of
+/// its own, its first line being the first in the flow wherever it is drawn (§15
+/// D883).
 ///
 /// Siblings out of the flow — pinned, hidden, masks — keep their indices
 /// relative to the flow around them; the result is an index into the child list

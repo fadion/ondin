@@ -853,8 +853,10 @@ impl RenderOverrides {
     /// a tool previews dragging a pinned child — and re-placing it by its old
     /// insets would draw the drag somewhere the pointer is not. Flex has its own
     /// pass, [`Self::flex_relayout`], run first (§15 D875); for absolute insets a
-    /// child's placement depends on its box and itself alone, and that is the
-    /// whole of what this reads.
+    /// child's placement depends on its box and itself alone — except a pinned
+    /// **layout root**, which this lays out again at the size its insets give it
+    /// and whose items it places from that pass (§15 D933). A child with no insets
+    /// is left where the commit drew it, unless this preview unpinned it.
     fn relayout(&mut self, doc: &Document, res: &Resolved, tx: &Transaction) {
         // Placed by the transaction: a transform, or a patch that changes the box.
         // A corner radius or a side count does not place anything — it reshapes a
@@ -1633,8 +1635,9 @@ impl RenderOverrides {
 /// A preview as the flex engine sees it (`ondin_core::container::LayoutView`):
 /// every answer the **specified** value the transaction leaves — its kind
 /// (`current_kind`, the one ops are applied to), its layout, item properties,
-/// insets and visibility — over the document's tree. `Resolved`'s `DocView` is
-/// the committed twin; one engine runs over both.
+/// insets and visibility — over the document's tree. `Resolved`'s `UsedView` is
+/// the committed twin (its `DocView` with the used box a pinned root stretches
+/// against, §15 D933); one engine runs over both.
 ///
 /// **Ghosts are not in the tree it describes**: a copy being Alt-dragged into a
 /// flex container is laid out on release, and until then its siblings do not make

@@ -1199,11 +1199,15 @@ rulings, the maintainer's:
 - **Both insets on an axis stretch** a layer with a size of its own, to the frame less both insets.
   🚨 **Not CSS**: CSS holds a replaced element at its intrinsic size there, and §15 D872 makes
   shapes replaced elements — between two insets is the one place that rule gives way. A kind that cannot stretch
-  is over-constrained the CSS way, its end inset ignored.
+  is over-constrained the CSS way, its end inset ignored when placing — and **stored true** all the
+  same, since it is the layer's position the moment the start goes (`AxisInsets::inverse`, §15 D938).
+  A frame with a layout so pinned is laid at the stretched size too, below (§15 D933).
 - **Rotation, skew and flip turn about the box centre**, CSS's default `transform-origin`: the
   unrotated box is placed and the linear transform applied about its middle.
 - **Centring is `margin: auto`** between two insets, one auto side pushing instead; the only margin
-  value there is.
+  value there is. 🚨 **A box bigger than the space between its insets overflows both ways, centred** —
+  Figma's reading, where CSS 2.1 §10.3.7 puts it at the start inset; kept, a recorded deviation (§15
+  D938).
 - **The inspector shows a pin diagram and top/right/bottom/left fields** in px or %: the *Position*
   card (§9.4), whose title is the session's choice and not part of the ruling. `container::with_edge`
   is the diagram's click, and pinning through it never moves the layer; an unpin never moves it
@@ -1248,7 +1252,10 @@ the size a container gives back into a kind, an auto-width box never narrower th
 stretch that gives less overflows the slot from its start rather than wrapping (§15 D917). Min-content is `text::content_widths` —
 parley's widths plus the widest paragraph's own edges, its start edge, a positive first-line indent
 and its end indent, since core places every line itself and parley knows none of them (§15 D931) —
-and taffy's repeated questions share a per-pass memo keyed by node and width. ⚠️ CSS's default
+and taffy's repeated questions share a per-pass memo keyed by node and width. **Every text
+measurement a pass makes goes through `LayoutView::measured` and `content_widths`**, which `Resolved`'s
+view answers from `text_memo`, kept across commits and dropped for a dirty node, so a nudge of a laid
+container re-lays it without re-shaping its text (§15 D936). ⚠️ CSS's default
 `align-items: stretch` stretches a replaced element's cross size too, and that is kept; a UI that
 wants otherwise creates containers with an explicit alignment, which is a default and not a
 deviation. That is flex's default; a grid's is CSS's `normal`, which holds a replaced element at
@@ -1264,8 +1271,11 @@ used kind, and a text leaf measured *for* layout goes through §15 D872's measur
 that cache — and flex keeps the order, its text items measured by the engine's own measure (§15
 D868, D875). Edits to specified properties are ordinary operations — `SetInsets` for insets,
 `SetDisplay` and `SetLayoutItem` (`SetFlexItem` until grid) for flex and grid alike, whole values,
-the latter dirtying the parent too, and both refused with `OpError::BadLayout` where CSS refuses the
-value (§15 D914) — so undo needs nothing of its own. They save as additive `#[serde(default)]` fields with no schema
+the latter dirtying the parent too, and both refused with `OpError::BadLayout` where CSS refuses a
+value the node does not already hold (§15 D914, D937). **Undo needs nothing of its own because history
+has a door of its own**: `History::undo` and `redo` apply through `Document::apply_restoring`, which
+stands that check down, a step writing back only what the document held — a file's refused value
+included, whose undo was refused and the step dropped until §15 D937. They save as additive `#[serde(default)]` fields with no schema
 bump (§5.11), because the default — no `display`, no insets — is exactly what every existing file means. ⚠️ **The cost is the risk.** Every consumer of
 geometry must read used geometry, and **every one that draws, measures or hit-tests now does**
 (2026-09-24, §15 D868): in core, `Resolved`'s world transforms, text, both bounds passes,
@@ -1283,7 +1293,8 @@ which patches the stored kind — plus `EditorSession::committed_node`, which re
 commit overwrites, and pen and path point editing, since a path does not stretch. And
 `RenderOverrides` (§6.2) patches the walk without re-resolving, so it cannot express a reflow in
 general; **for insets it re-runs `container::place`** in its `relayout` pass, since a pinned child's
-placement depends on its frame and itself alone, and **for flex it runs the engine itself** —
+placement depends on its frame and itself alone — laying a pinned layout root again first, and leaving
+a child with no insets where the commit drew it (§15 D933) — and **for flex it runs the engine itself** —
 `flex_relayout`, before `relayout`, over the preview's own state (§6.2, §15 D875). A grid preview
 reflows through the same pass (§15 D913, the session's call); it runs `lay_out` at any layout root, so
 it lays a grid with no code of its own — tested since §15 D916
@@ -1293,8 +1304,10 @@ it lays a grid with no code of its own — tested since §15 D916
 core's manifest with `std`, `flexbox` and — since step 4 — `grid` and `detailed_layout_info` (§2, §3; the last for a laid grid's tracks, §15 D916); used values come back quantized to **1/64
 px** (`container::quantize`, §15 D873, decided), so that f32's noise digits never reach a field or a
 file. **No mirror tree**: `container::FlexTree` implements taffy's low-level traits over Ondin's own
-nodes, read through `container::LayoutView` — `resolve::DocView` for the committed document,
-`RenderOverrides`' `PreviewView` for a preview, one engine for both — and is built for one pass and
+nodes, read through `container::LayoutView` — `resolve::UsedView` for `Resolved`'s pass, which is
+`resolve::DocView`'s committed document with the used box a pinned root is stretched against and the
+remembered text measurements (§15 D933, D936), and `RenderOverrides`' `PreviewView` for a preview,
+one engine for both — and is built for one pass and
 dropped, its `taffy::Cache`s with it; the incremental part is `Resolved`'s choice of which layout
 roots to re-lay (§15 D875).
 
@@ -1302,7 +1315,12 @@ roots to re-lay (§15 D875).
 container with a layout that is not itself an in-flow item of one — as the parents-first walk
 reaches it, a whole chain of nested flex containers in one pass; items take their slot and size
 (`item_placed`), a root its size (`root_sized`: a frame asked to hug grows its kind, a group takes the
-box). `update` collects `affected` from each dirty node's **`chain_root`**, so a change to one item
+box). **A root pinned by two insets on an axis is laid at the size they give it** (§15 D933), CSS's
+absolutely positioned container: `lay_out` lays it at its own size, places its insets against
+`LayoutView::parent_box` as `resolve::root_used` will place it, and lays it again at that size where
+the two differ — so a header pinned left and right justifies its items in the width it is drawn at.
+🚨 **Stretch wins over hug**: a `fit-content` root so pinned is laid stretched, the size `place` draws
+it at, where CSS would keep the hug — a recorded deviation. `update` collects `affected` from each dirty node's **`chain_root`**, so a change to one item
 re-lays its siblings — 🚨 the first hop counting for a child that has just *left* the flow — and the
 climb passes through a group or boolean with no layout, since an edit inside that atomic box resizes
 it; `root` moves only on a hop into a layout, so a deep plain-group tree still answers the node (§15
@@ -1320,15 +1338,21 @@ cross size. **`Start` and `End` are CSS's `flex-start` and `flex-end`** in `just
 `align-items`/`align-self` and `align-content` — the flow's own start, which `row-reverse` puts on the
 right and `wrap-reverse` at the bottom of a row — as the cards name and draw them (§15 D909); they were
 handed to taffy as its physical `START`/`END` until then. **A resize sticks**: `build::keep_flex_sizes`, beside `keep_insets` in
-`commit_inner`, writes `flex-grow`/`flex-shrink` 0 for a main-axis resize and `align-self: start` for
-a cross resize of a stretched item (the maintainer's ruling) — or `end` where the resize held the cross
+`commit_inner`, writes `flex-grow`/`flex-shrink` 0 and `flex-basis` `auto` for a main-axis resize and
+`align-self: start` for a cross resize of an item drawn stretched (the maintainer's ruling; *drawn
+stretched* is the keyword, an `auto` cross size and a kind a stretch resizes, never a frame —
+`build::stretched_across`, §15 D935) — or `end` where the resize held the cross
 axis's end edge and moved its start, a row's item dragged by its top (§15 D905, the maintainer's
 ruling), judged on the flow's cross axis — under `wrap-reverse` a row's cross start is its bottom, so
 there a drag by the top writes `start` and keeps the bottom (§15 D909) — spelled once as `build::held`, which `sized_flex_item` calls too for a laid group's
-resize, handed the transform the same edit writes. **The gesture preview applies the same holds**
+resize, handed the transform the same edit writes. **Nothing is held for a kind whose drawn size the
+layout never sets** — a path's points, a boolean's operator, a line's end on a growing item, which
+had its growth stopped and its siblings jump — and a px `min-` or `max-` is kept and clamps the resize
+(`container::can_stretch` in `build::flex_holds`, §15 D935). **The gesture preview applies the same holds**
 (`build::flex_holds`, §15 D904), so a resize is drawn as it will land rather than re-laid as stored
 until the release. The Item card names those flips, with an Undo
-that takes the whole step back (§15 D880). **And a resize writes px over a size keyword**:
+that takes the whole step back (§15 D880) — all but the basis, which it does not name (§15 D935's
+*Fix*). **And a resize writes px over a size keyword**:
 `keep_flex_sizes` sets a `%` or `fit-content` width or height back to `auto` on each axis a resizing
 `SetGeometry` changed, whatever the parent — `auto` being the stored size the resize has just written
 (`build::sized_in_px`, §15 D879). **And the stored translation is kept**: before
@@ -1342,18 +1366,22 @@ scales them per axis, as it does a frame's guides (`tools::scaled_layout`, §5.6
 
 **A drag inside a flex container is a reorder** (§15 D877, the session's defaults). An in-flow item's
 stored translation is drawn nowhere, so a move of one in-flow layer that stays in its parent commits
-a `Reorder` and no `SetTransform`: `build::flex_reorder` counts the dragged box's centre against every
-other in-flow sibling's used box in reading order — on its line by main-axis centre, reversed for
-`row-reverse`/`column-reverse`; on another line by cross centre — and out-of-flow siblings keep their
-place. Child order being flow order and paint order, the item's z-order moves with it. Under
-`wrap-reverse` the first line is the bottom one of a row, so a lower line comes first (§15 D883). One
+a `Reorder` and no `SetTransform`: `build::flex_reorder` reads the dragged box's centre against the
+**laid lines** — runs of the other in-flow siblings in flow order, a new one where the main axis runs
+back in a container that wraps, each band the union of its items' cross extents (§15 D934) — landing
+after every earlier line and, on the centre's line (the band holding it, else the nearest), by
+main-axis centre, reversed for `row-reverse`/`column-reverse`; out-of-flow siblings keep their place,
+and a drop that leaves the item's place in the flow as it was is no reorder. Child order being flow
+order and paint order, the item's z-order moves with it. Under `wrap-reverse` the first line is the
+bottom one of a row, which the flow order says with no arm of its own (§15 D883, D934). One
 layer leaving its frame moves by its transform as before — **and an in-flow item leaves only once the
 pointer is out of its container**, the area rule deciding past that: its box is where the layout put
 it, which an overflowing row or line can put mostly outside a fixed frame (§15 D926).
 **Several in-flow items of one container, none leaving it, reorder as a block** (§15 D902, the
 session's): `build::flex_reorder_many` reads the centre of their union against the other siblings by
 the same reading order — `build::flow_index`, shared with `flex_reorder` — and moves them there in
-their child-list order, deriving its `Reorder`s by walking the target order; in a grid the block
+their child-list order, deriving its `Reorder`s by walking the target order, and none where the
+in-flow order would come out as it is; in a grid the block
 moves by tracks instead (below, §15 D918). Any other several move by
 their transforms except an in-flow item, which stores no translation and keeps its slot, in the drag
 as on release (`canvas::stays_in_flow`).
@@ -1412,9 +1440,14 @@ the parent turns to grid. **What CSS refuses, the operations refuse** (`OpError:
 negative track, an `fr` minimum, `repeat(0, …)` or an empty repeat, line 0, `span 0`, and more than
 `container::MAX_TEMPLATE_TRACKS` — a thousand — explicit tracks on an axis, CSS letting a user agent
 clamp an overly large grid, §15 D919; not `layout::MAX_TRACKS`, the layout grids' cap, whose name it
-shared until §15 D924); a file carrying
+shared until §15 D924; and, flex's and grid's alike since §15 D937, a negative padding, gap, grow,
+shrink, size, limit or basis); a file carrying
 one opens, the value kept as written and read around by `container::style_of`, its template laid to
-the cap. `lay_out` is one
+the cap and a negative read as zero. **An edit carries such a value forward**: the operations ask
+`is_valid_over` the value the node holds, so a refused part the edit leaves as it was is tolerated
+and only one it writes is refused — the cards write a whole `Grid` or `LayoutItem` back, and a gap
+edit over a file's refused template was refused whole until §15 D937 — and history puts one back
+through `Document::apply_restoring`, above. `lay_out` is one
 `FlexTree` pass still, `compute_child_layout` sending a grid container to taffy's grid algorithm.
 ⚠️ **taffy's grid reads `baseline` as `start`** (its own *TODO*), so grid's cards do not offer it and
 the model keeps it for flex (§15 D914, D919); a grid that holds it anyway — from flex, or a file —
@@ -1457,7 +1490,7 @@ column lands on the last two rather than hanging into an implicit one an `fr` gr
 `grid_drop` is its block of one, and `build::layout_drop_many` — `flex_reorder_many` or
 `grid_drop_many` by the parent's `display` — is what `canvas::flex_block_reorder_of` asks. **The tracks are derived when asked, and stored nowhere**: `container::laid_grid`, public as
 `build::laid_grid`, re-runs the pass from the grid's layout root under taffy's `detailed_layout_info`
-and answers each axis's tracks in the container's space and every in-flow item's area as CSS line
+— at the size `lay_out` lays that root, a pinned root's stretched size included (§15 D933) — and answers each axis's tracks in the container's space and every in-flow item's area as CSS line
 numbers. §15 D913 said *"derived into `Resolved`"*; `Resolved` keeps used geometry and not the
 passes, so a stored map of tracks would be one more thing `update` has to keep equal to `rebuild`.
 
@@ -1470,7 +1503,10 @@ tracks is a band of `color::GRID_GAP` across the same run — the gap, and whate
 its kin hand out there, taffy placing the tracks apart by both: a band is space between two tracks
 where nothing is laid, whatever made it (§15 D921's amendment). The tracks are the preview's —
 `RenderOverrides::laid_grid`, `container::laid_grid` over the preview's view, equal to
-`build::laid_grid` with nothing patched — and the container's box and world transform are read
+`build::laid_grid` with nothing patched — ⚠️ except for a grid pinned on both sides inside a parent
+drawn at another size than it stores, where `build::laid_grid`, through `DocView`, lays it against
+the parent's stored box — or, in a laid group, unstretched — and so does a drop (§15 D933, a *Fix*) —
+and the container's box and world transform are read
 through the preview too, so a resize re-lays the lines with the box rather than the half-previewing
 overlay of §15 D391. **Drawn for every selected grid container, and during a move for every selected
 layer's parent that is a grid**, since the drop writes a cell (§15 D916); not for a hidden container.
@@ -3034,12 +3070,14 @@ pub enum Operation {
                                                       // is true, since an inset moves the layer
     SetDisplay  { id: NodeId, display: Option<Display> }, // the whole layout — §5.3c, §15 D875.
                                                           // No kind gate; refused NonFinite, and
-                                                          // BadLayout for a track CSS refuses
-                                                          // (§15 D914); `changes_ink` true
+                                                          // BadLayout for a value CSS refuses
+                                                          // that the node does not hold (§15
+                                                          // D914, D937); `changes_ink` true
     SetLayoutItem { id: NodeId, item: LayoutItem },   // the whole set; SetDisplay's terms (BadLayout
-                                                      // for line 0 or span 0), and it dirties the
-                                                      // PARENT too — an item's properties move
-                                                      // its siblings. `SetFlexItem` until §15 D914
+                                                      // for line 0, span 0 or a negative), and it
+                                                      // dirties the PARENT too — an item's
+                                                      // properties move its siblings.
+                                                      // `SetFlexItem` until §15 D914
     // the ops with no node to name — the ground and the guides belong to the document (§5.5):
     SetCanvasBackground { background: peniko::Color },
     AddGuide    { guide: Guide },
@@ -3149,9 +3187,12 @@ pub enum OpError {
   should never author one, and a file that carries one should still open.
 - **`SetDisplay` and `SetLayoutItem` refuse a layout value CSS refuses** (`BadLayout`, §5.3c, §15
   D914) — a negative track, a `minmax()` with an `fr` minimum, `repeat(0, …)` or an empty repeat,
-  grid line 0, `span 0`. The same asymmetry as `SetExports`', and **not the same loader**: nothing is
-  dropped or rewritten at load; the stored value stays as written, and `container::style_of` lays
-  around it.
+  grid line 0, `span 0`, and since §15 D937 a negative padding, gap, grow, shrink, size, limit or
+  basis. The same asymmetry as `SetExports`', and **not the same loader**: nothing is dropped or
+  rewritten at load; the stored value stays as written, and `container::style_of` lays around it.
+  ⚠️ **So the check is against what the node holds** (`is_valid_over`): a refused part an edit carries
+  forward unchanged is tolerated, and a history step is not checked at all (`apply_restoring`, §5.8) —
+  without both, a file's value could not be undone back to or edited around (§15 D937).
 - **`Operation::changes_ink` classifies an op by whether applying it changes what is *drawn*** — the
   artwork, not the chrome round it — and `Transaction::changes_ink` is **any** of its ops, not all,
   since a transaction that moves a layer *and* renames it has a visible result. Exactly **eleven**
@@ -3594,7 +3635,11 @@ pub struct History { undo: Vec<Transaction>, redo: Vec<Transaction>, run: Option
 
 - `commit(doc, tx)`: `out = doc.apply(&tx)?; undo.push(out.inverse); redo.clear();`
 - `undo`/`redo`: pop, apply, push the returned inverse to the other stack — symmetric, no special
-  cases, because `apply` always returns the inverse.
+  cases, because `apply` always returns the inverse. ⚠️ **One door of their own**: both apply through
+  `Document::apply_restoring`, `apply` with the layout operations' `BadLayout` check stood down, since
+  a step writes back only values the document held — a file's layout value CSS refuses among them,
+  whose undo was refused and, popped first, dropped from the stack (§5.3c, §15 D937). Every other
+  check stands.
 - **`redo.clear()` is what stops a redo being applied to a document that has moved on since the undo.**
   Commit A, undo it, commit B, press redo: without it the stack still holds the transaction that redoes
   A, so a `SetTransform` re-writes a stale value *and* pushes its own inverse, leaving a step the user
@@ -3640,6 +3685,7 @@ pub struct Resolved {
     failed: FxHashSet<NodeId>,               // booleans whose arithmetic was abandoned (§15 D239)
     index: rstar::RTree<BoundsEntry>,        // leaves = paintable nodes
     used: FxHashMap<NodeId, Used>,           // SPARSE: only where layout moves or resizes a node (§15 D868)
+    text_memo: FxHashMap<NodeId, TextMemo>,  // layout's text measurements, across commits (§15 D936)
 }
 impl Resolved {
     pub fn rebuild(doc: &Document) -> Self;
@@ -3649,6 +3695,8 @@ impl Resolved {
     pub fn used_local_of(&self, node: &Node) -> Affine;           // node in hand: MUST be doc's own
     pub fn used_kind_of<'a>(&'a self, node: &'a Node) -> &'a NodeKind;   // likewise
     pub fn used_frame(&self, id: NodeId) -> Option<Size>;  // a group WITH a layout's box — §15 D875
+    pub fn remembered_text_box(&self, id: NodeId, kind: &NodeKind) -> Option<Option<Rect>>; // preview, D936
+    pub fn remembered_text_widths(&self, id: NodeId) -> Option<Option<(f64, f64)>>;        // likewise
     pub fn ink_bounds(&self, id: NodeId) -> Option<Rect>;
     pub fn text_layout(&self, id: NodeId) -> Option<&TextLayout>;
     pub fn invalidate_text(&mut self, doc: &Document);
@@ -3681,6 +3729,13 @@ impl Resolved {
   `used_kind` and — since §15 D898, over random layout inputs — `used_frame` for every node, so it
   compares **five of the seven**, with `boolean`, `inner_ink` and
   `failed` still outside it.
+  ⚠️ **And an eighth since §15 D936, `text_memo`** — not a derived answer but a cache of the layout
+  pass's text measurements, each text node's box at each sizing asked and its content widths, kept
+  across commits so that a pass re-run by a nudge re-shapes nothing. The guard does not compare it and
+  must not: `rebuild` holds only what its own pass asked for. What it owes is that every entry is what
+  measuring would answer now, and its whole argument is D590's — a text node's measurement depends on
+  its own node alone, so `update` drops every dirty id's entries before the pass; fonts arriving dirty
+  every text node. It is moved into a `RefCell` for the length of a pass and put back.
 - **`used` is sparse and is read only through `used_local` and `used_kind`**, which answer the node's
   own `transform()` and `kind()` wherever there is no entry — so "no entry" means "as specified"
   everywhere, and a document with no layout in it holds nothing here. `used_local_of` and
@@ -3731,7 +3786,11 @@ impl Resolved {
   is shaped at its **used** kind, so a text node's layout can move without its own kind changing.
   `update` therefore records which used entries actually *changed* and re-shapes the text among them
   the dirty set did not already cover — **the one door past this rule, only as wide as the entries
-  that changed**, so a translate still re-shapes nothing. 🚨 **The expansion starts from each dirty
+  that changed**, so a translate still re-shapes nothing *into the text map*. ⚠️ **The layout pass
+  re-shaped it anyway until §15 D936**: every commit re-runs the pass at every layout root under its
+  chain root, a translate included, and the pass measured each text item it laid at several widths —
+  D590's defect back under a column at five times its size. Its measurements are kept across commits
+  now (`text_memo`, above). 🚨 **The expansion starts from each dirty
   node's `container::chain_root`** (§15 D875), not the node: under flex an item moves when its
   neighbour grows, so a change re-lays its whole chain from the topmost container above it — and the
   first hop counts for a child that has just left the flow, whose siblings close up behind it. The
@@ -4593,8 +4652,14 @@ pub trait ScenePainter {
   drawn, and re-placing it by its old insets would draw a drag away from the pointer. **A patch that
   does not resize places nothing** — a corner radius is absorbed onto a kind at the *stored* size — so
   a pinned layer carrying such a kind override is queued and re-placed **from that override kind**,
-  and a rounded stretched rect previews stretched; a layer with no insets that the preview only gave a
-  new kind is left alone. *"Did the kind change"* is judged against what would be drawn now — the
+  and a rounded stretched rect previews stretched; **a layer with no insets is left alone unless the
+  preview unpinned it** — drawn with the kind the preview gave it, or, untouched, where the commit drew
+  it. Only the first half held until §15 D933, so an untouched child of a resized frame fell through
+  to `place`, answered `None`, and was reset to its *stored* transform and kind: a hugging layout root
+  previewed at its typed size, its items piled at their stored transforms. **A pinned layout root it
+  re-places is laid again first** (§15 D933), through `lay_out` over the preview — `Resolved`'s order —
+  its laid size the base `place` stretches from and its items written by `apply_laid`, the item half
+  of `flex_relayout`. *"Did the kind change"* is judged against what would be drawn now — the
   override kind, else the committed used kind — so an absorbed stored-size kind is always replaced by
   the placed one (§15 D874). **Before it, `flex_relayout` runs the flex engine on the preview**
   (§15 D875): `absorb` records `SetDisplay` and `SetLayoutItem` as `NodeOverride::display` and `item`,
@@ -4654,7 +4719,9 @@ pub trait ScenePainter {
      to fake. One that **moves or removes** an existing node — delete, reparent — is not
      representable at all, because a patch cannot say "somewhere else" or "not there". Those, and
      values `apply` would reject, return `None`, and the caller shows no preview at
-     all. **A reorder stood in that list until §15 D877** and is representable: the node stays in its
+     all — a layout value CSS refuses among them since §15 D937, `SetDisplay`'s and `SetLayoutItem`'s
+     arms asking `is_valid_over` the node's value as the commit does, where a repeat count past the
+     track cap previewed the capped grid the commit then refused. **A reorder stood in that list until §15 D877** and is representable: the node stays in its
      parent, so what changes is one parent's child order, a patch on that parent that all three of
      its readers take (`RenderOverrides::children_of`) — the scene walk's paint order, the flex
      engine's `PreviewView`, and the boolean evaluator's `operand_children`, a `Subtract`'s base being
@@ -7332,8 +7399,8 @@ input event (winit/egui)
   computing an edit *from* it computes from where layout put the node**, which is the rule since step
   2 (§15 D874): `build::keep_insets` turns the placement written for a pinned layer into its insets,
   and `build::keep_flex_sizes`, straight after it, turns a resize of an in-flow flex item into
-  `flex-grow`/`flex-shrink` 0 or `align-self: start` — `end` from the cross start, §15 D905 — so the
-  size holds (§15 D875), and keeps the
+  `flex-grow`/`flex-shrink` 0 and `flex-basis` `auto`, or `align-self: start` for one drawn stretched
+  — `end` from the cross start, §15 D905, D935 — so the size holds (§15 D875), and keeps the
   item's stored translation under a `SetTransform` written while it stays in the flow — the slot a
   control computed from being where its container puts it, not a place of its own (§15 D877's second
   amendment).
@@ -11261,7 +11328,8 @@ D916). The
 preview is the translation plus that reorder — the item under the pointer, its siblings laid out
 around the gap — and the release commits **the `Reorder` alone**: an in-flow item's stored
 translation is drawn nowhere and would surface only when the layout is removed. A drop back into its
-own slot is an empty transaction and no undo step. One layer leaving its frame moves by its transform
+own place in the flow is an empty transaction and no undo step, a pinned or hidden sibling beside it
+notwithstanding (§15 D934). One layer leaving its frame moves by its transform
 as before, and so do several — except that an in-flow item in a multi-selection that stays in its
 parent gets no `SetTransform` and keeps its slot, the translation being one the layout ignores. One
 predicate answers both halves, `canvas::stays_in_flow`: `move_tx`'s multi-selection arm stores

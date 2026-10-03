@@ -1303,11 +1303,17 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D925** — **Grid's track lines stay up through an inspector scrub of their own container's layout, and go for any other edit held on it.** D921 hid them under the edit hold (D128) with the rest of the selection's chrome, and left open whether a gap scrub should keep them, the lines being the feedback. Under the hold a grid's lines are now hidden only while the preview restyles that container without touching its layout — `display` absent from its override; a `SetDisplay` preview keeps them. `chrome_hidden` is split into `editing_in_place()` — the pen, a path or an image edited — `||` the hold, one list still. ⚠️ **Not "shown only for a layout edit"**: the hold outlives the preview by its timeout, and that spelling blinked the lines off between a gap scrub's release and the hold's end. The asymmetry kept: after a fill scrub the lines are back a moment before the selection outline. *(Built and tested 2026-09-29, uncommitted when recorded; **Keep**, the session's, answering D921's open question. Test `canvas::grid_track_tests · a_layout_scrub_keeps_the_lines_and_any_other_hides_them`, two flips at their predicted sites. ⚠️ Not verified in the GUI. D921 amended; §5.3c; `roadmap.md`'s handoff item 1's question answered)*
 - **D926** — **An in-flow item leaves its layout only when the pointer leaves its container, so a block whose rows overflow a fixed frame no longer splits under the drag.** The maintainer's look, test 2 of 2026-10-02: a grid's column-1 pair dragged together moved whole with the pointer high and split with it low, the bottom one carried out of the frame. `canvas::move_destination` read leaving off D20's area rule, and an in-flow item's box is where the layout put it — an overflowing auto row or flex line puts it mostly outside a fixed frame at rest — so the block path declined and the mixed rule (`stays_in_flow`) kept one and moved the other. For an `is_flex_item` item it now answers *stays* while `pointer_in(parent, move_pointer(id, delta))` — the drag's anchor plus the delta, else the box centre; the container's turned box — the area rule deciding past that. ⚠️ **A second defect found building it**: `finish_drag` built the release with the drag already taken, so the commit read the centre where every preview frame read the pointer; it puts `Drag::Move` back around `clone_tx`/`move_tx`. *(Found by the maintainer, fixed and tested 2026-10-02, uncommitted when recorded; **Fixed**, the pointer rule ***Keep***, the session's under the maintainer's delegation, not ruled. Test `canvas::flex_canvas_tests · a_block_whose_rows_overflow_the_frame_moves_whole`, two flips at their predicted site; a rotated container, the Alt-drag copy, a single item and flex read, not tested. ⚠️ Not verified in the GUI. D20, D877, D902 amended; §5.3c, §9.4; `roadmap.md`'s handoff item 1 struck, with D927)*
 - **D927** — **A grid drop stops whole at the last track as it does at the first.** The maintainer's look, test 1 of 2026-10-02: an item spanning two of three `1fr` columns, dropped on the last, was written `3 / span 2` and drawn one column wide. D918's `room` clamped only a negative shift, and `index_at` stops only the centre at the last track, so the span hung into an implicit fourth column CSS sizes to nothing beside `fr` tracks. The forward shift is now clamped so the trailing area's end stays on the last laid track, explicit or implicit — `2 / span 2`. A drag makes no track past either end; one comes from typed lines or auto-placement. The test notes' promised dotted implicit column was a wrong expectation — that column is zero wide, and with no gap its edges are the last explicit one's, drawn dashed. *(Found by the maintainer and fixed 2026-10-02, uncommitted when recorded; **Fixed**, the session's, a defect in D918's clamp. Test `tests/grid.rs · a_spanning_item_dropped_on_the_last_column_keeps_its_span_inside`, its flip at the predicted site; the row axis and a block of several read, not tested. ⚠️ Not verified in the GUI. D918 amended; §5.3c; `roadmap.md`'s handoff item 1 struck, with D926)*
-- **D928** — **Undo and redo bump the session's revision, so a save queued before one no longer marks the session clean — and the recovery tick no longer deletes the snapshot that held it.** D616's amendment's *Fix*. `EditorSession::undo` and `redo` moved the document and not `revision`, so `finish_save`'s `revision == at` read a write queued before an undo as current: *Saved · just now* over a file holding the other document, no close prompt, and the next `recovery_tick` took its clean arm and **deleted the crash snapshot**, the one copy of the session's document on disk — the release review's `[R3-L5-01]`, its one Critical, measured end to end against the real writer, and `[R2-L8-01]` its record half. Both bump it now. `FlexReceipt` keys on a new `commits` counter, bumped in `commit_inner` alone, with the undo depth, so a redo still brings the receipt back — the redo D616's amendment left to decide, decided by the session: D880's behaviour kept. *(Fixed and tested 2026-10-03, committed as `780ec65`; **Fixed**, the receipt's redo ***Keep***, the session's. Tests `app::library_wiring_tests · an_undo_during_a_save_leaves_the_session_dirty_and_the_snapshot_standing` — the bump dropped fails at the revision assertion, and with that taken out at `is_dirty`, so the snapshot assertion is reached by neither flip — and `layout.rs · a_resize_leaves_a_receipt_until_anything_else_is_committed`, the receipt keyed on the revision failing at *"a redo puts the step back on top"*. D616, D880, D921 amended; §5.3c, §9.4, §9.5; `roadmap.md`'s *Now · Files, library and storage* true again, nothing to strike)*
+- **D928** — **Undo and redo bump the session's revision, so a save queued before one no longer marks the session clean — and the recovery tick no longer deletes the snapshot that held it.** D616's amendment's *Fix*. `EditorSession::undo` and `redo` moved the document and not `revision`, so `finish_save`'s `revision == at` read a write queued before an undo as current: *Saved · just now* over a file holding the other document, no close prompt, and the next `recovery_tick` took its clean arm and **deleted the crash snapshot**, the one copy of the session's document on disk — the release review's `[R3-L5-01]`, its one Critical, measured end to end against the real writer, and `[R2-L8-01]` its record half. Both bump it now. `FlexReceipt` keys on a new `commits` counter, bumped in `commit_inner` alone, with the undo depth, so a redo still brings the receipt back — the redo D616's amendment left to decide, decided by the session under the maintainer's delegation: D880's behaviour kept. *(Fixed and tested 2026-10-03, committed as `780ec65`; **Fixed**, the receipt's redo ***Keep***, the session's under the maintainer's delegation. Tests `app::library_wiring_tests · an_undo_during_a_save_leaves_the_session_dirty_and_the_snapshot_standing` — the bump dropped fails at the revision assertion, and with that taken out at `is_dirty`, so the snapshot assertion is reached by neither flip — and `layout.rs · a_resize_leaves_a_receipt_until_anything_else_is_committed`, the receipt keyed on the revision failing at *"a redo puts the step back on top"*. D616, D880, D921 amended; §5.3c, §9.4, §9.5; `roadmap.md`'s *Now · Files, library and storage* true again, nothing to strike)*
 - **D929** — **A door that takes a layer out of a layout writes it where it is drawn first — Group, *Frame selection*, a boolean, a mask, Ungroup and *Display → none*.** The release review's `[R1-L2-01]`–`[R1-L2-03]`, two of the five Highs it held the tag for. An in-flow item's stored transform is where it goes back to (D875) and a stretched item's stored size is not its drawn one, and these doors wrapped or spliced by the stored values: a flex row's members grouped with Ctrl+G went back to their creation point, stacked and unstretched; a laid group ungrouped dropped every child to (400, 250). `build::baked(doc, res, id)` writes the used transform and kind (`build::baked_ops`, **moved** from the app's inspector to core, the app's copy deleted) and, for a container with a layout of its own that is an in-flow item, on an axis its own pass would size differently, its drawn size — a frame's `fit-content` → `auto`, a laid group's `width`/`height` → px. `group`, `mask`, `boolean`, `ungroup` and `ungroup_all` take `&Resolved`; `frame` unions and re-bases from `used_local`; `ungroup` folds the container's used local into each child's, the old arithmetic outside a layout; a lone mask is baked before `SetMask`; *Display → none* bakes every child, a laid group's pinned children included, their insets kept. **The session's, under the maintainer's delegation**: members keep their stretched size as well as their place (the review's ruling 12), and the insets stay (13). ⚠️ **Two moves kept, not defects**: masking a pair in a flow moves it whole into the first slot, a masked group's box being its content's; and a laid group that is itself an item, its layout taken away, loses its padding and growth, so its parent re-places it and its children with it. *(Fixed and tested 2026-10-03, committed as `9fb385d`; **Fixed**, the two moves ***Keep***. Tests `tests/flex.rs` · `wrapping_flex_items_leaves_them_where_they_are_drawn`, `ungrouping_a_laid_group_leaves_its_children_where_they_are_drawn`, `a_grown_laid_group_keeps_its_box_when_wrapped`; `layout.rs` · `display_none_keeps_a_laid_groups_pinned_children_and_a_grown_groups_box`. D249, D878 amended; §5.3c, §5.7a, §9.4; nothing in `roadmap.md`)*
-- **D930** — ***Outline shape*, *Convert to path* and a one-boolean *Flatten* keep the layer's place in its layout, and *Outline shape* cuts a shape at the size it is drawn.** `[X1-L1-01]`. `replace_with_path` carried every property of the layer but the three container layout added to `Node`, so an outlined pinned layer came back in the flow and an outlined grid item lost its cell, its siblings reflowing round it. It carries `insets` when authored and `item` when not the default; `display` deliberately not, a path holding no children. `outline` takes `&Resolved` and cuts from the used kind, so a stretched shape keeps its drawn size — the session's answer to the review's ruling 4. `flatten_union` is unchanged: a new layer made of several inherits only paint, as `boolean`'s does — the ruling's other half. *(Fixed and tested 2026-10-03, committed as `9fb385d`; **Fixed**, the used kind and `flatten_union` ***Keep***, the session's. Tests `tests/flex.rs · outlining_a_laid_layer_leaves_it_where_it_is_drawn`, `tests/grid.rs · outlining_a_grid_item_keeps_its_cell`. D230, D260 amended; §9.4)*
+- **D930** — ***Outline shape*, *Convert to path* and a one-boolean *Flatten* keep the layer's place in its layout, and *Outline shape* cuts a shape at the size it is drawn.** `[X1-L1-01]`. `replace_with_path` carried every property of the layer but the three container layout added to `Node`, so an outlined pinned layer came back in the flow and an outlined grid item lost its cell, its siblings reflowing round it. It carries `insets` when authored and `item` when not the default; `display` deliberately not, a path holding no children. `outline` takes `&Resolved` and cuts from the used kind, so a stretched shape keeps its drawn size — the session's answer to the review's ruling 4, under the maintainer's delegation. `flatten_union` is unchanged: a new layer made of several inherits only paint, as `boolean`'s does — the ruling's other half. *(Fixed and tested 2026-10-03, committed as `9fb385d`; **Fixed**, the used kind and `flatten_union` ***Keep***, the session's under the maintainer's delegation. Tests `tests/flex.rs · outlining_a_laid_layer_leaves_it_where_it_is_drawn`, `tests/grid.rs · outlining_a_grid_item_keeps_its_cell`. D230, D260 amended; §9.4)*
 - **D931** — **A text's min-content counts its paragraphs' own edges.** `[X1-L1-02]`. `text::content_widths` returned parley's figures, and parley knows nothing of the start edge, a first-line indent or the end indent, this module placing every line itself; a text indented 40 and shrunk to its min-content was laid 177.58 wide with ink to 216.37, the rect beside it inside the ink. It adds the widest paragraph's `start_edge + max(indent, 0) + indent_end` to parley's min and max — never narrower than the truth, wider only when the longest word and the widest edges are in different paragraphs. ⚠️ **Not fixed**: whitespace-only content claims a min of 8.89 while its auto box is 0 wide. *(Fixed and tested 2026-10-03, committed as `bef94be`; **Fixed**, the over-estimate ***Keep***, the whitespace edge **open**. Test `container::flex_tests · an_indented_text_is_not_shrunk_into_its_neighbour`, its flip 177.58 against 216.37. D872 amended; §5.3c)*
-- **D932** — **The Position card's typed inset keeps an in-flow item's other axis where it is drawn, and its unit switch converts each layer's own pin.** `[X6.1-L1-02]`, `[X6.1-L1-01]`. Typing L into an item laid at (40, 0) pinned it at x 100 and dropped it to its stored y, 120: the axis left without an inset is placed by the stored transform, stale on every in-flow item. `OndinApp::typed_inset_ops` writes `baked_placement` first for an `is_flex_item` subject, `toggle_pin`'s rule, the typed edge as typed (D894's carve-out). The suffix wrote the anchor's converted value to every subject, moving one pinned elsewhere and pinning one not pinned; `inset_flip_ops` converts each subject's own distance in its own container and leaves a subject with that edge unpinned alone. **The drawn position and not CSS's static position** — the session's answer to the review's ruling 11, Figma's *Ignore auto layout* as D894 reads it; the two coincide in the measured fixture. *(Fixed and tested 2026-10-03, committed as `9fb385d`; **Fixed**, the drawn position ***Keep***, the session's. Tests `inspector::inset_card_tests` · `a_typed_inset_on_an_in_flow_item_keeps_its_other_axis`, `a_unit_switch_over_several_layers_converts_each_and_pins_nothing`, each flip at its predicted site. D894 amended; §5.3c, §9.4)*
+- **D932** — **The Position card's typed inset keeps an in-flow item's other axis where it is drawn, and its unit switch converts each layer's own pin.** `[X6.1-L1-02]`, `[X6.1-L1-01]`. Typing L into an item laid at (40, 0) pinned it at x 100 and dropped it to its stored y, 120: the axis left without an inset is placed by the stored transform, stale on every in-flow item. `OndinApp::typed_inset_ops` writes `baked_placement` first for an `is_flex_item` subject, `toggle_pin`'s rule, the typed edge as typed (D894's carve-out). The suffix wrote the anchor's converted value to every subject, moving one pinned elsewhere and pinning one not pinned; `inset_flip_ops` converts each subject's own distance in its own container and leaves a subject with that edge unpinned alone. **The drawn position and not CSS's static position** — the session's answer to the review's ruling 11, under the maintainer's delegation, Figma's *Ignore auto layout* as D894 reads it; the two coincide in the measured fixture. *(Fixed and tested 2026-10-03, committed as `9fb385d`; **Fixed**, the drawn position ***Keep***, the session's under the maintainer's delegation. Tests `inspector::inset_card_tests` · `a_typed_inset_on_an_in_flow_item_keeps_its_other_axis`, `a_unit_switch_over_several_layers_converts_each_and_pins_nothing`, each flip at its predicted site. D894 amended; §5.3c, §9.4)*
+- **D933** — **A layout root pinned by two insets is laid at the size they give it, and a frame resize previews the layouts inside it as the commit lays them.** `[X3.1-L1-01]`, `[X4.2-L2-01]`, two of the release review's Highs. The pass laid a root at its stored kind and `place` stretched it afterwards, so a row pinned `left: 0; right: 0` across 500 laid its end-justified item at 150..200 where CSS gives 450..500. `container::lay_out` lays once, places the root's insets against the new `LayoutView::parent_box` as `resolve::root_used` will, and lays again at that size where they differ; `resolve::UsedView` answers the parent's used box, and `laid_grid` sizes its root alike. The preview's `relayout` reset an untouched child of a resized frame to its stored transform and kind — a hugging row previewed at its stored 300 × 100, its items piled — and now leaves alone any child with no insets it did not unpin, and re-lays a pinned root it re-places (`apply_laid`, out of `flex_relayout`). **Stretch wins over hug** for a `fit-content` root pinned on both sides — the review's ruling 8, a CSS deviation. ⚠️ A grid drop's `laid_grid` reads the parent's stored box, not its used one. *(Fixed and tested 2026-10-03, committed as `a29914c`; **Fixed**, stretch over hug ***Keep***, the session's under the maintainer's delegation, the drop's parent box ***Fix***, read, not measured. Tests `tests/flex.rs · a_flex_frame_stretched_by_its_insets_lays_out_in_its_drawn_width` and `overrides.rs · a_resize_previews_nested_layouts_as_its_commit_lays_them`, cases (a)–(d), each flip at its predicted site. ⚠️ Not verified in the GUI. D874 amended; §5.3c, §6.2)*
+- **D934** — **A flex drag reads its lines off the flow, and a drop that keeps the flow order is no reorder.** `[X4.1-L1-01]`, a High, and `[X4.1-L1-02]`. `build::flow_index` asked "same line" of each sibling's own cross extent, so in a start-aligned `nowrap` row a 100-tall item never fell in a 20-tall one's band and could not be dropped before it, and a 16 px wobble landed a drag first or last. Lines are runs of in-flow siblings in flow order now, a new one where the main axis runs back and only when the container wraps, each band the union of its items'; `wrap-reverse` needs no arm. `flow_index` answers the place in the flow with the index; `flex_reorder` answers `None` and `flex_reorder_many` nothing when the flow order is unchanged — a nudge beside a pinned or hidden sibling had committed a `Reorder` past it. *(Fixed and tested 2026-10-03, committed as `568ec76`; **Fixed**. Tests `tests/flex.rs` · `a_drag_in_one_line_reorders_by_the_main_axis_alone`, `a_drag_that_keeps_the_flow_order_is_no_reorder`, each flip at its predicted site — the reorder half of `[X4.1-L6-01]`. ⚠️ Not verified in the GUI. D877, D883, D902 amended; §5.3c, §9.4)*
+- **D935** — **A flex resize holds only what the layout sized.** `[X3.2-L1-01]`, `[X4.1-L1-03]`, `[X4.1-L1-04]`. `build::held` read *stretched* off the keyword, so a frame or a px-tall laid group in a stretching row, resized from its top, was written `align-self: end` and jumped to 110..180; `build::stretched_across` asks the keyword, an `auto` cross size and a kind a stretch resizes — never a frame. 🚨 The finding expected the bottom held at 120; a definite item sits at its line's start, so the honest result is 20..90. A main-axis resize clears `flex-basis` with the growth; `flex_holds` holds nothing for a kind that is not `can_stretch` — a path's points, a boolean's operator, a line's end (the review's ruling 5); a px `min`/`max` is kept and clamps the resize, under the Scale tool too (ruling 14). ⚠️ The receipt does not name the basis. *(Fixed and tested 2026-10-03, committed as `8be8ed0`; **Fixed**, rulings 5 and 14 ***Keep***, the session's under the maintainer's delegation, the receipt's silence ***Fix***. Tests `tests/flex.rs` · `a_definite_item_dragged_by_its_top_does_not_jump`, `a_resize_clears_the_basis_and_a_point_edit_keeps_growth`, each flip at its predicted site; the Scale half read. ⚠️ Not verified in the GUI. D875, D880, D905 amended; §5.3c, §9.3)*
+- **D936** — **The layout pass's text measurements are remembered across commits, so a nudge of a laid container re-shapes nothing.** `[X2-L4-01]`. Every commit re-lays every layout root under its chain root, a translate included, and each pass shaped each text item at several widths — 120 shapes and 156 ms a nudge on twenty 4,000-character blocks in a column, D590's defect back. A pass measures through `LayoutView::measured` and `content_widths`; `Resolved::text_memo` keeps each text node's boxes by sizing and its widths, dropped for every dirty id, and the preview reads it for a node it gives no kind. After: 0 shapes, 0.1 ms. ⚠️ Narrowing `update` to the roots on the dirty path was tried and abandoned — the layout differential's seed 29. Not memoised: `place` for a pinned text. *(Fixed and tested 2026-10-03, committed as `ab2642c`; **Fixed**, the narrowed `update` ***declined***. Test `tests/resolve.rs · a_translate_on_a_laid_group_does_not_reshape_the_text_inside_it`, its flip 9 shapes against 0. D868 corrected, D875 answered; §5.3c, §5.9)*
+- **D937** — **History restores a layout value a file carried that CSS refuses, an edit carries one forward, and negatives are refused.** `[R3-L1-01]`, `[X3.1-L2-01]`, `[R1-L2-05]`. An undo writing a file's `grid-column: 0` back was refused with `BadLayout` and the step dropped by `History::undo`, and an edit writing the whole record back was refused whole. `Document::apply_restoring`, history's door, stands that check down for a step; `is_valid_over(was)` tolerates a refused part the node holds and the edit carries forward. The review's ruling 2: neither load normalisation nor a blanket exemption for an inverse, and D914's keep-as-written stands. Negative padding, gaps, grow, shrink, sizes, limits and basis are refused, a file's read as zero; `RenderOverrides::absorb` refuses what the commit would. *(Fixed and tested 2026-10-03, committed as `580a05b`; **Fixed**, ruling 2 ***Keep***, the session's under the maintainer's delegation. Tests `tests/grid.rs` · `a_files_refused_value_can_be_undone_back_to_and_carried_forward`, `a_negative_layout_length_is_refused_and_read_as_zero`, and two cases in `overrides.rs · values_the_commit_would_reject_are_refused`, each flip at its predicted site. D914 amended; §5.3c, §5.7, §5.8, §6.2)*
+- **D938** — **A path or line pinned on both sides of an axis stores its true end distance; and an overflowing box centred between two insets stays centred.** `[X3.1-L1-02]`: `with_edge`'s `Px(0)` placeholder survived `AxisInsets::inverse` for a kind that cannot stretch, whose end inset placing ignores — `right: 0` 180 px from the edge, an unpin jumping it there, *Centre* moving it 20 → 110. The `!can_stretch` arm writes the end too, and the early return waits while it is stale. `[X3.1-L1-03]`, the review's ruling 7, record-only: two auto margins centre an overflowing box symmetrically, Figma's reading, where CSS 2.1 §10.3.7 puts it at the start inset. *(Fixed and tested 2026-10-03, committed as `e69ecc5`; **Fixed**; the centring ***Keep***, a CSS deviation, the session's under the maintainer's delegation — *Revisit if* a centred image bigger than its frame is reported. Test `container::tests · a_path_pinned_on_both_sides_stores_its_true_end_distance`, its flip at the predicted site. ⚠️ Not verified in the GUI. D874 amended; §5.3c)*
 
 ---
 
@@ -19471,7 +19477,11 @@ layout goes through D872's measure function, which that entry already says is no
 **D590's re-argument, in the shape it took.** `update` records which entries actually *changed* —
 `relaid` — and re-shapes the text among them the dirty set did not already cover: **the one door past
 D590's rule, and only as wide as the entries that changed.** A translate changes no used kind, so the
-saving survives it; an edit that moves a wrap width re-shapes that text node once. 🚨 **Siblings are
+saving survives it *(corrected 2026-10-03: true of `Resolved`'s text map and false of the nudge as a
+whole once flex landed — every commit re-runs the layout pass under its chain root, a translate
+included, and the pass measured every text item it laid again; the release review measured D590's
+defect back at five times its size, and D936 keeps those measurements across commits)*; an edit that
+moves a wrap width re-shapes that text node once. 🚨 **Siblings are
 not in `affected`**, and under flex they will have to be — an item moves when its neighbour grows, and
 nothing dirties the neighbour. Identity layout cannot tell the difference; the step that makes one
 node's box depend on another's owes the widening, and `update`'s comment says so. ⚠️ **And
@@ -20327,6 +20337,17 @@ stands. And the card's header carries an *Absolute* badge while the layer is pin
 container with a layout since D891***, which also shows a plain frame's unpinned top and left as held
 at their distance, the implicit left/top of D871, rather than as `auto`.
 
+**Amended 2026-10-03, by three of the release review's fixes.** Ruling 1's end inset, *ignored* for a
+kind that cannot stretch, is **stored true** all the same since D938: it is the layer's position the
+moment the start goes, and `with_edge`'s `0` placeholder had survived for a path or a line. Ruling 1's
+stretch reaches a layout root's own pass since D933 — a frame with a layout pinned on both sides of an
+axis is laid at the size its insets give it, a `fit-content` one included, stretch over hug, a CSS
+deviation that entry records. Ruling 3's centring centres a box bigger than the space between its
+insets symmetrically, where CSS 2.1 puts it at the start inset — kept, D938. And the preview
+paragraph's *"for absolute insets only"* is wider: `relayout` lays a pinned layout root again before
+placing it, and leaves a child with no insets it did not unpin where the commit drew it, which it had
+reset to its stored transform and kind (D933).
+
 **D875 — A flex container is laid out by taffy over Ondin's own nodes, text keeps each sizing mode's
 meaning in it, and dragging an item's edge stops its growth. *Rulings (a)–(d) the maintainer's,
 2026-09-24; (e) and the engine's shape the session's. Built and tested 2026-09-24, committed
@@ -20373,7 +20394,12 @@ layout.)* *(Nor is that true since D878: the Container card writes `SetDisplay`,
    the cross axis's end edge and moved its start — a row's item dragged by its top, or by its bottom
    under `wrap-reverse`, whose cross start is the bottom since `start` became `flex-start` (D909) — so
    the held edge stays. **And the gesture preview applies these holds too** (D904, `build::flex_holds`), where it
-   used to lay the item out as stored until the release.
+   used to lay the item out as stored until the release. ***Amended 2026-10-03*** (D935): *"while its
+   container stretched it"* was read off the keyword, so a frame or a px-tall laid group — definite,
+   never stretched — was written `end` and jumped to its line's end; a stretch is released now only
+   where `build::stretched_across` says the item was drawn stretched. A main-axis resize clears
+   `flex-basis` with the growth, and nothing is held for a kind the layout never resizes — a path's
+   points, a boolean's operator, a line's end — the patch counting as a resize all the same.
 3. **(c) Frames and groups become flex containers in this step**, D869 and D870 together.
    `container::is_container` answers for `Artboard` and `Group`, and the group half is built (D869's
    amendment). 🚨 **The other half is not**: `can_parent` still refuses a frame under a group, and
@@ -20404,7 +20430,9 @@ dropped after**. ⚠️ **So its per-node `taffy::Cache` lives for one pass, and
 D867's lean named was not built**: the spike's *"0 ms and 0 calls"* for a clean relayout is not what
 happens here. The incremental part is `Resolved`'s choice of which roots to re-lay at all, and a root
 re-laid is computed whole. *Revisit if a large container's re-lay shows in a profile* — nothing was
-measured. `lay_out(view, root)` runs `taffy::compute_root_layout` at max-content and returns a `Laid`
+measured. ***Answered 2026-10-03*** (D936): it showed, as text and not as taffy — 1,000 rects in 50
+columns re-laid in 1.1–1.9 ms, twenty 4,000-character blocks in ~120 ms a nudge — and the pass's text
+measurements are kept across commits since; the pass itself still runs whole. `lay_out(view, root)` runs `taffy::compute_root_layout` at max-content and returns a `Laid`
 — the slot in the parent's space, and the size — for the root and every in-flow node under it, nested
 containers in its flow included in the same pass; `item_placed` turns an item's slot and size into
 used geometry, and `root_sized` a root's size, a frame asked to hug growing its kind and a group with
@@ -20811,6 +20839,14 @@ docs for the flips — not re-run; the probe's measurement, the gates and the 25
 by the caller. No number spent. `architecture.md` §5.3c, §6.2, §9.3 and §9.4 amended; `roadmap.md`'s
 step 3 marker rewritten as the next session's handoff)*
 
+**Amended 2026-10-03 (D934): the reading order is the laid lines, and a drop that keeps the flow
+order is nothing.** *"A sibling on the centre's line, its cross-axis extent spanning the centre"* was
+asked of each sibling's own extent, so in a single-line row aligned to the start a taller item read
+every shorter one as a line above and could never be dropped before it, and a vertical wobble decided
+the index. Lines are runs of in-flow siblings in flow order now, each band the union of its items'.
+And *"`None` when `id` … would land where it is"* is read off the item's place in the flow, not its
+child-list index, so a nudge beside a pinned or hidden sibling no longer commits a `Reorder` past it.
+
 **D878 — The Container and Item cards: container layout's inspector, built from the maintainer's
 mockup, and where the cards are not the mockup. *The mockup the maintainer's; every departure from it
 the session's, with its reason. Built and tested 2026-09-24, uncommitted when recorded.*** D867's
@@ -21079,6 +21115,14 @@ field* — the test's doc has both flips: the depth dropped fails at *"an undo t
 receipt keyed on the revision at *"a redo puts the step back on top"*. The two paragraphs above saying
 the revision is what is read are the record of this entry as built, and stand.
 
+**Amended 2026-10-03 (D935).** *"Across a stretch"* is now a stretch the item was drawn with —
+`build::stretched_across`, where the keyword alone was read before — so a frame resized from its top no
+longer receives, or is named as receiving, an `align-self: flex-end` it had no stretch for. ⚠️ **And a
+resize clears `flex-basis` now, which the receipt does not name**: `growth_held` counts grow, shrink
+and the two self-alignments, so an item whose growth was already 0 has its basis go back to `auto`
+under a drag with nothing in the card to say why — this entry's own reason for the receipt. *Fix by
+counting `basis` in `growth_held`.*
+
 *(Ruled 2026-09-24 by the maintainer; built and tested the same day, uncommitted when recorded;
 **Resolved.** Recorded from the brief and a read of `session.rs`' `FlexReceipt`, `flex_receipt`,
 `growth_held`, `commit_inner`, `undo` and `redo`, and `layout.rs`' `item_rows` receipt and test; the
@@ -21130,7 +21174,11 @@ two to a line, the first line at the bottom; `c`, on the upper line, dragged to 
 at the front of the flow. Dropping the `lines_reversed` arm answers `Some(1)` — `d`, above, counted as
 an earlier line — on the predicted assertion. *(Fixed and tested 2026-09-24; **Resolved.** Recorded
 from the brief and a read of `build.rs`' `flex_reorder` and the test; the flip as its doc records it.
-D877 amended; `architecture.md` §5.3c amended)*
+D877 amended; `architecture.md` §5.3c amended)* **Amended 2026-10-03 (D934): the arm is gone, and the
+rule it stood for is kept by construction.** Lines are read off the flow now, so a `wrap-reverse`
+row's first line is the first in the flow wherever it is drawn, and the reversed cross comparison has
+nothing left to do. ⚠️ The test's doc still records its flip as *"the `lines_reversed` arm dropped"* —
+code that no longer exists, so the flip cannot be re-run as written.
 
 **D884 — The cards' labels are CSS's names in sentence case: *Justify content*, *Flex start*. *The
 maintainer's ruling, 2026-09-26; three spellings the session's. Built 2026-09-26, uncommitted when
@@ -21977,6 +22025,15 @@ the maintainer. ⚠️ Nothing of it reachable in the GUI. Recorded from the bri
 `compute/grid/alignment.rs` and `compute/common/alignment.rs`; flips not re-run. D913 corrected;
 `architecture.md` §2, §5.3, §5.3c, §5.6, §5.7, §5.9 and §6.2 amended; `roadmap.md` step 4's first
 sub-step struck)*
+
+**Amended 2026-10-03 (D937): a value kept as written can be returned to and carried forward.** The
+undo of an edit away from one wrote it back through the same operation and was refused, and
+`History::undo`, having popped the step, dropped it; and any edit writing the whole record or layout
+back with the value in it was refused whole. History applies through `Document::apply_restoring`,
+which stands the check down, and an edit is asked `is_valid_over` the value the node holds, so a
+refused part only carried forward is tolerated. **The *no load-time rewrite* above stands** — D937
+has why load normalisation was not taken. And the refused set is wider: a negative padding, gap,
+grow, shrink, size, limit or basis, a file's read as zero.
 
 **D915 — Grid's `normal`: a shape keeps its size at the start of its cell and a box stretches, as
 CSS does. *The maintainer's ruling, 2026-09-27, answering D914's open question; the mechanism the
@@ -23156,7 +23213,7 @@ amended; `architecture.md` §5.3c, §5.7a and §9.4 amended; nothing in `roadmap
 **D930 — *Outline shape*, *Convert to path* and a one-boolean *Flatten* keep the layer's place in its
 layout, and *Outline shape* cuts a shape at the size it is drawn. *The release review's
 `[X1-L1-01]`. Fixed and tested 2026-10-03, committed as `9fb385d`; the review's ruling 4 the
-session's.*** `build::replace_with_path` is the body the three conversions share, and its contract is
+session's, under the maintainer's delegation.*** `build::replace_with_path` is the body the three conversions share, and its contract is
 in its own comment: *"This **is** the same layer, so everything about it that is not its geometry
 comes across"*. Its list carried name, transform, paint, opacity, visibility, pivot, mask, effects
 and fill rule, each added when its loss was found (D230, D282), and not the three fields container
@@ -23172,10 +23229,10 @@ default as the other carries are. ⚠️ **`display` does not, on purpose**: a p
 layout on one would lay out nothing (`container::is_container`).
 
 **`outline` cuts from the used kind, and so takes `&Resolved`** — the session's answer to the review's
-ruling 4. `geometry::local_path` is a pure function of a kind, but a shape stretched by its flex or
-grid container, or between two insets, is drawn at a size its stored kind does not hold, and a path
-cannot stretch, so the size it is cut at is the size it keeps. Outlined from the stored kind, the
-stretched `b` came back 30 tall against 160. D230's *"It needs no `Resolved`"* is amended; the lookup
+ruling 4, under the maintainer's delegation. `geometry::local_path` is a pure function of a kind, but a
+shape stretched by its flex or grid container, or between two insets, is drawn at a size its stored
+kind does not hold, and a path cannot stretch, so the size it is cut at is the size it keeps. Outlined
+from the stored kind, the stretched `b` came back 30 tall against 160. D230's *"It needs no `Resolved`"* is amended; the lookup
 is not an evaluated outline, so D260's cost argument for `outline_text` stands.
 
 **`flatten_union` is unchanged — the ruling's other half.** Two or more layers flattened make a
@@ -23192,8 +23249,8 @@ reading the stored kind fails on *"the stretched one"*, 30 tall against 160.
 the body and have no test of their own here; a pinned or celled text or boolean is read, not run.
 
 *(Found by the release review and measured there; fixed and tested 2026-10-03, committed as
-`9fb385d`; **Fixed**, the used kind and `flatten_union`'s exclusion ***Keep***, the session's. ⚠️ Not
-verified in the GUI. Recorded from the brief and a read of `build.rs`' `outline`, `outline_text`,
+`9fb385d`; **Fixed**, the used kind and `flatten_union`'s exclusion ***Keep***, the session's under
+the maintainer's delegation. ⚠️ Not verified in the GUI. Recorded from the brief and a read of `build.rs`' `outline`, `outline_text`,
 `flatten_boolean`, `flatten_union` and `replace_with_path`, the two tests and the finding; flips as the
 tests' docs record them, not re-run. D230 and D260 amended; `architecture.md` §9.4 amended)*
 
@@ -23234,7 +23291,7 @@ records it, not re-run. D872 amended; `architecture.md` §5.3c amended)*
 **D932 — The Position card's typed inset keeps an in-flow item's other axis where it is drawn, and
 its unit switch converts each layer's own pin. *The release review's `[X6.1-L1-02]` and
 `[X6.1-L1-01]`. Fixed and tested 2026-10-03, committed as `9fb385d`; the review's ruling 11 the
-session's.*** Two arms of `inset_field`, each extracted into a function a test can call.
+session's, under the maintainer's delegation.*** Two arms of `inset_field`, each extracted into a function a test can call.
 
 **A typed inset dropped the other axis.** A 400 × 200 row aligned to the start holds `a` and `b`, `b`
 stored at (250, 120), where it was before the layout took it, and laid at (40, 0). Typing `100` into
@@ -23269,10 +23326,429 @@ not — the anchor's value written to every subject again fails on *"B stays"*, 
 predicted. Both call the extracted functions and commit through the session; neither drives the field.
 
 *(Found by the release review, measured there through real `RawInput`; fixed and tested 2026-10-03,
-committed as `9fb385d`; **Fixed**, the drawn position ***Keep***, the session's. ⚠️ Not verified in the
-GUI. Recorded from the brief and a read of `inspector.rs`' `inset_field`, `inset_flip_ops`,
+committed as `9fb385d`; **Fixed**, the drawn position ***Keep***, the session's under the maintainer's
+delegation. ⚠️ Not verified in the GUI. Recorded from the brief and a read of `inspector.rs`' `inset_field`, `inset_flip_ops`,
 `typed_inset_ops`, `baked_placement` and the two tests, and the two findings; flips as the tests' docs
 record them, not re-run. D894 amended; `architecture.md` §5.3c and §9.4 amended)*
+
+**D933 — A layout root pinned by two insets is laid at the size they give it, and a frame resize
+previews the layouts inside it as the commit lays them. *The release review's `[X3.1-L1-01]` and
+`[X4.2-L2-01]`, two of the five Highs it held the tag for. Fixed and tested 2026-10-03, committed as
+`a29914c`; the review's ruling 8 the session's, under the maintainer's delegation.***
+`resolve::place_node` ran `container::lay_out` at a layout root before `used_geometry` placed it, and
+the pass read the root's **stored** kind — so a frame with a layout, pinned on both sides of an axis,
+was laid at the width it was typed at, and `container::place` then stretched the box it is drawn in.
+Measured by the review: a 200-wide row with `justify-content: end` and one 50 × 50 rect, pinned
+`left: 0; right: 0` in a 500-wide frame, drawn 0..500 with the rect at 150..200 — the end of a box
+nobody can see — where CSS, whose absolutely positioned container with both insets and `width: auto`
+is as wide as the space between them, puts it at 450..500. The same frame's pinned children, placed
+against its used size, followed the stretched edge while its in-flow items did not. `rebuild` gave
+the same numbers, so it was the design of the pass and not a stale cache. A header pinned left and
+right, the usual way to make one follow the page, kept its items where they were at the width it was
+first drawn at; a grid root kept its `fr` and `%` tracks at the stored width the same way, and X5.2
+measured the canvas track lines drawn there.
+
+**`lay_out` lays such a root twice.** `lay_out_at(view, root, None)` first, as before; then
+`pinned_size` — the root's insets placed by `place` from the root's own laid size, as `root_sized`
+reads it, against the box its parent gives a pinned child, exactly as `resolve::root_used` will place
+it — and where that size differs from the pass's, `lay_out_at` again with the root's taffy size
+definite on both axes. The parent's box is a new `LayoutView::parent_box(id)`, whose default is the
+parent frame's stored size. `resolve::UsedView` — the view `place_node` now lays through, `DocView`
+with that answer taken from the used map being filled — answers the parent's **used** box through
+`frame_box`, so a frame pinned inside a frame that is itself stretched lays at the stretched width,
+and a laid group's box is its laid one. `container::laid_grid` sizes its root the same way, so the
+track lines are read off the grid the commit lays.
+
+**Stretch wins over hug** — the review's ruling 8, the session's under the maintainer's delegation.
+A root asked to hug, `fit-content`, and pinned on both sides of an axis is laid at the stretched size,
+which is the size `place` already drew it at: D874's first ruling stretches anything with a size of
+its own between two insets, and a frame's size is its kind. 🚨 **A CSS deviation**: CSS's
+`fit-content` on an absolutely positioned box keeps the hug, the insets only bounding it. Kept so that
+the box drawn and the box laid are one box — before this the hug was laid and the stretch drawn, the
+review's *"same mismatch the other way round"*. *Revisit if* a hugging container pinned on both sides
+is reported drawn wider than its content.
+
+**The preview lied by a mechanism of its own** (`[X4.2-L2-01]`). `RenderOverrides::relayout`
+re-places every child of a frame the preview resizes, and it skipped only a child with no insets whose
+kind the preview had changed. An untouched child fell through to `place`, which answers `None` for no
+insets, and was reset to its **stored** transform and kind — "stored" having been "drawn" for every
+unpinned layer while insets were the only used geometry (D874), and false since flex gave laid roots
+and their items places of their own. Measured by the review against the commit through the real door:
+a hugging row in a plain 600 × 400 frame, the frame dragged to 700, previewed at its stored 300 × 100
+with its three items piled at their stored (270, 270), where the commit hugs at 160 × 50 and lays them
+at x 30, 80 and 130 — snapping into place on release, the lying preview §6.2 counts worse than none.
+A pinned row was previewed piled too, and so was a hugging row inside a grown frame that a
+**sibling's** resize shrank, no frame resized at all. `flex_relayout` could not reach any of it: it
+lays the roots *up* from a touched node (D911), and a nested root under a resized frame is below.
+
+**Now `relayout` leaves alone every child with no insets unless this preview unpinned it** — untouched,
+it is drawn where the commit drew it — **and lays a pinned layout root again before placing it**,
+through `lay_out` over the preview's `PreviewView`, `Resolved`'s order: the root's laid size is the base
+`place` stretches from, as `root_used`'s is, and its items are written by `apply_laid`, the item half
+of `flex_relayout` extracted so the two passes write a laid result one way. `PreviewView` carries `res`
+for its `parent_box`, which answers the parent's kind in this preview, else its committed used kind —
+for a laid group its preview box, else its used frame. `RenderOverrides::laid_grid` takes `res` with
+it.
+
+⚠️ **Two residues, both read and not measured.** `build::laid_grid` and `build::grid_drop_many` lay
+through `resolve::DocView`, whose `parent_box` is the trait's default — the parent frame's *stored*
+size, and `None` for a group. So for a grid pinned on both sides inside a parent drawn at another size
+than it stores — a frame itself stretched by insets, a frame that hugs, a laid group — a drop picks its
+cells off a grid laid at a size the commit never uses, while the track lines, read through
+`PreviewView`, are right; and §5.3c's *"equal to `build::laid_grid` with nothing patched"* is not true
+there. *Fix by laying the drop through a view that answers the used box.* And the second pass fixes
+**both** axes, the one the insets left alone at the size the first pass gave it: a root that hugs its
+height and is stretched *narrower* than its content's max-content width keeps the height it hugged at
+its own width, where CSS re-hugs at the stretched one, so content that wraps more there would
+overflow. Preview and commit agree on it. *Revisit if* a hugging pinned container is seen to clip or
+overflow its wrapped content.
+
+**The evidence.** `ondin-core/tests/flex.rs ·
+a_flex_frame_stretched_by_its_insets_lays_out_in_its_drawn_width`, the review's fixture: the rect at
+450, and at 550 once the outer frame is resized to 600, `update` against `rebuild` throughout. **Flip
+run**, `lay_out` returning its first pass whatever `pinned_size` says: fails on *"the end of the drawn
+width"*, x0 150 against 450, the predicted site. `ondin-render/tests/overrides.rs ·
+a_resize_previews_nested_layouts_as_its_commit_lays_them`, four documents through
+`assert_preview_matches_commit` — (a) a hugging row in a plain frame resized, (b) a row pinned `left:
+20; right: 20` with `justify-content: end`, (c) a flex frame resized while it holds a pinned flex frame
+of its own, (d) a sibling's resize shrinking a grown frame that holds a hugging row. **Flip runs**:
+`relayout`'s skip back to *"a layer whose kind this preview changed"* only fails on (a), at the hugging
+frame's fill, 300 × 100 against 160 × 50, the predicted site; the pinned-root pass switched off fails
+on (b), its items piled where (a) is now right. ⚠️ The review's (e), a hugging **grid** frame, is not
+among them — read as the same path, `lay_out` laying either.
+
+*(Found by the release review and measured there; fixed and tested 2026-10-03, committed as
+`a29914c`; **Fixed**, stretch over hug ***Keep*** — a CSS deviation, the session's under the
+maintainer's delegation — and the drop's parent box ***Fix***, read, not measured. ⚠️ Not verified in
+the GUI; gates not reported to this record. Recorded from the brief and a read of `container.rs`'
+`lay_out`, `pinned_size`, `lay_out_at`, `laid_grid` and `LayoutView::parent_box`, `resolve.rs`'
+`UsedView`, `frame_box`, `root_used` and `place_node`, `renderer.rs`' `relayout`, `apply_laid`,
+`flex_relayout`, `PreviewView` and `laid_grid`, `build.rs`' `laid_grid` and `grid_drop_many`, the two
+tests and the two findings; flips as the tests' docs record them, not re-run. D874 amended;
+`architecture.md` §5.3c and §6.2 amended)*
+
+**D934 — A flex drag reads its lines off the flow, and a drop that keeps the flow order is no
+reorder. *The release review's `[X4.1-L1-01]`, a High, and `[X4.1-L1-02]`. Fixed and tested
+2026-10-03, committed as `568ec76`.*** `build::flow_index` — D877's reading order, shared with the
+block drag since D902 — decided "same line" **per sibling**: a sibling whose own cross extent held the
+dragged centre was on its line and compared by main-axis centre, and any other was a line above or
+below and compared by cross centre, whether or not the container wraps. Measured by the review through
+`flex_reorder` against `rebuild`'s geometry: in a `nowrap` row aligned to the start, `a` 40 × 20 and
+`b` 40 × 100, `b`'s centre at y 70 is never inside `a`'s 20..40, so `a` was always a line above — `b`
+dragged left by 50, 100 or 300 answered `None`, and could not be put before `a` by dragging at all.
+Three equal 40 × 30 items, the last dragged 200 left with a 16 px vertical wobble: `None` at +16,
+first at −16, and the same −16 on the first item dragged right kept it first. The canvas hands
+`layout_drop` the raw pointer delta, so the wobble is the user's hand. Every reorder test used items of
+one height dragged horizontally, so none reached the arm — `[X4.1-L6-01]`'s reorder half.
+
+**The lines are the laid lines now.** The in-flow siblings, in flow order, are cut into runs: a new
+line where an item's main-axis start runs back behind the end of the one before it — the way the
+engine fills them — and only when the container wraps; a line's band is the union of its items' cross
+extents. The centre's line is the band that holds it, else the nearest, and the item lands after every
+earlier line and among that line's items by main-axis centre, `row-reverse` and `column-reverse`
+reading it backwards as before. **So a `nowrap` row is one line by construction, and `wrap-reverse`
+needs no arm**: its first line is the first in the flow wherever it is drawn, which is what D883's
+reversed cross comparison stood in for. The review sketched two arms — the main axis alone under
+`nowrap`, the line's union under `wrap` — and this is the one rule both are cases of.
+
+**And a drop that keeps the flow order is no reorder** (`[X4.1-L1-02]`). `flow_index` answered the
+child-list index just before the next in-flow sibling, and `flex_reorder` compared it with the item's
+own. With `p` pinned between `a` and `b`, `a` nudged 3 px stayed first in the flow and answered
+`Reorder { a, 1 }` — committed, `[p, a, b]`: nothing moved in the flow, `a` was painted over the layer
+it had been under, and the step went into history. A hidden sibling the same. `flex_reorder_many`
+inserted the block contiguously, so an out-of-flow sibling between its members was pulled out on any
+drop — `[a, h, b, c]`, `a` and `b` dragged short of `c`, committed `Reorder { h, 0 }`. The canvas's
+no-op test cannot see it, a `Reorder` really changing the child list. `flow_index` now answers the
+index **and the place in the flow** — how many in-flow siblings come before it; `flex_reorder` answers
+`None` when that place is the item's own, and `flex_reorder_many` an empty list when the in-flow order
+it would make is the one there is. It is the function meeting D877's own words, *"`None` when `id` …
+would land where it is"*. ⚠️ **Where a reorder does happen the index is still the one just before the
+next in-flow sibling**, so an out-of-flow sibling between the two can change sides of the item; the
+review's sketch for that half — insert after the previous in-flow sibling where that keeps such a
+sibling in place — was not built, and whether it is wanted is not decided.
+
+**The evidence**, `ondin-core/tests/flex.rs`. `a_drag_in_one_line_reorders_by_the_main_axis_alone`:
+`b` before `a` dragged 50, 100 and 300 left; the last to the front and the first to the back under a
+wobble of either sign. **Flip run**, each line's band the sibling's own cross extent again: fails on
+*"b before a"*, `None`, the predicted site. `a_drag_that_keeps_the_flow_order_is_no_reorder`: `[a, p,
+b]` with `p` pinned, `a` nudged and the block `[a, b]` nudged; `[a, h, b, c]` with `h` hidden, the same.
+**Flip run**, `flex_reorder` comparing child-list indices: fails on *"a nudge beside a pinned
+sibling"*, `Some(Reorder { a, 1 })`, the predicted site. Together the reorder half of `[X4.1-L6-01]`;
+its grid half — D927's row axis and a block stopped at the end — is not this change's. ⚠️ D883's
+`wrap_reverse_reorders_with_its_lines_read_bottom_up` stands, its doc's flip naming an arm that no
+longer exists (D883's amendment).
+
+*(Found by the release review and measured there; fixed and tested 2026-10-03, committed as
+`568ec76`; **Fixed**. ⚠️ Not verified in the GUI. Recorded from the brief and a read of `build.rs`'
+`flow_index`, `flex_reorder` and `flex_reorder_many`, the two tests and the two findings; flips as the
+tests' docs record them, not re-run. D877, D883 and D902 amended; `architecture.md` §5.3c and §9.4
+amended)*
+
+**D935 — A flex resize holds only what the layout sized: a stretch released only where the item was
+drawn stretched, the basis cleared with its growth, and nothing held for a kind no layout resizes.
+*The release review's `[X3.2-L1-01]`, `[X4.1-L1-03]` and `[X4.1-L1-04]`, its RC7. Fixed and tested
+2026-10-03, committed as `8be8ed0`; the review's rulings 5 and 14 the session's, under the
+maintainer's delegation.*** `build::held` is D875's ruling (b) spelled once — what a resize of an
+in-flow item writes so the size sticks — and the review found it deciding from the keyword or the
+patch rather than from what the layout actually sizes, three ways.
+
+**A definite-size item read as stretched** (`[X3.2-L1-01]`). `held` read *stretched* off the keyword
+alone — `align-self`, else the container's `align-items`, `stretch`. CSS stretches only an item whose
+cross size is `auto` (D893's reading), and a frame's `auto` is its stored size, definite and never
+stretched (D879); a laid group with a px height is the same. So a 40 × 100 frame in a stretching row,
+drawn at 20..120, resized from its top to 70 took D905's arm for a stretched item, was written
+`align-self: end` — a keyword nobody touched — and was drawn at 110..180, the edge the user had not
+touched moving 60 down; a laid group with `height: 100px` through `sized_flex_item` the same. The
+preview applies the holds (D904), so the jump was drawn mid-drag as well. D905's rule is right for an
+item that *is* stretched, whose line-end is its own bottom. New `build::stretched_across(flex, item,
+kind, laid)` asks the question: the keyword `stretch`, **and** an `auto` cross size, **and** a kind a
+stretch resizes — never a frame, a group only with a layout of its own, any other kind as
+`container::can_stretch` says. `held` takes the answer as a parameter, asked of the item as it was
+before the resize, from `flex_holds` and `sized_flex_item` both.
+
+🚨 **The finding's premise was false, and the test says so.** It expected the bottom to hold, the
+frame at 50..120. Nothing can give that: a definite item in a stretching line is placed at the line's
+start, as a start-aligned one is, so it keeps its top at 20 whichever handle resized it. **The honest
+result is 20..90** — the top held, the ordinary behaviour of a start-aligned item, which is what D905
+replaced for a stretched item only. Holding the bottom would need a keyword that moves the item to the
+line's end, and that keyword is the jump. The test was first named for the finding's premise,
+`a_definite_item_dragged_by_its_top_keeps_its_bottom`, and was renamed
+`a_definite_item_dragged_by_its_top_does_not_jump` the same day; it asserts the top kept, and its doc
+carries the correction. *Do not "fix" the test towards 50..120.*
+
+**The basis went on deciding the size** (`[X4.1-L1-03]`). `held` wrote grow and shrink and not
+`flex-basis`, and the basis decides the main size before growth does: a 40-wide rect with `basis:
+100px`, drawn 100 wide, resized to 60 stayed 100 — the commit writing the size, `grow 0`, `shrink 0`
+and a receipt for a hold that did nothing. Above the basis the resize held, CSS's automatic minimum
+being the specified width, so the failure was exactly *smaller than the basis*. A main-axis change now
+writes `basis: auto` with the growth, so the size the resize wrote is the basis — D875's *"set width
+and stop growth"*, in CSS's terms. ⚠️ **The receipt does not name it.** `session::growth_held` counts
+grow, shrink and the two self-alignments, so where an item's growth was already 0 a basis goes back to
+`auto` under a drag with nothing in the Item card to say why — D880's own reason for the receipt.
+*Fix by counting `basis` in `growth_held`.*
+
+**Ruling 14, the session's under the maintainer's delegation: a px `min-` or `max-` is kept, and
+clamps the resize.** It is a limit somebody set, and since the preview applies the holds (D904) the
+drag is seen to stop at it rather than landing elsewhere on release. **The Scale tool keeps them too**:
+scaling a limit would put a `SetLayoutItem` in the Scale tool's own transaction, and `flex_holds`
+leaves an item whose properties the transaction sets itself to it, so the growth, basis and stretch
+holds would be lost with it. The finding's Scale half for the basis is closed by `held` itself — the
+Scale tool writes `SetGeometry`, which reaches `flex_holds` at the commit door. ⚠️ Read, not driven.
+
+**A hold for a kind no layout resizes** (`[X4.1-L1-04]`). `flex_holds` fired on any `SetGeometry`
+whose patch `resizes()`, and D875 (b) counts a path's points, a boolean's operator, a line's end and
+the rail patches among those. On a growing item that stopped growth: a 40 × 30 path with `grow: 1`, an
+anchor moved so it is 42 wide, committed `grow 0`/`shrink 0`, and its sibling `b` jumped from x 340 to
+72. The hold bought nothing: a path is not `can_stretch`, its drawn size never followed `grow` — only
+its slot did — so there was no size for the layout to take back. **Ruling 5, the session's under the
+maintainer's delegation: only a kind whose drawn size follows the layout is held** — `flex_holds`' flex
+arm passes the item through when `container::can_stretch` refuses its used kind. Of the review's three
+answers — every box-changing patch, a size gesture only, a stretchable kind only — the last, the one
+that asks the question the hold exists for. The `%`/`fit-content` → `auto` rewrite (D879's
+`sized_in_px`) still applies to every kind, being the resize itself and not a hold, and the grid arm is
+untouched.
+
+**The evidence**, `ondin-core/tests/flex.rs`. `a_definite_item_dragged_by_its_top_does_not_jump`:
+a 40 × 100 frame in a stretching row padded 20, resized from its top to 70, lands at 20..90 with no
+`End` written, and a laid group with `height: 100px` handed the same shifted `to` answers no `End`.
+**Flip run**, `stretched_across` asked of the keyword alone: fails on *"at the line's start"*, 110..180,
+the predicted site. `a_resize_clears_the_basis_and_a_point_edit_keeps_growth`: the 100px-basis rect
+resized to 60 is drawn 60, and the growing path's anchor edit keeps `grow` 1 and `b` where it was.
+**Flip runs**: `held` keeping the basis fails on *"drawn at the size it was resized to"*, 100 against
+60; the kind gate in `flex_holds` deleted fails on *"its growth kept"*, 0 against 1 — both the
+predicted sites.
+
+*(Found by the release review and measured there; fixed and tested 2026-10-03, committed as
+`8be8ed0`; **Fixed**, rulings 5 and 14 ***Keep***, the session's under the maintainer's delegation;
+the receipt's silence on the basis ***Fix***. ⚠️ Not verified in the GUI; the Scale tool's half read,
+not driven. Recorded from the brief and a read of `build.rs`' `keep_flex_sizes`, `flex_holds`,
+`stretched_across`, `held`, `sized_in_px` and `sized_flex_item`, `session.rs`' `growth_held`, the two
+tests and the three findings; flips as the tests' docs record them, not re-run. D875, D880 and D905
+amended; `architecture.md` §5.3c and §9.3 amended)*
+
+**D936 — The layout pass's text measurements are remembered across commits, so a nudge of a laid
+container re-shapes nothing. *The release review's `[X2-L4-01]`, and the drag-preview cost X4.2
+measured beside it. Fixed and tested 2026-10-03, committed as `ab2642c`.*** D590 made a translate
+re-shape nothing: a text layout depends on nothing outside its own node, and re-shaping a nudged
+group's twenty blocks every keypress was 23 ms spent on a change that cannot move a glyph. D868 carried
+that rule across container layout with *"a translate changes no used kind, so the saving survives
+it"* — true of `Resolved`'s text map, and false of the nudge as a whole. **Every commit re-runs every
+layout root's pass under the commit's chain root**, a nudge of the container included, its own
+transform dirtying it; and each pass measured each text item, `AutoHeight` at several widths and its
+content widths, with `item_placed` and `flexed_text` shaping it twice more outside the per-pass memo.
+Measured by the review in release on D590's own fixture under a column — twenty 4,000-character
+`AutoHeight` blocks: 120 shapes and ~120 ms a nudge, where the same document without `display` costs 0
+shapes and 0.03 ms — D590's defect back at five times its size. A page of fifty cards with six labels
+each paid 900–1,800 shapes; 1,000 plain rects in 50 columns re-laid in 1.1–1.9 ms, so the cost was the
+text and not taffy. X4.2 measured 141 ms a drag-preview frame through `flex_relayout` by the same path.
+
+⚠️ **Tried first and abandoned, so that it is not tried again: narrowing `update` to re-lay only the
+roots on the path up from each dirty node**, every other node in `affected` keeping its `Used` entry —
+the review's sketch. The randomized `update ≡ rebuild` layout differential failed it at **seed 29**: a
+`SetDisplay None` on a container turned a laid group inside it into a new layout root, and nothing
+re-laid it — D591's hazard exactly, a narrowed predicate turning an accidental cover into a live bug.
+And the worst case, nudging the laid column itself, is a dirty root whose only change is its
+transform, which `DirtySet` cannot tell from any other change to it. So the pass still runs.
+
+**The measurements are what is kept.** `LayoutView` gains `measured(id, kind)` and `content_widths(id,
+kind)`, defaulting to `geometry::local_bounds` and `text::content_widths`, and every text measurement a
+pass makes asks through them: `FlexTree::measure` (`Leaf::Text` holds the kind now), `flexed_text` (a
+new `measure` parameter), `item_placed`, and `atomic_box`'s leaf case. `Resolved` keeps `text_memo` —
+per text node, its box at each sizing asked, keyed by the sizing's variant and its numbers' bits, and
+its content widths — moved into a `RefCell` for the length of a pass, read and filled through
+`UsedView`, and put back, so `Resolved` itself holds no interior mutability. **Its invalidation is
+D590's argument, read once more**: a text node's box depends on its own node alone, and every change to
+a node dirties it, so `update` drops every dirty id's entries before the pass, a deletion's included;
+fonts arriving — the one input from outside a node — dirty every text node through `invalidate_text`;
+`rebuild` starts empty. *Do not narrow which ids it drops.* The preview's `PreviewView` reads
+`Resolved::remembered_text_box` and `remembered_text_widths` for a node it gives no kind of its own, and
+measures afresh where it does. **Measured after, by the session with a throwaway release probe since
+deleted, on the review's twenty blocks: 120 shapes and 156 ms a nudge before, 0 shapes and 0.1 ms
+after.**
+
+⚠️ **It is an eighth map, and §5.9 counts them in prose.** `assert_resolved_matches_rebuild` does not
+compare it and must not: `rebuild` holds only what its own pass asked for, so the two need not hold the
+same entries. What the memo owes is that every entry is what measuring would answer now, and the
+dirty-drop is the whole of that argument. ⚠️ **Not memoised**: `container::place` for a pinned text
+still shapes. And no figure for the preview's drag frame after the change was reported to this record.
+
+**The evidence**, `ondin-core/tests/resolve.rs ·
+a_translate_on_a_laid_group_does_not_reshape_the_text_inside_it`, beside D590's own test: three blocks
+in a group laid out as a column, the group nudged — 0 shapes, and the blocks still moved with it; then
+a `SetText` on one block re-shapes it, so the memo is not simply never cleared. **Flip run**,
+`UsedView` measuring through the trait's default rather than the memo: fails on *"a translate re-shaped
+laid text"*, 9 against 0 — three shapes a label, the review's rate — the predicted site.
+
+*(Found by the release review and measured there; fixed and tested 2026-10-03, committed as
+`ab2642c`; **Fixed**, and the narrowed `update` ***declined*** on the differential's seed 29. Answers
+D875's *Revisit if a large container's re-lay shows in a profile*. Recorded from the brief and a read
+of `container.rs`' `LayoutView::measured` and `content_widths`, `flexed_text`, `item_placed`, `Leaf`,
+`FlexTree` and `atomic_box`, `resolve.rs`' `UsedView`, `TextMemo`, `sizing_key`, `rebuild`, `update`,
+`remembered_text_box`, `remembered_text_widths` and `invalidate_text`, `renderer.rs`' `PreviewView`, the
+test and the finding; the flip as the test's doc records it, not re-run; the probe's figures the
+session's. D868 corrected and D875 answered; `architecture.md` §5.3c and §5.9 amended)*
+
+**D937 — History restores a layout value a file carried that CSS refuses, an edit carries one
+forward, and negatives are refused. *The release review's `[R3-L1-01]`, `[X3.1-L2-01]` and
+`[R1-L2-05]`, its RC11. Fixed and tested 2026-10-03, committed as `580a05b`; the review's ruling 2 the
+session's, under the maintainer's delegation.*** D914 refuses at the operations what CSS refuses, and
+opens a file carrying one with the value **kept as written** — no load-time rewrite — and laid around.
+§5.3c then said the refusal meant *"undo needs nothing of its own"*, which held only for values the app
+had authored. Measured by the review: a grid item at `grid-column: 0 / span 2` from a file, set to line
+3 — committed; **Undo** wrote line 0 back, `op_set_layout_item` refused it with `BadLayout`, and
+`History::undo`, having popped the step before applying it, dropped it: undo depth 1 to 0, redo 0,
+*"Undo failed: a layout value CSS does not accept"*, and the file's value never reachable again. A
+template past `MAX_TEMPLATE_TRACKS`, the same. And every edit carrying such a value forward was refused
+whole — the Item card writes the whole `LayoutItem` and the grid card the whole `Grid`, so that item's
+`grow`, or that grid's gap, could not be changed — and a block drop over several items, one of them
+carrying a file's value, lost its whole undo step.
+
+**Ruling 2, the session's under the maintainer's delegation: history restores, edits carry forward.**
+Of the review's two answers, neither. **Not load normalisation**, D492's shape, which would change a
+file's bytes on save against D914's *no load-time rewrite*; and **not a blanket exemption for an
+inverse**, under which any transaction that happened to be one could write anything. Two narrower
+doors instead. `Document::apply_restoring` is `apply` with a `restoring` flag set for its length and
+false everywhere else, and `History::undo` and `redo` go through it: a history step writes back only
+values the document held, so the layout operations' `BadLayout` check stands down for it, and every
+other check stands — a non-finite number, the tree's rules — because nothing that passed them once can
+fail them on the way back, and one that does is worth hearing about. And an edit is asked
+`Display::is_valid_over(was)` or `LayoutItem::is_valid_over(&was)`: a refused part the node already
+holds, carried forward unchanged — the padding, either gap, a track axis, an item's size field or line
+pair — is tolerated, and a refused part the edit writes is refused. D914's keep-as-written stands, and
+§5.3c's *"so undo needs nothing of its own"* is true now by mechanism rather than by premise.
+
+**Negatives, which CSS refuses and the operations did not** (`[X3.1-L2-01]`). `Display::is_valid`
+answered `true` for every flex value, its doc claiming *"a flex container has no value CSS refuses that
+is not also non-finite"* — false of a negative `padding` or `gap`, which CSS drops outright. Measured:
+`padding: -30` and `column-gap: -20` on a 200 × 100 row committed, the first rect laid at x −30..20,
+outside its frame, and the second over it. `LayoutItem::is_valid` checked grid lines alone. Now
+`Display::is_valid` refuses a negative padding or gap, and `LayoutItem::is_valid` a negative grow,
+shrink, or `Px` or `Percent` size, limit or basis. The cards clamp at zero, so only a file or a writer
+outside them reaches either, and `style_of` reads a file's negative as zero — `Dimension::read`, and a
+floor at zero on grow, shrink, padding and gaps — grid's rule for its tracks (D914). The review asked
+for this to land with or after the undo half, since it widens what a file can carry that the
+operations refuse; it landed with it.
+
+**The preview refuses what the commit would** (`[R1-L2-05]`). `RenderOverrides::absorb` recorded
+`SetDisplay` and `SetLayoutItem` unchecked, where the `SetOpacity` arm beside them asks the commit's
+own predicate so that *"a preview can never show an edit that the commit will reject"*: a grid repeat
+count typed or scrubbed past the track cap previewed the capped grid `container::template` quietly lays,
+and the release was refused with `BadLayout` and the grid snapped back. Both arms now answer `None` for
+a value that fails `is_finite` or `is_valid_over` the node's current value — the commit's test, against
+the same `was`. ⚠️ **The card still offers the count**: the field's range is a fixed `1..=1000`
+(`panels/layout/grid.rs`' `track_fields`), so a count past the cap now previews nothing and its release
+still fails. The review's other sketch, bounding the field by what the list leaves, was not built.
+
+**The evidence.** `ondin-core/tests/grid.rs · a_files_refused_value_can_be_undone_back_to_and_carried_forward`:
+an item whose saved bytes carry `grid-column: 0`, set to line 3 and undone back to 0, redone and undone
+again; a `grow` edit carrying the line forward commits; a line 0 the edit writes into `grid_row` is still
+refused. **Flip runs**: `History::undo` back on plain `apply` fails on *"the undo lands"*,
+`Err(BadLayout)`; `op_set_layout_item` asking `is_valid` rather than `is_valid_over` fails on *"carried
+forward"* — both predicted. ⚠️ The `Display` half — a gap edit over a file's refused template — is the
+same rule, read and not tested. `a_negative_layout_length_is_refused_and_read_as_zero`: a −20 gap, a −1
+grow and a −40 px width refused, and a file's −20 gap laid as zero; **flip run**, `is_valid_over`
+without the padding-and-gap rule, fails on *"a negative gap is refused"*, the predicted site.
+`ondin-render/tests/overrides.rs · values_the_commit_would_reject_are_refused` gained a template past
+the cap and a negative grow; its comment records the `SetDisplay` check deleted failing on the first.
+
+*(Found by the release review and measured there; fixed and tested 2026-10-03, committed as
+`580a05b`; **Fixed**, ruling 2 ***Keep***, the session's under the maintainer's delegation; the count
+field's bound not built. Recorded from the brief and a read of `document.rs`' `restoring`,
+`apply_restoring`, `op_set_display` and `op_set_layout_item`, `history.rs`' `undo` and `redo`,
+`container.rs`' `Display::is_valid` and `is_valid_over`, `LayoutItem::is_valid` and `is_valid_over`,
+`Dimension::is_valid` and `read` and `style_of`'s floors, `renderer.rs`' two `absorb` arms, `grid.rs`'
+count field, the three tests and the three findings; flips as the tests' docs record them, not re-run.
+D914 amended; `architecture.md` §5.3c, §5.7, §5.8 and §6.2 amended)*
+
+**D938 — A path or line pinned on both sides of an axis stores its true end distance; and an
+overflowing box centred between two insets stays centred, Figma's reading over CSS's. *The release
+review's `[X3.1-L1-02]`, fixed and tested 2026-10-03, committed as `e69ecc5`; and its `[X3.1-L1-03]`,
+the review's ruling 7, record-only — the session's, under the maintainer's delegation.*** D874's first
+ruling has a kind that cannot stretch — a `Path`, a `Line` — over-constrained the CSS way between two
+insets, its end inset ignored when placing. **Ignored is not unused**: the end inset is inert while the
+start stands, and becomes the layer's whole position the moment the start is unpinned or auto margins
+go on, each a click on the Position card. `container::with_edge` pins a second edge as a `Px(0)`
+placeholder for `AxisInsets::inverse` to rewrite from the placement, its comment saying the placeholder
+survives only where the edge really is at 0 — true of a kind that stretches. For one that cannot,
+`resolve` ignores the end, so `inverse`'s early return — *the placement did not move* — fired and
+handed the placeholder back; and where it did not fire, the `!can_stretch` arm rewrote the start alone.
+Measured by the review on a 100 × 50 triangle drawn at (20, 10) in a 300 × 200 frame: pinned left then
+right, it stored `right: 0px` where a rect stores `180px`, and the card read R = 0; un-pinned on the
+left it **jumped 180 px** flush right; *Centre* moved it from x 20 to 110, where `toggle_centre`'s doc
+says *"Neither moves anything"*. The vertical axis and a `Line` did the same, and a drag of a path
+pinned on both sides left the end stale too.
+
+**The end inset is written true.** `inverse`'s `!can_stretch` arm with two plain insets now rewrites
+the end as well — `extent − pos − size`, in its own unit, as the stretch arm does — and placement goes
+on ignoring it. The early return is held off while that end disagrees with the placement, which is
+checked on its own: `resolve` cannot see the end inset on this axis, so the placement test that guards
+the return passed while the inset was wrong. *Do not fold the end check into the placement test.*
+**The evidence**, `container::tests · a_path_pinned_on_both_sides_stores_its_true_end_distance`, the
+review's triangle: pinned left then right it stores `right: 180px`; un-pinned on the left it stays at x
+20; centred between its two distances it stays at x 20. **Flip run**, `inverse`'s end check dropped:
+fails on *"the true distance"*, `Px(0)` against `Px(180)`, the predicted site.
+
+**Ruling 7, record-only: an overflowing box centred between two insets is centred** (`[X3.1-L1-03]`).
+D874's third ruling makes centring `margin: auto` on both sides between two insets, *"CSS's
+absolute-centring idiom"*, and `AxisInsets::resolve` halves the free space with no floor, so a box
+bigger than the space between its insets overflows both ways: a 300 × 50 rect pinned on all four sides
+with all four margins `auto`, in a 200 × 20 frame, is placed at (−50, −15). CSS 2.1 §10.3.7, carried
+into css-position-3, sets `margin-left` to 0 when equal auto margins would be negative, so a browser
+draws it at x 0, overflowing to the right; vertically §10.6.4 has no such exception, so the departure
+is horizontal only. **Kept, the session's under the maintainer's delegation**: Figma centres the
+overflow, and the case it reaches — a centred image or background larger than its frame, as the frame
+is resized smaller — is one a design tool is expected to keep centred. A recorded departure from
+D867's *where CSS and design-tool convention disagree, CSS wins*; no code changed. ⚠️ Whether current
+browsers apply the 2.1 rule under css-align's safe and unsafe defaults was not checked — the review's
+own caveat. *Revisit if* a centred image bigger than its frame is reported: CSS is then a floor at zero
+on the share in `resolve`'s auto arm, and its twin in `inverse`'s.
+
+*(Found by the release review and measured there. `[X3.1-L1-02]` fixed and tested 2026-10-03,
+committed as `e69ecc5`; **Fixed**. `[X3.1-L1-03]` ruled 2026-10-03, record-only; ***Keep***, a CSS
+deviation, the session's under the maintainer's delegation. ⚠️ Not verified in the GUI. Recorded from
+the brief and a read of `container.rs`' `AxisInsets::resolve` and `inverse`, `can_stretch`, `with_edge`
+and the test, and the two findings; the flip as the test's doc records it, not re-run. D874 amended;
+`architecture.md` §5.3c amended)*
 
 **D898 — The randomized `update`/`rebuild` guard authors layout inputs, and compares a laid group's
 box. *The session's; built 2026-09-27, committed as `da5b652`. Entry reconstructed 2026-09-27 from
@@ -23621,7 +24097,10 @@ landing outline and the mixed arm's test open. ⚠️ Not verified in the GUI. R
 `flex_block_reorder_of`, `move_preview_tx`, `stays_in_flow`, `move_tx` and `draw_flex_landing`, the
 three tests and their docs, and the two commits' messages. D877 amended; `architecture.md` §5.3c and
 §9.4 amended. **Amended 2026-09-28**: the landing outline and the mixed arm both tested, D901's
-amendment)*
+amendment. **Amended 2026-10-03**: `flow_index`'s *"on another line by cross centre"* above is the
+per-sibling reading D934 replaced with the laid lines, and a block whose in-flow order a drop leaves
+as it was answers an empty list — an out-of-flow sibling between its members had been pulled out from
+between them on any drop)*
 
 **D903 — The multi-selection Transform card's X and Y are inert while any member is placed by its
 container. *The session's, carrying the maintainer's D882 to the multi card. Fixed and tested
@@ -23811,6 +24290,14 @@ them. Recorded from the brief and a read of `build.rs`' `flex_holds`, `resized_f
 sites, `container.rs`' `align_items`, taffy 0.14.0's `align_flex_items_along_cross_axis`,
 `renderer.rs`' `flex_relayout` and `landing_of`, `layout.rs`' `align_name`, `Orient` and the receipt,
 and the two tests. D875 and D880 amended; `architecture.md` §5.3c, §6.2 and §9.3 amended)*
+
+**Amended 2026-10-03 (D935): *"a stretched item"* was the keyword.** `held` read the stretch off
+`align-self`, else `align-items`, so a frame or a px-tall laid group in a stretching row — which the
+keyword does not stretch (D879, D893) — took this rule when resized from its top and jumped to its
+line's end, 110..180. A stretch is released now only where `build::stretched_across` says the item was
+drawn stretched. The principle stands; a definite item resized from its top keeps its top, as a
+start-aligned item does, and the review's expectation that it keep its bottom was false — no keyword
+can give that without the jump.
 
 **D906 — A size field showing a keyword in its digits has no unit. *The maintainer's ruling,
 2026-09-27. Built and tested the same day, uncommitted when recorded.*** *"Don't show the unit
@@ -37675,8 +38162,8 @@ depth, and D616's amendment warned the bump would end it on redo, with that entr
 *"a redo puts the step back on top"* by design. The session kept D880's behaviour: a new field,
 `EditorSession::commits`, bumped in `commit_inner` alone — the revision without undo and redo — is what
 `FlexReceipt` records and `flex_receipt()` compares, with the depth as before. A redo puts the depth back
-and leaves the count where it was, so the receipt returns with its step. Not a ruling; D880's
-amendment has the flips.
+and leaves the count where it was, so the receipt returns with its step. The session's, under the
+maintainer's delegation for the review's fixes — not a ruling; D880's amendment has the flips.
 
 **The evidence**, `app::library_wiring_tests ·
 an_undo_during_a_save_leaves_the_session_dirty_and_the_snapshot_standing`, beside
@@ -37692,8 +38179,8 @@ receipt's half is `layout.rs · a_resize_leaves_a_receipt_until_anything_else_is
 D880's amendment records.
 
 *(Found by D616's amendment 2026-09-24 and measured by the release review; fixed and tested
-2026-10-03, committed as `780ec65`; **Fixed**, the receipt's redo ***Keep***, the session's. ⚠️ Not
-verified in the GUI; the window is one background write long, which is what made the loss rare and
+2026-10-03, committed as `780ec65`; **Fixed**, the receipt's redo ***Keep***, the session's under
+the maintainer's delegation. ⚠️ Not verified in the GUI; the window is one background write long, which is what made the loss rare and
 not what made it less than loss. Recorded from the brief and a read of `session.rs`' `revision` and
 `commits` fields, `FlexReceipt`, `flex_receipt`, `commit_inner`, `undo` and `redo`, `app.rs`'
 `FrameIndex` doc and the test, `layout.rs`' receipt test, and the release review's two findings; flips

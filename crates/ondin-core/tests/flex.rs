@@ -558,9 +558,10 @@ fn display_and_item_round_trip_through_the_save_format() {
 /// order. And `row-reverse` reads the main axis backwards: the same rightward
 /// drag, in a row drawn right to left, moves the item towards the *start*.
 ///
-/// **Flip run**, the `reversed` comparison dropped (`s_main < at_main` always):
-/// fails on *"row-reverse reads backwards"*, the predicted site; the forward rows
-/// pass either way, which is why the reverse case is here.
+/// **Flip run**, the `reversed` comparison dropped (`*centre < at_main` always
+/// in `flow_index` since §15 D934; `s_main < at_main` before it): fails on
+/// *"row-reverse reads backwards"*, the predicted site; the forward rows pass
+/// either way, which is why the reverse case is here.
 #[test]
 fn a_dragged_flex_item_reorders_by_where_its_centre_falls() {
     use ondin_core::kurbo::Vec2;
@@ -1024,8 +1025,10 @@ fn a_laid_group_resized_along_one_axis_keeps_hugging_along_the_other() {
 /// before it.
 ///
 /// **Flip run**, the `lines_reversed` arm dropped (lines compared top-down, the
-/// reading before D883): answers `Some(1)` — `d`, above, counted as an earlier line
-/// — on the predicted assertion.
+/// reading before D883): answered `Some(1)` — `d`, above, counted as an earlier
+/// line — on the predicted assertion. ⚠️ **That arm is gone** (§15 D934): lines
+/// are read off the flow now, and `wrap-reverse`'s first line is the first in it
+/// by construction, so there is no arm left to drop; the test pins the reading.
 #[test]
 fn wrap_reverse_reorders_with_its_lines_read_bottom_up() {
     use ondin_core::container::FlexWrap;
@@ -1731,7 +1734,7 @@ fn a_drag_that_keeps_the_flow_order_is_no_reorder() {
 /// **Flip run**, `stretched_across` asked of the keyword alone: fails on *"at
 /// the line's start"*, 110..180, the predicted site.
 #[test]
-fn a_definite_item_dragged_by_its_top_keeps_its_bottom() {
+fn a_definite_item_dragged_by_its_top_does_not_jump() {
     let mut s = Scene::new();
     let f = s.add(s.root, frame(400.0, 200.0), (0.0, 0.0));
     let card = s.add(f, frame(40.0, 100.0), (0.0, 0.0));

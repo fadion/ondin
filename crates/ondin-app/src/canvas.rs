@@ -2795,10 +2795,7 @@ impl OndinApp {
             // the press inside. Only a drag that takes the item clear of its
             // container takes it out.
             let pressed_in = self.pointer_in(p, self.move_pointer(id, Vec2::ZERO)?);
-            let meets = |c: KRect| {
-                c.x0 < landed.x1 && landed.x0 < c.x1 && c.y0 < landed.y1 && landed.y0 < c.y1
-            };
-            if !pressed_in && res.world_bounds(p).is_some_and(meets) {
+            if !pressed_in && self.box_meets(p, landed) {
                 return None;
             }
         }
@@ -2854,6 +2851,56 @@ impl OndinApp {
             return false;
         };
         local.contains(world.inverse() * at)
+    }
+
+    /// Whether the world rectangle `r` meets container `id`'s own box through its
+    /// world transform — [`Self::pointer_in`]'s twin for a box, so a rotated
+    /// container answers for its turned box here too (§15 D949). It asked the
+    /// container's upright world bounds, which for a turned container are larger
+    /// than the box on every side: an item pressed outside a turned row stayed in
+    /// it while its box was nowhere near the row, only near the region it covers.
+    ///
+    /// Separating axes: a convex quad and a rectangle are apart exactly when one
+    /// of their edge directions — the rectangle's two, the quad's two — has their
+    /// projections apart. Open intervals, so a box that only touches an edge does
+    /// not meet it, as the upright test it replaces did not.
+    fn box_meets(&self, id: NodeId, r: KRect) -> bool {
+        let (doc, res) = (&self.session.doc, &self.session.resolved);
+        let (Some(local), Some(world)) =
+            (ondin_core::local_box(doc, res, id), res.world_transform(id))
+        else {
+            return false;
+        };
+        let corners = |b: KRect| {
+            [
+                Point::new(b.x0, b.y0),
+                Point::new(b.x1, b.y0),
+                Point::new(b.x1, b.y1),
+                Point::new(b.x0, b.y1),
+            ]
+        };
+        let quad = corners(local).map(|p| world * p);
+        let rect = corners(r);
+        let axes = [
+            Vec2::new(1.0, 0.0),
+            Vec2::new(0.0, 1.0),
+            quad[1] - quad[0],
+            quad[3] - quad[0],
+        ];
+        axes.iter().all(|axis| {
+            if axis.hypot2() == 0.0 {
+                return true;
+            }
+            let span = |pts: &[Point; 4]| {
+                pts.iter()
+                    .map(|p| p.to_vec2().dot(*axis))
+                    .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| {
+                        (lo.min(v), hi.max(v))
+                    })
+            };
+            let ((a0, a1), (b0, b1)) = (span(&quad), span(&rect));
+            a0 < b1 && b0 < a1
+        })
     }
 
     /// Which of the moving layers this `delta` would take out of the frame they
@@ -25007,5 +25054,37 @@ mod flex_canvas_tests {
             "the corner outside the turned box is not in the container"
         );
         assert!(app.pointer_in(row, inside), "the inside is");
+
+        // **And a box answers for the turned box too** (§15 D949): the pressed-
+        // outside rule asks whether the item's landed box still meets its
+        // container, and asked the upright bounds. A 20 × 10 box at (120, 0) is
+        // inside those bounds and wholly on the far side of the turned box's top
+        // edge, the line y = x. **Flip run**, `box_meets` answering from the
+        // upright world bounds: fails on *"a box past the turned edge does not
+        // meet it"*, the predicted site.
+        let past = ondin_core::kurbo::Rect::new(120.0, 0.0, 140.0, 10.0);
+        assert!(
+            app.session
+                .resolved
+                .world_bounds(row)
+                .unwrap()
+                .overlaps(past),
+            "the fixture: inside the upright bounds"
+        );
+        assert!(
+            !app.box_meets(row, past),
+            "a box past the turned edge does not meet it"
+        );
+        assert!(
+            app.box_meets(row, ondin_core::kurbo::Rect::new(60.0, 80.0, 70.0, 90.0)),
+            "a box inside it does"
+        );
+        assert!(
+            app.box_meets(
+                row,
+                ondin_core::kurbo::Rect::new(-200.0, -200.0, 400.0, 400.0)
+            ),
+            "and one around it all"
+        );
     }
 }

@@ -1694,6 +1694,26 @@ impl ondin_core::container::LayoutView for PreviewView<'_> {
             },
         }
     }
+    /// The committed pass's measurement where this preview leaves the node's kind
+    /// alone (§15 D936) — a drag or a resize re-lays its containers every frame,
+    /// and re-shaped every text item in them each time. A node this preview gives
+    /// a kind of its own is measured afresh.
+    fn measured(&self, id: NodeId, kind: &NodeKind) -> Option<kurbo::Rect> {
+        if self.ov.get(id).and_then(|o| o.kind.as_ref()).is_none()
+            && let Some(b) = self.res.remembered_text_box(id, kind)
+        {
+            return b;
+        }
+        ondin_core::geometry::local_bounds(kind, None)
+    }
+    fn content_widths(&self, id: NodeId, kind: &NodeKind) -> Option<(f64, f64)> {
+        if self.ov.get(id).and_then(|o| o.kind.as_ref()).is_none()
+            && let Some(w) = self.res.remembered_text_widths(id)
+        {
+            return w;
+        }
+        ondin_core::node::TextRef::of(kind).map(ondin_core::text::content_widths)
+    }
 }
 
 /// Whether an `InsertSubtree`'s `nodes` would put a frame under a boolean or a

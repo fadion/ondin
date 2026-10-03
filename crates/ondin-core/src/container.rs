@@ -311,7 +311,14 @@ pub fn resized(kind: &NodeKind, size: Size, stretched: (bool, bool)) -> NodeKind
 /// room as well as more); auto height wraps at the width it was given, becoming
 /// fixed only if the container also made it taller than its lines; a fixed box
 /// takes the size whole.
-pub fn flexed_text(kind: &NodeKind, size: Size) -> NodeKind {
+///
+/// `measure` is the box of a kind — [`LayoutView::measured`] from the pass, so a
+/// view that remembers text boxes does not re-shape the text here (§15 D936).
+pub fn flexed_text(
+    kind: &NodeKind,
+    size: Size,
+    measure: &dyn Fn(&NodeKind) -> Option<Rect>,
+) -> NodeKind {
     let NodeKind::Text { sizing, .. } = kind else {
         return kind.clone();
     };
@@ -327,7 +334,7 @@ pub fn flexed_text(kind: &NodeKind, size: Size) -> NodeKind {
         // `local_bounds` answers for every text kind (`TextRef::of` refuses only
         // a kind that is not text), so the floor below always applies; the
         // fallback is the size whole and is unreachable.
-        TextSizing::Auto => match geometry::local_bounds(kind, None) {
+        TextSizing::Auto => match measure(kind) {
             Some(b) if near(b.width(), size.width) && near(b.height(), size.height) => kind.clone(),
             // 🚨 **Never narrower than its line** (§15 D917): a stretch can hand an
             // auto-width label *less* room than its line — a flex column or a grid
@@ -344,7 +351,7 @@ pub fn flexed_text(kind: &NodeKind, size: Size) -> NodeKind {
         },
         TextSizing::AutoHeight(_) => {
             let k = with(TextSizing::AutoHeight(size.width));
-            match geometry::local_bounds(&k, None) {
+            match measure(&k) {
                 Some(b) if near(b.height(), size.height) => k,
                 _ => with(TextSizing::Fixed(size)),
             }
@@ -1294,6 +1301,25 @@ pub trait LayoutView {
             _ => None,
         }
     }
+    /// `id`'s box drawn as `kind` — its own kind, or its own kind at another text
+    /// sizing, which is all the layout pass ever asks — `geometry::local_bounds`.
+    ///
+    /// **A method so a view can remember it** (§15 D936): a text node's box is a
+    /// shape, and a pass asks it several times, at several widths, every time the
+    /// pass runs — which is every commit under the node's chain root, a nudge
+    /// included. A text node's measurement depends on nothing outside its own node
+    /// (§15 D590), so `Resolved`'s view keeps the answers across commits and
+    /// forgets a node's when the node is dirtied.
+    fn measured(&self, id: crate::NodeId, kind: &NodeKind) -> Option<Rect> {
+        let _ = id;
+        geometry::local_bounds(kind, None)
+    }
+    /// `id`'s text min- and max-content widths ([`crate::text::content_widths`]),
+    /// for `kind`, its own kind — [`Self::measured`]'s reason for being a method.
+    fn content_widths(&self, id: crate::NodeId, kind: &NodeKind) -> Option<(f64, f64)> {
+        let _ = id;
+        crate::node::TextRef::of(kind).map(crate::text::content_widths)
+    }
 }
 
 /// Whether `kind` can be a layout container, flex or grid: a frame, or a group
@@ -1429,8 +1455,8 @@ pub fn item_placed(
         }
         NodeKind::Group | NodeKind::Boolean { .. } => (None, atomic_box(view, id, &kind)?, None),
         NodeKind::Text { .. } => {
-            let k = flexed_text(&kind, size);
-            let bx = geometry::local_bounds(&k, None)?;
+            let k = flexed_text(&kind, size, &|k| view.measured(id, k));
+            let bx = view.measured(id, &k)?;
             ((k != kind).then_some(k), bx, None)
         }
         _ => {
@@ -1714,9 +1740,10 @@ enum Leaf {
     /// A box with a size of its own — a shape, a frame with no layout, a group or
     /// a boolean taken whole.
     Replaced(Size),
-    /// A text node, measured by its sizing mode. Boxed: the parts are several
-    /// times the size of the other variants.
-    Text(Box<crate::text::TextParts>, String),
+    /// A text node, measured by its sizing mode through the view
+    /// ([`LayoutView::measured`], §15 D936). Boxed: a kind is several times the
+    /// size of the other variants.
+    Text(Box<NodeKind>),
 }
 
 /// taffy's view of one layout pass: the in-flow part of the subtree under a root
@@ -1781,8 +1808,8 @@ impl<'v> FlexTree<'v> {
         self.layouts.push(taffy::Layout::with_order(index as u32));
         let leaf = match (&display, &kind) {
             (Some(_), _) => Leaf::Container,
-            (None, NodeKind::Text { content, .. }) => match crate::text::TextParts::of(&kind) {
-                Some(parts) => Leaf::Text(Box::new(parts), content.clone()),
+            (None, NodeKind::Text { .. }) => match crate::node::TextRef::of(&kind) {
+                Some(_) => Leaf::Text(Box::new(kind.clone())),
                 None => Leaf::Replaced(Size::ZERO),
             },
             (None, _) => {
@@ -1826,7 +1853,7 @@ impl<'v> FlexTree<'v> {
         known: taffy::Size<Option<f32>>,
         available: taffy::Size<taffy::AvailableSpace>,
     ) -> taffy::Size<f32> {
-        let (parts, content) = match &self.leaves[index] {
+        let kind = match &self.leaves[index] {
             Leaf::Replaced(s) => {
                 return taffy::Size {
                     width: known.width.unwrap_or(s.width as f32),
@@ -1834,14 +1861,22 @@ impl<'v> FlexTree<'v> {
                 };
             }
             Leaf::Container => return taffy::Size::ZERO,
-            Leaf::Text(parts, content) => ((**parts).clone(), content.clone()),
+            Leaf::Text(kind) => (**kind).clone(),
         };
-        let at = |sizing: TextSizing| {
-            let mut p = parts.clone();
-            p.sizing = sizing;
-            crate::text::measure(p.as_ref(&content))
+        let NodeKind::Text { sizing, .. } = &kind else {
+            return taffy::Size::ZERO;
         };
-        match parts.sizing {
+        let sizing = *sizing;
+        let id = self.ids[index];
+        let view = self.view;
+        let at = |s: TextSizing| {
+            let mut k = kind.clone();
+            if let NodeKind::Text { sizing, .. } = &mut k {
+                *sizing = s;
+            }
+            view.measured(id, &k).unwrap_or(Rect::ZERO)
+        };
+        match sizing {
             // **Never wraps** (§15 D875): a label keeps its one line whatever room
             // it is given, `white-space: nowrap`'s reading of auto width.
             TextSizing::Auto => {
@@ -1870,7 +1905,7 @@ impl<'v> FlexTree<'v> {
                 let width = match known.width {
                     Some(w) => w,
                     None => {
-                        let (min, _) = crate::text::content_widths(parts.as_ref(&content));
+                        let (min, _) = view.content_widths(id, &kind).unwrap_or((0.0, 0.0));
                         let preferred = preferred as f32;
                         match available.width {
                             taffy::AvailableSpace::MinContent => min as f32,
@@ -1935,7 +1970,7 @@ pub fn atomic_box(view: &dyn LayoutView, id: crate::NodeId, kind: &NodeKind) -> 
                 atomic_box(view, c, &k).map(|b| geometry::transform_rect(view.local(c), b))
             })
             .reduce(|a, b| a.union(b)),
-        _ => geometry::local_bounds(kind, None),
+        _ => view.measured(id, kind),
     }
 }
 

@@ -186,11 +186,13 @@ impl crate::container::LayoutView for DocView<'_> {
 /// [`DocView`] with one answer from the used geometry filled so far: the box a
 /// pinned child is placed against ([`frame_box`]). What [`place_node`] lays a
 /// root out through, so a frame pinned inside a frame that is itself stretched
-/// is laid at the stretched parent's width (§15 D933). Every other answer is the
-/// document's.
+/// is laid at the stretched parent's width (§15 D933). And its text measurements
+/// through the memo [`Resolved`] keeps across commits ([`TextMemo`], §15 D936).
+/// Every other answer is the document's.
 struct UsedView<'a> {
     doc: &'a Document,
     used: &'a FxHashMap<NodeId, Used>,
+    memo: &'a std::cell::RefCell<FxHashMap<NodeId, TextMemo>>,
 }
 
 impl crate::container::LayoutView for UsedView<'_> {
@@ -223,6 +225,66 @@ impl crate::container::LayoutView for UsedView<'_> {
     }
     fn parent_box(&self, id: NodeId) -> Option<kurbo::Size> {
         frame_box(self.used, self.doc.get(self.doc.get(id)?.parent()?)?)
+    }
+    fn measured(&self, id: NodeId, kind: &NodeKind) -> Option<Rect> {
+        let Some(key) = sizing_key(kind) else {
+            return geometry::local_bounds(kind, None);
+        };
+        if let Some(memo) = self.memo.borrow().get(&id)
+            && let Some((_, b)) = memo.boxes.iter().find(|(k, _)| *k == key)
+        {
+            return *b;
+        }
+        let b = geometry::local_bounds(kind, None);
+        self.memo
+            .borrow_mut()
+            .entry(id)
+            .or_default()
+            .boxes
+            .push((key, b));
+        b
+    }
+    fn content_widths(&self, id: NodeId, kind: &NodeKind) -> Option<(f64, f64)> {
+        if let Some(w) = self.memo.borrow().get(&id).and_then(|m| m.widths) {
+            return w;
+        }
+        let w = crate::node::TextRef::of(kind).map(text::content_widths);
+        self.memo.borrow_mut().entry(id).or_default().widths = Some(w);
+        w
+    }
+}
+
+/// One text node's measurements as the layout pass asked for them — its box at
+/// each sizing asked, and its content widths — **kept across commits** (§15 D936).
+///
+/// A layout pass measures every text item it lays, at several widths, and a
+/// pass runs for every layout root under a commit's chain root — a nudge of the
+/// container included, since its own transform dirties it. So a translate of a
+/// frame column of twenty 4,000-character texts re-shaped all twenty, ~120
+/// shapes and ~120 ms an arrow-key press, D590's defect back at five times its
+/// size, and a page of fifty cards with six labels each paid 900–1,800 shapes. A
+/// text's box depends on nothing outside its own node (§15 D590), and every
+/// change to a node dirties it, so a node's entries are dropped when it is dirty
+/// and kept otherwise. Fonts arriving dirty every text node
+/// (`Resolved::invalidate_text`), which is the one outside input there is.
+#[derive(Default)]
+struct TextMemo {
+    boxes: Vec<(SizingKey, Option<Rect>)>,
+    widths: Option<Option<(f64, f64)>>,
+}
+
+/// A text sizing as a memo key: the variant and its numbers' bits.
+type SizingKey = (u8, u64, u64);
+
+fn sizing_key(kind: &NodeKind) -> Option<SizingKey> {
+    use crate::node::TextSizing;
+    match kind {
+        NodeKind::Text { sizing, .. } => Some(match sizing {
+            TextSizing::Auto => (0, 0, 0),
+            TextSizing::AutoHeight(w) => (1, w.to_bits(), 0),
+            TextSizing::Fixed(s) => (2, s.width.to_bits(), s.height.to_bits()),
+        }),
+        _ => None,
     }
 }
 
@@ -258,11 +320,11 @@ fn frame_box(used: &FxHashMap<NodeId, Used>, parent: &Node) -> Option<kurbo::Siz
 /// module's tests drive arbitrary used geometry through the plumbing; a probe
 /// answering `None` falls through to the real layout.
 fn used_geometry(
-    doc: &Document,
-    used: &FxHashMap<NodeId, Used>,
+    view: &UsedView<'_>,
     laid: &FxHashMap<NodeId, crate::container::Laid>,
     id: NodeId,
 ) -> Option<Used> {
+    let (doc, used) = (view.doc, view.used);
     #[cfg(test)]
     if let Some(u) = probe::used(doc, id) {
         return Some(u);
@@ -272,11 +334,10 @@ fn used_geometry(
     // and size from the pass its chain root ran; a layout root takes only its size
     // from its own pass (it hugs), and is placed as any other child of its parent.
     if let Some(l) = laid.get(&id) {
-        let view = DocView(doc);
         let item =
-            crate::container::parent_lays_out(&view, id) && crate::container::in_flow(&view, id);
+            crate::container::parent_lays_out(view, id) && crate::container::in_flow(view, id);
         if item {
-            return crate::container::item_placed(&view, id, l.slot, l.size).map(|p| Used {
+            return crate::container::item_placed(view, id, l.slot, l.size).map(|p| Used {
                 local: p.local,
                 kind: p.kind,
                 frame: p.frame,
@@ -333,17 +394,16 @@ fn root_used(
 /// chain's items find their results in `laid` when the parents-first walk reaches
 /// them.
 fn place_node(
-    doc: &Document,
-    used: &FxHashMap<NodeId, Used>,
+    view: &UsedView<'_>,
     laid: &mut FxHashMap<NodeId, crate::container::Laid>,
     id: NodeId,
 ) -> Option<Used> {
-    if crate::container::is_layout_root(&DocView(doc), id) {
-        for l in crate::container::lay_out(&UsedView { doc, used }, id) {
+    if crate::container::is_layout_root(view, id) {
+        for l in crate::container::lay_out(view, id) {
             laid.insert(l.id, l);
         }
     }
-    used_geometry(doc, used, laid, id)
+    used_geometry(view, laid, id)
 }
 
 /// `node`'s used local transform: the entry's where layout moved it, the
@@ -466,6 +526,10 @@ pub struct Resolved {
     /// composed, because both read it: a text node is shaped at its used kind, and
     /// a world transform composes used locals.
     used: FxHashMap<NodeId, Used>,
+    /// The layout pass's text measurements, kept across commits — see
+    /// [`TextMemo`] (§15 D936). Taken out into a `RefCell` for the length of a
+    /// pass and put back, so `Resolved` itself holds no interior mutability.
+    text_memo: FxHashMap<NodeId, TextMemo>,
 }
 
 impl Resolved {
@@ -477,8 +541,14 @@ impl Resolved {
         // placed against it.
         let mut used: FxHashMap<NodeId, Used> = FxHashMap::default();
         let mut laid = FxHashMap::default();
+        let memo = std::cell::RefCell::new(FxHashMap::default());
         for id in crate::subtree_nodes(doc, &[doc.root()]) {
-            if let Some(u) = place_node(doc, &used, &mut laid, id) {
+            let view = UsedView {
+                doc,
+                used: &used,
+                memo: &memo,
+            };
+            if let Some(u) = place_node(&view, &mut laid, id) {
                 used.insert(id, u);
             }
         }
@@ -511,6 +581,7 @@ impl Resolved {
             failed: FxHashSet::default(),
             index,
             used,
+            text_memo: memo.into_inner(),
         };
         // **Booleans in a second pass, through `update`.** The walk above cannot do
         // them: a boolean's outline needs its children's outlines, and a nested one
@@ -632,8 +703,24 @@ impl Resolved {
         // and the whole chain is re-laid.
         let mut relaid: Vec<NodeId> = Vec::new();
         let mut laid = FxHashMap::default();
+        // The text memo, without every dirty node's entries (§15 D936): a node's
+        // measurements depend on its own kind alone, and every change to one
+        // dirties it — deleted nodes included, which the loop at the top dropped
+        // from every other map.
+        let mut memo = std::mem::take(&mut self.text_memo);
+        for id in &dirty.0 {
+            memo.remove(id);
+        }
+        let memo = std::cell::RefCell::new(memo);
         for id in &ordered {
-            let fresh = place_node(doc, &self.used, &mut laid, *id);
+            let fresh = {
+                let view = UsedView {
+                    doc,
+                    used: &self.used,
+                    memo: &memo,
+                };
+                place_node(&view, &mut laid, *id)
+            };
             let changed = match fresh {
                 Some(u) => self.used.insert(*id, u.clone()).as_ref() != Some(&u),
                 None => self.used.remove(id).is_some(),
@@ -642,6 +729,7 @@ impl Resolved {
                 relaid.push(*id);
             }
         }
+        self.text_memo = memo.into_inner();
 
         // Text first: bounds depend on the shaped size, so re-shape before
         // anything measures.
@@ -778,6 +866,30 @@ impl Resolved {
     /// [`Self::used_local_of`]'s condition: `node` must be this document's own.
     pub fn used_kind_of<'a>(&'a self, node: &'a Node) -> &'a NodeKind {
         kind_in(&self.used, node)
+    }
+
+    /// The box the layout pass last measured for text node `id` drawn as `kind`,
+    /// if it is remembered — `Some(answer)` for a hit, `None` for a miss (§15
+    /// D936). `kind` must be `id`'s committed kind at some sizing: the memo is
+    /// keyed by the sizing alone, which is what keeps it valid only for the
+    /// document this was built from.
+    ///
+    /// **For the renderer's preview**, whose own layout passes would otherwise
+    /// re-shape every text item they lay on every frame of a gesture; it asks only
+    /// for nodes whose kind the preview leaves alone.
+    pub fn remembered_text_box(&self, id: NodeId, kind: &NodeKind) -> Option<Option<Rect>> {
+        let key = sizing_key(kind)?;
+        self.text_memo
+            .get(&id)?
+            .boxes
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, b)| *b)
+    }
+
+    /// [`Self::remembered_text_box`] for the content widths.
+    pub fn remembered_text_widths(&self, id: NodeId) -> Option<Option<(f64, f64)>> {
+        self.text_memo.get(&id)?.widths
     }
 
     /// The box a group with a layout was given, in its own space from its origin

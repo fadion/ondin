@@ -3905,3 +3905,74 @@ fn a_translate_on_a_group_does_not_reshape_the_text_inside_it() {
          and only it"
     );
 }
+
+/// **…and nor does a translate on a group that lays its text out** (§15 D936,
+/// the release review's `[X2-L4-01]`). D590's fixture with a column on the
+/// group: the nudge dirties the group, which is a layout root, so its pass runs
+/// — and the pass measured every text item again, at every width it asked, so
+/// D590's defect came back under a layout at five times its old size (120 shapes
+/// a nudge on twenty 4k-character blocks). The pass still runs; the text boxes
+/// it asks for are remembered across commits and dropped only for a dirty node.
+///
+/// **Flip run**, `UsedView` measuring through the trait's default rather than
+/// the memo: fails on *"a translate re-shaped laid text"*, 9 against 0 — three
+/// shapes a label, the review's per-label rate — the predicted site. The `SetText` control keeps a re-shape for the edited
+/// block, so the memo is not simply never cleared.
+#[test]
+fn a_translate_on_a_laid_group_does_not_reshape_the_text_inside_it() {
+    use ondin_core::container::{Display, Flex, FlexDirection};
+    let (mut doc, group, blocks) = group_of_text(3);
+    doc.apply(&Transaction(vec![Operation::SetDisplay {
+        id: group,
+        display: Some(Display::Flex(Flex {
+            direction: FlexDirection::Column,
+            ..Default::default()
+        })),
+    }]))
+    .expect("a column");
+    let mut res = Resolved::rebuild(&doc);
+
+    let at = ondin_core::text::shapes();
+    let dirty = doc
+        .apply(&Transaction(vec![Operation::SetTransform {
+            id: group,
+            transform: Affine::translate((40.0, 0.0)),
+        }]))
+        .expect("the nudge")
+        .dirty;
+    res.update(&doc, &dirty);
+    assert_eq!(
+        ondin_core::text::shapes() - at,
+        0,
+        "a translate re-shaped laid text"
+    );
+    assert_eq!(
+        res.world_transform(blocks[0]).unwrap().translation().x,
+        40.0,
+        "and the items still moved with their container"
+    );
+
+    let at = ondin_core::text::shapes();
+    let dirty = doc
+        .apply(&Transaction(vec![Operation::SetText {
+            id: blocks[1],
+            content: "hello world and then some".into(),
+            spans: Default::default(),
+            para_spans: Default::default(),
+        }]))
+        .expect("the edit")
+        .dirty;
+    res.update(&doc, &dirty);
+    assert!(
+        ondin_core::text::shapes() - at > 0,
+        "the control: an edited block is measured and shaped again"
+    );
+    let fresh = Resolved::rebuild(&doc);
+    for id in &blocks {
+        assert_eq!(
+            res.world_bounds(*id),
+            fresh.world_bounds(*id),
+            "and lands where a rebuild puts it"
+        );
+    }
+}

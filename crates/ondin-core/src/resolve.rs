@@ -271,6 +271,72 @@ impl crate::container::LayoutView for UsedView<'_> {
     }
 }
 
+/// The committed document as a finished [`Resolved`] draws it, for a builder that
+/// re-runs a layout pass to read something off it — [`DocView`]'s answers, with
+/// the box a pinned root is stretched against read from the used geometry, and
+/// text measured through the memo where it holds the answer (§15 D933, D936).
+///
+/// **What a grid drop lays its grid through** (`build::grid_drop_many`): under
+/// [`DocView`] a grid pinned on both sides inside a stretched, hugging or laid
+/// parent was laid against the parent's stored box, so the drop picked its cells
+/// in a grid the commit does not lay.
+pub(crate) struct CommittedView<'a> {
+    pub(crate) doc: &'a Document,
+    pub(crate) res: &'a Resolved,
+}
+
+impl crate::container::LayoutView for CommittedView<'_> {
+    fn parent(&self, id: NodeId) -> Option<NodeId> {
+        DocView(self.doc).parent(id)
+    }
+    fn children(&self, id: NodeId) -> Vec<NodeId> {
+        DocView(self.doc).children(id)
+    }
+    fn kind(&self, id: NodeId) -> Option<NodeKind> {
+        DocView(self.doc).kind(id)
+    }
+    fn display(&self, id: NodeId) -> Option<&crate::container::Display> {
+        self.doc.get(id).and_then(|n| n.display())
+    }
+    fn item(&self, id: NodeId) -> crate::container::LayoutItem {
+        DocView(self.doc).item(id)
+    }
+    fn insets(&self, id: NodeId) -> crate::container::Insets {
+        DocView(self.doc).insets(id)
+    }
+    fn visible(&self, id: NodeId) -> bool {
+        DocView(self.doc).visible(id)
+    }
+    fn mask(&self, id: NodeId) -> bool {
+        DocView(self.doc).mask(id)
+    }
+    fn local(&self, id: NodeId) -> Affine {
+        DocView(self.doc).local(id)
+    }
+    fn parent_box(&self, id: NodeId) -> Option<kurbo::Size> {
+        frame_box(&self.res.used, self.doc.get(self.doc.get(id)?.parent()?)?)
+    }
+    fn measured(&self, id: NodeId, kind: &NodeKind) -> Option<Rect> {
+        match self.res.remembered_text_box(id, kind) {
+            Some(b) => b,
+            None => geometry::local_bounds(kind, None),
+        }
+    }
+    fn content_widths(&self, id: NodeId, kind: &NodeKind) -> Option<(f64, f64)> {
+        match self.res.remembered_text_widths(id) {
+            Some(w) => w,
+            None => crate::node::TextRef::of(kind).map(text::content_widths),
+        }
+    }
+    fn first_baseline(&self, id: NodeId, kind: &NodeKind) -> Option<f64> {
+        if let Some(b) = self.res.remembered_text_baseline(id, kind) {
+            return b;
+        }
+        let layout = text::layout(crate::node::TextRef::of(kind)?);
+        layout.baselines.first().map(|b| b - layout.origin.y)
+    }
+}
+
 /// One text node's measurements as the layout pass asked for them — its box at
 /// each sizing asked, and its content widths — **kept across commits** (§15 D936).
 ///

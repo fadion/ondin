@@ -1594,3 +1594,56 @@ fn baseline_aligns_text_by_its_first_baseline() {
         );
     }
 }
+
+/// **A drop into a grid pinned across a stretched frame picks the cell it is
+/// drawn over** (§15 D942, D933's residue): an 800-wide page holds a frame stored
+/// 500 wide and pinned `left: 0; right: 0`, so drawn 800; in it, four `1fr`
+/// columns stored 200 wide and pinned the same way, so drawn 800 — 200 apiece.
+/// `a`, in the first, dragged 260 right lands in the second. The drop laid its
+/// grid through the parent's *stored* box — the trait's default, 500 — at 125
+/// apiece, and wrote the third.
+///
+/// **Flip run**, `grid_drop_many` back on `DocView`: fails on *"the second
+/// column"*, line 3 against 2, the predicted site. (A first draft pinned the grid
+/// in an unstretched frame, whose stored size *is* its drawn one, and the flip
+/// passed.)
+#[test]
+fn a_drop_into_a_pinned_grid_picks_the_cell_it_is_drawn_over() {
+    let mut s = Scene::new();
+    let both = ondin_core::Insets {
+        left: Some(ondin_core::LengthPct::Px(0.0)),
+        right: Some(ondin_core::LengthPct::Px(0.0)),
+        ..Default::default()
+    };
+    let page = s.add(s.root, frame(800.0, 300.0), (0.0, 0.0));
+    let outer = s.add(page, frame(500.0, 200.0), (0.0, 0.0));
+    s.commit(vec![Operation::SetInsets {
+        id: outer,
+        insets: both,
+    }]);
+    let g = s.add(outer, frame(200.0, 100.0), (0.0, 0.0));
+    let a = s.add(g, rect(10.0, 10.0), (0.0, 0.0));
+    s.display(
+        g,
+        Some(Display::Grid(Grid {
+            justify_items: Some(AlignItems::Start),
+            align_items: Some(AlignItems::Start),
+            ..grid(vec![fr(1.0), fr(1.0), fr(1.0), fr(1.0)], vec![px(100.0)])
+        })),
+    );
+    s.commit(vec![Operation::SetInsets {
+        id: g,
+        insets: both,
+    }]);
+    assert_eq!(s.bounds(g).width(), 800.0, "the fixture: stretched twice");
+    let Some(Operation::SetLayoutItem { item, .. }) =
+        ondin_core::build::grid_drop(&s.doc, &s.res, a, ondin_core::kurbo::Vec2::new(260.0, 0.0))
+    else {
+        panic!("a drop");
+    };
+    assert_eq!(
+        item.grid_column.start,
+        GridPlacement::Line(2),
+        "the second column"
+    );
+}

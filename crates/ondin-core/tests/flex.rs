@@ -1852,3 +1852,57 @@ fn a_resize_clears_the_basis_and_a_point_edit_keeps_growth() {
     assert_eq!(s.doc.get(p).unwrap().item().grow, 1.0, "its growth kept");
     assert_eq!(s.bounds(b), b0, "and its sibling where it was");
 }
+
+/// **A stretched auto-width label baked where it is drawn keeps its lines
+/// deciding its height** (§15 D940): in a stretching column a one-line label is
+/// drawn as a 300-wide `Fixed` box, and every door that bakes the drawn kind —
+/// the Position card's pin, a group, *Display → none* — stored that box, so the
+/// label stopped growing with its words. Baked now as `AutoHeight(300)`, the same
+/// picture.
+///
+/// **Flip run**, `kept_text_mode` answering the drawn sizing: fails on *"auto
+/// height at the drawn width"*, `Fixed(300 × …)`, the predicted site.
+#[test]
+fn a_stretched_label_is_baked_as_auto_height() {
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(300.0, 300.0), (0.0, 0.0));
+    let label = s.add(
+        f,
+        NodeKind::Text {
+            content: "several short words".into(),
+            style: Box::default(),
+            spans: Default::default(),
+            para_spans: Default::default(),
+            paragraph: Default::default(),
+            block: Default::default(),
+            sizing: ondin_core::TextSizing::Auto,
+            on_path: None,
+            on_path_flip: false,
+            on_path_offset: 0.0,
+        },
+        (0.0, 0.0),
+    );
+    s.display(
+        f,
+        Some(Display::Flex(Flex {
+            direction: FlexDirection::Column,
+            ..Default::default()
+        })),
+    );
+    let was = s.bounds(label);
+    assert_eq!(was.width(), 300.0, "the fixture stretches");
+    let ops = ondin_core::build::group(&s.doc, &s.res, &mut s.ids, &[label])
+        .unwrap()
+        .0
+        .0;
+    s.commit(ops);
+    let NodeKind::Text { sizing, .. } = s.doc.get(label).unwrap().kind() else {
+        unreachable!()
+    };
+    assert_eq!(
+        *sizing,
+        ondin_core::TextSizing::AutoHeight(300.0),
+        "auto height at the drawn width"
+    );
+    assert_eq!(s.bounds(label).size(), was.size(), "the same picture");
+}

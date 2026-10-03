@@ -411,14 +411,51 @@ pub fn baked_ops(id: NodeId, node: &crate::Node, local: Affine, kind: &NodeKind)
             | NodeKind::Polygon { size, .. }
             | NodeKind::Star { size, .. }
             | NodeKind::Artboard { size } => Some(crate::GeometryPatch::Size(*size)),
-            NodeKind::Text { sizing, .. } => Some(crate::GeometryPatch::TextSizing(*sizing)),
+            NodeKind::Text { sizing, .. } => Some(crate::GeometryPatch::TextSizing(
+                kept_text_mode(node, kind, *sizing),
+            )),
             _ => None,
         };
-        if let Some(geometry) = geometry {
+        if let Some(geometry) = geometry
+            && !matches!((&geometry, node.kind()),
+                (crate::GeometryPatch::TextSizing(s), NodeKind::Text { sizing, .. }) if s == sizing)
+        {
             ops.push(Operation::SetGeometry { id, geometry });
         }
     }
     ops
+}
+
+/// The sizing to bake for a text drawn as `kind` (sizing `drawn`) — **its stored
+/// mode kept where that draws the same** (§15 D940).
+///
+/// A label a flex or grid container stretched is drawn as a `Fixed` box
+/// (`container::flexed_text`), and baking that wrote the user's auto-width label
+/// as a fixed box: pinned from the Position card, it stopped growing with its
+/// words. Where the stored mode is `Auto` or `AutoHeight` and the drawn box is
+/// exactly as tall as its lines at that width, `AutoHeight` at the drawn width is
+/// the same picture and keeps the lines deciding the height; a box the container
+/// made taller than its lines stays `Fixed`, since nothing else draws it.
+fn kept_text_mode(
+    node: &crate::Node,
+    kind: &NodeKind,
+    drawn: crate::node::TextSizing,
+) -> crate::node::TextSizing {
+    use crate::node::TextSizing;
+    let (NodeKind::Text { sizing: stored, .. }, TextSizing::Fixed(s)) = (node.kind(), drawn) else {
+        return drawn;
+    };
+    if matches!(stored, TextSizing::Fixed(_)) {
+        return drawn;
+    }
+    let mut auto = kind.clone();
+    if let NodeKind::Text { sizing, .. } = &mut auto {
+        *sizing = TextSizing::AutoHeight(s.width);
+    }
+    match crate::geometry::local_bounds(&auto, None) {
+        Some(b) if (b.height() - s.height).abs() < 1.0 / 128.0 => TextSizing::AutoHeight(s.width),
+        _ => drawn,
+    }
 }
 
 /// The operations that make `id` **store where it is drawn**, for a door that
@@ -4632,7 +4669,9 @@ pub fn grid_drop_many(
     {
         return None;
     }
-    let view = crate::resolve::DocView(doc);
+    // Through the committed geometry, so a pinned grid is laid at the width it is
+    // drawn at — the grid the commit lays (§15 D933's residue, closed by D942).
+    let view = crate::resolve::CommittedView { doc, res };
     let grid = container::laid_grid(&view, parent)?;
     let areas: Vec<(NodeId, [i32; 4])> = ids
         .iter()

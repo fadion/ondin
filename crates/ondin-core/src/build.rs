@@ -379,6 +379,123 @@ pub fn reparent_preserving_world(
     ]))
 }
 
+/// The operations that write `local` and `kind` into `node` as its own — a
+/// `SetTransform` where `local` is not its stored transform, and a `SetGeometry`
+/// where `kind` is not its stored kind and has a size to write (a shape's or a
+/// frame's size, a text's sizing mode). Nothing for a kind whose size is not in
+/// it: a path's, a group's, an image's.
+///
+/// **The one spelling of "keep it where it is drawn"**, for every edit that
+/// takes a layer out of whatever was placing it: the structural verbs through
+/// [`baked`], and in the app a Position pin changed (`OndinApp::baked_placement`),
+/// an Item card's *Unpin insets* and a container's layout set to `none` (§15
+/// D878) — and, its `SetGeometry` half alone, W's or H's `px` picked from the
+/// sizing menu, which fixes a hugged or percentage size where it is drawn
+/// (`size_mode_tx`, §15 D879). One function because the kind-to-patch table is a
+/// definition of a shape's size, and a second copy would be the first to miss a
+/// kind — it lived in the app's inspector until the structural verbs needed it
+/// too (§15 D929), and moved rather than being copied.
+pub fn baked_ops(id: NodeId, node: &crate::Node, local: Affine, kind: &NodeKind) -> Vec<Operation> {
+    let mut ops = Vec::new();
+    if node.transform() != local {
+        ops.push(Operation::SetTransform {
+            id,
+            transform: local,
+        });
+    }
+    if kind != node.kind() {
+        let geometry = match kind {
+            NodeKind::Rect { size, .. }
+            | NodeKind::Ellipse { size }
+            | NodeKind::Polygon { size, .. }
+            | NodeKind::Star { size, .. }
+            | NodeKind::Artboard { size } => Some(crate::GeometryPatch::Size(*size)),
+            NodeKind::Text { sizing, .. } => Some(crate::GeometryPatch::TextSizing(*sizing)),
+            _ => None,
+        };
+        if let Some(geometry) = geometry {
+            ops.push(Operation::SetGeometry { id, geometry });
+        }
+    }
+    ops
+}
+
+/// The operations that make `id` **store where it is drawn**, for a door that
+/// takes it out of the layout that placed it or takes that layout away — so the
+/// edit moves nothing on screen (§9's rule for structural edits; §15 D929).
+///
+/// An in-flow item's stored transform is not where it is drawn — it is where it
+/// goes back to when it leaves (§15 D875) — and a stretched or grown item's
+/// stored size is not the size it is drawn at. Group, *Frame selection*, a
+/// boolean, a mask, ungroup and *Display → none* each take items out of a
+/// layout, and each wrapped or spliced them by their *stored* geometry: the
+/// members of a flex row grouped with Ctrl+G jumped back to wherever they were
+/// created and lost their stretch. So each writes this first.
+///
+/// Three parts: the used transform and the used kind ([`baked_ops`]); and, for
+/// a container with a layout of its own, **the size its parent's pass gave it,
+/// on an axis where its own pass would give another** — once nothing lays it
+/// out it is a layout root sized by its own `width` and `height`, and a grown
+/// item hugging its children would shrink back to them. A frame's size is its
+/// kind, so a frame there stops hugging (`fit-content` → `auto`, the kind
+/// carrying the drawn size); a group with a layout has no size in its kind, so
+/// it takes the drawn size in px. An axis its own pass already sizes alike is
+/// left alone, so a hugging container that was not grown goes on hugging.
+///
+/// Empty for a layer already stored where it is drawn — every layer outside a
+/// layout and outside a frame's insets — which is what keeps the doors that
+/// call this unchanged on a document with no layout in it.
+pub fn baked(doc: &Document, res: &Resolved, id: NodeId) -> Vec<Operation> {
+    use crate::container::Dimension;
+    let Some(node) = doc.get(id) else {
+        return Vec::new();
+    };
+    let local = res.used_local(doc, id).unwrap_or(node.transform());
+    let kind = res.used_kind(doc, id).unwrap_or(node.kind());
+    let mut ops = baked_ops(id, node, local, kind);
+    if node.display().is_none() || !is_flex_item(doc, id) {
+        return ops;
+    }
+    let drawn = match kind {
+        NodeKind::Artboard { size } => Some(*size),
+        NodeKind::Group => res.used_frame(id),
+        _ => None,
+    };
+    let view = crate::resolve::DocView(doc);
+    let own = crate::container::lay_out(&view, id)
+        .into_iter()
+        .find(|l| l.id == id)
+        .map(|l| l.size);
+    if let (Some(drawn), Some(own)) = (drawn, own) {
+        let near = |a: f64, b: f64| (a - b).abs() < 1.0 / 128.0;
+        let mut item = *node.item();
+        for (dim, d, o) in [
+            (&mut item.width, drawn.width, own.width),
+            (&mut item.height, drawn.height, own.height),
+        ] {
+            if near(d, o) {
+                continue;
+            }
+            *dim = match kind {
+                NodeKind::Artboard { .. } => Dimension::Auto,
+                _ => Dimension::Px(d),
+            };
+        }
+        if item != *node.item() {
+            ops.push(Operation::SetLayoutItem { id, item });
+        }
+    }
+    ops
+}
+
+/// [`baked`] without its `SetTransform` — for a door that writes the layer's new
+/// transform itself, from the drawn one ([`frame`], [`ungroup`]).
+fn baked_size(doc: &Document, res: &Resolved, id: NodeId) -> impl Iterator<Item = Operation> {
+    baked(doc, res, id)
+        .into_iter()
+        .filter(|op| !matches!(op, Operation::SetTransform { .. }))
+}
+
 /// Where a new container lands among `siblings` once `members` have been
 /// reparented into it — **the topmost member's slot** (§15 D286, D439).
 ///
@@ -430,9 +547,14 @@ fn container_slot(siblings: &[NodeId], members: &FxHashSet<NodeId>) -> Result<us
 /// arise from this function anyway, since a boolean holds no frame to group.
 ///
 /// The group is created with an identity transform in the shared parent's
-/// space, so every member keeps its existing local transform and nothing moves.
+/// space, so every member keeps its local transform and nothing moves — **its
+/// drawn one** ([`baked`], §15 D929). A member laid out by a flex or grid
+/// parent, or pinned by insets the group makes inert, is written where it is
+/// drawn first; wrapping by the stored transforms sent a flex row's members back
+/// to wherever they were created, stacked on each other and unstretched.
 pub fn group(
     doc: &Document,
+    res: &Resolved,
     ids: &mut IdSource,
     members: &[NodeId],
 ) -> Result<(Transaction, NodeId), OpError> {
@@ -485,6 +607,7 @@ pub fn group(
             new_parent: group_id,
             index: i,
         });
+        ops.extend(baked(doc, res, *member));
     }
     ops.push(Operation::Reorder {
         id: group_id,
@@ -607,6 +730,7 @@ pub fn can_be_mask(doc: &Document, id: NodeId) -> bool {
 /// evidently not been done here.
 pub fn mask(
     doc: &Document,
+    res: &Resolved,
     ids: &mut IdSource,
     members: &[NodeId],
     key: Option<NodeId>,
@@ -664,20 +788,21 @@ pub fn mask(
     }
 
     if unique.len() == 1 {
-        return Ok((
-            Transaction(vec![Operation::SetMask {
-                id: chosen,
-                mask: true,
-            }]),
-            chosen,
-        ));
+        // A mask leaves its container's flow (`container::in_flow`), so a lone
+        // in-flow member is written where it is drawn first (§15 D929).
+        let mut ops = baked(doc, res, chosen);
+        ops.push(Operation::SetMask {
+            id: chosen,
+            mask: true,
+        });
+        return Ok((Transaction(ops), chosen));
     }
 
     // `group` owns the rest of the admission test — no root, a parent that can
     // hold a group — and the placement rule that keeps the result where
     // the topmost member was. Reusing it rather than repeating it is what stops the
     // two verbs drifting about where a new container lands.
-    let (Transaction(mut ops), group_id) = group(doc, ids, members)?;
+    let (Transaction(mut ops), group_id) = group(doc, res, ids, members)?;
     if chosen != bottom {
         ops.push(Operation::Reorder {
             id: chosen,
@@ -721,12 +846,14 @@ pub fn mask(
 /// A third difference was listed here until frames could be grouped (§15 D876):
 /// *"frames may be members, where [`group`] refuses them"*. Both take them now.
 ///
-/// The correction is a pure translation and needs no [`Resolved`] lookup of its
-/// own: the frame and its members-to-be are siblings for the length of the
-/// arithmetic, so a member's new local transform is `translate(−origin) · local` in
-/// the one space both are already expressed in. `Resolved` is still needed to
-/// *measure* — a text node's box comes from its shaped layout and a container's
-/// from its children.
+/// The correction is a pure translation: the frame and its members-to-be are
+/// siblings for the length of the arithmetic, so a member's new local transform
+/// is `translate(−origin) · local` in the one space both are already expressed
+/// in. `Resolved` is needed to *measure* — a text node's box comes from its
+/// shaped layout and a container's from its children — and for `local` itself,
+/// which is the member's **used** transform: a flex or grid item's stored one is
+/// not where it is drawn, and its stretched size is written as its own too
+/// ([`baked`], §15 D929).
 ///
 /// The frame is created with **no background**, which is the rule that framing
 /// changes nothing you can see: a fill behind the selection would hide whatever the
@@ -790,12 +917,16 @@ pub fn frame(
     // own transform is expressed in. Each member's own box through its own local
     // transform — not `world_bounds`, which would have to be projected back and
     // would pick up an upright axis-aligned box for a rotated member on the way.
+    // **Through its used transform**, where it is drawn (§15 D929): the box is
+    // already the used one, and a flex item's stored transform is not its place.
     let union = ordered
         .iter()
         .filter_map(|id| {
-            let node = doc.get(*id)?;
             let local = crate::local_box(doc, res, *id)?;
-            Some(crate::geometry::transform_rect(node.transform(), local))
+            Some(crate::geometry::transform_rect(
+                res.used_local(doc, *id)?,
+                local,
+            ))
         })
         .reduce(|a, b| a.union(b))
         .ok_or(OpError::MalformedSubtree)?;
@@ -818,7 +949,9 @@ pub fn frame(
         name: None,
     });
     for (i, member) in ordered.iter().enumerate() {
-        let local = doc.get(*member).expect("checked above").transform();
+        let local = res
+            .used_local(doc, *member)
+            .ok_or(OpError::NoSuchNode(*member))?;
         ops.push(Operation::Reparent {
             id: *member,
             new_parent: frame_id,
@@ -828,6 +961,7 @@ pub fn frame(
             id: *member,
             transform: Affine::translate(-origin.to_vec2()) * local,
         });
+        ops.extend(baked_size(doc, res, *member));
     }
     ops.push(Operation::Reorder {
         id: frame_id,
@@ -922,6 +1056,7 @@ pub fn can_frame(doc: &Document, members: &[NodeId]) -> bool {
 /// disagrees.
 pub fn boolean(
     doc: &Document,
+    res: &Resolved,
     ids: &mut IdSource,
     members: &[NodeId],
     op: crate::node::BoolOp,
@@ -999,6 +1134,8 @@ pub fn boolean(
             new_parent: bool_id,
             index: i,
         });
+        // Operands are drawn where they were — [`group`]'s rule (§15 D929).
+        ops.extend(baked(doc, res, *member));
     }
     ops.push(Operation::Reorder {
         id: bool_id,
@@ -1197,10 +1334,13 @@ pub fn can_outline(kind: &NodeKind) -> bool {
 /// could edit; anchor editing and per-anchor radii both exist now (§15 D118, D119),
 /// so the trade is W/H for anchors — which is the trade the operation *is*.
 ///
-/// **It needs no [`Resolved`]**, unlike `flatten`: `geometry::local_path` is a pure
-/// function of the node's own kind, so there is no evaluated outline to look up and
-/// nothing about the node's place in the tree to consult. That is the whole
-/// difference in cost between the two operations.
+/// **It takes a [`Resolved`] for one lookup**, the kind the node is *sized* with
+/// (§15 D930): `geometry::local_path` is a pure function of a kind, but a shape a
+/// flex or grid container stretched, or two insets pinned on both sides, is drawn
+/// at a size its stored kind does not hold — and outlining the stored kind cut a
+/// path the size the shape had before the layout, which a path, unable to stretch,
+/// then kept. This said *"It needs no `Resolved`"* until container layout made
+/// the used size differ from the stored one.
 ///
 /// The radii are **not** carried onto the result: for a `Path` they have just been
 /// baked into the geometry, and for a rect they were never a path's kind of radius —
@@ -1208,6 +1348,7 @@ pub fn can_outline(kind: &NodeKind) -> bool {
 /// outline has no anchors at its corners any more, only the arcs that replaced them.
 pub fn outline(
     doc: &Document,
+    res: &Resolved,
     ids: &mut IdSource,
     id: NodeId,
 ) -> Result<(Transaction, NodeId), OpError> {
@@ -1215,7 +1356,8 @@ pub fn outline(
     if !can_outline(node.kind()) {
         return Err(OpError::WrongKindForOp);
     }
-    let path = crate::geometry::local_path(node.kind()).ok_or(OpError::EmptyGeometry)?;
+    let kind = res.used_kind(doc, id).unwrap_or(node.kind());
+    let path = crate::geometry::local_path(kind).ok_or(OpError::EmptyGeometry)?;
     replace_with_path(doc, ids, id, path)
 }
 
@@ -1628,6 +1770,29 @@ fn replace_with_path(
             rule: node.fill_rule(),
         });
     }
+    // **And its place in a layout** (§15 D930): its insets, which pin it against
+    // its frame, and its item properties — a grid cell, a growth, an `align-self`.
+    // Dropped, the path came back **unpinned and in the flow**: a pinned layer
+    // outlined jumped from its corner into the row, a grid item lost its cell and
+    // its siblings reflowed around it, from an edit that changes only how the
+    // geometry is held. The three fields arrived on `Node` with container layout
+    // and this list was not extended — the drift its own doc warns of. Skipped at
+    // the defaults, as the carries above are.
+    //
+    // ⚠️ **`display` does not come across, on purpose**: a path holds no children,
+    // so a layout on one would lay out nothing (`container::is_container`).
+    if node.insets().is_authored() {
+        ops.push(Operation::SetInsets {
+            id: new,
+            insets: *node.insets(),
+        });
+    }
+    if *node.item() != crate::container::LayoutItem::default() {
+        ops.push(Operation::SetLayoutItem {
+            id: new,
+            item: *node.item(),
+        });
+    }
     // **Two things deliberately do not come across.** *Lock* is a property of the
     // layer the user is holding rather than of the picture, and a locked result would
     // refuse the tidying that usually follows. The **proportion lock** is a
@@ -1785,13 +1950,22 @@ fn carried_paint(from: &Node, to: NodeId) -> Vec<Operation> {
 /// inert while it was consumed — comes back into view. `build::boolean` gave the
 /// container the *bottom* operand's paint precisely so that this round trip lands
 /// somewhere recognisable.
-pub fn ungroup(doc: &Document, id: NodeId) -> Result<Transaction, OpError> {
+///
+/// **Folded from where things are drawn** (§15 D929): the container's used
+/// transform into each child's used transform, and each child's used size
+/// written as its own ([`baked`]). For a group with a layout neither stored
+/// number is a place — the group's pass placed its children, and its parent's
+/// pass may have placed the group — so folding the stored ones put every in-flow
+/// child at its creation point, overlapping, and re-pinned a pinned child from a
+/// place it had left. Outside a layout the used and stored transforms are the
+/// same numbers, so a boolean's release is the arithmetic it always was.
+pub fn ungroup(doc: &Document, res: &Resolved, id: NodeId) -> Result<Transaction, OpError> {
     let node = doc.get(id).ok_or(OpError::NoSuchNode(id))?;
     if !matches!(node.kind(), NodeKind::Group | NodeKind::Boolean { .. }) {
         return Err(OpError::WrongKindForOp);
     }
     let parent = node.parent().ok_or(OpError::CannotModifyRoot)?;
-    let group_transform = node.transform();
+    let group_transform = res.used_local(doc, id).unwrap_or(node.transform());
     let children = node.children().to_vec();
     let at = doc
         .get(parent)
@@ -1803,15 +1977,15 @@ pub fn ungroup(doc: &Document, id: NodeId) -> Result<Transaction, OpError> {
 
     let mut ops = Vec::with_capacity(children.len() * 2 + 1);
     for (i, child) in children.iter().enumerate() {
-        let child_local = doc
-            .get(*child)
-            .ok_or(OpError::NoSuchNode(*child))?
-            .transform();
+        let child_local = res
+            .used_local(doc, *child)
+            .ok_or(OpError::NoSuchNode(*child))?;
         // The group's parent replaces the group as the frame of reference.
         ops.push(Operation::SetTransform {
             id: *child,
             transform: group_transform * child_local,
         });
+        ops.extend(baked_size(doc, res, *child));
         ops.push(Operation::Reparent {
             id: *child,
             new_parent: parent,
@@ -1849,15 +2023,24 @@ pub fn ungroup(doc: &Document, id: NodeId) -> Result<Transaction, OpError> {
 /// `ids` are dissolved in the order given and each must be a live `Group` or
 /// `Boolean`; anything else comes back as the error [`ungroup`] would have
 /// returned for it, with no ops built.
-pub fn ungroup_all(doc: &Document, ids: &[NodeId]) -> Result<Transaction, OpError> {
+pub fn ungroup_all(doc: &Document, res: &Resolved, ids: &[NodeId]) -> Result<Transaction, OpError> {
     if let [only] = ids {
-        return ungroup(doc, *only);
+        return ungroup(doc, res, *only);
     }
+    // The derived layer advanced with it, since [`ungroup`] folds from where
+    // things are drawn (§15 D929): `res` for the first container, then one
+    // rebuild over the advanced document and an incremental update per step after
+    // it, as a commit makes. Only a multi-selection pays for the rebuild.
     let mut advanced = doc.clone();
+    let mut resolved: Option<Resolved> = None;
     let mut ops = Vec::new();
     for id in ids {
-        let tx = ungroup(&advanced, *id)?;
-        advanced.apply(&tx)?;
+        let tx = ungroup(&advanced, resolved.as_ref().unwrap_or(res), *id)?;
+        let outcome = advanced.apply(&tx)?;
+        match &mut resolved {
+            Some(r) => r.update(&advanced, &outcome.dirty),
+            None => resolved = Some(Resolved::rebuild(&advanced)),
+        }
         ops.extend(tx.0);
     }
     Ok(Transaction(ops))

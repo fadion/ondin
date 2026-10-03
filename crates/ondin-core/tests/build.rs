@@ -119,7 +119,7 @@ fn group_preserves_world_positions_and_relative_order() {
     let b = f.add(f.artboard, rect(10.0, 10.0), (200.0, 150.0));
     let before = [f.world_origin(a), f.world_origin(b)];
 
-    let (tx, g) = build::group(&f.doc, &mut f.ids, &[b, a]).unwrap();
+    let (tx, g) = build::group(&f.doc, &f.resolved(), &mut f.ids, &[b, a]).unwrap();
     f.commit(tx);
 
     // Members moved inside the group, in their original z-order (a then b),
@@ -139,7 +139,7 @@ fn group_takes_the_z_position_of_its_topmost_member() {
     let front = f.add(f.artboard, rect(10.0, 10.0), (20.0, 0.0));
 
     // Group the middle and front shapes; `back` must stay behind the group.
-    let (tx, g) = build::group(&f.doc, &mut f.ids, &[mid, front]).unwrap();
+    let (tx, g) = build::group(&f.doc, &f.resolved(), &mut f.ids, &[mid, front]).unwrap();
     f.commit(tx);
     assert_eq!(f.children_of(f.artboard), vec![back, g]);
 }
@@ -195,7 +195,7 @@ fn a_container_takes_the_topmost_slot_even_when_the_selection_has_a_gap() {
 
     let mut f = Fixture::new();
     let (back, mid, front) = three(&mut f);
-    let (tx, g) = build::group(&f.doc, &mut f.ids, &[back, front]).unwrap();
+    let (tx, g) = build::group(&f.doc, &f.resolved(), &mut f.ids, &[back, front]).unwrap();
     f.commit(tx);
     check("group", &f, vec![mid, g]);
 
@@ -209,6 +209,7 @@ fn a_container_takes_the_topmost_slot_even_when_the_selection_has_a_gap() {
     let (back, mid, front) = three(&mut f);
     let (tx, b) = build::boolean(
         &f.doc,
+        &f.resolved(),
         &mut f.ids,
         &[back, front],
         ondin_core::BoolOp::Union,
@@ -228,7 +229,7 @@ fn a_container_takes_the_topmost_slot_even_when_the_selection_has_a_gap() {
     // rule reaching it is exactly what D286 records.
     let mut f = Fixture::new();
     let (back, mid, front) = three(&mut f);
-    let (tx, m) = build::mask(&f.doc, &mut f.ids, &[back, front], None).unwrap();
+    let (tx, m) = build::mask(&f.doc, &f.resolved(), &mut f.ids, &[back, front], None).unwrap();
     f.commit(tx);
     check("mask", &f, vec![mid, m]);
 
@@ -246,7 +247,7 @@ fn group_rejects_members_from_different_parents() {
     let a = f.add(f.artboard, rect(10.0, 10.0), (0.0, 0.0));
     let b = f.add(inner, rect(10.0, 10.0), (0.0, 0.0));
     assert!(matches!(
-        build::group(&f.doc, &mut f.ids, &[a, b]),
+        build::group(&f.doc, &f.resolved(), &mut f.ids, &[a, b]),
         Err(OpError::InvalidParent)
     ));
 }
@@ -257,14 +258,15 @@ fn group_rejects_members_from_different_parents() {
 #[test]
 fn group_takes_frames_and_rejects_the_root() {
     let mut f = Fixture::new();
-    let (tx, g) = build::group(&f.doc, &mut f.ids, &[f.artboard]).expect("a frame groups");
+    let (tx, g) =
+        build::group(&f.doc, &f.resolved(), &mut f.ids, &[f.artboard]).expect("a frame groups");
     f.commit(tx);
     assert_eq!(f.doc.get(f.artboard).unwrap().parent(), Some(g));
     assert!(matches!(
-        build::group(&f.doc, &mut f.ids, &[f.root]),
+        build::group(&f.doc, &f.resolved(), &mut f.ids, &[f.root]),
         Err(OpError::WrongKindForOp)
     ));
-    assert!(build::group(&f.doc, &mut f.ids, &[]).is_err());
+    assert!(build::group(&f.doc, &f.resolved(), &mut f.ids, &[]).is_err());
 }
 
 /// **What a group holding a frame cannot become** (§15 D876): a boolean operand, a
@@ -285,7 +287,7 @@ fn group_takes_frames_and_rejects_the_root() {
 fn a_group_holding_a_frame_is_no_operand_no_union_and_no_mask() {
     let mut f = Fixture::new();
     let card = f.add(f.artboard, artboard(), (0.0, 0.0));
-    let (tx, row) = build::group(&f.doc, &mut f.ids, &[card]).unwrap();
+    let (tx, row) = build::group(&f.doc, &f.resolved(), &mut f.ids, &[card]).unwrap();
     f.commit(tx);
     let dot = f.add(f.artboard, rect(10.0, 10.0), (0.0, 0.0));
 
@@ -299,6 +301,7 @@ fn a_group_holding_a_frame_is_no_operand_no_union_and_no_mask() {
     refused(
         build::boolean(
             &f.doc,
+            &f.resolved(),
             &mut f.ids,
             &[row, dot],
             ondin_core::BoolOp::Union,
@@ -311,14 +314,14 @@ fn a_group_holding_a_frame_is_no_operand_no_union_and_no_mask() {
         build::flatten(&f.doc, &res, &mut f.ids, &[row, dot]),
         "flatten",
     );
-    refused(build::mask(&f.doc, &mut f.ids, &[row], None), "mask");
+    refused(build::mask(&f.doc, &res, &mut f.ids, &[row], None), "mask");
     assert!(!build::can_be_mask(&f.doc, row));
 
     // A frame as masked content: `card` lowest, the dot above it as the mask.
     let card2 = f.add(f.artboard, artboard(), (0.0, 0.0));
     let dot2 = f.add(f.artboard, rect(10.0, 10.0), (0.0, 0.0));
-    let (tx, g) =
-        build::mask(&f.doc, &mut f.ids, &[card2, dot2], None).expect("the card is masked content");
+    let (tx, g) = build::mask(&f.doc, &f.resolved(), &mut f.ids, &[card2, dot2], None)
+        .expect("the card is masked content");
     f.commit(tx);
     assert_eq!(
         f.children_of(g),
@@ -393,7 +396,7 @@ fn framing_answers_the_placement_rule_in_both_directions() {
     let mut f = Fixture::new();
     let (tx, g) = {
         let a = f.add(f.artboard, rect(10.0, 10.0), (0.0, 0.0));
-        build::group(&f.doc, &mut f.ids, &[a]).unwrap()
+        build::group(&f.doc, &f.resolved(), &mut f.ids, &[a]).unwrap()
     };
     f.commit(tx);
     let inside = f.children_of(g);
@@ -451,7 +454,7 @@ fn ungroup_splices_children_back_in_place() {
     let b = f.add(f.artboard, rect(10.0, 10.0), (200.0, 150.0));
     let before = [f.world_origin(a), f.world_origin(b)];
 
-    let (tx, g) = build::group(&f.doc, &mut f.ids, &[a, b]).unwrap();
+    let (tx, g) = build::group(&f.doc, &f.resolved(), &mut f.ids, &[a, b]).unwrap();
     f.commit(tx);
     // Offset the group itself, then ungroup: the offset must be folded into
     // the children rather than lost.
@@ -462,7 +465,7 @@ fn ungroup_splices_children_back_in_place() {
     let after_offset = [f.world_origin(a), f.world_origin(b)];
     assert!((after_offset[0].x - before[0].x - 7.0).abs() < 1e-9);
 
-    let tx = build::ungroup(&f.doc, g).unwrap();
+    let tx = build::ungroup(&f.doc, &f.resolved(), g).unwrap();
     f.commit(tx);
 
     assert!(!f.doc.contains(g), "group node is gone");
@@ -478,9 +481,9 @@ fn group_then_ungroup_round_trips_world_positions() {
     let b = f.add(f.artboard, rect(10.0, 10.0), (56.0, 78.0));
     let before = [f.world_origin(a), f.world_origin(b)];
 
-    let (tx, g) = build::group(&f.doc, &mut f.ids, &[a, b]).unwrap();
+    let (tx, g) = build::group(&f.doc, &f.resolved(), &mut f.ids, &[a, b]).unwrap();
     f.commit(tx);
-    let tx = build::ungroup(&f.doc, g).unwrap();
+    let tx = build::ungroup(&f.doc, &f.resolved(), g).unwrap();
     f.commit(tx);
 
     approx(f.world_origin(a), before[0], "a round-tripped");
@@ -493,7 +496,7 @@ fn ungroup_rejects_non_groups() {
     let mut f = Fixture::new();
     let r = f.add(f.artboard, rect(10.0, 10.0), (0.0, 0.0));
     assert!(matches!(
-        build::ungroup(&f.doc, r),
+        build::ungroup(&f.doc, &f.resolved(), r),
         Err(OpError::WrongKindForOp)
     ));
 }
@@ -532,14 +535,14 @@ fn two_containers_ungroup_in_one_transaction_without_interleaving() {
             f.world_origin(d),
         ];
 
-        let (tx, g1) = build::group(&f.doc, &mut f.ids, &[a, b]).unwrap();
+        let (tx, g1) = build::group(&f.doc, &f.resolved(), &mut f.ids, &[a, b]).unwrap();
         f.commit(tx);
-        let (tx, g2) = build::group(&f.doc, &mut f.ids, &[c, d]).unwrap();
+        let (tx, g2) = build::group(&f.doc, &f.resolved(), &mut f.ids, &[c, d]).unwrap();
         f.commit(tx);
         assert_eq!(f.children_of(f.artboard), vec![behind, g1, g2]);
 
         let named = if reversed { [g2, g1] } else { [g1, g2] };
-        let tx = build::ungroup_all(&f.doc, &named).expect("two live groups");
+        let tx = build::ungroup_all(&f.doc, &f.resolved(), &named).expect("two live groups");
         f.commit(tx);
 
         assert_eq!(
@@ -571,11 +574,11 @@ fn one_bad_container_builds_no_ops_at_all() {
     let a = f.add(f.artboard, rect(10.0, 10.0), (0.0, 0.0));
     let b = f.add(f.artboard, rect(10.0, 10.0), (40.0, 0.0));
     let r = f.add(f.artboard, rect(10.0, 10.0), (80.0, 0.0));
-    let (tx, g) = build::group(&f.doc, &mut f.ids, &[a, b]).unwrap();
+    let (tx, g) = build::group(&f.doc, &f.resolved(), &mut f.ids, &[a, b]).unwrap();
     f.commit(tx);
 
     assert!(matches!(
-        build::ungroup_all(&f.doc, &[g, r]),
+        build::ungroup_all(&f.doc, &f.resolved(), &[g, r]),
         Err(OpError::WrongKindForOp)
     ));
     assert!(
@@ -1939,7 +1942,7 @@ fn an_unset_pivot_flips_a_rotated_group_exactly_as_before() {
     let mut f = Fixture::new();
     let a = f.add(f.artboard, rect(40.0, 10.0), (0.0, 0.0));
     let b = f.add(f.artboard, rect(10.0, 40.0), (60.0, 30.0));
-    let g = match build::group(&f.doc, &mut f.ids, &[a, b]) {
+    let g = match build::group(&f.doc, &f.resolved(), &mut f.ids, &[a, b]) {
         Ok((tx, id)) => {
             f.commit(tx);
             id
@@ -2011,6 +2014,7 @@ fn a_boolean_wraps_its_operands_and_takes_the_bottom_ones_paint() {
 
     let (tx, b) = build::boolean(
         &f.doc,
+        &f.resolved(),
         &mut f.ids,
         &[front, back],
         ondin_core::BoolOp::Subtract,
@@ -2053,7 +2057,7 @@ fn a_boolean_refuses_what_it_cannot_combine() {
     ];
     for (why, ids) in cases {
         assert!(
-            build::boolean(&f.doc, &mut f.ids, &ids, op, None).is_err(),
+            build::boolean(&f.doc, &f.resolved(), &mut f.ids, &ids, op, None).is_err(),
             "should refuse: {why}"
         );
     }
@@ -2066,8 +2070,15 @@ fn switching_the_operation_keeps_the_children_and_undoes_to_the_previous_one() {
     let mut f = Fixture::new();
     let a = f.add(f.artboard, rect(80.0, 40.0), (0.0, 0.0));
     let b = f.add(f.artboard, rect(80.0, 40.0), (40.0, 0.0));
-    let (tx, node) =
-        build::boolean(&f.doc, &mut f.ids, &[a, b], ondin_core::BoolOp::Union, None).unwrap();
+    let (tx, node) = build::boolean(
+        &f.doc,
+        &f.resolved(),
+        &mut f.ids,
+        &[a, b],
+        ondin_core::BoolOp::Union,
+        None,
+    )
+    .unwrap();
     f.commit(tx);
 
     let tx = build::set_boolean_op(&f.doc, node, ondin_core::BoolOp::Intersect).unwrap();
@@ -2110,8 +2121,15 @@ fn switching_the_operation_renames_only_a_default_name() {
     let mut f = Fixture::new();
     let a = f.add(f.artboard, rect(80.0, 40.0), (0.0, 0.0));
     let b = f.add(f.artboard, rect(80.0, 40.0), (40.0, 0.0));
-    let (tx, node) =
-        build::boolean(&f.doc, &mut f.ids, &[a, b], ondin_core::BoolOp::Union, None).unwrap();
+    let (tx, node) = build::boolean(
+        &f.doc,
+        &f.resolved(),
+        &mut f.ids,
+        &[a, b],
+        ondin_core::BoolOp::Union,
+        None,
+    )
+    .unwrap();
     f.commit(tx);
     assert_eq!(f.doc.get(node).unwrap().name(), "Union 1");
 
@@ -2165,6 +2183,7 @@ fn releasing_a_boolean_gives_its_operands_back_in_place() {
 
     let (tx, node) = build::boolean(
         &f.doc,
+        &f.resolved(),
         &mut f.ids,
         &[a, b],
         ondin_core::BoolOp::Subtract,
@@ -2183,7 +2202,7 @@ fn releasing_a_boolean_gives_its_operands_back_in_place() {
         "moving the container moved the operands with it"
     );
 
-    let tx = build::ungroup(&f.doc, node).expect("a boolean releases like a group");
+    let tx = build::ungroup(&f.doc, &f.resolved(), node).expect("a boolean releases like a group");
     f.commit(tx);
 
     assert!(f.doc.get(node).is_none(), "the container is gone");
@@ -2220,6 +2239,7 @@ fn flattening_a_boolean_keeps_its_outline_and_discards_the_operands() {
 
     let (tx, node) = build::boolean(
         &f.doc,
+        &f.resolved(),
         &mut f.ids,
         &[a, b],
         ondin_core::BoolOp::Subtract,
@@ -2314,6 +2334,7 @@ fn flattening_an_exclude_carries_the_even_odd_rule_its_holes_depend_on() {
 
     let (tx, node) = build::boolean(
         &f.doc,
+        &f.resolved(),
         &mut f.ids,
         &[a, b],
         ondin_core::BoolOp::Exclude,
@@ -2481,6 +2502,7 @@ fn flattening_an_abandoned_boolean_says_so_rather_than_blaming_the_geometry() {
     let b = f.add(f.artboard, rect(100.0, 100.0), (50.0, 0.0));
     let (tx, node) = build::boolean(
         &f.doc,
+        &f.resolved(),
         &mut f.ids,
         &[a, b],
         ondin_core::BoolOp::Subtract,
@@ -2600,7 +2622,7 @@ fn outlining_a_rect_keeps_its_shape_its_paint_and_its_place() {
     );
     let world_before = f.world_origin(r);
 
-    let (tx, made) = build::outline(&f.doc, &mut f.ids, r).expect("a rect outlines");
+    let (tx, made) = build::outline(&f.doc, &f.resolved(), &mut f.ids, r).expect("a rect outlines");
     f.commit(tx);
 
     assert!(f.doc.get(r).is_none(), "the rect is gone");
@@ -2726,7 +2748,8 @@ fn outlining_a_path_keeps_the_fill_rule_the_user_set_on_it() {
         "and the row is offered on it, which is what makes the loss reachable"
     );
 
-    let (tx, made) = build::outline(&f.doc, &mut f.ids, p).expect("a rounded path outlines");
+    let (tx, made) =
+        build::outline(&f.doc, &f.resolved(), &mut f.ids, p).expect("a rounded path outlines");
     f.commit(tx);
 
     assert!(
@@ -2989,6 +3012,7 @@ fn a_group_inside_a_boolean_is_a_single_operand() {
 
     let (tx, node) = build::boolean(
         &f.doc,
+        &f.resolved(),
         &mut f.ids,
         &[a, b, c],
         ondin_core::BoolOp::Exclude,
@@ -3020,7 +3044,8 @@ fn a_group_inside_a_boolean_is_a_single_operand() {
     );
 
     // Now group two of them *inside* the boolean, which is the act in question.
-    let (tx, g) = build::group(&f.doc, &mut f.ids, &[b, c]).expect("group inside a boolean");
+    let (tx, g) =
+        build::group(&f.doc, &f.resolved(), &mut f.ids, &[b, c]).expect("group inside a boolean");
     f.commit(tx);
     assert_eq!(f.doc.get(g).unwrap().parent(), Some(node));
     assert_eq!(f.children_of(node), vec![a, g], "two operands now");
@@ -3115,6 +3140,7 @@ fn the_key_becomes_the_bottom_operand_of_a_subtract() {
 
     let (tx, node) = build::boolean(
         &f.doc,
+        &f.resolved(),
         &mut f.ids,
         &[bottom, middle, top],
         ondin_core::BoolOp::Subtract,
@@ -3141,6 +3167,7 @@ fn without_a_key_a_boolean_keeps_the_layer_order() {
 
     let (tx, node) = build::boolean(
         &f.doc,
+        &f.resolved(),
         &mut f.ids,
         &[bottom, top],
         ondin_core::BoolOp::Subtract,
@@ -3166,7 +3193,15 @@ fn a_key_is_ignored_by_the_order_free_operations() {
         let bottom = f.add(f.artboard, rect(100.0, 100.0), (0.0, 0.0));
         let top = f.add(f.artboard, rect(100.0, 100.0), (40.0, 0.0));
 
-        let (tx, node) = build::boolean(&f.doc, &mut f.ids, &[bottom, top], op, Some(top)).unwrap();
+        let (tx, node) = build::boolean(
+            &f.doc,
+            &f.resolved(),
+            &mut f.ids,
+            &[bottom, top],
+            op,
+            Some(top),
+        )
+        .unwrap();
         f.commit(tx);
         assert_eq!(
             f.children_of(node),
@@ -3200,6 +3235,7 @@ fn the_key_also_decides_the_paint_the_boolean_inherits() {
 
     let (tx, node) = build::boolean(
         &f.doc,
+        &f.resolved(),
         &mut f.ids,
         &[bottom, top],
         ondin_core::BoolOp::Subtract,
@@ -3226,6 +3262,7 @@ fn a_key_outside_the_members_changes_nothing() {
 
     let (tx, node) = build::boolean(
         &f.doc,
+        &f.resolved(),
         &mut f.ids,
         &[bottom, top],
         ondin_core::BoolOp::Subtract,
@@ -3391,7 +3428,7 @@ fn duplicating_a_group_renames_the_group_and_nothing_inside_it() {
     let mut f = Fixture::new();
     let a = f.add(f.artboard, rect(10.0, 10.0), (0.0, 0.0));
     let b = f.add(f.artboard, rect(10.0, 10.0), (20.0, 0.0));
-    let (tx, group) = build::group(&f.doc, &mut f.ids, &[a, b]).unwrap();
+    let (tx, group) = build::group(&f.doc, &f.resolved(), &mut f.ids, &[a, b]).unwrap();
     f.commit(tx);
     assert_eq!(names_in(&f.doc, group), ["Rectangle 1", "Rectangle 2"]);
 
@@ -3483,8 +3520,15 @@ fn a_numbered_boolean_is_still_renamed_when_its_operation_changes() {
     let make_boolean = |f: &mut Fixture| {
         let a = f.add(f.artboard, rect(100.0, 100.0), (0.0, 0.0));
         let b = f.add(f.artboard, rect(100.0, 100.0), (40.0, 0.0));
-        let (tx, node) =
-            build::boolean(&f.doc, &mut f.ids, &[a, b], ondin_core::BoolOp::Union, None).unwrap();
+        let (tx, node) = build::boolean(
+            &f.doc,
+            &f.resolved(),
+            &mut f.ids,
+            &[a, b],
+            ondin_core::BoolOp::Union,
+            None,
+        )
+        .unwrap();
         f.commit(tx);
         node
     };
@@ -3644,8 +3688,8 @@ fn masking_a_pair_wraps_them_in_a_group_with_the_mask_at_the_bottom() {
         "fixture: bottom-first, and a third layer that must not be swept in"
     );
 
-    let (tx, made) =
-        build::mask(&f.doc, &mut f.ids, &[circle, photo], None).expect("two layers mask");
+    let (tx, made) = build::mask(&f.doc, &f.resolved(), &mut f.ids, &[circle, photo], None)
+        .expect("two layers mask");
     f.commit(tx);
 
     assert_eq!(
@@ -3690,8 +3734,14 @@ fn the_key_layer_becomes_the_mask_and_the_rest_keep_their_order() {
     let mid = f.add(f.artboard, rect(30.0, 30.0), (10.0, 0.0));
     let top = f.add(f.artboard, rect(30.0, 30.0), (20.0, 0.0));
 
-    let (tx, made) =
-        build::mask(&f.doc, &mut f.ids, &[low, mid, top], Some(top)).expect("three layers mask");
+    let (tx, made) = build::mask(
+        &f.doc,
+        &f.resolved(),
+        &mut f.ids,
+        &[low, mid, top],
+        Some(top),
+    )
+    .expect("three layers mask");
     f.commit(tx);
 
     assert_eq!(
@@ -3715,7 +3765,8 @@ fn masking_a_lone_layer_flags_it_where_it_stands() {
     let low = f.add(f.artboard, rect(30.0, 30.0), (0.0, 0.0));
     let above = f.add(f.artboard, rect(30.0, 30.0), (0.0, 0.0));
 
-    let (tx, made) = build::mask(&f.doc, &mut f.ids, &[low], None).expect("one layer masks");
+    let (tx, made) =
+        build::mask(&f.doc, &f.resolved(), &mut f.ids, &[low], None).expect("one layer masks");
     f.commit(tx);
 
     assert_eq!(
@@ -3743,7 +3794,7 @@ fn mask_refuses_a_frame_and_a_booleans_operands() {
     let inner_frame = f.add(f.artboard, artboard(), (0.0, 0.0));
     assert!(
         matches!(
-            build::mask(&f.doc, &mut f.ids, &[inner_frame], None),
+            build::mask(&f.doc, &f.resolved(), &mut f.ids, &[inner_frame], None),
             Err(OpError::WrongKindForOp)
         ),
         "a frame is a page and already clips its own contents"
@@ -3751,14 +3802,21 @@ fn mask_refuses_a_frame_and_a_booleans_operands() {
 
     let a = f.add(f.artboard, rect(30.0, 30.0), (0.0, 0.0));
     let b = f.add(f.artboard, rect(30.0, 30.0), (10.0, 0.0));
-    let (tx, boolean) =
-        build::boolean(&f.doc, &mut f.ids, &[a, b], ondin_core::BoolOp::Union, None).unwrap();
+    let (tx, boolean) = build::boolean(
+        &f.doc,
+        &f.resolved(),
+        &mut f.ids,
+        &[a, b],
+        ondin_core::BoolOp::Union,
+        None,
+    )
+    .unwrap();
     f.commit(tx);
     let operands = f.children_of(boolean);
     assert_eq!(operands.len(), 2, "fixture: the boolean took both");
     assert!(
         matches!(
-            build::mask(&f.doc, &mut f.ids, &operands[..1], None),
+            build::mask(&f.doc, &f.resolved(), &mut f.ids, &operands[..1], None),
             Err(OpError::WrongKindForOp)
         ),
         "operands are combined rather than drawn, so a mask there would do nothing"
@@ -3815,7 +3873,8 @@ fn a_shape_is_preferred_over_a_picture_however_they_are_stacked() {
         "the shape masks the photograph, not the other way round"
     );
 
-    let (tx, made) = build::mask(&f.doc, &mut f.ids, &[photo, circle], None).expect("masks");
+    let (tx, made) =
+        build::mask(&f.doc, &f.resolved(), &mut f.ids, &[photo, circle], None).expect("masks");
     f.commit(tx);
     assert_eq!(
         f.children_of(made),
@@ -3843,7 +3902,14 @@ fn keying_the_picture_makes_it_the_mask_anyway() {
         Some(photo),
         "the designation overrides the preference, as it overrides z-order"
     );
-    let (tx, made) = build::mask(&f.doc, &mut f.ids, &[photo, circle], Some(photo)).expect("masks");
+    let (tx, made) = build::mask(
+        &f.doc,
+        &f.resolved(),
+        &mut f.ids,
+        &[photo, circle],
+        Some(photo),
+    )
+    .expect("masks");
     f.commit(tx);
     assert_eq!(f.children_of(made), vec![photo, circle]);
     assert!(f.doc.get(photo).unwrap().mask());
@@ -4102,6 +4168,7 @@ fn a_boolean_operand_is_neither_offered_as_a_rail_nor_accepted_as_one() {
 
     let (tx, b) = ondin_core::build::boolean(
         &f.doc,
+        &f.resolved(),
         &mut f.ids,
         &[front, back],
         ondin_core::BoolOp::Subtract,
@@ -4277,7 +4344,7 @@ fn can_frame_answers_what_frame_would_do() {
     let a = f.add(f.artboard, rect(10.0, 10.0), (0.0, 0.0));
     let b = f.add(f.artboard, rect(10.0, 10.0), (20.0, 0.0));
     let nested_frame = f.add(f.artboard, artboard(), (40.0, 0.0));
-    let (tx, group) = build::group(&f.doc, &mut f.ids, &[b]).unwrap();
+    let (tx, group) = build::group(&f.doc, &f.resolved(), &mut f.ids, &[b]).unwrap();
     f.commit(tx);
     let in_group = f.children_of(group);
     let masked = f.add(f.artboard, NodeKind::Group, (60.0, 0.0));
@@ -4321,7 +4388,7 @@ fn can_frame_answers_what_frame_would_do() {
     // because that needs a `Resolved` and *"it is not a thing a user can act
     // on"*. An empty group has no measurable extent, so the row stays live and
     // the verb reports the failure.
-    let (tx, empty) = build::group(&f.doc, &mut f.ids, &[a]).unwrap();
+    let (tx, empty) = build::group(&f.doc, &f.resolved(), &mut f.ids, &[a]).unwrap();
     f.commit(tx);
     let inner = f.children_of(empty);
     f.commit(Transaction(vec![Operation::DeleteNode { id: inner[0] }]));

@@ -2134,9 +2134,15 @@ fn a_booleans_box_corner_is_not_its_transforms_origin() {
         Affine::translate((190.0, 90.0)),
     );
 
-    let (tx, node) =
-        ondin_core::build::boolean(&doc, &mut ids, &[a, b], ondin_core::BoolOp::Union, None)
-            .unwrap();
+    let (tx, node) = ondin_core::build::boolean(
+        &doc,
+        &Resolved::rebuild(&doc),
+        &mut ids,
+        &[a, b],
+        ondin_core::BoolOp::Union,
+        None,
+    )
+    .unwrap();
     doc.apply(&tx).unwrap();
     let res = Resolved::rebuild(&doc);
     let world = res.world_transform(node).unwrap();
@@ -2904,9 +2910,15 @@ fn a_mask_among_a_booleans_operands_does_not_clip_them() {
         Affine::translate((200.0, 0.0)),
     );
     let mut res = Resolved::rebuild(&doc);
-    let (tx, boolean) =
-        ondin_core::build::boolean(&doc, &mut ids, &[a, b], ondin_core::BoolOp::Union, None)
-            .expect("two rects union");
+    let (tx, boolean) = ondin_core::build::boolean(
+        &doc,
+        &res,
+        &mut ids,
+        &[a, b],
+        ondin_core::BoolOp::Union,
+        None,
+    )
+    .expect("two rects union");
     let dirty = doc.apply(&tx).expect("the boolean applies").dirty;
     res.update(&doc, &dirty);
     assert_eq!(

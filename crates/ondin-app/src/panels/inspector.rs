@@ -2447,7 +2447,7 @@ impl OndinApp {
         // last word is for. Without it the control is live and the click reports a
         // failure, which is the state the identity row's tooltips exist to prevent.
         let mut probe = ondin_core::IdSource::new(0);
-        if build::mask(doc, &mut probe, ids, key).is_err() {
+        if build::mask(doc, &self.session.resolved, &mut probe, ids, key).is_err() {
             return Err("These layers cannot be wrapped in a group, so they cannot be masked");
         }
         Ok(MaskAction::Make {
@@ -2483,7 +2483,13 @@ impl OndinApp {
             }
             Ok(MaskAction::Make { members, key }) => {
                 let grouped = members.len() > 1;
-                match build::mask(&self.session.doc, &mut self.session.ids, &members, key) {
+                match build::mask(
+                    &self.session.doc,
+                    &self.session.resolved,
+                    &mut self.session.ids,
+                    &members,
+                    key,
+                ) {
                     Ok((tx, made)) => {
                         if self.commit_edit(tx) {
                             self.session.selection.set_one(made);
@@ -2651,7 +2657,8 @@ impl OndinApp {
         let can_ungroup = ids.iter().any(is_container);
         let lone_container = ids.len() == 1 && can_ungroup;
         let mut probe = ondin_core::IdSource::new(0);
-        let can_group = !lone_container && build::group(&self.session.doc, &mut probe, ids).is_ok();
+        let can_group = !lone_container
+            && build::group(&self.session.doc, &self.session.resolved, &mut probe, ids).is_ok();
         (can_group, can_ungroup)
     }
 
@@ -2699,7 +2706,12 @@ impl OndinApp {
     /// still the thing they were working on, and the next gesture is usually `Enter`
     /// into its points, which needs it selected anyway (§15 D228).
     pub(crate) fn outline_shape(&mut self, id: NodeId) {
-        match build::outline(&self.session.doc, &mut self.session.ids, id) {
+        match build::outline(
+            &self.session.doc,
+            &self.session.resolved,
+            &mut self.session.ids,
+            id,
+        ) {
             Ok((tx, made)) => {
                 if self.commit_edit(tx) {
                     self.session.selection.set_one(made);
@@ -2843,6 +2855,7 @@ impl OndinApp {
         let mut probe = ondin_core::IdSource::new(0);
         build::boolean(
             &self.session.doc,
+            &self.session.resolved,
             &mut probe,
             &ids,
             ondin_core::BoolOp::Union,
@@ -2893,7 +2906,14 @@ impl OndinApp {
         // same reason align does: a key nested inside another member is not an
         // operand of this boolean at all.
         let key = self.session.selection.key().filter(|k| ids.contains(k));
-        match build::boolean(&self.session.doc, &mut self.session.ids, &ids, op, key) {
+        match build::boolean(
+            &self.session.doc,
+            &self.session.resolved,
+            &mut self.session.ids,
+            &ids,
+            op,
+            key,
+        ) {
             Ok((tx, made)) => {
                 if self.commit_edit(tx) {
                     // Select the result, as grouping does: the new container is
@@ -7628,7 +7648,7 @@ impl OndinApp {
     /// leaves to the edit rather than re-reading as a move.
     fn baked_placement(&self, id: NodeId, p: &InsetPlacement) -> Vec<Operation> {
         match self.session.doc.get(id) {
-            Some(node) => baked_ops(id, node, p.local, &p.kind),
+            Some(node) => build::baked_ops(id, node, p.local, &p.kind),
             None => Vec::new(),
         }
     }
@@ -7699,7 +7719,6 @@ impl OndinApp {
         use ondin_core::LengthPct;
         let set = inset_of(insets, edge);
         let distance = place.distance(edge);
-        let extent = place.extent(edge);
         let shown = match set {
             Some(LengthPct::Px(v)) | Some(LengthPct::Percent(v)) => v,
             None => distance,
@@ -7764,20 +7783,7 @@ impl OndinApp {
             resp
         };
         if flip && let Some(was) = set {
-            // Converted, not re-valued: the same distance in the other unit.
-            let px = was.resolve(extent);
-            let to = match was {
-                LengthPct::Px(_) => LengthPct::Percent(0.0).rewritten(px, extent),
-                LengthPct::Percent(_) => LengthPct::Px(px),
-            };
-            let ops = subjects
-                .iter()
-                .filter_map(|id| {
-                    let mut i = *self.session.doc.get(*id)?.insets();
-                    *inset_mut(&mut i, edge) = Some(to);
-                    Some(Operation::SetInsets { id: *id, insets: i })
-                })
-                .collect();
+            let ops = self.inset_flip_ops(subjects, edge, matches!(was, LengthPct::Px(_)));
             self.commit_edit(Transaction(ops));
             return;
         }
@@ -7789,16 +7795,76 @@ impl OndinApp {
             } else {
                 LengthPct::Px(v)
             };
-            subjects
-                .iter()
-                .filter_map(|id| {
-                    let mut i = self.session.display_node(*id)?.insets();
-                    *inset_mut(&mut i, edge) = Some(value);
-                    Some(Operation::SetInsets { id: *id, insets: i })
-                })
-                .collect()
+            self.typed_inset_ops(subjects, edge, value)
         };
         self.edit_valve(&resp, Transaction(ops));
+    }
+
+    /// The unit suffix's edit: every subject's pinned `edge` converted to `%` of
+    /// its container (`to_percent`) or to px — **each subject's own distance, in
+    /// its own container** (§15 D932). Converted, not re-valued, so nothing moves.
+    ///
+    /// The anchor's converted value was written to every subject until then, which
+    /// moved each one pinned at another distance and pinned each one that was not
+    /// pinned at all. A unit switch converts a pin and never makes one, so a
+    /// subject with the edge unpinned is left out. The unit the anchor shows is
+    /// the one every subject switches *to*.
+    fn inset_flip_ops(
+        &self,
+        subjects: &[NodeId],
+        edge: ondin_core::container::Edge,
+        to_percent: bool,
+    ) -> Vec<Operation> {
+        use ondin_core::LengthPct;
+        subjects
+            .iter()
+            .filter_map(|id| {
+                let mut i = *self.session.doc.get(*id)?.insets();
+                let own = inset_of(&i, edge)?;
+                let extent = self.inset_placement(*id)?.extent(edge);
+                let px = own.resolve(extent);
+                *inset_mut(&mut i, edge) = Some(if to_percent {
+                    LengthPct::Percent(0.0).rewritten(px, extent)
+                } else {
+                    LengthPct::Px(px)
+                });
+                Some(Operation::SetInsets { id: *id, insets: i })
+            })
+            .collect()
+    }
+
+    /// A typed or dragged inset's edit: `edge` pinned at `value` on every subject.
+    ///
+    /// **An in-flow item this pins leaves its flow where it is drawn** (§15
+    /// D932): its stored transform is where it goes back to (§15 D875), not where
+    /// it is, and the axis the edit does not pin is placed by it — so typing L into
+    /// an item laid at y 0 dropped it to its stored y, 120 px below. So its drawn
+    /// placement is written first, `toggle_pin`'s rule. The typed edge is as typed
+    /// — D894's carve-out, an explicit placement rather than a pin of where the
+    /// layer is — and only the other axis is kept.
+    fn typed_inset_ops(
+        &self,
+        subjects: &[NodeId],
+        edge: ondin_core::container::Edge,
+        value: ondin_core::LengthPct,
+    ) -> Vec<Operation> {
+        subjects
+            .iter()
+            .filter_map(|id| {
+                let mut i = self.session.display_node(*id)?.insets();
+                *inset_mut(&mut i, edge) = Some(value);
+                let mut ops = if ondin_core::build::is_flex_item(&self.session.doc, *id) {
+                    self.inset_placement(*id)
+                        .map(|p| self.baked_placement(*id, &p))
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+                ops.push(Operation::SetInsets { id: *id, insets: i });
+                Some(ops)
+            })
+            .flatten()
+            .collect()
     }
 
     /// The frames a frame panel is acting on: the selected **artboards**, in
@@ -12338,47 +12404,6 @@ const GRID_CELL: f32 = 28.0;
 /// between two lists doing the same job, which is the drift `CARD_ROW_GAP`'s own
 /// note is about. Spelled as the constant, it cannot drift again.
 const GRID_ROW_GAP: f32 = ui::CARD_ROW_GAP;
-
-/// The ops that write `local` and `kind` — where layout or insets draw `node` —
-/// into its stored transform and size, each only where it differs.
-///
-/// **The one spelling of "keep it where it is drawn"** for the three edits that
-/// take a layer out of whatever was placing it: a Position pin changed
-/// (`OndinApp::baked_placement`), an Item card's *Unpin insets*, and a container's
-/// layout set to `none` (`panels::layout`, §15 D878) — and, its `SetGeometry`
-/// half alone, for W's or H's `px` picked from the sizing menu, which fixes a
-/// hugged or percentage size where it is drawn (`size_mode_tx`, §15 D879). Written as one function
-/// because the kind-to-patch table is a definition of a shape's size, and a second
-/// copy would be the first to miss a kind.
-pub(super) fn baked_ops(
-    id: NodeId,
-    node: &ondin_core::Node,
-    local: Affine,
-    kind: &NodeKind,
-) -> Vec<Operation> {
-    let mut ops = Vec::new();
-    if node.transform() != local {
-        ops.push(Operation::SetTransform {
-            id,
-            transform: local,
-        });
-    }
-    if kind != node.kind() {
-        let geometry = match kind {
-            NodeKind::Rect { size, .. }
-            | NodeKind::Ellipse { size }
-            | NodeKind::Polygon { size, .. }
-            | NodeKind::Star { size, .. }
-            | NodeKind::Artboard { size } => Some(GeometryPatch::Size(*size)),
-            NodeKind::Text { sizing, .. } => Some(GeometryPatch::TextSizing(*sizing)),
-            _ => None,
-        };
-        if let Some(geometry) = geometry {
-            ops.push(Operation::SetGeometry { id, geometry });
-        }
-    }
-    ops
-}
 
 /// The Transform card's W and H sizing modes for one layer (§15 D879): which
 /// `layout::size_modes` offers, which each side is in, and the percentage a `%`
@@ -25170,8 +25195,13 @@ mod slot_decision_tests {
         // group and the loose rect, and `set_key` silently did nothing.
         let (mut app, ids) = three(&ctx);
         let mut src = ondin_core::IdSource::new(0x51E);
-        let (tx, group) = build::group(&app.session.doc, &mut src, &[ids[0], ids[1]])
-            .expect("two siblings group");
+        let (tx, group) = build::group(
+            &app.session.doc,
+            &app.session.resolved,
+            &mut src,
+            &[ids[0], ids[1]],
+        )
+        .expect("two siblings group");
         app.session.commit(tx);
         app.session.selection.set(vec![group, ids[0], ids[2]]);
         app.session.selection.set_key(ids[0]);
@@ -26004,6 +26034,118 @@ mod inset_card_tests {
             id: frame,
             geometry: GeometryPatch::Size(Size::new(w, 200.0)),
         }]));
+    }
+
+    fn create_rect(id: NodeId, parent: NodeId, index: usize, w: f64, at: (f64, f64)) -> Operation {
+        Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind: NodeKind::Rect {
+                size: Size::new(w, 30.0),
+                corner_radii: RoundedRectRadii::default(),
+            },
+            transform: Some(Affine::translate(at)),
+            name: None,
+        }
+    }
+
+    /// **Typing an inset into an in-flow item leaves its other axis where it is
+    /// drawn** (§15 D932, the release review's `[X6.1-L1-02]`). A 400 × 200 row
+    /// aligned to the start holds `a` 40 wide and `b` 60 wide, `b` stored at (250,
+    /// 120) — where it was before the layout took it — and laid at (40, 0). Typed
+    /// `left: 100`, it leaves the flow; its vertical axis, with no inset, is placed
+    /// by the stored transform, and dropped to y 120.
+    ///
+    /// **Flip run**, `typed_inset_ops`' `baked_placement` dropped: fails on *"y
+    /// kept"*, 120 against 0, the predicted site.
+    #[test]
+    fn a_typed_inset_on_an_in_flow_item_keeps_its_other_axis() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = ondin_core::IdSource::new(7);
+        let (root, frame, a, b) = (ids.mint(), ids.mint(), ids.mint(), ids.mint());
+        let mut doc = ondin_core::Document::new(root);
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: frame,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(400.0, 200.0),
+                },
+                transform: Some(Affine::IDENTITY),
+                name: None,
+            },
+            create_rect(a, frame, 0, 40.0, (0.0, 0.0)),
+            create_rect(b, frame, 1, 60.0, (250.0, 120.0)),
+            Operation::SetDisplay {
+                id: frame,
+                display: Some(ondin_core::container::Display::Flex(
+                    ondin_core::container::Flex {
+                        align_items: ondin_core::container::AlignItems::Start,
+                        ..Default::default()
+                    },
+                )),
+            },
+        ]))
+        .unwrap();
+        app.session.adopt_document(doc, None);
+        assert_eq!(drawn(&app, b).origin(), (40.0, 0.0).into(), "the fixture");
+        let ops = app.typed_inset_ops(&[b], Pin::Left, ondin_core::LengthPct::Px(100.0));
+        app.session.commit(Transaction(ops));
+        assert_eq!(drawn(&app, b).x0, 100.0, "x as typed");
+        assert_eq!(drawn(&app, b).y0, 0.0, "y kept");
+    }
+
+    /// **The unit suffix over several layers converts each one's own distance,
+    /// and pins nothing** (§15 D932, `[X6.1-L1-01]`). A 300 × 200 frame holds `A`
+    /// pinned `left: 40px` and `B` pinned `left: 100px`; switched to %, `A` reads
+    /// 13.333% and `B` 33.333%, and neither moves. With `B` unpinned instead it is
+    /// left unpinned. The anchor's converted value was written to both, so `B`
+    /// moved to x 40 — and an unpinned `B` was pinned there.
+    ///
+    /// **Flip run**, the anchor's value written to every subject again: fails on
+    /// *"B stays"*, x0 40 against 100, the predicted site.
+    #[test]
+    fn a_unit_switch_over_several_layers_converts_each_and_pins_nothing() {
+        use ondin_core::LengthPct;
+        for b_pinned in [true, false] {
+            let (mut app, frame, a) = app_with_pinnable();
+            let b = app.session.ids.mint();
+            assert!(app.session.commit(Transaction(vec![create_rect(
+                b,
+                frame,
+                1,
+                50.0,
+                (100.0, 100.0)
+            )])));
+            app.toggle_pin(&[a], Pin::Left, true);
+            if b_pinned {
+                app.toggle_pin(&[b], Pin::Left, true);
+            }
+            let (a0, b0) = (drawn(&app, a), drawn(&app, b));
+            let ops = app.inset_flip_ops(&[a, b], Pin::Left, true);
+            app.session.commit(Transaction(ops));
+            // A third of 300 is not exact in binary, so to within a hair.
+            let near =
+                |r: KRect, s: KRect| (r.x0 - s.x0).abs() < 1e-9 && (r.x1 - s.x1).abs() < 1e-9;
+            assert!(near(drawn(&app, a), a0), "A stays: {:?}", drawn(&app, a));
+            assert!(near(drawn(&app, b), b0), "B stays: {:?}", drawn(&app, b));
+            let left = |id| app.session.doc.get(id).unwrap().insets().left;
+            assert!(
+                matches!(left(a), Some(LengthPct::Percent(p)) if (p - 40.0 / 3.0).abs() < 1e-3)
+            );
+            if b_pinned {
+                assert!(
+                    matches!(left(b), Some(LengthPct::Percent(p)) if (p - 100.0 / 3.0).abs() < 1e-3),
+                    "B converted at its own distance: {:?}",
+                    left(b)
+                );
+            } else {
+                assert_eq!(left(b), None, "an unpinned B is not pinned");
+            }
+        }
     }
 
     /// A pin from the diagram keeps the layer exactly where it is, and then holds

@@ -2730,9 +2730,15 @@ fn an_exclusion_exports_the_even_odd_rule() {
         });
     }
     doc.apply(&Transaction(ops)).expect("two circles");
-    let (tx, node) =
-        ondin_core::build::boolean(&doc, &mut ids, &[a, b], ondin_core::BoolOp::Exclude, None)
-            .expect("an exclusion");
+    let (tx, node) = ondin_core::build::boolean(
+        &doc,
+        &Resolved::rebuild(&doc),
+        &mut ids,
+        &[a, b],
+        ondin_core::BoolOp::Exclude,
+        None,
+    )
+    .expect("an exclusion");
     doc.apply(&tx).expect("apply");
     doc.apply(&Transaction(vec![Operation::SetFills {
         id: node,

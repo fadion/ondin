@@ -37,11 +37,11 @@
 //! inert** (§15 D882), because its container places it and a typed position would
 //! be dropped at the commit door (`build::keep_flex_sizes`, §15 D877's amendment).
 
-use super::inspector::baked_ops;
 use crate::app::OndinApp;
 use crate::theme::{self, color, icon};
 use crate::ui::{self, Prefix, Scrub, Suffix};
 use eframe::egui;
+use ondin_core::build::baked_ops;
 use ondin_core::container::{
     self, AlignContent, AlignItems, Dimension, Display, Flex, FlexDirection, FlexWrap, Grid,
     JustifyContent, LayoutItem,
@@ -1074,7 +1074,7 @@ impl OndinApp {
     /// Give every subject the layout of `display` cell `to` — none, flex or grid.
     ///
     /// **Taking it away keeps every child where it is drawn** — its used transform
-    /// and size written back as its own (`inspector::baked_ops`), and a frame that
+    /// and size written back as its own (`build::baked`, §15 D929), and a frame that
     /// was hugging its children keeps the size it hugged to. Without that, `none`
     /// would send every child back to wherever its stored transform last had it,
     /// which is a place it has not been drawn since the layout was set: the
@@ -1116,16 +1116,15 @@ impl OndinApp {
                     display: Some(display),
                 }),
                 (None, true) => {
+                    // **Every child, not only the in-flow ones** (§15 D929): a
+                    // laid group's pinned children are placed against its box,
+                    // and with the layout gone the group has none — so they too
+                    // are written where they are drawn, their insets kept (inert
+                    // under a plain group, and live again if the layout comes
+                    // back). And a child that is a container with a layout of its
+                    // own keeps the size this layout gave it (`build::baked`).
                     for child in node.children() {
-                        if ondin_core::build::is_flex_item(doc, *child)
-                            && let (Some(c), Some(local), Some(kind)) = (
-                                doc.get(*child),
-                                res.used_local(doc, *child),
-                                res.used_kind(doc, *child),
-                            )
-                        {
-                            ops.extend(baked_ops(*child, c, local, kind));
-                        }
+                        ops.extend(ondin_core::build::baked(doc, res, *child));
                     }
                     // A frame hugging its children keeps the size it hugged to.
                     if let Some(kind @ NodeKind::Artboard { .. }) = res.used_kind(doc, *id) {
@@ -2477,6 +2476,125 @@ mod tests {
             s.app.session.doc.get(s.frame).unwrap().display().is_some(),
             "one undo step"
         );
+    }
+
+    /// **`display: none` keeps a laid group's pinned children, and a laid group
+    /// its laid box** (§15 D929, the release review's `[R1-L2-03]`) — the two
+    /// children the arm skipped when it baked only the in-flow ones.
+    ///
+    /// (a) A group at (500, 300), outside any flow, lays out a row of `a` and `b`
+    /// beside `c`, pinned to its top right and stored at (0, 0): `c` is drawn
+    /// against the group's laid box, which the group no longer has once its
+    /// layout is gone, so it fell back to (0, 0) — 140 px left of where it was.
+    /// (b) The scene's frame holds a group with a row of its own and `grow: 1`,
+    /// drawn as wide as the frame's row leaves it; with the frame's layout gone
+    /// the group is a layout root, and its `auto` box shrank to hug its children.
+    ///
+    /// ⚠️ **(a)'s group is outside a flow on purpose.** A laid group that is itself
+    /// an item loses its padding and its growth with its layout, so its box — and
+    /// with it the slot its parent places it at — changes, and everything inside
+    /// moves with it. That is the parent's layout answering a different box, not
+    /// a child left behind; a first draft of this test put the group in the
+    /// frame's row and measured exactly that 20 px.
+    ///
+    /// **Flip run**, the arm baking only `is_flex_item` children again: fails on
+    /// *"c stayed against where the box was"*, the predicted site; (b) needs the
+    /// container half of `build::baked`, which core's
+    /// `a_grown_laid_group_keeps_its_box_when_wrapped` flips.
+    #[test]
+    fn display_none_keeps_a_laid_groups_pinned_children_and_a_grown_groups_box() {
+        let mut s = scene();
+        let (g, c) = (s.app.session.ids.mint(), s.app.session.ids.mint());
+        let (frame, root) = (s.frame, s.app.session.doc.root());
+        assert!(s.app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: g,
+                parent: root,
+                index: 1,
+                kind: NodeKind::Group,
+                transform: Some(Affine::translate((500.0, 300.0))),
+                name: None,
+            },
+            Operation::Reparent {
+                id: s.a,
+                new_parent: g,
+                index: 0,
+            },
+            Operation::Reparent {
+                id: s.b,
+                new_parent: g,
+                index: 1,
+            },
+            Operation::CreateNode {
+                id: c,
+                parent: g,
+                index: 2,
+                kind: NodeKind::Rect {
+                    size: Size::new(10.0, 10.0),
+                    corner_radii: RoundedRectRadii::default(),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetDisplay {
+                id: g,
+                display: Some(Display::Flex(Flex {
+                    column_gap: 10.0,
+                    padding: [20.0; 4],
+                    ..Default::default()
+                })),
+            },
+            Operation::SetInsets {
+                id: c,
+                insets: ondin_core::Insets {
+                    top: Some(ondin_core::LengthPct::Px(0.0)),
+                    right: Some(ondin_core::LengthPct::Px(0.0)),
+                    ..Default::default()
+                },
+            },
+        ])));
+        let (g0, c0) = (drawn(&s.app, g), drawn(&s.app, c));
+        assert_eq!(c0.x1, g0.x1, "the fixture: c is pinned to the box's right");
+        assert_eq!(c0.x0, 640.0, "140 right of where it is stored");
+        s.app.set_display(&[g], 0);
+        assert_eq!(drawn(&s.app, c), c0, "c stayed against where the box was");
+
+        // (b): the group, emptied of its pinned child's layout, moved into the
+        // frame's row and grown.
+        let (h, r) = (s.app.session.ids.mint(), s.app.session.ids.mint());
+        assert!(s.app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: h,
+                parent: frame,
+                index: 0,
+                kind: NodeKind::Group,
+                transform: None,
+                name: None,
+            },
+            Operation::CreateNode {
+                id: r,
+                parent: h,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(20.0, 20.0),
+                    corner_radii: RoundedRectRadii::default(),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetDisplay {
+                id: h,
+                display: Some(Display::Flex(Flex {
+                    padding: [10.0; 4],
+                    ..Default::default()
+                })),
+            },
+        ])));
+        set_item(&mut s.app, h, |i| i.grow = 1.0);
+        let h0 = drawn(&s.app, h);
+        assert!(h0.width() > 100.0, "the fixture: grown, {}", h0.width());
+        s.app.set_display(&[frame], 0);
+        assert_eq!(drawn(&s.app, h), h0, "the grown group kept its laid box");
     }
 
     /// **A mode picked from the W/H menu moves nothing** (`size_mode_tx`, §15

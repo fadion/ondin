@@ -1256,6 +1256,7 @@ fn a_ghost_evaluates_a_boolean_inside_a_boolean() {
     let res = Resolved::rebuild(&doc);
     let (tx, outer) = build::boolean(
         &doc,
+        &res,
         &mut ids,
         &[inner, extra],
         ondin_core::BoolOp::Subtract,
@@ -1263,7 +1264,6 @@ fn a_ghost_evaluates_a_boolean_inside_a_boolean() {
     )
     .unwrap();
     doc.apply(&tx).expect("wrap");
-    let _ = res;
 
     let template = doc.capture_subtree(outer).expect("capture");
     let (nodes, new_root) = ondin_core::remap_subtree(&template, &mut ids).expect("remap");
@@ -1331,6 +1331,7 @@ fn dragging_an_operand_of_a_nested_boolean_previews_the_outer_one_too() {
     let res = Resolved::rebuild(&doc);
     let (wrap, _outer) = build::boolean(
         &doc,
+        &res,
         &mut ids,
         &[inner, r3],
         ondin_core::BoolOp::Subtract,
@@ -1338,7 +1339,6 @@ fn dragging_an_operand_of_a_nested_boolean_previews_the_outer_one_too() {
     )
     .expect("Subtract(Union(r1, r2), r3)");
     doc.apply(&wrap).expect("wrap");
-    let _ = res;
 
     // The gesture: drag `r2`, an operand of the **inner** union, 260 units right.
     // Two booleans are affected and their order is the whole question.

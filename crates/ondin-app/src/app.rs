@@ -4089,7 +4089,12 @@ impl OndinApp {
             self.session.info("Select two or more layers to group");
             return;
         }
-        match build::group(&self.session.doc, &mut self.session.ids, &ids) {
+        match build::group(
+            &self.session.doc,
+            &self.session.resolved,
+            &mut self.session.ids,
+            &ids,
+        ) {
             Ok((tx, group_id)) => {
                 if self.session.commit(tx) {
                     self.finish_grouping(group_id);
@@ -4203,7 +4208,7 @@ impl OndinApp {
             .filter_map(|g| self.session.doc.get(*g))
             .flat_map(|n| n.children().to_vec())
             .collect();
-        let tx = match build::ungroup_all(&self.session.doc, &groups) {
+        let tx = match build::ungroup_all(&self.session.doc, &self.session.resolved, &groups) {
             Ok(tx) => tx,
             Err(e) => {
                 self.session.fail(format!("Cannot ungroup: {e}"));
@@ -12805,11 +12810,21 @@ mod ungroup_tests {
             })
             .collect();
         app.session.adopt_document(doc, None);
-        let (tx, g1) =
-            build::group(&app.session.doc, &mut app.session.ids, &made[0..2]).expect("a group");
+        let (tx, g1) = build::group(
+            &app.session.doc,
+            &app.session.resolved,
+            &mut app.session.ids,
+            &made[0..2],
+        )
+        .expect("a group");
         app.session.commit(tx);
-        let (tx, g2) =
-            build::group(&app.session.doc, &mut app.session.ids, &made[2..4]).expect("a group");
+        let (tx, g2) = build::group(
+            &app.session.doc,
+            &app.session.resolved,
+            &mut app.session.ids,
+            &made[2..4],
+        )
+        .expect("a group");
         app.session.commit(tx);
         app.session.selection.set(vec![g1, g2]);
         (app, g1, g2, made)
@@ -12938,8 +12953,13 @@ mod ungroup_tests {
         }]))
         .expect("a rect");
         app.session.adopt_document(doc, None);
-        let (tx, group) =
-            build::group(&app.session.doc, &mut app.session.ids, &[rect]).expect("a group");
+        let (tx, group) = build::group(
+            &app.session.doc,
+            &app.session.resolved,
+            &mut app.session.ids,
+            &[rect],
+        )
+        .expect("a group");
         app.session.commit(tx);
         app.session.selection.set_one(group);
         // The fixture is in the state the assertions are about: one container,

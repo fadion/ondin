@@ -1315,3 +1315,259 @@ fn several_items_dragged_together_reorder_as_a_block() {
         "items of two containers are not a block"
     );
 }
+
+/// A 400 × 200 frame at the origin laying out a **stretching** row (gap 10,
+/// padding 20, CSS's default `align-items: stretch`) of two rects, 40 × 30 and
+/// 60 × 30, both created at (300, 150) — an in-flow item's stored translation is
+/// never where it is drawn (§15 D875). Drawn: `a` at 20..60 and `b` at 70..130,
+/// both stretched to 160 tall.
+fn stretched_pair() -> (Scene, NodeId, NodeId, NodeId) {
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(400.0, 200.0), (0.0, 0.0));
+    let a = s.add(f, rect(40.0, 30.0), (300.0, 150.0));
+    let b = s.add(f, rect(60.0, 30.0), (300.0, 150.0));
+    s.display(
+        f,
+        Some(Display::Flex(Flex {
+            column_gap: 10.0,
+            row_gap: 10.0,
+            padding: [20.0; 4],
+            ..Default::default()
+        })),
+    );
+    assert_eq!(
+        (s.bounds(a), s.bounds(b)),
+        (
+            Rect::new(20.0, 20.0, 60.0, 180.0),
+            Rect::new(70.0, 20.0, 130.0, 180.0)
+        ),
+        "the fixture"
+    );
+    (s, f, a, b)
+}
+
+/// **Group, *Frame selection*, a boolean and *Use as mask* over in-flow items
+/// leave every member where it is drawn** (§15 D929, the release review's
+/// `[R1-L2-01]`). Each wrapped the members by their *stored* transforms: grouped,
+/// both rects went back to (300, 150), the new group took their slot measured
+/// from there, and `b` was drawn at 20..80 — on top of `a`, both 30 tall.
+///
+/// Every verb through the commit door the app uses (`keep_insets`, then
+/// `keep_flex_sizes`), with the members' world boxes compared whole — place and
+/// size, since the stretch is half of what was lost. A mask is the exception the
+/// loop explains: its group is placed by its content's box, so the pair moves as
+/// one, and what is asserted is the pair.
+///
+/// **Flip run**, `group`'s `baked` call deleted: fails on *"group keeps a"*, 30
+/// tall against 160 — the stretch lost, where *"keeps b"* at x0 20 against 70
+/// was predicted; `a`'s place survives because the group's box, measured from
+/// the stored transforms, still lands at `a`'s slot. The loop stops there, so
+/// mask (which goes through `group`) is not reached.
+#[test]
+fn wrapping_flex_items_leaves_them_where_they_are_drawn() {
+    type Verb = fn(&Document, &Resolved, &mut IdSource, &[NodeId]) -> Vec<Operation>;
+    let verbs: [(&str, Verb); 4] = [
+        ("group", |d, r, ids, m| {
+            ondin_core::build::group(d, r, ids, m).unwrap().0.0
+        }),
+        ("frame", |d, r, ids, m| {
+            ondin_core::build::frame(d, r, ids, m).unwrap().0.0
+        }),
+        ("boolean", |d, r, ids, m| {
+            ondin_core::build::boolean(d, r, ids, m, ondin_core::BoolOp::Union, None)
+                .unwrap()
+                .0
+                .0
+        }),
+        ("mask", |d, r, ids, m| {
+            ondin_core::build::mask(d, r, ids, m, None).unwrap().0.0
+        }),
+    ];
+    for (name, verb) in verbs {
+        let (mut s, _, a, b) = stretched_pair();
+        let was = (s.bounds(a), s.bounds(b));
+        let ops = verb(&s.doc, &s.res, &mut s.ids, &[a, b]);
+        s.commit(ops);
+        if name == "mask" {
+            // A masked group's box in a flow is its content's, not the mask's
+            // (`container::atomic_box` leaves a mask out, as `world_bounds` does),
+            // so the group lands with `b` at the row's first slot and the mask
+            // goes with it — two slots become one, which is the layout's answer
+            // and not the wrap's. What the wrap owes is the pair as drawn.
+            let now = (s.bounds(a), s.bounds(b));
+            assert_eq!(
+                now.0.origin() - now.1.origin(),
+                was.0.origin() - was.1.origin(),
+                "mask keeps a where it was against b"
+            );
+            assert_eq!(
+                (now.0.size(), now.1.size()),
+                (was.0.size(), was.1.size()),
+                "mask keeps both sizes"
+            );
+            continue;
+        }
+        assert_eq!(s.bounds(a), was.0, "{name} keeps a");
+        assert_eq!(s.bounds(b), was.1, "{name} keeps b");
+    }
+}
+
+/// **Ungrouping a group with a layout leaves every child where it is drawn**
+/// (§15 D929, `[R1-L2-02]`). A frame (no layout) holds a group at (100, 100)
+/// laying out a row of `a` 40 × 30 and `b` 60 × 30, both stored at (300, 150),
+/// beside `c`, 10 × 10, pinned to the group's top right (§15 D887). Drawn: `a`
+/// at 120..160, `b` at 170..230, `c` at 240..250. Folding the stored transforms
+/// put `a` and `b` both at (400, 250) and re-pinned `c` against the frame from
+/// (100, 100).
+///
+/// **Flip run**, `ungroup` folding `node.transform()` again for the children
+/// rather than the used local: fails on *"a"* at x0 400 against 120, the
+/// predicted site.
+#[test]
+fn ungrouping_a_laid_group_leaves_its_children_where_they_are_drawn() {
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(800.0, 400.0), (0.0, 0.0));
+    let g = s.add(f, NodeKind::Group, (100.0, 100.0));
+    let a = s.add(g, rect(40.0, 30.0), (300.0, 150.0));
+    let b = s.add(g, rect(60.0, 30.0), (300.0, 150.0));
+    let c = s.add(g, rect(10.0, 10.0), (0.0, 0.0));
+    s.display(g, row());
+    s.commit(vec![Operation::SetInsets {
+        id: c,
+        insets: ondin_core::Insets {
+            top: Some(ondin_core::LengthPct::Px(0.0)),
+            right: Some(ondin_core::LengthPct::Px(0.0)),
+            ..Default::default()
+        },
+    }]);
+    let was = [a, b, c].map(|id| s.bounds(id));
+    assert_eq!(
+        (was[0].x0, was[1].x0, was[2].x0),
+        (120.0, 170.0, 240.0),
+        "the fixture"
+    );
+    let ops = ondin_core::build::ungroup(&s.doc, &s.res, g).unwrap().0;
+    s.commit(ops);
+    assert_eq!(s.bounds(a), was[0], "a");
+    assert_eq!(s.bounds(b), was[1], "b");
+    assert_eq!(s.bounds(c), was[2], "c, re-pinned against the frame");
+    assert!(
+        s.doc.get(c).unwrap().insets().is_authored(),
+        "and still pinned, now to the frame"
+    );
+}
+
+/// **A grown group with a layout keeps the size it was drawn at when a wrap
+/// takes it out of its row** (§15 D929, `build::baked`'s third part). In the
+/// stretching row, a column group holding one 40 × 30 rect is set `grow: 1`
+/// beside `a`, so it is drawn 310 wide and 160 tall; grouped with `a`, it is a
+/// layout root of its own and its `auto` box would hug the rect, 80 × 70. So the
+/// drawn size is written in px, and a group that was neither grown nor stretched
+/// (`align-self: start`) goes on hugging, its size left `auto` — the control
+/// half.
+///
+/// **Flip run**, `baked`'s container part deleted: fails on *"the grown group
+/// keeps its box"*, 80 × 70 against 310 × 160, the predicted site; the control
+/// stays green. (A first draft's control was stretched across the row, so it
+/// was 160 tall and the flip failed on it instead — a control that was not one.)
+#[test]
+fn a_grown_laid_group_keeps_its_box_when_wrapped() {
+    let (mut s, f, _, _) = stretched_pair();
+    let g = s.add(f, NodeKind::Group, (0.0, 0.0));
+    s.add(g, rect(40.0, 30.0), (0.0, 0.0));
+    s.display(
+        g,
+        Some(Display::Flex(Flex {
+            direction: FlexDirection::Column,
+            padding: [20.0; 4],
+            ..Default::default()
+        })),
+    );
+    s.item(g, |i| i.align_self = Some(AlignItems::Start));
+    let hugging = s.bounds(g);
+    assert_eq!(
+        hugging.size(),
+        Size::new(80.0, 70.0),
+        "the control: it hugs, neither grown nor stretched"
+    );
+    let ops = ondin_core::build::group(&s.doc, &s.res, &mut s.ids, &[g])
+        .unwrap()
+        .0
+        .0;
+    s.commit(ops);
+    assert_eq!(
+        s.bounds(g).size(),
+        hugging.size(),
+        "a hugging group goes on hugging"
+    );
+    let item = *s.doc.get(g).unwrap().item();
+    assert_eq!(
+        (item.width, item.height),
+        (
+            ondin_core::container::Dimension::Auto,
+            ondin_core::container::Dimension::Auto
+        ),
+        "and keeps its auto size, where its own pass already agreed"
+    );
+
+    let (mut s, f, a, b) = stretched_pair();
+    s.commit(vec![Operation::DeleteNode { id: b }]);
+    let g = s.add(f, NodeKind::Group, (0.0, 0.0));
+    s.add(g, rect(40.0, 30.0), (0.0, 0.0));
+    s.display(
+        g,
+        Some(Display::Flex(Flex {
+            direction: FlexDirection::Column,
+            padding: [20.0; 4],
+            ..Default::default()
+        })),
+    );
+    s.item(g, |i| i.grow = 1.0);
+    let grown = s.bounds(g);
+    assert_eq!(
+        (grown.width(), grown.height()),
+        (400.0 - 20.0 - 40.0 - 10.0 - 20.0, 160.0),
+        "the fixture: grown along the row, stretched across it"
+    );
+    let ops = ondin_core::build::group(&s.doc, &s.res, &mut s.ids, &[a, g])
+        .unwrap()
+        .0
+        .0;
+    s.commit(ops);
+    assert_eq!(s.bounds(g), grown, "the grown group keeps its box");
+}
+
+/// **Outlining a layer in a layout leaves it where it is drawn** (§15 D930,
+/// `[X1-L1-01]`): a 20 × 20 rect pinned `top: 10; right: 10` in the stretching
+/// row, and `b`, stretched to 160 tall. `replace_with_path` dropped the insets,
+/// so the pinned layer's path came back **in the flow**, pushed into the row
+/// after `b`; and `outline` cut its path from the stored kind, so the stretched
+/// `b` came back 30 tall — a path cannot stretch, so the size it is cut at is
+/// the size it keeps.
+///
+/// **Flip runs**: the `SetInsets` carry deleted fails on *"the pinned layer"*,
+/// at x0 140 against 370, the predicted site; `outline` reading the stored kind
+/// fails on *"the stretched one"*, 30 tall against 160.
+#[test]
+fn outlining_a_laid_layer_leaves_it_where_it_is_drawn() {
+    let (mut s, f, _, b) = stretched_pair();
+    let c = s.add(f, rect(20.0, 20.0), (0.0, 0.0));
+    s.commit(vec![Operation::SetInsets {
+        id: c,
+        insets: ondin_core::Insets {
+            top: Some(ondin_core::LengthPct::Px(10.0)),
+            right: Some(ondin_core::LengthPct::Px(10.0)),
+            ..Default::default()
+        },
+    }]);
+    let was = s.bounds(c);
+    assert_eq!(was, Rect::new(370.0, 10.0, 390.0, 30.0), "the fixture");
+    let (tx, path) = ondin_core::build::outline(&s.doc, &s.res, &mut s.ids, c).unwrap();
+    s.commit(tx.0);
+    assert_eq!(s.bounds(path), was, "the pinned layer");
+
+    let was = s.bounds(b);
+    let (tx, path) = ondin_core::build::outline(&s.doc, &s.res, &mut s.ids, b).unwrap();
+    s.commit(tx.0);
+    assert_eq!(s.bounds(path), was, "the stretched one");
+}

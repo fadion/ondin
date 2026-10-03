@@ -2139,6 +2139,7 @@ fn the_fill_rule_is_absent_until_a_path_is_given_one_and_never_for_a_boolean() {
     // An `Exclude` reports even-odd and stores nothing, so the bytes do not move.
     let (tx, b) = ondin_core::build::boolean(
         &doc,
+        &ondin_core::Resolved::rebuild(&doc),
         &mut IdSource::new(0x0E0D),
         doc.get(group).unwrap().children(),
         BoolOp::Exclude,

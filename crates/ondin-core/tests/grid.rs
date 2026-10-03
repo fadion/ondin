@@ -1375,3 +1375,35 @@ fn a_placement_reads_and_writes_as_css() {
         assert_eq!(parse_placement(bad), None, "{bad}");
     }
 }
+
+/// **Outlining a grid item keeps its cell** (§15 D930, the release review's
+/// `[X1-L1-01]`). Three 100 px columns, `a` set to `grid-column: 3`, `b` auto —
+/// so `b` takes the first cell and `a` the third. `replace_with_path` dropped
+/// the layer's item properties, so the outline of `a` came back auto-placed in
+/// the first cell and pushed `b` into the second: two layers moved by an edit
+/// that changes only how one of them is held.
+///
+/// **Flip run**, the `SetLayoutItem` carry deleted: fails on *"the path keeps
+/// a's cell"*, x0 0 against 200, the predicted site.
+#[test]
+fn outlining_a_grid_item_keeps_its_cell() {
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(300.0, 100.0), (0.0, 0.0));
+    let a = s.add(f, rect(20.0, 20.0), (0.0, 0.0));
+    let b = s.add(f, rect(20.0, 20.0), (0.0, 0.0));
+    s.display(
+        f,
+        Some(Display::Grid(Grid {
+            justify_items: Some(AlignItems::Start),
+            align_items: Some(AlignItems::Start),
+            ..grid(vec![px(100.0), px(100.0), px(100.0)], vec![px(50.0)])
+        })),
+    );
+    s.item(a, |i| i.grid_column.start = GridPlacement::Line(3));
+    let (was_a, was_b) = (s.bounds(a), s.bounds(b));
+    assert_eq!((was_a.x0, was_b.x0), (200.0, 0.0), "the fixture");
+    let (tx, path) = ondin_core::build::outline(&s.doc, &s.res, &mut s.ids, a).unwrap();
+    s.commit(tx.0);
+    assert_eq!(s.bounds(path), was_a, "the path keeps a's cell");
+    assert_eq!(s.bounds(b), was_b, "and b keeps its own");
+}

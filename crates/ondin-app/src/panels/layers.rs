@@ -3349,8 +3349,15 @@ mod subtract_base_tests {
             .expect("a rect");
             made.push(id);
         }
-        let (tx, container) =
-            build::boolean(&doc, &mut ids, &made, op, key.map(|k| made[k])).expect("a boolean");
+        let (tx, container) = build::boolean(
+            &doc,
+            &ondin_core::Resolved::rebuild(&doc),
+            &mut ids,
+            &made,
+            op,
+            key.map(|k| made[k]),
+        )
+        .expect("a boolean");
         doc.apply(&tx).expect("apply the boolean");
         let operands = doc
             .get(container)

@@ -67,8 +67,8 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 946 index rows, 946 body headings, next free
-D947** (measured at the close of session 42) — but trust the procedure over any number written
+anywhere cited either. **The live figures: 951 index rows, 951 body headings, next free
+D952** (measured at the close of session 42's second half) — but trust the procedure over any number written
 down here, including that one. **No block is reserved**: the next session reserves its own.
 ⚠️ **Session 42 reserved D928–D951 once, up front, and spent nineteen** — D928–D946, closing
 all 59 findings of the v0.2.0 release review (`review/release-v0.2.0/`, its `▶▶ FIX PHASE`
@@ -81,7 +81,12 @@ flipping, which is the only reason neither saw the other's mutation as a red sui
 test during a concurrent run is a question about *whose* edit is in the tree before it is a
 question about the code. Census: 846 distinct numbers cited from `.rs`, `.toml` and `.wgsl`
 under `crates/`, none unresolved — nineteen arrivals (D928–D946) and no departures against
-`544919c`.
+`544919c`. ⚠️ **Then the maintainer asked for the close's "noticed and left alone" list to be
+fixed**, and the session reserved **D947–D958** and spent five (D947–D951). One of the seven
+items was **written to pin a defect and found none** (D948's text `px` pick) — the close had
+listed it from reading, and the test said otherwise; the entry says so rather than inventing a
+fix. The closing negative grep over **D952–D958 found zero sites** and they are released.
+Census: 851, five arrivals (D947–D951) and no departures against `cd5244f`.
 ⚠️ **Session 41 reserved D926–D937 and spent two** — D926 (an in-flow item leaves its layout
 by the pointer) and D927 (a grid drop stopped whole at the last track). 🚨 **D927 was typed into
 a comment a minute before the block was reserved** — the warning below, again; the negative grep

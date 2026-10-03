@@ -1555,7 +1555,9 @@ its screen length — 759,234 shapes and 46.8 ms a frame for one selected 12-col
 and 2.86 M shapes and 106 ms for a 1000-track grid wholly off screen, measured in release by the
 release review. `OndinApp::dashed_in_view` cuts each line to the view grown by one dash period, its
 start pulled back to a whole number of periods from the line's true start so the pattern holds still
-under a pan; a gap band outside the view is skipped, and so is a container whose box misses it.
+under a pan; a gap band outside the view is skipped, and so is a container whose box misses it —
+**before its layout pass** (§15 D951), so a container off screen costs no pass; culled after it, as it
+first was, it saved only the track list.
 `track_lines` merges an edge with the last one only, the spans being laid in order — it searched every
 edge, quadratic in the track count.
 
@@ -4736,7 +4738,9 @@ pub trait ScenePainter {
   items back** at their stored transforms — a container with no layout roots no pass — which the
   preview/commit differential found. Ghosts are not in the view's tree, so a copy dragged into a flex
   row is laid out on release, and one dragged into a grid the same: `lay_out` lays both, and
-  `absorb`'s `SetDisplay` and `SetLayoutItem` arms leave a ghost unpatched — read, not measured.
+  `absorb`'s `SetDisplay` and `SetLayoutItem` arms leave a ghost unpatched — read, not measured. **The
+  grid's release is measured since §15 D950**: a copy kept in three `100px` columns is auto-placed at
+  (100, 0), where the drop alone would put it at (20, 10); the preview half is still read.
   **`InsertSubtree`'s `index` is
   honoured**, and `scene::paint_node` interleaves ghosts among their parent's real children by it
   rather than drawing them last. Drawing last was the same z-order only while every caller appended;
@@ -8514,8 +8518,10 @@ off the field's response it opened under the prefix (`ui::value_field_unit`, §1
 a mode moves nothing
 (`layout::size_mode_tx`), converting what the axis **specifies** — a number as it is, `auto` as a
 shape's or frame's stored size, the drawn size only under a keyword — and not the drawn size, which on
-a grown item is the specified one plus the line's share; `px` writes the picked axis only, and the lit
-row picks nothing; the Item card's basis and limit menus convert the same way, each subject its own
+a grown item is the specified one plus the line's share; `px` writes the picked axis only — a text's
+through `baked_ops`, its stored mode kept, so W's gives an auto-width label `AutoHeight` and H's fixes
+the box (§15 D948) — and the lit row picks nothing, which on `%`, whose conversion rounds to a tenth, is
+what stops a re-pick rewriting `33.33%` as `33.3%` (§15 D948); the Item card's basis and limit menus convert the same way, each subject its own
 value in its own container (§15 D943); typing writes px, or `%` while the mode is `%`; a click in and out writes
 nothing in any mode, and a typed size keeps a text's stored sizing mode (§15 D940, §5.6, §9.3). **The proportion lock is
 disabled while either side is a keyword or `%`**, with the reason on hover. A laid group's typed W and
@@ -8710,7 +8716,8 @@ columns first; and the padding. Switching between flex and grid keeps the paddin
 `grid-row` typed as CSS, start and end, and `justify-self` and `align-self`, the second offering
 `baseline` as the align rows do (§15 D939); each self-alignment *Auto
 · \<inherited\>* while unset; and in either, four limits behind a *Min / max* disclosure, its
-closed summary counted per item and *Mixed* where the counts differ (§15 D892's amendment),
+closed summary read per item and *Mixed* where the items set different limits (§15 D892's
+amendment, D948),
 a basis or limit left at a keyword reading it in the digits' place (§15 D895), with no unit beside it
 — typing or dragging a number is how to leave it (§15 D906);
 for a layer the flow skips it says why instead, in words — *Absolutely positioned* and which edges
@@ -11402,7 +11409,7 @@ The pointer is the one thing every item of a block shares. **Two cases come befo
 first, by the area rule — the pointer over such a frame is always inside the container, so a badge
 could not be dropped into a card beside it in its own row; and an item pressed on the part that
 overflows its container, the pointer outside from the first pixel, stays while its moved box still
-meets the container's bounds.
+meets the container's own box, turned with it (`OndinApp::box_meets`, §15 D949).
 
 Creation reads the same way. `canvas::draw_target` gives a new layer the topmost frame that actually
 **contains** the press and the document root when no frame does, so a shape, a text node or a path
@@ -12331,7 +12338,9 @@ where to open, or what a file is called on disk:
   time, until its cover renders. The list asks for no covers at all, and the project mosaic — up to
   `MOSAIC_MAX` a project card — asks under the same gate (§15 D863).
   ⚠️ **The worker's answers are taken once a dashboard pass, not only when a card asks** (§15 D863).
-  `Covers::pass` runs at the top of `dashboard_ui`, before any card, and drains; `get` drains too,
+  `Covers::pass` runs once a frame at the top of `dashboard_ui`, before any card — *where*, and not
+  only whether, being what the eviction's recency guard below rests on, pinned by counting the frame's
+  calls (§15 D947) — and drains; `get` drains too,
   which costs nothing the second time. An answer is a fact as well as a picture — `Cover::Unreadable`
   is the red mark — so one that arrived after the grid was left used to sit in the channel for as long
   as the list was up.

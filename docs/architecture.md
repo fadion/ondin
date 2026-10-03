@@ -1,7 +1,7 @@
 # Ondin — Architecture
 
 > Ondin is a native, open-source 2D design tool (Figma-class scope, minimal v1) for Windows and Linux,
-> written in Rust. Its document model is API-first: the same operation path that serves the UI serves
+> and for Apple Silicon Macs as a release target (§15 D956), written in Rust. Its document model is API-first: the same operation path that serves the UI serves
 > AI agents over MCP. Foundations-first — the seams (identity, mutation path, renderer boundary,
 > serialization) matter more than feature count, because features are cheap to add and seams are
 > expensive to change.
@@ -108,7 +108,9 @@
   deliberately *not* coming is D191, `images.md` having been folded into this document and deleted —
   minus that entry's **mask** bullet, which the user reversed on 2026-08-21 and which is now in scope
   above.)
-- macOS, web, mobile (wgpu keeps macOS cheap later; do not target now).
+- Web, mobile. ~~macOS~~ **is a release target since 2026-10-03, Apple Silicon only, at the
+  maintainer's direction** (§15 D952, D956) — but nobody developing Ondin has a Mac: CI's macOS leg
+  is its only compiler, and neither it nor the release workflow has yet run (§15 D955).
 
 ### Non-goals
 
@@ -482,6 +484,20 @@ permission.
     the two legitimately differ on culling, geometry spelling and element ordering, and both recorded
     divergences were ink-set bugs. **They agree today**, which the finding could not establish by
     reading.
+12. **The app's distribution identity never changes once shipped** (§15 D956, D957). This is the
+    *app's* identity, not invariant 3's: an installed copy finds its updates by these values, and
+    renaming one orphans every install made under the old one — silently, with no route back to those
+    users to tell them. Velopack's `--packId Ondin` and its channels `win-x64`, `linux-x64` and
+    `osx-arm64`; the reverse-DNS id `io.github.fadion.Ondin` (`chrome::APP_ID` — the Wayland app id
+    and X11 class, the desktop entry, the AppStream metadata, the icons and the macOS `--bundleId`);
+    the release feed `https://github.com/fadion/ondin` and the opt-out `ONDIN_NO_UPDATE_CHECK`
+    (`update.rs`); and the package repositories' base URL `https://fadion.github.io/ondin`, their
+    keyring path, `Origin: Ondin`/`Suite: stable` and `main`/`amd64`, which every user's source list
+    names. *A new platform adds a channel; it never renames one.*
+    ⚠️ **Not all of them are guarded.** `release.yml` refuses an unknown channel, a test pins the feed
+    and the opt-out, and a `pages.yml` step compares the repositories' values across their copies —
+    **`--packId` and the app id have no check at all**, the id being spelled in several files nothing
+    compares.
 
 ---
 
@@ -5892,6 +5908,9 @@ other were right, which is why both exist.
   export
   settings instead — every layer that carries any, at the formats and sizes the file says. It is a
   different command rather than a fourth format, and refusing `--all --png` is what says so.
+  ⚠️ **On Windows a release `ondin.exe` has no console to print to** (§15 D953), being a
+  GUI-subsystem binary, so the CLI is reached through `ondin.com` beside it — a console twin that
+  runs `ondin.exe` with its own standard handles, and that a bare `ondin` at a prompt resolves to.
   ⚠️ **One document, and `-o` takes a filename rather than whatever token comes next** (§15 D670).
   A second positional is **refused**, naming both files, rather than overwriting the first — a build
   step whose glob matched twice would otherwise export the wrong document into the right name — and
@@ -6139,8 +6158,8 @@ goes with the row above* rather than *these are two controls* (§15 D274).
 repository root, and both halves are needed because neither reaches the other's surfaces:
 
 - **The window.** `main::window_icon` decodes `icons/convertico-Ondin_256x256.png` to RGBA and
-  hands it to `ViewportBuilder::with_icon`. This paints the title bar, the taskbar button and
-  Alt-Tab. It is not optional in the presence of the resource icon below: winit registers its
+  hands it to `ViewportBuilder::with_icon`. This paints the taskbar button and Alt-Tab — and painted
+  the title bar, until Windows and Linux lost the system's (§15 D952). It is not optional in the presence of the resource icon below: winit registers its
   window class with `hIcon: 0` and does **not** fall back to the executable's icon, so without
   this call a running Ondin shows the generic Windows application glyph. One size has to be
   chosen, because `WM_SETICON` receives the same pixels for `ICON_BIG` and `ICON_SMALL`; 256 is
@@ -6158,11 +6177,37 @@ The build script failure is fatal rather than a warning, on the grounds that the
 already requires the same SDK for `link.exe` — an icon missing on some machines and not others is
 the failure mode worth refusing.
 
+**The window draws its own title bar on Windows and Linux (2026-10-03, §15 D952).** Both open
+undecorated, and `chrome.rs` supplies what the system's frame did: `caption_buttons` — minimize,
+maximize or restore, close — flush against the right end of each top bar, `drag_strip` laid first
+under each bar so its empty parts move the window and a double-click maximizes it, and `resize_zones`,
+eight `Order::Foreground` areas round the edge, none while maximized. macOS keeps its decorations
+under a transparent title bar, so the traffic lights and the resize border are the system's, and the
+bars start 72pt in to clear them. **Which host draws what is decided once**, in `chrome::Host::current`
+— the module's one `cfg!` — and everything else asks a `chrome::Chrome` a capability, so every branch
+compiles on every host. ⚠️ **The strip arms itself on the press**, because egui hands the drag of a
+press on a click-only button to the drag-sensing strip beneath it; ⚠️ **and the chrome never takes
+the keyboard focus** (`POINTER_ONLY`). D952 has both.
+
+**And it updates itself (§15 D954).** A Velopack install checks this repository's GitHub Releases at
+startup and every three hours, downloads what is newer without asking, and offers *Restart to update*
+in a chip beside Settings in both top bars; `ONDIN_NO_UPDATE_CHECK` stops it contacting GitHub at all.
+A portable archive, a `.deb` or `.rpm` and a `cargo` build are not Velopack installs and never check,
+a `.deb` or `.rpm` being updated by its package manager instead (§15 D957). The restart goes through the window's close
+request, so unsaved work is asked about first. A release build writes a log to
+`config_dir()/ondin/ondin.log`, because on Windows it has no console (§15 D953) and a failed check
+shows nothing in the window. What it is released as, and which of those names may never change, is
+§15 D956 and §4's twelfth invariant.
+
 ### 9.2 Layout
 
 ```
 ondin-app/src/
-├─ main.rs         # CLI: gui (default) | export | serve | mcp-proxy; eframe bootstrap
+├─ main.rs         # CLI: gui (default) | export | serve | mcp-proxy; Velopack's hook; eframe bootstrap
+├─ bin/ondin-cli.rs # the console twin Windows ships as ondin.com (§15 D953)
+├─ chrome.rs       # the window's own caption buttons, drag strip and resize edges, per host (§15 D952)
+├─ update.rs       # the Velopack updater and the top bars' chip (§15 D954)
+├─ logging.rs      # the log file, config_dir()/ondin/ondin.log (§15 D954)
 ├─ app.rs          # OndinApp: window layout, top bar, tool rail, Action dispatch, file IO
 ├─ session.rs      # EditorSession: Document, History, Resolved, IdSource, Selection, Camera,
 │                  #   save state, status. NO GPU — see below
@@ -10695,7 +10740,8 @@ here to match, so `ViewSwitch::accel` answers `None` for two of the twelve.
 
 **Rightmost in that cluster is the Settings button** — Phosphor's upright `sliders`, 28pt, ten points
 clear of everything to its left because everything to its left is *this document's* and this is the
-app's. It opens `settings.rs`'s modal, which is where preferences that belong to no panel live: the
+app's. The update chip, when there is one, sits between Settings and that gap, being the app's too
+(§15 D954). It opens `settings.rs`'s modal, which is where preferences that belong to no panel live: the
 arrow-key nudge step, *Show tree guides* and *Collapse groups on open* under one **Layers** eyebrow,
 and the web-font switch with the cache row beside it (§5.4a, §15 D330, §15 D331). `Ctrl+,` is the same door (`shortcuts.md` §8) and can only *open* one, because
 `input::resolve` is not called at all while a modal is up. It is deliberately **not** a fourth
@@ -10706,7 +10752,9 @@ written on the spot, where this modal stages everything and writes on *Save chan
 
 **There is no *Share*.** An accent-outlined button sat at the right end of the cluster until
 2026-08-24 and is gone: this is a local file editor with nothing to share, so it was a promise nothing
-behind it could keep. The Settings button took its place in the corner.
+behind it could keep. The Settings button took its place in the corner — which on Windows and Linux
+is the window's own caption buttons' since §15 D952, Settings sitting the bar's 14-point margin to
+their left.
 
 The three dropdowns are mutually exclusive **by construction**: `app::TopMenu` holds one value
 (`None | View | Snap | Zoom`), replacing the old `zoom_menu: bool`, and the design models it the same
@@ -10723,7 +10771,9 @@ enumeration is exhaustive and is the whole of the ruling** (§15 D750): guides, 
 selection box, the handles, the size badge, the hover outline and the frame name tags all stay, being
 things you edit *with* rather than parts of the app around them, and the mode exists for editing a
 large design with the panels out of the way or on a laptop screen the panels eat half of. The ruler
-**bars** go because they are window furniture at the edge of the frame. *A reader tempted to fold
+**bars** go because they are window furniture at the edge of the frame. ⚠️ **On Windows and Linux
+the top bar is the window's title bar too** (§15 D952), so its caption buttons and drag strip go with
+it, and until Escape the window cannot be moved, minimized or closed with the mouse — read, not ruled. *A reader tempted to fold
 `present` into some overlay's predicate should read D750 first* — two such guards existed, each
 arguing at length that present mode *"hides every other overlay"*, and neither was true even of the
 code. It is *not* a fourth view switch beside the others: it
@@ -12779,12 +12829,15 @@ first cannot structurally see, `a_second_recover_asks_before_it_spends_the_first
 dialog no headless probe can answer, and says so in its own doc.
 
 ⚠️ **The unsaved-close card is raised by cancelling the window close, and the cancel must be re-armed
-on every request rather than only the first** (`handle_close_request`, §15 D415). The title bar is not
-covered by an in-app `egui::Modal`, so a second click on ✕ — the ordinary reflex when a dialog appears
-— arrives while the card is already up; a guard on that state emitted no `CancelClose`, which has
-exactly one emitter in the workspace, so nothing cancelled the close and eframe took the window down
-with the card still unanswered. Cancelling again is free: the flag is idempotent and the card is
-already drawn.
+on every request rather than only the first** (`handle_close_request`, §15 D415). The system's title
+bar is not covered by an in-app `egui::Modal`, so a second click on ✕ — the ordinary reflex when a
+dialog appears — arrives while the card is already up; a guard on that state emitted no `CancelClose`,
+which has exactly one emitter in the workspace, so nothing cancelled the close and eframe took the
+window down with the card still unanswered. Cancelling again is free: the flag is idempotent and the
+card is already drawn. ⚠️ **On Windows and Linux the ✕ is the app's own since §15 D952**, in a top
+bar the card's backdrop covers — egui's `Modal` is an `Order::Foreground` area over the whole window;
+read, not tried — so there the second request is a system close such as Alt+F4 rather than a click;
+macOS keeps its traffic lights. The re-arm is needed exactly as before.
 ⚠️ **The card offers three answers behind two buttons**: *Recover*, *Discard*, and `Later` for the ✕,
 Escape and the backdrop, which pop the question for this launch and leave the file for the next one.
 *Discard* is the only one of the three that deletes, and a free dismissal must never become one.
@@ -13100,7 +13153,8 @@ tool list, no handlers, no socket.
 
 **M0 — Scaffold.** Five crates compile with module stubs, trait signatures, dependency rules.
 Versions pinned (verify §2 table against latest). CI: build + clippy + fmt + forbidden-dep check.
-✅ `cargo build` + `cargo test` green.
+✅ `cargo build` + `cargo test` green. ⚠️ **The CI half was not built until 2026-10-03** (§15 D955) —
+every gate until then a hand run on one Windows machine — and it has not yet run.
 
 **M1 — Core model + ops + history + IO.** §5 minus Resolved. Includes the Text node model (layout
 comes in M2).

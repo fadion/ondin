@@ -8,7 +8,7 @@ documents, and is untracked.
 | --- | --- |
 | `docs/architecture.md` | The design and the invariants. **Source of truth.** ~13,000 lines. |
 | `docs/decisions.md` | **§15** — every deviation from that design, **from D1 with no gaps** — the last is §15.0's last index row, not a figure here (this cell read *"D1–D912"* fifteen numbers late) — each with a verdict. ~54,000 lines. |
-| `docs/roadmap.md` | Open work, decided non-goals, parked decisions, post-v1. **Every `Now` section is clear as of 2026-09-23** — *Files, library and storage* reopened and closed that day (the cover cache's lifecycle, §15 D863–D864); what is left is *Later* and §0. **`Next · Container layout`** (flexbox, CSS grid and insets — `architecture.md` §5.3c, §15 D867–D883): steps 1–3 built and committed — step 3's cards (D878–D883), the maintainer's first-look fixes (D884–D891) and six rulings on what flex had left (D892–D897) all landed in session 36. Session 37 (D904–D912): a resize's holds in the preview, a top-edge resize aligning to the end, `Start`/`End` made `flex-start`/`flex-end` as the cards always drew (D909), and a layout nested in a plain group laid by both the preview and `keep_insets`. **Flex owes nothing** — its owed tests landed in session 39 (D901's amendment). **Step 4, grid, is built** (sessions 38–40, D913–D925): model and engine, preview and gestures, the cards, and the canvas track lines (D921), all committed; session 40 closed what was left beside them — a held `baseline` (D923), the two `MAX_TRACKS` (D924), the lines through a layout scrub (D925, D921's open question answered by the session and not ruled), and the last track-line tests. **The maintainer looked on 2026-10-02** over a ten-item list of the riskiest flex and grid cases and found two, both fixed that day (session 41): an in-flow item now leaves its layout by the pointer rather than by its box (D926), and a grid drop stops whole at the last track (D927). **The v0.2.0 release review's 59 findings were all closed on 2026-10-03** (session 42, D928–D946; fifteen rulings made under the maintainer's delegation, each open to overturning). **Steps 1–4 owe nothing; next is step 5, components and overrides — not designed.** |
+| `docs/roadmap.md` | Open work, decided non-goals, parked decisions, post-v1. **One `Now` section is open: *Distribution*** (2026-10-03, §15 D957) — the apt/dnf repository's signing key, its two secrets, GitHub Pages, and the fingerprint written into `install.sh` and `README.md`, all the maintainer's to do; until then a tagged Release run ends red at its `pages` job though its assets publish. The rest of *Now* has been clear since 2026-09-23; what is left beside it is *Later* and §0. **`Next · Container layout`** (flexbox, CSS grid and insets — `architecture.md` §5.3c, §15 D867–D883): steps 1–3 built and committed — step 3's cards (D878–D883), the maintainer's first-look fixes (D884–D891) and six rulings on what flex had left (D892–D897) all landed in session 36. Session 37 (D904–D912): a resize's holds in the preview, a top-edge resize aligning to the end, `Start`/`End` made `flex-start`/`flex-end` as the cards always drew (D909), and a layout nested in a plain group laid by both the preview and `keep_insets`. **Flex owes nothing** — its owed tests landed in session 39 (D901's amendment). **Step 4, grid, is built** (sessions 38–40, D913–D925): model and engine, preview and gestures, the cards, and the canvas track lines (D921), all committed; session 40 closed what was left beside them — a held `baseline` (D923), the two `MAX_TRACKS` (D924), the lines through a layout scrub (D925, D921's open question answered by the session and not ruled), and the last track-line tests. **The maintainer looked on 2026-10-02** over a ten-item list of the riskiest flex and grid cases and found two, both fixed that day (session 41): an in-flow item now leaves its layout by the pointer rather than by its box (D926), and a grid drop stops whole at the last track (D927). **The v0.2.0 release review's 59 findings were all closed on 2026-10-03** (session 42, D928–D946; fifteen rulings made under the maintainer's delegation, each open to overturning). **Steps 1–4 owe nothing; next is step 5, components and overrides — not designed.** |
 | `docs/shortcuts.md` | The whole keymap — bound, unbound and agreed. |
 | `docs/context-menus.md` | The context-menu spec and its own deviation ledger. |
 | `docs/vm.md` | The language behind Command Mode. Nothing here is built. |
@@ -67,9 +67,15 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 951 index rows, 951 body headings, next free
-D952** (measured at the close of session 42's second half) — but trust the procedure over any number written
+anywhere cited either. **The live figures: 957 index rows, 957 body headings, next free
+D958** (measured at the close of session 43) — but trust the procedure over any number written
 down here, including that one. **No block is reserved**: the next session reserves its own.
+⚠️ **Session 43 reserved D952–D963 and spent six** — D952 (the window's own chrome), D953
+(the GUI subsystem and the `ondin.com` twin), D954 (auto-update and the log file), D955 (CI),
+D956 (the Release workflow and Linux packages), D957 (the apt/dnf repository on Pages and
+`install.sh`), all ported from Schemaic at the maintainer's direction. The closing negative
+grep over **D958–D963 found zero sites** and they are released. Census: 856 distinct numbers
+cited from `crates/`, none unresolved.
 ⚠️ **Session 42 reserved D928–D951 once, up front, and spent nineteen** — D928–D946, closing
 all 59 findings of the v0.2.0 release review (`review/release-v0.2.0/`, its `▶▶ FIX PHASE`
 table is the status). Fifteen maintainer rulings were made **under the maintainer's
@@ -685,6 +691,14 @@ checkpoint commit, it is stale, and it is worth correcting rather than working a
   `commit` skill carries the format and the pre-commit bar and is the authority.
 - **No attribution trailer.** No `Co-Authored-By`, no "Generated with Claude Code".
 - **Version bumps are explicit-only** and belong to the `release` skill.
+- **A tag is a release, built and published by CI** (§15 D956): pushing `vX.Y.Z` runs
+  `release.yml`, which uploads installers that **every installed copy will offer to update
+  to** (§15 D954). There is no such thing as a test tag. A dry run is the Release
+  workflow's `workflow_dispatch`, which packs everything and publishes nothing.
+- **Identity values are permanent once shipped**: Velopack's `--packId Ondin`, the channels
+  `win-x64`/`linux-x64`/`osx-arm64`, and `chrome::APP_ID` (`io.github.fadion.Ondin`, also the
+  macOS bundle id and the Linux desktop entry). Renaming one orphans every install of it, with
+  no route back to those users. Add a channel; never rename one.
 
 **The safety net is now the working tree plus the edit tools, not the commit.** The `Edit`
 tool is what stops a write from destroying a file, and a session's uncommitted work is
@@ -1249,12 +1263,17 @@ stale four times before the session that measured it had ended.* Every figure in
 reading, and the reading is over the moment it is taken.
 
 ⚠️ **So it is the first of a class, and the rest of the class has no gate at all.**
-`canvas::os_cursor_desktop_px`, `library::clock::local_offset` and `library::store`'s
-permissions arm each have a `#[cfg(not(windows))]` twin, and `panels::show_in_file_browser`
+`canvas::os_cursor_desktop_px` and `library::clock::local_offset` each have a
+`#[cfg(not(windows))]` twin, `library::store`'s permissions arm a `cfg(unix)` one, and `panels::show_in_file_browser`
 has a `#[cfg(target_os = "macos")]` arm — **four decision functions this machine never
-compiles**, in either profile, under any gate. A rename, a signature change or a
-`rust-mechanic` sweep passes straight over them. Not fixable by adding a gate here; it wants
-a cross-compile or a CI runner.
+compiles**, in either profile, under any local gate. A rename, a signature change or a
+`rust-mechanic` sweep passes straight over them here. ⚠️ **Since 2026-10-03 CI is that gate**
+(`.github/workflows/ci.yml`, §15 D955): its Linux and macOS legs compile, lint and test
+every one of them — **written before either leg had run once**; the first push is the
+first time — so **a change touching a `cfg`-gated arm is not verified until CI is
+green**, and saying "all gates green" before the push is a claim about Windows only. A local
+`cargo check --target x86_64-unknown-linux-gnu` reaches the four library crates and **not
+`ondin-app`**: `ring` needs a Linux C compiler this machine does not have.
 
 ### Dead code has two blind spots
 

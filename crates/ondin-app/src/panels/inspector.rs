@@ -26619,6 +26619,203 @@ mod inset_card_tests {
             "no badge in a plain frame, where everything is absolute (§15 D891)"
         );
     }
+
+    /// Somewhere on the screen nothing in the card is drawn — a click here takes
+    /// focus away from a field, which is the way out a hand takes.
+    const AWAY: egui::Pos2 = egui::pos2(5.0, 850.0);
+
+    /// One frame of the Position card at the inspector column's 284, with
+    /// `events`; every text run it painted, with its rect.
+    fn card_frame(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        time: &mut f64,
+        events: Vec<egui::Event>,
+    ) -> Vec<(String, egui::Rect)> {
+        *time += 0.1;
+        let out = ctx.run_ui(
+            egui::RawInput {
+                time: Some(*time),
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(400.0, 900.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                ui.set_max_width(284.0);
+                app.inspector_insets(ui);
+            },
+        );
+        out.shapes
+            .iter()
+            .filter_map(|cs| match &cs.shape {
+                egui::epaint::Shape::Text(t) => Some((
+                    t.galley.text().to_owned(),
+                    t.galley.rect.translate(t.pos.to_vec2()),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A press and a release at `at`, and a frame after for focus to settle.
+    fn click_card(ctx: &egui::Context, app: &mut OndinApp, time: &mut f64, at: egui::Pos2) {
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        card_frame(ctx, app, time, vec![egui::Event::PointerMoved(at)]);
+        card_frame(ctx, app, time, vec![button(true)]);
+        card_frame(ctx, app, time, vec![button(false)]);
+        card_frame(ctx, app, time, Vec::new());
+    }
+
+    /// The centre of the run reading `text` in the field whose prefix is `label`:
+    /// on the prefix's row and right of it, the nearest such.
+    fn in_field(runs: &[(String, egui::Rect)], label: &str, text: &str) -> egui::Pos2 {
+        let prefix = runs
+            .iter()
+            .find(|(t, _)| t == label)
+            .unwrap_or_else(|| panic!("no {label:?} prefix in {runs:?}"))
+            .1;
+        runs.iter()
+            .filter(|(t, r)| {
+                t == text
+                    && (r.center().y - prefix.center().y).abs() < 3.0
+                    && r.left() > prefix.right()
+            })
+            .min_by(|a, b| a.1.left().total_cmp(&b.1.left()))
+            .unwrap_or_else(|| panic!("no {text:?} in the {label} field: {runs:?}"))
+            .1
+            .center()
+    }
+
+    /// **An inset field only clicked through pins nothing** (§9.4, §15 D874; the
+    /// release review's `[X6.1-L6-01]`) — `inset_field`'s click-through guard,
+    /// `set.is_none() && v == shown`, through the real field. In the plain frame
+    /// `R` reads `auto` and `L` is held at its distance, 40 (§15 D891); neither is
+    /// pinned, and each is clicked into and away from. The guard is what hands the
+    /// valve an empty edit for that: the number in the field is still the distance
+    /// under it, so without the guard the valve's commit on losing focus pins the
+    /// edge there. Nothing moves either way, which is why only the stored insets
+    /// and the history can see it.
+    ///
+    /// Each click is asserted to have focused the field and the click away to
+    /// have released it, or a click that missed would pass with the guard gone.
+    ///
+    /// **Flip run**, `inset_field`'s guard made `false && set.is_none() && v ==
+    /// shown` (the release review's own mutation): fails on *"a click through R
+    /// pinned nothing"* with `right: Some(Px(160.0))` — 300 − 40 − 100, the
+    /// distance under the `auto` — the predicted site.
+    #[test]
+    fn clicking_through_an_unpinned_inset_field_pins_nothing() {
+        let (mut app, _frame, rect) = app_with_pinnable();
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut time = 0.0;
+        let before = drawn(&app, rect);
+        let depth = app.session.history.undo_depth();
+        let mut runs = Vec::new();
+        for _ in 0..3 {
+            runs = card_frame(&ctx, &mut app, &mut time, Vec::new());
+        }
+        for (label, shown) in [("R", "auto"), ("L", "40")] {
+            let at = in_field(&runs, label, shown);
+            click_card(&ctx, &mut app, &mut time, at);
+            assert!(
+                ctx.memory(|m| m.focused()).is_some(),
+                "the fixture: clicking {label} focused it"
+            );
+            click_card(&ctx, &mut app, &mut time, AWAY);
+            assert!(
+                ctx.memory(|m| m.focused()).is_none(),
+                "the fixture: clicking away let {label} go"
+            );
+            let insets = *app.session.doc.get(rect).unwrap().insets();
+            assert!(
+                insets.is_unset(),
+                "a click through {label} pinned nothing: {insets:?}"
+            );
+            assert_eq!(app.session.history.undo_depth(), depth, "and left no step");
+            assert_eq!(drawn(&app, rect), before, "and moved nothing");
+            runs = card_frame(&ctx, &mut app, &mut time, Vec::new());
+        }
+    }
+
+    /// **A number typed into an unpinned inset field pins it, and the unit suffix
+    /// then converts it in place** (`[X6.1-L6-01]`) — the field's other two doors,
+    /// through real events, where `a_typed_inset_on_an_in_flow_item_keeps_its_other_axis`
+    /// and `a_unit_switch_over_several_layers_converts_each_and_pins_nothing` call
+    /// the two ops builders directly. `R` typed `20` and clicked away from: one
+    /// step, right pinned at 20 px, the rect at x 300 − 20 − 100 = 180. Then its
+    /// `px` clicked: one more step, right at 20 / 300 = 6.667 %, the rect where it
+    /// was.
+    ///
+    /// The typed half is also the click-through guard's other boundary: a guard
+    /// that swallowed every edit to an unpinned field (`set.is_none()` alone)
+    /// leaves the test above green and turns this one red.
+    ///
+    /// **Flip run**, the guard's condition cut to `set.is_none()`: fails on
+    /// *"typed into R"*, `None` against `Some(Px(20.0))` — the predicted site; the
+    /// test above stays green under it. **Flip run**,
+    /// `inset_field`'s suffix arm made `if false && flip && …`: fails on *"the
+    /// suffix converted R"*, still `Px(20.0)` — predicted.
+    #[test]
+    fn a_typed_inset_pins_it_and_its_unit_suffix_converts_it() {
+        use ondin_core::LengthPct;
+        let (mut app, _frame, rect) = app_with_pinnable();
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut time = 0.0;
+        let depth = app.session.history.undo_depth();
+        let mut runs = Vec::new();
+        for _ in 0..3 {
+            runs = card_frame(&ctx, &mut app, &mut time, Vec::new());
+        }
+        click_card(&ctx, &mut app, &mut time, in_field(&runs, "R", "auto"));
+        assert!(
+            ctx.memory(|m| m.focused()).is_some(),
+            "the fixture: clicking R focused it"
+        );
+        for ch in "20".chars() {
+            card_frame(
+                &ctx,
+                &mut app,
+                &mut time,
+                vec![egui::Event::Text(ch.into())],
+            );
+        }
+        click_card(&ctx, &mut app, &mut time, AWAY);
+        let right = |app: &OndinApp| app.session.doc.get(rect).unwrap().insets().right;
+        assert_eq!(right(&app), Some(LengthPct::Px(20.0)), "typed into R");
+        assert_eq!(app.session.history.undo_depth(), depth + 1, "one step");
+        let pinned = drawn(&app, rect);
+        assert_eq!(pinned.x0, 180.0, "and placed by it");
+
+        for _ in 0..3 {
+            runs = card_frame(&ctx, &mut app, &mut time, Vec::new());
+        }
+        click_card(&ctx, &mut app, &mut time, in_field(&runs, "R", "px"));
+        assert!(
+            matches!(right(&app), Some(LengthPct::Percent(p)) if (p - 20.0 / 3.0).abs() < 1e-9),
+            "the suffix converted R: {:?}",
+            right(&app)
+        );
+        assert_eq!(
+            app.session.history.undo_depth(),
+            depth + 2,
+            "in one step of its own"
+        );
+        let after = drawn(&app, rect);
+        assert!(
+            (after.x0 - pinned.x0).abs() < 1e-9 && (after.x1 - pinned.x1).abs() < 1e-9,
+            "and nothing moved: {after:?}"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -26634,8 +26831,18 @@ mod multi_xy_flex_tests {
     /// free rect moved and the laid-out item stayed in its slot, saying nothing
     /// (§15 D882's gap).
     ///
-    /// **Flip run**, the `laid_out == 0` gate made `true`: fails on *"nothing
-    /// moved"*, the free rect shifted — the predicted site. ⚠️ **The first draft
+    /// **Flip run**, `inspector_multi_transform`'s X/Y gate —
+    /// `ui::disable_unless(ui, laid_out.is_none(), …)` — made `true`: fails on
+    /// *"nothing moved"*, the free rect at x 520 against 500 and the in-flow item
+    /// still in its slot — the predicted site. **Flip run**, `laid_out_xy`
+    /// answering `None` (`(false && laid_out > 0)`): fails here on the same line
+    /// and value, and on `only_one_containers_items_are_told_to_drag_to_reorder`'s
+    /// *"one row's items are told to drag"* too, since it is the hover's text as
+    /// well. ⚠️ **This named the mutation *"the `laid_out == 0` gate made
+    /// `true`"*** — an expression gone since §15 D912 moved the count into
+    /// `laid_out_xy`, so the flip as written could not be re-applied (the release
+    /// review's `[R2-L8-05]`); both were re-run on 2026-10-03 and the recorded
+    /// result held. ⚠️ **The first draft
     /// selected two in-flow items and its flip did not bite**: the commit door
     /// keeps an in-flow item's stored translation, so with no free member the
     /// open field changed nothing either way. The defect is the mixed selection's,

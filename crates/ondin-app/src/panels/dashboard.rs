@@ -9292,6 +9292,95 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// **The list view takes a cover's answer though no row asks for one** (§15
+    /// D863; the release review's `[X7-L6-01]`) — the `Covers::pass` call at the
+    /// top of `dashboard_ui`, which is D863's and D864's only production caller.
+    /// `cover.rs`' `a_pass_takes_the_answers_a_card_never_came_back_for` tests
+    /// what `pass` does; this tests that the dashboard makes the call.
+    ///
+    /// A document a newer build wrote is asked for once — what its grid card did
+    /// before the grid was left — and then only list frames are drawn. The list
+    /// asks for no covers (asserted, since the test means nothing if it did), so
+    /// nothing but the pass takes the worker's `Unreadable` out of the channel, and
+    /// without it the row's *UNREADABLE* chip never arrives.
+    ///
+    /// ⚠️ **The ask is `Covers::get` called directly, not a grid frame.** A second
+    /// grid frame could take the answer through the card's own `get`, and the list
+    /// would have nothing left to prove; after one direct `get` the answer is owed
+    /// and untaken, by construction.
+    ///
+    /// ⚠️ **A deadline, not `Covers::settle`**: `settle` takes the answers itself —
+    /// it calls `arrive` — so a test that settled before the list frames would be
+    /// green with the call deleted. Ten seconds for one tiny document, polled at
+    /// 5 ms: the shape of `cover.rs`' test above, §15 D820's lesson for anything
+    /// whose assertion waits on work finishing. `settle` runs once at the end, so
+    /// no work is left in flight.
+    ///
+    /// **Flip run**, `dashboard_ui`'s `self.covers.pass(ui.ctx())` line deleted:
+    /// fails on *"a list frame took the answer no row asked for"*, after the whole
+    /// deadline — the predicted site.
+    #[test]
+    fn the_list_view_takes_an_unreadable_answer_no_row_asks_for() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, root) = app(&ctx, "pass-list");
+        let mut broken = ondin_core::Document::new(app.session.ids.mint());
+        let path = store::file_document(&root, None, "From tomorrow", &mut broken).unwrap();
+        // Well-formed JSON this loader refuses, as in
+        // `a_document_this_build_cannot_open_wears_the_mark_and_a_healthy_one_does_not`.
+        let text = std::fs::read_to_string(&path).unwrap();
+        let at = text.find("\"schema_version\":").unwrap();
+        let end = at + text[at..].find(',').unwrap();
+        std::fs::write(
+            &path,
+            format!("{}\"schema_version\":9999{}", &text[..at], &text[end..]),
+        )
+        .unwrap();
+        app.library.refresh();
+        app.dash.nav = Nav::All;
+        app.dash.list_view = true;
+        let entry = app
+            .library
+            .entries
+            .iter()
+            .find(|e| e.path == path)
+            .cloned()
+            .expect("the fixture: the document is listed");
+        let chips = |app: &mut OndinApp, ctx: &egui::Context| {
+            galleys(app, ctx)
+                .into_iter()
+                .filter(|(_, _, t)| t == Mark::Unreadable.label())
+                .count()
+        };
+        assert_eq!(
+            chips(&mut app, &ctx),
+            0,
+            "the fixture: the scan calls it healthy and nothing has asked"
+        );
+        assert!(
+            !app.covers.asked_for(&entry),
+            "the fixture: the list asks for no covers"
+        );
+
+        let _ = app.covers.get(&ctx, &entry);
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::pos2(0.0, 0.0), SCREEN)),
+            ..Default::default()
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !app.covers.unreadable(&entry) && std::time::Instant::now() < deadline {
+            let _ = ctx.run_ui(input.clone(), |ui| app.dashboard_ui(ui));
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(
+            app.covers.unreadable(&entry),
+            "a list frame took the answer no row asked for"
+        );
+        assert_eq!(chips(&mut app, &ctx), 1, "and the row wears the chip");
+        app.covers.settle(&ctx);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// **All four of `remember_search`'s decisions, and the rows they feed**
     /// (§15 D619, `[S20.1-L6-05]`).
     ///

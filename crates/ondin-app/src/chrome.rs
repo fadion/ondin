@@ -64,6 +64,17 @@ const POINTER_ONLY: Sense = Sense::CLICK.union(Sense::DRAG);
 /// glyph, which is what every Windows user reads as "this closes the window".
 const CLOSE_HOVER: Color32 = Color32::from_rgb(0xC4, 0x2B, 0x1C);
 
+/// The height of present mode's strip ([`present_strip`]) — Windows 11's own
+/// caption height, so its buttons are the system's shape rather than the top
+/// bar's taller one.
+const STRIP_H: f32 = 32.0;
+
+/// How close to the window's top edge the pointer must come to bring present
+/// mode's strip out. A band, not the single top row: a pointer thrown at the
+/// top of a maximized window lands on row 0, but one moved there by hand on a
+/// window that is not maximized stops wherever the hand does.
+const REVEAL: f32 = 6.0;
+
 /// Which kind of window manager the app is running under. BSDs and anything
 /// else unrecognised are treated as Linux: an X11 or Wayland desktop.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -309,6 +320,74 @@ fn three_buttons(ui: &mut egui::Ui) {
     if resp.on_hover_text("Minimize").clicked() {
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
     }
+}
+
+/// **Present mode's way to the window's buttons** (§15 D958): a slim strip
+/// across the top of the window — the drag strip and the three caption buttons
+/// over the top bar's fill — shown while the pointer is at the window's top
+/// edge and for as long as it stays on the strip. Call once a frame while
+/// present mode is on.
+///
+/// Present mode hides the top bar, and on a host that draws its own controls
+/// the top bar *is* the title bar: without this the window could not be
+/// closed, moved, maximized or minimized with the mouse until Escape. Nothing
+/// on macOS ([`Chrome::draws_own_controls`]), whose traffic lights are the
+/// system's and stay on screen.
+///
+/// **Revealed only from the edge, and only with no button held.** Coming back
+/// down to the strip's height from below shows nothing — the canvas under it
+/// is artwork somebody is working on — and a drag that carries a shape up to
+/// the top of the screen must not open a strip over it. Once out, a held
+/// button keeps it out, so a press on a caption button that strays off the
+/// strip before the release does not take the button away from under it.
+///
+/// ⚠️ **[`Order::Middle`], not [`Order::Foreground`]**, which is the layer the
+/// resize zones are on ([`resize_zones`]). The strip is above the canvas and
+/// below the zones, as the top bar is: with the strip on top, the edge that
+/// reveals it would have been the edge the window could no longer be resized
+/// from, since reaching it is what puts the strip there.
+pub(crate) fn present_strip(ctx: &egui::Context, chrome: Chrome) {
+    if !chrome.draws_own_controls() {
+        return;
+    }
+    let id = Id::new("present-strip");
+    let screen = ctx.content_rect();
+    let strip = Rect::from_min_size(screen.min, Vec2::new(screen.width(), STRIP_H));
+    let (pointer, down) = ctx.input(|i| (i.pointer.hover_pos(), i.pointer.any_down()));
+    let was = ctx.data(|d| d.get_temp::<bool>(id).unwrap_or(false));
+    let shown = match pointer {
+        Some(p) if was => down || strip.contains(p),
+        Some(p) => !down && p.y <= screen.min.y + REVEAL,
+        None => was && down,
+    };
+    ctx.data_mut(|d| d.insert_temp(id, shown));
+    if !shown {
+        return;
+    }
+    egui::Area::new(id)
+        .order(Order::Middle)
+        .fixed_pos(strip.min)
+        .constrain(false)
+        .show(ctx, |ui| {
+            // The whole strip is the area's, so the canvas never sees a pointer
+            // that is over any part of it.
+            ui.set_min_size(strip.size());
+            ui.painter().rect_filled(strip, 0.0, color::TOPBAR);
+            ui.painter().hline(
+                strip.x_range(),
+                strip.max.y - 0.5,
+                Stroke::new(1.0, color::DIVIDER),
+            );
+            ui.scope_builder(
+                egui::UiBuilder::new()
+                    .max_rect(strip)
+                    .layout(egui::Layout::right_to_left(egui::Align::Center)),
+                |ui| {
+                    drag_strip(ui, strip);
+                    caption_buttons(ui, chrome);
+                },
+            );
+        });
 }
 
 /// A point on the half-pixel, so a 1-point stroke through it lands on one row
@@ -684,5 +763,153 @@ mod tests {
             "none while maximized: {sent:?}"
         );
         assert!(sent.contains(&C::Close), "and the corner is close's again");
+    }
+
+    /// One frame of present mode as the app draws it: a canvas over the whole
+    /// window, the resize zones and the strip, with `events` delivered. Returns
+    /// the viewport commands the frame sent and whether the canvas was clicked.
+    fn present_frame(
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+        maximized: bool,
+    ) -> (Vec<egui::ViewportCommand>, bool) {
+        let mut input = egui::RawInput {
+            screen_rect: Some(SCREEN),
+            time: Some(ctx.input(|i| i.time) + 0.1),
+            events,
+            ..Default::default()
+        };
+        input.viewports.insert(
+            egui::ViewportId::ROOT,
+            egui::ViewportInfo {
+                maximized: Some(maximized),
+                ..Default::default()
+            },
+        );
+        let chrome = Chrome::of(Host::Windows);
+        let mut canvas = false;
+        let out = ctx.run_ui(input, |ui| {
+            canvas = ui
+                .interact(SCREEN, Id::new("canvas"), Sense::click_and_drag())
+                .clicked();
+            resize_zones(ui.ctx(), chrome);
+            present_strip(ui.ctx(), chrome);
+        });
+        let sent = out
+            .viewport_output
+            .get(&egui::ViewportId::ROOT)
+            .map(|v| v.commands.clone())
+            .unwrap_or_default();
+        (sent, canvas)
+    }
+
+    /// The pointer moved through `path`, then a click at its last point;
+    /// every command sent, and whether the canvas took a click.
+    fn present_click(
+        ctx: &egui::Context,
+        path: &[Pos2],
+        maximized: bool,
+    ) -> (Vec<egui::ViewportCommand>, bool) {
+        let (mut sent, mut canvas) = (Vec::new(), false);
+        let at = *path.last().unwrap();
+        let events = path
+            .iter()
+            .map(|p| vec![egui::Event::PointerMoved(*p)])
+            .chain([vec![press(at, true)], vec![press(at, false)], Vec::new()]);
+        for e in events {
+            let (s, c) = present_frame(ctx, e, maximized);
+            sent.extend(s);
+            canvas |= c;
+        }
+        (sent, canvas)
+    }
+
+    fn fresh_present() -> egui::Context {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let _ = present_frame(&ctx, Vec::new(), false);
+        ctx
+    }
+
+    /// **Present mode's strip comes out at the top edge, and its close button
+    /// closes** — and only from the edge: a pointer that arrives at the
+    /// strip's height from the canvas below finds the canvas there, and one
+    /// that has left the strip has hidden it.
+    ///
+    /// **Flip run**, revealed from anywhere on the strip (`strip.contains(p)`
+    /// for the edge band in the unrevealed arm): fails on *"the canvas keeps
+    /// its click there"*. Predicted on *"not from below"* and wrong — the strip
+    /// came out under the pointer and took the press from the canvas, but no
+    /// `Close` arrived in the frames this test pumps. So it is the canvas
+    /// assertion that has the teeth for this case, not the command one.
+    #[test]
+    fn the_present_strip_comes_out_at_the_top_edge_and_closes() {
+        use egui::ViewportCommand as C;
+        let close = Pos2::new(790.0, 16.0);
+        let middle = Pos2::new(400.0, 300.0);
+
+        let ctx = fresh_present();
+        let (sent, canvas) = present_click(&ctx, &[middle, close], false);
+        assert!(!sent.contains(&C::Close), "not from below: {sent:?}");
+        assert!(canvas, "the canvas keeps its click there");
+
+        let ctx = fresh_present();
+        let (sent, canvas) = present_click(&ctx, &[Pos2::new(790.0, 2.0), close], false);
+        assert!(sent.contains(&C::Close), "from the edge: {sent:?}");
+        assert!(!canvas, "and the canvas under it saw nothing");
+
+        let ctx = fresh_present();
+        let (sent, _) = present_click(&ctx, &[Pos2::new(790.0, 2.0), middle, close], false);
+        assert!(!sent.contains(&C::Close), "left, and hidden: {sent:?}");
+    }
+
+    /// **A drag carried to the top of the window brings nothing out**: the
+    /// strip is for a pointer at rest, and a shape dragged up to the edge must
+    /// not have a strip opened over it.
+    ///
+    /// **Flip run**, the `!down` dropped from the reveal: fails at the
+    /// assertion, the strip out under the held button — the predicted site.
+    #[test]
+    fn a_held_button_does_not_bring_the_strip_out() {
+        let ctx = fresh_present();
+        let start = Pos2::new(400.0, 300.0);
+        let _ = present_frame(&ctx, vec![egui::Event::PointerMoved(start)], false);
+        let _ = present_frame(&ctx, vec![press(start, true)], false);
+        for y in [200.0, 60.0, 2.0] {
+            let _ = present_frame(
+                &ctx,
+                vec![egui::Event::PointerMoved(Pos2::new(400.0, y))],
+                false,
+            );
+        }
+        let out = ctx.data(|d| d.get_temp::<bool>(Id::new("present-strip")));
+        assert_eq!(out, Some(false), "a held button reveals nothing");
+    }
+
+    /// **The edge that reveals the strip still resizes the window**, because
+    /// the strip is on a layer beneath the resize zones — and a maximized
+    /// window, which has no zones, gives the edge to the strip.
+    ///
+    /// **Flip run**, the strip on `Order::Foreground` beside the zones: fails
+    /// on *"the top edge resizes"*, the strip newer on that layer and so on top
+    /// of the zone — the predicted site.
+    #[test]
+    fn the_top_edge_still_resizes_under_the_strip() {
+        use egui::ViewportCommand as C;
+        let edge = Pos2::new(400.0, 1.0);
+        let ctx = fresh_present();
+        let (sent, _) = present_click(&ctx, &[edge], false);
+        assert!(
+            sent.contains(&C::BeginResize(ResizeDirection::North)),
+            "the top edge resizes: {sent:?}"
+        );
+
+        let ctx = fresh_present();
+        let (sent, canvas) = present_click(&ctx, &[edge, Pos2::new(731.0, 16.0)], true);
+        assert!(
+            sent.contains(&C::Maximized(false)),
+            "maximized, the strip restores: {sent:?}"
+        );
+        assert!(!canvas);
     }
 }

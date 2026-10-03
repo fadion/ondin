@@ -6187,7 +6187,10 @@ bars start 72pt in to clear them. **Which host draws what is decided once**, in 
 — the module's one `cfg!` — and everything else asks a `chrome::Chrome` a capability, so every branch
 compiles on every host. ⚠️ **The strip arms itself on the press**, because egui hands the drag of a
 press on a click-only button to the drag-sensing strip beneath it; ⚠️ **and the chrome never takes
-the keyboard focus** (`POINTER_ONLY`). D952 has both.
+the keyboard focus** (`POINTER_ONLY`). D952 has both. **Present mode hides the top bar, and so the
+title bar with it**; `present_strip` brings the drag strip and the buttons back in a 32pt strip when
+the pointer reaches the window's top edge with no button held, on `Order::Middle` so the resize zone
+along that edge stays above it (§15 D958, §9.4).
 
 **And it updates itself (§15 D954).** A Velopack install checks this repository's GitHub Releases at
 startup and every three hours, downloads what is newer without asking, and offers *Restart to update*
@@ -6205,7 +6208,8 @@ shows nothing in the window. What it is released as, and which of those names ma
 ondin-app/src/
 ├─ main.rs         # CLI: gui (default) | export | serve | mcp-proxy; Velopack's hook; eframe bootstrap
 ├─ bin/ondin-cli.rs # the console twin Windows ships as ondin.com (§15 D953)
-├─ chrome.rs       # the window's own caption buttons, drag strip and resize edges, per host (§15 D952)
+├─ chrome.rs       # the window's own caption buttons, drag strip and resize edges, per host (§15 D952),
+│                  #   and present mode's strip (§15 D958)
 ├─ update.rs       # the Velopack updater and the top bars' chip (§15 D954)
 ├─ logging.rs      # the log file, config_dir()/ondin/ondin.log (§15 D954)
 ├─ app.rs          # OndinApp: window layout, top bar, tool rail, Action dispatch, file IO
@@ -10773,7 +10777,11 @@ things you edit *with* rather than parts of the app around them, and the mode ex
 large design with the panels out of the way or on a laptop screen the panels eat half of. The ruler
 **bars** go because they are window furniture at the edge of the frame. ⚠️ **On Windows and Linux
 the top bar is the window's title bar too** (§15 D952), so its caption buttons and drag strip go with
-it, and until Escape the window cannot be moved, minimized or closed with the mouse — read, not ruled. *A reader tempted to fold
+it — and come back on hover (§15 D958): `chrome::present_strip` shows them in a 32pt strip once the
+pointer reaches the window's top edge with no button held, keeps it while the pointer is on it or a
+button is down, and hides it when the pointer leaves. Reaching the strip's height from the canvas
+below shows nothing, so the artwork under it stays the canvas's. The strip is a way to the window's
+buttons and not out of the mode. *A reader tempted to fold
 `present` into some overlay's predicate should read D750 first* — two such guards existed, each
 arguing at length that present mode *"hides every other overlay"*, and neither was true even of the
 code. It is *not* a fourth view switch beside the others: it

@@ -2623,6 +2623,10 @@ impl eframe::App for OndinApp {
             if self.show_toolbar {
                 self.tool_rail(ui);
             }
+        } else {
+            // The top bar is the title bar too, so hiding it hid the window's
+            // buttons; this brings them back on hover at the top edge (§15 D958).
+            crate::chrome::present_strip(&ctx, crate::chrome::Chrome::current());
         }
 
         // Before the canvas, because the canvas is what reads the answer. The note

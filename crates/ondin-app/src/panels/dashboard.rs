@@ -774,7 +774,9 @@ impl OndinApp {
         }
     }
 
-    /// Brand mark, name, and the Settings door.
+    /// Brand mark, name, and the Settings door — and the window's title bar, as
+    /// the editor's is: drag strip, caption buttons and update chip (§15 D952,
+    /// D954).
     fn dashboard_top_bar(&mut self, ui: &mut egui::Ui, act: &mut Option<Act>) {
         let chrome = crate::chrome::Chrome::current();
         egui::Panel::top("library-topbar")

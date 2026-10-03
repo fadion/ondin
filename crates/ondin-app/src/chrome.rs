@@ -7,9 +7,9 @@
 //! *does the app draw its own buttons?*, *how far must the bar's content stay
 //! from the left edge?* — rather than testing the target at the use site. The
 //! rule is Schemaic's (`schemaic-core`'s `window_chrome`), and it is worth more
-//! here than there: three of the four decision functions this machine never
-//! compiles are `cfg`-gated at their use sites (CLAUDE.md), and a capability
-//! keeps every branch compiled on every host. `cfg!` appears in this file once.
+//! here than there: the four decision functions CLAUDE.md lists as never compiled
+//! on this machine are each `cfg`-gated at their item, and a capability keeps
+//! every branch compiled on every host. `cfg!` appears in this file once.
 //!
 //! **What each host keeps:**
 //!
@@ -426,6 +426,7 @@ mod tests {
         assert_eq!(mac.decorations, None, "macOS keeps its decorations");
         assert_eq!(mac.fullsize_content_view, Some(true));
         assert_eq!(mac.titlebar_shown, Some(false));
+        assert_eq!(mac.app_id.as_deref(), Some(APP_ID));
         for host in [Host::Windows, Host::Linux] {
             let b = Chrome::of(host).viewport(egui::ViewportBuilder::default());
             assert_eq!(b.decorations, Some(false), "{host:?} draws its own");

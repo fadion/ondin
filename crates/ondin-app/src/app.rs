@@ -7743,7 +7743,9 @@ impl OndinApp {
     }
 
     /// The top bar: brand mark, breadcrumb, save state, file/edit actions,
-    /// zoom readout and the Settings button.
+    /// zoom readout and the Settings button — and, since §15 D952 and D954, the
+    /// window's own title bar: the strip it is dragged by, the caption buttons at
+    /// its right end, and the update chip beside Settings.
     ///
     /// **There is no *Share*.** It was an accent-outlined button at the right end
     /// until 2026-08-24, dropped when the design regeneration removed it and the

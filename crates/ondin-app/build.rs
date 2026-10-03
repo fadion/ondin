@@ -2,7 +2,7 @@
 //!
 //! This is the half of the app icon that `ViewportBuilder::with_icon` cannot
 //! reach. That one is RGBA handed to winit at startup and only ever paints a
-//! **live window** — title bar, taskbar button, Alt-Tab. A binary sitting in a
+//! **live window** — taskbar button, Alt-Tab. A binary sitting in a
 //! folder, pinned to the taskbar, or offered as a file association has no window
 //! yet, so Windows reads its icon out of the executable's own resource table
 //! instead. Only a resource compiler puts one there, which is why this build

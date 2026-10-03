@@ -6,8 +6,9 @@
 # Guards the dependency tree so a future `cargo update` cannot silently pull in a
 # crate whose license is incompatible with shipping Ondin under MIT.
 #
-# ⚠️ There is no CI, so nothing runs this on a push. It belongs in the `release`
-# skill's Phase 0 bar, which is the only gate this project has.
+# CI runs `check licenses` on every push (`.github/workflows/ci.yml`, §15 D955),
+# and the `release` skill's Phase 0 runs it locally. Licenses only — see the
+# advisories note below for why not a bare `cargo deny check`.
 
 [licenses]
 # Every license we accept. All permissive except MPL-2.0, which is weak
@@ -70,7 +71,9 @@ unmaintained = "workspace"
 # Neither reaches a shipped **Windows** build. `cargo tree -i quick-xml --target
 # x86_64-pc-windows-msvc` prints nothing at all — quick-xml arrives only on Linux,
 # through `wayland-scanner`, a build-time proc macro over Wayland's own vendored
-# protocol XML rather than over anything a user supplies. ⚠️ **And Ondin's SVG
+# protocol XML rather than over anything a user supplies. **Since Linux builds
+# ship (§15 D956) that is the case that matters, and it holds there too**: a proc
+# macro runs in the compiler and is not linked into the binary. ⚠️ **And Ondin's SVG
 # import — the only untrusted XML it reads — uses `roxmltree`, not quick-xml**, so
 # these do not touch the parser they look like they are about.
 #

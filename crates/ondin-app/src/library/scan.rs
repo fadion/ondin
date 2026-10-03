@@ -335,10 +335,10 @@ pub fn unnameable(root: &Path) -> Vec<PathBuf> {
 /// byte that is not valid UTF-8. Neither construction means anything on the other
 /// platform.
 ///
-/// ⚠️ **`#[cfg(unix)]` is compiled by nothing on this machine** — `CLAUDE.md`
-/// lists four production functions in the same position and no gate for them — so
-/// the arm below is written to be read rather than trusted, and the Windows one is
-/// what the measurement behind D809 was taken on.
+/// ⚠️ **`#[cfg(unix)]` is compiled by nothing on this machine** — only CI's Linux
+/// and macOS legs reach it (§15 D955) — so the arm below is written to be read
+/// rather than trusted until those legs have run it, and the Windows one is what
+/// the measurement behind D809 was taken on.
 ///
 /// Plain backticks throughout: this item is `#[cfg(test)]`, so `cargo doc` never
 /// builds it and an intra-doc link here would resolve against nothing and be

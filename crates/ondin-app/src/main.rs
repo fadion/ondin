@@ -637,7 +637,9 @@ fn export_all_report(
     out
 }
 
-/// The running window's icon — title bar, taskbar button, Alt-Tab.
+/// The running window's icon — taskbar button, Alt-Tab, and on macOS the Dock.
+/// (There is no system title bar to draw it in on Windows or Linux since the app
+/// draws its own, §15 D952.)
 ///
 /// Distinct from the icon on `ondin.exe` itself, which `build.rs` compiles into
 /// the binary's resource table as a multi-size `.ico`; winit has no way to read
@@ -649,8 +651,8 @@ fn export_all_report(
 /// One size has to be chosen here, since `WM_SETICON` gets the same pixels for
 /// `ICON_BIG` and `ICON_SMALL` and Windows scales for everything below it. 256 is
 /// the largest the set offers, so it is the one that has something left to give
-/// at 200% display scaling; the cost is that the 16px title-bar copy is an 8×
-/// downscale done by the OS rather than the artwork drawn at that size.
+/// at 200% display scaling; the cost is that the 16px copies are an 8× downscale
+/// done by the OS rather than the artwork drawn at that size.
 fn window_icon() -> eframe::egui::IconData {
     static PNG: &[u8] = include_bytes!("../../../icons/convertico-Ondin_256x256.png");
     // Compiled in, so this either works on every run or on none. The test below

@@ -98,10 +98,11 @@ fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
 /// database — the trade `library::clock`'s module note recorded as "a dependency
 /// or a platform call" and then did not take.
 ///
-/// **Zero off Windows**, i.e. UTC, which is what the whole file did before. The
-/// app is a Windows application (`windows-sys` is a `cfg(windows)` dependency and
-/// the icon is written by `rc.exe`); this arm exists so the module still compiles
-/// and reads honestly elsewhere rather than as a promise of portability.
+/// **Zero off Windows**, i.e. UTC, which is what the whole file did before. ⚠️
+/// **That is now a shipped gap, not a placeholder**: since §15 D956 the Linux and
+/// macOS builds are released, and their library dates read in UTC. Written when
+/// the app was Windows-only; the repair is a `localtime_r` call in this arm,
+/// which only CI can compile (`docs/roadmap.md`, *Now · Distribution*).
 pub fn local_offset(secs: u64) -> i64 {
     #[cfg(windows)]
     {

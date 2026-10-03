@@ -1077,13 +1077,49 @@ impl Display {
         }
     }
 
-    /// Every value one CSS accepts — [`Grid::is_valid`]; a flex container has no
-    /// value CSS refuses that is not also non-finite.
+    /// Every value one CSS accepts — [`Grid::is_valid`]'s tracks, and padding and
+    /// gaps that are not negative.
+    ///
+    /// ⚠️ **The negatives arrived with §15 D937.** This said *"a flex container has
+    /// no value CSS refuses that is not also non-finite"*, and CSS refuses a
+    /// negative `padding` or `gap` outright: a file or a writer outside the cards
+    /// (which clamp at zero) laid a row's first item outside its frame and the
+    /// next over it. A file that carries one is laid as zero ([`style_of`]).
     pub fn is_valid(&self) -> bool {
-        match self {
+        self.is_valid_over(None)
+    }
+
+    /// [`Self::is_valid`], **tolerating a refused part `was` already holds** —
+    /// what an operation asks of a value replacing `was` (§15 D937). An edit to
+    /// one property of a grid whose template a file carries refused writes the
+    /// whole layout back, template and all, and was refused whole: changing the
+    /// gap of such a grid was impossible. A part the edit carries forward
+    /// unchanged is not the edit's to answer for; a part it changes is.
+    pub fn is_valid_over(&self, was: Option<&Display>) -> bool {
+        let padding = self.padding();
+        let (column_gap, row_gap) = self.gaps();
+        let held = was.map(|w| (w.padding(), w.gaps()));
+        let padding_ok =
+            held.is_some_and(|(p, _)| p == padding) || padding.iter().all(|p| *p >= 0.0);
+        let gaps_ok = (held.is_some_and(|(_, (c, _))| c == column_gap) || column_gap >= 0.0)
+            && (held.is_some_and(|(_, (_, r))| r == row_gap) || row_gap >= 0.0);
+        let tracks_ok = match self {
             Display::Flex(_) => true,
-            Display::Grid(g) => g.is_valid(),
-        }
+            Display::Grid(g) => {
+                let old = match was {
+                    Some(Display::Grid(w)) => Some(w),
+                    _ => None,
+                };
+                let axis = |now: &[Track], then: Option<&[Track]>| {
+                    then.is_some_and(|t| t == now)
+                        || (now.iter().all(Track::is_valid)
+                            && track_count(now) <= MAX_TEMPLATE_TRACKS)
+                };
+                axis(&g.columns, old.map(|w| w.columns.as_slice()))
+                    && axis(&g.rows, old.map(|w| w.rows.as_slice()))
+            }
+        };
+        padding_ok && gaps_ok && tracks_ok
     }
 
     /// Top, right, bottom, left — either layout's.
@@ -1136,6 +1172,25 @@ impl Dimension {
         match self {
             Dimension::Px(v) | Dimension::Percent(v) => v.is_finite(),
             Dimension::Auto | Dimension::FitContent => true,
+        }
+    }
+
+    /// Not a negative length or percentage — CSS refuses both for every size
+    /// property and for `flex-basis` (§15 D937).
+    fn is_valid(self) -> bool {
+        match self {
+            Dimension::Px(v) | Dimension::Percent(v) => v >= 0.0,
+            Dimension::Auto | Dimension::FitContent => true,
+        }
+    }
+
+    /// This dimension as the engine reads it: a negative one, which only a file
+    /// can carry, as zero (§15 D937).
+    fn read(self) -> Self {
+        match self {
+            Dimension::Px(v) => Dimension::Px(v.max(0.0)),
+            Dimension::Percent(v) => Dimension::Percent(v.max(0.0)),
+            d => d,
         }
     }
 }
@@ -1233,11 +1288,37 @@ impl LayoutItem {
             && self.shrink.is_finite()
     }
 
-    /// Every grid line one CSS accepts: no line 0 and no `span 0`. The operation
-    /// that writes this refuses anything else; the engine reads one from a file as
-    /// `auto` ([`style_of`]).
+    /// Every value one CSS accepts: no grid line 0 and no `span 0`, and — since
+    /// §15 D937 — no negative `flex-grow`, `flex-shrink`, size, limit or basis. The
+    /// operation that writes this refuses anything else; the engine reads one from
+    /// a file around it ([`style_of`]: a bad line as `auto`, a negative as zero).
     pub fn is_valid(&self) -> bool {
-        self.grid_column.is_valid() && self.grid_row.is_valid()
+        self.is_valid_over(&Self::default())
+    }
+
+    /// [`Self::is_valid`], tolerating a refused value `was` already holds in the
+    /// same field — [`Display::is_valid_over`]'s rule, for an edit to one item
+    /// property that writes the whole record back (§15 D937).
+    pub fn is_valid_over(&self, was: &LayoutItem) -> bool {
+        let dims = |i: &LayoutItem| {
+            [
+                i.width,
+                i.height,
+                i.min_width,
+                i.min_height,
+                i.max_width,
+                i.max_height,
+                i.basis,
+            ]
+        };
+        dims(self)
+            .into_iter()
+            .zip(dims(was))
+            .all(|(d, w)| d == w || d.is_valid())
+            && (self.grow == was.grow || self.grow >= 0.0)
+            && (self.shrink == was.shrink || self.shrink >= 0.0)
+            && (self.grid_column == was.grid_column || self.grid_column.is_valid())
+            && (self.grid_row == was.grid_row || self.grid_row.is_valid())
     }
 }
 
@@ -1981,8 +2062,10 @@ pub fn atomic_box(view: &dyn LayoutView, id: crate::NodeId, kind: &NodeKind) -> 
 /// size is `auto` and comes from its measure.
 fn style_of(kind: &NodeKind, display: Option<&Display>, item: &LayoutItem) -> taffy::Style {
     use taffy::prelude::{auto, length, percent};
+    // Every length a file can carry negative — which the operations refuse, §15
+    // D937 — is read as zero here, as a bad grid line is read as `auto`.
     let dim = |d: Dimension, stored: Option<f64>| -> taffy::Dimension {
-        match d {
+        match d.read() {
             Dimension::Px(v) => length(v as f32),
             Dimension::Percent(p) => percent((p / 100.0) as f32),
             Dimension::FitContent => auto(),
@@ -1995,7 +2078,7 @@ fn style_of(kind: &NodeKind, display: Option<&Display>, item: &LayoutItem) -> ta
     // The limits take a narrower type than the sizes, with no `fit-content`: a
     // `FitContent` limit is no limit.
     let limit = |d: Dimension| -> taffy::LengthPercentageAuto {
-        match d {
+        match d.read() {
             Dimension::Px(v) => taffy::LengthPercentageAuto::length(v as f32),
             Dimension::Percent(p) => taffy::LengthPercentageAuto::percent((p / 100.0) as f32),
             Dimension::Auto | Dimension::FitContent => taffy::LengthPercentageAuto::auto(),
@@ -2018,8 +2101,8 @@ fn style_of(kind: &NodeKind, display: Option<&Display>, item: &LayoutItem) -> ta
             width: limit(item.max_width),
             height: limit(item.max_height),
         },
-        flex_grow: item.grow as f32,
-        flex_shrink: item.shrink as f32,
+        flex_grow: item.grow.max(0.0) as f32,
+        flex_shrink: item.shrink.max(0.0) as f32,
         flex_basis: dim(item.basis, None),
         align_self: item.align_self.map(align_items),
         justify_self: item.justify_self.map(align_items),
@@ -2053,10 +2136,10 @@ fn style_of(kind: &NodeKind, display: Option<&Display>, item: &LayoutItem) -> ta
             style.align_items = Some(align_items(f.align_items));
             style.align_content = Some(content_alignment(f.align_content));
             style.gap = taffy::Size {
-                width: length(f.column_gap as f32),
-                height: length(f.row_gap as f32),
+                width: length(f.column_gap.max(0.0) as f32),
+                height: length(f.row_gap.max(0.0) as f32),
             };
-            let [top, right, bottom, left] = f.padding.map(|p| length(p as f32));
+            let [top, right, bottom, left] = f.padding.map(|p| length(p.max(0.0) as f32));
             style.padding = taffy::Rect {
                 left,
                 right,
@@ -2079,10 +2162,10 @@ fn style_of(kind: &NodeKind, display: Option<&Display>, item: &LayoutItem) -> ta
             style.align_items = g.align_items.map(align_items);
             style.align_content = Some(content_alignment(g.align_content));
             style.gap = taffy::Size {
-                width: length(g.column_gap as f32),
-                height: length(g.row_gap as f32),
+                width: length(g.column_gap.max(0.0) as f32),
+                height: length(g.row_gap.max(0.0) as f32),
             };
-            let [top, right, bottom, left] = g.padding.map(|p| length(p as f32));
+            let [top, right, bottom, left] = g.padding.map(|p| length(p.max(0.0) as f32));
             style.padding = taffy::Rect {
                 left,
                 right,

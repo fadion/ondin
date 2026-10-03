@@ -665,6 +665,46 @@ fn values_the_commit_would_reject_are_refused() {
         "out-of-range opacity"
     );
 
+    // A layout the commit refuses (§15 D937, the release review's `[R1-L2-05]`):
+    // a repeat count past the track cap, which the preview drew as the capped
+    // grid the template lays and the commit then refused. Flip run: `absorb`'s
+    // `SetDisplay` check deleted fails on "a template past the track cap".
+    use ondin_core::container::{Display, Grid, LayoutItem, Track, TrackBreadth, TrackSize};
+    let too_many = Grid {
+        columns: vec![Track::Repeat {
+            repeat: 600,
+            tracks: vec![
+                TrackSize::Breadth(TrackBreadth::Fr(1.0)),
+                TrackSize::Breadth(TrackBreadth::Fr(2.0)),
+            ],
+        }],
+        ..Default::default()
+    };
+    for (tx, what) in [
+        (
+            Transaction(vec![Operation::SetDisplay {
+                id: f.artboard,
+                display: Some(Display::Grid(too_many)),
+            }]),
+            "a template past the track cap",
+        ),
+        (
+            Transaction(vec![Operation::SetLayoutItem {
+                id: f.rect,
+                item: LayoutItem {
+                    grow: -1.0,
+                    ..Default::default()
+                },
+            }]),
+            "a negative grow",
+        ),
+    ] {
+        assert!(
+            RenderOverrides::from_transaction(&f.doc, &res, &tx).is_none(),
+            "{what}"
+        );
+    }
+
     // A frame may be created inside a group (§15 D870) and never under a mask
     // (§15 D876), so its ghost is drawn in the first and not in the second — as a
     // create and as a paste. (Inside another artboard it can — frames nest, §5.3.)

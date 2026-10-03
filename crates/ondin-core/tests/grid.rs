@@ -1407,3 +1407,127 @@ fn outlining_a_grid_item_keeps_its_cell() {
     assert_eq!(s.bounds(path), was_a, "the path keeps a's cell");
     assert_eq!(s.bounds(b), was_b, "and b keeps its own");
 }
+
+/// **A file's refused layout value can be edited away, undone back to, and
+/// carried forward by an edit to something else** (§15 D937, the release
+/// review's `[R3-L1-01]`). A grid item at `grid-column: 0` (CSS refuses line 0;
+/// D914 opens it and keeps it): set to line 3, then undone. The undo's inverse
+/// wrote line 0 back, `SetLayoutItem` refused it with `BadLayout`, and
+/// `History::undo`, having popped the step, dropped it — the file's value could
+/// never be returned to. And a change to the item's `grow`, which writes the
+/// whole record back with the line in it, was refused whole. (A gap edit on a
+/// grid whose template a file carries refused was too; `Display::is_valid_over`
+/// is the same rule for it, read and not tested here.)
+///
+/// **Flip runs**: `History::undo` back on plain `apply` fails on *"the undo
+/// lands"*, `Err(BadLayout)`; `op_set_layout_item` checking `is_valid` rather
+/// than `is_valid_over` fails on *"carried forward"* — both predicted.
+#[test]
+fn a_files_refused_value_can_be_undone_back_to_and_carried_forward() {
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(300.0, 100.0), (0.0, 0.0));
+    let a = s.add(f, rect(20.0, 20.0), (0.0, 0.0));
+    s.display(
+        f,
+        Some(Display::Grid(grid(
+            vec![px(100.0), px(100.0), px(100.0)],
+            vec![px(50.0)],
+        ))),
+    );
+    s.item(a, |i| i.grid_column.start = GridPlacement::Line(2));
+    let (mut doc, _) = reopened(&s, r#""Line": 2"#, r#""Line": 0"#);
+    assert_eq!(
+        doc.get(a).unwrap().item().grid_column.start,
+        GridPlacement::Line(0),
+        "the fixture: the file carries line 0"
+    );
+    let mut history = History::new();
+    let at = |doc: &Document, f: &dyn Fn(&mut LayoutItem)| {
+        let mut item = *doc.get(a).unwrap().item();
+        f(&mut item);
+        Transaction(vec![Operation::SetLayoutItem { id: a, item }])
+    };
+    let tx = at(&doc, &|i| i.grid_column.start = GridPlacement::Line(3));
+    history.commit(&mut doc, tx).expect("a valid line commits");
+    assert!(
+        matches!(history.undo(&mut doc), Ok(Some(_))),
+        "the undo lands"
+    );
+    assert_eq!(
+        doc.get(a).unwrap().item().grid_column.start,
+        GridPlacement::Line(0),
+        "and puts the file's value back"
+    );
+    assert!(
+        matches!(history.redo(&mut doc), Ok(Some(_))),
+        "and the redo"
+    );
+    history.undo(&mut doc).unwrap();
+    let tx = at(&doc, &|i| i.grow = 1.0);
+    assert!(
+        history.commit(&mut doc, tx).is_ok(),
+        "an edit to another property carried forward"
+    );
+    let tx = at(&doc, &|i| i.grid_row.start = GridPlacement::Line(0));
+    assert!(
+        matches!(history.commit(&mut doc, tx), Err(OpError::BadLayout)),
+        "while a refused value an edit writes is still refused"
+    );
+}
+
+/// **A negative padding, gap, growth or size is refused, and read as zero from
+/// a file** (§15 D937, `[X3.1-L2-01]`) — CSS refuses all of them, and a row with
+/// `column-gap: -20` laid its second item over its first. The cards clamp at
+/// zero; the operations did not.
+///
+/// **Flip run**, `Display::is_valid_over` without the padding and gap rule:
+/// fails on *"a negative gap is refused"*, `Ok`, the predicted site.
+#[test]
+fn a_negative_layout_length_is_refused_and_read_as_zero() {
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(200.0, 100.0), (0.0, 0.0));
+    let a = s.add(f, rect(50.0, 50.0), (0.0, 0.0));
+    let b = s.add(f, rect(50.0, 50.0), (0.0, 0.0));
+    let flex = |gap: f64| {
+        Some(Display::Flex(Flex {
+            column_gap: gap,
+            align_items: AlignItems::Start,
+            ..Default::default()
+        }))
+    };
+    s.display(f, flex(10.0));
+    assert!(
+        matches!(
+            s.try_commit(vec![Operation::SetDisplay {
+                id: f,
+                display: flex(-20.0)
+            }]),
+            Err(OpError::BadLayout)
+        ),
+        "a negative gap is refused"
+    );
+    for item in [
+        LayoutItem {
+            grow: -1.0,
+            ..Default::default()
+        },
+        LayoutItem {
+            width: ondin_core::container::Dimension::Px(-40.0),
+            ..Default::default()
+        },
+    ] {
+        assert!(
+            matches!(
+                s.try_commit(vec![Operation::SetLayoutItem { id: a, item }]),
+                Err(OpError::BadLayout)
+            ),
+            "{item:?} is refused"
+        );
+    }
+    let (_, res) = reopened(&s, r#""column_gap": 10.0"#, r#""column_gap": -20.0"#);
+    assert_eq!(
+        res.world_bounds(b).unwrap().x0,
+        50.0,
+        "a file's negative gap is laid as zero"
+    );
+}

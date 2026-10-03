@@ -1192,13 +1192,31 @@ impl RenderOverrides {
             }
             // Recorded, not drawn, `SetInsets`' way: the flex relayout turns a
             // layout or an item's properties into placements for the whole chain.
+            // The commit's own checks, `SetOpacity`'s rule (§15 D937): a repeat
+            // count scrubbed past the track cap previewed the capped grid the
+            // template quietly lays, and the commit then refused it with
+            // `BadLayout` and the grid snapped back. Asked against the document's
+            // value, as `op_set_display` asks it, so a refused part a file carries
+            // and the edit only carries forward is not a reason to refuse.
             Operation::SetDisplay { id, display } => {
+                let was = doc.get(*id).and_then(|n| n.display());
+                if display
+                    .as_ref()
+                    .is_some_and(|d| !d.is_finite() || !d.is_valid_over(was))
+                {
+                    return None;
+                }
                 if self.ghost(*id).is_none() {
                     self.entry(*id).display = Some(display.clone());
                     self.mark_moved(doc, *id);
                 }
             }
             Operation::SetLayoutItem { id, item } => {
+                if let Some(was) = doc.get(*id).map(|n| *n.item())
+                    && (!item.is_finite() || !item.is_valid_over(&was))
+                {
+                    return None;
+                }
                 if self.ghost(*id).is_none() {
                     self.entry(*id).item = Some(*item);
                     self.mark_moved(doc, *id);

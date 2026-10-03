@@ -74,6 +74,11 @@ pub struct Document {
     /// a step in its editing history. `crate::meta` records the rest of that
     /// reasoning and the invariant-9 rule that constrains what may go in it.
     meta: DocumentMeta,
+    /// **True only while [`Self::apply_restoring`] runs** — a history step putting
+    /// back values this document already held, which the layout operations then
+    /// take whether or not CSS accepts them (§15 D937). Never true between calls,
+    /// so equality and every reader outside `apply` see `false`.
+    restoring: bool,
 }
 
 impl Document {
@@ -117,6 +122,7 @@ impl Document {
             // fixture and the starter document use. Minting here would put a
             // fresh identity on a document nobody has saved.
             meta: DocumentMeta::default(),
+            restoring: false,
         }
     }
 
@@ -329,12 +335,34 @@ impl Document {
             guides,
             images,
             meta,
+            restoring: false,
         }
     }
 
     /// Iterate all nodes in unspecified order (used by IO on save, which sorts).
     pub(crate) fn nodes_iter(&self) -> impl Iterator<Item = &Node> {
         self.nodes.values()
+    }
+
+    /// [`Self::apply`] for a **history step** — an undo or a redo putting back
+    /// values this document held before — with the layout operations' CSS
+    /// validity check stood down (§15 D937).
+    ///
+    /// A file may carry a layout value CSS refuses: D914 opens it, keeps it as
+    /// written and lays around it. An edit then replaces it with a valid value,
+    /// and that edit's inverse writes the refused value back — which
+    /// `SetDisplay` and `SetLayoutItem` refused with `BadLayout`, so the undo
+    /// failed and `History::undo`, having popped the step, dropped it: the file's
+    /// value could never be returned to. Every value a history step writes was
+    /// in this document already, so it is not the operations' to refuse. Every
+    /// other check stands — a non-finite number is still refused, the tree rules
+    /// still hold — because nothing that passed them once can fail them on the
+    /// way back, and a broken one is worth hearing about.
+    pub fn apply_restoring(&mut self, tx: &Transaction) -> Result<ApplyOutcome, OpError> {
+        self.restoring = true;
+        let outcome = self.apply(tx);
+        self.restoring = false;
+        outcome
     }
 
     /// The one mutation path (§5.7, invariant 2).
@@ -1356,7 +1384,10 @@ impl Document {
     /// Replace a layer's layout (`crate::container::Display`, §15 D867).
     ///
     /// Refused when a number in it is not finite, `op_set_insets`' rule, and when
-    /// a grid carries a track CSS refuses (`OpError::BadLayout`, §15 D914). No
+    /// it carries a value CSS refuses — a grid track (§15 D914), a negative
+    /// padding or gap (§15 D937) — that the node does not already hold; a history
+    /// step putting back what the node held is not checked at all
+    /// ([`Self::apply_restoring`]). No
     /// kind gate: stored on any layer and read on a frame or a group. The node is
     /// dirtied; its subtree follows through `Resolved::update`'s expansion, which
     /// is every child the layout moves.
@@ -1369,7 +1400,15 @@ impl Document {
         if display.as_ref().is_some_and(|d| !d.is_finite()) {
             return Err(OpError::NonFinite);
         }
-        if display.as_ref().is_some_and(|d| !d.is_valid()) {
+        // A value CSS refuses is refused — unless this is a history step putting
+        // back what the node held, or the refused part is one the node holds now
+        // and the edit only carries it forward (§15 D937).
+        let was = self
+            .nodes
+            .get(&id)
+            .ok_or(OpError::NoSuchNode(id))?
+            .display();
+        if !self.restoring && display.as_ref().is_some_and(|d| !d.is_valid_over(was)) {
             return Err(OpError::BadLayout);
         }
         let node = self.nodes.get_mut(&id).ok_or(OpError::NoSuchNode(id))?;
@@ -1380,8 +1419,10 @@ impl Document {
 
     /// Replace a layer's layout-item properties (`crate::container::LayoutItem`).
     ///
-    /// Refused when a number is not finite, and when a grid line is one CSS
-    /// refuses — line 0, `span 0` (`OpError::BadLayout`, §15 D914). The node is
+    /// Refused when a number is not finite, and when a value is one CSS refuses —
+    /// line 0, `span 0` (`OpError::BadLayout`, §15 D914), a negative grow, shrink,
+    /// size, limit or basis (§15 D937) — in a field that does not already hold it;
+    /// a history step is not checked ([`Self::apply_restoring`]). The node is
     /// dirtied, and **its parent with it**: an item's properties move its siblings
     /// too, and `Resolved`'s expansion descends from the parent to reach them.
     fn op_set_layout_item(
@@ -1393,7 +1434,9 @@ impl Document {
         if !item.is_finite() {
             return Err(OpError::NonFinite);
         }
-        if !item.is_valid() {
+        // `op_set_display`'s rule (§15 D937).
+        let was = *self.nodes.get(&id).ok_or(OpError::NoSuchNode(id))?.item();
+        if !self.restoring && !item.is_valid_over(&was) {
             return Err(OpError::BadLayout);
         }
         let node = self.nodes.get_mut(&id).ok_or(OpError::NoSuchNode(id))?;

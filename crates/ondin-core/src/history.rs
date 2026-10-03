@@ -124,7 +124,9 @@ impl History {
         let Some(tx) = self.undo.pop() else {
             return Ok(None);
         };
-        let outcome = doc.apply(&tx)?;
+        // A step puts back values the document held — a layout value a file
+        // carried that CSS refuses among them (§15 D937).
+        let outcome = doc.apply_restoring(&tx)?;
         self.redo.push(outcome.inverse);
         Ok(Some(outcome.dirty))
     }
@@ -144,7 +146,7 @@ impl History {
         let Some(tx) = self.redo.pop() else {
             return Ok(None);
         };
-        let outcome = doc.apply(&tx)?;
+        let outcome = doc.apply_restoring(&tx)?;
         self.undo.push(outcome.inverse);
         Ok(Some(outcome.dirty))
     }

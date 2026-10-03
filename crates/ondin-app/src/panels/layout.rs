@@ -755,7 +755,9 @@ pub(crate) fn size_field(
                         .on_hover_text(m.describe());
                     // **The lit row picks nothing** (§15 D943): re-picking the
                     // mode already set converted the drawn size into it — an edit,
-                    // and on a growing item a jump.
+                    // and on a growing item a jump. Since the conversion reads the
+                    // specified value, the jump is gone and `%`'s rounding is what
+                    // is left: a stored `33.33%` re-picked wrote `33.3%` (§15 D948).
                     if row.clicked() && mode != Some(*m) {
                         picked = Some(*m);
                     }
@@ -1966,17 +1968,17 @@ impl OndinApp {
         drawn: Option<ondin_core::kurbo::Rect>,
         full: f32,
     ) {
-        // Counted per item, and *Mixed* where the items disagree — the first
-        // item's count alone read "All auto" over a selection another item of
-        // which had a limit set (`[X6.2-L1-04]`; every field below reads
-        // `shared` the same way, §15 D892).
-        let count = |i: &LayoutItem| {
-            [i.min_width, i.max_width, i.min_height, i.max_height]
-                .iter()
-                .filter(|d| **d != Dimension::Auto)
-                .count()
+        // Read per item, and *Mixed* where the items disagree on **which**
+        // limits are set — the first item's count alone read "All auto" over a
+        // selection another item of which had a limit set (`[X6.2-L1-04]`), and
+        // a shared *count* read "1 set" over one item's min width and another's
+        // max height, a sentence true of each and of no limit (§15 D948). The
+        // values may still differ under a shared pattern: the fields below say
+        // *Mixed* for those, as every field reads `shared` (§15 D892).
+        let pattern = |i: &LayoutItem| {
+            [i.min_width, i.max_width, i.min_height, i.max_height].map(|d| d != Dimension::Auto)
         };
-        let set = shared(items, count);
+        let set = shared(items, pattern).map(|p| p.iter().filter(|s| **s).count());
         let key = egui::Id::new("flex-item-limits");
         let open = ui.ctx().data(|d| d.get_temp::<bool>(key).unwrap_or(false));
         let row = ui.horizontal(|ui| {
@@ -2157,9 +2159,10 @@ impl OndinApp {
     /// mode picked from the unit's menu writes (§15 D879). Each converts what the
     /// axis **specifies** rather than the size it is drawn ([`specified_along`],
     /// §15 D943): `px` writes it on the picked axis only — for a kind
-    /// `resizable_size` reads; text and the rest still go through `baked_ops`'
-    /// whole used kind — `%` converts it against the container's content box, and
-    /// a keyword hands the size to the layout.
+    /// `resizable_size` reads; text goes through `baked_ops`' used kind, which
+    /// keeps its stored mode at the drawn extents, so a W gives an auto-width label
+    /// `AutoHeight` and an H fixes the box (§15 D948) — `%` converts it against
+    /// the container's content box, and a keyword hands the size to the layout.
     pub(super) fn size_mode_tx(
         &self,
         id: NodeId,
@@ -2820,10 +2823,13 @@ mod tests {
     ///
     /// **Flip runs**: the pick converting the drawn length again fails on *"drawn
     /// where it was"*, 227.4 against 165, the predicted site. ⚠️ **The lit-row
-    /// filter in `size_field` deleted does not bite**, though *"the lit row is no
-    /// step"* was predicted to fail: converting the *specified* 40px into px is
-    /// 40px, which changes nothing and so commits nothing. The filter is a second
-    /// guard over a cause the conversion already removed.
+    /// filter in `size_field` deleted does not bite on `px`**, though *"the lit
+    /// row is no step"* was predicted to fail: converting the *specified* 40px
+    /// into px is 40px, which changes nothing and so commits nothing. **It bites
+    /// on `%`** (§15 D948): the conversion rounds to a tenth of a percent, so
+    /// re-picking the lit `%` over a stored `33.33%` wrote `33.3%` — an edit
+    /// nobody made, and a step. With the filter deleted the test fails on
+    /// *"the lit % is no step either"* — the predicted site.
     #[test]
     fn a_unit_switch_on_a_growing_item_moves_nothing() {
         let mut s = scene();
@@ -2854,6 +2860,19 @@ mod tests {
             (drawn(&p.app, a).width() - 165.0).abs() < 0.2,
             "drawn where it was: {}",
             drawn(&p.app, a).width()
+        );
+
+        // A stored percentage finer than the conversion's tenth.
+        set_item(&mut p.app, a, |i| i.basis = Dimension::Percent(33.33));
+        let depth = p.app.session.history.undo_depth();
+        pick_unit(&mut p, "Flex basis", "%");
+        assert_eq!(
+            (
+                p.app.session.history.undo_depth(),
+                p.app.session.doc.get(a).unwrap().item().basis
+            ),
+            (depth, Dimension::Percent(33.33)),
+            "the lit % is no step either"
         );
     }
 
@@ -2908,6 +2927,59 @@ mod tests {
         };
         assert_eq!(size.height, 30.0, "the height untouched");
         assert_eq!(size.width, 36.0, "the width the 10% specified, of 360");
+    }
+
+    /// **A text's W `px` keeps it the width it is drawn, and its height still
+    /// follows its lines; its H `px` fixes the box** (§15 D948): an auto-width
+    /// label in a 300-wide column, `width: 50%`, wraps at 150, and W's px gives
+    /// it `AutoHeight(150)` — drawn where it was. Then `height: 20%`, 60 tall, and
+    /// H's px gives `Fixed(150 × 60)`, drawn where it was.
+    ///
+    /// ⚠️ **Written to pin a defect and found none.** The session's close listed
+    /// the text arm — `baked_ops` over the used kind, not the picked axis only —
+    /// as left alone; read, it looked as though an auto-width label would be
+    /// baked back to `Auto` and unwrap. It is not: `baked_ops` keeps the stored
+    /// mode at the drawn extents (`gesture_text_sizing`, §15 D940, D942), which
+    /// for `Auto` drawn at a fixed width is `AutoHeight`. Every other kind that
+    /// reaches the arm offers `px` alone, lit, so nothing picks it there.
+    ///
+    /// **Flip run**, text routed through the shapes' picked-axis arm: fails on
+    /// *"W's px: the width the axis specified"* with `Auto` — the label
+    /// unwrapped, the predicted site.
+    #[test]
+    fn a_texts_px_pick_keeps_its_width_and_lets_its_lines_set_the_height() {
+        let (mut p, text, _) = text_column(AlignItems::Start);
+        set_item(&mut p.app, text, |i| i.width = Dimension::Percent(50.0));
+        let before = drawn(&p.app, text);
+        assert_eq!(
+            before.width(),
+            150.0,
+            "the fixture wraps at half the column"
+        );
+        let tx = p.app.size_mode_tx(text, true, SizeMode::Px, before.size());
+        p.app.session.commit(tx);
+        let sizing = |p: &Panel| match p.app.session.doc.get(text).unwrap().kind() {
+            NodeKind::Text { sizing, .. } => *sizing,
+            _ => unreachable!(),
+        };
+        assert_eq!(
+            sizing(&p),
+            ondin_core::TextSizing::AutoHeight(150.0),
+            "W's px: the width the axis specified, the height the lines'"
+        );
+        assert_eq!(drawn(&p.app, text), before, "drawn where it was");
+
+        set_item(&mut p.app, text, |i| i.height = Dimension::Percent(20.0));
+        let tall = drawn(&p.app, text);
+        assert_eq!(tall.height(), 60.0, "the fixture: a fifth of the column");
+        let tx = p.app.size_mode_tx(text, false, SizeMode::Px, tall.size());
+        p.app.session.commit(tx);
+        assert_eq!(
+            sizing(&p),
+            ondin_core::TextSizing::Fixed(tall.size()),
+            "H's px: the box fixed where it is drawn"
+        );
+        assert_eq!(drawn(&p.app, text), tall, "and still drawn where it was");
     }
 
     /// **The out-of-flow block's buttons bring a layer back**, at its own place
@@ -4262,8 +4334,16 @@ mod tests {
     /// fields of the card say *Mixed* too). The summary counted the first item's
     /// limits only, and `a` is always first, in document order.
     ///
-    /// **Flip run**, the count read off `items.first()` again: fails on *"not
-    /// All auto over both"* — the predicted site.
+    /// **And a shared count is not a shared summary** (§15 D948): `a` given a
+    /// max height, so each item has one limit set — a different one — and the
+    /// two together read neither *1 set* nor *All auto*. Given the **same**
+    /// limit at another value (`a`'s min width 60), they read *1 set*, the
+    /// values left to the fields to call mixed.
+    ///
+    /// **Flip runs**: the count read off `items.first()` again fails on *"not
+    /// All auto over both"*; the summary shared by count rather than by pattern
+    /// fails on *"one limit each, but not the same one"* — each the predicted
+    /// site.
     #[test]
     fn the_limits_summary_counts_every_item() {
         let mut s = scene();
@@ -4277,6 +4357,21 @@ mod tests {
         p.app.session.selection.set(vec![a, b]);
         assert!(p.runs("All auto").is_empty(), "not All auto over both");
         assert!(p.runs("1 set").is_empty(), "nor b's count");
+
+        set_item(&mut p.app, a, |i| i.max_height = Dimension::Px(80.0));
+        assert!(
+            p.runs("1 set").is_empty(),
+            "one limit each, but not the same one"
+        );
+        set_item(&mut p.app, a, |i| {
+            i.max_height = Dimension::Auto;
+            i.min_width = Dimension::Px(60.0);
+        });
+        assert_eq!(
+            p.runs("1 set").len(),
+            1,
+            "the same limit at different values: 1 set, the values the fields' business"
+        );
     }
 
     /// **A receipt over two items held at opposite ends names both values**

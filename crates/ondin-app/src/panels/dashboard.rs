@@ -87,11 +87,34 @@ const PROJECT_ROW_GAP: f32 = 9.0;
 /// A project card on *Recent* — **taller than a file card**, because it carries a
 /// picture of up to five documents where a file card carries one.
 const PROJECT_CARD_H: f32 = PROJECT_PAD * 2.0 + MOSAIC_H + PROJECT_ROW_GAP * 2.0 + 16.0 + 13.0;
-/// How many cards a row of the grid holds. **Fixed rather than fitted**, which
-/// is the design's `repeat(4,1fr)`: a grid that reflows to the window makes the
-/// same library look different on two monitors, and the cards are thumbnails
-/// rather than content that needs a minimum width.
-const GRID_COLS: usize = 4;
+/// The widest a card on the grid may be (§15 D964). A row holds as many cards
+/// as it takes to keep each one this wide or narrower, and they share the row
+/// between them — CSS's `repeat(auto-fill, …)` with a ceiling rather than the
+/// design's `repeat(4,1fr)`.
+///
+/// 🚨 **This replaced a fixed four columns, overruled.** `GRID_COLS` argued that
+/// *"a grid that reflows to the window makes the same library look different on
+/// two monitors"*. On a wide window four columns stretched every card past 500
+/// points while its thumbnail band stayed `CARD_THUMB_H` tall, and the
+/// maintainer ruled for a ceiling and more columns: up to 300 the cards *"seem
+/// to look fine"*.
+const CARD_MAX_W: f32 = 300.0;
+/// Between two cards on the grid, across and down.
+const GRID_GAP: f32 = 14.0;
+
+/// How many columns the grid lays in `width`: the fewest that keep every card
+/// at [`CARD_MAX_W`] or narrower, and never fewer than one. The cards then
+/// fill the row exactly — [`card_width`] — so a wider window adds a column
+/// rather than a gutter.
+fn grid_cols(width: f32) -> usize {
+    (((width + GRID_GAP) / (CARD_MAX_W + GRID_GAP)).ceil() as usize).max(1)
+}
+
+/// A card's width in a grid `width` wide, at [`grid_cols`] columns.
+fn card_width(width: f32) -> f32 {
+    let cols = grid_cols(width) as f32;
+    ((width - GRID_GAP * (cols - 1.0)) / cols).max(1.0)
+}
 /// The search field, from the design.
 const SEARCH_W: f32 = 340.0;
 /// A row in the search dropdown.
@@ -369,6 +392,11 @@ pub(crate) struct DashboardState {
     pub(crate) nav: Nav,
     pub(crate) sort: Sort,
     pub(crate) list_view: bool,
+    /// How many columns the file grid was last laid in (§15 D964), for the
+    /// arrow keys: `Down` is a whole row, and a row is as wide as the window
+    /// made it. Written by `file_grid` every frame it draws; `0` before the
+    /// first, which `arrow_target` reads as one.
+    pub(crate) grid_cols: usize,
     /// Where the **keyboard's cursor** is, by path — and nothing else puts it
     /// there.
     ///
@@ -2352,12 +2380,14 @@ impl OndinApp {
     fn project_cards(&mut self, ui: &mut egui::Ui) {
         section_label(ui, "PROJECTS");
         ui.add_space(6.0);
-        let gap = 14.0;
-        let card_w =
-            ((ui.available_width() - gap * (GRID_COLS as f32 - 1.0)) / GRID_COLS as f32).max(120.0);
+        let gap = GRID_GAP;
+        // The file grid's columns and widths, so a project card on *Recent*
+        // sits over a file card of its own size (§15 D964).
+        let cols = grid_cols(ui.available_width());
+        let card_w = card_width(ui.available_width());
         let projects = self.recent_projects();
         let mut go: Option<String> = None;
-        for row in projects.chunks(GRID_COLS) {
+        for row in projects.chunks(cols) {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = gap;
                 for p in row {
@@ -2563,7 +2593,7 @@ impl OndinApp {
     /// when there is a project to put it in.
     ///
     /// ⚠️ **Indices rather than `chunks`, because the card is a cell.** A
-    /// `chunks(GRID_COLS)` loop can only put it on a row of its own, which is
+    /// `chunks(cols)` loop can only put it on a row of its own, which is
     /// wrong exactly when it matters — a project holding one file would show its
     /// card and then a whole empty row with the *New file* card alone at the left
     /// of it. Counting slots is what lets the card finish a short last row.
@@ -2574,14 +2604,16 @@ impl OndinApp {
         new_file: Option<&str>,
         act: &mut Option<Act>,
     ) {
-        let gap = 14.0;
-        let card_w =
-            ((ui.available_width() - gap * (GRID_COLS as f32 - 1.0)) / GRID_COLS as f32).max(120.0);
+        let gap = GRID_GAP;
+        let cols = grid_cols(ui.available_width());
+        let card_w = card_width(ui.available_width());
+        // The arrow keys' row length, from the grid as it was just laid.
+        self.dash.grid_cols = cols;
         let slots = entries.len() + usize::from(new_file.is_some());
-        for start in (0..slots).step_by(GRID_COLS) {
+        for start in (0..slots).step_by(cols) {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = gap;
-                for i in start..(start + GRID_COLS).min(slots) {
+                for i in start..(start + cols).min(slots) {
                     match entries.get(i) {
                         Some(entry) => self.file_card(ui, entry, card_w, act),
                         // The one slot past the end, which only exists when
@@ -3280,7 +3312,13 @@ impl OndinApp {
                 .selected
                 .as_ref()
                 .and_then(|p| entries.iter().position(|e| &e.path == p));
-            if let Some(to) = arrow_target(at, key, self.dash.list_view, entries.len()) {
+            if let Some(to) = arrow_target(
+                at,
+                key,
+                self.dash.list_view,
+                self.dash.grid_cols,
+                entries.len(),
+            ) {
                 self.dash.selected = Some(entries[to].path.clone());
                 self.dash.scroll_to_selected = true;
             }
@@ -5853,7 +5891,7 @@ impl OndinApp {
 /// **Linear order, so the grid wraps at the ends of its rows.** `Right` from the
 /// last card of a row is the first of the next, which is what a grid of files
 /// laid out in reading order means — the alternative, a `Right` that stops at the
-/// right-hand column, makes the fourth card a wall the keyboard cannot get past.
+/// right-hand column, makes the last card of a row a wall the keyboard cannot get past.
 ///
 /// ⚠️ **Out of range clamps rather than refusing.** `Down` from the third column
 /// of the second-to-last row, where the last row holds two cards, lands on the
@@ -5869,12 +5907,16 @@ fn arrow_target(
     current: Option<usize>,
     key: egui::Key,
     list_view: bool,
+    grid_cols: usize,
     len: usize,
 ) -> Option<usize> {
     if len == 0 {
         return None;
     }
-    let cols = if list_view { 1 } else { GRID_COLS } as isize;
+    // The grid's width in columns is the window's now (§15 D964), so the
+    // caller passes the count the grid was laid in; `0`, before any grid has
+    // been drawn, is one.
+    let cols = if list_view { 1 } else { grid_cols.max(1) } as isize;
     let step = match key {
         egui::Key::ArrowLeft if !list_view => -1,
         egui::Key::ArrowRight if !list_view => 1,
@@ -8247,7 +8289,7 @@ mod tests {
     fn the_arrows_step_in_reading_order_and_clamp_at_the_ends() {
         use egui::Key::{ArrowDown, ArrowLeft, ArrowRight, ArrowUp};
         // Six items in a four-wide grid: one full row and a short one.
-        let g = |cur, key| arrow_target(cur, key, false, 6);
+        let g = |cur, key| arrow_target(cur, key, false, 4, 6);
         assert_eq!(
             g(None, ArrowDown),
             Some(0),
@@ -8276,7 +8318,7 @@ mod tests {
         );
         // The list is one column wide, so its verticals are single steps and it
         // has no horizontals at all.
-        let l = |cur, key| arrow_target(cur, key, true, 6);
+        let l = |cur, key| arrow_target(cur, key, true, 4, 6);
         assert_eq!(l(Some(2), ArrowDown), Some(3));
         assert_eq!(l(Some(2), ArrowUp), Some(1));
         assert_eq!(
@@ -8287,8 +8329,67 @@ mod tests {
         assert_eq!(l(Some(2), ArrowRight), None);
         // ⚠️ The caller indexes `entries` with what this returns, so `None` on an
         // empty list is the thing standing between an arrow key and a panic.
-        assert_eq!(arrow_target(None, ArrowDown, false, 0), None);
-        assert_eq!(arrow_target(Some(0), ArrowUp, true, 0), None);
+        assert_eq!(arrow_target(None, ArrowDown, false, 4, 0), None);
+        assert_eq!(arrow_target(Some(0), ArrowUp, true, 4, 0), None);
+    }
+
+    /// **`Down` is a row of whatever width the window made** (§15 D964): six
+    /// columns step six, and a count of `0` — no grid drawn yet — steps one
+    /// rather than standing still.
+    ///
+    /// **Flip run**, `GRID_COLS`' old 4 put back in place of `grid_cols`:
+    /// fails on *"down is a row of six"*, `Some(5)` against `Some(7)`, as
+    /// predicted.
+    #[test]
+    fn the_arrows_step_a_row_of_the_grid_as_laid() {
+        use egui::Key::ArrowDown;
+        assert_eq!(
+            arrow_target(Some(1), ArrowDown, false, 6, 20),
+            Some(7),
+            "down is a row of six"
+        );
+        assert_eq!(
+            arrow_target(Some(1), ArrowDown, false, 0, 20),
+            Some(2),
+            "before any grid is drawn, a row of one"
+        );
+    }
+
+    /// **The grid holds as many columns as keep every card at 300 points or
+    /// narrower, and the cards fill the row** (§15 D964).
+    ///
+    /// The widths the maintainer's screenshot was taken at and either side of
+    /// them: a 1600-point body, which the fixed four columns split into
+    /// 389-point cards, now holds six of about 255; a body of exactly four
+    /// cards at the ceiling holds four at 300; one point wider adds a fifth.
+    /// And a body narrower than one card is one column, not zero.
+    ///
+    /// **Flip run**, `floor` for `ceil` in `grid_cols`: fails on *"no card is
+    /// wider than the ceiling"*, 443 at 900. Predicted at 1600 (five columns of
+    /// 309) and wrong about the width: the loop runs narrowest first, and 900
+    /// is the first width `floor` leaves a whole card short.
+    #[test]
+    fn the_grid_adds_columns_rather_than_stretching_cards() {
+        for width in [
+            120.0, 299.0, 300.0, 614.0, 900.0, 1242.0, 1243.0, 1600.0, 2400.0,
+        ] {
+            let w = card_width(width);
+            let cols = grid_cols(width) as f32;
+            assert!(
+                w <= CARD_MAX_W + 1e-3,
+                "no card is wider than the ceiling: {w} at {width}"
+            );
+            assert!(
+                (cols * w + (cols - 1.0) * GRID_GAP - width).abs() < 1e-3,
+                "and the row is filled exactly at {width}"
+            );
+        }
+        // Four cards at the ceiling and three gaps.
+        let four = 4.0 * CARD_MAX_W + 3.0 * GRID_GAP;
+        assert_eq!(grid_cols(four), 4, "exactly four at 300");
+        assert_eq!(grid_cols(four + 1.0), 5, "one point more is a fifth column");
+        assert_eq!(grid_cols(1600.0), 6, "the screenshot's width holds six");
+        assert_eq!(grid_cols(100.0), 1, "and a narrow body is one column");
     }
 
     /// Arrows move the selection, `Escape` puts it back, `Enter` opens it and
@@ -10032,8 +10133,11 @@ mod tests {
     /// document filed in that project. No other nav has one.
     ///
     /// ⚠️ **Both assertions bite, and the prediction that only one would was
-    /// wrong** — the flip is `file_grid` back to `entries.chunks(GRID_COLS)` plus
-    /// a trailing card, which is the shape this was written against. The x fails
+    /// wrong** — the flip is `file_grid` back to `entries.chunks(cols)` plus a
+    /// trailing card (`GRID_COLS` then), which is the shape this was written
+    /// against. ⚠️ The coordinates below were measured at the fixed four
+    /// columns, before §15 D964 fitted the grid to the window; the shape of the
+    /// failure is the same and the numbers are not re-measured. The x fails
     /// unambiguously (the label lands at 359, centred in the *first* column,
     /// against 298 for the file's name beside it). The y was expected to pass
     /// vacuously and does not: the labels come out 138pt apart, over a threshold

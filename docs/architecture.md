@@ -12429,8 +12429,9 @@ where to open, or what a file is called on disk:
   as the list was up.
   ⚠️ **Past `MAX_RESIDENT_COVERS` = 128 textures, the least recently asked-for goes** (§15 D864),
   aged by `Covers`' own pass count rather than egui's. One asked for on this pass or the one before
-  never does, so a screen showing more covers than the cap — a tall *Recent* of project mosaics can —
-  exceeds it rather than churning. Only `Ready` covers are evicted, `Unreadable` being the mark's
+  never does, so a screen showing more covers than the cap — a tall *Recent* of project mosaics can,
+  and since §15 D964 so can a grid of file cards on a body past ~3,126 points — exceeds it rather than
+  churning. Only `Ready` covers are evicted, `Unreadable` being the mark's
   fact, and an evicted one is asked of the worker again, which reads the disk cache. 128 is a chosen
   value: ~80 MB at the 400² worst case, arithmetic rather than a measurement.
 
@@ -13013,7 +13014,10 @@ it. The early return asks `library_menu_open()`, the predicate the pointer side 
 twins cannot drift apart again — and the enumeration above is untouched, this being the *early return*
 rather than `library_keys_are_free`. The arithmetic is the free function
 `arrow_target`, per §15 D269; the grid steps in **reading order** and out of range **clamps** rather than
-refusing, so no press is ever dead. ⚠️ **`OndinApp::can_open` is one predicate for the keyboard and the
+refusing, so no press is ever dead. ⚠️ **`↑`/`↓` step a row of the grid as last laid** (§15 D964):
+`file_grid` writes its column count to `DashboardState::grid_cols` every frame it draws, and
+`dashboard_keys`, which runs before it, reads that — last frame's — with `0`, no grid drawn yet, read
+as one. ⚠️ **`OndinApp::can_open` is one predicate for the keyboard and the
 click**, because a document in the trash may not be opened — the editor would sit on a file the
 purge deletes out from under it — and the pointer had been ignoring the rule the ⋮ menu states.
 `DashboardState::scroll_to_selected` and `OndinApp::follow_selection` bring the card into view **only
@@ -13049,6 +13053,16 @@ here rules either way.
 used to print the base folder path under the sentence, on the argument that an empty library usually
 means the setting points elsewhere. That is true of the cause and wrong about where the answer belongs:
 the path is in the Settings card, where it can also be changed.
+
+**The grid fits its columns to the window, and no card is wider than 300 points (§15 D964).**
+`dashboard::grid_cols` lays the fewest columns that keep every card at `CARD_MAX_W` or narrower, and
+`card_width` shares the row between them exactly, `GRID_GAP` apart — CSS's `repeat(auto-fill, …)`
+with a ceiling, so a wider window adds a column rather than stretching the cards or leaving a gutter.
+*Recent*'s project row lays with the same two functions, so a project card sits over a file card of
+its own width; heights are fixed and only widths move. ⚠️ **This overturns the design's
+`repeat(4,1fr)`**, which the old `GRID_COLS` kept on the argument that a reflowing grid makes one
+library look different on two monitors; the maintainer's ruling accepts that cost. There is no
+minimum width beyond what a column's arrival implies — 143 points at the step from one column to two.
 
 **A project's grid ends in a dashed *New file in {project}* card, and its list in a *New file* row
 (§15 D376).** The design's, and a shortcut rather than a capability: `Act::NewFile` has one meaning and

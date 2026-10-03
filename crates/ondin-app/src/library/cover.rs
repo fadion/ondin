@@ -60,12 +60,14 @@ const COVER_MAX_PX: f64 = 400.0;
 /// **~640 KB, which is ~640 MB at 1,000 documents** — arithmetic on the cap,
 /// not a measurement of real covers, most of which are not square.
 ///
-/// **128 is ~80 MB at that worst case, and more than twice what a screen of
-/// file cards shows**: the grid is four columns of ~172 pt rows, so a 2,160
-/// pt-tall window shows about 12 rows, 48 cards. ⚠️ **Not a screen of project
-/// cards**: a mosaic asks for up to five, twenty a row of four, and *Recent*
+/// **128 is ~80 MB at that worst case, and more than one screen of file cards
+/// on most windows** — ⚠️ **no longer "more than twice"**: the grid fitted its
+/// columns to the window in §15 D964, a column per 300 pt or so of body, so a
+/// 2,160 pt-tall window's ~12 rows of ~172 pt are about 72 cards at a 1,600 pt
+/// body and pass 128 past a body of ~3,126 pt. And **not a screen of project
+/// cards**: a mosaic asks for up to five, thirty a row of six, and *Recent*
 /// lists every active project with files — so at a `PROJECT_CARD_H` of 185 pt,
-/// seven rows pass 128 (arithmetic, not measured). The floor that matters is
+/// five rows pass 128 (arithmetic, not measured). The floor that matters is
 /// *"more than one screen"*, and eviction never takes a cover asked for on the
 /// current or previous pass whatever this says, which is what holds there: the
 /// cap is exceeded rather than churned. The rest is how far back a scroll finds

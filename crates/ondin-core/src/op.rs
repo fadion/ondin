@@ -413,7 +413,10 @@ impl Operation {
     /// did. [`Self::overwrites`] answers a subject and the operation's discriminant
     /// answers the variant, and for every overwriting operation but one that pair
     /// **is** the field set — each writes a fixed group of fields. Checked variant
-    /// by variant (23 of 24 since `SetInsets`, which writes its whole set).
+    /// by variant against `overwrites`' list: `SetInsets`, `SetDisplay` and
+    /// `SetLayoutItem` each write their whole set too. No count here on purpose —
+    /// one stood here and stayed at *"23 of 24"* while two variants arrived
+    /// (`[R2-L8-06]`); a new variant is checked by reading it, not by a figure.
     ///
     /// ⚠️ **`SetGeometry` is the one exception, and it is the reason this function
     /// exists** (`[S2.2-L2-02]`). Its payload is itself a field selector:

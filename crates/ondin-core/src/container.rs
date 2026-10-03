@@ -2797,7 +2797,7 @@ mod tests {
         );
     }
 
-    /// [`inverse`] undoes [`place`], and a move rewrites each inset **in its own
+    /// `inverse` undoes `place`, and a move rewrites each inset **in its own
     /// unit**: dragging a right-pinned child 30 left adds 30 to `right`, and a
     /// percentage stays a percentage.
     ///
@@ -2972,8 +2972,10 @@ mod tests {
     }
 }
 
-/// The flex engine on its own, against an in-memory [`LayoutView`] — what taffy
+/// The flex engine on its own, against an in-memory `LayoutView` — what taffy
 /// computes through `FlexTree`, before `Resolved` is involved (§15 D867, D875).
+/// Plain backticks: a `cfg(test)` module's doc is as invisible to `cargo doc` as
+/// its prose (§15 D319, `[R2-L8-04]`).
 #[cfg(test)]
 mod flex_tests {
     use super::*;

@@ -23726,7 +23726,10 @@ mod flex_drag_tests {
     /// it, by the frame rule, which a reorder must not swallow.
     ///
     /// **Flip run**, `move_tx`'s reorder arm deleted: fails on *"one reorder"*
-    /// with a `SetTransform` — the predicted site. (Until §15 D902 two items kept
+    /// with an **empty** transaction — the predicted site, and not the
+    /// `SetTransform` this said until `[R2-L8-05]` ran it: the loop's
+    /// `stays_in_flow` arm stores nothing for an in-flow item that stays in its
+    /// parent, so no translation would have been written either. (Until §15 D902 two items kept
     /// their slots and this asserted that; the flips recorded against that rule —
     /// the multi-item arm, and `move_preview_tx`'s `retain` — went with it.)
     #[test]

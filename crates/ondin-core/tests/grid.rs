@@ -426,7 +426,7 @@ fn column_flow_fills_a_column_first() {
 
 /// **`auto` tracks share the free space by default** — a grid's `normal`
 /// content distribution is `stretch` (§15 D914), which is why `Grid` takes
-/// [`AlignContent`] on both axes: 360 across, less a gap of 10 and two 20-wide
+/// `AlignContent` on both axes: 360 across, less a gap of 10 and two 20-wide
 /// items, leaves 310, 155 to each track, so they are 175 wide and the second
 /// starts at 20 + 175 + 10 = 205. Told `start`, the tracks keep their content's
 /// width and the second starts at 50.
@@ -1012,9 +1012,11 @@ fn a_dropped_area_keeps_its_span_and_its_spelling() {
 /// `a` has room for one. The block moves one: `a` to column 1, `b` to column 3,
 /// the gap between them kept, rather than `a` held at 1 and `b` moved two.
 ///
-/// **Flip run**, `grid_drop_many`'s `room` answering the raw shift (each start
-/// then clamped alone by `line`, as a single item's is): fails on *"stopped
-/// whole at line 1"* with `b` at line 2, the predicted site.
+/// **Flip run**, the backward half of `grid_drop_many`'s `room` answering the
+/// raw shift: fails on *"stopped whole at line 1"* with `a` written as line −6
+/// and `b` at line 2 — the predicted site. (This read *"each start then clamped
+/// alone by `line`"*; `line` clamps nothing since §15 D918's amendment, and a
+/// start before the grid is written as a negative line — `[R2-L8-02]`.)
 #[test]
 fn several_items_of_a_grid_move_as_a_block() {
     use ondin_core::kurbo::Vec2;
@@ -1216,6 +1218,61 @@ fn a_spanning_item_dropped_on_the_last_column_keeps_its_span_inside() {
         GridPlacement::Line(3),
         "room to spare, no clamp"
     );
+}
+
+/// **A block dropped at the bottom-right stops whole inside, on both axes**
+/// (§15 D927's row axis and its block case, *"read, not tested"* until
+/// `[X4.1-L6-01]`): over a 3 × 3 grid of `1fr`, `a` spanning two rows and `b`
+/// beside it are dragged together until the block's centre is on the last
+/// cell. The block moves one column and one row — as far as `b`'s column and
+/// `a`'s rows have room for — so `a` lands `2 / span 2` down and in column 2,
+/// `b` in column 3 row 2, neither hanging past the last line.
+///
+/// **Flip runs**: `room`'s forward arm clamping columns only (`axis == 0`)
+/// fails on *"a stopped at the last row"*, line 3 — the predicted site. `room`
+/// reading `last` off the first area rather than the furthest was predicted to
+/// fail on *"b stopped at the last column"* and fails one assertion sooner, on
+/// *"a moved one column"* with line 3: the block moved two, `a` with it.
+#[test]
+fn a_block_dropped_at_the_bottom_right_stops_whole_inside() {
+    use ondin_core::kurbo::Vec2;
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(300.0, 300.0), (0.0, 0.0));
+    let a = s.add(f, rect(20.0, 20.0), (0.0, 0.0));
+    let b = s.add(f, rect(20.0, 20.0), (0.0, 0.0));
+    let tracks = || vec![fr(1.0), fr(1.0), fr(1.0)];
+    s.display(f, Some(Display::Grid(grid(tracks(), tracks()))));
+    s.item(a, |i| i.grid_row.end = GridPlacement::Span(2));
+    assert_eq!(
+        (s.bounds(b).x0, s.bounds(b).y0),
+        (100.0, 0.0),
+        "the fixture: b beside a, in the first row"
+    );
+
+    // The block's centre, (60, 10), carried to (280, 260): the last cell.
+    let ops = ondin_core::build::grid_drop_many(&s.doc, &s.res, &[a, b], Vec2::new(220.0, 250.0))
+        .expect("a block drop");
+    s.commit(ops);
+    let lines = |id| {
+        let item = s.doc.get(id).unwrap().item();
+        (
+            item.grid_column.start,
+            item.grid_row.start,
+            item.grid_row.end,
+        )
+    };
+    let (a_col, a_row, a_span) = lines(a);
+    assert_eq!(a_row, GridPlacement::Line(2), "a stopped at the last row");
+    assert_eq!(a_span, GridPlacement::Span(2), "and keeps its span");
+    assert_eq!(a_col, GridPlacement::Line(2), "a moved one column");
+    let (b_col, b_row, _) = lines(b);
+    assert_eq!(
+        b_col,
+        GridPlacement::Line(3),
+        "b stopped at the last column"
+    );
+    assert_eq!(b_row, GridPlacement::Line(2), "b moved one row, with a");
+    assert_eq!(s.bounds(a).y0, 100.0, "a drawn from the second row");
 }
 
 /// An auto-width label, `Inter` 12.

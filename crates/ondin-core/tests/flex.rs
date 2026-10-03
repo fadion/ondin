@@ -426,15 +426,23 @@ fn a_pinned_child_of_a_flex_group_is_placed_against_its_box_and_re_pinned_when_m
 /// **A frame that hugs across the line is not stretched** (§15 D893) — CSS's
 /// `stretch` applying only to an `auto` cross size, and Figma's *Hug* staying
 /// hugged. In a 400 × 200 row with padding 20 and the default `align-items:
-/// stretch`, a card frame holding a 40 × 30 rect and set to `fit-content` both
-/// ways stays 30 tall; a rect beside it, whose cross size is `auto`, still
-/// stretches to 160 (§15 D872). A frame is no control here: its `auto` is its
-/// stored size, which is definite and never stretched either (§15 D879) — the
+/// stretch`, a card frame holding a 40 × 30 rect and set to `fit-content`
+/// **across only** stays 30 tall; a rect beside it, whose cross size is `auto`,
+/// still stretches to 160 (§15 D872). A frame is no control here: its `auto` is
+/// its stored size, which is definite and never stretched either (§15 D879) — the
 /// first draft of this test used one and found exactly that.
 ///
-/// **Flip run**, the `fit_content_across` patch in `FlexTree::push` deleted:
+/// ⚠️ **Across only, and in both directions** (`[X3.2-L6-02]`): with both axes
+/// hugging, whichever axis `fit_content_across` read answered `FitContent`, so
+/// the test passed against the axis picked backwards — and a hugged height in a
+/// row is the commonest Hug there is. The column is
+/// `a_frame_that_hugs_across_a_column_is_not_stretched`'s.
+///
+/// **Flip runs**: the `fit_content_across` patch in `FlexTree::push` deleted
 /// fails on *"the hugging card keeps hugging"*, 160 against 30 — the predicted
-/// site; the stretching rect stays green, as it should.
+/// site, the stretching rect green as it should be; `fit_content_across`
+/// reading the axis backwards (`is_row()` negated) fails at the same site, 160
+/// against 30.
 #[test]
 fn a_frame_that_hugs_across_the_line_is_not_stretched() {
     let mut s = Scene::new();
@@ -451,13 +459,12 @@ fn a_frame_that_hugs_across_the_line_is_not_stretched() {
     );
     s.display(hug, Some(Display::Flex(Flex::default())));
     s.item(hug, |i| {
-        i.width = ondin_core::container::Dimension::FitContent;
         i.height = ondin_core::container::Dimension::FitContent;
     });
     assert_eq!(
         s.bounds(hug).width(),
-        40.0,
-        "the fixture hugs along the row"
+        10.0,
+        "the fixture keeps its stored width along the row"
     );
     assert_eq!(
         s.bounds(hug).height(),
@@ -468,6 +475,50 @@ fn a_frame_that_hugs_across_the_line_is_not_stretched() {
         s.bounds(tall).height(),
         160.0,
         "an `auto` height still stretches: 200 less 20 twice"
+    );
+}
+
+/// **A frame that hugs across a column is not stretched** — the column twin of
+/// `a_frame_that_hugs_across_the_line_is_not_stretched` (`[X3.2-L6-02]`):
+/// in a 400 × 200 column with padding 20, a card hugging its **width** only
+/// stays 40 wide, and an `auto`-width rect beside it stretches to 360.
+///
+/// **Flip run**, `fit_content_across` reading the axis backwards (`is_row()`
+/// negated): fails on *"the hugging card keeps hugging across the column"*,
+/// 360 against 40 — the predicted site.
+#[test]
+fn a_frame_that_hugs_across_a_column_is_not_stretched() {
+    let mut s = Scene::new();
+    let f = s.add(s.root, frame(400.0, 200.0), (0.0, 0.0));
+    let hug = s.add(f, frame(10.0, 10.0), (0.0, 0.0));
+    s.add(hug, rect(40.0, 30.0), (0.0, 0.0));
+    let wide = s.add(f, rect(40.0, 30.0), (0.0, 0.0));
+    s.display(
+        f,
+        Some(Display::Flex(Flex {
+            direction: FlexDirection::Column,
+            padding: [20.0; 4],
+            ..Default::default()
+        })),
+    );
+    s.display(hug, Some(Display::Flex(Flex::default())));
+    s.item(hug, |i| {
+        i.width = ondin_core::container::Dimension::FitContent;
+    });
+    assert_eq!(
+        s.bounds(hug).height(),
+        10.0,
+        "the fixture keeps its stored height down the column"
+    );
+    assert_eq!(
+        s.bounds(hug).width(),
+        40.0,
+        "the hugging card keeps hugging across the column"
+    );
+    assert_eq!(
+        s.bounds(wide).width(),
+        360.0,
+        "an `auto` width still stretches: 400 less 20 twice"
     );
 }
 
@@ -651,9 +702,13 @@ fn a_dragged_flex_item_reorders_by_where_its_centre_falls() {
 /// **Flip runs**: `justify-content`'s mapping back to taffy's `START` fails on
 /// *"row-reverse packs right"*, a at 90..130 — and so does
 /// `a_dragged_flex_item_reorders_by_where_its_centre_falls` on its new right-edge
-/// assertion, b ending at 160; `align_items`' and `align-content`'s
-/// back to `START` fail on *"wrap-reverse sits at the bottom"*, a at y 20..50 —
-/// the predicted sites. `resized_from_cross_start` without its `WrapReverse` swap
+/// assertion, b ending at 160. `container::align_items`' `Start` arm back to
+/// taffy's `START` fails on *"wrap-reverse sits at the bottom"* with a at y
+/// 130..160, and `a_released_stretch_keeps_the_held_edge_on_every_axis` with it;
+/// `container::content_alignment`'s `Start` arm alone fails at the same site with
+/// a at 40..70; the two together put a at 20..50 — each run one at a time and
+/// together (`[X3.2-L6-03]`: this read 20..50 against each, the joint flip's
+/// number), the predicted site. `resized_from_cross_start` without its `WrapReverse` swap
 /// fails on *"the flow's start held"*, `End` — predicted.
 #[test]
 fn flex_start_follows_the_reversals() {

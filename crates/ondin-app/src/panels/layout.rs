@@ -1690,9 +1690,9 @@ impl OndinApp {
             .iter()
             .filter_map(|id| self.session.display_node(*id).map(|n| n.item()))
             .collect();
-        let Some(&first) = items.first() else {
+        if items.is_empty() {
             return;
-        };
+        }
         let full = ui.available_width();
         let parent = self.session.doc.get(subjects[0]).and_then(|n| n.parent());
         let parent_display = parent
@@ -1755,19 +1755,37 @@ impl OndinApp {
         }
 
         // --- min / max ----------------------------------------------------------
-        self.limit_rows(ui, subjects, &items, first, drawn, full);
+        self.limit_rows(ui, subjects, &items, drawn, full);
 
         // --- the receipt --------------------------------------------------------
-        if let Some((_, now)) = receipt.first() {
+        if !receipt.is_empty() {
+            // Each property is said from the items whose property the resize
+            // changed, every distinct value named once — `receipt.first()`'s
+            // alone said *"justify self to start"* over two items held at
+            // opposite ends, `start` and `end` (`[X6.3-L1-04]`).
+            let values = |changed: &dyn Fn(&LayoutItem, &LayoutItem) -> bool,
+                          say: &dyn Fn(&LayoutItem) -> Option<String>|
+             -> Option<String> {
+                let mut out: Vec<String> = Vec::new();
+                for (_, now) in receipt.iter().filter(|(w, n)| changed(w, n)) {
+                    if let Some(s) = say(now)
+                        && !out.contains(&s)
+                    {
+                        out.push(s);
+                    }
+                }
+                (!out.is_empty()).then(|| out.join(" / "))
+            };
             let mut said = Vec::new();
-            if flipped_grow {
-                said.push(format!("flex grow to {}", ui::number(2)(now.grow, 0..=2)));
+            if let Some(v) = values(&|w, n| w.grow != n.grow, &|n| {
+                Some(ui::number(2)(n.grow, 0..=2))
+            }) {
+                said.push(format!("flex grow to {v}"));
             }
-            if flipped_shrink {
-                said.push(format!(
-                    "flex shrink to {}",
-                    ui::number(2)(now.shrink, 0..=2)
-                ));
+            if let Some(v) = values(&|w, n| w.shrink != n.shrink, &|n| {
+                Some(ui::number(2)(n.shrink, 0..=2))
+            }) {
+                said.push(format!("flex shrink to {v}"));
             }
             if cleared_basis {
                 said.push("flex basis to auto".to_owned());
@@ -1779,11 +1797,15 @@ impl OndinApp {
                 (Some(_), AlignItems::End) => "end",
                 _ => align_name(a),
             };
-            if flipped_justify && let Some(a) = now.justify_self {
-                said.push(format!("justify self to {}", name(a).to_lowercase()));
+            if let Some(v) = values(&|w, n| w.justify_self != n.justify_self, &|n| {
+                n.justify_self.map(|a| name(a).to_lowercase())
+            }) {
+                said.push(format!("justify self to {v}"));
             }
-            if flipped_align && let Some(a) = now.align_self {
-                said.push(format!("align self to {}", name(a).to_lowercase()));
+            if let Some(v) = values(&|w, n| w.align_self != n.align_self, &|n| {
+                n.align_self.map(|a| name(a).to_lowercase())
+            }) {
+                said.push(format!("align self to {v}"));
             }
             let list = match said.len() {
                 0 => return,
@@ -1941,19 +1963,20 @@ impl OndinApp {
         ui: &mut egui::Ui,
         subjects: &[NodeId],
         items: &[LayoutItem],
-        first: LayoutItem,
         drawn: Option<ondin_core::kurbo::Rect>,
         full: f32,
     ) {
-        let set = [
-            first.min_width,
-            first.max_width,
-            first.min_height,
-            first.max_height,
-        ]
-        .iter()
-        .filter(|d| **d != Dimension::Auto)
-        .count();
+        // Counted per item, and *Mixed* where the items disagree — the first
+        // item's count alone read "All auto" over a selection another item of
+        // which had a limit set (`[X6.2-L1-04]`; every field below reads
+        // `shared` the same way, §15 D892).
+        let count = |i: &LayoutItem| {
+            [i.min_width, i.max_width, i.min_height, i.max_height]
+                .iter()
+                .filter(|d| **d != Dimension::Auto)
+                .count()
+        };
+        let set = shared(items, count);
         let key = egui::Id::new("flex-item-limits");
         let open = ui.ctx().data(|d| d.get_temp::<bool>(key).unwrap_or(false));
         let row = ui.horizontal(|ui| {
@@ -1974,8 +1997,9 @@ impl OndinApp {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(
                     egui::RichText::new(match set {
-                        0 => "All auto".to_owned(),
-                        n => format!("{n} set"),
+                        None => "Mixed".to_owned(),
+                        Some(0) => "All auto".to_owned(),
+                        Some(n) => format!("{n} set"),
                     })
                     .size(10.5)
                     .color(theme::text::FAINT),
@@ -4226,6 +4250,97 @@ mod tests {
         p.run("Resizing set justify self to start.");
         assert!(outlined(row("Justify self")), "the justify row outlined");
         assert!(!outlined(row("Align self")), "and not the align row");
+    }
+
+    /// **The *Min / max* summary does not read "All auto" over a selection one
+    /// item of which has a limit** (`[X6.2-L1-04]`) — `b` given `min-width:
+    /// 100px`, `a` none: `a` alone reads *All auto*, `b` alone *1 set*, and the
+    /// two together neither (they read *Mixed*, which is not asserted: other
+    /// fields of the card say *Mixed* too). The summary counted the first item's
+    /// limits only, and `a` is always first, in document order.
+    ///
+    /// **Flip run**, the count read off `items.first()` again: fails on *"not
+    /// All auto over both"* — the predicted site.
+    #[test]
+    fn the_limits_summary_counts_every_item() {
+        let mut s = scene();
+        set_item(&mut s.app, s.b, |i| i.min_width = Dimension::Px(100.0));
+        let (a, b) = (s.a, s.b);
+        let mut p = Panel::new(s.app, OndinApp::inspector_item);
+        p.app.session.selection.set(vec![a]);
+        assert_eq!(p.runs("All auto").len(), 1, "the control: a alone");
+        p.app.session.selection.set(vec![b]);
+        assert_eq!(p.runs("1 set").len(), 1, "b alone");
+        p.app.session.selection.set(vec![a, b]);
+        assert!(p.runs("All auto").is_empty(), "not All auto over both");
+        assert!(p.runs("1 set").is_empty(), "nor b's count");
+    }
+
+    /// **A receipt over two items held at opposite ends names both values**
+    /// (`[X6.3-L1-04]`) — `a` and `b` set to `justify-self: stretch`, then in one
+    /// commit `a` narrowed from its right edge and `b` from its left: the commit
+    /// holds `a` with `start` and `b` with `end`, and the card says *"justify self
+    /// to start / end"*. It read `receipt.first()`'s value alone — *"to
+    /// start"* — naming nothing of `b`'s.
+    ///
+    /// **Flip run**, `values` keeping only its first item's value: fails on
+    /// *"both values named"* — the predicted site.
+    #[test]
+    fn a_receipt_over_items_held_at_opposite_ends_names_both() {
+        let mut s = grid_scene();
+        for id in [s.a, s.b] {
+            set_item(&mut s.app, id, |i| {
+                i.justify_self = Some(AlignItems::Stretch)
+            });
+        }
+        let (a, b) = (drawn(&s.app, s.a), drawn(&s.app, s.b));
+        let resize = |app: &OndinApp, id, handle, to| {
+            crate::tools::resize_layer(
+                &app.session.doc,
+                &app.session.resolved,
+                id,
+                handle,
+                to,
+                crate::tools::Resize::default(),
+            )
+        };
+        let mut tx = resize(
+            &s.app,
+            s.a,
+            crate::preview::Handle::Right,
+            ondin_core::kurbo::Point::new(a.x0 + 50.0, a.center().y),
+        );
+        tx.0.extend(
+            resize(
+                &s.app,
+                s.b,
+                crate::preview::Handle::Left,
+                ondin_core::kurbo::Point::new(b.x1 - 50.0, b.center().y),
+            )
+            .0,
+        );
+        s.app.session.commit(tx);
+        let receipt = s.app.session.flex_receipt().expect("a receipt");
+        let held = |id| {
+            receipt
+                .held
+                .iter()
+                .find(|(n, ..)| *n == id)
+                .and_then(|(_, _, now)| now.justify_self)
+        };
+        assert_eq!(
+            (held(s.a), held(s.b)),
+            (Some(AlignItems::Start), Some(AlignItems::End)),
+            "the fixture: held at opposite ends"
+        );
+        let (a, b) = (s.a, s.b);
+        let mut p = Panel::new(s.app, OndinApp::inspector_item);
+        p.app.session.selection.set(vec![a, b]);
+        assert!(
+            !p.runs("Resizing set justify self to start / end.")
+                .is_empty(),
+            "both values named"
+        );
     }
 
     /// **A grid item holding `baseline` across reads *Baseline · Start*, and its

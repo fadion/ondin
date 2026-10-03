@@ -1,0 +1,241 @@
+name: Pages
+
+# Publishes the APT and DNF repositories to GitHub Pages (§15 D957).
+#
+# **The GitHub Release is the source of truth; this site is derived from it.**
+# Every run downloads the last five releases' .deb and .rpm assets and rebuilds
+# the whole site from nothing. There is no gh-pages branch on purpose: a branch
+# holding every release's packages would be carried by every clone of this
+# repository forever, and pruning it later would not shrink a single clone that
+# already exists. An Actions deployment has no git history at all, so the
+# published size is the only size.
+#
+# It is *called* by release.yml after every leg of a tagged build has finished
+# — not triggered by the release event, which would never fire: a release
+# created with GITHUB_TOKEN does not start another workflow. `workflow_dispatch`
+# is the repair path, and it is a real one: because the build is a rebuild, a
+# repository that has gone wrong is fixed by running this again.
+#
+# Needs two repository secrets, GPG_PRIVATE_KEY and GPG_PASSPHRASE, and Pages
+# set to deploy from GitHub Actions — packaging/repo/README.md has the commands.
+on:
+  workflow_call:
+    inputs:
+      # The tag this build is publishing for, so the built site can be checked
+      # against it. Without it a site that lost its newest release to a
+      # transient download failure is perfectly self-consistent and every
+      # verifier passes it — see `build-site.sh`'s ONDIN_EXPECT_VERSION.
+      expect_version:
+        description: "Fail unless the built site's newest release is this version"
+        type: string
+        required: false
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Deploy to Pages (uncheck to build and upload the artifact only)"
+        type: boolean
+        default: true
+
+# `id-token` is what the Pages deployment uses to prove where the artifact came
+# from; `contents: read` is enough because nothing here writes to the repo.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never two deployments at once, and never cancel one in flight: a half-written
+# repository is one where InRelease does not match the Packages file beside it,
+# and every client sees a hash mismatch until the next release.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build and publish the package repositories
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v5
+
+      # Bounded and retried for the same reason ci.yml's apt step is: an apt
+      # mirror that stalls never fails on its own, and a job left to itself runs
+      # for six hours before GitHub steps in.
+      - name: Install the repository tooling
+        timeout-minutes: 8
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if sudo timeout 120 apt-get update -o Acquire::Retries=3; then
+              break
+            fi
+            echo "::warning::apt-get update stalled or failed (attempt $attempt of 3), retrying"
+            sleep 5
+          done
+          # apt-utils provides apt-ftparchive, rpm provides rpmsign.
+          sudo timeout 300 apt-get install -y apt-utils createrepo-c rpm gnupg xz-utils
+
+      # Fails closed. An unsigned repository is not a degraded version of this
+      # one — it is a repository whose only client instruction is "turn the
+      # signature check off", which is worse than the direct download it would
+      # be replacing. So a missing key stops the publish rather than shipping
+      # something that needs [trusted=yes] to use.
+      - name: Import the signing key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GPG_PRIVATE_KEY}" ]; then
+            echo "::error::secrets.GPG_PRIVATE_KEY is not set. Generate a signing key and add it before publishing — packaging/repo/README.md has the commands. Publishing unsigned is not an option here."
+            exit 1
+          fi
+          mkdir -p ~/.gnupg && chmod 700 ~/.gnupg
+          # gpg 2.1+ refuses --pinentry-mode loopback for some operations
+          # unless the agent is told to allow it, and there is no terminal on a
+          # runner for the alternative.
+          echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
+          gpgconf --kill gpg-agent || true
+          printf '%s\n' "${GPG_PRIVATE_KEY}" | gpg --batch --import
+          fpr="$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr:/ { print $10; exit }')"
+          [ -n "$fpr" ] || { echo "::error::no secret key after import"; exit 1; }
+          echo "GPG_KEY_ID=$fpr" >> "$GITHUB_ENV"
+          echo "::notice::signing with $fpr"
+          if [ -n "${GPG_PASSPHRASE}" ]; then
+            pass="${RUNNER_TEMP}/gpg-passphrase"
+            install -m 600 /dev/null "$pass"
+            printf '%s' "${GPG_PASSPHRASE}" > "$pass"
+            echo "GPG_PASSPHRASE_FILE=$pass" >> "$GITHUB_ENV"
+          fi
+
+      # The base URL is app identity in the same way a Velopack channel name is:
+      # it is written into every user's source list and their machine keeps
+      # asking for it, so moving it stops updates for every existing install —
+      # silently, and with no route back to those users to tell them. It lives
+      # in three files that have no reason to be edited together, and a drift
+      # between them would publish a repository at one URL while telling people
+      # to add another. So the three are compared rather than trusted.
+      #
+      # Changing the URL deliberately means changing it in all three *and*
+      # here — which is the friction, not an oversight.
+      - name: Check the repository URL agrees everywhere
+        run: |
+          set -euo pipefail
+          expected="https://fadion.github.io/ondin"
+          fail=0
+          grep -q "^SITE=\"${expected}\"$" install.sh \
+            || { echo "::error::install.sh does not point at ${expected}"; fail=1; }
+          grep -q "^BASE_URL=\"\${ONDIN_REPO_URL:-${expected}}\"$" packaging/repo/build-site.sh \
+            || { echo "::error::packaging/repo/build-site.sh does not default to ${expected}"; fail=1; }
+          grep -q "^ *ONDIN_REPO_URL: ${expected}$" .github/workflows/pages.yml \
+            || { echo "::error::this workflow does not build for ${expected}"; fail=1; }
+
+          # The **keyring path** is the same kind of value and has the same
+          # number of copies: it is written into every user's source list as
+          # `Signed-By`, and a machine whose list points at a path nothing
+          # installs stops verifying — or stops updating. Five copies, all
+          # compared here.
+          keyring="/usr/share/keyrings/ondin-archive-keyring.gpg"
+          for f in install.sh packaging/repo/build-site.sh packaging/repo/index.html.in \
+                   packaging/repo/verify-site.py; do
+            grep -q "${keyring}" "$f" \
+              || { echo "::error::${f} does not name ${keyring}"; fail=1; }
+          done
+          grep -c "${keyring}" packaging/repo/build-site.sh | grep -qx 2 \
+            || { echo "::error::build-site.sh writes the keyring path in both the deb822 and the one-line source, or the pair has drifted"; fail=1; }
+
+          # `Origin`/`Suite` are what an unattended-upgrades user writes in
+          # `Allowed-Origins` as "Ondin:stable", so they are published
+          # interface in exactly the way the base URL is.
+          grep -q '^ORIGIN="Ondin"$' packaging/repo/build-apt-repo.sh \
+            || { echo "::error::the apt repository's Origin is no longer Ondin; every Allowed-Origins line in the wild names the old one"; fail=1; }
+          grep -q '^SUITE="stable"$' packaging/repo/build-apt-repo.sh \
+            || { echo "::error::the apt repository's Suite is no longer stable"; fail=1; }
+          grep -q 'Origin: Ondin`, `Suite: stable' packaging/repo/README.md \
+            || { echo "::error::packaging/repo/README.md documents a different Origin/Suite"; fail=1; }
+
+          # `Components` and `Architectures` are the same class of value one
+          # field further down the deb822 stanza. They are written into every
+          # user's source list, and the repository's index is laid out under
+          # `dists/stable/<component>/binary-<arch>/` — so a change on either
+          # side alone publishes an index at a path the source lists do not ask
+          # for, and `apt update` 404s on every machine that already has one.
+          # `Architectures` has no other backstop: verify-site.py hard-codes
+          # `main/binary-amd64`, which means it would only ever notice the
+          # mismatch as a missing file, and only if the *other* side moved.
+          #
+          # Three places, deliberately: the stanza the user installs, the
+          # builder that lays the index out, and the checker that fetches it.
+          grep -q '^Components: main$' packaging/repo/build-site.sh \
+            || { echo "::error::the published source list no longer names the 'main' component; every ondin.sources in the wild asks for it"; fail=1; }
+          grep -q '^Architectures: amd64$' packaging/repo/build-site.sh \
+            || { echo "::error::the published source list no longer names the amd64 architecture"; fail=1; }
+          grep -q '^COMPONENT="main"$' packaging/repo/build-apt-repo.sh \
+            || { echo "::error::the apt repository is built under a component the source list does not name"; fail=1; }
+          grep -q '^ARCH="amd64"$' packaging/repo/build-apt-repo.sh \
+            || { echo "::error::the apt repository is built for an architecture the source list does not name"; fail=1; }
+          grep -q '"main", "binary-amd64"' packaging/repo/verify-site.py \
+            || { echo "::error::verify-site.py checks an index path the source list does not point at"; fail=1; }
+          grep -q 'arch=amd64 ' packaging/repo/build-site.sh \
+            || { echo "::error::the one-line .list and the deb822 stanza disagree about the architecture"; fail=1; }
+          [ "$fail" -eq 0 ]
+
+      - name: Build the site
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ONDIN_REPO_URL: https://fadion.github.io/ondin
+          ONDIN_RETAIN: "5"
+          ONDIN_GH_REPO: ${{ github.repository }}
+          # Empty on `workflow_dispatch`, which has no tag — the repair path
+          # rebuilds whatever the releases currently hold, which is the point of
+          # it.
+          ONDIN_EXPECT_VERSION: ${{ inputs.expect_version }}
+        run: bash packaging/repo/build-site.sh site
+
+      # **The published fingerprint is an identity value too**, and the one
+      # the packaging README designates *the* independent channel: a
+      # fingerprint you can only check against the same server the key came
+      # from is not a check at all, and this repository's history is a channel
+      # that server does not control. The site's copy is derived from the key
+      # that actually signed this build, so a rotation moves it and leaves
+      # README.md asserting the old one — which is worse than no fingerprint,
+      # because someone will check against it.
+      #
+      # After the build rather than beside the step above, because the built
+      # value is what there is to compare against.
+      #
+      # Until the maintainer writes the fingerprint into README.md and
+      # install.sh (packaging/repo/README.md, "The fingerprint, in exactly two
+      # files"), this step fails every publish. That is intended.
+      - name: Check the published key fingerprint agrees with the README
+        run: |
+          set -euo pipefail
+          built="$(sed -n 's|.*<pre><code>\([0-9A-F]\{40\}\)</code></pre>.*|\1|p' site/index.html | head -n1)"
+          [ -n "$built" ] || { echo "::error::no 40-hex fingerprint in the built site/index.html"; exit 1; }
+          fail=0
+          grep -qx "$built" README.md \
+            || { echo "::error::README.md does not carry the fingerprint this build published (${built}) on a line of its own. Either it was never written there, or the signing key rotated: update README.md, and say so in the release notes — people check against it."; fail=1; }
+          # install.sh *refuses* a key that is not this one, so a rotation that
+          # misses that constant bricks every new install rather than merely
+          # misinforming a careful reader.
+          grep -qx "KEY_FINGERPRINT=\"${built}\"" install.sh \
+            || { echo "::error::install.sh's KEY_FINGERPRINT is not the fingerprint this build published (${built}). It refuses any other key, so every new install from the repositories would fail."; fail=1; }
+          [ "$fail" -eq 0 ]
+
+      # A repository whose metadata does not match its packages installs
+      # nothing, and finds that out on a user's machine. This reads the site
+      # back the way a client would, before it is anywhere a client can see it.
+      - name: Verify the built repositories
+        run: bash packaging/repo/verify-site.sh site
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to Pages
+        id: deploy
+        if: github.event_name != 'workflow_dispatch' || inputs.publish
+        uses: actions/deploy-pages@v4

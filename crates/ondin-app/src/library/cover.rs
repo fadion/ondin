@@ -63,7 +63,7 @@ const COVER_MAX_PX: f64 = 400.0;
 /// **128 is ~80 MB at that worst case, and more than one screen of file cards
 /// on most windows** — ⚠️ **no longer "more than twice"**: the grid fitted its
 /// columns to the window in §15 D964, a column per 300 pt or so of body, so a
-/// 2,160 pt-tall window's ~12 rows of ~172 pt are about 72 cards at a 1,600 pt
+/// 2,160 pt-tall window's ~12 rows of ~176 pt (§15 D965) are about 72 cards at a 1,600 pt
 /// body and pass 128 past a body of ~3,126 pt. And **not a screen of project
 /// cards**: a mosaic asks for up to five, thirty a row of six, and *Recent*
 /// lists every active project with files — so at a `PROJECT_CARD_H` of 185 pt,

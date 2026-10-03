@@ -59,7 +59,14 @@ const NAV_H: f32 = 30.0;
 const UNARCHIVE_X: f32 = 12.0 + 13.0 / 2.0;
 /// A card in the grid view: the thumbnail's height, plus its caption.
 const CARD_THUMB_H: f32 = 116.0;
-const CARD_CAPTION_H: f32 = 42.0;
+/// The caption band under the thumbnail: the name centred 15 below the
+/// thumbnail, the date 31. **46, where it was 42** (§15 D965): at 42 the date's
+/// line box ended about 4.5 points above the card's edge while the name's began
+/// about 7.5 below the thumbnail — arithmetic from the two centres and the 12.5
+/// and 11 point sizes, not a measurement of ink — and the maintainer saw less
+/// padding under the date than over the name. The four points go under the date
+/// and move neither line.
+const CARD_CAPTION_H: f32 = 46.0;
 /// The design's mosaic: 118 tall, two rows, a 7pt gutter, and at most five of the
 /// project's files in it.
 const MOSAIC_H: f32 = 118.0;
@@ -9856,10 +9863,13 @@ mod tests {
     /// key having stopped working. Flip-checked by deleting the call from
     /// `file_card`: the label comes back at **y=970** against a window 820 tall,
     /// a row and a half below the fold rather than marginally under it. **Twenty
-    /// documents is the fixture and not a round number**: the rows are 172 apart
+    /// documents is the fixture and not a round number**: the rows were 172 apart
     /// (a 158 card and a 14 gap), so a sixteen-document version would have put the
     /// fourth row's caption at y≈798 against a fold at 800 — two points inside,
-    /// which is a test that passes with no scrolling at all.
+    /// which is a test that passes with no scrolling at all. ⚠️ Rows are 176 apart
+    /// since §15 D965's taller caption — by arithmetic that fourth row would now
+    /// sit near 810, past the fold, but the 798 was measured on the old grid and
+    /// nothing here re-measured it. Twenty stays the fixture.
     #[test]
     fn arrowing_off_the_bottom_of_the_grid_scrolls_the_card_into_view() {
         let ctx = egui::Context::default();
@@ -10142,7 +10152,8 @@ mod tests {
     /// against 298 for the file's name beside it). The y was expected to pass
     /// vacuously and does not: the labels come out 138pt apart, over a threshold
     /// of `CARD_THUMB_H` at 116. **The margin is 22pt, and that is the finding**
-    /// — had the threshold been the card's full height, 158, which is the number a
+    /// — had the threshold been the card's full height, 158 then (162 since §15
+    /// D965), which is the number a
     /// reader reaches for first when writing "the same row", the assertion would
     /// have been green for exactly the layout it rules out. It is the thumbnail's
     /// height that gives it teeth, and only by accident, so the x is the one to

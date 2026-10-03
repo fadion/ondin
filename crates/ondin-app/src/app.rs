@@ -9625,12 +9625,13 @@ mod tests {
     /// fails naming `inspector.rs`. Predicted correctly.
     #[test]
     fn only_the_layers_panel_commits_without_the_committer() {
-        let panels: [(&str, &str); 8] = [
+        let panels: [(&str, &str); 9] = [
             ("dashboard.rs", include_str!("panels/dashboard.rs")),
             ("export.rs", include_str!("panels/export.rs")),
             ("inspector.rs", include_str!("panels/inspector.rs")),
             ("layers.rs", include_str!("panels/layers.rs")),
             ("layout.rs", include_str!("panels/layout.rs")),
+            ("layout/grid.rs", include_str!("panels/layout/grid.rs")),
             ("paint.rs", include_str!("panels/paint.rs")),
             ("picker.rs", include_str!("panels/picker.rs")),
             ("typography.rs", include_str!("panels/typography.rs")),
@@ -9659,13 +9660,30 @@ mod tests {
         //
         // `mod.rs` is deliberately absent from the list — it is the module
         // declaration rather than a panel — and is the one name subtracted.
+        //
+        // ⚠️ **Recursive, by path below `panels/`.** The listing was one
+        // `read_dir`, which sees a subdirectory as a name not ending `.rs` — so
+        // `layout/grid.rs`, the grid cards and some twenty commit sites, joined
+        // the tree unscanned with both assertions green (`[R2-L6-01]`). **Flip
+        // run**, the listing back to one level: fails here, `layout/grid.rs` in
+        // the list and not on disk — the predicted site.
+        fn listed_under(dir: &std::path::Path, prefix: &str, out: &mut Vec<String>) {
+            for e in std::fs::read_dir(dir)
+                .expect("a panels directory")
+                .flatten()
+            {
+                let name = e.file_name().to_string_lossy().into_owned();
+                let path = format!("{prefix}{name}");
+                if e.path().is_dir() {
+                    listed_under(&e.path(), &format!("{path}/"), out);
+                } else if path.ends_with(".rs") && path != "mod.rs" {
+                    out.push(path);
+                }
+            }
+        }
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/panels");
-        let mut on_disk: Vec<String> = std::fs::read_dir(&dir)
-            .expect("the panels directory")
-            .filter_map(|e| e.ok())
-            .map(|e| e.file_name().to_string_lossy().into_owned())
-            .filter(|n| n.ends_with(".rs") && n != "mod.rs")
-            .collect();
+        let mut on_disk: Vec<String> = Vec::new();
+        listed_under(&dir, "", &mut on_disk);
         on_disk.sort();
         let mut listed: Vec<String> = panels.iter().map(|(n, _)| (*n).to_owned()).collect();
         listed.sort();

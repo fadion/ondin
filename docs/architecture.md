@@ -1249,7 +1249,10 @@ intrinsic size its children's union bounds — ⚠️ through their **specified*
 never wraps (`white-space: nowrap`), auto height wraps at the width it is given — its stored width
 the preferred one, never below its widest word — and fixed is fixed; `container::flexed_text` turns
 the size a container gives back into a kind, an auto-width box never narrower than its line, so a
-stretch that gives less overflows the slot from its start rather than wrapping (§15 D917). Min-content is `text::content_widths` —
+stretch that gives less overflows the slot from its start rather than wrapping (§15 D917). **A text
+leaf reports its first baseline** to the engine — `LayoutView::first_baseline`, asked at the kind it
+is drawn as and remembered with its boxes — so `baseline` lines up letters; a shape reports none and
+is aligned by its bottom edge, CSS's synthesized baseline, and until §15 D939 text was too. Min-content is `text::content_widths` —
 parley's widths plus the widest paragraph's own edges, its start edge, a positive first-line indent
 and its end indent, since core places every line itself and parley knows none of them (§15 D931) —
 and taffy's repeated questions share a per-pass memo keyed by node and width. **Every text
@@ -1351,8 +1354,8 @@ had its growth stopped and its siblings jump — and a px `min-` or `max-` is ke
 (`container::can_stretch` in `build::flex_holds`, §15 D935). **The gesture preview applies the same holds**
 (`build::flex_holds`, §15 D904), so a resize is drawn as it will land rather than re-laid as stored
 until the release. The Item card names those flips, with an Undo
-that takes the whole step back (§15 D880) — all but the basis, which it does not name (§15 D935's
-*Fix*). **And a resize writes px over a size keyword**:
+that takes the whole step back (§15 D880) — the basis among them since §15 D940, which left an item
+with no growth to stop changing its basis in silence until then. **And a resize writes px over a size keyword**:
 `keep_flex_sizes` sets a `%` or `fit-content` width or height back to `auto` on each axis a resizing
 `SetGeometry` changed, whatever the parent — `auto` being the stored size the resize has just written
 (`build::sized_in_px`, §15 D879). **And the stored translation is kept**: before
@@ -1394,7 +1397,10 @@ basis, `align-self` and limits, or says why a layer is out of the flow and puts 
 taken away with `display: none` from the Container card leaves every child where it is drawn and a
 hugging frame the size it hugged to, the Position card's unpin rule — every child, a laid group's
 pinned ones included with their insets kept, and a child container with a layout of its own at the
-size this one gave it (`build::baked`, §15 D929). The Transform card's W and H
+size this one gave it (`build::baked`, §15 D929) — and a stretched label its sizing mode, a drawn
+`Fixed` box over a stored `Auto` or `AutoHeight` baked as `AutoHeight` at the drawn width wherever
+its lines fill the box, so it goes on growing with its words (`build::baked_ops`, §15 D940; every
+door that bakes, the Position card's pin and Group included). The Transform card's W and H
 offer the sizing modes that differ for the layer (§15 D879), and an in-flow item's X and Y are inert
 (§15 D882) — the multi card's too, while any member is in flow (§15 D903). A sizing field shows a
 number where the number is a real size of the layer — W and H —
@@ -1449,10 +1455,13 @@ and only one it writes is refused — the cards write a whole `Grid` or `LayoutI
 edit over a file's refused template was refused whole until §15 D937 — and history puts one back
 through `Document::apply_restoring`, above. `lay_out` is one
 `FlexTree` pass still, `compute_child_layout` sending a grid container to taffy's grid algorithm.
-⚠️ **taffy's grid reads `baseline` as `start`** (its own *TODO*), so grid's cards do not offer it and
-the model keeps it for flex (§15 D914, D919); a grid that holds it anyway — from flex, or a file —
-reads *Baseline · Start* with Start's picture, on a lit row `glyph_combo` adds for a held value its
-list does not offer (§15 D923). Grid's values have CSS text in core — `tracks_css` and
+⚠️ **taffy's grid aligns `baseline` on its block axis and reads it as `start` across** — its own
+*TODO* is the inline axis's: the vertical placement is handed each item's shim to the row's tallest
+baseline and the horizontal one is handed none (§15 D939, correcting D914's and D919's *"as `start`"*,
+which looked true while no text reported a baseline). So `align-items` and `align-self` offer it and
+name it *Baseline*, and the justify rows leave it out; a justify row that holds it anyway — from
+flex, or a file — reads *Baseline · Start* with Start's picture, on a lit row `glyph_combo` adds for a
+held value its list does not offer (§15 D923). Grid's values have CSS text in core — `tracks_css` and
 `parse_tracks`, `placement_css` and `parse_placement` — for the cards' typed fields; the parser reads,
 and `Grid::is_valid` judges at the operation (§15 D920).
 
@@ -1505,7 +1514,10 @@ where nothing is laid, whatever made it (§15 D921's amendment). The tracks are 
 `RenderOverrides::laid_grid`, `container::laid_grid` over the preview's view, equal to
 `build::laid_grid` with nothing patched — ⚠️ except for a grid pinned on both sides inside a parent
 drawn at another size than it stores, where `build::laid_grid`, through `DocView`, lays it against
-the parent's stored box — or, in a laid group, unstretched — and so does a drop (§15 D933, a *Fix*) —
+the parent's stored box — or, in a laid group, unstretched (§15 D933). A drop did the same until §15
+D942: `build::grid_drop_many` lays through `resolve::CommittedView`, `DocView`'s answers with the
+parent's box from the used geometry, so it picks the cells the grid is drawn with; `build::laid_grid`,
+taking no `Resolved`, cannot, and only tests call it —
 and the container's box and world transform are read
 through the preview too, so a resize re-lays the lines with the box rather than the half-previewing
 overlay of §15 D391. **Drawn for every selected grid container, and during a move for every selected
@@ -2885,6 +2897,12 @@ end of one JSON file keep both, which is the whole reason the table sits where i
   The fields exist for all three sizing modes, reading `query::local_box` like the handles do rather
   than the `sizing` field, which is what gives an `AutoHeight` layer a door onto its authored width
   (§15 D297).
+- **The mode each of those doors starts from is the one the node stores, at the extents it is drawn**
+  (`tools::gesture_text_sizing`, §15 D940) — the handle, the W and H fields and the Scale tool's
+  `scale_geometry` alike. The used kind is not enough: a text a flex or grid container stretched or
+  grew is drawn as a `Fixed` box whatever it stores (§5.3c), and reading that as the mode turned an
+  auto-width label in a stretching column, dragged or typed narrower, into a one-line-high fixed box
+  with its wrapped lines over the next item.
 - Group resize recurses geometry edits into children (`tools::resize_group`, one transaction): each
   descendant's position within the group scales with the box and each leaf's geometry scales with
   it, so the group's own transform comes out untouched and a resized group is still a group of
@@ -3697,6 +3715,7 @@ impl Resolved {
     pub fn used_frame(&self, id: NodeId) -> Option<Size>;  // a group WITH a layout's box — §15 D875
     pub fn remembered_text_box(&self, id: NodeId, kind: &NodeKind) -> Option<Option<Rect>>; // preview, D936
     pub fn remembered_text_widths(&self, id: NodeId) -> Option<Option<(f64, f64)>>;        // likewise
+    pub fn remembered_text_baseline(&self, id: NodeId, kind: &NodeKind) -> Option<Option<f64>>; // D939
     pub fn ink_bounds(&self, id: NodeId) -> Option<Rect>;
     pub fn text_layout(&self, id: NodeId) -> Option<&TextLayout>;
     pub fn invalidate_text(&mut self, doc: &Document);
@@ -3730,7 +3749,8 @@ impl Resolved {
   compares **five of the seven**, with `boolean`, `inner_ink` and
   `failed` still outside it.
   ⚠️ **And an eighth since §15 D936, `text_memo`** — not a derived answer but a cache of the layout
-  pass's text measurements, each text node's box at each sizing asked and its content widths, kept
+  pass's text measurements, each text node's box and first baseline at each sizing asked (the
+  baseline since §15 D939) and its content widths, kept
   across commits so that a pass re-run by a nudge re-shapes nothing. The guard does not compare it and
   must not: `rebuild` holds only what its own pass asked for. What it owes is that every entry is what
   measuring would answer now, and its whole argument is D590's — a text node's measurement depends on
@@ -7327,7 +7347,9 @@ input event (winit/egui)
   was** (§15 D841): `picker::hex_row` and `typography::char_hex` had the same defect and the same
   numbers. Every live `lost_focus()` in `crates/` has since been read, and each now calls this, reads
   the key itself, or is one of the gates below. The grid cards' typed CSS fields were written to it
-  from the start (`layout::grid::css_field`, §15 D920). 🚨 **The *write* is what is declined and never the
+  from the start (`layout::grid::css_field`, §15 D920), and compare the text with what the field was
+  seeded with rather than with what it shows — a *Mixed* field shows nothing, and that comparison
+  read a click through one as typing the empty list (§15 D941). 🚨 **The *write* is what is declined and never the
   block** — the buffer clear has to run on every way out, or a cancelled edit leaves its typed text in
   the field, which nothing asserts and no gate sees.
   🚨 **And the gate above does not cover that class, which is a fact about its *name* rather than a
@@ -7404,8 +7426,11 @@ input event (winit/egui)
   item's stored translation under a `SetTransform` written while it stays in the flow — the slot a
   control computed from being where its container puts it, not a place of its own (§15 D877's second
   amendment).
-  What is written back is still the used value, so a stretched auto-width text node resized stores
-  `AutoHeight(w)`. `committed_node` has no
+  What is written back is still the used value — **but a text's sizing mode is read from the node**,
+  at the drawn extents (`tools::gesture_text_sizing`, §15 D940): an auto-width text stretched by
+  insets is drawn `AutoHeight(w)` and one a container stretched a `Fixed` box, and the second resized
+  or typed narrower stored that box until then. A stretched auto-width label resized by its left or right
+  handle stores `AutoHeight` now whichever stretched it (§5.6). `committed_node` has no
   used kind at all: it reports the value a commit is about to overwrite, which is the specified one.
   `keep_flex_sizes` also turns a resize of any layer into px on each axis it changed, a `%` or
   `fit-content` width or height going back to `auto` (§15 D879). **The preview carries those holds
@@ -7420,6 +7445,11 @@ input event (winit/egui)
   cards did (§15 D885); `layout::edited` latches "moved since engaged" through the engagement's last
   frame. Building the edit unconditionally, as the Position card's pinned insets do, is not the
   general fix: a field only clicked through would write the value it shows to every subject.
+  **The Transform card's W and H ask the same latch** since §15 D940, in every sizing mode, so a click
+  in and out writes nothing — it wrote the drawn width back, which for a text is a mode change.
+  🚨 **The latch, and not "the number differs from the one drawn"**: a width the preview reads back
+  clamped — a label's widest word — shows the drawn number on the committing frame, and a guard
+  comparing the two emptied a typed edit.
 - **A multi-selection Transform field carries its own drag total, and that is a real difference from
   the single-layer path.** The single-layer fields need no such state: they read their number back
   through the render override, so the preview *is* the running total and each frame's edit is an
@@ -8439,7 +8469,8 @@ layer, where the Item card's unset basis and limits read their keyword in the di
 D895, the maintainer's ruling); the menu opens under the unit, its right edge under the unit's — hung
 off the field's response it opened under the prefix (`ui::value_field_unit`, §15 D907); picking
 a mode moves nothing
-(`layout::size_mode_tx`); typing writes px, or `%` while the mode is `%`. **The proportion lock is
+(`layout::size_mode_tx`); typing writes px, or `%` while the mode is `%`; a click in and out writes
+nothing in any mode, and a typed size keeps a text's stored sizing mode (§15 D940, §5.6, §9.3). **The proportion lock is
 disabled while either side is a keyword or `%`**, with the reason on hover. A laid group's typed W and
 H take `tools::resize_box_to`, as any box without an authored `size` does (above), and so reach
 `build::sized_flex_item`. The menu is the single card's only; the multi card's W and H are plain.
@@ -8624,11 +8655,13 @@ with its track count and a `+`, a row per entry — a grip, a kind menu leading 
 fields, a cross — and under it the whole template as a CSS line, which applies on a defocus that
 commits and never on `Escape` and shows a parse error or a refused list in red; `justify-content`,
 `justify-items`, `align-items` and `align-content`, named *Start* and *End* rather than *Flex start*,
-the items rows leading with *Normal* (§15 D915) and none offering `baseline` (§15 D919) — a held
-one reading *Baseline · Start* on a lit row of its own (§15 D923); the gaps,
+the items rows leading with *Normal* (§15 D915), `align-items` offering `baseline` as *Baseline* and
+`justify-items` leaving it out (§15 D919, D939) — a held one reading *Baseline · Start* on a lit row
+of its own (§15 D923); the gaps,
 columns first; and the padding. Switching between flex and grid keeps the padding and the gaps.
 *Item* has, in a flex container, grow and shrink, basis and `align-self`; in a grid, `grid-column` and
-`grid-row` typed as CSS, start and end, and `justify-self` and `align-self`; each self-alignment *Auto
+`grid-row` typed as CSS, start and end, and `justify-self` and `align-self`, the second offering
+`baseline` as the align rows do (§15 D939); each self-alignment *Auto
 · \<inherited\>* while unset; and in either, four limits behind a *Min / max* disclosure,
 a basis or limit left at a keyword reading it in the digits' place (§15 D895), with no unit beside it
 — typing or dragging a number is how to leave it (§15 D906);
@@ -8644,8 +8677,9 @@ child, not only the in-flow ones** (§15 D929): a laid group's pinned children a
 the group has no longer, so they are written where they are drawn too, their insets kept — inert under
 a plain group, live again if the layout comes back — and a child container with a layout of its own
 keeps the size this one gave it. **A resize's flips come with
-a receipt** (§15 D880): the grow, shrink or `align-self` a resize changed on the user's behalf is
-outlined and named, with an Undo that takes the whole step back — and a grid item's `justify-self`
+a receipt** (§15 D880): the grow, shrink, basis or `align-self` a resize changed on the user's
+behalf is named and, but for the basis, outlined, with an Undo that takes the whole step back — the
+basis named since §15 D940 — and a grid item's `justify-self`
 and `align-self` likewise, each row outlined while the receipt names it (§15 D920, D922). The fields read `DisplayNode::display`
 and `item`, which have overrides behind them, and commit through `layout::edited`'s latch (§9.3, §15
 D885). A number field over a disagreeing selection reads *"Mixed"* (§15 D892). Neither card has a

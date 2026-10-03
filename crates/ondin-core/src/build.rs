@@ -382,8 +382,9 @@ pub fn reparent_preserving_world(
 /// The operations that write `local` and `kind` into `node` as its own — a
 /// `SetTransform` where `local` is not its stored transform, and a `SetGeometry`
 /// where `kind` is not its stored kind and has a size to write (a shape's or a
-/// frame's size, a text's sizing mode). Nothing for a kind whose size is not in
-/// it: a path's, a group's, an image's.
+/// frame's size, a text's sizing — its stored mode kept where that draws the
+/// same, [`kept_text_mode`], §15 D940, and nothing where that is what it stores).
+/// Nothing for a kind whose size is not in it: a path's, a group's, an image's.
 ///
 /// **The one spelling of "keep it where it is drawn"**, for every edit that
 /// takes a layer out of whatever was placing it: the structural verbs through
@@ -4609,7 +4610,10 @@ pub fn layout_drop(doc: &Document, res: &Resolved, id: NodeId, delta: Vec2) -> O
 
 /// The committed document's grid container `id` as its pass lays it — its
 /// tracks and its items' areas ([`crate::container::laid_grid`], §15 D916). The
-/// public door, for the canvas's track lines and for tests.
+/// public door, for tests — the canvas's track lines read the preview's
+/// (`RenderOverrides::laid_grid`, §15 D921), and a drop lays through the committed
+/// geometry (`grid_drop_many`, §15 D942). Laid through the stored document, so a
+/// grid pinned in a parent drawn at another size is laid at the stored one.
 pub fn laid_grid(doc: &Document, id: NodeId) -> Option<crate::container::LaidGrid> {
     crate::container::laid_grid(&crate::resolve::DocView(doc), id)
 }

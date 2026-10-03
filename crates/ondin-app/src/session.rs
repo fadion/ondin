@@ -360,9 +360,12 @@ impl<'a> DisplayNode<'a> {
     /// computing it from where layout put the node — which is the rule now, not a
     /// debt (§15 D874): tools and controls compute from used geometry, and
     /// `build::keep_insets`, at the top of `commit_inner`, turns a placement written
-    /// for a pinned layer into its insets. What survives of the old warning is the
-    /// value written back: a stretched auto-width text node's used kind is
-    /// `AutoHeight(w)`, so an edit built from this stores that mode.
+    /// for a pinned layer into its insets. What survives of the old warning is a
+    /// text's *mode*: an auto-width text stretched by insets is drawn as
+    /// `AutoHeight(w)`, and one a flex or grid container stretched as a `Fixed`
+    /// box, so an edit must not take its mode from here — the doors read it from
+    /// the node (`tools::gesture_text_sizing`), and a bake keeps it
+    /// (`build::baked_ops`, §15 D940).
     pub fn kind(&self) -> &'a NodeKind {
         self.over
             .and_then(|o| o.kind.as_ref())

@@ -307,7 +307,9 @@ impl RenderOverrides {
     /// The grid container `id` as **this preview** lays it — its tracks and its
     /// items' areas ([`ondin_core::container::laid_grid`] over the patched
     /// fields), `None` where it is not a grid. With nothing patched it is the
-    /// committed document's answer, `build::laid_grid`'s.
+    /// grid the committed pass lays — which `build::laid_grid`, laying through the
+    /// stored document, is not for a grid pinned in a parent drawn at another size
+    /// than it stores (§15 D933, D942).
     ///
     /// **The canvas's track lines' one source** (§15 D921), so a container being
     /// resized re-lays its lines against the box the gesture is drawing rather

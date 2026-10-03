@@ -3539,6 +3539,130 @@ mod tests {
         p.run("100 needs a unit: px, % or fr");
     }
 
+    /// `grid_scene` with its columns set to `css`.
+    fn grid_with_columns(css: &str) -> Scene {
+        let mut s = grid_scene();
+        let mut g = grid_of(&s.app, s.frame);
+        g.columns = ondin_core::container::parse_tracks(css).unwrap();
+        s.app
+            .session
+            .commit(Transaction(vec![Operation::SetDisplay {
+                id: s.frame,
+                display: Some(Display::Grid(g)),
+            }]));
+        s
+    }
+
+    /// **A click in and out of a *Mixed* template line writes nothing** (§15
+    /// D941, the release review's `[X6.3-L1-01]`): two grids with different
+    /// columns selected, the CSS line reading empty under its *Mixed* hint,
+    /// focused and left with `Enter`. The untouched empty buffer compared unequal
+    /// to the `None` a mixed selection shows, so it was committed — and an empty
+    /// list is `none`: both grids lost every column, in one undo step.
+    ///
+    /// **Flip run**, `css_field` comparing against `shown` again: fails on
+    /// *"both grids keep their columns"*, both `none`, the predicted site. (A first
+    /// draft clicked the first *Mixed* on the card — the list's summary on its
+    /// head row — and passed under the flip, focusing nothing.)
+    #[test]
+    fn a_click_through_a_mixed_template_line_writes_nothing() {
+        let mut s = grid_scene();
+        let other = s.app.session.ids.mint();
+        let root = s.app.session.doc.root();
+        assert!(s.app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: other,
+                parent: root,
+                index: 1,
+                kind: NodeKind::Artboard {
+                    size: Size::new(300.0, 200.0),
+                },
+                transform: Some(Affine::translate((600.0, 0.0))),
+                name: None,
+            },
+            Operation::SetDisplay {
+                id: other,
+                display: Some(Display::Grid(Grid {
+                    columns: ondin_core::container::parse_tracks("1fr 1fr 1fr").unwrap(),
+                    ..Default::default()
+                })),
+            },
+        ])));
+        let frame_id = s.frame;
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        p.app.session.selection.set(vec![frame_id, other]);
+        let depth = p.app.session.history.undo_depth();
+        // The second *Mixed*: the first is the column list's summary on its head
+        // row, and the CSS line's hint sits under it.
+        let at = p.runs(ui::MIXED_WORD)[1];
+        p.click(at);
+        p.frame(vec![key(egui::Key::Enter)]);
+        for _ in 0..2 {
+            p.frame(Vec::new());
+        }
+        let css = |app: &OndinApp, id| ondin_core::container::tracks_css(&grid_of(app, id).columns);
+        assert_eq!(
+            (css(&p.app, frame_id), css(&p.app, other)),
+            ("100px 1fr".to_owned(), "1fr 1fr 1fr".to_owned()),
+            "both grids keep their columns"
+        );
+        assert_eq!(p.app.session.history.undo_depth(), depth, "and no step");
+    }
+
+    /// **Picking a `minmax()` end's lit unit changes nothing** (§15 D941,
+    /// `[X6.3-L1-02]`): `minmax(200px, 1fr)`'s min `px` clicked, and the menu's
+    /// `px` — the lit row — clicked. The menu answered every row with the kind's
+    /// default, so the lit one wrote `minmax(100px, 1fr)`.
+    ///
+    /// **Flip run**, the `k != kind` filter deleted: fails on *"unchanged"*,
+    /// `minmax(100px, 1fr) 50px`, the predicted site.
+    #[test]
+    fn picking_a_minmax_ends_lit_unit_changes_nothing() {
+        let s = grid_with_columns("minmax(200px, 1fr) 50px");
+        let frame_id = s.frame;
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        p.app.session.selection.set(vec![frame_id]);
+        let depth = p.app.session.history.undo_depth();
+        // The min's unit: the first `px` in the card, the column list leading it.
+        let unit = p.runs("px")[0];
+        p.click(unit);
+        let row = p
+            .runs("px")
+            .into_iter()
+            .filter(|r| r.y > unit.y + 4.0)
+            .min_by(|a, b| a.y.total_cmp(&b.y))
+            .expect("the menu's px row under the unit");
+        p.click(row);
+        assert_eq!(
+            ondin_core::container::tracks_css(&grid_of(&p.app, frame_id).columns),
+            "minmax(200px, 1fr) 50px",
+            "unchanged"
+        );
+        assert_eq!(p.app.session.history.undo_depth(), depth, "and no step");
+    }
+
+    /// **`0` typed over a keyword lands** (§15 D941, `[X6.3-L1-03]`):
+    /// `minmax(auto, 1fr)`'s min, reading `auto`, retyped `0` — CSS's
+    /// `minmax(0, 1fr)`, an `fr` column that may shrink below its content. The
+    /// hidden number under a keyword is 0, so a typed 0 never moved it and nothing
+    /// committed.
+    ///
+    /// **Flip run**, the keystroke clause deleted: fails on *"minmax(0, 1fr)"*,
+    /// the template unchanged, the predicted site.
+    #[test]
+    fn zero_typed_over_a_keyword_lands() {
+        let s = grid_with_columns("minmax(auto, 1fr)");
+        let frame_id = s.frame;
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        p.app.session.selection.set(vec![frame_id]);
+        p.retype("auto", "0", egui::Key::Enter);
+        assert_eq!(
+            ondin_core::container::tracks_css(&grid_of(&p.app, frame_id).columns),
+            "minmax(0px, 1fr)",
+            "minmax(0, 1fr)"
+        );
+    }
+
     /// **A grid item's card has its lines and self-alignments where a flex item's
     /// has grow, shrink and basis** (§15 D920), and **a line is typed as CSS**:
     /// `a`'s column start retyped `2` and its end `span 2` land as

@@ -220,7 +220,19 @@ impl AxisInsets {
         // through a divide and a multiply: a nudge along x must not turn a `33.3%`
         // top inset into its float-noise neighbour and commit that as a change.
         let (now, now_size) = self.resolve(extent, size, pos, can_stretch);
-        if (now - pos).abs() < 1e-9 && (now_size - size).abs() < 1e-9 {
+        // ⚠️ **A box that cannot stretch, between two plain insets, ignores its
+        // end inset when placed — so that inset is checked here on its own**
+        // (§15 D938): it decides nothing while the start inset is there, and
+        // becomes the box's whole position the moment the start is unpinned or
+        // auto margins go on. `with_edge` pins a second edge as a `0` placeholder
+        // for this function to rewrite, and the early return below handed it back
+        // untouched, so a path pinned on both sides stored `right: 0` 180 px from
+        // the edge — and un-pinning its left jumped it there.
+        let end_stale = !can_stretch
+            && !(self.auto_start || self.auto_end)
+            && matches!((self.start, self.end), (Some(_), Some(e))
+                if (e.resolve(extent) - (extent - pos - size)).abs() > 1e-9);
+        if (now - pos).abs() < 1e-9 && (now_size - size).abs() < 1e-9 && !end_stale {
             return self;
         }
         let mut out = self;
@@ -240,8 +252,11 @@ impl AxisInsets {
                     out.start = Some(start.rewritten(pos, extent));
                     out.end = Some(end.rewritten(extent - pos - size, extent));
                 } else {
-                    // The end inset is ignored on this axis, so only the start moves.
+                    // The end inset is ignored on this axis when placing — but it
+                    // is still written true, since it is the position the moment
+                    // the start goes (§15 D938). This rewrote the start alone.
                     out.start = Some(start.rewritten(pos, extent));
+                    out.end = Some(end.rewritten(extent - pos - size, extent));
                 }
             }
         }
@@ -2822,6 +2837,55 @@ mod tests {
         let out = with_edge(&centred, Edge::Left, false, FRAME, at, bx, &kind);
         assert_eq!(out.left, None);
         assert!(out.margin_auto.is_none());
+    }
+
+    /// **A path pinned on both sides of an axis stores its true end distance**
+    /// (§15 D938, the release review's `[X3.1-L1-02]`). A path cannot stretch, so
+    /// between two plain insets its end inset is ignored when placing — and
+    /// `with_edge`'s `0` placeholder for the second edge survived `inverse`, which
+    /// returned early for a placement that had not moved. Stored `right: 0`, 180
+    /// px from the edge: un-pinning the left then jumped the path flush right, and
+    /// centring between the two moved it to x 110.
+    ///
+    /// **Flip run**, `inverse`'s end check dropped: fails on *"the true distance"*,
+    /// `Px(0)` against `Px(180)`, the predicted site.
+    #[test]
+    fn a_path_pinned_on_both_sides_stores_its_true_end_distance() {
+        let mut path = kurbo::BezPath::new();
+        path.move_to((0.0, 0.0));
+        path.line_to((100.0, 0.0));
+        path.line_to((50.0, 50.0));
+        path.close_path();
+        let kind = NodeKind::Path {
+            path,
+            corner_radii: Vec::new(),
+        };
+        let bx = geometry::local_bounds(&kind, None).unwrap();
+        let at = Affine::translate((20.0, 10.0));
+        let mut insets = Insets::default();
+        for edge in [Edge::Left, Edge::Right] {
+            insets = with_edge(&insets, edge, true, FRAME, at, bx, &kind);
+        }
+        assert_eq!(insets.right, px(180.0), "the true distance, 300 - 20 - 100");
+        let unpinned = with_edge(&insets, Edge::Left, false, FRAME, at, bx, &kind);
+        assert_eq!(
+            placed(unpinned, at, &kind).0.x,
+            20.0,
+            "un-pinning the left leaves it where it was"
+        );
+        let centred = Insets {
+            margin_auto: AutoMargins {
+                left: true,
+                right: true,
+                ..Default::default()
+            },
+            ..insets
+        };
+        assert_eq!(
+            placed(centred, at, &kind).0.x,
+            20.0,
+            "and centring between its distances keeps it put"
+        );
     }
 
     /// A group and a boolean take no insets — their box is their children's,

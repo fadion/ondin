@@ -1607,14 +1607,14 @@ first was, it saved only the track list.
 `track_lines` merges an edge with the last one only, the spans being laid in order — it searched every
 edge, quadratic in the track count.
 
-### 5.3d Components and overrides (designed 2026-10-04; build steps 1–3 built; §15 D978–D981)
+### 5.3d Components and overrides (designed 2026-10-04; build steps 1–4 built; §15 D978–D981)
 
 > **Design ahead of code, part of it** — decided with the maintainer on 2026-10-04 (session 47). **Build
-> steps 1–3 are built** the same day — the list items' ids (§15 D980, `a83adc8`), the component model,
+> steps 1–4 are built** the same day — the list items' ids (§15 D980, `a83adc8`), the component model,
 > its two fields, two operations and post-conditions (§15 D978, `e3df69d`), the verbs — create, detach,
-> delete, copy, and their keys and menu rows (§15 D979, D981, `0ae3cd7`, then `settle_links`) — and
-> field propagation (§15 D979 (a), `45730f6`) — and the paragraphs on those say so; structural
-> propagation, the resets, the live preview and most of the chrome are not. It sits beside §5.3c
+> delete, copy, and their keys and menu rows (§15 D979, D981, `0ae3cd7`, then `settle_links`) — field
+> propagation (§15 D979 (a), `45730f6`) and structural propagation (§15 D979 (b), `6ac7d0d`) — and the
+> paragraphs on those say so; the resets, the live preview and most of the chrome are not. It sits beside §5.3c
 > because what it changes is the node model. Every other passage of this document still describes `HEAD`; where one states a rule this
 > design will change, it carries a forward pointer here — §4's invariants 4 and 8, §5.11's bump rule
 > and §12's fourth property. **When a step below lands, this section is rewritten in the present
@@ -1734,14 +1734,15 @@ current have the same keys, so two variants are never mixed; **items** for the f
 D980); and **skip** for locks, the links themselves and everything structural (step 4). **An instance
 root's placement is its own** — `SetTransform`, `SetInsets`, `SetLayoutItem` and `SetVisible`, a main
 hidden on a components page hiding no instance — and **spans follow only onto a copy with the same
-content**. 🚨 **Two places it falls short of this section, noted by the record and not yet fixed** (§15
-D979's amendment): the fields merge needs the *same keys*, and `TextStyle`, `ParagraphStyle`,
-`BlockStyle`, `Insets`, `LayoutItem` and `Flex` skip default-valued fields when serialized — so wherever
-the main or the copy moves a field to or from its default, the merge sees different shapes and compares
-the struct **whole**, and a copy that overrode one field stops following the others; and the placement
-skip asks `component::instance_root`, whose instance root is any node whose chain ends at a main — which
-includes a nested copy in an outer instance, so moving or hiding a nested instance inside its outer main
-does **not** reach the outer instances, where the bullet above says it must. (§15 D980 — per item the maintainer's ruling, the
+content**. The fields merge (`merge_present`) goes over the **union** of keys with absence as a value of
+its own, since `TextStyle`, `ParagraphStyle`, `BlockStyle`, `Insets`, `LayoutItem` and `Flex` skip
+default-valued fields when serialized, and follows a changed enum variant whole; the placement skip asks
+`linked_to_main` — linked straight to a main — so a nested instance moved inside its outer main moves in
+the outer instances, the bullet above. ⚠️ **Both read *same keys* and *any instance root* in the first
+build** — a copy with one override stopped following the struct's other fields, and a nested instance's
+move stopped at its outer instances — **fixed in `6ac7d0d`** with
+`every_field_follows_iff_it_held_the_old_value`, the spec as a property over 19,683 cases (§15 D979's
+amendments). (§15 D980 — per item the maintainer's ruling, the
 shape and the migration the session's). ✅ **Built 2026-10-04** (`a83adc8`), the first half of build
 step 1 below, in `ondin-core/src/item.rs` — **the one part of this section that is built**, and this
 paragraph describes it in the present tense. Five lists have ids: `Paint::fills`, `Paint::strokes`,
@@ -1831,6 +1832,21 @@ node in an instance linked to a given main node.
   membership is judged at the nearest instance root (below), so a node moved into a nested instance
   fails it and loses its link — noted by the record, not ruled.
 
+✅ **Built 2026-10-04 — build step 4** (`6ac7d0d`, §15 D979's amendment): `propagate::propagate_structure`,
+in `commit_inner` before `settle_links` (it mints ids, and `settle_links` then settles what it leaves),
+working from the transaction's final tree against a reverse link map. A gained child is copied in at
+its anchor, down the copy chain, each node linked one level up, against a child list simulated per
+parent as inserts land so two children gained at once keep their order; a lost child takes a
+counterpart only where it is `untouched` — every field but the locks equal, the same linked children in
+the same order, recursively, no local additions — and a deleted counterpart is a lost child for its own
+copies; a move within a main and a reorder follow as above. ⚠️ **Known, not ruled**: a move into a
+parent **created in the same transaction** reads as a loss and a gain — an untouched counterpart
+replaced by a fresh copy, a changed one kept *and* a fresh copy beside it — and that is *Group
+selection* inside a main. ⚠️ **Read, not run** (§15 D979's amendment): ungrouping inside a main looks
+refused whenever an instance's copy of the group is untouched — the pass deletes that copy, subtree and
+all, then reparents its children's counterparts, which the delete removed; and a move whose new parent
+has no counterpart leaves the counterpart linked where it was, where the rule above reads a removal.
+
 A **reset** family belongs to the design: reset a field; reset structure — re-insert the missing
 counterparts at their anchors, local additions left alone; and reset all — the fields, the missing
 counterparts and the main's order.
@@ -1844,9 +1860,8 @@ outer main's deletion as an instance of its own main.
 way a link's target goes**: `component::relink_past(doc, gone, among)` — a link into `gone` climbs to
 the first source above it not in `gone`, or is cut. **Delete** (`relink_for_delete`, from
 `OndinApp::delete_selection`) detaches a deleted main's instances, a nested one climbing to its own
-main. ⚠️ **A deleted main *child* leaves every counterpart as the instance's own layer, changed or not —
-an interim**: *the main loses a child*'s delete-or-keep above needs build step 4 to tell an untouched
-counterpart from a changed one. **Detach** (`component::detach`) **cuts** the root and its own members
+main. A deleted main *child* is step 4's — delete-or-keep, below; step 2's interim kept every
+counterpart, and is gone. **Detach** (`component::detach`) **cuts** the root and its own members
 — climbing a member would leave it with no instance root above it, which `Membership` refuses — and
 lets a nested instance inside climb past this instance's main to its own. 🚨 **And no door that
 moves, deletes or regroups layers has to know about components**: `component::settle_links`, a
@@ -2038,11 +2053,12 @@ layer moved out of its instance, the other delete doors and a nested instance co
 the delete-or-keep for a main's child, which is step 4's; (3) ✅ **built 2026-10-04** (`45730f6`, §15
 D979's amendment) — the propagation pass for **fields**: the compare rule, list items by id, nested
 chains, user operations winning, and the exact-equality risk measured for the pinned-child path, above.
-⚠️ **The property-based test this step was to carry** — after a main edit, each counterpart's field
-equals the new value if and only if it equalled the old — **is not among its tests**, which are
-fixed scenarios; and the fields merge and the nested placement skip fall short, above; (4) **next** —
-propagation for **structure** — insert at an anchor, reorder, reparent, delete or unlink; (5) the reset family, and the inspector showing
-overridden fields; (6) the live preview of main-component edits; (7) then variants and properties.
+⚠️ The property-based test this step was to carry was not among its first tests, and the fields
+merge and the nested placement skip fell short — all three fixed in `6ac7d0d`; (4) ✅ **built
+2026-10-04** (`6ac7d0d`) — propagation for **structure**: insert at an anchor, reorder, move, delete
+or keep, with a known consequence for a move into a new parent and two things read and not run, above;
+(5) **next** — the reset family, and the inspector showing overridden fields; (6) the live preview of
+main-component edits; (7) then variants and properties.
 
 ### 5.4 Text node
 

@@ -218,7 +218,15 @@ pub fn propagate(doc: &Document, tx: &Transaction) -> Vec<Operation> {
 ///   main's old order, a layer of the copy's own keeping its place after the
 ///   sibling it followed.
 /// - **A move within a main** follows onto a copy still under the counterpart of
-///   the old parent, when the copy has a counterpart of the new one.
+///   the old parent — to the new parent's counterpart, **including the copy this
+///   pass just made of a parent the same edit created**, so *Group selection*
+///   inside a main moves each instance's own layers into a copy of the new group
+///   rather than re-copying them. Where an instance has no counterpart of the new
+///   parent, the move is a removal there (delete if untouched, else cut).
+///
+/// The ops go out as inserts, then moves, then deletes, then reorders, and the
+/// delete decisions are made after the moves: *Ungroup* lifts the children out of
+/// a group before the group goes, and its copy is untouched once they have left.
 ///
 /// Mints ids for what it copies, so it runs where an `IdSource` is: before
 /// `settle_links`, which then settles any link these leave behind.
@@ -267,7 +275,9 @@ pub fn propagate_structure(
         .filter(|p| {
             let b = before.get(p).map(|n| &n.children);
             let a = after_nodes.get(p).map(|n| &n.children);
-            a.is_some() && b != a
+            // A parent the edit deleted counts: its children are lost from it, and
+            // the ones lifted out first (an ungroup) are moves.
+            b.is_some() && b != a
         })
         .collect();
     parents.sort();
@@ -275,72 +285,41 @@ pub fn propagate_structure(
     // Lost children: delete the untouched counterparts, recursively.
     let mut lost: Vec<NodeId> = Vec::new();
     for p in &parents {
-        let a: FxHashSet<NodeId> = after_nodes[p].children.iter().copied().collect();
+        let a: FxHashSet<NodeId> = after_nodes
+            .get(p)
+            .map(|n| n.children.iter().copied().collect())
+            .unwrap_or_default();
         lost.extend(before[p].children.iter().filter(|c| !a.contains(c)));
     }
-    // A child moved to another parent inside the same main is a move, not a loss.
-    // (A new parent made by the same transaction is not in `doc`, so it has no main
-    // there and the move reads as a loss and a gain — the subtree is re-copied.)
+    // A child moved to another parent inside the same main is a **move**, not a
+    // loss — judged on the tree the transaction leaves, so a parent made by the same
+    // edit counts: *Group selection* inside a main moves each instance's own
+    // counterpart into a copy of the new group rather than re-copying it.
     let moved_within: FxHashMap<NodeId, NodeId> = lost
         .iter()
         .filter_map(|c| Some((*c, after_nodes.get(c)?.parent?)))
         .filter(|(c, np)| {
-            main_of_node(doc, *c).is_some() && main_of_node(doc, *c) == main_of_node(doc, *np)
+            main_of_node(doc, *c).is_some() && main_of_node(doc, *c) == main_of_node(&after, *np)
         })
         .collect();
-    let mut deleted: FxHashSet<NodeId> = FxHashSet::default();
-    let mut queue: Vec<NodeId> = lost
-        .iter()
-        .copied()
-        .filter(|c| !moved_within.contains_key(c))
-        .collect();
-    while let Some(gone) = queue.pop() {
-        for &c in copies.get(&gone).into_iter().flatten() {
-            if deleted.contains(&c) || !untouched(doc, c, gone) {
-                continue;
-            }
-            deleted.insert(c);
-            out.push(Operation::DeleteNode { id: c });
-            queue.push(c);
-        }
-    }
 
-    // Moves within a main.
-    for (x, np) in &moved_within {
-        let op = before[x].parent.expect("a lost child had a parent");
-        for &c in copies.get(x).into_iter().flatten() {
-            let Some(root) = crate::component::instance_root(doc, c) else {
-                continue;
-            };
-            if before[&c].parent != counterpart(doc, root, op) {
-                continue; // the instance moved it itself
-            }
-            let Some(target) = counterpart(doc, root, *np) else {
-                continue;
-            };
-            let kids: Vec<NodeId> = before[&target]
-                .children
-                .iter()
-                .copied()
-                .filter(|k| !deleted.contains(k) && *k != c)
-                .collect();
-            let index = anchor(&after_nodes[np].children, *x, &kids, |s| {
-                counterpart(doc, root, s)
-            });
-            out.push(Operation::Reparent {
-                id: c,
-                new_parent: target,
-                index,
-            });
-        }
-    }
+    // **The ops go out as inserts, then moves, then deletes, then reorders.** A move
+    // can target a copy the inserts make (the new group's), and a delete must come
+    // after the moves out of what it deletes — *Ungroup* lifts the children before
+    // the group goes, and deleting an untouched group copy first took the children's
+    // counterparts with it (the first build: `NoSuchNode`).
+    let mut deletes: Vec<NodeId> = Vec::new();
+    let mut deleted: FxHashSet<NodeId> = FxHashSet::default();
 
     // Gained children: copy them in, recursively. Each parent's children are
-    // simulated as the inserts land — the deletes above taken out, every insert put
-    // in — so a second child gained in the same edit, and a copy one level further
-    // down, are placed against what is really there.
+    // simulated as the inserts land, so a second child gained in the same edit, and a
+    // copy one level further down, are placed against what is really there. (The
+    // deletes come after, so they are still in the lists here.)
     let mut sim: FxHashMap<NodeId, Vec<NodeId>> = FxHashMap::default();
     let mut new_links: FxHashMap<NodeId, NodeId> = FxHashMap::default();
+    // (instance root, a new node of the main) → its copy in that instance, so a move
+    // into a parent this edit made finds the parent's copy.
+    let mut made: FxHashMap<(NodeId, NodeId), NodeId> = FxHashMap::default();
     let children_of = |sim: &FxHashMap<NodeId, Vec<NodeId>>, p: NodeId| -> Vec<NodeId> {
         sim.get(&p).cloned().unwrap_or_else(|| {
             after_nodes
@@ -348,14 +327,14 @@ pub fn propagate_structure(
                 .map(|n| n.children.clone())
                 .or_else(|| before.get(&p).map(|n| n.children.clone()))
                 .unwrap_or_default()
-                .into_iter()
-                .filter(|k| !deleted.contains(k))
-                .collect()
         })
     };
     for p in &parents {
+        let Some(after_p) = after_nodes.get(p) else {
+            continue; // deleted: it gained nothing
+        };
         let b: FxHashSet<NodeId> = before[p].children.iter().copied().collect();
-        let gained: Vec<NodeId> = after_nodes[p]
+        let gained: Vec<NodeId> = after_p
             .children
             .iter()
             .copied()
@@ -365,6 +344,13 @@ pub fn propagate_structure(
             let Some(template) = after.capture_subtree(x) else {
                 continue;
             };
+            // Only what this edit **made**: a layer that already existed and was moved
+            // in (a group made around existing layers) is a move, handled below, and
+            // its counterpart moves rather than being copied again.
+            let template = only_new(template, |id| before.contains_key(&id));
+            if template.is_empty() {
+                continue;
+            }
             // (source parent, the subtree as it stands at that level)
             let mut level = vec![(*p, template)];
             while let Some((src_parent, nodes)) = level.pop() {
@@ -392,6 +378,11 @@ pub fn propagate_structure(
                     });
                     let new_root = copy[0].id;
                     new_links.insert(new_root, nodes[0].id);
+                    if let Some(root) = crate::component::instance_root(doc, pc) {
+                        for (c, t) in copy.iter().zip(&nodes) {
+                            made.insert((root, t.id), c.id);
+                        }
+                    }
                     let mut placed = kids.clone();
                     placed.insert(index.min(placed.len()), new_root);
                     sim.insert(pc, placed);
@@ -407,9 +398,112 @@ pub fn propagate_structure(
         }
     }
 
+    // Moves within a main, carried down the copy chain: a counterpart still under
+    // its source's old parent's counterpart moves to the new parent's counterpart —
+    // a node that existed, or the copy the inserts above just made. Where an
+    // instance has no counterpart of the new parent, the move is a removal there:
+    // the counterpart goes if untouched and is cut loose otherwise (§5.3d).
+    let target_of = |root: NodeId, src: NodeId| {
+        made.get(&(root, src))
+            .copied()
+            .or_else(|| counterpart(doc, root, src))
+    };
+    let mut cut: Vec<NodeId> = Vec::new();
+    let mut moved_out: FxHashSet<NodeId> = FxHashSet::default();
+    let mut moves: Vec<(NodeId, NodeId, NodeId)> = moved_within
+        .iter()
+        .map(|(x, np)| {
+            (
+                *x,
+                before[x].parent.expect("a lost child had a parent"),
+                *np,
+            )
+        })
+        .collect();
+    moves.sort();
+    while let Some((x, old_parent, new_parent)) = moves.pop() {
+        for &c in copies.get(&x).into_iter().flatten() {
+            let Some(root) = crate::component::instance_root(doc, c) else {
+                continue;
+            };
+            if before[&c].parent != counterpart(doc, root, old_parent) {
+                continue; // the instance moved it itself
+            }
+            let Some(target) = target_of(root, new_parent) else {
+                if untouched(doc, c, x, &moved_out) {
+                    if deleted.insert(c) {
+                        deletes.push(c);
+                    }
+                } else {
+                    cut.push(c);
+                }
+                continue;
+            };
+            let siblings = children_of(&sim, new_parent);
+            let mut kids = children_of(&sim, target);
+            kids.retain(|k| *k != c);
+            let link_of = |k: NodeId| {
+                new_links
+                    .get(&k)
+                    .copied()
+                    .or_else(|| before.get(&k).and_then(|n| n.link))
+            };
+            let index = anchor(&siblings, x, &kids, |s| {
+                kids.iter().copied().find(|k| link_of(*k) == Some(s))
+            });
+            let mut placed = kids.clone();
+            placed.insert(index.min(placed.len()), c);
+            sim.insert(target, placed);
+            if let Some(from) = before[&c].parent {
+                let mut left = children_of(&sim, from);
+                left.retain(|k| *k != c);
+                sim.insert(from, left);
+            }
+            out.push(Operation::Reparent {
+                id: c,
+                new_parent: target,
+                index,
+            });
+            moved_out.insert(c);
+            moves.push((
+                c,
+                before[&c].parent.expect("a moved node had a parent"),
+                target,
+            ));
+        }
+    }
+
+    // Lost children: an untouched counterpart goes with its source, recursively —
+    // judged **after** the moves, ignoring what they carry out: an ungrouped
+    // group's copy is untouched once its children have left it, whatever the
+    // instance did to those children.
+    let mut queue: Vec<NodeId> = lost
+        .iter()
+        .copied()
+        .filter(|c| !moved_within.contains_key(c))
+        .collect();
+    while let Some(gone) = queue.pop() {
+        for &c in copies.get(&gone).into_iter().flatten() {
+            if deleted.contains(&c) || !untouched(doc, c, gone, &moved_out) {
+                continue;
+            }
+            deleted.insert(c);
+            deletes.push(c);
+            queue.push(c);
+        }
+    }
+    out.extend(deletes.iter().map(|id| Operation::DeleteNode { id: *id }));
+    out.extend(
+        cut.into_iter()
+            .map(|id| Operation::SetLink { id, link: None }),
+    );
+
     // Reorders: a parent whose children are the same set in a new order.
     for p in &parents {
-        let (b, a) = (&before[p].children, &after_nodes[p].children);
+        let Some(after_p) = after_nodes.get(p) else {
+            continue;
+        };
+        let (b, a) = (&before[p].children, &after_p.children);
         let bs: FxHashSet<_> = b.iter().collect();
         if b.len() != a.len() || !a.iter().all(|c| bs.contains(c)) {
             continue;
@@ -454,6 +548,29 @@ pub fn propagate_structure(
         }
     }
     out
+}
+
+/// `template` (a captured subtree, root first) without the nodes `existed` admits
+/// and anything under them — what an edit **made**, as opposed to what it moved in.
+/// Children lists are pruned to match, so `remap_subtree` still accepts the result.
+fn only_new(
+    template: Vec<crate::node::Node>,
+    existed: impl Fn(NodeId) -> bool,
+) -> Vec<crate::node::Node> {
+    let mut dropped: FxHashSet<NodeId> = FxHashSet::default();
+    let mut kept: Vec<crate::node::Node> = Vec::new();
+    for n in template {
+        let parent_dropped = n.parent.is_some_and(|p| dropped.contains(&p));
+        if existed(n.id) || parent_dropped {
+            dropped.insert(n.id);
+        } else {
+            kept.push(n);
+        }
+    }
+    for n in &mut kept {
+        n.children.retain(|c| !dropped.contains(c));
+    }
+    kept
 }
 
 /// The main a node sits in (the nearest main at or above it), if any.
@@ -502,10 +619,31 @@ fn anchor(
 
 /// Whether the counterpart `copy` and everything under it still equal `src` and
 /// its subtree — the test for deleting it with its source (§15 D979 (b)).
-fn untouched(doc: &Document, copy: NodeId, src: NodeId) -> bool {
+///
+/// Children in `moved_out` — counterparts this same pass is carrying elsewhere —
+/// are left out of the comparison, with their sources: what an ungroup lifts out
+/// of a group no longer decides whether the group's copy is untouched.
+fn untouched(doc: &Document, copy: NodeId, src: NodeId, moved_out: &FxHashSet<NodeId>) -> bool {
     let (Some(c), Some(s)) = (doc.get(copy), doc.get(src)) else {
         return false;
     };
+    let link = |id: NodeId| doc.get(id).and_then(|n| n.link);
+    let c_kids: Vec<NodeId> = c
+        .children
+        .iter()
+        .copied()
+        .filter(|k| !moved_out.contains(k))
+        .collect();
+    let s_kids: Vec<NodeId> = s
+        .children
+        .iter()
+        .copied()
+        .filter(|sk| {
+            !c.children
+                .iter()
+                .any(|ck| moved_out.contains(ck) && link(*ck) == Some(*sk))
+        })
+        .collect();
     let same = c.kind == s.kind
         && c.transform == s.transform
         && c.name == s.name
@@ -523,12 +661,11 @@ fn untouched(doc: &Document, copy: NodeId, src: NodeId) -> bool {
         && c.insets == s.insets
         && c.display == s.display
         && c.item == s.item
-        && c.children.len() == s.children.len();
-    same && c
-        .children
+        && c_kids.len() == s_kids.len();
+    same && c_kids
         .iter()
-        .zip(&s.children)
-        .all(|(cc, sc)| doc.get(*cc).and_then(|n| n.link) == Some(*sc) && untouched(doc, *cc, *sc))
+        .zip(&s_kids)
+        .all(|(cc, sc)| link(*cc) == Some(*sc) && untouched(doc, *cc, *sc, moved_out))
 }
 
 /// Whether `id` is linked **straight to a main** — an instance placed by itself,

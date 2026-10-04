@@ -632,3 +632,106 @@ fn a_nested_instance_moved_inside_its_outer_main_moves_in_its_instances() {
     );
     assert_eq!(f.doc.get(nested_copy).unwrap().transform(), to);
 }
+
+/// *Group selection* inside a main: the instance's **own** counterpart moves into
+/// a copy of the new group — it is not replaced by a fresh copy, which would lose
+/// whatever the instance had changed on it (the first build's "loss plus gain").
+/// Then *Ungroup* takes it back out, and the commit goes through (the first build
+/// deleted the untouched group copy, and the counterpart with it, before moving
+/// it — `NoSuchNode`).
+#[test]
+fn grouping_and_ungrouping_inside_a_main_moves_the_instances_own_layers() {
+    let mut f = fixture();
+    // The instance's own change to its counterpart, which must survive both.
+    f.doc
+        .apply(&Transaction(vec![Operation::SetName {
+            id: f.ia,
+            name: "mine".into(),
+        }]))
+        .unwrap();
+    let (g, m, a, i, ia) = (f.ids.mint(), f.m, f.a, f.i, f.ia);
+    commit_all(
+        &mut f,
+        vec![
+            Operation::CreateNode {
+                id: g,
+                parent: m,
+                index: 0,
+                kind: NodeKind::Group,
+                transform: None,
+                name: None,
+            },
+            Operation::Reparent {
+                id: a,
+                new_parent: g,
+                index: 0,
+            },
+        ],
+    );
+    let gc = f
+        .doc
+        .get(ia)
+        .expect("the counterpart survives")
+        .parent()
+        .unwrap();
+    assert_eq!(link(&f.doc, gc), Some(g), "it moved into the group's copy");
+    assert_eq!(f.doc.get(gc).unwrap().parent(), Some(i));
+    assert_eq!(link(&f.doc, ia), Some(a), "still linked");
+    assert_eq!(f.doc.get(ia).unwrap().name(), "mine", "its change kept");
+
+    commit_all(
+        &mut f,
+        vec![
+            Operation::Reparent {
+                id: a,
+                new_parent: m,
+                index: 0,
+            },
+            Operation::DeleteNode { id: g },
+        ],
+    );
+    assert_eq!(
+        f.doc.get(ia).unwrap().parent(),
+        Some(i),
+        "back out of the group"
+    );
+    assert!(
+        f.doc.get(gc).is_none(),
+        "the empty group copy went with the group"
+    );
+    assert_eq!(link(&f.doc, ia), Some(a));
+}
+
+/// A move into a parent the instance has deleted is a removal from that instance
+/// (§5.3d): the untouched counterpart goes. Flip: leaving it where it was keeps a
+/// layer the main no longer has there.
+#[test]
+fn a_move_into_a_parent_the_instance_lacks_removes_the_counterpart() {
+    let mut f = fixture();
+    let (g, m) = (f.ids.mint(), f.m);
+    commit_all(
+        &mut f,
+        vec![Operation::CreateNode {
+            id: g,
+            parent: m,
+            index: 2,
+            kind: NodeKind::Group,
+            transform: None,
+            name: None,
+        }],
+    );
+    let gc = *kids(&f.doc, f.i).last().unwrap();
+    assert_eq!(link(&f.doc, gc), Some(g), "the fixture: the group's copy");
+    // The instance deletes its copy of the group (free structure).
+    commit_all(&mut f, vec![Operation::DeleteNode { id: gc }]);
+    let (a, ia) = (f.a, f.ia);
+    commit_all(
+        &mut f,
+        vec![Operation::Reparent {
+            id: a,
+            new_parent: g,
+            index: 0,
+        }],
+    );
+    assert!(f.doc.get(ia).is_none(), "the untouched counterpart went");
+}

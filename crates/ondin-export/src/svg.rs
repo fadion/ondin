@@ -25,9 +25,9 @@
 //! long string would break it at its own width and place nothing where the canvas
 //! did.
 
-use ondin_core::Brush;
 use ondin_core::kurbo::{Affine, BezPath, Insets, Rect, Shape};
 use ondin_core::peniko::{Color, Extend, GradientKind};
+use ondin_core::{Brush, Keyed};
 use ondin_core::{
     Decoration, Document, Effect, EffectKind, Fill, Framing, LineStyle, MaskMode, Node, NodeId,
     NodeKind, Resolved, Shadow, Stroke, StrokeAlign, geometry,
@@ -436,7 +436,7 @@ fn effect_region(
     res: &Resolved,
     id: NodeId,
     transform: Affine,
-    effects: &[Effect],
+    effects: &[Keyed<Effect>],
 ) -> Option<Rect> {
     let ink = res.ink_bounds(id)?;
     let world = res.world_transform(id)?;
@@ -512,7 +512,7 @@ fn effect_region(
 /// `feComposite operator="in"` against the layer's own alpha confines the result,
 /// so no extra region area can draw. `0.0` for a stack with no inner shadow in
 /// it, which is every case that worked before.
-fn inner_working_pad(effects: &[Effect]) -> f64 {
+fn inner_working_pad(effects: &[Keyed<Effect>]) -> f64 {
     effects
         .iter()
         .filter(|e| e.visible)
@@ -542,7 +542,7 @@ fn inner_working_pad(effects: &[Effect]) -> f64 {
 /// desaturate in a different colour space from our own canvas. `adjust_def` above
 /// already pins it for image adjustments, and `ondin_render::effects` pins the
 /// same choice for the two backends.
-fn effect_def(name: &str, effects: &[Effect], region: Rect) -> String {
+fn effect_def(name: &str, effects: &[Keyed<Effect>], region: Rect) -> String {
     let mut out = format!(
         "    <filter id=\"{name}\" filterUnits=\"userSpaceOnUse\" \
          color-interpolation-filters=\"sRGB\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\">\n",
@@ -730,6 +730,7 @@ fn visible_fills(node: &Node) -> impl Iterator<Item = (usize, &Fill)> {
         .iter()
         .enumerate()
         .filter(|(_, f)| f.visible)
+        .map(|(i, f)| (i, &f.value))
 }
 
 fn visible_strokes(node: &Node) -> impl Iterator<Item = (usize, &Stroke)> {
@@ -738,6 +739,7 @@ fn visible_strokes(node: &Node) -> impl Iterator<Item = (usize, &Stroke)> {
         .iter()
         .enumerate()
         .filter(|(_, s)| s.visible)
+        .map(|(i, s)| (i, &s.value))
 }
 
 fn collect_defs(doc: &Document, res: &Resolved, id: NodeId, outer: Affine, defs: &mut Defs) {
@@ -3042,10 +3044,10 @@ mod def_count_tests {
                 ]);
             ops.push(Operation::SetFills {
                 id,
-                fills: vec![Fill {
+                fills: ondin_core::keyed_by_position([Fill {
                     brush: Brush::Gradient(g.into()),
                     visible: true,
-                }],
+                }]),
             });
         }
         doc.apply(&Transaction(ops)).expect("the fixture");

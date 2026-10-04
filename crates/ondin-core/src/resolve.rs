@@ -2025,9 +2025,9 @@ mod measurable_bounds_tests {
         );
         doc.apply(&Transaction(vec![Operation::SetEffects {
             id: node,
-            effects: vec![crate::effect::Effect::new(
+            effects: crate::keyed_by_position([crate::effect::Effect::new(
                 crate::effect::EffectKind::LayerBlur { radius: 10.0 },
-            )],
+            )]),
         }]))
         .expect("a blur is a legal effect");
 
@@ -2059,9 +2059,9 @@ mod measurable_bounds_tests {
         );
         doc.apply(&Transaction(vec![Operation::SetEffects {
             id: plain,
-            effects: vec![crate::effect::Effect::new(
+            effects: crate::keyed_by_position([crate::effect::Effect::new(
                 crate::effect::EffectKind::LayerBlur { radius: 10.0 },
-            )],
+            )]),
         }]))
         .expect("a blur is a legal effect");
         let res = Resolved::rebuild(&doc);
@@ -2121,9 +2121,9 @@ mod measurable_bounds_tests {
         let radius = 4e154;
         doc.apply(&Transaction(vec![Operation::SetEffects {
             id: node,
-            effects: vec![crate::effect::Effect::new(
+            effects: crate::keyed_by_position([crate::effect::Effect::new(
                 crate::effect::EffectKind::LayerBlur { radius },
-            )],
+            )]),
         }]))
         .expect("a blur is a legal effect");
 
@@ -2143,9 +2143,9 @@ mod measurable_bounds_tests {
         // measurable ink at all, rather than the box it started from.
         doc.apply(&Transaction(vec![Operation::SetEffects {
             id: node,
-            effects: vec![crate::effect::Effect::new(
+            effects: crate::keyed_by_position([crate::effect::Effect::new(
                 crate::effect::EffectKind::LayerBlur { radius: f64::MAX },
-            )],
+            )]),
         }]))
         .expect("still a legal effect");
         let res = Resolved::rebuild(&doc);

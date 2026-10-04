@@ -35,7 +35,7 @@ use ondin_core::build::{Axis, Edge};
 use ondin_core::kurbo::{Affine, Cap, Join, Point, Rect, RoundedRectRadii, Size, Vec2};
 use ondin_core::{
     Adjustment, DashStyle, Effect, EffectKind, Fill, GeometryPatch, GridAlign, GridAxis, GuideAxis,
-    LayoutGrid, NodeId, NodeKind, Operation, OrientOp, PaintShown, PaintTarget, Stroke,
+    Keyed, LayoutGrid, NodeId, NodeKind, Operation, OrientOp, PaintShown, PaintTarget, Stroke,
     StrokeAlign, StrokeSides, TextSizing, Transaction, build,
 };
 /// What the identity row's *Use as mask* would do to the current selection.
@@ -5439,7 +5439,7 @@ impl OndinApp {
         &mut self,
         ui: &mut egui::Ui,
         scope: PaintScope,
-        shown: &PaintShown<Fill>,
+        shown: &PaintShown<Keyed<Fill>>,
         fresh: bool,
     ) {
         let fills = shown.list();
@@ -5521,10 +5521,15 @@ impl OndinApp {
         if add {
             self.open_paint_panel("Fill");
             let mut next = fills.to_vec();
-            next.push(Fill {
-                brush: paint::new_solid(),
-                visible: true,
-            });
+            // An item added to an existing list is minted (§15 D980); over a
+            // selection `write_fill_list` re-mints it per layer.
+            next.push(Keyed::new(
+                self.session.ids.mint_item(),
+                Fill {
+                    brush: paint::new_solid(),
+                    visible: true,
+                },
+            ));
             self.write_fill_list(scope, next);
             // Not opened here: the row it belongs to is drawn next frame, and
             // only the row knows where it lands. See `pending_picker`.
@@ -5550,7 +5555,7 @@ impl OndinApp {
         &mut self,
         ui: &mut egui::Ui,
         scope: PaintScope,
-        shown: &PaintShown<Stroke>,
+        shown: &PaintShown<Keyed<Stroke>>,
         fresh: bool,
     ) {
         let strokes = shown.list();
@@ -5655,17 +5660,21 @@ impl OndinApp {
                 app.remap_paint_indices(anchor, PaintList::Stroke, |j| paint::removed_index(i, j));
             } else if let Some((i, s)) = edit {
                 let mut next = strokes.to_vec();
-                next[i] = s;
+                next[i].value = s;
                 app.write_strokes(scope, next);
             }
         });
         if add {
             self.open_paint_panel("Stroke");
             let mut next = strokes.to_vec();
-            next.push(Stroke {
-                brush: paint::new_solid(),
-                ..Default::default()
-            });
+            // Minted, as the Fill panel's `+` is (§15 D980).
+            next.push(Keyed::new(
+                self.session.ids.mint_item(),
+                Stroke {
+                    brush: paint::new_solid(),
+                    ..Default::default()
+                },
+            ));
             self.write_strokes(scope, next);
             self.pending_picker = Some((
                 scope.anchor(self),
@@ -5711,10 +5720,10 @@ impl OndinApp {
         if out.remove {
             let tx = match target {
                 ondin_core::PaintTarget::Fill => {
-                    ondin_core::set_fills_all(&self.session.doc, &ids, &[])
+                    ondin_core::set_fills_all(&self.session.doc, &ids, &[], &mut self.session.ids)
                 }
                 ondin_core::PaintTarget::Stroke => {
-                    ondin_core::set_strokes_all(&self.session.doc, &ids, &[])
+                    ondin_core::set_strokes_all(&self.session.doc, &ids, &[], &mut self.session.ids)
                 }
             };
             self.commit_edit(tx);
@@ -6374,7 +6383,12 @@ impl OndinApp {
     /// preview already carries this value (invariant 5 keeps it out of the
     /// document), so comparing with what is on screen would discard the very
     /// transaction the release has to commit.
-    fn strokes_tx(&self, scope: PaintScope, strokes: Vec<Stroke>) -> Transaction {
+    ///
+    /// ⚠️ **Over a selection, an edit of the list the targets share** (§15 D980):
+    /// `strokes` is [`Self::strokes_in_scope`]'s anchor after the change, so it is
+    /// retargeted onto each target's own item ids rather than written verbatim —
+    /// which would hand every layer the anchor's ids.
+    fn strokes_tx(&mut self, scope: PaintScope, strokes: Vec<Keyed<Stroke>>) -> Transaction {
         match scope {
             PaintScope::Node(id) => {
                 let committed = self
@@ -6387,11 +6401,16 @@ impl OndinApp {
                 }
                 Transaction(vec![Operation::SetStrokes { id, strokes }])
             }
-            PaintScope::Selection => ondin_core::set_strokes_all(
-                &self.session.doc,
-                self.session.selection.ids(),
-                &strokes,
-            ),
+            PaintScope::Selection => {
+                let anchor = self.strokes_in_scope(PaintScope::Selection);
+                ondin_core::retarget_strokes_all(
+                    &self.session.doc,
+                    self.session.selection.ids(),
+                    &anchor,
+                    &strokes,
+                    &mut self.session.ids,
+                )
+            }
         }
     }
     /// Put a scrubbed number on stroke `index` through the edit valve.
@@ -7267,7 +7286,7 @@ impl OndinApp {
         if subjects.is_empty() {
             return;
         }
-        let shared = self.shared_grids(&subjects);
+        let shared = self.shared_grids_keyed(&subjects);
         // **Closed when there is no grid to show, exactly as Fill, Stroke, Effects
         // and Export are.** A card whose whole body is the words "No layout grid"
         // is a row of chrome saying nothing, and every frame in a fresh document is
@@ -7302,7 +7321,7 @@ impl OndinApp {
         // happened". Collected rather than committed inside the loop, because a
         // row that removes itself would otherwise be editing a list the rows
         // after it are still reading.
-        let mut next: Option<Vec<LayoutGrid>> = None;
+        let mut next: Option<Vec<Keyed<LayoutGrid>>> = None;
         let add = self.panel(ui, "Layout grid", action, |app, ui| {
             let Some(grids) = shared.clone() else {
                 ui.label(
@@ -7321,7 +7340,7 @@ impl OndinApp {
                 return;
             }
             for (index, grid) in grids.iter().enumerate() {
-                let out = app.grid_rows(ui, &subjects, index, *grid);
+                let out = app.grid_rows(ui, &subjects, index, grid.value);
                 if out.remove {
                     let mut list = grids.clone();
                     list.remove(index);
@@ -7332,7 +7351,7 @@ impl OndinApp {
                     next = Some(list);
                 } else if let Some(set) = out.set {
                     let mut list = grids.clone();
-                    list[index] = set;
+                    list[index].value = set;
                     next = Some(list);
                 }
                 if index + 1 < grids.len() {
@@ -7341,10 +7360,12 @@ impl OndinApp {
             }
         });
         if let Some(grids) = next {
-            self.write_grids(&subjects, &grids);
+            let anchor = shared.clone().unwrap_or_default();
+            self.retarget_grids(&subjects, &anchor, &grids);
         }
         if add {
-            match grid_add(shared.as_deref()) {
+            let values = shared.as_deref().map(ondin_core::item::values);
+            match grid_add(values.as_deref()) {
                 GridAdd::Append(seed) => self.append_grid(&subjects, seed),
                 GridAdd::Write(seed) => self.write_grids(&subjects, &[seed]),
             }
@@ -7952,24 +7973,66 @@ impl OndinApp {
     /// instead and is applied by [`Self::grid_rows`], one row at a time.
     /// `pub(crate)` for `picker_ui`'s orphan match — see [`Self::frame_subjects`].
     pub(crate) fn shared_grids(&self, subjects: &[NodeId]) -> Option<Vec<LayoutGrid>> {
+        self.shared_grids_keyed(subjects)
+            .map(|l| ondin_core::item::values(&l))
+    }
+
+    /// [`Self::shared_grids`] with the first subject's item ids — the anchor a row
+    /// edit is retargeted from. Agreement is by value (§15 D980): two frames given
+    /// one grid separately carry different ids.
+    fn shared_grids_keyed(&self, subjects: &[NodeId]) -> Option<Vec<Keyed<LayoutGrid>>> {
         let mut nodes = subjects.iter().filter_map(|id| self.session.doc.get(*id));
         let first = nodes.next()?.grids().to_vec();
         nodes
-            .all(|n| n.grids() == first.as_slice())
+            .all(|n| ondin_core::same_values(n.grids(), &first))
             .then_some(first)
+    }
+
+    /// A row **edit** of the list every subject shares, onto each subject's own
+    /// item ids (`ondin_core::item::retarget`, §15 D980), as one step.
+    fn retarget_grids(
+        &mut self,
+        subjects: &[NodeId],
+        anchor: &[Keyed<LayoutGrid>],
+        edited: &[Keyed<LayoutGrid>],
+    ) {
+        let session = &mut self.session;
+        let ops: Vec<Operation> = subjects
+            .iter()
+            .filter_map(|id| {
+                let own = session.doc.get(*id)?.grids();
+                let grids = ondin_core::item::retarget(anchor, own, edited, &mut session.ids);
+                (grids != own).then_some(Operation::SetLayoutGrids { id: *id, grids })
+            })
+            .collect();
+        if !ops.is_empty() {
+            self.commit_edit(Transaction(ops));
+        }
     }
 
     /// Write one list to every subject, as a single undoable step.
     ///
     /// One transaction rather than one per frame: giving four frames a twelve-column
     /// grid is one act and has to undo as one.
+    ///
+    /// ⚠️ **A wholesale replacement** — the mixed card's override — so each subject
+    /// keeps its own item ids by position (`ondin_core::item::rekey_by_position`,
+    /// §15 D980); a row edit goes through [`Self::retarget_grids`].
     fn write_grids(&mut self, subjects: &[NodeId], grids: &[LayoutGrid]) {
+        let session = &mut self.session;
         let tx = Transaction(
             subjects
                 .iter()
-                .map(|id| Operation::SetLayoutGrids {
-                    id: *id,
-                    grids: grids.to_vec(),
+                .map(|id| {
+                    let own = session.doc.get(*id).map(|n| n.grids()).unwrap_or(&[]);
+                    Operation::SetLayoutGrids {
+                        id: *id,
+                        grids: ondin_core::item::rekey_by_position(
+                            own,
+                            grids.iter().copied(),
+                            &mut session.ids,
+                        ),
+                    }
                 })
                 .collect(),
         );
@@ -7986,12 +8049,14 @@ impl OndinApp {
     /// an append and costs nothing when they match — `append_exports`' note, and
     /// the same reasoning.
     fn append_grid(&mut self, subjects: &[NodeId], grid: LayoutGrid) {
+        let session = &mut self.session;
         let ops: Vec<Operation> = subjects
             .iter()
             .filter_map(|id| {
-                let node = self.session.doc.get(*id)?;
+                let node = session.doc.get(*id)?;
                 let mut grids = node.grids().to_vec();
-                grids.push(grid);
+                // An item added to an existing list is minted, per frame (§15 D980).
+                grids.push(Keyed::new(session.ids.mint_item(), grid));
                 Some(Operation::SetLayoutGrids { id: *id, grids })
             })
             .collect();
@@ -8276,7 +8341,7 @@ impl OndinApp {
     }
     /// What the Stroke panel is showing for a scope: the layer's own list, the one
     /// the selection shares, or a disagreement.
-    fn strokes_shown(&self, scope: PaintScope) -> PaintShown<Stroke> {
+    fn strokes_shown(&self, scope: PaintScope) -> PaintShown<Keyed<Stroke>> {
         match scope {
             // One layer never disagrees with itself.
             PaintScope::Node(id) => PaintShown::List(
@@ -8292,7 +8357,7 @@ impl OndinApp {
     }
     /// What the Fill panel is showing for a scope, with each entry's visibility, so
     /// a write that only changes brushes does not switch a hidden paint back on.
-    fn fills_shown(&self, scope: PaintScope) -> PaintShown<Fill> {
+    fn fills_shown(&self, scope: PaintScope) -> PaintShown<Keyed<Fill>> {
         match scope {
             PaintScope::Node(id) => PaintShown::List(
                 self.session
@@ -8308,7 +8373,7 @@ impl OndinApp {
     /// The stroke rows a scope is showing — none of them when they disagree, which
     /// is what the slot plumbing wants: a mixed panel draws no indexed row, so
     /// nothing downstream of one has an index to resolve.
-    fn strokes_in_scope(&self, scope: PaintScope) -> Vec<Stroke> {
+    fn strokes_in_scope(&self, scope: PaintScope) -> Vec<Keyed<Stroke>> {
         self.strokes_shown(scope).list().to_vec()
     }
     /// The fill rows a scope is showing. [`Self::strokes_in_scope`]'s twin.
@@ -8327,7 +8392,7 @@ impl OndinApp {
     /// that read. That is worse where it is read, and it would break the
     /// one-for-one correspondence with core that makes the app half easy to check
     /// against the model half.
-    fn fills_in_scope(&self, scope: PaintScope) -> Vec<Fill> {
+    fn fills_in_scope(&self, scope: PaintScope) -> Vec<Keyed<Fill>> {
         self.fills_shown(scope).list().to_vec()
     }
     /// A transaction that rewrites the brush of **every** fill (or stroke) of every
@@ -8433,7 +8498,7 @@ impl OndinApp {
     /// difference in the question.
     fn shown_over<P, T>(
         &self,
-        list: impl Fn(&ondin_core::Paint) -> &[P],
+        list: impl Fn(&ondin_core::Paint) -> &[Keyed<P>],
         of: impl Fn(&P) -> T,
     ) -> Spread<T> {
         let mut spread = Spread::default();
@@ -8456,7 +8521,7 @@ impl OndinApp {
             // looking for that sentence does not find it. Quote or paraphrase, not
             // both.
             spread.bare |= paints.is_empty();
-            spread.values.extend(paints.iter().map(&of));
+            spread.values.extend(paints.iter().map(|k| of(&k.value)));
         }
         spread
     }
@@ -10043,7 +10108,7 @@ impl OndinApp {
             // to every subject with a one-element list; the ⚠️ above is what warns.
             let mut next = effects.clone();
             let at = next.len();
-            next.push(Effect::new(drop));
+            next.push(Keyed::new(self.session.ids.mint_item(), Effect::new(drop)));
             self.write_effects(subjects, next);
             // Straight open, where Fill has to defer through `pending_picker`: the
             // picker needs the row's position to spawn beside it and only the row
@@ -10113,13 +10178,17 @@ impl OndinApp {
     /// detached picker orphans an `Effect` slot when the card stops drawing rows,
     /// and *"the card is drawing rows"* is exactly this question. One reading, so
     /// the picker cannot outlive the row on a rule of its own.
-    pub(crate) fn shared_effects(&self, subjects: &[NodeId]) -> Option<Vec<Effect>> {
+    ///
+    /// The list comes back **keyed, with the first subject's item ids** — the anchor
+    /// [`Self::write_effects`] retargets an edit from — and agreement is by value
+    /// (§15 D980), since two layers given one shadow separately carry different ids.
+    pub(crate) fn shared_effects(&self, subjects: &[NodeId]) -> Option<Vec<Keyed<Effect>>> {
         let mut nodes = subjects
             .iter()
             .filter_map(|id| self.session.display_node(*id));
         let first = nodes.next()?.effects().to_vec();
         nodes
-            .all(|n| n.effects() == first.as_slice())
+            .all(|n| ondin_core::same_values(n.effects(), &first))
             .then_some(first)
     }
     /// Write one stack to every subject, as a single undo step.
@@ -10132,13 +10201,35 @@ impl OndinApp {
     /// toggle and a tuned number are all this one call — which is the point of the
     /// operation being the whole list (§15 D333) and why the panel never has to
     /// describe *which* of those it made.
-    fn write_effects(&mut self, subjects: &[NodeId], effects: Vec<Effect>) {
+    ///
+    /// ⚠️ **`effects` is an edit of the first subject's list** — every caller builds
+    /// it from [`Self::shared_effects`] or from the first subject's own stack — so
+    /// it is retargeted onto each subject's own item ids from that list
+    /// (`ondin_core::item::retarget`, §15 D980) rather than written verbatim, which
+    /// would hand every layer the first one's ids. Over a mixed selection the edit
+    /// shares no id with the anchor and every subject gets fresh ones, which is the
+    /// `+`'s *replace them all with one* exactly.
+    fn write_effects(&mut self, subjects: &[NodeId], effects: Vec<Keyed<Effect>>) {
+        let anchor = subjects
+            .first()
+            .and_then(|id| self.session.display_node(*id))
+            .map(|n| n.effects().to_vec())
+            .unwrap_or_default();
+        let session = &mut self.session;
         let tx = Transaction(
             subjects
                 .iter()
-                .map(|id| Operation::SetEffects {
-                    id: *id,
-                    effects: effects.clone(),
+                .map(|id| {
+                    let own = session.doc.get(*id).map(|n| n.effects()).unwrap_or(&[]);
+                    Operation::SetEffects {
+                        id: *id,
+                        effects: ondin_core::item::retarget(
+                            &anchor,
+                            own,
+                            &effects,
+                            &mut session.ids,
+                        ),
+                    }
                 })
                 .collect(),
         );
@@ -11199,21 +11290,18 @@ impl OndinApp {
             PaintSlot::Selection(target, i) => {
                 let ids = self.session.selection.ids();
                 match target {
+                    // Row `i` on each target, in place, so every target keeps its
+                    // own item ids (§15 D980) — this wrote the anchor's whole list
+                    // over every target, ids and all.
                     PaintTarget::Fill => {
-                        let mut fills = self.fills_in_scope(PaintScope::Selection);
-                        match fills.get_mut(i) {
-                            Some(f) => f.brush = brush,
-                            None => return Transaction(Vec::new()),
-                        }
-                        ondin_core::set_fills_all(&self.session.doc, ids, &fills)
+                        ondin_core::edit_fill_at_all(&self.session.doc, ids, i, |f| {
+                            f.brush = brush.clone()
+                        })
                     }
                     PaintTarget::Stroke => {
-                        let mut strokes = self.strokes_in_scope(PaintScope::Selection);
-                        match strokes.get_mut(i) {
-                            Some(s) => s.brush = brush,
-                            None => return Transaction(Vec::new()),
-                        }
-                        ondin_core::set_strokes_all(&self.session.doc, ids, &strokes)
+                        ondin_core::edit_stroke_at_all(&self.session.doc, ids, i, |s| {
+                            s.brush = brush.clone()
+                        })
                     }
                 }
             }
@@ -11679,33 +11767,55 @@ impl OndinApp {
     /// what `[S14.3-L1-04]` wants either, since a **no-op** transaction is not an
     /// empty one. The comparison `strokes_tx` has and documents is the thing that
     /// is missing, and this is now the one place to put it for both lists.
+    ///
+    /// ⚠️ **Over a selection `list` is an edit of the shared anchor** (§15 D980) —
+    /// the list the panel showed, reordered, toggled, shortened or with a row
+    /// added — so `all` retargets it onto each target's own item ids from
+    /// `anchor`, the list as it stands before the edit.
     fn write_paint_list<P>(
         &mut self,
         scope: PaintScope,
-        list: Vec<P>,
-        one: impl Fn(NodeId, Vec<P>) -> Operation,
-        all: impl Fn(&ondin_core::Document, &[NodeId], &[P]) -> Transaction,
+        list: Vec<Keyed<P>>,
+        anchor: Vec<Keyed<P>>,
+        one: impl Fn(NodeId, Vec<Keyed<P>>) -> Operation,
+        all: impl Fn(
+            &ondin_core::Document,
+            &[NodeId],
+            &[Keyed<P>],
+            &[Keyed<P>],
+            &mut ondin_core::IdSource,
+        ) -> Transaction,
     ) {
         let tx = match scope {
             PaintScope::Node(id) => Transaction(vec![one(id, list)]),
-            PaintScope::Selection => all(&self.session.doc, self.session.selection.ids(), &list),
+            PaintScope::Selection => all(
+                &self.session.doc,
+                self.session.selection.ids(),
+                &anchor,
+                &list,
+                &mut self.session.ids,
+            ),
         };
         self.commit_edit(tx);
     }
-    fn write_fill_list(&mut self, scope: PaintScope, fills: Vec<Fill>) {
+    fn write_fill_list(&mut self, scope: PaintScope, fills: Vec<Keyed<Fill>>) {
+        let anchor = self.fills_in_scope(scope);
         self.write_paint_list(
             scope,
             fills,
+            anchor,
             |id, fills| Operation::SetFills { id, fills },
-            ondin_core::set_fills_all,
+            ondin_core::retarget_fills_all,
         );
     }
-    fn write_strokes(&mut self, scope: PaintScope, strokes: Vec<Stroke>) {
+    fn write_strokes(&mut self, scope: PaintScope, strokes: Vec<Keyed<Stroke>>) {
+        let anchor = self.strokes_in_scope(scope);
         self.write_paint_list(
             scope,
             strokes,
+            anchor,
             |id, strokes| Operation::SetStrokes { id, strokes },
-            ondin_core::set_strokes_all,
+            ondin_core::retarget_strokes_all,
         );
     }
     /// Open (or retarget) the detached picker on a slot.
@@ -16206,8 +16316,11 @@ mod frame_fill_tests {
         }]))
         .expect("the fixture node");
         if !fills.is_empty() {
-            doc.apply(&Transaction(vec![Operation::SetFills { id, fills }]))
-                .expect("the fixture node's paint");
+            doc.apply(&Transaction(vec![Operation::SetFills {
+                id,
+                fills: ondin_core::keyed_by_position(fills),
+            }]))
+            .expect("the fixture node's paint");
         }
         if !inside.is_empty() {
             let child = ids.mint();
@@ -16225,7 +16338,7 @@ mod frame_fill_tests {
                 },
                 Operation::SetFills {
                     id: child,
-                    fills: inside,
+                    fills: ondin_core::keyed_by_position(inside),
                 },
             ]))
             .expect("the child");
@@ -16522,10 +16635,10 @@ mod frame_fill_tests {
         let red = ondin_core::peniko::Color::from_rgb8(0xEB, 0x6E, 0x5A);
         let blue = ondin_core::peniko::Color::from_rgb8(0x3C, 0x78, 0xDC);
         let solid = |c| {
-            vec![Fill {
+            ondin_core::keyed_by_position([Fill {
                 brush: Brush::Solid(c),
                 visible: true,
-            }]
+            }])
         };
         doc.apply(&Transaction(vec![
             Operation::CreateNode {
@@ -16645,10 +16758,10 @@ mod frame_fill_tests {
         let red = ondin_core::peniko::Color::from_rgb8(0xEB, 0x6E, 0x5A);
         let blue = ondin_core::peniko::Color::from_rgb8(0x3C, 0x78, 0xDC);
         let solid = |c| {
-            vec![Fill {
+            ondin_core::keyed_by_position([Fill {
                 brush: Brush::Solid(c),
                 visible: true,
-            }]
+            }])
         };
         let mut ops = Vec::new();
         for (i, id) in [a, b].into_iter().enumerate() {
@@ -16833,10 +16946,10 @@ mod scale_row_tests {
                 if stroke {
                     doc.apply(&Transaction(vec![Operation::SetStrokes {
                         id,
-                        strokes: vec![Stroke {
+                        strokes: ondin_core::keyed_by_position([Stroke {
                             width: 2.0,
                             ..Default::default()
-                        }],
+                        }]),
                     }]))
                     .expect("a stroke");
                 }
@@ -17845,12 +17958,10 @@ mod stroke_card_geometry_tests {
             app.session
                 .try_commit(Transaction(vec![Operation::SetStrokes {
                     id,
-                    strokes: (0..n)
-                        .map(|i| Stroke {
-                            width: 1.0 + i as f64,
-                            ..Default::default()
-                        })
-                        .collect(),
+                    strokes: ondin_core::keyed_by_position((0..n).map(|i| Stroke {
+                        width: 1.0 + i as f64,
+                        ..Default::default()
+                    })),
                 }]))
                 .expect("strokes to draw");
         }
@@ -18085,8 +18196,11 @@ mod fill_row_door_tests {
             name: None,
         }]))
         .expect("build");
-        doc.apply(&Transaction(vec![Operation::SetFills { id: rect, fills }]))
-            .expect("paint");
+        doc.apply(&Transaction(vec![Operation::SetFills {
+            id: rect,
+            fills: ondin_core::keyed_by_position(fills),
+        }]))
+        .expect("paint");
         (doc, rect)
     }
 
@@ -18238,7 +18352,7 @@ mod effects_panel_tests {
                 app.session
                     .try_commit(Transaction(vec![Operation::SetEffects {
                         id,
-                        effects: kinds.into_iter().map(Effect::new).collect(),
+                        effects: ondin_core::keyed_by_position(kinds.into_iter().map(Effect::new)),
                     }]))
                     .expect("effects to draw");
             }
@@ -18328,13 +18442,14 @@ mod effects_panel_tests {
         /// The stack as the document holds it — what a commit is checked against,
         /// rather than what the panel is previewing.
         fn committed(&self) -> Vec<Effect> {
-            self.app
-                .session
-                .doc
-                .get(self.id)
-                .expect("the layer")
-                .effects()
-                .to_vec()
+            ondin_core::item::values(
+                self.app
+                    .session
+                    .doc
+                    .get(self.id)
+                    .expect("the layer")
+                    .effects(),
+            )
         }
     }
 
@@ -19011,7 +19126,9 @@ mod effects_multi_tests {
                 if !kinds.is_empty() {
                     doc.apply(&Transaction(vec![Operation::SetEffects {
                         id,
-                        effects: kinds.iter().cloned().map(Effect::new).collect(),
+                        effects: ondin_core::keyed_by_position(
+                            kinds.iter().cloned().map(Effect::new),
+                        ),
                     }]))
                     .expect("effects");
                 }
@@ -19074,13 +19191,14 @@ mod effects_multi_tests {
         }
 
         fn stack(&self, i: usize) -> Vec<Effect> {
-            self.app
-                .session
-                .doc
-                .get(self.ids[i])
-                .expect("the layer")
-                .effects()
-                .to_vec()
+            ondin_core::item::values(
+                self.app
+                    .session
+                    .doc
+                    .get(self.ids[i])
+                    .expect("the layer")
+                    .effects(),
+            )
         }
 
         fn says(&mut self, text: &str) -> bool {
@@ -20588,16 +20706,16 @@ mod rhythm_tests {
             },
             Operation::SetFills {
                 id,
-                fills: vec![ondin_core::Fill {
+                fills: ondin_core::keyed_by_position([ondin_core::Fill {
                     brush: ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::from_rgb8(
                         200, 90, 60,
                     )),
                     visible: true,
-                }],
+                }]),
             },
             Operation::SetStrokes {
                 id,
-                strokes: vec![ondin_core::Stroke {
+                strokes: ondin_core::keyed_by_position([ondin_core::Stroke {
                     width: 2.0,
                     // **Per-side, so the two rows of widths are drawn.** They are
                     // the rows the pitch was missing from — they sit *outside* the
@@ -20612,7 +20730,7 @@ mod rhythm_tests {
                         left: 1.0,
                     },
                     ..Default::default()
-                }],
+                }]),
             },
         ]))
         .expect("a painted rect");
@@ -20850,10 +20968,10 @@ mod rhythm_tests {
             },
             Operation::SetFills {
                 id,
-                fills: vec![Fill {
+                fills: ondin_core::keyed_by_position([Fill {
                     brush: super::paint::new_solid(),
                     visible: true,
-                }],
+                }]),
             },
         ]))
         .expect("a frame");
@@ -20862,14 +20980,12 @@ mod rhythm_tests {
             app.session
                 .try_commit(Transaction(vec![Operation::SetLayoutGrids {
                     id,
-                    grids: (0..n)
-                        .map(|i| {
-                            LayoutGrid::new(match i % 2 {
-                                0 => GridAxis::Columns,
-                                _ => GridAxis::Rows,
-                            })
+                    grids: ondin_core::keyed_by_position((0..n).map(|i| {
+                        LayoutGrid::new(match i % 2 {
+                            0 => GridAxis::Columns,
+                            _ => GridAxis::Rows,
                         })
-                        .collect(),
+                    })),
                 }]))
                 .expect("grids to draw");
         }
@@ -20928,7 +21044,7 @@ mod rhythm_tests {
                 app.session
                     .try_commit(Transaction(vec![Operation::SetLayoutGrids {
                         id: *id,
-                        grids: grids.clone(),
+                        grids: ondin_core::keyed_by_position(grids.clone()),
                     }]))
                     .expect("grids to draw");
             }
@@ -21018,8 +21134,9 @@ mod rhythm_tests {
         let _ = ctx.run_ui(Default::default(), |_| {});
         let cols = LayoutGrid::new(GridAxis::Columns);
         let rows = LayoutGrid::new(GridAxis::Rows);
-        let grids =
-            |app: &OndinApp, id: NodeId| app.session.doc.get(id).expect("a frame").grids().to_vec();
+        let grids = |app: &OndinApp, id: NodeId| {
+            ondin_core::item::values(app.session.doc.get(id).expect("a frame").grids())
+        };
 
         // 1. Nothing anywhere: collapsed, and the card says so.
         let mut app = OndinApp::headless(&ctx);
@@ -21223,7 +21340,9 @@ mod rhythm_tests {
         let slot = PaintSlot::Grid(1);
         let default = LayoutGrid::new(GridAxis::Rows).color;
         let colour = |b: Option<Brush>| super::paint::stops_of(&b.expect("a brush"))[0].1;
-        let grids = |app: &OndinApp| app.session.doc.get(id).expect("the frame").grids().to_vec();
+        let grids = |app: &OndinApp| {
+            ondin_core::item::values(app.session.doc.get(id).expect("the frame").grids())
+        };
 
         assert_eq!(colour(app.slot_brush(id, slot)), default);
         assert!(
@@ -21280,7 +21399,7 @@ mod rhythm_tests {
         // touch this buffer**, which is the one rule keeping the picker's buffer and
         // the fields' `grid_scrub` from fighting over one grid.
         app.in_flight.grid_paint = None;
-        let mut list = grids(&app);
+        let mut list = app.session.doc.get(id).expect("the frame").grids().to_vec();
         list[1].count = 3;
         app.preview_grid(&Transaction(vec![Operation::SetLayoutGrids {
             id,
@@ -21537,7 +21656,10 @@ mod rhythm_tests {
             let id = frame_with_grids(&mut app, 0);
             if !grids.is_empty() {
                 app.session
-                    .try_commit(Transaction(vec![Operation::SetLayoutGrids { id, grids }]))
+                    .try_commit(Transaction(vec![Operation::SetLayoutGrids {
+                        id,
+                        grids: ondin_core::keyed_by_position(grids),
+                    }]))
                     .expect("grids to draw");
             }
             for _ in 0..4 {
@@ -21654,7 +21776,7 @@ mod rhythm_tests {
             let mut doc = app.session.doc.clone();
             doc.apply(&Transaction(vec![Operation::SetLayoutGrids {
                 id,
-                grids: vec![grid],
+                grids: ondin_core::keyed_by_position([grid]),
             }]))
             .expect("the grid to draw");
             app.session.adopt_document(doc, None);
@@ -21694,7 +21816,7 @@ mod rhythm_tests {
                 "fixture: the panel drew only {drawn} clickable controls over three \
                  frames — it is not showing a grid, and nothing below means anything"
             );
-            let stored = app.session.doc.get(id).expect("the frame").grids()[0];
+            let stored = app.session.doc.get(id).expect("the frame").grids()[0].value;
             (
                 stored,
                 app.session.history.undo_depth() - depth0,
@@ -21906,10 +22028,10 @@ mod mixed_opacity_tests {
         };
         let paint = |id, alpha: f32| Operation::SetFills {
             id,
-            fills: vec![Fill {
+            fills: ondin_core::keyed_by_position([Fill {
                 brush: Brush::Solid(Color::new([1.0, 0.0, 0.0, alpha])),
                 visible: true,
-            }],
+            }]),
         };
         doc.apply(&Transaction(vec![
             rect(a),
@@ -22171,13 +22293,13 @@ mod paint_hex_field_tests {
             },
             Operation::SetFills {
                 id,
-                fills: vec![ondin_core::Fill {
+                fills: ondin_core::keyed_by_position([ondin_core::Fill {
                     // **Off the 8-bit lattice** — which is anything the picker's
                     // HSV plane produced, and the only kind of colour the
                     // quantisation is visible on.
                     brush: Brush::Solid(ondin_core::peniko::Color::new([0.5, 0.25, 0.125, 1.0])),
                     visible: true,
-                }],
+                }]),
             },
         ]))
         .expect("build the fixture");
@@ -22999,7 +23121,10 @@ mod shipped_shared_readout_tests {
             let ops = ids
                 .iter()
                 .zip(each)
-                .map(|(id, fills)| Operation::SetFills { id: *id, fills })
+                .map(|(id, fills)| Operation::SetFills {
+                    id: *id,
+                    fills: ondin_core::keyed_by_position(fills),
+                })
                 .collect();
             app.session.doc.apply(&Transaction(ops)).expect("paint");
         };
@@ -23043,11 +23168,11 @@ mod shipped_shared_readout_tests {
             .apply(&Transaction(vec![
                 Operation::SetStrokes {
                     id: ids[0],
-                    strokes: vec![four.clone()],
+                    strokes: ondin_core::keyed_by_position([four.clone()]),
                 },
                 Operation::SetStrokes {
                     id: ids[1],
-                    strokes: vec![four.clone()],
+                    strokes: ondin_core::keyed_by_position([four.clone()]),
                 },
             ]))
             .expect("stroke both");
@@ -23164,12 +23289,12 @@ mod subject_tests {
             },
             Operation::SetFills {
                 id: rect,
-                fills: vec![ondin_core::Fill {
+                fills: ondin_core::keyed_by_position([ondin_core::Fill {
                     brush: ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::from_rgb8(
                         200, 90, 60,
                     )),
                     visible: true,
-                }],
+                }]),
             },
             guide(v, GuideAxis::Vertical, 40.0),
             guide(h, GuideAxis::Horizontal, 90.0),
@@ -23792,12 +23917,10 @@ mod paint_write_tests {
             },
             Operation::SetStrokes {
                 id,
-                strokes: (0..n)
-                    .map(|i| ondin_core::Stroke {
-                        width: i as f64 + 1.0,
-                        ..Default::default()
-                    })
-                    .collect(),
+                strokes: ondin_core::keyed_by_position((0..n).map(|i| ondin_core::Stroke {
+                    width: i as f64 + 1.0,
+                    ..Default::default()
+                })),
             },
         ]))
         .expect("a striped rect");
@@ -23806,7 +23929,7 @@ mod paint_write_tests {
         (app, id)
     }
 
-    fn strokes(app: &OndinApp, id: NodeId) -> Vec<Stroke> {
+    fn strokes(app: &OndinApp, id: NodeId) -> Vec<ondin_core::Keyed<Stroke>> {
         app.session
             .doc
             .get(id)
@@ -23814,6 +23937,81 @@ mod paint_write_tests {
             .paint()
             .strokes
             .clone()
+    }
+
+    /// **A fill list edited over a selection lands on each layer's own items**
+    /// (§15 D980). Two rects carry the same two fills under different item ids;
+    /// removing the first row through the panel's own write must leave each rect
+    /// its *own* id on the survivor, and on an instance's child that id is what
+    /// still matches the main's fill.
+    ///
+    /// Flip, the plausible wrong version — the selection arm writing the edited list
+    /// verbatim, the anchor's ids onto every layer (`write_fill_list` handing
+    /// `|doc, ids, _, e, _| …SetFills { fills: e.to_vec() }…` as `all`): red at the
+    /// second rect's assertion, its survivor carrying the first rect's id. Rekeying
+    /// by position (`set_fills_all`) is red there too, the survivor taking the
+    /// deleted row's id.
+    #[test]
+    fn a_selection_fill_edit_keeps_each_layers_item_ids() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = ondin_core::IdSource::new(0x5A2);
+        let root = ids.mint();
+        let mut doc = ondin_core::Document::new(root);
+        let solid = |r: u8| Fill {
+            brush: Brush::Solid(ondin_core::peniko::Color::from_rgba8(r, 0, 0, 255)),
+            visible: true,
+        };
+        let mut ops = Vec::new();
+        let mut rects = Vec::new();
+        for i in 0..2 {
+            let id = ids.mint();
+            ops.push(Operation::CreateNode {
+                id,
+                parent: root,
+                index: i,
+                kind: NodeKind::Rect {
+                    size: Size::new(10.0, 10.0),
+                    corner_radii: Default::default(),
+                },
+                transform: None,
+                name: None,
+            });
+            ops.push(Operation::SetFills {
+                id,
+                fills: vec![
+                    Keyed::new(ids.mint_item(), solid(10)),
+                    Keyed::new(ids.mint_item(), solid(20)),
+                ],
+            });
+            rects.push(id);
+        }
+        doc.apply(&Transaction(ops)).expect("two rects");
+        app.session.adopt_document(doc, None);
+        app.session.selection.set(rects.clone());
+        let fills_of = |app: &OndinApp, id: NodeId| {
+            app.session.doc.get(id).expect("node").paint().fills.clone()
+        };
+        let (a, b) = (fills_of(&app, rects[0]), fills_of(&app, rects[1]));
+        assert_ne!(a[1].id, b[1].id, "the fixture's rects carry different ids");
+
+        let mut next = app.fills_in_scope(PaintScope::Selection);
+        assert_eq!(
+            next.len(),
+            2,
+            "the selection agrees, so the panel shows a list"
+        );
+        next.remove(0);
+        app.write_fill_list(PaintScope::Selection, next);
+
+        let (a2, b2) = (fills_of(&app, rects[0]), fills_of(&app, rects[1]));
+        assert_eq!(a2.len(), 1);
+        assert_eq!(a2[0].id, a[1].id, "the first rect keeps its survivor's id");
+        assert_eq!(
+            b2[0].id, b[1].id,
+            "the second rect keeps *its* survivor's id"
+        );
     }
 
     /// **Writing a stroke list that is already there builds no transaction.**
@@ -24043,11 +24241,11 @@ mod paint_write_tests {
         };
         let stroked = |id, align| Operation::SetStrokes {
             id,
-            strokes: vec![Stroke {
+            strokes: ondin_core::keyed_by_position([Stroke {
                 width: 2.0,
                 align,
                 ..Default::default()
-            }],
+            }]),
         };
         doc.apply(&Transaction(vec![
             rect(a),
@@ -24433,11 +24631,11 @@ mod paint_write_tests {
                 rect(b),
                 Operation::SetFills {
                     id: a,
-                    fills: a_fills,
+                    fills: ondin_core::keyed_by_position(a_fills),
                 },
                 Operation::SetFills {
                     id: b,
-                    fills: b_fills,
+                    fills: ondin_core::keyed_by_position(b_fills),
                 },
             ]))
             .expect("two rects");
@@ -24537,10 +24735,10 @@ mod paint_write_tests {
         };
         let paint = |id, c| Operation::SetFills {
             id,
-            fills: vec![Fill {
+            fills: ondin_core::keyed_by_position([Fill {
                 brush: Brush::Solid(c),
                 visible: true,
-            }],
+            }]),
         };
         let blue = ondin_core::peniko::Color::from_rgb8(30, 120, 200);
         let green = ondin_core::peniko::Color::from_rgb8(20, 180, 90);
@@ -24618,10 +24816,10 @@ mod paint_write_tests {
         app.session.selection.set(vec![a, b]);
 
         let red = ondin_core::peniko::Color::from_rgb8(220, 30, 30);
-        let one_fill = vec![Fill {
+        let one_fill = ondin_core::keyed_by_position([Fill {
             brush: Brush::Solid(red),
             visible: true,
-        }];
+        }]);
         let counts = |app: &OndinApp| {
             let n = |id| {
                 let p = app.session.doc.get(id).expect("node").paint();
@@ -24640,10 +24838,10 @@ mod paint_write_tests {
 
         app.write_strokes(
             PaintScope::Selection,
-            vec![ondin_core::Stroke {
+            ondin_core::keyed_by_position([ondin_core::Stroke {
                 width: 3.0,
                 ..Default::default()
-            }],
+            }]),
         );
         assert_eq!(
             counts(&app),
@@ -24702,10 +24900,10 @@ mod paint_write_tests {
             },
             Operation::SetFills {
                 id,
-                fills: vec![Fill {
+                fills: ondin_core::keyed_by_position([Fill {
                     brush: Brush::Solid(red),
                     visible: true,
-                }],
+                }]),
             },
         ]))
         .expect("a rect with one fill");
@@ -24779,14 +24977,14 @@ mod paint_write_tests {
             rect(b),
             Operation::SetEffects {
                 id: a,
-                effects: vec![shadow(red)],
+                effects: ondin_core::keyed_by_position([shadow(red)]),
             },
             Operation::SetEffects {
                 id: b,
-                effects: vec![
+                effects: ondin_core::keyed_by_position([
                     shadow(green),
                     ondin_core::Effect::new(ondin_core::EffectKind::LayerBlur { radius: 12.0 }),
-                ],
+                ]),
             },
         ]))
         .expect("two shadowed rects, one of them also blurred");
@@ -24835,9 +25033,9 @@ mod paint_write_tests {
         // land does nothing rather than inventing somewhere.
         app.session.commit(Transaction(vec![Operation::SetEffects {
             id: a,
-            effects: vec![ondin_core::Effect::new(ondin_core::EffectKind::LayerBlur {
-                radius: 4.0,
-            })],
+            effects: ondin_core::keyed_by_position([ondin_core::Effect::new(
+                ondin_core::EffectKind::LayerBlur { radius: 4.0 },
+            )]),
         }]));
         let tx = app.slot_transaction(a, PaintSlot::Effect(0), Brush::Solid(red));
         assert!(
@@ -24923,11 +25121,11 @@ mod mixed_spread_tests {
             rect(b),
             Operation::SetFills {
                 id: a,
-                fills: a_fills,
+                fills: ondin_core::keyed_by_position(a_fills),
             },
             Operation::SetFills {
                 id: b,
-                fills: b_fills,
+                fills: ondin_core::keyed_by_position(b_fills),
             },
         ]))
         .expect("two rects");
@@ -25347,13 +25545,13 @@ mod slot_decision_tests {
         let red = ondin_core::peniko::Color::from_rgb8(220, 30, 30);
         app.session.commit(Transaction(vec![Operation::SetEffects {
             id,
-            effects: vec![
+            effects: ondin_core::keyed_by_position([
                 Effect::new(EffectKind::DropShadow(ondin_core::Shadow {
                     color: red,
                     ..Default::default()
                 })),
                 Effect::new(EffectKind::LayerBlur { radius: 12.0 }),
-            ],
+            ]),
         }]));
 
         assert_eq!(

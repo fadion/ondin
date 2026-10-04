@@ -3248,8 +3248,14 @@ mod missing_picture_tests {
         }]))
         .expect("a rect");
         doc.apply(&Transaction(vec![
-            Operation::SetFills { id: rect, fills },
-            Operation::SetStrokes { id: rect, strokes },
+            Operation::SetFills {
+                id: rect,
+                fills: ondin_core::keyed_by_position(fills),
+            },
+            Operation::SetStrokes {
+                id: rect,
+                strokes: ondin_core::keyed_by_position(strokes),
+            },
         ]))
         .expect("paint it");
         (doc, rect)

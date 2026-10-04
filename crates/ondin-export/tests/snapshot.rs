@@ -2,6 +2,7 @@
 
 mod common;
 
+use ondin_core::keyed_by_position;
 use ondin_export::snapshot::{Geometry, PaintSummary, Snapshot, snapshot};
 
 #[test]
@@ -202,10 +203,10 @@ fn gradients_are_described_not_just_flagged() {
     f.doc
         .apply(&Transaction(vec![Operation::SetFills {
             id: f.rect,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Gradient(gradient.into()),
                 visible: true,
-            }],
+            }]),
         }]))
         .unwrap();
     let res = Resolved::rebuild(&f.doc);
@@ -308,7 +309,7 @@ fn an_image_fill_is_summarised_by_its_id_and_its_framing_mode() {
             },
             Operation::SetFills {
                 id: f.rect,
-                fills: vec![Fill {
+                fills: keyed_by_position([Fill {
                     brush: ondin_core::Brush::Image(ondin_core::ImageBrush {
                         image: ImageRef {
                             fit: ImageFit::Tile,
@@ -317,7 +318,7 @@ fn an_image_fill_is_summarised_by_its_id_and_its_framing_mode() {
                         sampler: Default::default(),
                     }),
                     visible: true,
-                }],
+                }]),
             },
         ]))
         .expect("give the rect a picture");
@@ -360,7 +361,7 @@ fn an_adjusted_picture_summarises_only_the_sliders_that_moved() {
                 },
                 Operation::SetFills {
                     id: f.rect,
-                    fills: vec![Fill {
+                    fills: keyed_by_position([Fill {
                         brush: ondin_core::Brush::Image(ondin_core::ImageBrush {
                             image: ImageRef {
                                 adjust,
@@ -369,7 +370,7 @@ fn an_adjusted_picture_summarises_only_the_sliders_that_moved() {
                             sampler: Default::default(),
                         }),
                         visible: true,
-                    }],
+                    }]),
                 },
             ]))
             .expect("give the rect a picture");
@@ -418,7 +419,7 @@ fn the_snapshot_carries_a_layers_effects_in_the_units_the_panel_shows() {
     f.doc
         .apply(&Transaction(vec![Operation::SetEffects {
             id: f.rect,
-            effects: vec![
+            effects: keyed_by_position([
                 Effect::new(EffectKind::DropShadow(Shadow {
                     offset: Vec2::new(0.0, 4.0),
                     blur: 12.0,
@@ -430,7 +431,7 @@ fn the_snapshot_carries_a_layers_effects_in_the_units_the_panel_shows() {
                     kind: EffectKind::LayerBlur { radius: 9.0 },
                     visible: false,
                 },
-            ],
+            ]),
         }]))
         .unwrap();
     f.res = Resolved::rebuild(&f.doc);

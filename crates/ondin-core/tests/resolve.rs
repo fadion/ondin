@@ -6,7 +6,7 @@ use ondin_core::kurbo::{Affine, Point, Rect, RoundedRectRadii, Size};
 use ondin_core::{
     Document, Effect, EffectKind, GeometryPatch, History, IdSource, NodeId, NodeKind, Operation,
     Resolved, Shadow, TextSizing, TextStyle, Transaction, hit_test, is_effectively_locked,
-    nodes_in_view,
+    keyed_by_position, nodes_in_view,
 };
 
 fn rect(w: f64, h: f64) -> NodeKind {
@@ -496,7 +496,10 @@ fn run_random_session_with(seed: u64, layout: bool, grid: bool) {
                         },
                     ],
                 };
-                Transaction(vec![Operation::SetEffects { id, effects }])
+                Transaction(vec![Operation::SetEffects {
+                    id,
+                    effects: keyed_by_position(effects),
+                }])
             }),
             // give a random container a flex layout (or, in the grid run, a grid
             // one half the time), or take it away
@@ -1046,8 +1049,8 @@ fn stroke_expansion_follows_alignment() {
     use ondin_core::{Fill, Paint, Stroke, StrokeAlign, geometry};
 
     let stroke = |align| Paint {
-        fills: Vec::<Fill>::new(),
-        strokes: vec![Stroke {
+        fills: Vec::<ondin_core::Keyed<Fill>>::new(),
+        strokes: keyed_by_position([Stroke {
             brush: ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::BLACK),
             width: 10.0,
             join: ondin_core::kurbo::Join::Miter,
@@ -1059,7 +1062,7 @@ fn stroke_expansion_follows_alignment() {
             dash_fit: false,
             align,
             visible: true,
-        }],
+        }]),
     };
 
     assert_eq!(
@@ -1613,13 +1616,13 @@ fn stroke_expansion_follows_the_sides_a_stroke_actually_paints() {
     use ondin_core::{Fill, Paint, Stroke, StrokeAlign, StrokeSides};
 
     let paint = |sides| Paint {
-        fills: Vec::<Fill>::new(),
-        strokes: vec![Stroke {
+        fills: Vec::<ondin_core::Keyed<Fill>>::new(),
+        strokes: keyed_by_position([Stroke {
             width: 10.0,
             align: StrokeAlign::Outside,
             sides,
             ..Default::default()
-        }],
+        }]),
     };
     assert_eq!(
         stroke_expansion(&rect(10.0, 10.0), &paint(StrokeSides::All)),
@@ -1762,8 +1765,8 @@ fn bounds_allow_for_a_stroke_the_walk_will_actually_draw() {
         ..Default::default()
     };
     let paint = Paint {
-        fills: Vec::<Fill>::new(),
-        strokes: vec![nowhere.clone()],
+        fills: Vec::<ondin_core::Keyed<Fill>>::new(),
+        strokes: keyed_by_position([nowhere.clone()]),
     };
 
     // On a rect the field is honoured, so nothing is painted and nothing is
@@ -3316,12 +3319,12 @@ fn a_shadow_moves_the_ink_box_up_the_tree_and_leaves_the_editing_box_alone() {
             &mut doc,
             Transaction(vec![Operation::SetEffects {
                 id: shape,
-                effects: vec![Effect::new(EffectKind::DropShadow(Shadow {
+                effects: keyed_by_position([Effect::new(EffectKind::DropShadow(Shadow {
                     offset: Vec2::new(0.0, 20.0),
                     blur: 0.0,
                     spread: 0.0,
                     ..Shadow::default()
-                }))],
+                }))]),
             }]),
         )
         .unwrap();

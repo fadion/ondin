@@ -13,6 +13,7 @@
 use ondin_core::effect::{Effect, EffectKind, Filters, Shadow};
 use ondin_core::kurbo::Vec2;
 use ondin_core::peniko::Color;
+use ondin_core::{Keyed, keyed_by_position};
 use ondin_render::effects::{self, Surface};
 use ondin_render::fx_gpu::{self, FxPipelines, Slice};
 
@@ -216,7 +217,7 @@ fn readback(g: &Gpu, tex: &wgpu::Texture) -> Vec<u8> {
 }
 
 /// What the CPU backend would produce for the same stack, in straight alpha.
-fn reference(effects_list: &[Effect]) -> Vec<u8> {
+fn reference(effects_list: &[Keyed<Effect>]) -> Vec<u8> {
     let mut buf = premultiply(&fixture());
     let mut s = Surface::new(&mut buf, W as usize, H as usize);
     effects::run(&mut s, effects_list, SCALE);
@@ -280,6 +281,7 @@ fn check(name: &str, list: Vec<Effect>) {
         eprintln!("no GPU adapter; skipping {name}");
         return;
     };
+    let list = keyed_by_position(list);
     let src = upload(&g, &fixture());
     let out = fx_gpu::run(&g.device, &g.queue, &g.fx, &src, whole(), &list, SCALE)
         .expect("the stack has ink, so it produces a texture");
@@ -415,24 +417,24 @@ fn a_deeply_resampled_shadow_costs_the_buffer_and_not_the_block() {
         "and past the buffer, or the dispatch is not the degenerate one: {k} against {}",
         W.max(H)
     );
-    let list = vec![Effect::new(EffectKind::DropShadow(shadow(
+    let list = keyed_by_position([Effect::new(EffectKind::DropShadow(shadow(
         0.0,
         0.0,
         blur,
         0.0,
         [0, 0, 0, 255],
-    )))];
+    )))]);
     // The control: the ordinary resampled path, `k = 3`, the case
     // `a_resampled_drop_shadow_matches_the_reference` checks the pixels of.
-    let control = vec![Effect::new(EffectKind::DropShadow(shadow(
+    let control = keyed_by_position([Effect::new(EffectKind::DropShadow(shadow(
         0.0,
         0.0,
         120.0,
         0.0,
         [0, 0, 0, 255],
-    )))];
+    )))]);
     let src = upload(&g, &fixture());
-    let once = |effects: &[Effect]| {
+    let once = |effects: &[Keyed<Effect>]| {
         let at = std::time::Instant::now();
         let out = fx_gpu::run(&g.device, &g.queue, &g.fx, &src, whole(), effects, SCALE)
             .expect("the stack has ink");
@@ -589,5 +591,6 @@ fn a_stack_with_no_ink_asks_for_no_texture() {
         },
         Effect::new(EffectKind::Filters(Filters::default())),
     ];
+    let list = keyed_by_position(list);
     assert!(fx_gpu::run(&g.device, &g.queue, &g.fx, &src, whole(), &list, SCALE).is_none());
 }

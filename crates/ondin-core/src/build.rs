@@ -19,6 +19,7 @@
 use crate::document::Document;
 use crate::id::{IdSource, NodeId};
 use crate::image::Brush;
+use crate::item::{Keyed, same_values};
 use crate::node::{Fill, Node, NodeKind, Stroke};
 use crate::op::{GeometryPatch, OpError, Operation, Transaction};
 use crate::query::pivot_world;
@@ -2657,25 +2658,29 @@ pub fn repaint(doc: &Document, ids: &[NodeId], from: &Brush, to: &Brush) -> Tran
     for id in subtree_nodes(doc, ids) {
         let Some(node) = doc.get(id) else { continue };
         let swap = |b: &Brush| if b == from { to.clone() } else { b.clone() };
-        let fills: Vec<Fill> = node
+        let fills: Vec<Keyed<Fill>> = node
             .paint()
             .fills
             .iter()
-            .map(|f| Fill {
-                brush: swap(&f.brush),
-                visible: f.visible,
+            .map(|f| {
+                f.map(|f| Fill {
+                    brush: swap(&f.brush),
+                    visible: f.visible,
+                })
             })
             .collect();
         if fills != node.paint().fills {
             ops.push(Operation::SetFills { id, fills });
         }
-        let strokes: Vec<Stroke> = node
+        let strokes: Vec<Keyed<Stroke>> = node
             .paint()
             .strokes
             .iter()
-            .map(|s| Stroke {
-                brush: swap(&s.brush),
-                ..s.clone()
+            .map(|s| {
+                s.map(|s| Stroke {
+                    brush: swap(&s.brush),
+                    ..s.clone()
+                })
             })
             .collect();
         if strokes != node.paint().strokes {
@@ -2720,13 +2725,15 @@ pub fn recolor(doc: &Document, ids: &[NodeId], from: Color, to: Color) -> Transa
             let fills = paint
                 .fills
                 .iter()
-                .map(|f| Fill {
-                    brush: if is_solid(&f.brush, key) {
-                        Brush::Solid(to)
-                    } else {
-                        f.brush.clone()
-                    },
-                    visible: f.visible,
+                .map(|f| {
+                    f.map(|f| Fill {
+                        brush: if is_solid(&f.brush, key) {
+                            Brush::Solid(to)
+                        } else {
+                            f.brush.clone()
+                        },
+                        visible: f.visible,
+                    })
                 })
                 .collect();
             ops.push(Operation::SetFills { id, fills });
@@ -2869,8 +2876,14 @@ impl<T> PaintShown<T> {
 }
 
 /// Fold one list per target into the panel's answer.
-fn paint_shown<T: PartialEq>(lists: impl Iterator<Item = Vec<T>>) -> PaintShown<T> {
-    let mut first: Option<Vec<T>> = None;
+///
+/// 🚨 **Agreement is by value, not by item** (§15 D980): two layers given the same
+/// fill separately carry different item ids, and comparing the keyed lists whole
+/// would read them as *Mixed*. The list returned is the **first** target's, ids and
+/// all — the anchor a multi-selection write retargets from (`item::retarget`), never
+/// a list to be written verbatim onto the others.
+fn paint_shown<T: PartialEq>(lists: impl Iterator<Item = Vec<Keyed<T>>>) -> PaintShown<Keyed<T>> {
+    let mut first: Option<Vec<Keyed<T>>> = None;
     for list in lists {
         match &first {
             None => first = Some(list),
@@ -2879,7 +2892,7 @@ fn paint_shown<T: PartialEq>(lists: impl Iterator<Item = Vec<T>>) -> PaintShown<
             // to check for: empty lists are all equal to each other, so reaching
             // here at all means something in scope is painted and there is
             // something for the row to stand for.
-            Some(f) if *f != list => return PaintShown::Mixed,
+            Some(f) if !same_values(f, &list) => return PaintShown::Mixed,
             Some(_) => {}
         }
     }
@@ -2887,7 +2900,7 @@ fn paint_shown<T: PartialEq>(lists: impl Iterator<Item = Vec<T>>) -> PaintShown<
 }
 
 /// The fill list every paint target in scope shares — or a disagreement.
-pub fn shared_fills(doc: &Document, ids: &[NodeId]) -> PaintShown<Fill> {
+pub fn shared_fills(doc: &Document, ids: &[NodeId]) -> PaintShown<Keyed<Fill>> {
     paint_shown(
         paint_targets(doc, ids)
             .into_iter()
@@ -2905,7 +2918,7 @@ pub fn shared_fills(doc: &Document, ids: &[NodeId]) -> PaintShown<Fill> {
 /// stroke scope genuinely differed on that kind and only that kind. A frame fills
 /// now, the two scopes are the same set, and the filter and the predicate are both
 /// gone rather than left agreeing with each other.
-pub fn shared_strokes(doc: &Document, ids: &[NodeId]) -> PaintShown<Stroke> {
+pub fn shared_strokes(doc: &Document, ids: &[NodeId]) -> PaintShown<Keyed<Stroke>> {
     paint_shown(
         paint_targets(doc, ids)
             .into_iter()
@@ -3035,14 +3048,25 @@ pub fn edit_strokes_all(doc: &Document, ids: &[NodeId], edit: impl Fn(&mut Strok
 /// list — so a two-fill selection came back out of a frame as one, and the panel's
 /// list stopped being the truth for part of what it was showing. That was the
 /// "known limitation" `architecture.md` §5.7a recorded, and it is gone.
-pub fn set_fills_all(doc: &Document, ids: &[NodeId], fills: &[Fill]) -> Transaction {
+///
+/// **Values in, each target's own ids kept by position** (§15 D980,
+/// `item::rekey_by_position`): a replacement is not an edit of the list it lands
+/// on, so there is no anchor to say which item became which. An edit of a list the
+/// targets share goes through [`retarget_fills_all`] instead.
+pub fn set_fills_all(
+    doc: &Document,
+    ids: &[NodeId],
+    fills: &[Fill],
+    src: &mut IdSource,
+) -> Transaction {
     let mut ops = Vec::new();
     for id in paint_targets(doc, ids) {
         let Some(node) = doc.get(id) else { continue };
-        if node.paint().fills != fills {
+        let own = &node.paint().fills;
+        if own.len() != fills.len() || own.iter().zip(fills).any(|(o, f)| o.value != *f) {
             ops.push(Operation::SetFills {
                 id,
-                fills: fills.to_vec(),
+                fills: crate::item::rekey_by_position(own, fills.iter().cloned(), src),
             });
         }
     }
@@ -3051,15 +3075,116 @@ pub fn set_fills_all(doc: &Document, ids: &[NodeId], fills: &[Fill]) -> Transact
 
 /// Give every paint target in scope exactly this stroke list — [`set_fills_all`]'s
 /// twin, over the same targets, frames included.
-pub fn set_strokes_all(doc: &Document, ids: &[NodeId], strokes: &[Stroke]) -> Transaction {
+pub fn set_strokes_all(
+    doc: &Document,
+    ids: &[NodeId],
+    strokes: &[Stroke],
+    src: &mut IdSource,
+) -> Transaction {
     let mut ops = Vec::new();
     for id in paint_targets(doc, ids) {
         let Some(node) = doc.get(id) else { continue };
-        if node.paint().strokes != strokes {
+        let own = &node.paint().strokes;
+        if own.len() != strokes.len() || own.iter().zip(strokes).any(|(o, s)| o.value != *s) {
             ops.push(Operation::SetStrokes {
                 id,
-                strokes: strokes.to_vec(),
+                strokes: crate::item::rekey_by_position(own, strokes.iter().cloned(), src),
             });
+        }
+    }
+    Transaction(ops)
+}
+
+/// Change fill `index` of every paint target in scope, in place — one row of a
+/// list the targets share (their lists agree in value, so row `index` is the
+/// same fill on each). Every id stays where it is; a target with no fill there
+/// is left alone.
+pub fn edit_fill_at_all(
+    doc: &Document,
+    ids: &[NodeId],
+    index: usize,
+    edit: impl Fn(&mut Fill),
+) -> Transaction {
+    let mut ops = Vec::new();
+    for id in paint_targets(doc, ids) {
+        let Some(node) = doc.get(id) else { continue };
+        let mut fills = node.paint().fills.clone();
+        let Some(fill) = fills.get_mut(index) else {
+            continue;
+        };
+        edit(fill);
+        if fills != node.paint().fills {
+            ops.push(Operation::SetFills { id, fills });
+        }
+    }
+    Transaction(ops)
+}
+
+/// [`edit_fill_at_all`]'s twin over strokes.
+pub fn edit_stroke_at_all(
+    doc: &Document,
+    ids: &[NodeId],
+    index: usize,
+    edit: impl Fn(&mut Stroke),
+) -> Transaction {
+    let mut ops = Vec::new();
+    for id in paint_targets(doc, ids) {
+        let Some(node) = doc.get(id) else { continue };
+        let mut strokes = node.paint().strokes.clone();
+        let Some(stroke) = strokes.get_mut(index) else {
+            continue;
+        };
+        edit(stroke);
+        if strokes != node.paint().strokes {
+            ops.push(Operation::SetStrokes { id, strokes });
+        }
+    }
+    Transaction(ops)
+}
+
+/// An **edit** of the fill list every paint target in scope shares, written onto
+/// each target with its own ids (§15 D980, `item::retarget`).
+///
+/// `anchor` is the list the panel showed — [`shared_fills`]' answer, the first
+/// target's — and `edited` is that list after the user's change. Writing `edited`
+/// verbatim would give every target the anchor's ids, which on an instance's child
+/// cuts each fill from its counterpart in the main; retargeting maps each edited
+/// item back through the anchor to the target's own item at the same position, and
+/// mints a fresh id per target for a row the user added.
+pub fn retarget_fills_all(
+    doc: &Document,
+    ids: &[NodeId],
+    anchor: &[Keyed<Fill>],
+    edited: &[Keyed<Fill>],
+    src: &mut IdSource,
+) -> Transaction {
+    let mut ops = Vec::new();
+    for id in paint_targets(doc, ids) {
+        let Some(node) = doc.get(id) else { continue };
+        let own = &node.paint().fills;
+        let fills = crate::item::retarget(anchor, own, edited, src);
+        if fills != *own {
+            ops.push(Operation::SetFills { id, fills });
+        }
+    }
+    Transaction(ops)
+}
+
+/// [`retarget_fills_all`]'s twin over strokes.
+pub fn retarget_strokes_all(
+    doc: &Document,
+    ids: &[NodeId],
+    anchor: &[Keyed<Stroke>],
+    edited: &[Keyed<Stroke>],
+    src: &mut IdSource,
+) -> Transaction {
+    let mut ops = Vec::new();
+    for id in paint_targets(doc, ids) {
+        let Some(node) = doc.get(id) else { continue };
+        let own = &node.paint().strokes;
+        let strokes = crate::item::retarget(anchor, own, edited, src);
+        if strokes != *own {
+            ops.push(Operation::SetStrokes { id, strokes });
         }
     }
     Transaction(ops)
@@ -3113,8 +3238,8 @@ pub fn properties_of(node: &Node) -> Option<Properties> {
         return None;
     }
     Some(Properties {
-        fills: node.paint().fills.clone(),
-        strokes: node.paint().strokes.clone(),
+        fills: crate::item::values(&node.paint().fills),
+        strokes: crate::item::values(&node.paint().strokes),
         opacity: node.opacity(),
     })
 }
@@ -3132,9 +3257,14 @@ pub fn properties_of(node: &Node) -> Option<Properties> {
 ///
 /// Each of the three drops the targets that already agree, so pasting the
 /// properties a layer already has produces an empty transaction and no undo step.
-pub fn paste_properties(doc: &Document, ids: &[NodeId], props: &Properties) -> Transaction {
-    let mut ops = set_fills_all(doc, ids, &props.fills).0;
-    ops.extend(set_strokes_all(doc, ids, &props.strokes).0);
+pub fn paste_properties(
+    doc: &Document,
+    ids: &[NodeId],
+    props: &Properties,
+    src: &mut IdSource,
+) -> Transaction {
+    let mut ops = set_fills_all(doc, ids, &props.fills, src).0;
+    ops.extend(set_strokes_all(doc, ids, &props.strokes, src).0);
     ops.extend(set_opacity_all(doc, ids, props.opacity).0);
     Transaction(ops)
 }

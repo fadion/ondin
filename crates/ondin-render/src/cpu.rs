@@ -313,7 +313,7 @@ struct FxFrame {
     /// pixels.
     origin: (i32, i32),
     size: (u16, u16),
-    effects: Vec<Effect>,
+    effects: Vec<ondin_core::Keyed<Effect>>,
     /// The enclosing target's `base`, put back when this layer pops.
     saved_base: Affine,
     /// **Buffer** pixels per document unit along each axis, for the layer this
@@ -589,7 +589,12 @@ impl ScenePainter for CpuPainter<'_> {
     /// An empty intersection means there is nothing to draw — but the layer is
     /// still pushed, with a 1×1 buffer, because [`Self::pop_layer`] cannot tell
     /// which kind of layer it is closing and the walk owes it a pop either way.
-    fn push_effect_layer(&mut self, transform: Affine, bounds: Rect, effects: &[Effect]) {
+    fn push_effect_layer(
+        &mut self,
+        transform: Affine,
+        bounds: Rect,
+        effects: &[ondin_core::Keyed<Effect>],
+    ) {
         let device = (self.base * transform).transform_rect_bbox(bounds);
         let limit = match self.fx.last() {
             Some(f) => Rect::new(0.0, 0.0, f.size.0 as f64, f.size.1 as f64),

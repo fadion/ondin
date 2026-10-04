@@ -5217,7 +5217,7 @@ impl OndinApp {
             return;
         };
         let ids = self.session.selection.ids().to_vec();
-        let tx = build::paste_properties(&self.session.doc, &ids, &props);
+        let tx = build::paste_properties(&self.session.doc, &ids, &props, &mut self.session.ids);
         if tx.0.is_empty() {
             self.session.info("Already has these properties");
             return;
@@ -10739,10 +10739,10 @@ mod image_edit_lock_tests {
         .expect("build");
         doc.apply(&Transaction(vec![Operation::SetFills {
             id: rect,
-            fills: vec![Fill {
+            fills: ondin_core::keyed_by_position([Fill {
                 brush: image_brush(ondin_core::ImageId("a-photo".into())),
                 visible: true,
-            }],
+            }]),
         }]))
         .expect("paint");
         if locked {
@@ -11031,10 +11031,10 @@ mod image_edit_lock_tests {
         .expect("build");
         doc.apply(&Transaction(vec![Operation::SetFills {
             id: child,
-            fills: vec![Fill {
+            fills: ondin_core::keyed_by_position([Fill {
                 brush: image_brush(ondin_core::ImageId("a-photo".into())),
                 visible: true,
-            }],
+            }]),
         }]))
         .expect("paint");
         doc.apply(&Transaction(vec![Operation::SetLocked {
@@ -11089,10 +11089,10 @@ mod copy_as_png_tests {
         .expect("build");
         doc.apply(&Transaction(vec![Operation::SetFills {
             id: rect,
-            fills: vec![Fill {
+            fills: ondin_core::keyed_by_position([Fill {
                 brush: Brush::Solid(Color::from_rgba8(200, 40, 60, 255)),
                 visible: true,
-            }],
+            }]),
         }]))
         .expect("paint");
         let res = Resolved::rebuild(&doc);
@@ -17135,23 +17135,23 @@ mod context_menu_rule_tests {
             .try_commit(Transaction(vec![
                 Operation::SetStrokes {
                     id,
-                    strokes: vec![Stroke {
+                    strokes: ondin_core::keyed_by_position([Stroke {
                         width: 2.0,
                         ..Default::default()
-                    }],
+                    }]),
                 },
                 Operation::SetEffects {
                     id,
-                    effects: vec![ondin_core::Effect::new(ondin_core::EffectKind::DropShadow(
-                        Default::default(),
-                    ))],
+                    effects: ondin_core::keyed_by_position([ondin_core::Effect::new(
+                        ondin_core::EffectKind::DropShadow(Default::default()),
+                    )]),
                 },
                 Operation::SetExports {
                     id,
-                    exports: vec![ondin_core::ExportSpec::new(
+                    exports: ondin_core::keyed_by_position([ondin_core::ExportSpec::new(
                         ondin_core::ExportFormat::Png,
                         ondin_core::ExportScale::Times(1.0),
-                    )],
+                    )]),
                 },
             ]))
             .expect("a stroke, an effect and an export to draw");
@@ -17686,10 +17686,10 @@ mod clipboard_crossing_tests {
             },
             Operation::SetFills {
                 id: rect,
-                fills: vec![Fill {
+                fills: ondin_core::keyed_by_position([Fill {
                     brush: image_brush(id.clone()),
                     visible: true,
-                }],
+                }]),
             },
         ]))
         .expect("a rect painted with a picture");

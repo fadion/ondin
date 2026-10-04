@@ -14,6 +14,7 @@ use crate::guide::{Guide, GuideAxis, GuideId};
 use crate::id::NodeId;
 use crate::image::{ImageEntry, ImageFormat, ImageId, ImageSource};
 use crate::io::{CURRENT_SCHEMA_VERSION, IoError, MAX_TREE_DEPTH};
+use crate::item::Keyed;
 use crate::meta::DocumentMeta;
 use crate::node::{FillRule, MaskMode, Node, NodeKind, Paint, Pivot};
 use base64::Engine as _;
@@ -189,14 +190,14 @@ pub(crate) struct NodeDto {
     /// added one, so the field changed no existing file's bytes (invariant 9).
     /// See §5.11.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub exports: Vec<ExportSpec>,
+    pub exports: Vec<Keyed<ExportSpec>>,
     /// The effect stack (§5.3a), absent for a layer carrying none. Purely
     /// additive on the same terms as `exports` above — a file written before
     /// effects existed has no entry, and an empty stack is exactly what those
     /// layers meant, so no version bump and no existing file's bytes change
     /// (invariant 9).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub effects: Vec<Effect>,
+    pub effects: Vec<Keyed<Effect>>,
     /// The layout grids drawn over this layer (`crate::layout`), absent for one
     /// carrying none. Additive on `exports`' terms exactly — no version bump, no
     /// existing file's bytes changed (invariant 9).
@@ -208,7 +209,7 @@ pub(crate) struct NodeDto {
     /// worst a stray one costs is bytes — and dropping it would silently delete
     /// something a later version might have a use for.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub grids: Vec<crate::layout::LayoutGrid>,
+    pub grids: Vec<Keyed<crate::layout::LayoutGrid>>,
     /// The layer's CSS insets inside its frame (`crate::container`), absent when
     /// none is set — additive on `grids`' terms, no version bump and no existing
     /// file's bytes changed (§5.11, §15 D868: the default is exactly what every
@@ -387,7 +388,7 @@ impl NodeDto {
             exports: self
                 .exports
                 .into_iter()
-                .filter(crate::document::export_spec_is_usable)
+                .filter(|k| crate::document::export_spec_is_usable(k))
                 .collect(),
             effects: self.effects,
             grids: self.grids,
@@ -708,6 +709,10 @@ fn verify_integrity(nodes: &FxHashMap<NodeId, Node>, root: NodeId) -> Result<(),
     let mut claimed: FxHashMap<NodeId, NodeId> = FxHashMap::default();
 
     for node in nodes.values() {
+        // The rule `Document::apply` checks after every transaction (§15 D980),
+        // at the other door: a hand-edited file repeating an item id in one list.
+        node.check_item_ids()
+            .map_err(|e| IoError::Integrity(e.to_string()))?;
         match node.parent() {
             None if node.id() != root => {
                 return Err(IoError::Integrity(format!(

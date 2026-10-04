@@ -39,6 +39,7 @@ pub(crate) fn migrate(mut value: Value) -> Result<Value, IoError> {
             1 => migrate_1_to_2(&mut value),
             2 => migrate_2_to_3(&mut value),
             3 => migrate_3_to_4(&mut value),
+            4 => migrate_4_to_5(&mut value),
             other => return Err(IoError::UnsupportedVersion(other)),
         }
     }
@@ -193,4 +194,43 @@ fn migrate_3_to_4(value: &mut Value) {
         }
     }
     value["schema_version"] = Value::from(4u32);
+}
+
+/// v4 → v5: every item of a node's five item lists gains an id (§15 D980).
+///
+/// `paint.fills`, `paint.strokes`, `effects`, `exports` and `grids` — each item is
+/// given `"id": "0:<index>"`, `ItemId::positional`'s wire form. **Deterministic**,
+/// so a migrated document saves to the same bytes twice (invariant 9), and unique
+/// within the list it numbers, which is the only uniqueness an item id owes. A v4
+/// file holds no instances, so there is no match across nodes for a positional id
+/// to get wrong; the ids a session mints later are never actor 0's in practice and
+/// are reserved past in any case (`reserve_existing_ids`).
+///
+/// An item that somehow already carries an `id` keeps it, and a list that is not
+/// an array, or an item that is not an object, is left for the loader to refuse
+/// with a message — the tolerance `migrate_3_to_4` states for the same reason.
+fn migrate_4_to_5(value: &mut Value) {
+    fn number(list: Option<&mut Value>) {
+        let Some(items) = list.and_then(Value::as_array_mut) else {
+            return;
+        };
+        for (i, item) in items.iter_mut().enumerate() {
+            if let Some(obj) = item.as_object_mut() {
+                obj.entry("id")
+                    .or_insert_with(|| Value::from(format!("0:{i}")));
+            }
+        }
+    }
+    if let Some(nodes) = value.get_mut("nodes").and_then(Value::as_array_mut) {
+        for node in nodes {
+            if let Some(paint) = node.get_mut("paint") {
+                number(paint.get_mut("fills"));
+                number(paint.get_mut("strokes"));
+            }
+            number(node.get_mut("effects"));
+            number(node.get_mut("exports"));
+            number(node.get_mut("grids"));
+        }
+    }
+    value["schema_version"] = Value::from(5u32);
 }

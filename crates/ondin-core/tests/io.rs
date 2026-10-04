@@ -3,12 +3,14 @@
 
 use ondin_core::Brush;
 use ondin_core::io::{self, IoError};
+use ondin_core::item::values;
 use ondin_core::kurbo::{BezPath, Point, RoundedRectRadii, Size, Vec2};
 use ondin_core::peniko::Color;
 use ondin_core::{
     Document, DocumentMeta, Effect, EffectKind, Fill, Filters, GradientBrush, Guide, GuideAxis,
     GuideId, History, IdSource, ImageEntry, ImageFormat, ImageId, ImageSource, NodeId, NodeKind,
     OpError, Operation, Pivot, Shadow, Stroke, StrokeAlign, Transaction, image_brush,
+    keyed_by_position,
 };
 
 /// Build a document exercising every node kind and several fields.
@@ -46,10 +48,10 @@ fn rich_document() -> (Document, NodeId) {
             },
             Operation::SetFills {
                 id: ab,
-                fills: vec![Fill {
+                fills: keyed_by_position([Fill {
                     brush: Brush::Solid(Color::from_rgba8(250, 250, 250, 255)),
                     visible: true,
-                }],
+                }]),
             },
             Operation::CreateNode {
                 id: group,
@@ -137,14 +139,14 @@ fn rich_document() -> (Document, NodeId) {
         Transaction(vec![
             Operation::SetFills {
                 id: r,
-                fills: vec![Fill {
+                fills: keyed_by_position([Fill {
                     brush: Brush::Solid(Color::from_rgba8(200, 30, 30, 255)),
                     visible: true,
-                }],
+                }]),
             },
             Operation::SetStrokes {
                 id: r,
-                strokes: vec![Stroke {
+                strokes: keyed_by_position([Stroke {
                     brush: Brush::Solid(Color::from_rgba8(20, 20, 20, 255)),
                     width: 2.5,
                     join: ondin_core::kurbo::Join::Bevel,
@@ -156,7 +158,7 @@ fn rich_document() -> (Document, NodeId) {
                     dash_fit: false,
                     align: StrokeAlign::Center,
                     visible: true,
-                }],
+                }]),
             },
             Operation::SetOpacity {
                 id: r,
@@ -347,7 +349,7 @@ fn a_v1_file_carrying_all_three_old_shapes_migrates_through_every_step() {
         "v3→v4: the kind carries a size and nothing else"
     );
     assert_eq!(
-        frame.paint().fills,
+        values(&frame.paint().fills),
         vec![Fill {
             brush: Brush::Solid(Color::from_rgba8(250, 250, 250, 255)),
             visible: true,
@@ -454,7 +456,7 @@ fn migration_moves_a_v3_frame_background_into_its_fill_list() {
         "the kind carries a size and nothing else"
     );
     assert_eq!(
-        frame.paint().fills,
+        values(&frame.paint().fills),
         vec![Fill {
             brush: Brush::Solid(Color::from_rgba8(250, 250, 250, 255)),
             visible: true,
@@ -1819,10 +1821,10 @@ fn a_dangling_image_reference_loads_rather_than_failing() {
     );
     doc.apply(&Transaction(vec![Operation::SetFills {
         id: rect,
-        fills: vec![Fill {
+        fills: keyed_by_position([Fill {
             brush: image_brush(ImageId("sha256:gone".into())),
             visible: true,
-        }],
+        }]),
     }]))
     .unwrap();
 
@@ -1893,14 +1895,14 @@ fn export_settings_round_trip_and_cost_nothing_when_empty() {
     let inverse = doc
         .apply(&Transaction(vec![Operation::SetExports {
             id: rect,
-            exports: specs.clone(),
+            exports: keyed_by_position(specs.clone()),
         }]))
         .unwrap()
         .inverse;
 
     let loaded = io::load(&io::save(&doc).unwrap()).expect("a file with exports must load");
     assert_eq!(doc, loaded);
-    assert_eq!(loaded.get(rect).unwrap().exports(), specs.as_slice());
+    assert_eq!(values(loaded.get(rect).unwrap().exports()), specs);
 
     doc.apply(&inverse).unwrap();
     assert!(
@@ -1952,14 +1954,14 @@ fn layout_grids_round_trip_and_cost_nothing_when_empty() {
     let inverse = doc
         .apply(&Transaction(vec![Operation::SetLayoutGrids {
             id: frame,
-            grids: grids.clone(),
+            grids: keyed_by_position(grids.clone()),
         }]))
         .unwrap()
         .inverse;
 
     let loaded = io::load(&io::save(&doc).unwrap()).expect("a file with grids must load");
     assert_eq!(doc, loaded);
-    assert_eq!(loaded.get(frame).unwrap().grids(), grids.as_slice());
+    assert_eq!(values(loaded.get(frame).unwrap().grids()), grids);
     // ⚠️ **Named rather than left to `assert_eq!(doc, loaded)`**: the whole
     // document comparing equal proves the *list* survived, and would still pass
     // if `visible` or `align` were dropped on both sides of the trip by a DTO
@@ -2339,7 +2341,7 @@ fn an_effect_stack_round_trips_in_order_and_costs_nothing_when_empty() {
     let inverse = doc
         .apply(&Transaction(vec![Operation::SetEffects {
             id: board,
-            effects: stack.clone(),
+            effects: keyed_by_position(stack.clone()),
         }]))
         .unwrap()
         .inverse;
@@ -2347,8 +2349,8 @@ fn an_effect_stack_round_trips_in_order_and_costs_nothing_when_empty() {
     let loaded = io::load(&io::save(&doc).unwrap()).expect("a file with effects must load");
     assert_eq!(doc, loaded);
     assert_eq!(
-        loaded.get(board).unwrap().effects(),
-        stack.as_slice(),
+        values(loaded.get(board).unwrap().effects()),
+        stack,
         "three entries, two of one kind, in the order they were written"
     );
 
@@ -2911,7 +2913,7 @@ fn no_operation_may_write_a_number_that_is_not_finite() {
             "SetFills (gradient stop offset)",
             Operation::SetFills {
                 id: rect,
-                fills: vec![Fill {
+                fills: keyed_by_position([Fill {
                     brush: Brush::Gradient(GradientBrush {
                         gradient: peniko::Gradient::new_linear((0.0, 0.0), (1.0, 0.0)).with_stops(
                             [
@@ -2933,32 +2935,32 @@ fn no_operation_may_write_a_number_that_is_not_finite() {
                         opacity: 1.0,
                     }),
                     visible: true,
-                }],
+                }]),
             },
         ),
         (
             "SetFills (gradient transform)",
             Operation::SetFills {
                 id: rect,
-                fills: vec![Fill {
+                fills: keyed_by_position([Fill {
                     brush: Brush::Gradient(GradientBrush {
                         gradient: peniko::Gradient::new_linear((0.0, 0.0), (1.0, 0.0)),
                         transform: ondin_core::kurbo::Affine::new([f64::INFINITY; 6]),
                         opacity: 1.0,
                     }),
                     visible: true,
-                }],
+                }]),
             },
         ),
         (
             "SetStrokes (width)",
             Operation::SetStrokes {
                 id: rect,
-                strokes: vec![Stroke {
+                strokes: keyed_by_position([Stroke {
                     brush: Brush::Solid(peniko::color::palette::css::BLACK),
                     width: f64::NAN,
                     ..Default::default()
-                }],
+                }]),
             },
         ),
         (
@@ -2968,12 +2970,12 @@ fn no_operation_may_write_a_number_that_is_not_finite() {
             "SetStrokes (dashes)",
             Operation::SetStrokes {
                 id: rect,
-                strokes: vec![Stroke {
+                strokes: keyed_by_position([Stroke {
                     brush: Brush::Solid(peniko::color::palette::css::BLACK),
                     width: 1.0,
                     dashes: vec![f64::INFINITY, 5.0],
                     ..Default::default()
-                }],
+                }]),
             },
         ),
         // ⚠️ **The pivot half, added 2026-09-09 (§15 D639), and it is a
@@ -3008,19 +3010,19 @@ fn no_operation_may_write_a_number_that_is_not_finite() {
             "SetEffects (blur radius)",
             Operation::SetEffects {
                 id: rect,
-                effects: vec![Effect::new(EffectKind::LayerBlur {
+                effects: keyed_by_position([Effect::new(EffectKind::LayerBlur {
                     radius: f64::INFINITY,
-                })],
+                })]),
             },
         ),
         (
             "SetEffects (shadow offset)",
             Operation::SetEffects {
                 id: rect,
-                effects: vec![Effect::new(EffectKind::DropShadow(Shadow {
+                effects: keyed_by_position([Effect::new(EffectKind::DropShadow(Shadow {
                     offset: Vec2::new(f64::NAN, 0.0),
                     ..Shadow::default()
-                }))],
+                }))]),
             },
         ),
         (
@@ -3030,20 +3032,20 @@ fn no_operation_may_write_a_number_that_is_not_finite() {
             "SetEffects (shadow colour)",
             Operation::SetEffects {
                 id: rect,
-                effects: vec![Effect::new(EffectKind::DropShadow(Shadow {
+                effects: keyed_by_position([Effect::new(EffectKind::DropShadow(Shadow {
                     color: Color::new([f32::NAN, 0.0, 0.0, 1.0]),
                     ..Shadow::default()
-                }))],
+                }))]),
             },
         ),
         (
             "SetEffects (filter factor)",
             Operation::SetEffects {
                 id: rect,
-                effects: vec![Effect::new(EffectKind::Filters(Filters {
+                effects: keyed_by_position([Effect::new(EffectKind::Filters(Filters {
                     saturation: f64::NAN,
                     ..Filters::default()
-                }))],
+                }))]),
             },
         ),
     ];
@@ -3092,7 +3094,7 @@ fn no_operation_may_write_a_number_that_is_not_finite() {
         },
         Operation::SetEffects {
             id: rect,
-            effects: vec![Effect::new(EffectKind::LayerBlur { radius: 8.0 })],
+            effects: keyed_by_position([Effect::new(EffectKind::LayerBlur { radius: 8.0 })]),
         },
     ]))
     .expect("finite values are ordinary");
@@ -3379,10 +3381,10 @@ fn a_clipboard_payload_carries_the_image_table_entries_it_keys_into() {
     };
     doc.apply(&Transaction(vec![Operation::SetFills {
         id: painted,
-        fills: vec![Fill {
+        fills: keyed_by_position([Fill {
             brush: image_brush(id.clone()),
             visible: true,
-        }],
+        }]),
     }]))
     .expect("an image fill is accepted");
     let captured = vec![doc.capture_subtree(frame).unwrap()];
@@ -3780,10 +3782,10 @@ fn a_hostile_clipboard_payload_is_refused_and_leaves_the_document_openable() {
         brush.opacity = 0.375;
         doc.apply(&Transaction(vec![Operation::SetFills {
             id: kid,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Gradient(brush),
                 visible: true,
-            }],
+            }]),
         }]))
         .expect("a gradient with an in-range opacity is accepted");
         let captured = vec![doc.capture_subtree(kid).unwrap()];

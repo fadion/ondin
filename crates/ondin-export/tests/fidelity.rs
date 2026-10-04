@@ -20,7 +20,7 @@ use ondin_core::peniko::{Color, ColorStop, Gradient, GradientKind, SweepGradient
 use ondin_core::{
     Brush, Effect, EffectKind, Fill, GeometryPatch, GradientBrush, ImageBrush, ImageEntry,
     ImageFormat, ImageId, ImageRef, ImageSource, NodeKind, Operation, Resolved, Shadow,
-    Transaction,
+    Transaction, keyed_by_position,
 };
 use ondin_export::svg::{svg_of, svg_of_reported};
 
@@ -80,7 +80,7 @@ fn everything_lossy() -> common::Fixture {
             // A sweep and a picture on one node: two features, two lists.
             Operation::SetFills {
                 id: f.rect,
-                fills: vec![
+                fills: keyed_by_position([
                     Fill {
                         brush: sweep(),
                         visible: true,
@@ -92,17 +92,17 @@ fn everything_lossy() -> common::Fixture {
                         }),
                         visible: true,
                     },
-                ],
+                ]),
             },
             // A spread, which is what `feMorphology` is for.
             Operation::SetEffects {
                 id: f.rect,
-                effects: vec![Effect::new(EffectKind::DropShadow(Shadow {
+                effects: keyed_by_position([Effect::new(EffectKind::DropShadow(Shadow {
                     offset: Vec2::new(2.0, 2.0),
                     blur: 3.0,
                     spread: 4.0,
                     color: Color::BLACK,
-                }))],
+                }))]),
             },
             // Flipped type on a rail: one approximation and one round-trip loss.
             // **Two patches and not one**, which is the model's own separation —
@@ -130,10 +130,10 @@ fn everything_lossy() -> common::Fixture {
             },
             Operation::SetFills {
                 id: hidden,
-                fills: vec![Fill {
+                fills: keyed_by_position([Fill {
                     brush: sweep(),
                     visible: true,
-                }],
+                }]),
             },
             Operation::SetVisible {
                 id: hidden,
@@ -356,12 +356,12 @@ fn a_shadow_with_no_spread_is_not_reported() {
     f.doc
         .apply(&Transaction(vec![Operation::SetEffects {
             id: f.rect,
-            effects: vec![Effect::new(EffectKind::DropShadow(Shadow {
+            effects: keyed_by_position([Effect::new(EffectKind::DropShadow(Shadow {
                 offset: Vec2::new(2.0, 2.0),
                 blur: 3.0,
                 spread: 0.0,
                 color: Color::BLACK,
-            }))],
+            }))]),
         }]))
         .expect("a plain drop shadow");
     f.res = Resolved::rebuild(&f.doc);
@@ -385,7 +385,7 @@ fn an_invisible_shadow_is_not_reported() {
     f.doc
         .apply(&Transaction(vec![Operation::SetEffects {
             id: f.rect,
-            effects: vec![Effect {
+            effects: keyed_by_position([Effect {
                 kind: EffectKind::DropShadow(Shadow {
                     offset: Vec2::new(2.0, 2.0),
                     blur: 3.0,
@@ -393,7 +393,7 @@ fn an_invisible_shadow_is_not_reported() {
                     color: Color::BLACK,
                 }),
                 visible: false,
-            }],
+            }]),
         }]))
         .expect("a switched-off drop shadow");
     f.res = Resolved::rebuild(&f.doc);

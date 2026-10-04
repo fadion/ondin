@@ -10,6 +10,7 @@ use crate::guide::{Guide, GuideId};
 use crate::id::{IdSource, NodeId};
 use crate::image::{ImageEntry, ImageId};
 use crate::io::{CURRENT_SCHEMA_VERSION, MAX_TREE_DEPTH};
+use crate::item::Keyed;
 use crate::meta::DocumentMeta;
 use crate::node::{
     BlockStyle, CharSpans, Fill, FillRule, MaskMode, Node, NodeKind, Paint, ParaSpans,
@@ -423,6 +424,17 @@ impl Document {
             working.check_guide_owner(guide.owner)?;
         }
 
+        // Item ids unique within each of a node's five lists (§15 D980), over the
+        // nodes this transaction wrote: a duplicate would match two of an
+        // instance's items to one of its main's. After the last op, for the guide
+        // owners' reason above — and `dirty` covers every node an op wrote,
+        // including each node an `InsertSubtree` brought in.
+        for id in &dirty.0 {
+            if let Some(n) = working.nodes.get(id) {
+                n.check_item_ids()?;
+            }
+        }
+
         // All ops succeeded — commit the working copy.
         *self = working;
 
@@ -741,7 +753,7 @@ impl Document {
             if !n.kind.geometry_is_finite()
                 || !affine_is_finite(n.transform)
                 || n.pivot.is_some_and(|p| !p.is_finite())
-                || !n.effects.iter().all(effect_is_finite)
+                || !n.effects.iter().all(|e| effect_is_finite(e))
                 || !n.paint.fills.iter().all(|f| brush_is_finite(&f.brush))
                 || !n.paint.strokes.iter().all(|s| {
                     brush_is_finite(&s.brush)
@@ -1213,7 +1225,7 @@ impl Document {
     fn op_set_fills(
         &mut self,
         id: NodeId,
-        fills: &[Fill],
+        fills: &[Keyed<Fill>],
         dirty: &mut DirtySet,
     ) -> Result<Operation, OpError> {
         // Invariant 8's paint half (§15 D451). `OpError::NonFinite` used to cover
@@ -1235,7 +1247,7 @@ impl Document {
     fn op_set_strokes(
         &mut self,
         id: NodeId,
-        strokes: &[Stroke],
+        strokes: &[Keyed<Stroke>],
         dirty: &mut DirtySet,
     ) -> Result<Operation, OpError> {
         // The same refusal `op_set_fills` makes, and for the same reason (§15
@@ -1277,13 +1289,13 @@ impl Document {
     fn op_set_effects(
         &mut self,
         id: NodeId,
-        effects: &[Effect],
+        effects: &[Keyed<Effect>],
         dirty: &mut DirtySet,
     ) -> Result<Operation, OpError> {
         // Invariant 8's third family (§15 D641, `[S10.1-L1-05]`). Checked before
         // the node is looked up so the *reported* error is the interesting one,
         // the same order `op_insert_subtree` uses.
-        if !effects.iter().all(effect_is_finite) {
+        if !effects.iter().all(|e| effect_is_finite(e)) {
             return Err(OpError::NonFinite);
         }
         let node = self.nodes.get_mut(&id).ok_or(OpError::NoSuchNode(id))?;
@@ -1310,7 +1322,7 @@ impl Document {
     fn op_set_exports(
         &mut self,
         id: NodeId,
-        exports: &[ExportSpec],
+        exports: &[Keyed<ExportSpec>],
         dirty: &mut DirtySet,
     ) -> Result<Operation, OpError> {
         // Invariant 8's export half (§15 D492, `[S8.2-L1-03]`). This was six lines
@@ -1326,7 +1338,7 @@ impl Document {
         // entry points already refuse exactly this set and say why. So the model
         // was the only door without the guard, which is where a hand-edited file
         // or another tool comes in.
-        if !exports.iter().all(export_spec_is_usable) {
+        if !exports.iter().all(|k| export_spec_is_usable(k)) {
             return Err(OpError::BadExportSpec);
         }
         let node = self.nodes.get_mut(&id).ok_or(OpError::NoSuchNode(id))?;
@@ -1346,7 +1358,7 @@ impl Document {
     fn op_set_grids(
         &mut self,
         id: NodeId,
-        grids: &[crate::layout::LayoutGrid],
+        grids: &[Keyed<crate::layout::LayoutGrid>],
         dirty: &mut DirtySet,
     ) -> Result<Operation, OpError> {
         let node = self.nodes.get_mut(&id).ok_or(OpError::NoSuchNode(id))?;
@@ -1885,11 +1897,28 @@ pub fn reserve_existing_ids(doc: &Document, ids: &mut IdSource) {
     // Guides are minted from the same stream (`crate::guide::GuideId`), so they
     // have to be reserved past as well — otherwise a file whose highest id
     // belongs to a guide hands the next `AddGuide` a duplicate.
+    //
+    // Item ids too (§15 D980): they come from the same stream (`IdSource::mint_item`),
+    // and the positional ids a migration writes are actor 0 — improbable for a
+    // live session, not impossible, `session::random_actor` being an unguarded
+    // hash. A session that drew 0 would otherwise mint `0:1` onto a list already
+    // holding the migrated `0:1`.
+    let items = doc.nodes.values().flat_map(|n| {
+        let p = &n.paint;
+        p.fills
+            .iter()
+            .map(|k| k.id.0)
+            .chain(p.strokes.iter().map(|k| k.id.0))
+            .chain(n.effects.iter().map(|k| k.id.0))
+            .chain(n.exports.iter().map(|k| k.id.0))
+            .chain(n.grids.iter().map(|k| k.id.0))
+    });
     let highest = doc
         .nodes
         .keys()
         .copied()
         .chain(doc.guides.iter().map(|g| g.id.0))
+        .chain(items)
         .filter(|id| id.actor == actor)
         .map(|id| id.seq)
         .max();
@@ -2480,9 +2509,9 @@ mod tests {
         let mut ids = IdSource::new(0xEF);
         let g = ids.mint();
         let mut n = group(g, None, vec![]);
-        n.effects = vec![crate::Effect::new(crate::EffectKind::LayerBlur {
+        n.effects = crate::keyed_by_position([crate::Effect::new(crate::EffectKind::LayerBlur {
             radius: f64::INFINITY,
-        })];
+        })]);
         assert!(matches!(
             insert(&mut doc, vec![n], ab),
             Err(OpError::NonFinite)
@@ -2519,40 +2548,40 @@ mod tests {
             (
                 "fill",
                 Paint {
-                    fills: vec![Fill {
+                    fills: crate::keyed_by_position([Fill {
                         brush: crate::Brush::Solid(bad),
                         visible: true,
-                    }],
+                    }]),
                     ..Paint::default()
                 },
             ),
             (
                 "stroke brush",
                 Paint {
-                    strokes: vec![Stroke {
+                    strokes: crate::keyed_by_position([Stroke {
                         brush: crate::Brush::Solid(bad),
                         ..Stroke::default()
-                    }],
+                    }]),
                     ..Paint::default()
                 },
             ),
             (
                 "stroke width",
                 Paint {
-                    strokes: vec![Stroke {
+                    strokes: crate::keyed_by_position([Stroke {
                         width: f64::INFINITY,
                         ..Stroke::default()
-                    }],
+                    }]),
                     ..Paint::default()
                 },
             ),
             (
                 "dash length",
                 Paint {
-                    strokes: vec![Stroke {
+                    strokes: crate::keyed_by_position([Stroke {
                         dashes: vec![4.0, f64::NAN],
                         ..Stroke::default()
-                    }],
+                    }]),
                     ..Paint::default()
                 },
             ),
@@ -2575,7 +2604,7 @@ mod tests {
                 // half, which is the clause this case exists to pin.
                 "gradient opacity",
                 Paint {
-                    fills: vec![Fill {
+                    fills: crate::keyed_by_position([Fill {
                         brush: crate::Brush::Gradient({
                             let mut g =
                                 crate::image::GradientBrush::from(peniko::Gradient::default());
@@ -2583,7 +2612,7 @@ mod tests {
                             g
                         }),
                         visible: true,
-                    }],
+                    }]),
                     ..Paint::default()
                 },
             ),

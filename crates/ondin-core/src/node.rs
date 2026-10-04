@@ -7,6 +7,7 @@
 
 use crate::id::NodeId;
 use crate::image::Brush;
+use crate::item::Keyed;
 use kurbo::{Affine, BezPath, Point, RoundedRectRadii, Size, Vec2};
 use serde::{Deserialize, Serialize};
 
@@ -126,7 +127,7 @@ pub struct Node {
     /// `Operation::SetEffects` answers `true` to `changes_ink`, and an effect
     /// that reaches outside its layer widens the cached bounds
     /// ([`crate::effect::stack_escape`]).
-    pub(crate) effects: Vec<crate::effect::Effect>,
+    pub(crate) effects: Vec<Keyed<crate::effect::Effect>>,
     /// Where this node's transforms turn and mirror about, or `None` for the
     /// centre of its own box.
     ///
@@ -142,7 +143,7 @@ pub struct Node {
     /// walk, and read only by the export path. Nothing here affects what is
     /// drawn, which is why `Operation::SetExports` answers `false` to
     /// `changes_ink`.
-    pub(crate) exports: Vec<crate::export::ExportSpec>,
+    pub(crate) exports: Vec<Keyed<crate::export::ExportSpec>>,
     /// The columns and rows drawn over this layer (`crate::layout`).
     ///
     /// **Empty on every node until someone adds one**, on exactly [`Self::exports`]'
@@ -157,7 +158,7 @@ pub struct Node {
     /// offer is that a grid is measured against an **authored** size —
     /// `NodeKind::Artboard` has one, and a group's box is derived from its
     /// contents, so a grid on a group would move whenever a child did.
-    pub(crate) grids: Vec<crate::layout::LayoutGrid>,
+    pub(crate) grids: Vec<Keyed<crate::layout::LayoutGrid>>,
     /// This layer's CSS insets and auto margins inside its frame (`crate::container`,
     /// §15 D871) — unset on every layer until somebody pins one.
     ///
@@ -180,6 +181,21 @@ pub struct Node {
 impl Node {
     pub fn id(&self) -> NodeId {
         self.id
+    }
+    /// Refuse a node whose five item lists repeat an item id within one list
+    /// (§15 D980) — `Document::apply`'s post-condition and the loader's check.
+    /// Across lists and across nodes an id may repeat: duplication copies them.
+    pub(crate) fn check_item_ids(&self) -> Result<(), crate::op::OpError> {
+        use crate::item::first_duplicate;
+        let dup = first_duplicate(&self.paint.fills)
+            .or_else(|| first_duplicate(&self.paint.strokes))
+            .or_else(|| first_duplicate(&self.effects))
+            .or_else(|| first_duplicate(&self.exports))
+            .or_else(|| first_duplicate(&self.grids));
+        match dup {
+            Some(item) => Err(crate::op::OpError::DuplicateItemId(self.id, item)),
+            None => Ok(()),
+        }
     }
     pub fn parent(&self) -> Option<NodeId> {
         self.parent
@@ -256,7 +272,7 @@ impl Node {
         &self.paint
     }
     /// The effect stack, in compositing order.
-    pub fn effects(&self) -> &[crate::effect::Effect] {
+    pub fn effects(&self) -> &[Keyed<crate::effect::Effect>] {
         &self.effects
     }
     /// Where this node's transforms pivot, or `None` if it still sits on the
@@ -266,12 +282,12 @@ impl Node {
         self.pivot
     }
     /// The export specs this layer carries, in the order the panel shows them.
-    pub fn exports(&self) -> &[crate::export::ExportSpec] {
+    pub fn exports(&self) -> &[Keyed<crate::export::ExportSpec>] {
         &self.exports
     }
     /// The layout grids drawn over this layer, in the order the panel shows
     /// them (`crate::layout`).
-    pub fn grids(&self) -> &[crate::layout::LayoutGrid] {
+    pub fn grids(&self) -> &[Keyed<crate::layout::LayoutGrid>] {
         &self.grids
     }
     /// This layer's insets inside its frame (`crate::container`) — the specified
@@ -992,8 +1008,8 @@ impl NodeKind {
 /// second stroke widened the cached world bounds and painted nothing. See §15 D56.)
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Paint {
-    pub fills: Vec<Fill>,
-    pub strokes: Vec<Stroke>,
+    pub fills: Vec<Keyed<Fill>>,
+    pub strokes: Vec<Keyed<Stroke>>,
 }
 
 impl Paint {

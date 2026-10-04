@@ -24,7 +24,9 @@
 use ondin_core::Brush;
 use ondin_core::kurbo::{Affine, Rect, RoundedRectRadii, Size};
 use ondin_core::peniko::Color;
-use ondin_core::{Document, Fill, IdSource, NodeKind, Operation, Resolved, Transaction};
+use ondin_core::{
+    Document, Fill, IdSource, NodeKind, Operation, Resolved, Transaction, keyed_by_position,
+};
 use ondin_render::{ImageStore, VelloCpuRenderer, Viewport};
 
 const GREY: Color = Color::from_rgb8(102, 102, 102);
@@ -53,10 +55,10 @@ fn abutting_pair() -> (Document, Resolved) {
         },
         Operation::SetFills {
             id: ab,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::WHITE),
                 visible: true,
-            }],
+            }]),
         },
         Operation::CreateNode {
             id: top,
@@ -85,10 +87,10 @@ fn abutting_pair() -> (Document, Resolved) {
     for id in [top, bot] {
         d.apply(&Transaction(vec![Operation::SetFills {
             id,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(GREY),
                 visible: true,
-            }],
+            }]),
         }]))
         .unwrap();
     }
@@ -174,10 +176,10 @@ fn a_sub_pixel_shape_survives_snapping() {
     .unwrap();
     d.apply(&Transaction(vec![Operation::SetFills {
         id: bar,
-        fills: vec![Fill {
+        fills: keyed_by_position([Fill {
             brush: Brush::Solid(Color::BLACK),
             visible: true,
-        }],
+        }]),
     }]))
     .unwrap();
     let res = Resolved::rebuild(&d);

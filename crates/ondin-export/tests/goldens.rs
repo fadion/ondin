@@ -42,7 +42,7 @@ use ondin_core::kurbo::{Affine, BezPath, Cap, Join, Point, RoundedRectRadii, Siz
 use ondin_core::peniko::{Brush, Color, Gradient};
 use ondin_core::{
     BoolOp, Document, Fill, IdSource, NodeKind, Operation, Resolved, Stroke, StrokeAlign,
-    TextSizing, TextStyle, Transaction,
+    TextSizing, TextStyle, Transaction, keyed_by_position,
 };
 use ondin_export::snapshot::snapshot;
 use ondin_export::svg::svg;
@@ -205,10 +205,10 @@ fn golden_document() -> (Document, Resolved) {
         },
         Operation::SetFills {
             id: artboard,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::from_rgba8(250, 250, 252, 255)),
                 visible: true,
-            }],
+            }]),
         },
         Operation::CreateNode {
             id: rect,
@@ -363,14 +363,14 @@ fn golden_document() -> (Document, Resolved) {
         // A solid fill and a dashed, round-joined stroke.
         Operation::SetFills {
             id: rect,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::from_rgba8(60, 120, 220, 255)),
                 visible: true,
-            }],
+            }]),
         },
         Operation::SetStrokes {
             id: rect,
-            strokes: vec![Stroke {
+            strokes: keyed_by_position([Stroke {
                 brush: Brush::Solid(Color::from_rgba8(20, 30, 60, 255)),
                 width: 2.5,
                 join: Join::Round,
@@ -382,12 +382,12 @@ fn golden_document() -> (Document, Resolved) {
                 dash_fit: false,
                 align: StrokeAlign::Center,
                 visible: true,
-            }],
+            }]),
         },
         // A gradient, so the `<defs>` block and the stop list are covered.
         Operation::SetFills {
             id: ellipse,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Gradient(
                     Gradient::new_linear(Point::new(0.0, 0.0), Point::new(70.0, 45.0))
                         .with_stops([
@@ -398,21 +398,21 @@ fn golden_document() -> (Document, Resolved) {
                         .into(),
                 ),
                 visible: true,
-            }],
+            }]),
         },
         Operation::SetFills {
             id: polygon,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::from_rgba8(30, 160, 110, 255)),
                 visible: true,
-            }],
+            }]),
         },
         Operation::SetFills {
             id: star,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::from_rgba8(220, 60, 90, 255)),
                 visible: true,
-            }],
+            }]),
         },
         // Centred, because `geometry::stroke_align_applies` is false for a `Line`
         // — it has no interior, so "outside" is not a side. The outside stroke
@@ -420,7 +420,7 @@ fn golden_document() -> (Document, Resolved) {
         // was the first draft and the golden showed it doing nothing.
         Operation::SetStrokes {
             id: line,
-            strokes: vec![Stroke {
+            strokes: keyed_by_position([Stroke {
                 brush: Brush::Solid(Color::from_rgba8(90, 90, 100, 255)),
                 width: 3.0,
                 join: Join::Miter,
@@ -432,13 +432,13 @@ fn golden_document() -> (Document, Resolved) {
                 dash_fit: false,
                 align: StrokeAlign::Center,
                 visible: true,
-            }],
+            }]),
         },
         // An *outside* stroke on a closed shape — not a `stroke` attribute but a
         // `<clipPath>` plus a doubled width (§7.1, §15 D97).
         Operation::SetStrokes {
             id: polygon,
-            strokes: vec![Stroke {
+            strokes: keyed_by_position([Stroke {
                 brush: Brush::Solid(Color::from_rgba8(10, 70, 50, 255)),
                 width: 3.0,
                 join: Join::Miter,
@@ -450,28 +450,28 @@ fn golden_document() -> (Document, Resolved) {
                 dash_fit: false,
                 align: StrokeAlign::Outside,
                 visible: true,
-            }],
+            }]),
         },
         Operation::SetFills {
             id: path,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::from_rgba8(140, 100, 220, 255)),
                 visible: true,
-            }],
+            }]),
         },
         Operation::SetFills {
             id: nested,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::from_rgba8(40, 40, 45, 255)),
                 visible: true,
-            }],
+            }]),
         },
         Operation::SetFills {
             id: operand_a,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::from_rgba8(15, 130, 190, 255)),
                 visible: true,
-            }],
+            }]),
         },
         // **On the boolean itself, not on its operands.** The container carries
         // the paint; an operand's fill is not inherited by the result. The first
@@ -480,10 +480,10 @@ fn golden_document() -> (Document, Resolved) {
         // a golden of the wrong document.
         Operation::SetFills {
             id: boolean,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::from_rgba8(15, 130, 190, 255)),
                 visible: true,
-            }],
+            }]),
         },
         Operation::SetOpacity {
             id: group,
@@ -502,7 +502,7 @@ fn golden_document() -> (Document, Resolved) {
         // default did.
         Operation::SetEffects {
             id: rect,
-            effects: vec![
+            effects: keyed_by_position([
                 ondin_core::Effect::new(ondin_core::EffectKind::DropShadow(ondin_core::Shadow {
                     offset: ondin_core::kurbo::Vec2::new(3.0, 4.0),
                     blur: 6.0,
@@ -522,7 +522,7 @@ fn golden_document() -> (Document, Resolved) {
                     saturation: 1.2,
                     hue: 15.0,
                 })),
-            ],
+            ]),
         },
         // **A pivot, on a different node** — the other field with no occurrence
         // in either golden (§15 D658). `Normalized` rather than `Local`, because

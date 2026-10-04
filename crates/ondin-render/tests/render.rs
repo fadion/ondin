@@ -10,7 +10,7 @@ use ondin_core::kurbo::{Affine, Rect, RoundedRectRadii, Size};
 use ondin_core::peniko::Color;
 use ondin_core::{
     BoolOp, Document, Fill, IdSource, MaskMode, NodeId, NodeKind, Operation, Resolved, StrokeAlign,
-    Transaction,
+    Transaction, keyed_by_position,
 };
 use ondin_render::scene::{self, ClipRule, ScenePainter, StrokePaint, TextRun};
 use ondin_render::{RenderOverrides, Viewport};
@@ -129,17 +129,17 @@ fn two_rect_doc() -> (Document, Resolved, NodeId, NodeId) {
     doc.apply(&Transaction(vec![
         Operation::SetFills {
             id: near,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::from_rgba8(10, 20, 30, 255)),
                 visible: true,
-            }],
+            }]),
         },
         Operation::SetFills {
             id: far,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::from_rgba8(10, 20, 30, 255)),
                 visible: true,
-            }],
+            }]),
         },
     ]))
     .unwrap();
@@ -347,10 +347,10 @@ fn gradient_fills_reach_the_backend_intact() {
     ]);
     doc.apply(&Transaction(vec![Operation::SetFills {
         id: near,
-        fills: vec![Fill {
+        fills: keyed_by_position([Fill {
             brush: Brush::Gradient(gradient.into()),
             visible: true,
-        }],
+        }]),
     }]))
     .unwrap();
     let res = Resolved::rebuild(&doc);
@@ -448,19 +448,19 @@ fn an_image_is_framed_by_its_shape_and_its_stroke_agrees() {
         },
         Operation::SetFills {
             id: near,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: image_brush(id.clone()),
                 visible: true,
-            }],
+            }]),
         },
         Operation::SetStrokes {
             id: near,
-            strokes: vec![ondin_core::Stroke {
+            strokes: keyed_by_position([ondin_core::Stroke {
                 brush: image_brush(id.clone()),
                 width: 10.0,
                 align: ondin_core::StrokeAlign::Center,
                 ..Default::default()
-            }],
+            }]),
         },
     ]))
     .unwrap();
@@ -598,7 +598,7 @@ fn bare_stroked_rect(align: StrokeAlign, closed: bool) -> (Document, Resolved) {
     .unwrap();
     doc.apply(&Transaction(vec![Operation::SetStrokes {
         id: shape,
-        strokes: vec![ondin_core::Stroke {
+        strokes: keyed_by_position([ondin_core::Stroke {
             brush: Brush::Solid(Color::BLACK),
             width: 4.0,
             join: ondin_core::kurbo::Join::Miter,
@@ -610,7 +610,7 @@ fn bare_stroked_rect(align: StrokeAlign, closed: bool) -> (Document, Resolved) {
             dash_fit: false,
             align,
             visible: true,
-        }],
+        }]),
     }]))
     .unwrap();
     let res = Resolved::rebuild(&doc);
@@ -778,8 +778,14 @@ fn painted_rect(fills: Vec<Fill>, strokes: Vec<ondin_core::Stroke>) -> (Document
     }]))
     .unwrap();
     doc.apply(&Transaction(vec![
-        Operation::SetFills { id: shape, fills },
-        Operation::SetStrokes { id: shape, strokes },
+        Operation::SetFills {
+            id: shape,
+            fills: keyed_by_position(fills),
+        },
+        Operation::SetStrokes {
+            id: shape,
+            strokes: keyed_by_position(strokes),
+        },
     ]))
     .unwrap();
     let res = Resolved::rebuild(&doc);
@@ -855,11 +861,11 @@ fn a_line_stacks_its_strokes_and_ignores_its_fills() {
     doc.apply(&Transaction(vec![
         Operation::SetFills {
             id: line,
-            fills: vec![fill(9, true)],
+            fills: keyed_by_position([fill(9, true)]),
         },
         Operation::SetStrokes {
             id: line,
-            strokes: vec![stroke(1, true), stroke(2, true)],
+            strokes: keyed_by_position([stroke(1, true), stroke(2, true)]),
         },
     ]))
     .unwrap();
@@ -1006,8 +1012,14 @@ fn painted_text(
     }]))
     .unwrap();
     doc.apply(&Transaction(vec![
-        Operation::SetFills { id: t, fills },
-        Operation::SetStrokes { id: t, strokes },
+        Operation::SetFills {
+            id: t,
+            fills: keyed_by_position(fills),
+        },
+        Operation::SetStrokes {
+            id: t,
+            strokes: keyed_by_position(strokes),
+        },
     ]))
     .unwrap();
     let res = Resolved::rebuild(&doc);
@@ -1154,10 +1166,10 @@ fn stroked_frame(strokes: Vec<ondin_core::Stroke>, opacity: f32) -> (Document, R
         },
         Operation::SetFills {
             id: ab,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::WHITE),
                 visible: true,
-            }],
+            }]),
         },
         Operation::CreateNode {
             id: child,
@@ -1175,9 +1187,12 @@ fn stroked_frame(strokes: Vec<ondin_core::Stroke>, opacity: f32) -> (Document, R
     doc.apply(&Transaction(vec![
         Operation::SetFills {
             id: child,
-            fills: vec![fill(7, true)],
+            fills: keyed_by_position([fill(7, true)]),
         },
-        Operation::SetStrokes { id: ab, strokes },
+        Operation::SetStrokes {
+            id: ab,
+            strokes: keyed_by_position(strokes),
+        },
         Operation::SetOpacity { id: ab, opacity },
     ]))
     .unwrap();
@@ -1373,7 +1388,7 @@ fn a_frames_fill_stack_paints_in_order_behind_its_children() {
     let ab = doc.get(doc.root()).unwrap().children()[0];
     doc.apply(&Transaction(vec![Operation::SetFills {
         id: ab,
-        fills: vec![
+        fills: keyed_by_position([
             Fill {
                 brush: Brush::Solid(ground),
                 visible: true,
@@ -1386,7 +1401,7 @@ fn a_frames_fill_stack_paints_in_order_behind_its_children() {
                 brush: Brush::Solid(over),
                 visible: true,
             },
-        ],
+        ]),
     }]))
     .unwrap();
     let res = Resolved::rebuild(&doc);
@@ -1572,10 +1587,10 @@ fn a_second_mask_ends_the_first_ones_run_instead_of_nesting() {
     // the fixture rather than the run rule.
     doc.apply(&Transaction(vec![Operation::SetFills {
         id: top,
-        fills: vec![Fill {
+        fills: keyed_by_position([Fill {
             brush: Brush::Solid(Color::from_rgba8(10, 20, 30, 255)),
             visible: true,
-        }],
+        }]),
     }]))
     .unwrap();
     assert_eq!(
@@ -1778,7 +1793,7 @@ fn decorated_text(
     .unwrap();
     doc.apply(&Transaction(vec![Operation::SetFills {
         id: t,
-        fills: vec![fill(1, true)],
+        fills: keyed_by_position([fill(1, true)]),
     }]))
     .unwrap();
     let res = Resolved::rebuild(&doc);
@@ -1970,17 +1985,17 @@ fn a_group_masked_by_a_group_that_masks_internally_is_not_culled_away() {
             node(inner_big, m, 1, square(400.0)),
             Operation::SetFills {
                 id: outer_big,
-                fills: vec![Fill {
+                fills: keyed_by_position([Fill {
                     brush: Brush::Solid(Color::from_rgba8(220, 30, 40, 255)),
                     visible: true,
-                }],
+                }]),
             },
             Operation::SetFills {
                 id: inner_big,
-                fills: vec![Fill {
+                fills: keyed_by_position([Fill {
                     brush: Brush::Solid(Color::WHITE),
                     visible: true,
-                }],
+                }]),
             },
             Operation::SetMask { id: m, mask: true },
         ]))
@@ -2061,10 +2076,10 @@ fn parked_containers(kind: NodeKind, n: usize) -> (Document, Resolved) {
     let root = ids.mint();
     let mut doc = Document::new(root);
     let solid = || {
-        vec![Fill {
+        keyed_by_position([Fill {
             brush: Brush::Solid(Color::from_rgba8(10, 20, 30, 255)),
             visible: true,
-        }]
+        }])
     };
     let rect = || NodeKind::Rect {
         size: Size::new(20.0, 20.0),

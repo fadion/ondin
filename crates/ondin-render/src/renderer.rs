@@ -46,7 +46,7 @@ pub struct NodeOverride {
     /// shadow's blur previews through the same door as reordering two of them,
     /// and there is one description of the edit rather than one per field
     /// (§15 D245 is the bug where a field has no door at all).
-    pub effects: Option<Vec<ondin_core::Effect>>,
+    pub effects: Option<Vec<ondin_core::Keyed<ondin_core::Effect>>>,
     pub opacity: Option<f32>,
     pub visible: Option<bool>,
     /// Re-shaped layout, when the kind change affected text.
@@ -108,7 +108,7 @@ pub struct GhostNode {
     /// is no third state meaning "ask the document". An Alt-drag copy therefore
     /// carries its original's shadow from the first frame, which is what the copy
     /// will have once it commits.
-    pub effects: Vec<ondin_core::Effect>,
+    pub effects: Vec<ondin_core::Keyed<ondin_core::Effect>>,
     pub text: Option<TextLayout>,
     /// A `Boolean` ghost's combined outline, in its own local space — the ghost's
     /// share of what `Resolved` keeps for a committed boolean.

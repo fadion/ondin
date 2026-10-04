@@ -8,11 +8,12 @@
 //! selected.
 
 use ondin_core::Brush;
+use ondin_core::item::values;
 use ondin_core::kurbo::{Affine, Cap, Join, RoundedRectRadii, Size};
 use ondin_core::peniko::{Color, Gradient};
 use ondin_core::{
-    Document, Fill, History, IdSource, NodeId, NodeKind, Operation, Stroke, StrokeAlign,
-    Transaction, build,
+    Document, Fill, History, IdSource, Keyed, NodeId, NodeKind, Operation, Stroke, StrokeAlign,
+    Transaction, build, keyed_by_position,
 };
 
 const RED: Color = Color::from_rgb8(0xEB, 0x6E, 0x5A);
@@ -46,6 +47,13 @@ fn solid_stroke(c: Color) -> Stroke {
         dash_fit: false,
         align: StrokeAlign::Center,
         visible: true,
+    }
+}
+
+fn shown_values<T: Clone>(shown: build::PaintShown<Keyed<T>>) -> build::PaintShown<T> {
+    match shown {
+        build::PaintShown::List(v) => build::PaintShown::List(values(&v)),
+        build::PaintShown::Mixed => build::PaintShown::Mixed,
     }
 }
 
@@ -106,8 +114,14 @@ impl Fixture {
 
     fn paint(&mut self, id: NodeId, fills: Vec<Fill>, strokes: Vec<Stroke>) {
         self.commit(Transaction(vec![
-            Operation::SetFills { id, fills },
-            Operation::SetStrokes { id, strokes },
+            Operation::SetFills {
+                id,
+                fills: keyed_by_position(fills),
+            },
+            Operation::SetStrokes {
+                id,
+                strokes: keyed_by_position(strokes),
+            },
         ]));
     }
 
@@ -438,7 +452,7 @@ fn a_shared_fill_list_means_the_whole_list_agrees() {
     f.paint(a, vec![solid_fill(RED)], vec![]);
     f.paint(b, vec![solid_fill(RED)], vec![]);
     assert_eq!(
-        build::shared_fills(&f.doc, &[g]),
+        shown_values(build::shared_fills(&f.doc, &[g])),
         build::PaintShown::List(vec![solid_fill(RED)]),
         "identical lists"
     );
@@ -516,7 +530,8 @@ fn a_mixed_row_states_what_the_paints_agree_on_and_edits_one_property() {
     );
 
     // A disagreement in one property is invisible to the others.
-    f.commit(build::set_fills_all(&f.doc, &[one], &[solid_fill(BLUE)]));
+    let tx = build::set_fills_all(&f.doc, &[one], &[solid_fill(BLUE)], &mut f.ids);
+    f.commit(tx);
     assert_eq!(
         build::shared_over_fills(&f.doc, &[g], |x| x.brush.clone()),
         None,
@@ -564,7 +579,7 @@ fn a_mixed_stroke_row_agrees_per_property_too() {
         s.align = StrokeAlign::Center
     }));
     assert_eq!(
-        build::shared_strokes(&f.doc, &[g]),
+        shown_values(build::shared_strokes(&f.doc, &[g])),
         build::PaintShown::List(vec![wide(StrokeAlign::Center)]),
         "settling the one property they disagreed about ends the disagreement"
     );
@@ -580,14 +595,15 @@ fn setting_the_fill_list_replaces_it_everywhere() {
     let none = f.add(g, rect());
     f.paint(two, vec![solid_fill(RED), solid_fill(BLUE)], vec![]);
 
-    f.commit(build::set_fills_all(&f.doc, &[g], &[solid_fill(GREEN)]));
+    let tx = build::set_fills_all(&f.doc, &[g], &[solid_fill(GREEN)], &mut f.ids);
+    f.commit(tx);
     for id in [two, none] {
         let fills = &f.doc.get(id).unwrap().paint().fills;
         assert_eq!(fills.len(), 1, "one fill each now");
         assert_eq!(fills[0].brush, Brush::Solid(GREEN));
     }
     assert_eq!(
-        build::shared_fills(&f.doc, &[g]),
+        shown_values(build::shared_fills(&f.doc, &[g])),
         build::PaintShown::List(vec![solid_fill(GREEN)]),
         "and they now agree, so the panel shows the list it just wrote"
     );
@@ -638,15 +654,16 @@ fn a_fill_over_a_frame_and_a_shape_colours_both() {
     let loose = f.add(root, rect());
 
     let both = [solid_fill(RED), solid_fill(BLUE)];
-    f.commit(build::set_fills_all(&f.doc, &[f.artboard, loose], &both));
+    let tx = build::set_fills_all(&f.doc, &[f.artboard, loose], &both, &mut f.ids);
+    f.commit(tx);
 
     assert_eq!(
-        f.doc.get(f.artboard).unwrap().paint().fills,
+        values(&f.doc.get(f.artboard).unwrap().paint().fills),
         both,
         "the frame took the whole list, not its first entry"
     );
     assert_eq!(
-        f.doc.get(loose).unwrap().paint().fills,
+        values(&f.doc.get(loose).unwrap().paint().fills),
         both,
         "so did the shape"
     );
@@ -660,7 +677,7 @@ fn a_fill_over_a_frame_and_a_shape_colours_both() {
     // The two now agree, so the panel reads back one shared list — the whole list,
     // which is what made this the assertion the old one-fill frame could not make.
     assert_eq!(
-        build::shared_fills(&f.doc, &[f.artboard, loose]),
+        shown_values(build::shared_fills(&f.doc, &[f.artboard, loose])),
         build::PaintShown::List(both.to_vec())
     );
 }
@@ -686,8 +703,9 @@ fn a_frames_fill_list_reorders_hides_and_removes_like_any_other() {
     let fills = |f: &Fixture| f.doc.get(ab).unwrap().paint().fills.clone();
 
     // Reorder: the panel's grip hands the whole list back swapped.
-    let swapped = vec![fills(&f)[1].clone(), fills(&f)[0].clone()];
-    f.commit(build::set_fills_all(&f.doc, &[ab], &swapped));
+    let swapped = vec![fills(&f)[1].value.clone(), fills(&f)[0].value.clone()];
+    let tx = build::set_fills_all(&f.doc, &[ab], &swapped, &mut f.ids);
+    f.commit(tx);
     assert_eq!(
         fills(&f)
             .iter()
@@ -710,9 +728,11 @@ fn a_frames_fill_list_reorders_hides_and_removes_like_any_other() {
 
     // Remove: the row's `x` is a shorter list, down to the empty one, which is what
     // "delete the colour" has always meant on a frame and still does.
-    f.commit(build::set_fills_all(&f.doc, &[ab], &fills(&f)[..1]));
+    let tx = build::set_fills_all(&f.doc, &[ab], &values(&fills(&f)[..1]), &mut f.ids);
+    f.commit(tx);
     assert_eq!(fills(&f).len(), 1);
-    f.commit(build::set_fills_all(&f.doc, &[ab], &[]));
+    let tx = build::set_fills_all(&f.doc, &[ab], &[], &mut f.ids);
+    f.commit(tx);
     assert!(
         fills(&f).is_empty(),
         "a frame with no ground is transparent"
@@ -753,11 +773,13 @@ fn a_frame_is_counted_in_a_shared_stroke() {
         build::PaintShown::Mixed
     );
 
-    f.commit(build::set_strokes_all(
+    let tx = build::set_strokes_all(
         &f.doc,
         &[f.artboard, loose],
         &[solid_stroke(GREEN)],
-    ));
+        &mut f.ids,
+    );
+    f.commit(tx);
     assert_eq!(
         f.doc.get(f.artboard).unwrap().paint().strokes[0].brush,
         Brush::Solid(GREEN),
@@ -769,7 +791,7 @@ fn a_frame_is_counted_in_a_shared_stroke() {
     );
     // And they now agree, which is the other half of being counted.
     assert_eq!(
-        build::shared_strokes(&f.doc, &[f.artboard, loose]),
+        shown_values(build::shared_strokes(&f.doc, &[f.artboard, loose])),
         build::PaintShown::List(vec![solid_stroke(GREEN)])
     );
 }
@@ -1065,10 +1087,10 @@ fn a_group_has_no_properties_to_copy_and_a_frame_does() {
     // (§15 D400), which is also why `props.fills` could never be longer than one.
     f.commit(Transaction(vec![Operation::SetFills {
         id: f.artboard,
-        fills: vec![Fill {
+        fills: keyed_by_position([Fill {
             brush: Brush::Solid(GREEN),
             visible: true,
-        }],
+        }]),
     }]));
     let props = build::properties_of(f.doc.get(f.artboard).unwrap()).expect("a frame has paint");
     assert_eq!(props.fills.len(), 1);
@@ -1106,7 +1128,8 @@ fn pasting_properties_paints_through_a_group_and_fades_only_the_group() {
     f.paint(b, vec![solid_fill(BLUE)], vec![]);
 
     let props = build::properties_of(f.doc.get(source).unwrap()).unwrap();
-    f.commit(build::paste_properties(&f.doc, &[group], &props));
+    let tx = build::paste_properties(&f.doc, &[group], &props, &mut f.ids);
+    f.commit(tx);
 
     for child in [a, b] {
         assert_eq!(f.fill0(child), Brush::Solid(RED), "the fill reached inside");
@@ -1146,7 +1169,9 @@ fn pasting_the_properties_a_layer_already_has_is_not_an_edit() {
 
     let props = build::properties_of(f.doc.get(a).unwrap()).unwrap();
     assert!(
-        build::paste_properties(&f.doc, &[b], &props).0.is_empty(),
+        build::paste_properties(&f.doc, &[b], &props, &mut f.ids)
+            .0
+            .is_empty(),
         "b already looks like a"
     );
 
@@ -1157,7 +1182,7 @@ fn pasting_the_properties_a_layer_already_has_is_not_an_edit() {
         id: b,
         opacity: 0.25,
     }]));
-    let tx = build::paste_properties(&f.doc, &[b], &props);
+    let tx = build::paste_properties(&f.doc, &[b], &props, &mut f.ids);
     assert_eq!(tx.0.len(), 1, "only the opacity differs: {tx:?}");
     f.commit(tx);
     assert_eq!(f.doc.get(b).unwrap().opacity(), 1.0);

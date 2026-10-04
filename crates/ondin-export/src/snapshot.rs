@@ -474,14 +474,14 @@ fn node_snapshot(
             .paint()
             .fills
             .iter()
-            .filter(|f: &&Fill| f.visible)
+            .filter(|f: &&ondin_core::Keyed<Fill>| f.visible)
             .map(|f| paint_summary(&f.brush))
             .collect(),
         strokes: node
             .paint()
             .strokes
             .iter()
-            .filter(|s: &&Stroke| s.visible)
+            .filter(|s: &&ondin_core::Keyed<Stroke>| s.visible)
             .map(|s| StrokeSummary {
                 paint: paint_summary(&s.brush),
                 width: s.width,
@@ -491,7 +491,7 @@ fn node_snapshot(
             .effects()
             .iter()
             .filter(|e| e.visible)
-            .map(effect_summary)
+            .map(|e| effect_summary(e))
             .collect(),
     }
 }

@@ -65,7 +65,7 @@ struct FxFrame {
     /// pixels.
     origin: (i32, i32),
     size: (u32, u32),
-    effects: Vec<ondin_core::Effect>,
+    effects: Vec<ondin_core::Keyed<ondin_core::Effect>>,
     /// The enclosing target's `base` and `limit`, put back when this layer pops.
     saved_base: Affine,
     saved_limit: Rect,
@@ -100,7 +100,7 @@ pub struct EffectJob {
     /// into the enclosing scene. A second copy would be a number that could
     /// disagree with the drawing it describes.
     size: (u32, u32),
-    effects: Vec<ondin_core::Effect>,
+    effects: Vec<ondin_core::Keyed<ondin_core::Effect>>,
     scale: (f64, f64),
     /// How many effect layers enclose this one — see
     /// [`VelloGpuRenderer::resolve_effects`], which batches a level at a time.
@@ -343,7 +343,7 @@ impl ScenePainter for GpuScenePainter<'_> {
         &mut self,
         transform: Affine,
         bounds: Rect,
-        effects: &[ondin_core::Effect],
+        effects: &[ondin_core::Keyed<ondin_core::Effect>],
     ) {
         let device = (self.base * transform).transform_rect_bbox(bounds);
         let m = (self.base * transform).as_coeffs();

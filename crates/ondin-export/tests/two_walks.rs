@@ -51,6 +51,7 @@ use ondin_core::kurbo::{Affine, BezPath, Rect, Size};
 use ondin_core::peniko::Color;
 use ondin_core::{
     Brush, Document, Fill, IdSource, NodeId, NodeKind, Operation, Resolved, Transaction,
+    keyed_by_position,
 };
 use ondin_render::scene::{ClipRule, ScenePainter, StrokePaint, TextRun};
 use ondin_render::{RenderOverrides, Viewport};
@@ -203,10 +204,10 @@ fn tree() -> Tree {
         painted.push((id, key(c)));
         ops.push(Operation::SetFills {
             id,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(c),
                 visible: true,
-            }],
+            }]),
         });
     }
     ops.push(Operation::SetVisible {

@@ -194,7 +194,12 @@ pub trait ScenePainter {
     /// that has not implemented the passes yet — it draws the artwork unfiltered
     /// rather than dropping it, which is the failure mode worth having. Every
     /// backend that ships to a user overrides this.
-    fn push_effect_layer(&mut self, transform: Affine, bounds: Rect, effects: &[Effect]) {
+    fn push_effect_layer(
+        &mut self,
+        transform: Affine,
+        bounds: Rect,
+        effects: &[ondin_core::Keyed<Effect>],
+    ) {
         let _ = (bounds, effects);
         self.push_layer(transform, None, ClipRule::NonZero, 1.0);
     }
@@ -1158,7 +1163,7 @@ fn effect_bounds(
     id: NodeId,
     painted: &Painted<'_>,
     world: Affine,
-    effects: &[ondin_core::Effect],
+    effects: &[ondin_core::Keyed<ondin_core::Effect>],
 ) -> Option<Rect> {
     let base = match painted.kind {
         NodeKind::Group | NodeKind::Root => res.inner_ink(id)?,
@@ -2034,7 +2039,12 @@ fn paint_strokes<P: ScenePainter>(
     shape: &BezPath,
     frame: Rect,
 ) {
-    let visible: Vec<&Stroke> = paint.strokes.iter().filter(|s| s.visible).collect();
+    let visible: Vec<&Stroke> = paint
+        .strokes
+        .iter()
+        .filter(|s| s.visible)
+        .map(|s| &s.value)
+        .collect();
     if visible.is_empty() {
         return;
     }

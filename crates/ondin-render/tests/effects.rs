@@ -11,7 +11,7 @@ use ondin_core::kurbo::{Affine, Rect, Size, Vec2};
 use ondin_core::peniko::Color;
 use ondin_core::{
     Brush, Document, Effect, EffectKind, Fill, Filters, IdSource, NodeKind, Operation, Resolved,
-    Shadow, Transaction,
+    Shadow, Transaction, keyed_by_position,
 };
 use ondin_render::{ImageStore, VelloCpuRenderer, Viewport};
 
@@ -44,12 +44,15 @@ fn render_kind(kind: NodeKind, effects: Vec<Effect>) -> (Vec<u8>, usize) {
         },
         Operation::SetFills {
             id: r,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::WHITE),
                 visible: true,
-            }],
+            }]),
         },
-        Operation::SetEffects { id: r, effects },
+        Operation::SetEffects {
+            id: r,
+            effects: keyed_by_position(effects),
+        },
     ]))
     .unwrap();
     let res = Resolved::rebuild(&doc);
@@ -504,22 +507,25 @@ fn render_with(opacity: f32, clip: bool, effects: Vec<Effect>) -> (Vec<u8>, usiz
         name: None,
     }]))
     .unwrap();
-    let mut ops = vec![Operation::SetEffects { id: r, effects }];
+    let mut ops = vec![Operation::SetEffects {
+        id: r,
+        effects: keyed_by_position(effects),
+    }];
     if !clip {
         ops.push(Operation::SetFills {
             id: r,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::WHITE),
                 visible: true,
-            }],
+            }]),
         });
     } else {
         ops.push(Operation::SetFills {
             id: r,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::WHITE),
                 visible: true,
-            }],
+            }]),
         });
         ops.push(Operation::SetClip { id: r, clip: true });
     }
@@ -636,14 +642,14 @@ fn render_view(effects: &[Effect], view: Rect) -> Vec<u8> {
         },
         Operation::SetFills {
             id: r,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::WHITE),
                 visible: true,
-            }],
+            }]),
         },
         Operation::SetEffects {
             id: r,
-            effects: effects.to_vec(),
+            effects: keyed_by_position(effects.to_vec()),
         },
     ]))
     .unwrap();

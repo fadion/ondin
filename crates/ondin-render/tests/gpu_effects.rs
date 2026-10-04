@@ -15,7 +15,7 @@ use ondin_core::kurbo::{Affine, Rect, Size, Vec2};
 use ondin_core::peniko::Color;
 use ondin_core::{
     Brush, Document, Effect, EffectKind, Fill, IdSource, NodeKind, Operation, Resolved, Shadow,
-    Transaction,
+    Transaction, keyed_by_position,
 };
 use ondin_render::{ImageStore, RenderOverrides, VelloCpuRenderer, VelloGpuRenderer, Viewport};
 
@@ -48,12 +48,15 @@ fn document(effects: Vec<Effect>, opacity: f32) -> (Document, Resolved) {
         },
         Operation::SetFills {
             id: r,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::WHITE),
                 visible: true,
-            }],
+            }]),
         },
-        Operation::SetEffects { id: r, effects },
+        Operation::SetEffects {
+            id: r,
+            effects: keyed_by_position(effects),
+        },
     ]))
     .unwrap();
     if opacity < 1.0 {
@@ -281,10 +284,10 @@ fn photographs(n: usize, w: u32, h: u32) -> (Document, Resolved, ImageStore) {
         });
         ops.push(Operation::SetFills {
             id: node,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: image_brush(iid),
                 visible: true,
-            }],
+            }]),
         });
     }
     doc.apply(&Transaction(ops)).unwrap();
@@ -399,12 +402,15 @@ fn banner(effects: Vec<Effect>) -> (Document, Resolved) {
         },
         Operation::SetFills {
             id: r,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::WHITE),
                 visible: true,
-            }],
+            }]),
         },
-        Operation::SetEffects { id: r, effects },
+        Operation::SetEffects {
+            id: r,
+            effects: keyed_by_position(effects),
+        },
     ]))
     .unwrap();
     let res = Resolved::rebuild(&doc);
@@ -856,17 +862,20 @@ fn nested(stacks: Vec<Vec<Effect>>) -> (Document, Resolved) {
     });
     ops.push(Operation::SetFills {
         id: r,
-        fills: vec![Fill {
+        fills: keyed_by_position([Fill {
             brush: Brush::Solid(Color::WHITE),
             visible: true,
-        }],
+        }]),
     });
     doc.apply(&Transaction(ops)).expect("the fixture applies");
     let ops: Vec<Operation> = groups
         .into_iter()
         .zip(stacks)
         .filter(|(_, fx)| !fx.is_empty())
-        .map(|(id, effects)| Operation::SetEffects { id, effects })
+        .map(|(id, effects)| Operation::SetEffects {
+            id,
+            effects: keyed_by_position(effects),
+        })
         .collect();
     if !ops.is_empty() {
         doc.apply(&Transaction(ops)).expect("the effects apply");
@@ -922,10 +931,10 @@ fn siblings(n: usize, size: f64) -> (Document, Resolved) {
         });
         ops.push(Operation::SetFills {
             id: r,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::WHITE),
                 visible: true,
-            }],
+            }]),
         });
         groups.push(g);
     }
@@ -934,7 +943,7 @@ fn siblings(n: usize, size: f64) -> (Document, Resolved) {
         .into_iter()
         .map(|id| Operation::SetEffects {
             id,
-            effects: vec![Effect::new(EffectKind::LayerBlur { radius: 3.0 })],
+            effects: keyed_by_position([Effect::new(EffectKind::LayerBlur { radius: 3.0 })]),
         })
         .collect();
     doc.apply(&Transaction(ops)).expect("the effects apply");
@@ -995,16 +1004,16 @@ fn build_picture_doc(others: usize, on_the_picture: bool) -> (Document, Resolved
         },
         Operation::SetFills {
             id: pic,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: image_brush(iid),
                 visible: true,
-            }],
+            }]),
         },
     ];
     if on_the_picture {
         ops.push(Operation::SetEffects {
             id: pic,
-            effects: vec![Effect::new(EffectKind::LayerBlur { radius: 3.0 })],
+            effects: keyed_by_position([Effect::new(EffectKind::LayerBlur { radius: 3.0 })]),
         });
     }
     for i in 0..others {
@@ -1022,14 +1031,14 @@ fn build_picture_doc(others: usize, on_the_picture: bool) -> (Document, Resolved
         });
         ops.push(Operation::SetFills {
             id: other,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::WHITE),
                 visible: true,
-            }],
+            }]),
         });
         ops.push(Operation::SetEffects {
             id: other,
-            effects: vec![Effect::new(EffectKind::LayerBlur { radius: 4.0 })],
+            effects: keyed_by_position([Effect::new(EffectKind::LayerBlur { radius: 4.0 })]),
         });
     }
     doc.apply(&Transaction(ops)).expect("the fixture applies");

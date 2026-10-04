@@ -19,7 +19,7 @@ pub mod schema;
 use crate::document::Document;
 
 /// Current on-disk schema version, written on every save.
-pub const CURRENT_SCHEMA_VERSION: u32 = 4;
+pub const CURRENT_SCHEMA_VERSION: u32 = 5;
 
 /// How deep a document's tree may be nested, root at 0 (§15 D416).
 ///

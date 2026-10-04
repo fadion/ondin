@@ -15,7 +15,7 @@ use ondin_core::kurbo::{Affine, BezPath, Point, Rect, RoundedRectRadii, Shape, S
 use ondin_core::peniko::{Color, Gradient};
 use ondin_core::{
     Document, Effect, EffectKind, Fill, GeometryPatch, IdSource, NodeId, NodeKind, Operation,
-    Resolved, Shadow, TextSizing, TextStyle, Transaction, build,
+    Resolved, Shadow, TextSizing, TextStyle, Transaction, build, keyed_by_position,
 };
 use ondin_render::scene::{self, ClipRule, ScenePainter, StrokePaint, TextRun};
 use ondin_render::{RenderOverrides, Viewport};
@@ -101,11 +101,16 @@ impl ScenePainter for Recorder {
     fn push_mask_layer(&mut self) {
         self.0.push(Call::MaskPush);
     }
-    fn push_effect_layer(&mut self, t: Affine, bounds: Rect, effects: &[ondin_core::Effect]) {
+    fn push_effect_layer(
+        &mut self,
+        t: Affine,
+        bounds: Rect,
+        effects: &[ondin_core::Keyed<ondin_core::Effect>],
+    ) {
         self.0.push(Call::Effect(
             t.as_coeffs(),
             [bounds.x0, bounds.y0, bounds.x1, bounds.y1],
-            effects.to_vec(),
+            ondin_core::item::values(effects),
         ));
     }
     fn pop_layer(&mut self) {
@@ -243,10 +248,10 @@ fn fixture() -> Fixture {
         },
         Operation::SetFills {
             id: artboard,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::from_rgba8(250, 250, 250, 255)),
                 visible: true,
-            }],
+            }]),
         },
         Operation::CreateNode {
             id: group,
@@ -308,10 +313,10 @@ fn fixture() -> Fixture {
     .unwrap();
     doc.apply(&Transaction(vec![Operation::SetFills {
         id: rect,
-        fills: vec![Fill {
+        fills: keyed_by_position([Fill {
             brush: Brush::Solid(Color::from_rgba8(70, 130, 220, 255)),
             visible: true,
-        }],
+        }]),
     }]))
     .unwrap();
 
@@ -527,10 +532,10 @@ fn a_gradient_fill_matches_its_commit() {
         &f.doc,
         &Transaction(vec![Operation::SetFills {
             id: f.rect,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Gradient(gradient.into()),
                 visible: true,
-            }],
+            }]),
         }]),
         "gradient fill",
     );
@@ -556,10 +561,10 @@ fn a_shape_being_drawn_matches_the_shape_that_lands() {
         },
         Operation::SetFills {
             id: new_id,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::from_rgba8(217, 217, 217, 255)),
                 visible: true,
-            }],
+            }]),
         },
     ]);
     assert_preview_matches_commit(&f.doc, &tx, "drawing a new shape");
@@ -1088,10 +1093,10 @@ fn boolean_fixture(op: ondin_core::BoolOp) -> (Document, NodeId, NodeId, NodeId)
         corner_radii: RoundedRectRadii::default(),
     };
     let fill = |c: Color| {
-        vec![Fill {
+        keyed_by_position([Fill {
             brush: Brush::Solid(c),
             visible: true,
-        }]
+        }])
     };
     doc.apply(&Transaction(vec![
         Operation::CreateNode {
@@ -1577,10 +1582,10 @@ fn a_ghost_operand_folds_in_the_slot_its_insert_names() {
     }
     ops.push(Operation::SetFills {
         id: b,
-        fills: vec![Fill {
+        fills: keyed_by_position([Fill {
             brush: Brush::Solid(Color::from_rgb8(0x40, 0x80, 0xC0)),
             visible: true,
-        }],
+        }]),
     });
     doc.apply(&Transaction(ops)).expect("build the ring");
 
@@ -1630,10 +1635,10 @@ fn a_ghost_draws_at_its_index_not_on_top() {
         });
         ops.push(Operation::SetFills {
             id: *id,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::from_rgba8(10 * i as u8, 0, 0, 255)),
                 visible: true,
-            }],
+            }]),
         });
     }
     doc.apply(&Transaction(ops))
@@ -1705,10 +1710,10 @@ fn a_reorder_changes_the_paint_order_it_commits() {
         });
         ops.push(Operation::SetFills {
             id: *id,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::from_rgba8(60 * i as u8 + 40, 0, 0, 255)),
                 visible: true,
-            }],
+            }]),
         });
     }
     doc.apply(&Transaction(ops))
@@ -1781,10 +1786,10 @@ fn a_chrome_ghost_draws_under_its_layer_without_counting_as_a_preview() {
                     corner_radii: RoundedRectRadii::default(),
                 },
                 paint: ondin_core::Paint {
-                    fills: vec![Fill {
+                    fills: keyed_by_position([Fill {
                         brush: marker.clone(),
                         visible: true,
-                    }],
+                    }]),
                     strokes: Vec::new(),
                 },
                 effects: Vec::new(),
@@ -1943,10 +1948,10 @@ fn the_crop_ghosts_picture_lands_exactly_where_the_layers_does() {
             },
             Operation::SetFills {
                 id: f.rect,
-                fills: vec![Fill {
+                fills: keyed_by_position([Fill {
                     brush: Brush::Image(brush.clone()),
                     visible: true,
-                }],
+                }]),
             },
         ]))
         .expect("fixture applies");
@@ -1977,10 +1982,10 @@ fn the_crop_ghosts_picture_lands_exactly_where_the_layers_does() {
                         corner_radii: RoundedRectRadii::default(),
                     },
                     paint: ondin_core::Paint {
-                        fills: vec![Fill {
+                        fills: keyed_by_position([Fill {
                             brush: Brush::Image(whole),
                             visible: true,
-                        }],
+                        }]),
                         strokes: Vec::new(),
                     },
                     effects: Vec::new(),
@@ -2175,7 +2180,10 @@ fn previewing_a_bigger_effect_asks_for_the_bigger_buffer() {
     ] {
         assert_preview_matches_commit(
             &doc,
-            &Transaction(vec![Operation::SetEffects { id, effects }]),
+            &Transaction(vec![Operation::SetEffects {
+                id,
+                effects: keyed_by_position(effects),
+            }]),
             what,
         );
     }
@@ -2219,19 +2227,19 @@ fn shadowed_layer() -> (Document, NodeId) {
         },
         Operation::SetFills {
             id,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::WHITE),
                 visible: true,
-            }],
+            }]),
         },
         Operation::SetEffects {
             id,
-            effects: vec![Effect::new(EffectKind::DropShadow(Shadow {
+            effects: keyed_by_position([Effect::new(EffectKind::DropShadow(Shadow {
                 offset: Vec2::new(0.0, 2.0),
                 blur: 2.0,
                 spread: 0.0,
                 color: Color::BLACK,
-            }))],
+            }))]),
         },
     ]))
     .unwrap();
@@ -2274,7 +2282,7 @@ fn a_ghost_of_a_shadowed_group_previews_with_its_shadow() {
     f.doc
         .apply(&Transaction(vec![Operation::SetEffects {
             id: f.group,
-            effects: vec![big_shadow()],
+            effects: keyed_by_position([big_shadow()]),
         }]))
         .unwrap();
 
@@ -2336,14 +2344,14 @@ fn a_ghost_of_a_shadowed_stroked_shape_reserves_the_strokes_reach() {
         .apply(&Transaction(vec![
             Operation::SetStrokes {
                 id: f.rect,
-                strokes: vec![ondin_core::Stroke {
+                strokes: keyed_by_position([ondin_core::Stroke {
                     width: 40.0,
                     ..Default::default()
-                }],
+                }]),
             },
             Operation::SetEffects {
                 id: f.rect,
-                effects: vec![big_shadow()],
+                effects: keyed_by_position([big_shadow()]),
             },
         ]))
         .unwrap();
@@ -2528,10 +2536,10 @@ fn pinned_fixture() -> (Document, NodeId, NodeId) {
         if painted {
             ops.push(Operation::SetFills {
                 id,
-                fills: vec![Fill {
+                fills: keyed_by_position([Fill {
                     brush: Brush::Solid(Color::from_rgba8(200, 60, 60, 255)),
                     visible: true,
-                }],
+                }]),
             });
         }
         doc.apply(&Transaction(ops)).unwrap();
@@ -2712,10 +2720,10 @@ fn flex_fixture() -> (Document, NodeId, NodeId, NodeId) {
         if painted {
             ops.push(Operation::SetFills {
                 id,
-                fills: vec![Fill {
+                fills: keyed_by_position([Fill {
                     brush: Brush::Solid(Color::from_rgba8(60, 120, 200, 255)),
                     visible: true,
-                }],
+                }]),
             });
         }
         doc.apply(&Transaction(ops)).unwrap();
@@ -3002,10 +3010,10 @@ fn a_layout_nested_in_a_plain_group_previews_as_it_commits() {
     };
     let fill = |id| Operation::SetFills {
         id,
-        fills: vec![Fill {
+        fills: keyed_by_position([Fill {
             brush: Brush::Solid(Color::from_rgba8(60, 120, 200, 255)),
             visible: true,
-        }],
+        }]),
     };
     doc.apply(&Transaction(vec![
         create(
@@ -3300,10 +3308,10 @@ fn grid_fixture() -> (Document, NodeId, [NodeId; 4]) {
             },
             Operation::SetFills {
                 id,
-                fills: vec![Fill {
+                fills: keyed_by_position([Fill {
                     brush: Brush::Solid(Color::from_rgba8(60, 120, 200, 255)),
                     visible: true,
-                }],
+                }]),
             },
         ]))
         .unwrap();
@@ -3472,10 +3480,10 @@ fn painted(
     if !matches!(kind, NodeKind::Group) {
         ops.push(Operation::SetFills {
             id,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::from_rgba8(60, 120, 200, 255)),
                 visible: true,
-            }],
+            }]),
         });
     }
     doc.apply(&Transaction(ops)).unwrap();

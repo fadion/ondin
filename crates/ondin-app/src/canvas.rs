@@ -5048,10 +5048,11 @@ impl OndinApp {
                         corner_radii: ondin_core::kurbo::RoundedRectRadii::from_single_radius(0.0),
                     },
                     paint: ondin_core::Paint {
-                        fills: vec![ondin_core::Fill {
+                        // A node being created, so a list built whole.
+                        fills: ondin_core::keyed_by_position([ondin_core::Fill {
                             brush: ondin_core::Brush::Image(image),
                             visible: true,
-                        }],
+                        }]),
                         strokes: Vec::new(),
                     },
                     // The crop backdrop explains the picture's extent, so it
@@ -9789,7 +9790,7 @@ impl OndinApp {
                 && scrubbed.contains(&id)
                 && let Some(slot) = grids.get_mut(*index)
             {
-                *slot = *held;
+                slot.value = *held;
             }
             // And the colour a picker is dragging, which reaches the canvas by its
             // own road for the same reason (`OndinApp::grid_paint`). **After the
@@ -14197,7 +14198,10 @@ mod layout_grid_tests {
                 transform: None,
                 name: None,
             },
-            Operation::SetLayoutGrids { id: frame, grids },
+            Operation::SetLayoutGrids {
+                id: frame,
+                grids: ondin_core::keyed_by_position(grids),
+            },
         ]))
         .expect("build the fixture");
         app.session.adopt_document(doc, None);
@@ -18735,14 +18739,14 @@ mod headless_app_tests {
             .try_commit(Transaction(vec![
                 Operation::SetFills {
                     id: a,
-                    fills: vec![ondin_core::Fill {
+                    fills: ondin_core::keyed_by_position([ondin_core::Fill {
                         brush: ondin_core::Brush::Solid(ondin_core::peniko::Color::WHITE),
                         visible: true,
-                    }],
+                    }]),
                 },
                 Operation::SetStrokes {
                     id: a,
-                    strokes: vec![
+                    strokes: ondin_core::keyed_by_position([
                         ondin_core::Stroke {
                             width: 2.0,
                             ..Default::default()
@@ -18751,7 +18755,7 @@ mod headless_app_tests {
                             width: 4.0,
                             ..Default::default()
                         },
-                    ],
+                    ]),
                 },
             ]))
             .expect("give it paint to draw");
@@ -18802,10 +18806,10 @@ mod headless_app_tests {
         app.session
             .try_commit(Transaction(vec![Operation::SetFills {
                 id: a,
-                fills: vec![ondin_core::Fill {
+                fills: ondin_core::keyed_by_position([ondin_core::Fill {
                     brush: ondin_core::Brush::Solid(ondin_core::peniko::Color::WHITE),
                     visible: true,
-                }],
+                }]),
             }]))
             .expect("a fill to edit");
         let red = ondin_core::Brush::Solid(ondin_core::peniko::Color::from_rgb8(255, 0, 0));
@@ -20588,10 +20592,10 @@ mod locked_picture_tests {
             },
             Operation::SetFills {
                 id: rect,
-                fills: vec![Fill {
+                fills: ondin_core::keyed_by_position([Fill {
                     brush: image_brush(ondin_core::ImageId("a-photo".into())),
                     visible: true,
-                }],
+                }]),
             },
         ]))
         .expect("build the fixture");
@@ -20845,10 +20849,10 @@ mod crop_click_tests {
             },
             Operation::SetFills {
                 id: rect,
-                fills: vec![Fill {
+                fills: ondin_core::keyed_by_position([Fill {
                     brush: image_brush(image),
                     visible: true,
-                }],
+                }]),
             },
         ]))
         .expect("build the fixture");

@@ -1545,10 +1545,10 @@ mod pointer_slot_tests {
         app.session
             .try_commit(Transaction(vec![Operation::SetFills {
                 id,
-                fills: vec![ondin_core::Fill {
+                fills: ondin_core::keyed_by_position([ondin_core::Fill {
                     brush: Brush::Solid(Color::WHITE),
                     visible: true,
-                }],
+                }]),
             }]))
             .expect("a fill to edit");
         (ctx, app, id, PaintSlot::Fill(0))
@@ -1728,10 +1728,10 @@ mod mixed_hex_tests {
         };
         let paint = |id, c: Color| Operation::SetFills {
             id,
-            fills: vec![Fill {
+            fills: ondin_core::keyed_by_position([Fill {
                 brush: Brush::Solid(c),
                 visible: true,
-            }],
+            }]),
         };
         doc.apply(&Transaction(vec![
             rect(a),
@@ -1905,10 +1905,10 @@ mod mixed_hex_tests {
         let grey = Color::new([0.5, 0.5, 0.5, 1.0]);
         app.session.commit(Transaction(vec![Operation::SetFills {
             id: a,
-            fills: vec![Fill {
+            fills: ondin_core::keyed_by_position([Fill {
                 brush: Brush::Solid(grey),
                 visible: true,
-            }],
+            }]),
         }]));
         app.session.selection.set(vec![a]);
         app.picker = Some(Picker::new(a, PaintSlot::Fill(0), egui::pos2(400.0, 300.0)));
@@ -2093,10 +2093,10 @@ mod radial_centre_tests {
             },
             Operation::SetFills {
                 id: a,
-                fills: vec![Fill {
+                fills: ondin_core::keyed_by_position([Fill {
                     brush,
                     visible: true,
-                }],
+                }]),
             },
         ]))
         .expect("build");
@@ -2442,11 +2442,11 @@ mod grid_orphan_tests {
             ),
             Operation::SetLayoutGrids {
                 id: a,
-                grids: vec![grid(5, Color::new([1.0, 0.0, 0.0, 1.0]))],
+                grids: ondin_core::keyed_by_position([grid(5, Color::new([1.0, 0.0, 0.0, 1.0]))]),
             },
             Operation::SetLayoutGrids {
                 id: b,
-                grids: vec![grid(10, Color::new([0.0, 0.0, 1.0, 1.0]))],
+                grids: ondin_core::keyed_by_position([grid(10, Color::new([0.0, 0.0, 1.0, 1.0]))]),
             },
         ]))
         .expect("build");
@@ -2635,10 +2635,10 @@ mod grid_orphan_tests {
             .doc
             .apply(&Transaction(vec![Operation::SetFills {
                 id: a,
-                fills: vec![Fill {
+                fills: ondin_core::keyed_by_position([Fill {
                     brush: Brush::Solid(red),
                     visible: true,
-                }],
+                }]),
             }]))
             .expect("fill the frame");
         app.session.selection.set(vec![a]);

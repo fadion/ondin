@@ -1998,10 +1998,12 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
                 );
                 self.push(Operation::SetFills {
                     id,
-                    fills: vec![Fill {
+                    // A node the importer just made, so a list built whole
+                    // (`item::keyed_by_position`).
+                    fills: crate::item::keyed_by_position([Fill {
                         brush,
                         visible: true,
-                    }],
+                    }]),
                 });
                 Some(id)
             }
@@ -2810,8 +2812,13 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
             })
             .into_iter()
             .collect();
+        // Lists for a node the importer just made, built whole
+        // (`item::keyed_by_position`), as every list below is.
         if !fills.is_empty() {
-            self.push(Operation::SetFills { id, fills });
+            self.push(Operation::SetFills {
+                id,
+                fills: crate::item::keyed_by_position(fills),
+            });
         }
         let strokes: Vec<Stroke> = style
             .stroke
@@ -2842,7 +2849,10 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
             .into_iter()
             .collect();
         if !strokes.is_empty() {
-            self.push(Operation::SetStrokes { id, strokes });
+            self.push(Operation::SetStrokes {
+                id,
+                strokes: crate::item::keyed_by_position(strokes),
+            });
         }
         if style.fill_rule == FillRule::EvenOdd {
             self.push(Operation::SetFillRule {
@@ -2956,7 +2966,7 @@ impl<'d, 'input> Builder<'_, 'd, 'input> {
                 if !read.effects.is_empty() {
                     self.push(Operation::SetEffects {
                         id,
-                        effects: read.effects,
+                        effects: crate::item::keyed_by_position(read.effects),
                     });
                 }
             }
@@ -5414,7 +5424,7 @@ mod tests {
     /// other asks the *markup* what it said, and a test asserting the first while
     /// reading as though it called the second is a test about nothing.
     fn stack_of(doc: &Document, out: &Import) -> Vec<crate::effect::Effect> {
-        doc.get(shapes(doc, out)[0]).unwrap().effects().to_vec()
+        crate::item::values(doc.get(shapes(doc, out)[0]).unwrap().effects())
     }
 
     /// **A `<filter>` holding one `<feGaussianBlur>` is `EffectKind::LayerBlur`**,

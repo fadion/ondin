@@ -10,7 +10,7 @@ use ondin_core::kurbo::Size;
 use ondin_core::peniko::Color;
 use ondin_core::{
     Brush, Document, ExportFormat, ExportScale, ExportSpec, Fill, IdSource, NodeId, NodeKind,
-    Operation, Resolved, Transaction,
+    Operation, Resolved, Transaction, keyed_by_position,
 };
 use ondin_export::png::{RasterOpts, raster_of};
 
@@ -50,10 +50,10 @@ fn frame_with_a_small_rect() -> (Document, Resolved, NodeId, NodeId) {
         },
         Operation::SetFills {
             id: rect,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(RED),
                 visible: true,
-            }],
+            }]),
         },
     ]))
     .unwrap();
@@ -333,10 +333,10 @@ fn thin_rect(w: f64, h: f64) -> (Document, Resolved, NodeId) {
         },
         Operation::SetFills {
             id: rect,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(RED),
                 visible: true,
-            }],
+            }]),
         },
     ]))
     .unwrap();

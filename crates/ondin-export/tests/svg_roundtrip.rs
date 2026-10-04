@@ -47,6 +47,7 @@ use ondin_core::kurbo::{Affine, Point, Rect, Size};
 use ondin_core::peniko::Color;
 use ondin_core::{
     BoolOp, Document, FillRule, IdSource, NodeId, NodeKind, Operation, Resolved, Transaction,
+    keyed_by_position,
 };
 use ondin_export::svg::svg_of;
 
@@ -174,7 +175,7 @@ fn four_shapes() -> (Document, Resolved, Vec<NodeId>) {
         // A line with no stroke has no ink and no bounds worth comparing.
         Operation::SetStrokes {
             id: line,
-            strokes: vec![ondin_core::Stroke {
+            strokes: keyed_by_position([ondin_core::Stroke {
                 brush: ondin_core::peniko::Brush::Solid(Color::from_rgba8(0, 0, 0, 255)),
                 width: 2.0,
                 join: ondin_core::kurbo::Join::Miter,
@@ -186,7 +187,7 @@ fn four_shapes() -> (Document, Resolved, Vec<NodeId>) {
                 align: ondin_core::StrokeAlign::Center,
                 sides: ondin_core::StrokeSides::All,
                 visible: true,
-            }],
+            }]),
         },
     ]))
     .expect("the fixture applies");
@@ -351,10 +352,10 @@ fn an_exclusion_comes_back_with_its_hole() {
         },
         Operation::SetFills {
             id: bool_id,
-            fills: vec![ondin_core::Fill {
+            fills: keyed_by_position([ondin_core::Fill {
                 brush: ondin_core::peniko::Brush::Solid(Color::from_rgba8(255, 0, 0, 255)),
                 visible: true,
-            }],
+            }]),
         },
     ]))
     .expect("the fixture applies");
@@ -944,10 +945,10 @@ fn a_radial_gradients_focal_point_round_trips_where_it_sits() {
         },
         Operation::SetFills {
             id: rect,
-            fills: vec![ondin_core::Fill {
+            fills: keyed_by_position([ondin_core::Fill {
                 brush: ondin_core::Brush::Gradient(gradient.into()),
                 visible: true,
-            }],
+            }]),
         },
     ]))
     .expect("a lit sphere");
@@ -1014,7 +1015,7 @@ fn an_elliptical_gradient_round_trips_as_the_same_ellipse() {
         },
         Operation::SetFills {
             id: rect,
-            fills: vec![ondin_core::Fill {
+            fills: keyed_by_position([ondin_core::Fill {
                 brush: ondin_core::Brush::Gradient(GradientBrush {
                     gradient: Gradient::new_radial((40.0, 40.0), 20.0).with_stops([
                         (0.0_f32, Color::from_rgba8(255, 0, 0, 255)),
@@ -1024,7 +1025,7 @@ fn an_elliptical_gradient_round_trips_as_the_same_ellipse() {
                     opacity: 1.0,
                 }),
                 visible: true,
-            }],
+            }]),
         },
     ]))
     .expect("a rect with an elliptical gradient");
@@ -1108,12 +1109,12 @@ fn an_effect_stack_round_trips_as_the_same_stack() {
         },
         Operation::SetEffects {
             id: rect,
-            effects: vec![Effect::new(EffectKind::DropShadow(Shadow {
+            effects: keyed_by_position([Effect::new(EffectKind::DropShadow(Shadow {
                 offset: ondin_core::kurbo::Vec2::new(4.0, 6.0),
                 blur: 8.0,
                 spread: 0.0,
                 color: Color::from_rgba8(0, 0, 0, 128),
-            }))],
+            }))]),
         },
     ]))
     .expect("a rect with one drop shadow");
@@ -1261,13 +1262,13 @@ fn an_image_fill_is_reported_lost_rather_than_silently_blackened() {
         },
         Operation::SetFills {
             id: rect,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Image(ondin_core::ImageBrush {
                     image: ImageRef::new(pic),
                     sampler: Default::default(),
                 }),
                 visible: true,
-            }],
+            }]),
         },
     ]))
     .expect("a rect with a picture on it");
@@ -1424,7 +1425,7 @@ fn a_layers_name_survives_the_round_trip() {
     // The second fill is what moves `stacked` onto the writer's stacked arm.
     doc.apply(&Transaction(vec![Operation::SetFills {
         id: stacked,
-        fills: vec![
+        fills: keyed_by_position([
             ondin_core::Fill {
                 brush: ondin_core::peniko::Brush::Solid(Color::from_rgba8(0xC0, 0x20, 0x20, 255)),
                 visible: true,
@@ -1433,7 +1434,7 @@ fn a_layers_name_survives_the_round_trip() {
                 brush: ondin_core::peniko::Brush::Solid(Color::from_rgba8(0x20, 0x20, 0xC0, 0x80)),
                 visible: true,
             },
-        ],
+        ]),
     }]))
     .expect("two fills apply");
 

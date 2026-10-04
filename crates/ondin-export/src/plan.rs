@@ -98,7 +98,9 @@ pub fn plan(
         // set that is still distinct. Per node rather than across the plan: two
         // layers legitimately carry the same spec, and it is their names that keep
         // the files apart.
-        let mut specs: Vec<ExportSpec> = n.exports().to_vec();
+        // Values, not keyed items: the dedupe below asks *same spec*, and two rows
+        // with one spec carry different item ids (§15 D980).
+        let mut specs: Vec<ExportSpec> = ondin_core::item::values(n.exports());
         if let Some(forced) = opts.scale_override {
             for spec in &mut specs {
                 spec.scale = forced;
@@ -445,10 +447,10 @@ mod tests {
             },
             Operation::SetFills {
                 id: frame,
-                fills: vec![Fill {
+                fills: ondin_core::keyed_by_position([Fill {
                     brush: ondin_core::Brush::Solid(Color::from_rgba8(10, 20, 30, 255)),
                     visible: true,
-                }],
+                }]),
             },
             Operation::CreateNode {
                 id: rect,
@@ -461,7 +463,10 @@ mod tests {
                 transform: None,
                 name: Some("Button".into()),
             },
-            Operation::SetExports { id: rect, exports },
+            Operation::SetExports {
+                id: rect,
+                exports: ondin_core::keyed_by_position(exports),
+            },
         ]))
         .unwrap();
         let res = Resolved::rebuild(&doc);

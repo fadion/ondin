@@ -45,7 +45,7 @@ use ondin_core::kurbo::{
 use ondin_core::peniko::Color;
 use ondin_core::{
     Document, Fill, GeometryPatch, ImageEntry, ImageId, NodeId, NodeKind, Operation, Resolved,
-    Stroke, TextSizing, TextStyle, Transaction, geometry,
+    Stroke, TextSizing, TextStyle, Transaction, geometry, keyed_by_position,
 };
 
 /// The active canvas tool. `Select` manipulates existing nodes; the others draw
@@ -2518,10 +2518,10 @@ pub fn create_artboard(
         },
         Operation::SetFills {
             id,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(background),
                 visible: true,
-            }],
+            }]),
         },
     ])
 }
@@ -2552,10 +2552,10 @@ pub fn create_rect(
         },
         Operation::SetFills {
             id,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(fill),
                 visible: true,
-            }],
+            }]),
         },
     ])
 }
@@ -2745,10 +2745,10 @@ fn image_ops(
     });
     ops.push(Operation::SetFills {
         id,
-        fills: vec![Fill {
+        fills: keyed_by_position([Fill {
             brush: ondin_core::image_brush(image),
             visible: true,
-        }],
+        }]),
     });
     Transaction(ops)
 }
@@ -2880,10 +2880,10 @@ pub fn create_ellipse(
         },
         Operation::SetFills {
             id,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(fill),
                 visible: true,
-            }],
+            }]),
         },
     ])
 }
@@ -2992,10 +2992,10 @@ fn shape_at(
         },
         Operation::SetFills {
             id,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(fill),
                 visible: true,
-            }],
+            }]),
         },
     ])
 }
@@ -3028,11 +3028,11 @@ pub fn create_line(
         },
         Operation::SetStrokes {
             id,
-            strokes: vec![Stroke {
+            strokes: keyed_by_position([Stroke {
                 brush: Brush::Solid(color),
                 width,
                 ..Default::default()
-            }],
+            }]),
         },
     ])
 }
@@ -4239,11 +4239,11 @@ pub fn create_path(
         },
         Operation::SetStrokes {
             id,
-            strokes: vec![Stroke {
+            strokes: keyed_by_position([Stroke {
                 brush: Brush::Solid(color),
                 width,
                 ..Default::default()
-            }],
+            }]),
         },
     ])
 }
@@ -4407,7 +4407,7 @@ mod tests {
             visible: true,
         };
         let paint = |fills: Vec<Fill>| Paint {
-            fills,
+            fills: ondin_core::keyed_by_position(fills),
             strokes: Vec::new(),
         };
         assert_eq!(
@@ -8940,7 +8940,7 @@ mod tests {
             },
             Operation::SetStrokes {
                 id: rect,
-                strokes: vec![Stroke {
+                strokes: ondin_core::keyed_by_position([Stroke {
                     width: 2.0,
                     dashes: vec![0.0, 6.0],
                     dash_offset: 3.0,
@@ -8951,7 +8951,7 @@ mod tests {
                         left: 2.0,
                     },
                     ..Default::default()
-                }],
+                }]),
             },
         ]))
         .unwrap();
@@ -9210,10 +9210,10 @@ mod tests {
                 },
                 Operation::SetStrokes {
                     id: rect,
-                    strokes: vec![Stroke {
+                    strokes: ondin_core::keyed_by_position([Stroke {
                         width: 2.0,
                         ..Default::default()
-                    }],
+                    }]),
                 },
             ]))
             .expect("a frame may sit in a group");

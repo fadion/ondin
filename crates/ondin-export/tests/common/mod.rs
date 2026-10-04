@@ -26,7 +26,7 @@ use ondin_core::kurbo::{Affine, BezPath, Point, RoundedRectRadii, Size};
 use ondin_core::peniko::{Brush, Color};
 use ondin_core::{
     Document, Fill, IdSource, NodeId, NodeKind, Operation, Resolved, Stroke, StrokeAlign,
-    TextSizing, TextStyle, Transaction,
+    TextSizing, TextStyle, Transaction, keyed_by_position,
 };
 
 pub struct Fixture {
@@ -70,10 +70,10 @@ pub fn fixture() -> Fixture {
         },
         Operation::SetFills {
             id: artboard,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::from_rgba8(245, 245, 245, 255)),
                 visible: true,
-            }],
+            }]),
         },
         Operation::CreateNode {
             id: rect,
@@ -169,14 +169,14 @@ pub fn fixture() -> Fixture {
     doc.apply(&Transaction(vec![
         Operation::SetFills {
             id: rect,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::from_rgba8(60, 120, 220, 255)),
                 visible: true,
-            }],
+            }]),
         },
         Operation::SetStrokes {
             id: rect,
-            strokes: vec![Stroke {
+            strokes: keyed_by_position([Stroke {
                 brush: Brush::Solid(Color::BLACK),
                 width: 2.0,
                 join: ondin_core::kurbo::Join::Round,
@@ -188,7 +188,7 @@ pub fn fixture() -> Fixture {
                 dash_fit: false,
                 align: StrokeAlign::Center,
                 visible: true,
-            }],
+            }]),
         },
     ]))
     .expect("paint rect");
@@ -210,7 +210,7 @@ pub fn fixture_with_stroke_align(align: StrokeAlign) -> Fixture {
     f.doc
         .apply(&Transaction(vec![Operation::SetStrokes {
             id: f.rect,
-            strokes: vec![Stroke {
+            strokes: keyed_by_position([Stroke {
                 brush: Brush::Solid(Color::BLACK),
                 width: 3.0,
                 join: ondin_core::kurbo::Join::Round,
@@ -222,7 +222,7 @@ pub fn fixture_with_stroke_align(align: StrokeAlign) -> Fixture {
                 dash_fit: false,
                 align,
                 visible: true,
-            }],
+            }]),
         }]))
         .expect("align stroke");
     f.res = Resolved::rebuild(&f.doc);

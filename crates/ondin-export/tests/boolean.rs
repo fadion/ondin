@@ -20,6 +20,7 @@ use ondin_core::kurbo::{Affine, Rect, RoundedRectRadii, Size};
 use ondin_core::peniko::Color;
 use ondin_core::{
     BoolOp, Brush, Document, Fill, IdSource, NodeId, NodeKind, Operation, Resolved, Transaction,
+    keyed_by_position,
 };
 use ondin_render::{ImageStore, VelloCpuRenderer, Viewport};
 
@@ -170,14 +171,14 @@ fn an_aligned_stroke_on_a_boolean_exports_with_its_clip() {
     let (mut doc, _, b) = notched(BoolOp::Subtract);
     doc.apply(&Transaction(vec![Operation::SetStrokes {
         id: b,
-        strokes: vec![ondin_core::Stroke {
+        strokes: keyed_by_position([ondin_core::Stroke {
             brush: ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::from_rgba8(
                 255, 0, 0, 255,
             )),
             width: 4.0,
             align: ondin_core::StrokeAlign::Inside,
             ..Default::default()
-        }],
+        }]),
     }]))
     .expect("a stroke on the boolean");
     let res = Resolved::rebuild(&doc);
@@ -202,14 +203,14 @@ fn an_aligned_stroke_on_a_boolean_exports_with_its_clip() {
     // emitted unconditionally.
     doc.apply(&Transaction(vec![Operation::SetStrokes {
         id: b,
-        strokes: vec![ondin_core::Stroke {
+        strokes: keyed_by_position([ondin_core::Stroke {
             brush: ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::from_rgba8(
                 255, 0, 0, 255,
             )),
             width: 4.0,
             align: ondin_core::StrokeAlign::Center,
             ..Default::default()
-        }],
+        }]),
     }]))
     .expect("centre it");
     let res = Resolved::rebuild(&doc);
@@ -274,10 +275,10 @@ fn filled(
     .expect("build the boolean");
     doc.apply(&Transaction(vec![Operation::SetFills {
         id: b,
-        fills: vec![Fill {
+        fills: keyed_by_position([Fill {
             brush: Brush::Solid(Color::from_rgba8(220, 30, 40, 255)),
             visible: true,
-        }],
+        }]),
     }]))
     .expect("fill the result");
     let res = Resolved::rebuild(&doc);
@@ -390,12 +391,12 @@ fn stroked(align: ondin_core::StrokeAlign, width: f64) -> (Document, Resolved) {
     );
     doc.apply(&Transaction(vec![Operation::SetStrokes {
         id: b,
-        strokes: vec![ondin_core::Stroke {
+        strokes: keyed_by_position([ondin_core::Stroke {
             brush: ondin_core::peniko::Brush::Solid(Color::from_rgba8(30, 90, 220, 255)),
             width,
             align,
             ..Default::default()
-        }],
+        }]),
     }]))
     .expect("stroke the boolean");
     let res = Resolved::rebuild(&doc);

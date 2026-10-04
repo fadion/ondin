@@ -23,7 +23,7 @@ use crate::app::OndinApp;
 use crate::theme::{self, icon};
 use crate::ui::{self, Prefix, Scrub, value_field};
 use ondin_core::{
-    ExportBackground, ExportFormat, ExportScale, ExportSpec, NodeId, Operation, Transaction,
+    ExportBackground, ExportFormat, ExportScale, ExportSpec, Keyed, NodeId, Operation, Transaction,
 };
 use ondin_export::{PlanOptions, PlannedFile};
 
@@ -283,17 +283,52 @@ impl OndinApp {
     /// there is nothing about an export setting to preview. Reading the committed
     /// node is therefore not a shortcut but the only honest source.
     fn shared_exports(&self, subjects: &[NodeId]) -> Option<Vec<ExportSpec>> {
+        self.shared_exports_keyed(subjects)
+            .map(|l| ondin_core::item::values(&l))
+    }
+
+    /// [`Self::shared_exports`] with the first subject's item ids — the anchor a
+    /// row edit is retargeted from ([`Self::retarget_exports`]). Agreement is by
+    /// value (§15 D980): two layers given one spec separately carry different ids.
+    fn shared_exports_keyed(&self, subjects: &[NodeId]) -> Option<Vec<Keyed<ExportSpec>>> {
         let mut nodes = subjects.iter().filter_map(|id| self.session.doc.get(*id));
         let first = nodes.next()?.exports().to_vec();
         nodes
-            .all(|n| n.exports() == first.as_slice())
+            .all(|n| ondin_core::same_values(n.exports(), &first))
             .then_some(first)
+    }
+
+    /// A row **edit** of the list every subject shares, written onto each subject
+    /// with its own item ids (`ondin_core::item::retarget`, §15 D980), as one step.
+    fn retarget_exports(
+        &mut self,
+        subjects: &[NodeId],
+        anchor: &[Keyed<ExportSpec>],
+        edited: &[Keyed<ExportSpec>],
+    ) {
+        let session = &mut self.session;
+        let ops: Vec<Operation> = subjects
+            .iter()
+            .filter_map(|id| {
+                let own = session.doc.get(*id)?.exports();
+                let exports = ondin_core::item::retarget(anchor, own, edited, &mut session.ids);
+                (exports != own).then_some(Operation::SetExports { id: *id, exports })
+            })
+            .collect();
+        if !ops.is_empty() {
+            self.commit_edit(Transaction(ops));
+        }
     }
 
     /// Write one list to every subject, as a single undoable step.
     ///
     /// One transaction rather than one per layer: adding a 2× PNG to thirty icons
     /// is one act and has to undo as one.
+    ///
+    /// **A wholesale replacement** — the mixed row's override, a paste, a preset —
+    /// so each subject keeps its own item ids by position
+    /// (`ondin_core::item::rekey_by_position`); a row edit of a shared list goes
+    /// through [`Self::retarget_exports`] instead.
     fn write_exports(&mut self, subjects: &[NodeId], specs: &[ExportSpec]) {
         let tx = self.exports_tx(subjects, specs);
         if !tx.0.is_empty() {
@@ -307,13 +342,21 @@ impl OndinApp {
         }
     }
 
-    fn exports_tx(&self, subjects: &[NodeId], specs: &[ExportSpec]) -> Transaction {
+    fn exports_tx(&mut self, subjects: &[NodeId], specs: &[ExportSpec]) -> Transaction {
+        let session = &mut self.session;
         Transaction(
             subjects
                 .iter()
-                .map(|id| Operation::SetExports {
-                    id: *id,
-                    exports: specs.to_vec(),
+                .map(|id| {
+                    let own = session.doc.get(*id).map(|n| n.exports()).unwrap_or(&[]);
+                    Operation::SetExports {
+                        id: *id,
+                        exports: ondin_core::item::rekey_by_position(
+                            own,
+                            specs.iter().cloned(),
+                            &mut session.ids,
+                        ),
+                    }
                 })
                 .collect(),
         )
@@ -328,12 +371,18 @@ impl OndinApp {
     /// separately all the same, because "whatever each already has" is the honest
     /// spelling of an append and costs nothing when they match.
     fn append_exports(&mut self, subjects: &[NodeId], specs: &[ExportSpec]) {
+        let session = &mut self.session;
         let ops: Vec<Operation> = subjects
             .iter()
             .filter_map(|id| {
-                let node = self.session.doc.get(*id)?;
+                let node = session.doc.get(*id)?;
                 let mut next = node.exports().to_vec();
-                next.extend(specs.iter().cloned());
+                // An item added to an existing list is minted, per subject (§15 D980).
+                next.extend(
+                    specs
+                        .iter()
+                        .map(|s| Keyed::new(session.ids.mint_item(), s.clone())),
+                );
                 Some(Operation::SetExports {
                     id: *id,
                     exports: next,
@@ -361,7 +410,7 @@ impl OndinApp {
         if self.collapsed_panels.contains("Export") {
             self.export_menu = false;
         }
-        let shared = self.shared_exports(&subjects);
+        let shared = self.shared_exports_keyed(&subjects);
         // **Closed when the layer exports nothing, exactly as Fill and Stroke
         // are.** A card whose whole body is the words "No exports" is a row of
         // chrome saying nothing, and every layer in a fresh document is in that
@@ -416,7 +465,7 @@ impl OndinApp {
                 for (i, spec) in specs.iter().enumerate() {
                     let out = app.export_row(ui, i, spec, sizing, i + 1 == specs.len());
                     if let Some(edited) = out.edited {
-                        next[i] = edited;
+                        next[i].value = edited;
                         changed = true;
                     }
                     if out.remove {
@@ -436,7 +485,7 @@ impl OndinApp {
                 changed = true;
             }
             if changed {
-                app.write_exports(&subjects, &next);
+                app.retarget_exports(&subjects, &specs, &next);
             }
             app.export_buttons(ui, &subjects);
             // **Inside the card, not a card of its own.** A preview belongs to the
@@ -2677,10 +2726,10 @@ mod tests {
             });
             ops.push(ondin_core::Operation::SetFills {
                 id: frame,
-                fills: vec![ondin_core::Fill {
+                fills: ondin_core::keyed_by_position([ondin_core::Fill {
                     brush: ondin_core::Brush::Solid(ground),
                     visible: true,
-                }],
+                }]),
             });
             ops.push(ondin_core::Operation::CreateNode {
                 id: rect,
@@ -3265,7 +3314,10 @@ mod export_all_scope_tests {
         let mut app = crate::app::OndinApp::headless(&ctx);
         let parent = app.session.doc.root();
         let (group, inner) = (app.session.ids.mint(), app.session.ids.mint());
-        let png = vec![ExportSpec::new(ExportFormat::Png, ExportScale::Times(1.0))];
+        let png = ondin_core::keyed_by_position([ExportSpec::new(
+            ExportFormat::Png,
+            ExportScale::Times(1.0),
+        )]);
         assert!(app.session.commit(ondin_core::Transaction(vec![
             ondin_core::Operation::CreateNode {
                 id: group,
@@ -3343,7 +3395,10 @@ mod export_all_scope_tests {
         crate::theme::install(&ctx);
         let mut app = crate::app::OndinApp::headless(&ctx);
         let parent = app.session.doc.root();
-        let png = vec![ExportSpec::new(ExportFormat::Png, ExportScale::Times(1.0))];
+        let png = ondin_core::keyed_by_position([ExportSpec::new(
+            ExportFormat::Png,
+            ExportScale::Times(1.0),
+        )]);
         let ids: Vec<_> = (0..3).map(|_| app.session.ids.mint()).collect();
         let mut ops = Vec::new();
         for (i, id) in ids.iter().enumerate() {
@@ -3506,7 +3561,10 @@ mod export_all_scope_tests {
         let mut app = crate::app::OndinApp::headless(&ctx);
         let parent = app.session.doc.root();
         let (rect, empty) = (app.session.ids.mint(), app.session.ids.mint());
-        let png = vec![ExportSpec::new(ExportFormat::Png, ExportScale::Times(1.0))];
+        let png = ondin_core::keyed_by_position([ExportSpec::new(
+            ExportFormat::Png,
+            ExportScale::Times(1.0),
+        )]);
         assert!(app.session.commit(ondin_core::Transaction(vec![
             ondin_core::Operation::CreateNode {
                 id: rect,
@@ -3632,7 +3690,10 @@ mod export_all_scope_tests {
             },
             ondin_core::Operation::SetExports {
                 id: rect,
-                exports: vec![ExportSpec::new(ExportFormat::Png, ExportScale::Times(1.0))],
+                exports: ondin_core::keyed_by_position([ExportSpec::new(
+                    ExportFormat::Png,
+                    ExportScale::Times(1.0),
+                )]),
             },
         ])));
 

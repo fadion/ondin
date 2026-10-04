@@ -8,6 +8,7 @@ use crate::export::ExportSpec;
 use crate::guide::{Guide, GuideId};
 use crate::id::NodeId;
 use crate::image::{ImageEntry, ImageId};
+use crate::item::Keyed;
 use crate::node::{Fill, FillRule, MaskMode, Node, NodeKind, Pivot, Stroke, TextStyle};
 use kurbo::{Affine, BezPath, Point, RoundedRectRadii, Size};
 use peniko::Color;
@@ -203,11 +204,11 @@ pub enum Operation {
     },
     SetFills {
         id: NodeId,
-        fills: Vec<Fill>,
+        fills: Vec<Keyed<Fill>>,
     },
     SetStrokes {
         id: NodeId,
-        strokes: Vec<Stroke>,
+        strokes: Vec<Keyed<Stroke>>,
     },
     /// The whole effect stack (§5.3a), for `SetStrokes`' reason: a reorder, a
     /// removal, a visibility toggle and a tuned number are then one operation
@@ -215,7 +216,7 @@ pub enum Operation {
     /// made.
     SetEffects {
         id: NodeId,
-        effects: Vec<Effect>,
+        effects: Vec<Keyed<Effect>>,
     },
     /// The list of files this layer produces (§7). The whole list, not a
     /// per-entry edit, for `SetStrokes`' reason: a reorder, a removal and an
@@ -223,7 +224,7 @@ pub enum Operation {
     /// describe *which* change it made.
     SetExports {
         id: NodeId,
-        exports: Vec<ExportSpec>,
+        exports: Vec<Keyed<ExportSpec>>,
     },
     /// The columns and rows drawn over this layer (`crate::layout`). The whole
     /// list, for [`Operation::SetStrokes`]' reason.
@@ -233,7 +234,7 @@ pub enum Operation {
     /// never part of it.
     SetLayoutGrids {
         id: NodeId,
-        grids: Vec<crate::layout::LayoutGrid>,
+        grids: Vec<Keyed<crate::layout::LayoutGrid>>,
     },
     /// The layer's CSS insets and auto margins inside its frame
     /// (`crate::container`, §15 D871) — the whole set, for
@@ -1110,6 +1111,12 @@ pub enum OpError {
     /// [`crate::build::guides_of`].
     #[error("a guide may only be scoped to a live frame, not {0:?}")]
     BadGuideOwner(NodeId),
+    /// One of a node's five item lists repeats an item id (§15 D980). Item ids
+    /// are what match an instance's items to its main's, so two items sharing one
+    /// would both claim the same counterpart. Checked after the last op, as
+    /// [`Self::BadGuideOwner`] is.
+    #[error("node {0:?} has item id {1:?} twice in one list")]
+    DuplicateItemId(NodeId, crate::item::ItemId),
     /// A number that is `NaN` or infinite — in a node's geometry, in its
     /// transform, in its **pivot** (§15 D639), in an **effect** it carries — a
     /// shadow's offset, blur, spread and colour, a layer blur's radius, the four
@@ -1486,10 +1493,10 @@ mod changes_nothing_tests {
                 },
                 Operation::SetFills {
                     id: a,
-                    fills: vec![Fill {
+                    fills: crate::keyed_by_position([Fill {
                         brush: Brush::Solid(peniko::Color::BLACK),
                         visible: true,
-                    }],
+                    }]),
                 },
             ),
             (
@@ -1499,9 +1506,9 @@ mod changes_nothing_tests {
                 },
                 Operation::SetEffects {
                     id: a,
-                    effects: vec![Effect::new(crate::effect::EffectKind::LayerBlur {
-                        radius: 2.0,
-                    })],
+                    effects: crate::keyed_by_position([Effect::new(
+                        crate::effect::EffectKind::LayerBlur { radius: 2.0 },
+                    )]),
                 },
             ),
             (
@@ -1511,10 +1518,10 @@ mod changes_nothing_tests {
                 },
                 Operation::SetExports {
                     id: a,
-                    exports: vec![ExportSpec::new(
+                    exports: crate::keyed_by_position([ExportSpec::new(
                         crate::export::ExportFormat::Png,
                         crate::export::ExportScale::Times(1.0),
-                    )],
+                    )]),
                 },
             ),
             (
@@ -1524,9 +1531,9 @@ mod changes_nothing_tests {
                 },
                 Operation::SetLayoutGrids {
                     id: frame,
-                    grids: vec![crate::layout::LayoutGrid::new(
+                    grids: crate::keyed_by_position([crate::layout::LayoutGrid::new(
                         crate::layout::GridAxis::Columns,
-                    )],
+                    )]),
                 },
             ),
             (

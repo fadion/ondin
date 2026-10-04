@@ -1107,12 +1107,12 @@ mod tests {
             },
             Operation::SetFills {
                 id: ab,
-                fills: vec![Fill {
+                fills: ondin_core::keyed_by_position([Fill {
                     brush: ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::from_rgba8(
                         10, 20, 30, 255,
                     )),
                     visible: true,
-                }],
+                }]),
             },
         ]))
         .unwrap();
@@ -1183,12 +1183,12 @@ mod tests {
             },
             Operation::SetFills {
                 id: ab,
-                fills: vec![Fill {
+                fills: ondin_core::keyed_by_position([Fill {
                     brush: ondin_core::peniko::Brush::Solid(ondin_core::peniko::Color::from_rgba8(
                         10, 20, 30, 255,
                     )),
                     visible: true,
-                }],
+                }]),
             },
         ]))
         .unwrap();
@@ -1416,11 +1416,11 @@ mod tests {
             },
             Operation::SetExports {
                 id: rect,
-                exports: vec![
+                exports: ondin_core::keyed_by_position([
                     ExportSpec::new(Fmt::Png, ExportScale::Times(1.0)),
                     ExportSpec::new(Fmt::Png, ExportScale::Times(2.0)),
                     ExportSpec::new(Fmt::Svg, ExportScale::Times(1.0)),
-                ],
+                ]),
             },
         ]))
         .unwrap();
@@ -1561,7 +1561,10 @@ mod tests {
             },
             Operation::SetExports {
                 id: empty,
-                exports: vec![ExportSpec::new(Fmt::Png, ExportScale::Times(1.0))],
+                exports: ondin_core::keyed_by_position([ExportSpec::new(
+                    Fmt::Png,
+                    ExportScale::Times(1.0),
+                )]),
             },
         ]))
         .unwrap();

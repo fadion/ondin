@@ -8,7 +8,7 @@ use ondin_core::peniko::Color;
 use ondin_core::{
     Document, Effect, EffectKind, Fill, GeometryPatch, Guide, GuideAxis, GuideId, History,
     IdSource, ImageEntry, ImageFormat, ImageId, ImageSource, NodeId, NodeKind, OpError, Operation,
-    Stroke, StrokeAlign, TextSizing, TextStyle, Transaction, image_brush,
+    Stroke, StrokeAlign, TextSizing, TextStyle, Transaction, image_brush, keyed_by_position,
 };
 
 fn artboard() -> NodeKind {
@@ -466,11 +466,11 @@ fn set_fills_and_strokes_paintable_only() {
         Transaction(vec![
             Operation::SetFills {
                 id: r,
-                fills: vec![solid(200, 30, 30)],
+                fills: keyed_by_position([solid(200, 30, 30)]),
             },
             Operation::SetStrokes {
                 id: r,
-                strokes: vec![Stroke {
+                strokes: keyed_by_position([Stroke {
                     brush: Brush::Solid(Color::BLACK),
                     width: 1.0,
                     join: ondin_core::kurbo::Join::Miter,
@@ -482,7 +482,7 @@ fn set_fills_and_strokes_paintable_only() {
                     dash_fit: false,
                     align: StrokeAlign::Center,
                     visible: true,
-                }],
+                }]),
             },
         ]),
     )
@@ -494,7 +494,7 @@ fn set_fills_and_strokes_paintable_only() {
     let err = doc
         .apply(&Transaction(vec![Operation::SetFills {
             id: g,
-            fills: vec![solid(0, 0, 0)],
+            fills: keyed_by_position([solid(0, 0, 0)]),
         }]))
         .unwrap_err();
     assert!(matches!(err, OpError::WrongKindForOp));
@@ -529,13 +529,13 @@ fn set_fills_reaches_a_frame() {
         &mut doc,
         Transaction(vec![Operation::SetFills {
             id: ab,
-            fills: vec![ground.clone(), solid(0, 0, 255)],
+            fills: keyed_by_position([ground.clone(), solid(0, 0, 255)]),
         }]),
     )
     .unwrap();
     // Two, because "a frame holds one ground" is exactly the rule that went away.
     assert_eq!(doc.get(ab).unwrap().paint().fills.len(), 2);
-    assert_eq!(doc.get(ab).unwrap().paint().fills[0], ground);
+    assert_eq!(doc.get(ab).unwrap().paint().fills[0].value, ground);
 
     assert!(hist.undo(&mut doc).unwrap().is_some());
     assert!(doc.get(ab).unwrap().paint().fills.is_empty());
@@ -676,25 +676,27 @@ fn capture_remap_insert_duplicates_a_subtree_with_fresh_ids() {
             },
             Operation::SetEffects {
                 id: group,
-                effects: vec![Effect {
+                effects: keyed_by_position([Effect {
                     kind: EffectKind::DropShadow(ondin_core::Shadow {
                         blur: 4.0,
                         spread: 1.0,
                         ..ondin_core::Shadow::default()
                     }),
                     visible: true,
-                }],
+                }]),
             },
             Operation::SetExports {
                 id: group,
-                exports: vec![ondin_core::ExportSpec::new(
+                exports: keyed_by_position([ondin_core::ExportSpec::new(
                     ondin_core::ExportFormat::Png,
                     ondin_core::ExportScale::Times(2.0),
-                )],
+                )]),
             },
             Operation::SetLayoutGrids {
                 id: group,
-                grids: vec![ondin_core::LayoutGrid::new(ondin_core::GridAxis::Columns)],
+                grids: keyed_by_position([ondin_core::LayoutGrid::new(
+                    ondin_core::GridAxis::Columns,
+                )]),
             },
             Operation::SetVisible {
                 id: r1,
@@ -711,10 +713,10 @@ fn capture_remap_insert_duplicates_a_subtree_with_fresh_ids() {
             },
             Operation::SetFills {
                 id: r1,
-                fills: vec![Fill {
+                fills: keyed_by_position([Fill {
                     brush: Brush::Solid(Color::from_rgba8(10, 20, 30, 255)),
                     visible: true,
-                }],
+                }]),
             },
             Operation::SetClip { id: r2, clip: true },
             Operation::SetFillRule {
@@ -1180,7 +1182,7 @@ fn an_export_scale_that_cannot_be_a_size_is_refused() {
     let set = |doc: &mut Document, scale| {
         doc.apply(&Transaction(vec![Operation::SetExports {
             id: frame,
-            exports: vec![spec(scale)],
+            exports: keyed_by_position([spec(scale)]),
         }]))
     };
 
@@ -1217,7 +1219,7 @@ fn an_export_scale_that_cannot_be_a_size_is_refused() {
     // door into the model that exists solely to break it.
     doc.apply(&Transaction(vec![Operation::SetExports {
         id: frame,
-        exports: vec![spec(ExportScale::Width(512)), spec(ExportScale::Times(2.0))],
+        exports: keyed_by_position([spec(ExportScale::Width(512)), spec(ExportScale::Times(2.0))]),
     }]))
     .expect("two ordinary export rows");
     let bytes = ondin_core::io::save(&doc).expect("it saves");
@@ -1557,10 +1559,10 @@ fn deleting_the_last_layer_showing_an_image_leaves_the_table_alone() {
             },
             Operation::SetFills {
                 id: rect,
-                fills: vec![Fill {
+                fills: keyed_by_position([Fill {
                     brush: image_brush(id.clone()),
                     visible: true,
-                }],
+                }]),
             },
         ]),
     )
@@ -1762,7 +1764,7 @@ fn effects_go_on_a_container_but_never_on_the_root() {
     let g = ids.mint();
     create(&mut hist, &mut doc, g, ab, NodeKind::Group);
 
-    let stack = vec![Effect::new(EffectKind::LayerBlur { radius: 8.0 })];
+    let stack = keyed_by_position([Effect::new(EffectKind::LayerBlur { radius: 8.0 })]);
     doc.apply(&Transaction(vec![Operation::SetEffects {
         id: g,
         effects: stack.clone(),

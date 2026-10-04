@@ -362,7 +362,7 @@ pub fn run(
     fx: &FxPipelines,
     src: &Texture,
     slice: Slice,
-    effects: &[Effect],
+    effects: &[ondin_core::Keyed<Effect>],
     scale: (f64, f64),
 ) -> Option<Texture> {
     if !effects::any_ink(effects) {

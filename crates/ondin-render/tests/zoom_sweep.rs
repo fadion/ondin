@@ -25,7 +25,7 @@ use ondin_core::kurbo::{Affine, BezPath, Point, Rect, Size, Vec2};
 use ondin_core::peniko::Color;
 use ondin_core::{
     Brush, Document, Effect, EffectKind, Fill, IdSource, NodeId, NodeKind, Operation, Resolved,
-    Stroke, Transaction,
+    Stroke, Transaction, keyed_by_position,
 };
 use ondin_render::{ImageStore, RenderOverrides, VelloGpuRenderer, Viewport};
 
@@ -121,7 +121,7 @@ fn synthetic(paths: usize) -> (Document, Rect) {
         if !fx.is_empty() {
             ops.push(Operation::SetEffects {
                 id: *g,
-                effects: fx,
+                effects: keyed_by_position(fx),
             });
         }
     }
@@ -154,7 +154,7 @@ fn synthetic(paths: usize) -> (Document, Rect) {
         });
         ops.push(Operation::SetFills {
             id,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::from_rgba8(
                     rng.range(20.0, 240.0) as u8,
                     rng.range(20.0, 240.0) as u8,
@@ -162,16 +162,16 @@ fn synthetic(paths: usize) -> (Document, Rect) {
                     rng.range(120.0, 255.0) as u8,
                 )),
                 visible: true,
-            }],
+            }]),
         });
         if rng.next() < 0.25 {
             ops.push(Operation::SetStrokes {
                 id,
-                strokes: vec![Stroke {
+                strokes: keyed_by_position([Stroke {
                     brush: Brush::Solid(Color::from_rgba8(30, 30, 40, 255)),
                     width: rng.range(0.5, 4.0),
                     ..Default::default()
-                }],
+                }]),
             });
         }
     }

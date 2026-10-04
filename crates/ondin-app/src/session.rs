@@ -25,7 +25,7 @@ use ondin_core::peniko::Color;
 use ondin_core::text::TextLayout;
 use ondin_core::{
     Document, Fill, GuideId, History, IdSource, Node, NodeId, NodeKind, OpError, Operation, Paint,
-    Pivot, Resolved, Transaction, geometry,
+    Pivot, Resolved, Transaction, geometry, keyed_by_position,
 };
 use ondin_render::{NodeOverride, RenderOverrides};
 use std::path::PathBuf;
@@ -417,7 +417,7 @@ impl<'a> DisplayNode<'a> {
     /// a live preview or it is the unscrubbable field §15 D245 is about — which is
     /// the same reason `RenderOverrides` carries `SetEffects` at all rather than
     /// filing it with the operations that change nothing drawn.
-    pub fn effects(&self) -> &'a [ondin_core::Effect] {
+    pub fn effects(&self) -> &'a [ondin_core::Keyed<ondin_core::Effect>] {
         self.over
             .and_then(|o| o.effects.as_deref())
             .unwrap_or_else(|| self.node.effects())
@@ -1664,26 +1664,27 @@ fn starter_document() -> (Document, IdSource) {
         // **The frame's white ground, and it is a fill now like the two below it**
         // (§15 D400) — it used to ride in on `CreateNode` as a field of the kind,
         // which is why it was the one paint in this document not written here.
+        // New nodes, so lists built whole (`ondin_core::keyed_by_position`).
         Operation::SetFills {
             id: artboard,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::from_rgba8(255, 255, 255, 255)),
                 visible: true,
-            }],
+            }]),
         },
         Operation::SetFills {
             id: rect,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::from_rgba8(70, 130, 220, 255)),
                 visible: true,
-            }],
+            }]),
         },
         Operation::SetFills {
             id: ellipse,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: Brush::Solid(Color::from_rgba8(235, 110, 90, 255)),
                 visible: true,
-            }],
+            }]),
         },
     ]))
     .expect("paint starter shapes");

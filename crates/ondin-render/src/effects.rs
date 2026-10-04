@@ -31,6 +31,7 @@
 //! tool does; matching Figma here matters more than matching physics, and the
 //! three writers agreeing matters more than either.
 
+use ondin_core::Keyed;
 use ondin_core::effect::{Effect, EffectKind, Filters};
 
 /// A premultiplied sRGB RGBA8 image the passes work over.
@@ -547,7 +548,7 @@ pub fn device_sigma(radius: f64, scale_x: f64, scale_y: f64) -> (f32, f32) {
 /// inner shadow following a drop shadow take its silhouette from the layer plus
 /// the shadow — and the two writers would then disagree about a file, which is
 /// the failure this whole module is arranged to prevent.
-pub fn run(s: &mut Surface<'_>, effects: &[Effect], scale: (f64, f64)) {
+pub fn run(s: &mut Surface<'_>, effects: &[Keyed<Effect>], scale: (f64, f64)) {
     for e in effects.iter().filter(|e| e.visible) {
         match &e.kind {
             EffectKind::Filters(f) if !f.is_neutral() => apply_matrix(s, &filter_matrix(f)),
@@ -863,7 +864,7 @@ fn over(dst: &mut [u8], src: &[u8]) {
 /// sitting on its neutral values, has to answer `false` here — or every layer
 /// that has ever had an effect added and turned off pays for an offscreen buffer
 /// and a composite on every frame, forever.
-pub fn any_ink(effects: &[Effect]) -> bool {
+pub fn any_ink(effects: &[Keyed<Effect>]) -> bool {
     effects.iter().any(|e| {
         e.visible
             && match &e.kind {
@@ -880,6 +881,7 @@ pub fn any_ink(effects: &[Effect]) -> bool {
 mod tests {
     use super::*;
     use ondin_core::effect::Shadow;
+    use ondin_core::keyed_by_position;
     use ondin_core::peniko::Color;
 
     fn solid(w: usize, h: usize, rgba: [u8; 4]) -> Vec<u8> {
@@ -1076,7 +1078,11 @@ mod tests {
                 offset: ondin_core::kurbo::Vec2::ZERO,
                 color: Color::BLACK,
             }))];
-            run(&mut Surface::new(&mut px, w, h), &effects, scale);
+            run(
+                &mut Surface::new(&mut px, w, h),
+                &keyed_by_position(effects),
+                scale,
+            );
             let a = |x: usize, y: usize| px[(y * w + x) * 4 + 3];
             let right = (hi..w).take_while(|&x| a(x, (lo + hi) / 2) > 0).count();
             let down = (hi..h).take_while(|&y| a((lo + hi) / 2, y) > 0).count();
@@ -1134,6 +1140,7 @@ mod tests {
                 offset: ondin_core::kurbo::Vec2::ZERO,
                 color: Color::BLACK,
             }))];
+            let effects = keyed_by_position(effects);
             let started = std::time::Instant::now();
             run(&mut Surface::new(&mut px, w, h), &effects, (1.0, 1.0));
             (px, started.elapsed())
@@ -1205,10 +1212,15 @@ mod tests {
                 vec![Effect::new(EffectKind::DropShadow(clear))],
             ),
         ] {
-            assert!(!any_ink(&stack), "{label} must not cost a buffer");
+            assert!(
+                !any_ink(&keyed_by_position(stack)),
+                "{label} must not cost a buffer"
+            );
         }
         assert!(
-            any_ink(&[Effect::new(EffectKind::LayerBlur { radius: 1.0 })]),
+            any_ink(&keyed_by_position([Effect::new(EffectKind::LayerBlur {
+                radius: 1.0
+            })])),
             "and a real one must"
         );
     }
@@ -1400,6 +1412,7 @@ mod tests {
             blur: 2e30,
             ..Shadow::default()
         }))];
+        let effects = keyed_by_position(effects);
         let t = std::time::Instant::now();
         run(&mut Surface::new(&mut px, w, h), &effects, (1.0, 1.0));
         let took = t.elapsed();

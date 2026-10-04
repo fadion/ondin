@@ -32,6 +32,7 @@ pub mod history;
 pub mod id;
 pub mod image;
 pub mod io;
+pub mod item;
 pub mod layout;
 pub mod meta;
 pub mod naming;
@@ -51,9 +52,10 @@ pub use peniko;
 pub use boolean::evaluate as evaluate_boolean;
 pub use build::{
     ColorUse, GradientUse, PaintAt, PaintShown, PaintTarget, Placement, any_paint_in, any_rect_in,
-    boolean, can_parent, colors_in, edit_fills_all, edit_strokes_all, gradients_in, group,
-    insert_subtrees, local_for_world, move_by_world, outermost, paint_at, paint_targets,
-    place_at_world, recolor, repaint, reparent_preserving_world, set_boolean_op,
+    boolean, can_parent, colors_in, edit_fill_at_all, edit_fills_all, edit_stroke_at_all,
+    edit_strokes_all, gradients_in, group, insert_subtrees, local_for_world, move_by_world,
+    outermost, paint_at, paint_targets, place_at_world, recolor, repaint,
+    reparent_preserving_world, retarget_fills_all, retarget_strokes_all, set_boolean_op,
     set_corner_radius_all, set_fills_all, set_opacity_all, set_strokes_all, shared_corner_radius,
     shared_fills, shared_over_fills, shared_over_strokes, shared_strokes, subtree_nodes, ungroup,
     valid_opacity,
@@ -76,6 +78,7 @@ pub use image::{
     TONE_STEPS, crop_clamped, crop_panned, crop_reframed, crop_scaled, image_brush,
     missing_placeholder, transfer, whole_crop,
 };
+pub use item::{ItemId, Keyed, keyed_by_position, same_values};
 pub use layout::{
     DEFAULT_GRID_COLOR, GRID_COLORS, GridAlign, GridAxis, LayoutGrid, next_grid_color,
     tracks as grid_tracks,

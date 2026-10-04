@@ -26,7 +26,7 @@ use ondin_core::kurbo::{Affine, RoundedRectRadii, Size};
 use ondin_core::peniko::Color;
 use ondin_core::{
     Brush, Document, Fill, GeometryPatch, IdSource, Insets, LengthPct, NodeId, NodeKind, Operation,
-    Resolved, TextSizing, TextStyle, Transaction,
+    Resolved, TextSizing, TextStyle, Transaction, keyed_by_position,
 };
 use ondin_render::Viewport;
 
@@ -56,10 +56,10 @@ fn pinned() -> (Document, Vec<NodeId>) {
         if !text {
             ops.push(Operation::SetFills {
                 id,
-                fills: vec![Fill {
+                fills: keyed_by_position([Fill {
                     brush: Brush::Solid(Color::from_rgba8(colour, 90, 200 - colour / 2, 255)),
                     visible: true,
-                }],
+                }]),
             });
         }
         doc.apply(&Transaction(ops)).unwrap();

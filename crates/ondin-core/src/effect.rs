@@ -34,6 +34,7 @@
 //! than a ride-along on this one. Both backends' `push_layer` already takes a
 //! blend mode and SVG has `feBlend`, so the cost when it comes will be small.
 
+use crate::item::Keyed;
 use kurbo::{Insets, Vec2};
 use peniko::Color;
 use serde::{Deserialize, Serialize};
@@ -155,7 +156,7 @@ pub const MAX_SHADOW_BLOCK: u32 = 4096;
 /// behind artwork that stays sharp — so a stack of nothing but shadows has a
 /// crisp layer in it, and treating its shadow's deviation as the layer's would
 /// license a downscale that visibly softens the drawing.
-pub fn layer_blur_deviation(effects: &[Effect]) -> f64 {
+pub fn layer_blur_deviation(effects: &[Keyed<Effect>]) -> f64 {
     effects
         .iter()
         .filter(|e| e.visible)
@@ -193,7 +194,7 @@ pub fn layer_blur_deviation(effects: &[Effect]) -> f64 {
 /// enough to hide it, and it saves a quarter of a convolution that was never the
 /// problem. The whole benefit is in the large factors, so the small ones are
 /// declined and the ordinary zoom a designer works at is left exactly alone.
-pub fn buffer_downscale(effects: &[Effect], scale: (f64, f64)) -> f64 {
+pub fn buffer_downscale(effects: &[Keyed<Effect>], scale: (f64, f64)) -> f64 {
     let sigma = layer_blur_deviation(effects) * scale.0.abs().max(scale.1.abs());
     let k = sigma / BLUR_SIGMA_BUDGET;
     if k < 2.0 { 1.0 } else { k }
@@ -915,7 +916,7 @@ pub fn buffer_box_within(
 /// same rule the old comment states, applied to the quantities §6.4 actually
 /// produces. §15 **D334**'s *"union, never a sum"* is right about two shadows and
 /// is what this narrows.
-pub fn stack_escape(effects: &[Effect]) -> Insets {
+pub fn stack_escape(effects: &[Keyed<Effect>]) -> Insets {
     // Stage 1: the visible layer blurs convolve. `deviation` is what `reach`
     // multiplies by `BLUR_CUTOFF`, so the composition is done in deviations and
     // turned back into a reach once — squaring a reach and rooting it would be
@@ -1030,10 +1031,10 @@ mod tests {
     /// blur of the same composed deviation fades to 0 with 7.5 units to spare.
     #[test]
     fn two_layer_blurs_convolve_rather_than_summing_or_taking_the_larger() {
-        let stack = vec![
+        let stack = crate::keyed_by_position([
             Effect::new(EffectKind::LayerBlur { radius: 12.0 }),
             Effect::new(EffectKind::LayerBlur { radius: 20.0 / 3.0 }),
-        ];
+        ]);
         assert_eq!(reach(20.0 / 3.0), 10.0, "the fixture is the size it says");
         let want = (6.0f64.powi(2) + (10.0f64 / 3.0).powi(2)).sqrt() * BLUR_CUTOFF;
         let got = stack_escape(&stack);
@@ -1072,7 +1073,7 @@ mod tests {
     /// whatever stage 1 does.
     #[test]
     fn a_drop_shadow_over_a_layer_blur_reaches_past_both() {
-        let stack = vec![
+        let stack = crate::keyed_by_position([
             Effect::new(EffectKind::LayerBlur { radius: 12.0 }),
             Effect::new(EffectKind::DropShadow(Shadow {
                 offset: Vec2::new(0.0, 40.0),
@@ -1080,7 +1081,7 @@ mod tests {
                 spread: 0.0,
                 color: Color::BLACK,
             })),
-        ];
+        ]);
         let i = stack_escape(&stack);
         assert!(
             (i.y1 - 64.0).abs() < 1e-9,
@@ -1097,7 +1098,7 @@ mod tests {
         // **The control.** An inner shadow escapes nothing, so stage 1 is the
         // whole answer however loud it is — a fold that grew every effect by
         // stage 1 rather than the shadows alone would fail here.
-        let inner = vec![
+        let inner = crate::keyed_by_position([
             Effect::new(EffectKind::LayerBlur { radius: 12.0 }),
             Effect::new(EffectKind::InnerShadow(Shadow {
                 offset: Vec2::new(0.0, 40.0),
@@ -1105,7 +1106,7 @@ mod tests {
                 spread: 0.0,
                 color: Color::BLACK,
             })),
-        ];
+        ]);
         assert_eq!(
             stack_escape(&inner),
             Insets::uniform(18.0),
@@ -1346,7 +1347,7 @@ mod tests {
     /// in *buffer* pixels lands on the budget however far in the view is zoomed.
     #[test]
     fn a_blurs_kernel_stops_growing_once_the_buffer_starts_shrinking() {
-        let fx = vec![Effect::new(EffectKind::LayerBlur { radius: 55.5 })];
+        let fx = crate::keyed_by_position([Effect::new(EffectKind::LayerBlur { radius: 55.5 })]);
         // 1x: deviation 27.75, under the budget's deadband, so nothing changes.
         assert_eq!(buffer_downscale(&fx, (1.0, 1.0)), 1.0);
         for zoom in [4.0, 8.0, 16.0, 64.0, 1000.0] {
@@ -1366,7 +1367,7 @@ mod tests {
     /// byte-identical at 4x and 8x and differed at 1x, where the factor was 1.157.
     #[test]
     fn a_shallow_downscale_is_declined_rather_than_taken() {
-        let fx = vec![Effect::new(EffectKind::LayerBlur { radius: 55.5 })];
+        let fx = crate::keyed_by_position([Effect::new(EffectKind::LayerBlur { radius: 55.5 })]);
         // Just under 2x, and just over.
         assert_eq!(buffer_downscale(&fx, (1.7, 1.7)), 1.0);
         assert!(buffer_downscale(&fx, (1.8, 1.8)) > 2.0);
@@ -1389,7 +1390,7 @@ mod tests {
             EffectKind::DropShadow(huge.clone()),
             EffectKind::InnerShadow(huge.clone()),
         ] {
-            let fx = vec![Effect::new(kind)];
+            let fx = crate::keyed_by_position([Effect::new(kind)]);
             assert_eq!(
                 buffer_downscale(&fx, (8.0, 8.0)),
                 1.0,
@@ -1398,10 +1399,10 @@ mod tests {
             assert_eq!(layer_blur_deviation(&fx), 0.0);
         }
         // And a stack holding both is bounded by the *layer* blur, not the shadow's.
-        let fx = vec![
+        let fx = crate::keyed_by_position([
             Effect::new(EffectKind::LayerBlur { radius: 55.5 }),
             Effect::new(EffectKind::DropShadow(huge)),
-        ];
+        ]);
         assert_eq!(layer_blur_deviation(&fx), deviation(55.5));
     }
 
@@ -1410,10 +1411,10 @@ mod tests {
     /// it cannot be the licence for losing resolution.
     #[test]
     fn a_hidden_blur_does_not_buy_a_downscale() {
-        let fx = vec![Effect {
+        let fx = crate::keyed_by_position([Effect {
             kind: EffectKind::LayerBlur { radius: 55.5 },
             visible: false,
-        }];
+        }]);
         assert_eq!(buffer_downscale(&fx, (8.0, 8.0)), 1.0);
     }
 

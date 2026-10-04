@@ -24,7 +24,9 @@
 use ondin_core::Brush;
 use ondin_core::kurbo::{Rect, RoundedRectRadii, Size};
 use ondin_core::peniko::Color;
-use ondin_core::{Document, Fill, IdSource, NodeKind, Operation, Resolved, Transaction};
+use ondin_core::{
+    Document, Fill, IdSource, NodeKind, Operation, Resolved, Transaction, keyed_by_position,
+};
 use ondin_render::{RenderOverrides, VelloGpuRenderer, Viewport};
 
 #[test]
@@ -75,10 +77,10 @@ fn gpu_renders_fixture_on_device() {
     .unwrap();
     doc.apply(&Transaction(vec![Operation::SetFills {
         id: rect,
-        fills: vec![Fill {
+        fills: keyed_by_position([Fill {
             brush: Brush::Solid(Color::from_rgba8(220, 30, 40, 255)),
             visible: true,
-        }],
+        }]),
     }]))
     .unwrap();
     let res = Resolved::rebuild(&doc);

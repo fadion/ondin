@@ -5,9 +5,11 @@
 //! which parent a node hangs off, and since transforms are local (invariant 6)
 //! that silently teleports the node unless the builder re-projects it.
 
+use ondin_core::item::values;
 use ondin_core::kurbo::{Affine, Point, RoundedRectRadii, Size, Vec2};
 use ondin_core::{
-    Document, History, IdSource, NodeId, NodeKind, OpError, Operation, Resolved, Transaction, build,
+    Document, History, IdSource, NodeId, NodeKind, OpError, Operation, Resolved, Transaction,
+    build, keyed_by_position,
 };
 
 fn rect(w: f64, h: f64) -> NodeKind {
@@ -2008,7 +2010,7 @@ fn a_boolean_wraps_its_operands_and_takes_the_bottom_ones_paint() {
     };
     f.commit(Transaction(vec![Operation::SetFills {
         id: back,
-        fills: vec![blue.clone()],
+        fills: keyed_by_position([blue.clone()]),
     }]));
     let before = (f.world_origin(back), f.world_origin(front));
 
@@ -2031,7 +2033,7 @@ fn a_boolean_wraps_its_operands_and_takes_the_bottom_ones_paint() {
     approx(f.world_origin(back), before.0, "the bottom operand");
     approx(f.world_origin(front), before.1, "the top operand");
     assert_eq!(
-        f.doc.get(b).unwrap().paint().fills,
+        values(&f.doc.get(b).unwrap().paint().fills),
         vec![blue],
         "the result took the bottom operand's fill"
     );
@@ -2234,7 +2236,7 @@ fn flattening_a_boolean_keeps_its_outline_and_discards_the_operands() {
     };
     f.commit(Transaction(vec![Operation::SetFills {
         id: a,
-        fills: vec![red.clone()],
+        fills: keyed_by_position([red.clone()]),
     }]));
 
     let (tx, node) = build::boolean(
@@ -2279,7 +2281,7 @@ fn flattening_a_boolean_keeps_its_outline_and_discards_the_operands() {
     );
     approx(f.world_origin(flat), world_before, "and in the same place");
     assert_eq!(
-        f.doc.get(flat).unwrap().paint().fills,
+        values(&f.doc.get(flat).unwrap().paint().fills),
         vec![red],
         "with the paint that was governing the result"
     );
@@ -2586,7 +2588,7 @@ fn outlining_a_rect_keeps_its_shape_its_paint_and_its_place() {
     f.commit(Transaction(vec![
         Operation::SetFills {
             id: r,
-            fills: vec![red.clone()],
+            fills: keyed_by_position([red.clone()]),
         },
         Operation::SetOpacity {
             id: r,
@@ -2603,12 +2605,12 @@ fn outlining_a_rect_keeps_its_shape_its_paint_and_its_place() {
         Operation::SetMask { id: r, mask: true },
         Operation::SetEffects {
             id: r,
-            effects: vec![ondin_core::Effect::new(ondin_core::EffectKind::DropShadow(
-                ondin_core::Shadow {
+            effects: keyed_by_position([ondin_core::Effect::new(
+                ondin_core::EffectKind::DropShadow(ondin_core::Shadow {
                     blur: 14.0,
                     ..ondin_core::Shadow::default()
-                },
-            ))],
+                }),
+            )]),
         },
     ]));
     // The fixture: a *rounded* rect, so `local_path` has something to bake and the
@@ -2649,7 +2651,7 @@ fn outlining_a_rect_keeps_its_shape_its_paint_and_its_place() {
         "the radii are in the geometry now: {corner_radii:?}"
     );
     approx(f.world_origin(made), world_before, "in the same place");
-    assert_eq!(node.paint().fills, vec![red], "with its paint");
+    assert_eq!(values(&node.paint().fills), vec![red], "with its paint");
     assert_eq!(node.name(), "Badge", "and its name");
     assert_eq!(node.opacity(), 0.5, "and its opacity");
     assert_eq!(
@@ -3230,7 +3232,7 @@ fn the_key_also_decides_the_paint_the_boolean_inherits() {
     };
     f.commit(Transaction(vec![Operation::SetFills {
         id: top,
-        fills: vec![red.clone()],
+        fills: keyed_by_position([red.clone()]),
     }]));
 
     let (tx, node) = build::boolean(
@@ -3244,7 +3246,7 @@ fn the_key_also_decides_the_paint_the_boolean_inherits() {
     .unwrap();
     f.commit(tx);
     assert_eq!(
-        f.doc.get(node).unwrap().paint().fills,
+        values(&f.doc.get(node).unwrap().paint().fills),
         vec![red],
         "the key is the base, so its paint is the one carried up"
     );
@@ -3595,10 +3597,10 @@ fn a_copied_picture_arrives_in_a_document_that_never_had_it() {
         },
         Operation::SetFills {
             id: shape,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: image_brush(key.clone()),
                 visible: true,
-            }],
+            }]),
         },
     ]));
     assert!(from.doc.has_image(&key), "the fixture is in the state");
@@ -3839,10 +3841,10 @@ fn make_it_a_picture(f: &mut Fixture, id: NodeId) {
         },
         Operation::SetFills {
             id,
-            fills: vec![Fill {
+            fills: keyed_by_position([Fill {
                 brush: image_brush(key),
                 visible: true,
-            }],
+            }]),
         },
     ]));
 }

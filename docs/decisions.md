@@ -1243,8 +1243,8 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D865** — **The Type panel's two chords and its line-height field read their `Bounds`, where they had spelled the same numbers from the constants.** Not a finding: noticed closing **D861**. §15 **D817**'s *a held key stops where the field stops* was honoured by value — the tracking arm bounded its em step by `MIN_TRACKING_PCT / 100.0 ..= MAX_TRACKING_PCT / 100.0` and its px step by `px_range_for` over the same constants, both by hand, beside a field reading `Bounds::TRACKING` — D861's shape one function over. Line height had no `Bounds` at all, and the `Leading` arm (§15 **D840**) and `type_line_height_field` each spelled `MIN_LINE_HEIGHT_PCT..=MAX_LINE_HEIGHT_PCT`. `Bounds::LINE_HEIGHT` (the field's existing `0..=1000%`) and `Bounds::em()`, the `%` range over a hundred — the scale a `Length::Em` holds; both arms and the field read their faces off a `Bounds` now. *(Fixed and tested 2026-09-23; **Resolved** — no range moved, `stepped_into` untouched. ⚠️ **`em()` is the chords' face and not the field's**: the field shows an em ×100 and bounds on `.pct`, and handing it `.em()` would cap line height at 10%. `both_ends_of_every_length_field_bound_the_same_quantity` derives `LINE_HEIGHT` with the rest and asserts every `em()` is its `%` face ÷100; flip run, `em()` undivided, red there at `TRACKING` — predicted — and in two tracking-chord tests. ⚠️ **No leading-chord test failed**: the one there was pinned line height's floor, 0 in either scale — **closed the same day**, that test now driving both ceilings and red under the same flip at `Em(21.0)`. D425's scope sentence amended and the test's own copy corrected; D817 and D861 carry a line; `architecture.md` unchanged; nothing struck from `roadmap.md`)*
 - **D866** — **The deep-resample GPU test bounds a ratio to the ordinary path, not a wall clock, after one unexplained 54 ms on a healthy tree — which is D593's shape, taken with far more margin, and still a clock.** `fx_gpu.rs · a_deeply_resampled_shadow_costs_the_buffer_and_not_the_block` is **D743**'s test of the `coarsen` loop bound (D403's promise) and asserted *best of three under 50 ms* against 0.45 ms healthy and 116.3 ms broken. The release bar for v0.2.0 read **54.4 ms** with the code under test unchanged since v0.1.0, then passed 21 runs running; the reading was never recreated and its cause is unknown. The degenerate shadow is timed now **interleaved** with a control — `k = 3`, blur 120, the shadow `a_resampled_drop_shadow_matches_the_reference` checks — one warm-up each, best of five each, and `deep / ordinary < 20` is asserted: **1.73–1.85×** healthy, **1.29–2.01×** with two other GPU suites looping in a second process, **176–208×** with the loop unbounded. *(Changed and measured 2026-09-23; **Keep** — test-only. 🚨 **Not a way out of D854**: D593's test was a ratio of two clocks too, chosen so as not to measure the machine, and failed 13 in 60 under load after two re-samplings; what differs is margin — about ten times each side here, against D829's 46% and 31% — and a load that lands on one arm alone still counterfeits a regression, which the interleave is meant to prevent and was not shown to against the unknown cause. **Counting**, CLAUDE.md's first question of a timing flake, needs an atomic counter compiled into the shader and was judged too invasive for a test. *Revisit if it goes red on a healthy tree* — with the count, not more samples or a wider bound. Flip run with `fx.wgsl` reverted and its diff against `HEAD` confirmed empty. D743 amended in body and index; `architecture.md` unchanged; nothing struck from `roadmap.md`)*
 - **D867** — **Container layout is being built, as CSS flexbox and CSS grid under CSS's names, on taffy — and §1's deferral of it is reversed.** "v1" in these documents names the phase in which the basic editing tools were finished, not a release tag; that phase is over, so layout starts and components follow it. **Where CSS and design-tool convention disagree, CSS wins** — transforms do not affect layout, child order is flow and paint order, text wraps at the available width, specified and used values are kept apart. **Not §13's constraint engine**: a fixed algorithm re-run from specified values. taffy 0.14.0, MIT, f32, measured on a spike: 1,000 rects in a wrapping flex frame **0.558 ms**, a 900-cell grid **1.087 ms**, 100 text cards **29.2 ms** full and **0.302 ms** after one text edit — shaping, not taffy, is the bill. *(Decided 2026-09-23 by the maintainer; **step 1 built 2026-09-24** — core's half, then render, export and the app the same day (D868), cited from `resolve.rs`; **step 2** the same day (D874), model half then inspector card; **step 3** the same day (D875–D877, its inspector cards D878–D883), steps 4–5 not built. It read *not built — no line of `crates/` changed and no code cites it* until then. ⚠️ **No verdict word existed for a decision taken ahead of its code**; *Decided; not built* is proposed for D867–D872, to become *Built and tested* per step. Build order recorded; its three open questions — mirror tree against trait implementation, how taffy is declared, the module's name — answered by D875's build: low-level traits and no mirror, `=0.14.0` with `std` + `flexbox` only, `container.rs`. `architecture.md` §5.3c written, §1 and §13 amended; `roadmap.md` §0 loses auto layout, constraints and components and gains *Next · Container layout*; `context-menus.md` §7 corrected. The chrome spells CSS's names in sentence case since D884; the model and the file keep CSS's)*
-- **D868** — **What the user sets and what is drawn become two numbers, and the drawn one is never saved.** Amends §5.6's *"one number in one place"* into a specified number and a used one; the used boxes are derived in `Resolved` from specified properties plus the registered fonts, for three reasons — CSS keeps the two apart, components will derive instances on the same pipeline, and a font arriving just re-resolves. 🚨 **The cost is the risk**: rendering, export, hit-testing, snapping and the inspector all read `Node::transform` and the kind's size when this was decided, and `RenderOverrides` cannot express a reflow. ⚠️ **It breaks two arguments true at `HEAD`**: D590's text pass skipping the subtree expansion, and D778's decline of a seventh map on `Resolved` — whose grounds do not transfer and whose cost does. *(Decided 2026-09-23 by the maintainer; **D867's step 1 built and tested 2026-09-24**, step 2's model half the same day (**D874**), which 🚨 **reverses the editing rule below** — tools compute from used geometry and `build::keep_insets` converts — and pays both step-1 debts, the cross-crate one for render and export only. Core's half: a sparse seventh map `used` on `Resolved`, read through `used_local`/`used_kind` — *draw, measure and hit-test from these; edit from the node* — behind an identity pass proved by byte-identical goldens and, because that proof cannot see a consumer still reading the document, by a `cfg(test)` probe; `update` recomputes it over `affected` and re-shapes text whose used kind changed, the one door past D590, while ⚠️ siblings were not dirtied until step 3 collected `affected` from each dirty node's `chain_root` (D875); the guard compares it, five of seven maps — over random layout inputs, `used_frame` included, since D898; `geometry::world_bounds_of` deleted. Then render, export and the app, the same day: `scene::paint_node` and `mask_geometry`, `RenderOverrides::transform_of` and a new `drawn_kind` fall back to used geometry while 🚨 `current_kind` stays on the document, because it is what a preview op is *applied to*; the SVG writer through `used_local_of`/`used_kind_of`; the snapshot's `local_transform` and `geometry` report **used** values — ⚠️ the session's default, not ruled on by the maintainer; `DisplayNode::kind` and every `preview_*` helper fall back to used, `committed_node` deliberately not. 🚨 **Owed to step 2**: the edit sites that mix a used world with a stored local (`rotate_node` and five more), each owed a decision; and the only non-identity routing test is core's, so nothing outside core proves a used geometry arrives — step 2's right-pinned-child fixture is to. 🚨 A doc-comment theft on `resolve_subtree` found by reading and repaired. Open: how previews reflow, what a resize writes, the rotation origin, `TextSizing`'s mapping, and — unstated by the design — what an in-flow item's stored translation means; the first, third and fourth answered **for absolute insets only** by D874, and all five **for flex** by D875 — the rotation origin and the stored translation as the session's reading in code, not ruled — ruled since, 2026-09-27 (D896). §5.6 carries a pointer; §5.3c, §5.9 and §5.10 amended 2026-09-24, and §5.3c, §5.9, §6.2, §7, §9.3 and §9.4's booleans again for the second half, and again for D874)*
-- **D869** — **A group with `display` has a box; a group without one is exactly today's group.** Setting `display` makes a group's bounds its layout box, padding included, and a resize writes `width`/`height` and reflows instead of `tools::resize_group`'s scale. **Paint and clip stay frame-only**: pass-through paint and scale-on-resize are design-tool behaviours with no CSS equivalent, and merging the kinds would lose them. `Boolean` ignores `display`; the root is no container; a mask is out of flow. *(Decided 2026-09-23 by the maintainer; **built in core and the preview 2026-09-24** (D875), committed 2026-09-24 (session 34) — a group's box, bounds and `local_box`; a resize writes the box since the same day (D875's amendment); the Container card sets `display` since the same day too (D878). *Revisit when components land.* ⚠️ Four passages argue from *"a group has no box"* and become conditional on `display` — listed in the body, not decided by it. §5.6's group-resize bullet carries a pointer)*
+- **D868** — **What the user sets and what is drawn become two numbers, and the drawn one is never saved.** Amends §5.6's *"one number in one place"* into a specified number and a used one; the used boxes are derived in `Resolved` from specified properties plus the registered fonts, for three reasons — CSS keeps the two apart, components will derive instances on the same pipeline (🚨 *reinterpreted 2026-10-04 by D978: instances are stored linked copies, and what they share with layout is the commit-time write-back*), and a font arriving just re-resolves. 🚨 **The cost is the risk**: rendering, export, hit-testing, snapping and the inspector all read `Node::transform` and the kind's size when this was decided, and `RenderOverrides` cannot express a reflow. ⚠️ **It breaks two arguments true at `HEAD`**: D590's text pass skipping the subtree expansion, and D778's decline of a seventh map on `Resolved` — whose grounds do not transfer and whose cost does. *(Decided 2026-09-23 by the maintainer; **D867's step 1 built and tested 2026-09-24**, step 2's model half the same day (**D874**), which 🚨 **reverses the editing rule below** — tools compute from used geometry and `build::keep_insets` converts — and pays both step-1 debts, the cross-crate one for render and export only. Core's half: a sparse seventh map `used` on `Resolved`, read through `used_local`/`used_kind` — *draw, measure and hit-test from these; edit from the node* — behind an identity pass proved by byte-identical goldens and, because that proof cannot see a consumer still reading the document, by a `cfg(test)` probe; `update` recomputes it over `affected` and re-shapes text whose used kind changed, the one door past D590, while ⚠️ siblings were not dirtied until step 3 collected `affected` from each dirty node's `chain_root` (D875); the guard compares it, five of seven maps — over random layout inputs, `used_frame` included, since D898; `geometry::world_bounds_of` deleted. Then render, export and the app, the same day: `scene::paint_node` and `mask_geometry`, `RenderOverrides::transform_of` and a new `drawn_kind` fall back to used geometry while 🚨 `current_kind` stays on the document, because it is what a preview op is *applied to*; the SVG writer through `used_local_of`/`used_kind_of`; the snapshot's `local_transform` and `geometry` report **used** values — ⚠️ the session's default, not ruled on by the maintainer; `DisplayNode::kind` and every `preview_*` helper fall back to used, `committed_node` deliberately not. 🚨 **Owed to step 2**: the edit sites that mix a used world with a stored local (`rotate_node` and five more), each owed a decision; and the only non-identity routing test is core's, so nothing outside core proves a used geometry arrives — step 2's right-pinned-child fixture is to. 🚨 A doc-comment theft on `resolve_subtree` found by reading and repaired. Open: how previews reflow, what a resize writes, the rotation origin, `TextSizing`'s mapping, and — unstated by the design — what an in-flow item's stored translation means; the first, third and fourth answered **for absolute insets only** by D874, and all five **for flex** by D875 — the rotation origin and the stored translation as the session's reading in code, not ruled — ruled since, 2026-09-27 (D896). §5.6 carries a pointer; §5.3c, §5.9 and §5.10 amended 2026-09-24, and §5.3c, §5.9, §6.2, §7, §9.3 and §9.4's booleans again for the second half, and again for D874)*
+- **D869** — **A group with `display` has a box; a group without one is exactly today's group.** Setting `display` makes a group's bounds its layout box, padding included, and a resize writes `width`/`height` and reflows instead of `tools::resize_group`'s scale. **Paint and clip stay frame-only**: pass-through paint and scale-on-resize are design-tool behaviours with no CSS equivalent, and merging the kinds would lose them. `Boolean` ignores `display`; the root is no container; a mask is out of flow. *(Decided 2026-09-23 by the maintainer; **built in core and the preview 2026-09-24** (D875), committed 2026-09-24 (session 34) — a group's box, bounds and `local_box`; a resize writes the box since the same day (D875's amendment); the Container card sets `display` since the same day too (D878). *Revisit when components land* — which, as designed on 2026-10-04, do not force it: a component is a flag on either kind (D978). ⚠️ Four passages argue from *"a group has no box"* and become conditional on `display` — listed in the body, not decided by it. §5.6's group-resize bullet carries a pointer)*
 - **D870** — **A frame may sit inside any group, and `paint_targets` already stops at one.** A flex row of frame-cards in a group is illegal under `can_parent` today. Relaxed for *any* group, since legality hanging on `display` would refuse removing `display` from a group holding a frame. Of the two reasons `can_parent`'s doc gives, *"clipped by something with no edges"* is weak — groups do not clip — and the `paint_targets` one was **checked**: its `takes_paint` arm takes a frame and does not descend. *(Decided 2026-09-23 by the maintainer; **built and tested 2026-09-24** (D876), committed 2026-09-24 (session 34) — `can_parent` admits a `Group` parent. 🚨 **Not one match arm after all**: the relaxation let a group carry a frame into a boolean or a mask at any depth, so an ancestor rule, `Document::frame_may_sit_under`, now sits beside `can_parent` at every door, and the audit owed here is D876's list. `paint_targets` unchanged, as predicted. §5.3 and §5.7a amended; D62 carries a line)*
 - **D871** — **Constraints are `position: absolute` with insets, and a child with none stays where it is.** Pin left, pin right, stretch and scale are a left inset, a right inset, both, and percentages — in a frame or a group with `display`, and not in a group without, which has no edges. No authored inset means the stored position stands, so no existing document moves. Spike, frame 300 → 500: pin-left stays at 10, pin-right 240 → 440, stretch 280 → 480, 25%/25% 75/150 → 125/250. *(Decided 2026-09-23 by the maintainer; **built and tested 2026-09-24** (D874) — frames only, the model and then the inspector's *Position* card; a group with `display` placed since D875 and given the card and the commit-seam conversion by D887, 2026-09-26; the card shows the implicit left/top as held outside a layout since D891. Not §13's persistent constraints)*
 - **D872** — **Every leaf is measured, and shapes are replaced elements.** As an empty `width: 40px` box a rectangle shrank to **30.643** under `flex-shrink: 1`; as a measured leaf it held **40**. Rect, Ellipse, Polygon, Star, Path, Line and Boolean take their stored geometry as intrinsic size, `width`/`height` `auto`; a group without `display` is atomic likewise. ⚠️ `align-items: stretch` still stretches them — CSS-faithful, kept. **Text has two gaps in core**: no min-content query (`AutoHeight(1.0)` reports 1.000 wide where the widest word is 45.148), and 16 `measure` calls per leaf per compute with no memo by width. *(Decided 2026-09-23 by the maintainer; **built 2026-09-24** (D875), committed 2026-09-24 (session 34) — `text::content_widths` for min-content, a per-pass memo keyed by node and width; ⚠️ `content_widths` itself is not memoised. **Amended 2026-10-03**: a box rule was owed — parley's widths plus the widest paragraph's own edges, D931. Measured in D867's spike. §5.3c. ⚠️ **Gives way between two insets**, which stretch a shape — D874's first ruling)*
@@ -1353,6 +1353,9 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D975** — **`atomic::write` keeps the document's mode, and writes through its symbolic link.** `[R3-L5-03]`, pre-existing, first shipped to Linux and macOS by D956. The temp was `0644` under the usual umask and the rename replaced the inode, so a `0600` document came back world-readable; and a rename replaces a link, so a document reached through one became a plain file its target never saw again. `through_link` writes at the `canonicalize`d target of a link that resolves; the replaced file's permissions are copied onto the temp after `sync_all`. On Windows that is the read-only flag, whose destination refuses the rename anyway (D967). ⚠️ **Only the mode**: ownership, ACLs, extended attributes and hard links are not kept. *(Fixed and tested 2026-10-04, session 45, not yet committed; **Keep**, the session's. Test `atomic::tests::a_save_keeps_the_documents_mode_and_its_link`, `cfg(unix)`, run and flip-checked under WSL Ubuntu 24.04 — the copy disabled failing with `420` against `384`, `through_link` skipped on *"the link is still a link"*; no local gate compiles it. D378 amended in the same pass for the log file; §9.5)*
 - **D976** — **The Release workflow builds under a read-only token and publishes from the one job that can write.** `[X3-L5-03]`'s last bullet, which D974 left open. Top-level `contents: read`; the matrix job is `build`, each leg staging every file it ships by its exact name — a missing one fails the leg, the `.nupkg` scoped to `$VPK_VERSION` because the feed's fetch leaves the previous one in `Releases/` — and uploading them as the artifact `release-<channel>`; `publish`, `needs: build`, on a tag only, `contents: write`, runs the pinned `softprops` action once with `fail_on_unmatched_files: true`; `pages` is `needs: publish`. `vpk download` keeps the token, read-only now, for the authenticated rate limit. **A Release is every platform's assets or none** — a failed macOS leg had left Windows and Linux published — no step tolerates a missing file, and `[X3-L1-04]`'s re-run hazard narrows to a `publish` that died part-way and a leg re-run after it. 🚨 **A compromised build tool can still poison what it builds**; what it loses is any write to the repository. *(Built 2026-10-04, committed as `23c3c10`; **Keep**, the session's, the shape the finding sketched. 🚨 Not run — **ran 2026-10-04**: a dispatch dry run built all three legs and left the fourteen assets under their shipping names, then **v0.4.1** ran it whole — three builds, `publish`, `pages`, all green, fourteen assets, every feed listing 0.4.1 over 0.4.0. D956, D957, D974 amended. **Amended** the same day: both artifact actions pinned by commit at their current majors, the upload `overwrite: true`)*
 - **D977** — **install.sh's single-package rpm route waives the signature check for the downloaded file only.** `[X3-L5-04]`, which D974 left open. `install_rpm_direct`'s dnf branch is `--setopt=localpkg_gpgcheck=0`, was `--nogpgcheck`, which waived the check for every dependency in the transaction; zypper's `--allow-unsigned-rpm` and `rpm -i --nosignature` already scoped to the file and are unchanged. **Set, not dropped**: both dnf generations default it off, but a policy turning it on refuses the file with no flag. Measured in containers on Fedora 40 (dnf 4.22.0), 42 (dnf5 5.2.18.0) and 44 (dnf5 5.4.3.0), identically: an unsigned dependency from a `gpgcheck=1` repository installs under `--nogpgcheck` and is refused under the setopt; end to end, the published v0.4.0 rpm installed through `ONDIN_NO_REPO=1` on all three, under the strict policy too. `README.md`'s release-files table drops the flag. *(Fixed 2026-10-04, committed as `bd6ff4f`; **Keep**, the session's. The zypper and plain-`rpm` branches not run. D974 amended)*
+- **D978** — **An instance is a linked copy written at the commit, not a subtree derived in `Resolved` — which reinterprets D868's shared pipeline as layout's write-back.** Every reader in Ondin is keyed by a stored `NodeId` — every `Resolved` map, `container::lay_out` through `LayoutView`, selection, hit-testing, `scene::build` and the SVG writer, the snapshot, the layers panel, `RenderOverrides` — so a derived child would need path ids or an expanded-document view in all of them and every edit verb re-targeted into *override at path*. Instance subtrees are ordinary `Node`s with their own ids, each linked to the node it was copied from, and a commit-time pass writes main-component changes into them as ops in the same transaction — `keep_insets`' shape in `commit_inner`, which is what components share with layout. No new `Resolved` map. Penpot's model; Figma and Sketch derive. ⚠️ **Costs**: copies are derived data stored in the document, bending §12's fourth property — replay converges, concurrent collaboration would need a resync on merge — and invariant 4's D788 clause gains a second member; file size grows with instances; a main edit fans out into ops on every copy. A link is the cross-node reference D405 declined, its semantics written down after the guide owner's precedent (D491). *(Decided 2026-10-04 by the maintainer; **not built**. **Keep** — *revisit if* real-time collaboration is built, the maintainer's verdict: collaboration *"currently a non-goal, but open for the future"*. The model and its post-conditions, the v5 bump, preview and snapshot are the session's design in `architecture.md` §5.3d, open to overturning. D868 and D867 amended, D869 noted; §5.3d written, §1, §5.3c, invariants 4 and 8, §5.11 and §12 amended or pointed; `roadmap.md` step 5 rewritten; `context-menus.md` §7 corrected)*
+- **D979** — **An override is a value that differs from its source, an instance's structure is free, a main's deletion detaches, components are document-local, and a copy of a main is an instance.** (a) Nothing records an override: when a main node's field goes `old` → `new`, each linked node takes `new` iff it still holds `old` — per field inside `TextStyle`, `ParagraphStyle`, `BlockStyle`, `LayoutItem`, `Display`, `Insets` and `GeometryPatch`'s parts, per item by id in the five item lists (D980), and 🚨 a text's `content` as one unit with its spans, which index into it; drift cannot exist, *reset* copies the source back, and setting a copy equal to the main makes it follow again. (b) Structure is free — the maintainer overruled locking it, slots being *"more of a workaround than a real solution"*: local additions, deletions, reorders and reparents inside an instance, with a main's structural edits followed only where the instance still matches, and a main's removed child deleted only where its counterpart's whole subtree still equals its sources with no local additions, else kept unlinked — the session's rule, open to overturning. (c) Deleting a main detaches its instances in the same transaction, nested chains relinking one level up. (d) Document-local; a paste into another document drops unresolvable links; shared libraries deferred, not a non-goal. (e) Copy, paste, duplicate and Alt-drag of a main make an instance; *Duplicate as component* makes a new main. *(Decided 2026-10-04 by the maintainer; **not built**. **Keep.** `architecture.md` §5.3d; `roadmap.md` gains the parked shared-libraries entry. Amended the same day: lists per item (D980), overturning the record's first reading of (a), and (e) added)*
+- **D980** — **The five item lists carry ids, in a wrapper beside each item rather than a field inside it, and an instance's items follow its main's item by item.** The maintainer overturned the record's first reading of D979 (a), a list compared whole: *"Rather do it right first time than do it twice."* `Paint::fills`, `Paint::strokes`, `Node::effects`, `Node::exports` and `Node::grids` become `Vec<Keyed<T>>`, `Keyed<T> { id: ItemId, value: T }`; a template's tracks, gradient stops, path points, `corner_radii` and spans stay single values. 🚨 **Not an `id` inside `Fill`/`Stroke`/`Effect`**: all derive `PartialEq`, and every *same look* comparison — *Mixed*, `changes_nothing`, `overwrites` and run merging, dedupes — would change meaning in silence; ⚠️ five whole-list *Mixed* readings (grids, effects, exports, and fills and strokes through `build::paint_shown`) still compare ids through the wrapper and must compare values. `ItemId` over `NodeId`, minted from `IdSource`, unique within its list, copied verbatim on duplicate — which is the match — and global so local and main additions never collide. The structural rule one level down. `migrate_4_to_5` gives `ItemId { actor: 0, seq: index }`; ⚠️ actor 0 is improbable, not excluded, so `reserve_existing_ids` must sweep item ids. ~330 construction sites, in build step 1. *(Per item decided 2026-10-04 by the maintainer; shape and migration the session's; **not built**. **Keep.** D979 amended; `architecture.md` §5.3d, invariant 3 and §5.11 amended or pointed; `roadmap.md` step 5 amended)*
 
 ---
 
@@ -19665,6 +19668,12 @@ is fourteen names against fourteen declared, and §2's table has a row. This num
 The maintainer ruled the cards' labels into sentence case — *Justify content*, *Flex start*, *Row
 gap* — and the model, the save format and the snapshot keep CSS's identifiers (D884).
 
+**Amended 2026-10-04: step 5 is designed, and not *"on the same pipeline"*.** The build order above
+ends *"(5) components and overrides, on the same pipeline"*; the maintainer ruled instances stored
+linked copies kept in step at the commit (D978), with overrides found by comparing values and
+structure free (D979), so what components share with layout is the commit-time write-back and not
+`Resolved`'s derivation. `architecture.md` §5.3d is the design; nothing is built.
+
 **D868 — What the user sets and what is drawn become two numbers, and the drawn one is never saved.
 *Decided 2026-09-23 by the maintainer; D867's step 1 built and tested 2026-09-24, step 2's model
 half the same day (D874), step 3's flex pass the same day (D875), the rest not built.*** §5.6 opens with the rule that keeps scale out of
@@ -19679,7 +19688,10 @@ the user's size lives.
 keeps specified and used values apart, so saving the used box as though it had been typed would need
 a second field to remember what the user actually set. Components will derive instance subtrees from
 a master plus overrides, so derived layout and derived instances share one pipeline instead of two.
-And a font arriving just re-resolves, where stored positions would go stale — invariant 4's D735
+*(🚨 **Reinterpreted 2026-10-04 by D978**: the maintainer ruled instances **stored linked copies**,
+written at the commit, so this reason no longer holds — the pipeline instances share with layout is
+the commit-time write-back `build::keep_insets` runs, not this derivation. Layout stays derived on the
+first and third reasons.)* And a font arriving just re-resolves, where stored positions would go stale — invariant 4's D735
 clause from another side: the used boxes are reconstructible from the document **plus the registered
 fonts**, exactly as text layouts are, because text is measured.
 
@@ -19983,7 +19995,9 @@ today**, which is what keeps every existing document unchanged.
 puts the distinction as *"a group is organisation; a frame is a thing"* (§5.7a): a paint edit passes
 through a group to what it holds, and resizing a group scales what it holds. Both are design-tool
 behaviours with no CSS equivalent, and folding the two kinds into one — a group with a fill and a
-clip *is* a frame — would lose both. *Revisit when components land.* For a future HTML/CSS export the
+clip *is* a frame — would lose both. *Revisit when components land.* *(Components, designed
+2026-10-04, do not force it: a main component is a flag on an `Artboard` or a `Group` as each stands
+(D978), so neither kind has to change for one. The revisit is left standing on its own merits.)* For a future HTML/CSS export the
 mapping is: frame → a `div` with a background and `overflow`; group with `display` → a `div`; group
 without → a positioned `div` with absolutely positioned children.
 
@@ -20023,6 +20037,199 @@ four passages above is among the cards' readers was not checked. **Amended 2026-
 child of a laid group is tested and offered the card** (D887) — in core and the app, not the preview —
 and `build::keep_insets` pins against the group's box, where it was frame-only and the child snapped
 back after a move)*
+
+**D978 — An instance is a linked copy written at the commit, not a subtree derived in `Resolved` —
+which reinterprets D868's shared pipeline as layout's write-back. *Decided 2026-10-04 by the
+maintainer; not built.*** Filed beside D868 because it takes away one of that entry's three reasons.
+D868 derived layout for three, and its second read *"Components will derive instance subtrees from a
+master plus overrides, so derived layout and derived instances share one pipeline instead of two"*;
+D867's build order closed on *"(5) components and overrides, on the same pipeline"*, `architecture.md`
+§1 on *"the same derive-from-specified pipeline"*, and `roadmap.md`'s step 5 on derived instances
+*"meant to share layout's derive-from-specified path"*. **None of those was a design** — the step was
+recorded as not designed — and when it was designed, on 2026-10-04, the derivation did not survive the
+first question asked of it: what does every other part of Ondin key on?
+
+**A stored `NodeId`, everywhere.** Every map on `Resolved`; `container::lay_out`, through its
+`LayoutView`; selection; hit-testing; `scene::build` and the SVG writer; the snapshot; the layers
+panel; `RenderOverrides`, whose every patch is keyed by the id it patches. A derived instance child
+is a node nobody stored, so it has no id: each of those readers would need path ids or an
+expanded-document view laid over the real one, and every edit verb — the tools, the inspector, the
+Type panel, the clipboard — would have to be re-targeted from *set this node's field* into *record an
+override at this path*. **Linked copies need none of it**: an instance's subtree is ordinary `Node`s in `Document.nodes`, each with its own minted id and a link to the node it
+was copied from, so every existing tool, the inspector, export and layout work on an instance's
+contents unchanged, and a resized instance re-lays through the same engine. **No new `Resolved` map.**
+A commit-time pass writes a main component's changes into its copies as operations in the same
+transaction, which is `build::keep_insets` and `build::keep_flex_sizes`' shape in
+`EditorSession::commit_inner` — **and that is the pipeline components share with layout**: the
+write-back at the commit, not the derivation in `Resolved`. Layout stays derived on D868's first and
+third reasons, which do not touch components. Penpot's model is the precedent; Figma and Sketch take
+the derived one.
+
+**What it costs, and the first item is a rule bent rather than a price paid.** (a) A copy's following
+fields are derived data stored in the document. `architecture.md` §12's fourth property is *"no
+derived state in the document — replicas converge by replaying ops"*: a single editor, and op replay,
+still converge, because the propagated ops are in the transaction like any other; but concurrent
+collaboration — a main-component edit on one peer racing an instance's creation on another — would
+leave the new instance's copies at the old values and need a resync on merge, which the derived model
+gets for free. Invariant 4's D788 clause, that `ImageEntry`'s size is the *one* derived value the
+document stores, gains a second member the day this is built. (b) File size grows with the number of
+instances. (c) One main-component edit fans out into operations on every copy, which a scan finds per
+commit in the first build — a maintained index is a measurement's question, owing D301's clone
+question as a `Document` field and §5.9's ruling as a `Resolved` map.
+
+⚠️ **A link is the cross-node reference D405 declined, taken on with its semantics written down.** D405
+refused an `Option<NodeId>` for a text's rail because it would be *"the first cross-node reference in
+this model — nothing here references anything — so it would have to invent dangling, delete,
+duplicate and cross-document-paste semantics no other field needs"*. *"Nothing here references
+anything"* was not quite true then: a guide's `owner` names a frame, and it is the precedent this
+follows — a post-condition after `apply`'s last op (D491), the deleting verb carrying the cascade in
+the same transaction (`build::guides_of`), a loader that refuses rather than repairs. What is new is
+that the reference is from one *node* to another, and §5.3d writes the four semantics D405 named: a
+dangling link is refused by `apply` and by the loader; deleting a main detaches (D979); a duplicate
+inside its own instance is local (D979); a paste into another document drops the links it cannot
+resolve (D979).
+
+*(Decided 2026-10-04 by the maintainer, in session 47; **not built** — no line of `crates/` changed and
+no code cites this number, which is expected for a design ahead of its code. **Keep** — *revisit if*
+real-time collaboration is built, where (a) is the cost that arrives: the maintainer's verdict, the
+same day, with *"Real-time collaboration is currently a non-goal, but open for the future."* The model fields, where a link
+points, the post-conditions, the v5 bump, the preview and the snapshot are the session's design under
+this ruling, in §5.3d, open to overturning. D868 amended in body and index; D867 amended; D869's
+*revisit when components land* noted as not forced by this design and left standing;
+`architecture.md` §5.3d written, §1's deferred bullet, §5.3c's header and build order, invariants 4
+and 8, §5.11's bump rule and §12's fourth property amended or pointed; `roadmap.md`'s step 5 rewritten;
+`context-menus.md` §7's deferred-features bullet corrected)*
+
+**D979 — An override is a value that differs from its source, an instance's structure is free, a
+main's deletion detaches, components are document-local, and a copy of a main is an instance.
+*Decided 2026-10-04 by the maintainer; not built.*** Five rulings on D978's linked copies, the fifth
+proposed after the first four, all taken the same session and kept in one entry because each is read
+against the first, which (b) carries from fields to structure: **whatever still
+matches the main follows it; whatever differs belongs to the instance.**
+
+**(a) Overrides are found by comparing values, not stored as marks.** Nothing records which
+properties a copy overrides. When a main node changes a field from `old` to `new`, each node linked to
+it takes `new` if and only if its current value of that field equals `old`; otherwise it keeps its
+value, and that difference *is* the override. A stored override record would be a second account that
+has to agree with the values it describes; with none, the values *are* the record, so **drift cannot
+exist by construction**, *reset* is copying the source's value back, and the inspector shows an
+override by comparing a field with its source. The granularity is the field: where an operation's
+payload is a struct of independently editable fields — `TextStyle`, `ParagraphStyle`, `BlockStyle`,
+`LayoutItem`, `Display`, `Insets`, `GeometryPatch`'s parts — the comparison is per field, so an
+instance that changed only its font size still follows the main's change of family. **The five lists
+the inspector edits item by item — fills, strokes, effects, exports, layout grids — compare item by
+item, matched by id** (D980, the maintainer's, the same day): the record first read a list as one
+field compared whole, and the maintainer overturned that. 🚨 **One coupling is load-bearing**: a
+text's `content` compares as one unit with its `CharSpans` and `ParaSpans`, because spans index into content — content following while overridden
+spans stay behind would leave spans pointing into a string they were not written for. *Do not split
+it* for finer following. **The accepted catch**: setting a copy's value back to equal the main's makes
+it follow again, which a mark would not.
+
+**(b) Instance structure is free.** The recommendation was to lock it — Figma's model, with slots
+later for the places a designer needs to put something in. The maintainer overruled it, calling slots
+*"more of a workaround than a real solution"*. An instance may add local children, delete linked ones,
+reorder, and reparent within itself, and the compare rule decides what follows: a main's new child is
+inserted into each instance still holding the parent's counterpart, at an anchor read from its main
+siblings; a main's reorder is followed only where the instance's linked siblings are still in the
+main's old order; a main's internal reparent only where the copy is still under the old parent's
+counterpart. **A main losing a child deletes the counterpart only if it and its whole subtree still
+equal their sources and it holds no local additions**; otherwise it is kept, unlinked, as local
+content. That last rule is the session's recommendation made under the free-structure ruling, not the
+maintainer's own words, and is recorded as the design's rule open to overturning; its reason is that
+with structure free an instance can hold work the main never had, and **a main-component edit must
+never destroy instance-side work**. A *reset* family — a field, structure, all — is part of the design.
+§5.3d has the rules case by case, with the readings the session settled the same day where they were
+not yet exact — an anchor read among the parent counterpart's children, a reorder judged over the
+survivors, kept content relinking one level up.
+
+**(c) Deleting a main component detaches its instances**, in the same transaction: each becomes a
+plain copy that keeps its current look, and undo restores the main and the links. It agrees with
+(b)'s rule for a removed child: in neither case is anything an instance holds destroyed. Nested
+chains relink one level up, so a nested instance survives its outer main's deletion as an instance of
+its own main.
+
+**(d) Components are document-local in the first version.** No cross-document libraries; a document
+stays self-contained, as embedded images keep it. Pasting into another document drops every link whose
+source is not in the target. **Shared libraries are deferred, not a non-goal** — a later, separate
+feature, parked in `roadmap.md` — and nothing here is to be read as having refused them.
+
+**(e) A copy of a main component is an instance** (ruled the same day, after (a)–(d)). Copy and paste,
+duplicate and Alt-drag of a main make an instance of it; a separate *Duplicate as component* makes a
+new main. The session's design carries it to a whole instance — copying one makes another instance of
+the same main — and to a payload holding a main and its instance, whose links are remapped with the
+ids (`architecture.md` §5.3d).
+
+*(Decided 2026-10-04 by the maintainer, in session 47 — all five rulings theirs, (b)'s
+delete-or-unlink excepted as above; **not built**, and no code cites this number. **Keep.** The
+property-based test of (a) — after a main edit, each counterpart's field equals the new value iff it
+equalled the old — is the build order's step 3, and is the spec this entry hangs on.
+`architecture.md` §5.3d carries all five; `roadmap.md` gains the parked shared-libraries entry.
+**Amended the same day**: (a)'s lists compare per item by id (D980), overturning the record's first
+reading, and (e) added)*
+
+**D980 — The five item lists carry ids, in a wrapper beside each item rather than a field inside it,
+and an instance's items follow its main's item by item. *Decided 2026-10-04 by the maintainer — per
+item; the shape and the migration the session's; not built.*** When D979 was first written the record
+read its ruling (a) as making a list one field, compared whole — so an instance that had changed its
+first fill would stop following the main's change to its second. The maintainer overturned that the
+same day: *"Rather do it right first time than do it twice."* Comparing per item needs a way to say
+which item in the copy is which item in the main, and position cannot say it once an instance may add,
+delete and reorder its own — so the items get ids.
+
+**Which lists.** `Paint::fills`, `Paint::strokes`, `Node::effects`, `Node::exports` and `Node::grids`
+— the lists the inspector edits as items. **Not given ids, compared as one value**: a grid template's
+track list, a template being one value as a path is; a gradient's stops, inside its brush; a `Path`'s
+points and `corner_radii`; and text spans, already coupled with their content under D979 (a).
+
+🚨 **The shape is a wrapper, `Keyed<T> { id: ItemId, value: T }`, and the reason is a trap.** The
+obvious spelling is an `id` field inside `Fill`, `Stroke` and `Effect`. All three derive `PartialEq`
+(`node.rs`' `Fill` and `Stroke`, `effect.rs`' `Effect`), so an id inside them makes two fills that look
+identical compare unequal — and every comparison in the tree that means *same look* changes meaning
+with nothing to say so: the inspector's *Mixed* across a multi-selection, `Transaction::changes_nothing`,
+`Operation::overwrites` and run merging, and any dedupe in export or import. With the wrapper the types
+keep *same item* (`id`) apart from *same look* (`value`). ⚠️ **The wrapper does not answer a whole-list
+`==`**: `Vec<Keyed<T>>` compares the ids too, and five *Mixed* readings compare whole lists across a
+selection today — `inspector.rs`' layout grids and effects, `panels/export.rs`' exports, and fills and
+strokes through `build::paint_shown` (under `shared_fills`/`shared_strokes`; this read *"three"* until
+the delegating session read `paint_shown`, which the first grep had not matched) — each of
+which has to compare values when this lands, or two layers given the same shadow separately read as
+*Mixed* — a test that fails on that is owed with the change, the record's reading. *Do not* "simplify" the wrapper into a
+field later; that is the edit this paragraph exists to stop.
+
+**`ItemId` is a newtype over `NodeId`, as `GuideId` is**, minted by the caller from the session's
+`IdSource` (invariant 3; `apply` never allocates). **Unique within its list** — a post-condition and a
+loader check — and deliberately **not** across nodes: duplicating a node copies its item ids verbatim,
+and that is the match, a copy's fill matching its source's fill by id. **Global minting rather than a
+per-list counter** because an item added locally to an instance and one added to its main later must
+never collide, and two per-list counters each starting from the same place would.
+
+**The per-item rule is the structural rule one level down** (D979 (b)): match by id; compare field by
+field within a matched item; an item the main gains goes into each copy after its preceding item's
+counterpart; an order change follows only where the items both still hold are in the main's old order;
+an item the main loses goes from a copy only if it still equals its source, and otherwise stays as the
+copy's own. **One algorithm at two levels**, children and list items, and the build is to write it
+once.
+
+**`migrate_4_to_5` stops being a no-op**: each existing item gets `ItemId { actor: 0, seq: index }` —
+deterministic, so saving twice gives the same bytes (invariant 9), and unique within its list. The ids
+repeat across nodes, and that is harmless because a v4 file holds no instance, so no cross-node match
+exists to break. ⚠️ **The guarantee is not *"actor 0 is never minted"*, which is not true**: a live
+session's actor is `session::random_actor`, an unguarded hash for which 0 is improbable rather than
+excluded, and three tests in `inspector.rs` mint from `IdSource::new(0)`. What does hold is
+`reserve_existing_ids`, which already advances the session past every id of its own actor among the
+nodes and the guides; extended over item ids — the record's reading, owed with the change — it moves a
+session that drew actor 0 past the highest migrated index, and per-list uniqueness does the rest.
+
+**What it costs**: about 330 construction sites across the workspace — `Fill {` ~195, `Stroke {` ~96,
+`LayoutGrid {` ~32, `ExportSpec {` ~9, grep counts with the tests, a rough figure. Mechanical,
+`rust-mechanic`'s kind of sweep, and it lands in build step 1 with the model, before anything reads an
+id.
+
+*(Per item decided 2026-10-04 by the maintainer, in session 47; the wrapper, `ItemId`, global minting
+and the migration the session's, open to overturning; **not built**, and no code cites this number.
+**Keep.** D979 (a) amended in body and index; `architecture.md` §5.3d's overrides paragraph, a new
+list-items paragraph, the save-format paragraph and build step 1, invariant 3 and §5.11's bump rule
+pointed; `roadmap.md`'s step 5 amended)*
 
 **D870 — A frame may sit inside any group, and `paint_targets` already stops at one. *Decided
 2026-09-23 by the maintainer; built and tested 2026-09-24 (D876), committed 2026-09-24 (session 34).*** `build::can_parent` lets a frame hang off the root or

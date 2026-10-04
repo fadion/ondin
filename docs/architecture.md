@@ -81,8 +81,11 @@
   pixel, and probably a *fill* rather than an effect). §15 D333 has the reasoning for each, so none of
   the three is re-argued; `shortcuts.md` §2 still reserves `Shift+3`…`Shift+9` behind the blend modes.
   ~~Filters, blur, shadows~~ — built 2026-08-24, §5.3a.
-- Components/instances/variants — **sequenced after layout**, on the same derive-from-specified
-  pipeline (§5.3c, §15 D867). ~~Auto-layout/constraints~~ **left this list on 2026-09-23 and are
+- ~~Components/instances~~ **left this list on 2026-10-04 and are designed** (§5.3d, §15 D978,
+  D979) — as linked copies kept in step at the commit, not on layout's derive-from-specified pipeline
+  as this bullet said: the maintainer ruled instances stored, every reader here being keyed by a stored
+  id. **Variants, component properties, instance swap and shared libraries stay on it.**
+  ~~Auto-layout/constraints~~ **left this list on 2026-09-23 and are
   designed**: CSS flexbox, CSS grid and absolute insets (§5.3c, §15 D867, D871) — insets on frames
   built 2026-09-24, inspector card included (§15 D874); flex built the same day — its model, engine
   and preview, an item's reorder by drag, a laid group's resize, and the Container and Item cards
@@ -276,6 +279,9 @@ permission.
    the *caller* (via `IdSource`) and carried **inside** operations — `apply` never allocates ids.
    Deleting a node never invalidates other ids; undo of a delete restores the identical ids. This
    makes op replay deterministic, which is the property future multiplayer needs (§12).
+   ⚠️ **Components' list-item ids will be minted the same way and repeat by design** (designed, not
+   built — §5.3d, §15 D980): unique within one list, copied verbatim into an instance so a copy's fill
+   matches its source's, and written by the v4 → v5 migration rather than by a session.
 4. **Document = truth; everything else derived.** `Document` is pure and serializable. `Resolved`
    (world transforms, bounds, R-tree, text layouts) and renderer scenes are derived artifacts —
    never serialized, always reconstructible. No render representation ever feeds back into the model.
@@ -296,6 +302,8 @@ permission.
    is the only record there is. A link exists precisely because the file may be absent; there is
    nothing to derive it from without one. **Not an oversight, and repairing it by re-decoding on load
    is the mistake this clause exists to prevent.**
+   ⚠️ **Components will make it the first of two** (designed, not built — §5.3d, §15 D978): an
+   instance's copies are stored nodes whose following fields the commit writes from their sources.
 5. **Uncommitted state never enters the Document.** Interactive gestures (drag, resize, pen preview,
    text-in-progress) live in app-side preview state and reach the renderer as `RenderOverrides`
    (§6.2) — per-node patches projected from the very transaction the gesture will commit. Exactly
@@ -443,7 +451,8 @@ permission.
    the document becomes real because the rule is about the document rather than about one operation —
    and it is **after the loop** rather than inside it because a transaction is allowed to pass
    *through* a state with an orphan in it: frame-then-guides ends perfectly valid, and a per-op check
-   would refuse it (§5.5, §5.7).
+   would refuse it (§5.5, §5.7). ⚠️ **Components will end "the only one"** (designed, not built —
+   §5.3d): links between nodes are checked by the same kind of post-condition.
 9. **Serialization is versioned and deterministic.** Every saved document carries `schema_version`;
    the loader migrates any older version to current. Saving the same document twice produces
    identical bytes (nodes serialized in sorted-id order, stable field order) — the property the golden
@@ -1136,7 +1145,8 @@ pub fn next_grid_color(existing: &[LayoutGrid]) -> Color;    // the first of GRI
 > (§15 D877), and the inspector's Container and Item cards (§15 D878–D889); frames sit inside groups
 > since the same day (§15 D876). **Grid's model, engine, preview, gestures and cards are built**
 > (step 4's first three parts, §15 D914, D916 and D920, 2026-09-27), **and its canvas track lines**
-> (the fourth, §15 D921, 2026-09-28); components are not.
+> (the fourth, §15 D921, 2026-09-28); components are not — designed on 2026-10-04 in §5.3d, and not
+> on this section's derived pipeline (§15 D978).
 > Every other passage of this document still describes `HEAD`; where one states a rule this design
 > will change,
 > it carries a forward pointer here instead of being rewritten. **When a step below lands, this
@@ -1445,7 +1455,9 @@ maintainer on 2026-09-26 (§15 D884–D891);
 (4) grid, with the track editor — its model and engine, preview and gestures, and cards **built
 2026-09-27** (§15 D914, D916, D920), its canvas track lines **2026-09-28** (§15 D921); the riskiest
 flex and grid cases looked at by the maintainer on 2026-10-02 (§15 D926, D927); (5) components and
-overrides, on the same pipeline.
+overrides — **designed 2026-10-04 in §5.3d** (§15 D978, D979), not built. This read *"on the same
+pipeline"*, D868's derivation; the maintainer ruled linked copies instead, and what they share with
+layout is the commit-time write-back `keep_insets` runs, not `Resolved`.
 
 **Grid's open questions were answered before its code** (§15 D913, 2026-09-27; the model, engine,
 preview and gestures are built since, below):
@@ -1583,6 +1595,282 @@ under a pan; a gap band outside the view is skipped, and so is a container whose
 first was, it saved only the track list.
 `track_lines` merges an edge with the last one only, the spans being laid in order — it searched every
 edge, quadratic in the track count.
+
+### 5.3d Components and overrides (designed 2026-10-04, not built; §15 D978–D980)
+
+> **Design ahead of code, all of it** — decided with the maintainer on 2026-10-04 (session 47), and
+> no line of `crates/` implements any of it. It sits beside §5.3c because what it changes is the node
+> model. Every other passage of this document still describes `HEAD`; where one states a rule this
+> design will change, it carries a forward pointer here — §4's invariants 4 and 8, §5.11's bump rule
+> and §12's fourth property. **When a step below lands, this section is rewritten in the present
+> tense and the pointers go.** The maintainer's rulings are §15 D978 (linked copies), D979
+> (overrides, free structure, a main's deletion, document-local, what a copy of a main makes) and
+> D980 (list items compared one by one, by id). Everything else here — the model fields, where a link
+> points, the post-conditions, the item ids' shape, the save-format bump, the preview — is the
+> session's design under those rulings, open to overturning, and each paragraph says which it is.
+
+**An instance is a linked copy, not a derived one** (§15 D978, the maintainer's ruling). Its subtree
+is stored as ordinary `Node`s in `Document.nodes`, each with its own minted id and each carrying a
+link to the node it was copied from, and a commit-time pass writes a main component's changes into
+its copies as operations in the same transaction. That is Penpot's model; Figma and Sketch derive an
+instance's contents from the main plus a record of overrides. **The reason is that every reader in
+Ondin is keyed by a stored `NodeId`**: every map on `Resolved`, `container::lay_out` through its
+`LayoutView`, selection, hit-testing, `scene::build` and the SVG writer, the snapshot, the layers
+panel and `RenderOverrides`. A derived child has no stored id, so every one of those would need path
+ids or an expanded-document view, and every edit verb would have to be re-targeted into an *override
+at path* operation. A linked copy is an ordinary node, so every existing tool, the inspector, export
+and layout work on an instance's contents unchanged, and a resized instance re-lays through the same
+engine. **No new `Resolved` map is needed.**
+
+**This reinterprets §15 D868**, whose second reason for deriving layout was that *"components will
+derive instance subtrees from a master plus overrides, so derived layout and derived instances share
+one pipeline instead of two"*. The pipeline instances share with layout is the **commit-time
+write-back** — the shape of `build::keep_insets` and `build::keep_flex_sizes`, run in
+`EditorSession::commit_inner` — and not `Resolved`'s derivation. Layout stays derived on D868's other
+two reasons.
+
+⚠️ **What it costs, recorded because the trade is real.** (a) A copy's following fields are derived
+data stored in the document, which bends §12's fourth property, *"no derived state in the
+document"*: a single editor and op replay still converge, but concurrent collaboration — a
+main-component edit racing an instance's creation — would need a resync on merge, which the derived
+model gets for free; and invariant 4's D788 clause stops naming the only derived value the document
+stores. (b) File size grows with the number of instances. (c) One main-component edit fans out into
+operations on every copy.
+
+**The model** (the session's; names provisional). A main component is **a flag on an `Artboard` or a
+`Group`** — `Node.component: bool` — and not a new `NodeKind`: a new kind would fall through the six
+`matches!` predicates that answer `false` for a variant nobody added (§5.3, §15 D668's matrix) and
+through every layout and paint applicability check, where a flag leaves a frame a frame and a group a
+group, so §15 D869's *paint and clip stay frame-only* holds as it is. Every node gains
+`Node.link: Option<NodeId>`, the node it was copied from. An **instance root** is a linked node whose
+source is a component root, or — nested, below — an instance root itself. Two operations write the
+fields, `SetComponent { id, component: bool }` and `SetLink { id, link: Option<NodeId> }`, names
+provisional.
+
+⚠️ **A link is a cross-node reference, which §15 D405 declined for text-on-path** — an id at a
+sibling would have been *"the first cross-node reference in this model … dangling, delete, duplicate
+and cross-document-paste semantics no other field needs"*. D405's *"nothing here references
+anything"* was already not quite true when written: a guide's `owner` names a frame (§5.5), and it is
+the precedent this design follows — a post-condition after the last op of `apply` (§15 D491), the
+verb that deletes the target carrying the cascade in the same transaction (`build::guides_of`), and a
+loader that refuses a dangling reference rather than repairing it (§5.11). What is new is a reference
+from one *node* to another.
+
+**A link points one level up** (the session's). It names the node this one was copied from, never
+the far end of a chain: an instance of a component holding a nested instance has nodes linking to the
+nested copy inside the outer main, which links in turn to the inner main. Propagation is transitive
+and runs in topological order — the inner main, then the nested copy in the outer main, then the
+outer main's instances. **One rule for every way a link is cut** — a detach, a main's deletion,
+content kept and unlinked when the main loses a child (below): a node whose source is itself linked
+relinks to its source's source, and only a node whose source is unlinked loses its link outright.
+That is consistent by construction, since under the compare rule below the values are already
+materialised, and it is what keeps a nested instance an instance of its own main whichever way the
+outer link went.
+
+**Overrides are found by comparing values, not stored as marks** (§15 D979's ruling (a), the
+maintainer's). Nothing records which properties a copy overrides. When a main-component node changes
+a field from `old` to `new`, each node linked to it takes `new` **if and only if its current value of
+that field equals `old`**; otherwise it keeps its value, and that difference *is* the override. The
+granularity is the field. Where an operation's payload is a struct of independently editable fields —
+`TextStyle`, `ParagraphStyle`, `BlockStyle`, `LayoutItem`, `Display`, `Insets`, `GeometryPatch`'s
+parts — the comparison is per field, so an instance that changed only its font size still follows
+the main's change of family. **A list the inspector edits item by item is compared item by item, by
+id** (§15 D980, the maintainer's ruling, below) — this read *"compares whole"* when first written, the
+record's reading of D979, and the maintainer overturned it the same day. **Coupled payloads compare as
+one unit**: a text's `content` with its `CharSpans` and `ParaSpans`, since spans index into the
+content, and content must not follow while overridden spans stay behind. What follows: drift cannot
+exist, there being no override record to fall out of step with the values; *reset* copies the
+source's value back; and the inspector shows a field as overridden by comparing it with its source.
+**The accepted catch**: setting a copy's value equal to the main's makes it follow again.
+
+Three rules the session adds to it:
+
+- **The instance root's transform is never linked** — it is where the instance sits. Exactly: the
+  transform of a node whose source is a component root, so a nested copy inside an outer main still
+  passes its place within that main on to the outer instances. Every other field of the root, its
+  size included, follows by the compare rule, so a resized instance stops following the main's size.
+- **User operations win over propagation in the same transaction**: a counterpart the transaction
+  itself targets for a field is not overwritten by that field's propagation. Without it, a copy set
+  in the same edit to the main's *old* value would compare equal and be carried off to the new one.
+- **Undo and redo never re-propagate.** History applies through `Document::apply_restoring`, not
+  through `commit_inner`'s passes (§5.3c), and the step it applies already holds the propagated
+  operations or their inverses.
+
+**List items carry ids, and are matched by them** (§15 D980 — per item the maintainer's ruling, the
+shape and the migration the session's). Five lists get ids: `Paint::fills`, `Paint::strokes`,
+`Node::effects`, `Node::exports` and `Node::grids` (§5.3b's layout grids). What stays one value,
+compared whole: a grid template's track list (a template is one value, as a path is), a gradient's
+stops inside its brush, a `Path`'s points, `corner_radii`, and text spans, coupled with their content
+above. **The shape is a wrapper**, `Keyed<T> { id: ItemId, value: T }`, the lists becoming
+`Vec<Keyed<Fill>>` and so on — name provisional. 🚨 **Not an `id` field inside `Fill`, `Stroke` or
+`Effect`**, and that is the reason for the shape: all three derive `PartialEq`, so an id inside them
+makes two fills that look identical compare unequal, and every comparison that means *same look*
+changes meaning in silence — the inspector's *Mixed* across a multi-selection,
+`Transaction::changes_nothing`, `Operation::overwrites` and run merging, and any dedupe in export or
+import. The wrapper puts *same item* (`id`) and *same look* (`value`) in different places in the types.
+⚠️ **It does not decide a whole-list `==` for anyone**: `Vec<Keyed<T>>` compares ids too, and five
+*Mixed* readings compare whole lists across a selection today (`inspector.rs`' grids and effects,
+`panels/export.rs`' exports, and fills and strokes through `build::paint_shown`, under
+`shared_fills`/`shared_strokes`) — each has to compare values, or two layers given the same shadow
+separately read as *Mixed*. (This read *"three"* for an hour: the fill and stroke pair was found by
+reading `paint_shown`, which the first grep for list comparisons had not matched.) `ItemId` is a newtype over `NodeId`, as `GuideId` is, minted from the
+session's `IdSource` by the caller (invariant 3); unique **within its list** — a post-condition and a
+loader check — and deliberately not across nodes, since duplicating a node copies its item ids
+verbatim, and that is the match: a copy's fill matches its source's fill by id. Minted from the global
+stream rather than a per-list counter because an item added locally to an instance and one added later
+to its main must never collide, and two per-list counters would.
+
+**The per-item rule is the structural rule one level down** — one algorithm at two levels, children
+and list items. Items match by id; within a matched item each field compares as above; an item the main
+gains is inserted into each copy after the counterpart of its preceding item, with a child's
+fallbacks; an order change follows only where the items both lists still hold are in the main's old
+order; and an item the main loses goes from a copy only if it still equals its source,
+otherwise it stays as the copy's own.
+
+**Instance structure is free** (§15 D979's ruling (b), the maintainer's, who overruled the
+recommendation to lock it — Figma's model, with slots later — as *"more of a workaround than a real
+solution"*). An instance may add local children (unlinked nodes), delete linked ones, reorder, and
+reparent within itself. The compare rule governs structure as it does fields: **whatever still
+matches the main follows it; whatever differs belongs to the instance.** A *counterpart* below is the
+node in an instance linked to a given main node.
+
+- *The main gains a child* (`CreateNode`, `InsertSubtree`, or a `Reparent` into the main): in each
+  instance still holding the counterpart of the parent, a copy is inserted — fresh ids, each node
+  linked to its source — after the counterpart of its preceding main sibling; failing that, before
+  the counterpart of its next one; failing that, topmost. Where the instance deleted the parent's
+  counterpart, nothing is inserted. **The anchor is read among the children of the parent's
+  counterpart**, wherever in the instance that counterpart now sits (the session's): a preceding
+  sibling's counterpart moved elsewhere or deleted is no anchor, and the sibling before it is tried,
+  then the *before the next* rule, then topmost.
+- *The main reorders*: an instance follows only if the relative order of its linked siblings still
+  equals the main's old order — **read over the siblings present in both**, the survivors (the
+  session's); local additions keep their anchor, after their preceding sibling.
+- *The main reparents a child within itself*: a copy follows only if it is still under the
+  counterpart of the old parent; where the new parent's counterpart is missing, it is a removal from
+  that instance.
+- *The main loses a child* (`DeleteNode`, or a reparent out of the main): the counterpart is deleted
+  **only if it and its whole subtree still equal their sources and it holds no local additions**;
+  otherwise it is kept and unlinked, and becomes local content — by the one rule above, so a nested
+  instance inside it relinks to its own main rather than detaching. **A main-component edit never
+  destroys instance-side work.** The session's recommendation under the free-structure ruling, recorded
+  as the design's rule and open to the maintainer overturning it.
+- *Instance-side edits*: a linked node reparented out of its instance loses its link; a linked node
+  duplicated or pasted inside its own instance becomes local — so **at most one node per instance
+  links to a given source**. ⚠️ *Out of its instance* includes **into a nested instance inside it**:
+  membership is judged at the nearest instance root (below), so a node moved into a nested instance
+  fails it and loses its link — noted by the record, not ruled.
+
+A **reset** family belongs to the design: reset a field; reset structure — re-insert the missing
+counterparts at their anchors, local additions left alone; and reset all — the fields, the missing
+counterparts and the main's order.
+
+**Deleting a main component detaches its instances** (§15 D979's ruling (c), the maintainer's), in the
+same transaction: each instance becomes a plain copy that keeps its current look, and undo restores
+the main and the links. Nested chains relink one level up, above, so a nested instance survives its
+outer main's deletion as an instance of its own main.
+
+**Components are document-local** in the first version (§15 D979's ruling (d), the maintainer's). There
+are no cross-document libraries, and a document stays self-contained as it does with embedded images.
+Pasting into another document drops every link whose source is not in the target document. **Shared
+libraries are deferred, not a non-goal** (`roadmap.md`, *Later · Parked decisions*).
+
+**A copy of a main component is an instance** (§15 D979's ruling (e), the maintainer's, the same
+day). Copy and paste, duplicate and Alt-drag of a main make an instance of it; a separate *Duplicate as
+component* makes a new main. **A copy of a whole instance is another instance of the same main** (the
+session's): duplicating, pasting or Alt-dragging one keeps its links. A payload holding a main and an
+instance of it has the instance's links remapped with the ids, so the pasted instance links to the
+pasted main. **Creating an instance copies the main's names verbatim** (the session's): §5.7b's
+duplicate numbering does not apply, or every renumbered name would start life as an override.
+
+**`apply`'s post-conditions** (the session's; §15 D491's shape — after the last op, before
+`*self = working`, so a transaction may pass *through* a state that breaks one). Every link resolves; a
+linked node, unless its source is a component root, has its source inside the subtree that its nearest
+ancestor instance root's link names (*membership*); at most one node per instance links to a given
+source; `component` only on an `Artboard` or a `Group`; no node both `component` and linked at its own
+root; no main component inside a main component or an instance; no component containing,
+transitively, an instance of itself; and every list item's id unique within its list (§15 D980).
+**The loader runs the same checks and refuses a file that fails them**, as it refuses a guide's
+dangling owner (§5.11). It does not compare values: under the compare
+rule there is nothing to drift.
+
+**The save format goes to v5** (the session's), on two counts. `component` and `link` are additive
+and §5.11's rule would not bump for them — but the loader has no `deny_unknown_fields`, so a build that
+predates components would open a v4-numbered file holding them, drop every link and flag in silence,
+and save every instance back as a detached copy, where a version it does not know it refuses outright
+(`IoError::UnsupportedVersion`). ⚠️ **That half is a bump for an *older build's* sake, which §5.11's
+rule has never made**: the rule asks only whether old files keep their meaning, and a build older than
+container layout drops `display` and the insets in exactly this way, unbumped. **The other half is
+§5.11's own case** (§15 D980): a v4 list item has no id, so the five keyed lists change shape and an
+old file needs a real step. **`migrate_4_to_5` gives each existing item `ItemId { actor: 0, seq:
+index }`** — deterministic, so a re-save is byte-identical (invariant 9), and unique within its list;
+a v4 file holds no instance, so there is no cross-node match for the reused ids to break. ⚠️ **What
+keeps a migrated id from colliding with a minted one is `reserve_existing_ids`, not actor 0**: a live
+session's actor is an unguarded hash (`session::random_actor`), so 0 is improbable rather than
+excluded, and three of the inspector's tests mint from `IdSource::new(0)`. The reservation already
+sweeps guide ids for this reason and has to sweep item ids too, after which a session that drew actor
+0 mints past the highest migrated index — noted by the record, not ruled. The clipboard
+needs nothing: `io::clip::read` already refuses every version but its own.
+
+**Finding counterparts** (the session's). The map from a source to the nodes linked to it is computed
+by a scan of the document per commit in the first build. A maintained index is a later question for a
+measurement: as a `Document` field it owes §15 D301's question, `apply` cloning the document whole, and
+as a `Resolved` map it is a decision rather than an optimisation (§5.9, §15 D778).
+
+**The preview** (the session's). The pass also runs over the pending transaction, so `RenderOverrides`
+shows the copies following a main-component drag live; operations that add nodes stay ghosts by the
+existing preview rule (§6.2).
+
+**The snapshot** (the session's). No `snapshot_version` bump in the first build: a copy reads as an
+ordinary node, which is not a misreading of it. Exposing `component` and `link` is the parked MCP
+work's question, and so is whether a fill in the snapshot carries its item id (§15 D980) — a change
+of the snapshot's own shape, if it is made, owes its own bump.
+
+🚨 **The pass lives in `ondin-core`, beside `keep_insets` in `build.rs`, and `EditorSession`'s commit
+is the only door that runs it** (the session's). MCP's write tools and Command Mode's scripts commit
+through that door too (invariant 10). **A door that edits a document holding components and bypasses
+it is a defect**, because a skipped propagation corrupts nothing visibly: structure is guarded — a
+deletion that would leave a link dangling is refused by the post-conditions — but a field edit to a
+main that reaches `Document::apply` without the pass leaves every following copy at the old value,
+which the compare rule then reads, **permanently**, as an override. Nothing gates it; the rule is what
+stands in for one.
+
+**Where the pass runs among the commit's passes** (the session's): after `keep_insets` and
+`keep_flex_sizes` — `kept_flow_translations` included, which `keep_flex_sizes` runs first — so that
+what they append to a main node propagates. Whether they must then also run over the propagated
+operations is the resize question below.
+
+**Open, and recorded as open:**
+
+- 🚨 **Exact equality against the commit's arithmetic — the build's main technical risk.** The
+  comparison is exact, so any pass that *recomputes* a copy's stored value rather than copying it can
+  turn a following field into an override by an ulp. The sharpest case is an instance resize: if
+  resizing an instance root rewrites its children's stored transforms or insets through `keep_insets`,
+  those children differ from the main and stop following its moves — and whether the commit's passes
+  must also run over the propagated operations is the same question. **To be measured at build step 3**,
+  before choosing between deriving a copy's value from the main's *specified* values and a tolerance in
+  the comparison.
+- **The chrome.** A canvas click selecting the instance root as it does a group, and a double-click
+  entering; a layers-panel mark for local additions; context-menu rows and shortcuts. None is decided,
+  and `context-menus.md` §7 adds no row.
+- **Guides.** A guide scoped to a main frame (§5.5) is not copied into its instances — noted by the
+  record, not ruled.
+
+**Variants, component properties, instance swap, and pushing an instance's changes to its main come
+later.** So does real-time collaboration, the one place §15 D978's cost (a) arrives: a non-goal for
+now and open for the future, in the maintainer's words, and D978's verdict is to revisit linked copies
+if it is built.
+
+**Build order** (the session's): (1) the model — `component`, `link`, `SetComponent` and `SetLink`, the
+post-conditions, the loader's checks, schema v5 — and the five lists' item ids (§15 D980), `Keyed<T>`
+and its migration, which is mechanical and wide: about 330 construction sites across the workspace
+(`Fill {` ~195, `Stroke {` ~96, `LayoutGrid {` ~32, `ExportSpec {` ~9 — grep counts with the tests, a
+rough figure), `rust-mechanic`'s kind of sweep; (2) create a component, create an instance, detach, and a main's deletion
+detaching; (3) the propagation pass for **fields** — the compare rule, list items by id, nested chains,
+user operations winning — with a property-based test of its specification: after a main edit, each
+counterpart's field equals the new value if and only if it equalled the old; and the exact-equality
+risk measured here, above; (4) propagation for **structure** — insert at
+an anchor, reorder, reparent, delete or unlink; (5) the reset family, and the inspector showing
+overridden fields; (6) the live preview of main-component edits; (7) then variants and properties.
 
 ### 5.4 Text node
 
@@ -4379,6 +4667,10 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   else in that file.
   A bump is still required for anything that changes the
   meaning of an existing field, or whose default would silently alter old documents.
+  ⚠️ **Components are designed to bump to v5 on a reason this rule does not name** (§5.3d, not
+  built): an *older build* would drop their links in silence, which a version it does not know it
+  refuses instead. Their list-item ids (§15 D980) are this rule's own case besides, with a real
+  `migrate_4_to_5`.
 - **Guides are verified too, but not against a tree** — there is none for one to corrupt. The loader
   rejects a malformed guide id, a duplicate one, and a non-finite position; a guide far off the side
   of the artwork is legal, because panning reaches it. Their ids come out of the same reservation
@@ -13427,6 +13719,9 @@ What v1 locks in so a future sync layer is possible without re-architecting:
 2. **Ids inside operations** (§5.7) — a transaction replays deterministically on any replica.
 3. **Transactions as the unit of change** — the natural sync/OT/CRDT payload.
 4. **No derived state in the document** — replicas converge by replaying ops; `Resolved` is local.
+   ⚠️ **Components are designed to bend this** (§5.3d, §15 D978, not built): an instance is a stored
+   copy its main's edits are written into at the commit, so replay still converges, but a main edit
+   racing an instance's creation on two peers would need a resync on merge.
 
 Explicitly *not* designed now: conflict resolution, causality/ordering metadata, presence, network
 protocol. Ops are the unit of change; everything else is future work that these four properties

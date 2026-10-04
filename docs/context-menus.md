@@ -867,8 +867,10 @@ Recorded so they are not re-argued, the way `shortcuts.md`'s *Deliberately unbou
   spelled here. *Use as mask* is that row — checked while the layer is a mask or holds one, absent
   where the verb has no answer. Struck rather than deleted, because the lesson is that a non-row
   argued from a *mechanism* expires when the mechanism does.
-- **Blend modes, effects, components, auto layout.** Blend modes and components are deferred in
-  `architecture.md` §1, and a menu row is not the place a deferred feature first appears. ⚠️ **The
+- **Blend modes, effects, components, auto layout.** Blend modes are deferred in
+  `architecture.md` §1, and a menu row is not the place a deferred feature first appears. Components
+  left that list on 2026-10-04 and are designed and not built (§5.3d, §15 D978, D979); which rows
+  and shortcuts they get is one of that design's open questions, and none is decided here. ⚠️ **The
   other two are not deferred and are still not rows**: effects were built on 2026-08-24 and are
   authored in the inspector's Effects card (§5.3a), and auto layout left §1's list on 2026-09-23 and
   is designed (§5.3c, §15 D867) — its absolute insets built on 2026-09-24 and authored in the

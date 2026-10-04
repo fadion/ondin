@@ -1179,6 +1179,93 @@ mod tests {
         assert_eq!(now.iter().find(|k| k.id == main[0].id).unwrap(), &main[0]);
     }
 
+    /// The Effects card reads its stack the same way (§15 D981, 4D–4E's *Inner
+    /// shadow ↺*): the instance hides the main's first effect and removes the
+    /// second; the second is a ghost row whose *Restore* brings it back, and the
+    /// first's ↺ under the pointer takes the main's back.
+    #[test]
+    fn an_effect_stack_restores_and_resets_item_by_item() {
+        use ondin_core::{Effect, EffectKind, keyed_by_position};
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let r = f.app.session.doc.get(f.m).unwrap().children()[0];
+        let [a, b, ..] = EffectKind::all_defaults();
+        let main = keyed_by_position([Effect::new(a.clone()), Effect::new(b.clone())]);
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![Operation::SetEffects {
+                    id: r,
+                    effects: main.clone(),
+                }]))
+        );
+        let mut hidden = main[0].clone();
+        hidden.visible = false;
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![Operation::SetEffects {
+                    id: f.ir,
+                    effects: vec![hidden],
+                }]))
+        );
+        f.app.collapsed_panels.remove("Effects");
+        f.app.session.selection.set_one(f.ir);
+        let effects_of = |app: &OndinApp| app.session.doc.get(f.ir).unwrap().effects().to_vec();
+        let click = |app: &mut OndinApp, at: egui::Pos2| {
+            let press = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            };
+            frame(app, &ctx, vec![egui::Event::PointerMoved(at)]);
+            frame(app, &ctx, vec![press(true)]);
+            frame(app, &ctx, vec![press(false)]);
+        };
+        let mut out = frame(&mut f.app, &ctx, Vec::new());
+        for _ in 0..3 {
+            out = frame(&mut f.app, &ctx, Vec::new());
+        }
+        let restore = texts(&out)
+            .into_iter()
+            .find(|(t, _)| t == "Restore")
+            .map(|(_, r)| r.center())
+            .unwrap_or_else(|| panic!("no ghost row in {:?}", texts(&out)));
+        click(&mut f.app, restore);
+        assert!(
+            effects_of(&f.app).iter().any(|k| k.id == main[1].id),
+            "restored"
+        );
+        let out = frame(&mut f.app, &ctx, Vec::new());
+        let row = texts(&out)
+            .into_iter()
+            .find(|(t, _)| t == a.label())
+            .map(|(_, r)| r)
+            .expect("the hidden effect's row");
+        frame(
+            &mut f.app,
+            &ctx,
+            vec![egui::Event::PointerMoved(row.center())],
+        );
+        let out = frame(&mut f.app, &ctx, Vec::new());
+        let undo = texts(&out)
+            .into_iter()
+            .find(|(t, r)| {
+                t == icon::ARROW_COUNTER_CLOCKWISE && (r.center().y - row.center().y).abs() < 4.0
+            })
+            .map(|(_, r)| r.center())
+            .expect("↺ in the hovered effect row");
+        click(&mut f.app, undo);
+        assert_eq!(
+            effects_of(&f.app)
+                .iter()
+                .find(|k| k.id == main[0].id)
+                .unwrap(),
+            &main[0]
+        );
+    }
+
     fn fills_of(app: &OndinApp, id: NodeId) -> Vec<ondin_core::Keyed<ondin_core::Fill>> {
         app.session.doc.get(id).unwrap().paint().fills.clone()
     }

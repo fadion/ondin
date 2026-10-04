@@ -632,6 +632,8 @@ struct EffectRowOut {
     toggle: bool,
     /// The row itself was clicked: show or hide its popover.
     open: bool,
+    /// An instance's overridden effect asked for its main's back (§15 D981).
+    reset: bool,
 }
 /// The picture an effect row wears, from `design/Editor.dc.html`.
 ///
@@ -10267,6 +10269,13 @@ impl OndinApp {
         self.sync_paint_collapse("Effects", !mixed && effects.is_empty(), fresh);
         let mut out = EffectRowOut::default();
         let mut acted: Option<usize> = None;
+        // An instance's stack read against its source's (§15 D981) — one layer
+        // only: over several the card is already a shared reading.
+        let source = match subjects {
+            [one] => self.source_list(*one, |n| n.effects()),
+            _ => None,
+        };
+        let mut restore = None;
         let action = Some(if mixed {
             // **Live, and the tooltip is the whole warning.** A `+` that did
             // nothing here would leave no way out of the state at all.
@@ -10295,15 +10304,30 @@ impl OndinApp {
                 return;
             }
             let mut head = None;
+            let states = source
+                .as_ref()
+                .map(|s| ondin_core::reset::item_states(s, &effects));
             for (index, effect) in effects.iter().enumerate() {
                 let open = app.effect_menu == Some((anchor, index));
-                let (row, resp) = Self::effect_row(ui, index, effect, open);
-                if row.remove || row.toggle || row.open {
+                let item = states.as_ref().map(|s| s[index]);
+                let (row, resp) = Self::effect_row(ui, index, effect, open, item);
+                if row.remove || row.toggle || row.open || row.reset {
                     out = row;
                     acted = Some(index);
                 }
                 if open {
                     head = Some(resp);
+                }
+            }
+            // The main's effects this instance removed, as ghost rows (§15 D981).
+            for gone in source
+                .as_deref()
+                .map(|s| ondin_core::reset::removed_items(s, &effects))
+                .unwrap_or_default()
+            {
+                let w = ui.available_width() - 28.0 - ui::CARD_COL_GAP;
+                if super::component::ghost_row(ui, gone.kind.label(), w) {
+                    restore = Some(gone.id);
                 }
             }
             // **After every row**, so the popover's `Area` cannot claim a press
@@ -10346,6 +10370,27 @@ impl OndinApp {
             // knows that, but a popover anchors on the row's own response, which
             // the next frame supplies.
             self.effect_menu = Some((anchor, at));
+            return;
+        }
+        // A ghost row's *Restore*, or an overridden row's ↺ — the main's item back
+        // by its id (`reset::reset_item`).
+        //
+        // ⚠️ **Written verbatim, not through `write_effects`**, which is the
+        // multi-selection writer: `item::retarget` mints a fresh id for any item
+        // its anchor lacks, so a restored effect landed as a *new local item*
+        // carrying the main's value — cut from its counterpart, the one thing a
+        // restore must not do. The source exists only for one subject, so there is
+        // no selection to retarget across. Caught by
+        // `an_effect_stack_restores_and_resets_item_by_item`.
+        let reset = acted
+            .filter(|_| out.reset)
+            .map(|i| effects[i].id)
+            .or(restore);
+        if let (Some(item), Some(src), [one]) = (reset, source.as_deref(), subjects) {
+            self.commit_edit(Transaction(vec![Operation::SetEffects {
+                id: *one,
+                effects: ondin_core::reset::reset_item(src, &effects, item),
+            }]));
             return;
         }
         let Some(index) = acted else { return };
@@ -10611,11 +10656,16 @@ impl OndinApp {
     /// **No `self`**, and that is worth keeping: a row here only ever *reports*
     /// ([`EffectRowOut`]), so it has nothing to read from the app and nothing to
     /// write to it, and a version taking `&mut self` would be inviting the second.
+    ///
+    /// `item` is what the effect is to an instance (§15 D981), for the reserved
+    /// trailing slot a paint row has too (`component::item_slot`); `None` outside
+    /// one.
     fn effect_row(
         ui: &mut egui::Ui,
         index: usize,
         effect: &Effect,
         open: bool,
+        item: Option<ondin_core::reset::ItemState>,
     ) -> (EffectRowOut, egui::Response) {
         /// The `×`'s box, from the paint rows — one glyph in one hit target, the
         /// same size in both lists so the two cards' right-hand edges line up.
@@ -10634,6 +10684,9 @@ impl OndinApp {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
                     let size = egui::vec2(ui.available_width() - 28.0 - ui::CARD_COL_GAP, 28.0);
+                    // `paint_row`'s `hot`, for the same slot.
+                    let hot =
+                        ui.rect_contains_pointer(egui::Rect::from_min_size(ui.cursor().min, size));
                     // The field is drawn inside a scope purely to get its rect back:
                     // `field_row_active` returns what its body returned, and the body
                     // here returns the `×`'s press.
@@ -10653,6 +10706,9 @@ impl OndinApp {
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
+                                    if let Some(state) = item {
+                                        out.reset = super::component::item_slot(ui, state, hot);
+                                    }
                                     if icon_button(ui, icon::X, CLOSE_W, 13.0, false, true)
                                         .on_hover_text("Remove")
                                         .clicked()
@@ -10676,6 +10732,11 @@ impl OndinApp {
                     // are a control that does the wrong thing.
                     let mut hit = field.response.rect;
                     hit.max.x -= CLOSE_W + ui::FIELD_PAD_X;
+                    // And the item slot's corner, where an instance's row has one —
+                    // its 14 and the field's own 9-pt pitch before it.
+                    if item.is_some() {
+                        hit.max.x -= 14.0 + 9.0;
+                    }
                     let resp = ui
                         .interact(
                             hit,

@@ -662,6 +662,9 @@ fn card_of(op: &Operation) -> Option<&'static str> {
         | O::SetProportionsLocked { .. }
         | O::SetComponent { .. }
         | O::SetLink { .. }
+        | O::SetVariantSet { .. }
+        | O::SetVariant { .. }
+        | O::SetProperties { .. }
         | O::CreateNode { .. }
         | O::DeleteNode { .. }
         | O::InsertSubtree { .. }

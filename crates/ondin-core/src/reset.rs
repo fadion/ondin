@@ -69,6 +69,10 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
         item,
         component: _,
         link: _,
+        // A main's or a set's own, read by an instance through its link (§15 D982).
+        set: _,
+        variant: _,
+        props: _,
     } = node;
     let id = *id;
     use Operation as O;
@@ -265,7 +269,7 @@ pub fn overrides(doc: &Document, id: NodeId) -> Vec<Override> {
 
 /// The field an operation writes, without its subject: the variant, and the patch
 /// variant for a geometry edit — `Operation::shape_key` less the node.
-fn field_key(
+pub(crate) fn field_key(
     op: &Operation,
 ) -> Option<(
     std::mem::Discriminant<Operation>,
@@ -274,7 +278,7 @@ fn field_key(
     op.shape_key().map(|(op, patch, _)| (op, patch))
 }
 
-fn is_kind_op(op: &Operation) -> bool {
+pub(crate) fn is_kind_op(op: &Operation) -> bool {
     matches!(
         op,
         Operation::SetGeometry { .. }
@@ -684,8 +688,7 @@ pub fn restore_children(doc: &Document, scopes: &[NodeId], ids: &mut IdSource) -
                 continue;
             };
             for (k, t) in copy.iter_mut().zip(&template) {
-                k.link = Some(t.id);
-                k.component = false;
+                k.make_copy_of(t.id);
             }
             let Some(src_parent) = source_of(doc, p).and_then(|s| doc.get(s)) else {
                 continue;

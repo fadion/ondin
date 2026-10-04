@@ -278,6 +278,24 @@ pub enum Operation {
         id: NodeId,
         link: Option<NodeId>,
     },
+    /// Make a frame a component set with these variant properties, or stop it
+    /// being one (§15 D982). Checked after the last op, as [`Self::SetComponent`]
+    /// is (`crate::variant::check`).
+    SetVariantSet {
+        id: NodeId,
+        set: Option<crate::variant::VariantSet>,
+    },
+    /// A variant's values, one per property of its set (§15 D982).
+    SetVariant {
+        id: NodeId,
+        values: Vec<String>,
+    },
+    /// The component properties a main or a set defines (§15 D982) — the whole
+    /// list, as the other keyed lists are written.
+    SetProperties {
+        id: NodeId,
+        props: Vec<Keyed<crate::variant::Property>>,
+    },
     /// The ground behind and around the frames — the one operation with no node
     /// to name, because the ground belongs to the document rather than to
     /// anything in it (§15 D18). A solid colour, not a `Brush`: there is
@@ -404,7 +422,10 @@ impl Operation {
             | Operation::SetDisplay { id, .. }
             | Operation::SetLayoutItem { id, .. }
             | Operation::SetComponent { id, .. }
-            | Operation::SetLink { id, .. } => Some(*id),
+            | Operation::SetLink { id, .. }
+            | Operation::SetVariantSet { id, .. }
+            | Operation::SetVariant { id, .. }
+            | Operation::SetProperties { id, .. } => Some(*id),
             Operation::CreateNode { .. }
             | Operation::DeleteNode { .. }
             | Operation::InsertSubtree { .. }
@@ -457,7 +478,10 @@ impl Operation {
             | Operation::SetDisplay { id, .. }
             | Operation::SetLayoutItem { id, .. }
             | Operation::SetComponent { id, .. }
-            | Operation::SetLink { id, .. } => id,
+            | Operation::SetLink { id, .. }
+            | Operation::SetVariantSet { id, .. }
+            | Operation::SetVariant { id, .. }
+            | Operation::SetProperties { id, .. } => id,
             _ => return None,
         };
         *id = to;
@@ -576,6 +600,13 @@ impl Operation {
             // exactly like the nodes it holds.
             | Operation::SetComponent { .. }
             | Operation::SetLink { .. }
+            // A set's properties, a variant's values and a component's
+            // properties are what the components machinery reads, never what is
+            // drawn: the derived name and a bound field change through their own
+            // operations (§15 D982).
+            | Operation::SetVariantSet { .. }
+            | Operation::SetVariant { .. }
+            | Operation::SetProperties { .. }
             | Operation::AddGuide { .. }
             | Operation::RemoveGuide { .. }
             | Operation::SetGuidePosition { .. }
@@ -839,6 +870,15 @@ impl Operation {
                 node(id).is_some_and(|n| n.component() == *component)
             }
             Operation::SetLink { id, link } => node(id).is_some_and(|n| n.link() == *link),
+            Operation::SetVariantSet { id, set } => {
+                node(id).is_some_and(|n| n.set() == set.as_ref())
+            }
+            Operation::SetVariant { id, values } => {
+                node(id).is_some_and(|n| n.variant() == values.as_slice())
+            }
+            Operation::SetProperties { id, props } => {
+                node(id).is_some_and(|n| n.props() == props.as_slice())
+            }
 
             Operation::SetCanvasBackground { background } => doc.canvas_background() == *background,
             Operation::SetGuidePosition { id, position } => {
@@ -1271,6 +1311,8 @@ mod changes_ink_tests {
     ///
     /// **Thirteen with `SetComponent` and `SetLink`** (§15 D978), 2026-10-04 — prose
     /// and fixture recounted together, the fixture's assertion moved first.
+    /// **Sixteen with `SetVariantSet`, `SetVariant` and `SetProperties`** (§15
+    /// D982), 2026-10-05, the same way.
     #[test]
     fn only_the_chrome_operations_change_no_ink() {
         let mut ids = IdSource::new(1);
@@ -1294,6 +1336,9 @@ mod changes_ink_tests {
                 component: true,
             },
             Operation::SetLink { id, link: None },
+            Operation::SetVariantSet { id, set: None },
+            Operation::SetVariant { id, values: vec![] },
+            Operation::SetProperties { id, props: vec![] },
             Operation::AddGuide {
                 guide: crate::guide::Guide {
                     id: guide,
@@ -1322,11 +1367,7 @@ mod changes_ink_tests {
         // makes the count in this test's doc comment checkable by anything but a
         // reader — and that comment has been wrong once, by exactly this
         // mechanism.
-        assert_eq!(
-            invisible.len(),
-            13,
-            "the chrome list is thirteen operations"
-        );
+        assert_eq!(invisible.len(), 16, "the chrome list is sixteen operations");
         for op in &invisible {
             assert!(
                 !op.changes_ink(),

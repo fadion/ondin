@@ -41,6 +41,8 @@ pub enum LinkRule {
     LinkCycle,
     /// A main component contains, at some depth, an instance of itself.
     ComponentCycle,
+    /// A variant or component-property rule (§15 D982).
+    Variant(crate::variant::VariantRule),
 }
 
 impl std::fmt::Display for LinkRule {
@@ -54,6 +56,7 @@ impl std::fmt::Display for LinkRule {
             Self::SharedSource => "shares its source with another node of the same instance",
             Self::LinkCycle => "is on a chain of links that never reaches a main component",
             Self::ComponentCycle => "is a main component that contains an instance of itself",
+            Self::Variant(rule) => return rule.fmt(f),
         })
     }
 }
@@ -79,6 +82,7 @@ impl std::fmt::Display for LinkRule {
 ///   itself (an instance, or a local instance inside another) is placed freely;
 /// - no main contains, at any depth, an instance whose chain ends at itself.
 pub fn check(nodes: &FxHashMap<NodeId, Node>) -> Result<(), (NodeId, LinkRule)> {
+    crate::variant::check(nodes).map_err(|(id, rule)| (id, LinkRule::Variant(rule)))?;
     if !nodes.values().any(|n| n.component || n.link.is_some()) {
         return Ok(());
     }
@@ -609,8 +613,7 @@ pub(crate) fn settle_copy(
         && nodes.get(&root.id).is_some_and(|n| n.component)
     {
         for (c, t) in copy.iter_mut().zip(template) {
-            c.link = Some(t.id);
-            c.component = false;
+            c.make_copy_of(t.id);
         }
         return true;
     }

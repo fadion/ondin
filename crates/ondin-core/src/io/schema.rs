@@ -237,6 +237,18 @@ pub(crate) struct NodeDto {
     /// nothing is refused, not dropped (`crate::component::check`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link: Option<String>,
+    /// A component set's variant properties (§15 D982), absent on every other
+    /// layer. Part of v5 — no release went out between v5's components and these
+    /// (`v0.4.1` predates both), so no released v5 reader would drop them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub set: Option<crate::variant::VariantSet>,
+    /// A variant's values, absent on everything that is not one (§15 D982).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub variant: Vec<String>,
+    /// A main's or a set's component properties, absent when it defines none
+    /// (§15 D982). Bound layers are wire ids, checked on load with the links.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub props: Vec<Keyed<crate::variant::Property>>,
 }
 
 /// What a file written before `clip` existed meant: frames clipped.
@@ -321,6 +333,9 @@ impl NodeDto {
             item: *n.item(),
             component: n.component(),
             link: n.link().map(NodeId::to_wire),
+            set: n.set().cloned(),
+            variant: n.variant().to_vec(),
+            props: n.props().to_vec(),
         }
     }
 
@@ -410,6 +425,9 @@ impl NodeDto {
             item: self.item,
             component: self.component,
             link,
+            set: self.set,
+            variant: self.variant,
+            props: self.props,
         })
     }
 }

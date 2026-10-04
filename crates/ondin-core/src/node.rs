@@ -190,6 +190,18 @@ pub struct Node {
     /// way that one is: after the last op of every transaction
     /// (`crate::component::check`).
     pub(crate) link: Option<NodeId>,
+    /// This frame's **variant properties**, when it is a component set (§5.3d
+    /// step 7, §15 D982) — every main directly inside it is a variant. `None` on
+    /// every other layer. A set is a frame and never a main itself.
+    pub(crate) set: Option<crate::variant::VariantSet>,
+    /// This main's **values**, one per property of the set around it, in the set's
+    /// order — empty on everything that is not a variant (§15 D982). The variant's
+    /// name is derived from them (`crate::variant::settle`).
+    pub(crate) variant: Vec<String>,
+    /// The **component properties** this main or set defines (§15 D982) — each a
+    /// view over a field of the layers it is bound to. Empty everywhere else, and
+    /// on a variant, whose properties are its set's.
+    pub(crate) props: Vec<Keyed<crate::variant::Property>>,
 }
 
 impl Node {
@@ -203,6 +215,29 @@ impl Node {
     /// The node this one was copied from, if it is part of an instance (§15 D978).
     pub fn link(&self) -> Option<NodeId> {
         self.link
+    }
+    /// Make this freshly remapped node a **linked copy** of `source`: linked to
+    /// it, and none of what makes a main a main — the flag, a variant's values, a
+    /// component's properties (§15 D978, D982). Every door that makes an instance
+    /// node goes through here, so a new main-only field is cleared in one place.
+    pub(crate) fn make_copy_of(&mut self, source: NodeId) {
+        self.link = Some(source);
+        self.component = false;
+        self.set = None;
+        self.variant.clear();
+        self.props.clear();
+    }
+    /// The variant properties, if this frame is a component set (§15 D982).
+    pub fn set(&self) -> Option<&crate::variant::VariantSet> {
+        self.set.as_ref()
+    }
+    /// This variant's values, one per property of its set; empty unless it is one.
+    pub fn variant(&self) -> &[String] {
+        &self.variant
+    }
+    /// The component properties this main or set defines (§15 D982).
+    pub fn props(&self) -> &[Keyed<crate::variant::Property>] {
+        &self.props
     }
     /// Refuse a node whose five item lists repeat an item id within one list
     /// (§15 D980) — `Document::apply`'s post-condition and the loader's check.

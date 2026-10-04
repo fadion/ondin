@@ -46,6 +46,7 @@ pub mod resolve;
 pub mod svg_in;
 pub mod text;
 pub mod typography;
+pub mod variant;
 
 // Re-export the geometry/paint crates whose types appear in our public API, so
 // downstream crates (and tests) use the exact same versions (§6.3).

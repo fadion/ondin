@@ -1229,6 +1229,12 @@ impl EditorSession {
         tx.0.extend(structure);
         let cuts = ondin_core::component::settle_links(&self.doc, &tx);
         tx.0.extend(cuts);
+        // And what the variant rules owe (§15 D982): a main moved into a set takes
+        // values, one moved out drops them, every variant is renamed from its
+        // values — before the propagation below, so an instance still carrying a
+        // variant's old name follows it — and a binding that no longer fits goes.
+        let settled = ondin_core::variant::settle(&self.doc, &tx);
+        tx.0.extend(settled);
         // And last, what the edit owes the instances (§5.3d build step 3): a main's
         // change written onto every copy that still holds the main's old value —
         // after the passes above, so what they append to a main propagates too.

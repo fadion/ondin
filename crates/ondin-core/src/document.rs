@@ -110,6 +110,9 @@ impl Document {
             item: Default::default(),
             component: false,
             link: None,
+            set: None,
+            variant: Vec::new(),
+            props: Vec::new(),
         };
         let mut nodes = FxHashMap::default();
         nodes.insert(root_id, root);
@@ -574,6 +577,30 @@ impl Document {
                 dirty.0.insert(*id);
                 Ok(Operation::SetLink { id: *id, link: old })
             }
+            Operation::SetVariantSet { id, set } => {
+                let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
+                let old = std::mem::replace(&mut node.set, set.clone());
+                dirty.0.insert(*id);
+                Ok(Operation::SetVariantSet { id: *id, set: old })
+            }
+            Operation::SetVariant { id, values } => {
+                let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
+                let old = std::mem::replace(&mut node.variant, values.clone());
+                dirty.0.insert(*id);
+                Ok(Operation::SetVariant {
+                    id: *id,
+                    values: old,
+                })
+            }
+            Operation::SetProperties { id, props } => {
+                let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
+                let old = std::mem::replace(&mut node.props, props.clone());
+                dirty.0.insert(*id);
+                Ok(Operation::SetProperties {
+                    id: *id,
+                    props: old,
+                })
+            }
             Operation::SetCanvasBackground { background } => {
                 Ok(self.op_set_canvas_background(*background))
             }
@@ -685,6 +712,9 @@ impl Document {
             item: Default::default(),
             component: false,
             link: None,
+            set: None,
+            variant: Vec::new(),
+            props: Vec::new(),
         };
         self.nodes.insert(id, node);
         self.nodes
@@ -2075,6 +2105,26 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
             // function's.
             component: n.component,
             link: n.link.map(|l| map.get(&l).copied().unwrap_or(l)),
+            // A copied set is a set and a copied variant keeps its values (§15
+            // D982); a property's bound layers are remapped with the ids, so a copy
+            // of a main drives its own layers — one bound outside the template is
+            // kept as it is, and `variant::settle` unbinds it where it lands.
+            set: n.set.clone(),
+            variant: n.variant.clone(),
+            props: n
+                .props
+                .iter()
+                .map(|p| {
+                    p.map(|p| crate::variant::Property {
+                        bound: p
+                            .bound
+                            .iter()
+                            .map(|b| map.get(b).copied().unwrap_or(*b))
+                            .collect(),
+                        ..p.clone()
+                    })
+                })
+                .collect(),
         });
     }
     Some((out, new_root?))
@@ -2291,6 +2341,9 @@ mod tests {
             item: Default::default(),
             component: false,
             link: None,
+            set: None,
+            variant: Vec::new(),
+            props: Vec::new(),
         }
     }
 

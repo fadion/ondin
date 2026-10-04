@@ -81,6 +81,11 @@ fn mode(op: &Operation) -> Mode {
         | Operation::SetProportionsLocked { .. }
         | Operation::SetComponent { .. }
         | Operation::SetLink { .. }
+        // A set, a variant's values and a component's properties belong to the
+        // main or set they are on; an instance reads them through its link.
+        | Operation::SetVariantSet { .. }
+        | Operation::SetVariant { .. }
+        | Operation::SetProperties { .. }
         | Operation::CreateNode { .. }
         | Operation::DeleteNode { .. }
         | Operation::InsertSubtree { .. }
@@ -383,8 +388,7 @@ pub fn propagate_structure(
                         continue;
                     };
                     for (c, t) in copy.iter_mut().zip(&nodes) {
-                        c.link = Some(t.id);
-                        c.component = false;
+                        c.make_copy_of(t.id);
                     }
                     let siblings = children_of(&sim, src_parent);
                     let kids = children_of(&sim, pc);
@@ -644,7 +648,12 @@ pub(crate) fn anchor(
 /// Children in `moved_out` — counterparts this same pass is carrying elsewhere —
 /// are left out of the comparison, with their sources: what an ungroup lifts out
 /// of a group no longer decides whether the group's copy is untouched.
-fn untouched(doc: &Document, copy: NodeId, src: NodeId, moved_out: &FxHashSet<NodeId>) -> bool {
+pub(crate) fn untouched(
+    doc: &Document,
+    copy: NodeId,
+    src: NodeId,
+    moved_out: &FxHashSet<NodeId>,
+) -> bool {
     let (Some(c), Some(s)) = (doc.get(copy), doc.get(src)) else {
         return false;
     };
@@ -713,7 +722,12 @@ fn same_content(doc: &Document, a: NodeId, b: NodeId) -> bool {
 /// The edit a copy `m` takes, given the main's `new` edit, the main's `old` value
 /// and the copy's `cur` value (both as inverse operations), or `None` when the copy
 /// keeps everything it has.
-fn follow(new: &Operation, old: &Operation, cur: &Operation, m: NodeId) -> Option<Operation> {
+pub(crate) fn follow(
+    new: &Operation,
+    old: &Operation,
+    cur: &Operation,
+    m: NodeId,
+) -> Option<Operation> {
     use Operation as O;
     match (new, old, cur) {
         (

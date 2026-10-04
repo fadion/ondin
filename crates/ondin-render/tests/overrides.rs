@@ -2381,7 +2381,8 @@ fn a_ghost_of_a_shadowed_stroked_shape_reserves_the_strokes_reach() {
 
 /// **`absorb` treats thirteen operations as a no-op, not eleven** — §15 D659,
 /// `[S19.2-L2-04]`. (Fifteen and thirteen since `SetComponent` and `SetLink`
-/// joined the chrome arm, §15 D978; the paragraphs below keep the counts of the
+/// joined the chrome arm, §15 D978, and eighteen and sixteen since the three
+/// variant ops did, §15 D982; the paragraphs below keep the counts of the
 /// finding they record.)
 ///
 /// 🚨 **The design said the two lists were the same eleven, and a review pass
@@ -2431,8 +2432,9 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
     let guide = ondin_core::guide::GuideId(ids.mint());
     let pic = ondin_core::ImageId("pic".into());
 
-    // The thirteen `changes_ink` answers `false` for, in `op.rs`'s own order —
-    // eleven until `SetComponent` and `SetLink` (§15 D978).
+    // The sixteen `changes_ink` answers `false` for, in `op.rs`'s own order —
+    // eleven until `SetComponent` and `SetLink` (§15 D978), thirteen until the
+    // three variant ops (§15 D982).
     let chrome = [
         Operation::SetName {
             id,
@@ -2451,6 +2453,9 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
             component: false,
         },
         Operation::SetLink { id, link: None },
+        Operation::SetVariantSet { id, set: None },
+        Operation::SetVariant { id, values: vec![] },
+        Operation::SetProperties { id, props: vec![] },
         Operation::AddGuide {
             guide: ondin_core::guide::Guide {
                 id: guide,
@@ -2492,7 +2497,7 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
     // The fixture asserts its own lengths, for the reason `op.rs`'s does: it is
     // the only thing that makes the counts in the comment above checkable by
     // anything but a reader, and those counts have been wrong before.
-    assert_eq!(chrome.len(), 13, "the chrome list is thirteen operations");
+    assert_eq!(chrome.len(), 16, "the chrome list is sixteen operations");
     assert_eq!(images.len(), 2, "and the image pair is two");
 
     let res = Resolved::rebuild(&f.doc);

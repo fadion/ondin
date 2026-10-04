@@ -2909,6 +2909,8 @@ impl OndinApp {
             Action::Escape => self.escape(ctx),
             Action::Group => self.group_selection(),
             Action::Mask => self.toggle_mask(),
+            Action::CreateComponent => self.create_component(),
+            Action::DetachInstance => self.detach_instances(),
             Action::Boolean(op) => self.apply_boolean(op),
             Action::Flatten => self.flatten_selection(),
             Action::Ungroup => self.ungroup_selection(),
@@ -4172,6 +4174,184 @@ impl OndinApp {
             }
             Err(e) => self.session.fail(format!("Cannot frame: {e}")),
         }
+    }
+
+    /// *Create component* (`Ctrl+Alt+K`, §15 D981): make the selected frame or
+    /// group a main component, or — for anything else, or several layers — wrap the
+    /// selection in a frame first and make that the main, in one undo step.
+    ///
+    /// The toast speaks only when wrapping happened (D981's ruling): the tree changed
+    /// shape, and that deserves a line. Text-only, naming the key (its ruling (d)).
+    pub(crate) fn create_component(&mut self) {
+        let ids = build::outermost(&self.session.doc, self.session.selection.ids());
+        let doc = &self.session.doc;
+        match ids.as_slice() {
+            [] => self.session.info("Select a layer to make a component"),
+            [one] if doc.get(*one).is_some_and(|n| n.component()) => {
+                self.session.info("Already a component")
+            }
+            [one] if ondin_core::component::can_be_main(doc, *one) => {
+                let tx = Transaction(vec![Operation::SetComponent {
+                    id: *one,
+                    component: true,
+                }]);
+                if self.session.commit(tx) {
+                    self.session.info("Created a component");
+                }
+            }
+            [one]
+                if doc.get(*one).is_some_and(|n| {
+                    matches!(n.kind(), NodeKind::Artboard { .. } | NodeKind::Group)
+                }) =>
+            {
+                self.session
+                    .fail("A component cannot sit inside a component or an instance")
+            }
+            _ => {
+                let wrapped = ids.len();
+                match build::frame(doc, &self.session.resolved, &mut self.session.ids, &ids) {
+                    Ok((mut tx, frame)) => {
+                        tx.0.push(Operation::SetComponent {
+                            id: frame,
+                            component: true,
+                        });
+                        if self.session.commit(tx) {
+                            self.session.selection.set_one(frame);
+                            let name = self
+                                .session
+                                .doc
+                                .get(frame)
+                                .map(|n| n.name().to_string())
+                                .unwrap_or_default();
+                            self.session.info(format!(
+                                "Created “{name}” — {wrapped} layer{} wrapped in a frame · Ctrl+Z to undo",
+                                if wrapped == 1 { "" } else { "s" }
+                            ));
+                        }
+                    }
+                    Err(e) => self.session.fail(format!("Cannot make a component: {e}")),
+                }
+            }
+        }
+    }
+
+    /// *Detach instance* (`Ctrl+Alt+B`, §15 D981): every instance the selection
+    /// sits in becomes ordinary layers that keep their look
+    /// (`component::detach`). No toast — the glyph changing is enough (D981).
+    pub(crate) fn detach_instances(&mut self) {
+        let doc = &self.session.doc;
+        let mut roots: Vec<NodeId> = self
+            .session
+            .selection
+            .ids()
+            .iter()
+            .filter_map(|id| ondin_core::component::instance_root(doc, *id))
+            .collect();
+        roots.sort();
+        roots.dedup();
+        // An instance inside another selected one is detached by the outer's own
+        // climb or stays nested by design; only the outermost are acted on.
+        let roots = build::outermost(doc, &roots);
+        if roots.is_empty() {
+            self.session.info("Select an instance to detach");
+            return;
+        }
+        let ops: Vec<Operation> = roots
+            .iter()
+            .filter_map(|r| ondin_core::component::detach(doc, *r))
+            .flat_map(|tx| tx.0)
+            .collect();
+        self.session.commit(Transaction(ops));
+    }
+
+    /// *Go to main component* (§15 D981): select what the selected layer was
+    /// copied from — the main itself for an instance, the counterpart inside it for
+    /// a child — and bring it into view.
+    pub(crate) fn go_to_main(&mut self) {
+        let Some(id) = self.session.selection.single() else {
+            return;
+        };
+        let doc = &self.session.doc;
+        let target = match doc.get(id).and_then(|n| n.link()) {
+            Some(src) if ondin_core::component::instance_root(doc, id) == Some(id) => {
+                ondin_core::component::main_of(doc, id).unwrap_or(src)
+            }
+            Some(src) => src,
+            None => return,
+        };
+        self.session.selection.set_one(target);
+        self.reveal_selection();
+    }
+
+    /// What the one selected layer is to the components machinery, for D981's menu
+    /// rows — [`crate::menu::Role::Plain`] for several layers or none.
+    pub(crate) fn component_role(&self) -> crate::menu::Role {
+        use crate::menu::Role;
+        let doc = &self.session.doc;
+        let Some(id) = self.session.selection.single() else {
+            return Role::Plain;
+        };
+        let Some(node) = doc.get(id) else {
+            return Role::Plain;
+        };
+        if node.component() {
+            return Role::Main;
+        }
+        match ondin_core::component::instance_root(doc, id) {
+            Some(root) if root == id => Role::Instance,
+            Some(_) if node.link().is_some() => Role::Member,
+            Some(_) => Role::Local,
+            None => Role::Plain,
+        }
+    }
+
+    /// *Duplicate as component* (§15 D981): a copy of the selected main that is a
+    /// new, independent main rather than an instance of it.
+    pub(crate) fn duplicate_as_component(&mut self) {
+        let Some(id) = self.session.selection.single() else {
+            return;
+        };
+        let doc = &self.session.doc;
+        let (Some(template), Some(parent)) = (
+            doc.capture_subtree(id),
+            doc.get(id).and_then(|n| n.parent()),
+        ) else {
+            return;
+        };
+        let after = doc
+            .get(parent)
+            .and_then(|p| p.children().iter().position(|c| *c == id))
+            .map(|i| i + 1);
+        let step = self.clone_step(&[id]);
+        let placements = [build::Placement {
+            nodes: template,
+            parent,
+            index: after,
+        }];
+        let (tx, created) = build::insert_subtrees_as(
+            &self.session.doc,
+            &mut self.session.ids,
+            &placements,
+            step,
+            ondin_core::component::MainCopy::NewMain,
+        );
+        if self.session.commit(tx) && !created.is_empty() {
+            self.session.info("Duplicated as a new component");
+            self.session.selection.set(created);
+        }
+    }
+
+    /// *Select all instances* (§15 D981) of the selected main.
+    pub(crate) fn select_all_instances(&mut self) {
+        let Some(main) = self.session.selection.single() else {
+            return;
+        };
+        let all = ondin_core::component::instances_of(&self.session.doc, main);
+        if all.is_empty() {
+            self.session.info("No instances of this component");
+            return;
+        }
+        self.session.selection.set(all);
     }
 
     /// Select a freshly made group, and leave it **shut** in the layers tree.
@@ -5602,11 +5782,39 @@ impl OndinApp {
         let mut ops = build::guides_of(&self.session.doc, &ids);
         let guides = ops.len();
         ops.extend(ids.iter().map(|id| Operation::DeleteNode { id: *id }));
+        // **Links into what is deleted climb past it** (§15 D979 (c),
+        // `component::relink_for_delete`): a deleted main's instances detach and
+        // keep their look, a nested instance among them stays an instance of its
+        // own main, and a deleted main's child leaves its counterparts as the
+        // instances' own layers. Without these the commit is refused —
+        // `component::check` will not keep a link to nothing.
+        let relinks = ondin_core::component::relink_for_delete(&self.session.doc, &ids);
+        let detached = relinks
+            .iter()
+            .filter(|op| {
+                matches!(op, Operation::SetLink { id, link: None }
+                    if ondin_core::component::instance_root(&self.session.doc, *id) == Some(*id))
+            })
+            .count();
+        ops.extend(relinks);
+        let name = match ids.as_slice() {
+            [one] => self.session.doc.get(*one).map(|n| n.name().to_string()),
+            _ => None,
+        };
         if self.session.commit(Transaction(ops)) {
             self.session.selection.clear();
-            self.session.info(match guides {
-                0 => format!("Deleted {} layer(s)", ids.len()),
-                n => format!("Deleted {} layer(s) and {n} guide(s)", ids.len()),
+            self.session.info(match (guides, detached, name) {
+                // D981's wording, text-only (its ruling (d)).
+                (_, d @ 1.., Some(name)) => format!(
+                    "Deleted “{name}” — {d} instance{} detached · Ctrl+Z to undo",
+                    if d == 1 { "" } else { "s" }
+                ),
+                (_, d @ 1.., None) => format!(
+                    "Deleted {} layer(s) — {d} instance(s) detached · Ctrl+Z to undo",
+                    ids.len()
+                ),
+                (0, _, _) => format!("Deleted {} layer(s)", ids.len()),
+                (n, _, _) => format!("Deleted {} layer(s) and {n} guide(s)", ids.len()),
             });
         }
     }
@@ -19296,6 +19504,118 @@ mod chrome_focus_write_tests {
         assert!(
             !app.chrome_focus,
             "on the library screen the flag is not stale — nothing there is focused"
+        );
+    }
+}
+
+/// The component verbs as the app reaches them (§15 D978, D981): Delete owes the
+/// relinking, *Create component* wraps, Detach cuts.
+#[cfg(test)]
+mod component_verb_tests {
+    use super::OndinApp;
+    use ondin_core::kurbo::Size;
+    use ondin_core::{Document, IdSource, NodeId, NodeKind, Operation, Transaction};
+
+    /// A main frame `m` holding a rect, and an instance `i` of it — built through
+    /// the app's own *Create component* and *Duplicate*, so the fixture is the verbs.
+    fn main_and_instance(ctx: &egui::Context) -> (OndinApp, NodeId, NodeId) {
+        let mut app = OndinApp::headless(ctx);
+        let mut ids = IdSource::new(0x7C0);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let [m, r] = [(); 2].map(|_| ids.mint());
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: m,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(100.0, 100.0),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::CreateNode {
+                id: r,
+                parent: m,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(10.0, 10.0),
+                    corner_radii: Default::default(),
+                },
+                transform: None,
+                name: None,
+            },
+        ]))
+        .expect("a frame holding a rect");
+        app.session.adopt_document(doc, None);
+        app.session.selection.set_one(m);
+        app.create_component();
+        assert!(
+            app.session.doc.get(m).unwrap().component(),
+            "the fixture's main"
+        );
+        app.duplicate_selection();
+        let i = app
+            .session
+            .selection
+            .single()
+            .expect("the copy is selected");
+        assert_eq!(
+            app.session.doc.get(i).unwrap().link(),
+            Some(m),
+            "an instance"
+        );
+        (app, m, i)
+    }
+
+    /// Deleting a main with an instance goes through and detaches it, rather than
+    /// being refused for the link it would leave. Flip: dropping
+    /// `relink_for_delete` from `delete_selection` leaves the main in place.
+    #[test]
+    fn deleting_a_main_detaches_its_instance() {
+        let ctx = egui::Context::default();
+        let (mut app, m, i) = main_and_instance(&ctx);
+        app.session.selection.set_one(m);
+        app.delete_selection();
+        assert!(app.session.doc.get(m).is_none(), "the main is gone");
+        assert_eq!(
+            app.session.doc.get(i).unwrap().link(),
+            None,
+            "the instance detached"
+        );
+    }
+
+    /// *Detach instance* cuts the instance and every node it links.
+    #[test]
+    fn detaching_cuts_every_link() {
+        let ctx = egui::Context::default();
+        let (mut app, _, i) = main_and_instance(&ctx);
+        app.session.selection.set_one(i);
+        app.detach_instances();
+        let doc = &app.session.doc;
+        assert_eq!(doc.get(i).unwrap().link(), None);
+        assert!(
+            doc.get(i)
+                .unwrap()
+                .children()
+                .iter()
+                .all(|k| doc.get(*k).unwrap().link().is_none())
+        );
+    }
+
+    /// *Create component* on a layer inside a main is refused — the frame it would
+    /// wrap the layer in would be a main inside a main (`LinkRule::NestedMain`).
+    #[test]
+    fn a_layer_inside_a_main_is_not_made_a_component() {
+        let ctx = egui::Context::default();
+        let (mut app, m, _) = main_and_instance(&ctx);
+        let rect = app.session.doc.get(m).unwrap().children()[0];
+        app.session.selection.set_one(rect);
+        app.create_component();
+        assert!(
+            !app.session.doc.get(rect).unwrap().component(),
+            "a rect inside a main is refused, not made a main"
         );
     }
 }

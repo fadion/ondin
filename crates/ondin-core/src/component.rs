@@ -3,8 +3,9 @@
 //! An instance is a **linked copy**: its nodes are ordinary stored nodes, each
 //! carrying [`crate::Node::link`] — the node it was copied from, one level up. A
 //! main component is a frame or group with [`crate::Node::component`] set. That
-//! link is the first node-to-node reference in the model besides a guide's owner
-//! (§15 D405 declined one for exactly the semantics it owes), and it is held to
+//! link is the first reference from one node to another — a guide's owner, the
+//! only earlier cross-reference, runs from a guide to a node — and §15 D405
+//! declined one for exactly the semantics it owes. It is held to
 //! account the way the owner is (§15 D491): [`check`] runs after the last op of
 //! every transaction in `Document::apply`, and on load.
 //!
@@ -13,8 +14,10 @@
 //! (§15 D979 (a)) a value an instance holds is never *invalid*, only an override,
 //! so nothing here compares values: the rules are all about structure and links.
 
+use crate::document::Document;
 use crate::id::NodeId;
 use crate::node::{Node, NodeKind};
+use crate::op::{Operation, Transaction};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Which rule a document broke. Carried by `OpError::BadLink` and turned into the
@@ -69,9 +72,11 @@ impl std::fmt::Display for LinkRule {
 /// - an **instance root** is a linked node whose source is a main, or whose source
 ///   is itself an instance root (a nested instance copied with its outer main); a
 ///   link chain must end at a main;
-/// - every other linked node belongs to the nearest instance root above it, and its
-///   source lies strictly inside that root's source; within one instance, no two
-///   such nodes share a source;
+/// - every linked node **except one linked straight to a main** belongs to the
+///   nearest instance root above it, and its source lies strictly inside that
+///   root's source; within one instance, no two such nodes share a source. A
+///   nested copy's root is held to this like a member — only a link to a main
+///   itself (an instance, or a local instance inside another) is placed freely;
 /// - no main contains, at any depth, an instance whose chain ends at itself.
 pub fn check(nodes: &FxHashMap<NodeId, Node>) -> Result<(), (NodeId, LinkRule)> {
     if !nodes.values().any(|n| n.component || n.link.is_some()) {
@@ -128,6 +133,14 @@ pub fn check(nodes: &FxHashMap<NodeId, Node>) -> Result<(), (NodeId, LinkRule)> 
         let Some(src) = n.link else { continue };
         if is_root(n) {
             main_of(n.id)?;
+        }
+        // **Only a link straight to a main is placed freely** — an instance, or a
+        // local instance inside some other instance. A nested copy's root (linked
+        // to an instance root inside an outer main) belongs to the instance around
+        // it like any member: it was copied with that main, and a layer elsewhere
+        // linked to the nested instance inside main B would otherwise pass
+        // anywhere, and two of them could share it.
+        if nodes[&src].component {
             continue;
         }
         let root = ancestors(n.id)
@@ -201,4 +214,256 @@ fn reaches_itself(
         .is_some_and(|next| next.iter().any(|m| reaches_itself(*m, uses, path, done)));
     path.pop();
     looped
+}
+
+// ── The verbs (§5.3d, build step 2) ────────────────────────────────────────────
+
+/// Whether `id` could be made a main component as it stands: a frame or a group,
+/// not linked, and with no main or linked node above it — [`check`]'s own rules,
+/// asked ahead so a menu row can say so rather than the commit refusing.
+pub fn can_be_main(doc: &Document, id: NodeId) -> bool {
+    let nodes = doc.node_map();
+    let Some(n) = nodes.get(&id) else {
+        return false;
+    };
+    if n.component
+        || n.link.is_some()
+        || !matches!(n.kind, NodeKind::Artboard { .. } | NodeKind::Group)
+    {
+        return false;
+    }
+    let mut at = n.parent;
+    while let Some(p) = at.and_then(|p| nodes.get(&p)) {
+        if p.component || p.link.is_some() {
+            return false;
+        }
+        at = p.parent;
+    }
+    true
+}
+
+/// The instance root `id` belongs to — itself, if it is one, else the nearest one
+/// above it — or `None` outside every instance. A local addition inside an
+/// instance belongs to it too: this is about where a node sits, not whether it is
+/// linked.
+pub fn instance_root(doc: &Document, id: NodeId) -> Option<NodeId> {
+    let nodes = doc.node_map();
+    let mut at = Some(id);
+    while let Some(n) = at.and_then(|a| nodes.get(&a)) {
+        if is_instance_root(nodes, n) {
+            return Some(n.id);
+        }
+        at = n.parent;
+    }
+    None
+}
+
+/// Every instance of `main` in the document — each instance root whose chain of
+/// links ends at it, nested copies included — in id order.
+pub fn instances_of(doc: &Document, main: NodeId) -> Vec<NodeId> {
+    let nodes = doc.node_map();
+    let mut out: Vec<NodeId> = nodes
+        .values()
+        .filter(|n| n.link.is_some() && is_instance_root(nodes, n))
+        .filter(|n| main_of(doc, n.id) == Some(main))
+        .map(|n| n.id)
+        .collect();
+    out.sort();
+    out
+}
+
+/// The main an instance root's chain of links ends at.
+pub fn main_of(doc: &Document, root: NodeId) -> Option<NodeId> {
+    let nodes = doc.node_map();
+    let mut at = nodes.get(&root)?;
+    for _ in 0..=nodes.len() {
+        if at.component {
+            return Some(at.id);
+        }
+        at = nodes.get(&at.link?)?;
+    }
+    None
+}
+
+/// Links into `gone` **climb past it**: every node `among` admits whose link
+/// names a node in `gone` is relinked to the first source above that is not in
+/// `gone`, or cut when there is none.
+///
+/// The one rule behind every way a link's target disappears (§5.3d's *"one rule
+/// for every way a link is cut"*):
+/// - **deleting a main** (§15 D979 (c)): its instances' own links climb to
+///   nothing, so they detach and keep their look, while a nested instance copied
+///   with them climbs to *its* main and stays an instance;
+/// - **deleting a node inside a main**: each counterpart is cut loose and kept as
+///   the instance's own layer, so instance-side work is never destroyed by an
+///   edit to the main — until build step 4 can tell an untouched counterpart from
+///   a changed one, which is when the untouched ones start being deleted with it;
+/// - **detaching** ([`detach`]) is the same climb, past the instance's own main.
+pub fn relink_past(
+    doc: &Document,
+    gone: &FxHashSet<NodeId>,
+    among: impl Fn(NodeId) -> bool,
+) -> Vec<Operation> {
+    let nodes = doc.node_map();
+    let mut ops = Vec::new();
+    for n in nodes.values() {
+        let Some(link) = n.link else { continue };
+        if !gone.contains(&link) || !among(n.id) {
+            continue;
+        }
+        let mut to = Some(link);
+        for _ in 0..=nodes.len() {
+            match to {
+                Some(s) if gone.contains(&s) => to = nodes.get(&s).and_then(|s| s.link),
+                _ => break,
+            }
+        }
+        ops.push(Operation::SetLink { id: n.id, link: to });
+    }
+    // Deterministic order, so the same edit produces the same transaction.
+    ops.sort_by_key(|op| match op {
+        Operation::SetLink { id, .. } => *id,
+        _ => unreachable!(),
+    });
+    ops
+}
+
+/// The ops that keep every link valid when the subtrees under `deleted` go — the
+/// [`relink_past`] the Delete verb owes (§15 D979 (c)). Empty in a document with
+/// no instances.
+pub fn relink_for_delete(doc: &Document, deleted: &[NodeId]) -> Vec<Operation> {
+    let gone: FxHashSet<NodeId> = crate::build::subtree_nodes(doc, deleted)
+        .into_iter()
+        .collect();
+    relink_past(doc, &gone, |id| !gone.contains(&id))
+}
+
+/// **Detach** the instance rooted at `root`: it becomes ordinary layers that keep
+/// their current look (§5.3d).
+///
+/// The root and every node that belongs to it are cut loose. A nested instance
+/// inside it is not detached with it: its links climb past this instance's main
+/// to the nested main's own nodes ([`relink_past`]), so it stays an instance of
+/// that main. Links to anything else — a local instance of some other main —
+/// are left alone. `None` when `root` is not an instance root.
+pub fn detach(doc: &Document, root: NodeId) -> Option<Transaction> {
+    let nodes = doc.node_map();
+    let r = nodes.get(&root)?;
+    if !is_instance_root(nodes, r) {
+        return None;
+    }
+    let src = r.link?;
+    let past: FxHashSet<NodeId> = crate::build::subtree_nodes(doc, &[src])
+        .into_iter()
+        .collect();
+    // Which instance root each node of this one belongs to: the nearest instance
+    // root at or above it, a nested root belonging to itself.
+    let owner = |id: NodeId| {
+        let mut at = nodes.get(&id);
+        while let Some(n) = at {
+            if is_instance_root(nodes, n) {
+                return Some(n.id);
+            }
+            at = n.parent.and_then(|p| nodes.get(&p));
+        }
+        None
+    };
+    let mut ops = Vec::new();
+    for id in crate::build::subtree_nodes(doc, &[root]) {
+        let Some(link) = nodes.get(&id).and_then(|n| n.link) else {
+            continue;
+        };
+        if !past.contains(&link) {
+            continue; // a local instance of some other main: not this instance's link
+        }
+        let to = if owner(id) == Some(root) {
+            // The root and its own members: cut. Climbing would hand a member a
+            // link with no instance root above it once the root is cut.
+            None
+        } else {
+            // A nested instance copied inside this one, and its members: climb
+            // past this instance's main to the nested main's own nodes.
+            let mut to = Some(link);
+            for _ in 0..=nodes.len() {
+                match to {
+                    Some(s) if past.contains(&s) => to = nodes.get(&s).and_then(|s| s.link),
+                    _ => break,
+                }
+            }
+            to
+        };
+        ops.push(Operation::SetLink { id, link: to });
+    }
+    Some(Transaction(ops))
+}
+
+/// How a copy of a **main** lands (§15 D979 (e)): as an instance of it, which is
+/// what copy and paste, duplicate and Alt-drag do, or as a new main — *Duplicate
+/// as component*.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MainCopy {
+    Instance,
+    NewMain,
+}
+
+/// Settle the links of `copy` — `template` run through `remap_subtree`, index for
+/// index — for where it is about to land in `doc`. Answers whether the copy became
+/// an **instance** of the main it was copied from.
+///
+/// - A copy of a main in this document becomes an instance of it under
+///   [`MainCopy::Instance`]: every copied node links to the node it was copied
+///   from, and the copy is not itself a main. Its names stay the main's (§15
+///   D981), which is why the caller skips the copy-numbering then.
+/// - Otherwise links are settled one at a time. A link `remap_subtree` pointed
+///   inside the copy stays (a main copied with its instance). A link to a node not
+///   in this document is dropped — a paste from another document (§15 D979 (d)).
+///   An instance root's link stays: its copy is a new instance of the same source.
+///   **A member's link stays only if its instance root came along**; a member
+///   copied on its own becomes the copy's own layer, which is what keeps a
+///   duplicate inside its own instance from claiming its original's source
+///   (`LinkRule::SharedSource`).
+pub(crate) fn settle_copy(
+    doc: &Document,
+    template: &[Node],
+    copy: &mut [Node],
+    mains: MainCopy,
+) -> bool {
+    let nodes = doc.node_map();
+    let in_template: FxHashMap<NodeId, &Node> = template.iter().map(|n| (n.id, n)).collect();
+    let root = template
+        .iter()
+        .find(|n| n.parent.is_none_or(|p| !in_template.contains_key(&p)));
+    if mains == MainCopy::Instance
+        && let Some(root) = root
+        && root.component
+        && nodes.get(&root.id).is_some_and(|n| n.component)
+    {
+        for (c, t) in copy.iter_mut().zip(template) {
+            c.link = Some(t.id);
+            c.component = false;
+        }
+        return true;
+    }
+    let copied: FxHashSet<NodeId> = copy.iter().map(|n| n.id).collect();
+    let root_above = |t: &Node| {
+        let mut at = t.parent.and_then(|p| in_template.get(&p).copied());
+        while let Some(a) = at {
+            if is_instance_root(nodes, a) {
+                return true;
+            }
+            at = a.parent.and_then(|p| in_template.get(&p).copied());
+        }
+        false
+    };
+    for (c, t) in copy.iter_mut().zip(template) {
+        let Some(link) = c.link else { continue };
+        if copied.contains(&link) {
+            continue;
+        }
+        let keep = nodes.contains_key(&link) && (is_instance_root(nodes, t) || root_above(t));
+        if !keep {
+            c.link = None;
+        }
+    }
+    false
 }

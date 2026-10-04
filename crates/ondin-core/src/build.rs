@@ -2117,11 +2117,36 @@ pub struct Placement {
 /// the wrong sibling. Counting only the inserts that already shifted *this* index is
 /// correct for either order, and is the same simulate-as-you-go rule
 /// `layers::plan_layer_move` uses for a multi-row reorder (§15 D54).
+///
+/// **Components** (§15 D978, D979 (e)): a copy of a main lands as an **instance**
+/// of it — copy and paste, duplicate and Alt-drag all come through here — and every
+/// copy's links are settled for where it lands (`component::settle_copy`): a link
+/// to another document is dropped, and a member copied without its instance root
+/// becomes the copy's own layer. An instance keeps its main's names, so the copy
+/// numbering is skipped for one. [`insert_subtrees_as`] with
+/// [`crate::component::MainCopy::NewMain`] is *Duplicate as component*.
 pub fn insert_subtrees(
     doc: &Document,
     ids: &mut IdSource,
     placements: &[Placement],
     offset: Vec2,
+) -> (Transaction, Vec<NodeId>) {
+    insert_subtrees_as(
+        doc,
+        ids,
+        placements,
+        offset,
+        crate::component::MainCopy::Instance,
+    )
+}
+
+/// [`insert_subtrees`], saying how a copy of a main lands.
+pub fn insert_subtrees_as(
+    doc: &Document,
+    ids: &mut IdSource,
+    placements: &[Placement],
+    offset: Vec2,
+    mains: crate::component::MainCopy,
 ) -> (Transaction, Vec<NodeId>) {
     // The indices this transaction has already inserted at, per parent — not a count of
     // them. See the note above on why the count was not enough.
@@ -2131,9 +2156,11 @@ pub fn insert_subtrees(
     let mut names = CopyNames::default();
 
     for placement in placements {
-        let Some((nodes, new_root)) = crate::document::remap_subtree(&placement.nodes, ids) else {
+        let Some((mut nodes, new_root)) = crate::document::remap_subtree(&placement.nodes, ids)
+        else {
             continue;
         };
+        let instance = crate::component::settle_copy(doc, &placement.nodes, &mut nodes, mains);
         let Some(root) = nodes.iter().find(|n| n.id() == new_root) else {
             continue;
         };
@@ -2155,7 +2182,9 @@ pub fn insert_subtrees(
             id: new_root,
             transform: Affine::translate(offset) * base,
         });
-        ops.extend(names.rename(doc, placement.parent, new_root, &was_called));
+        if !instance {
+            ops.extend(names.rename(doc, placement.parent, new_root, &was_called));
+        }
         created.push(new_root);
     }
 

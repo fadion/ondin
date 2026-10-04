@@ -728,6 +728,16 @@ pub mod icon {
     pub const COPY_SIMPLE: &str = "\u{e1cc}";
     /// *Paste*.
     pub const CLIPBOARD: &str = "\u{e196}";
+    /// *Create component* and *Duplicate as component* — the outline hexagon
+    /// §15 D981 gives components. Regular weight only: the bundled font has no
+    /// filled hexagon, which D981 wants for a main's own mark in the layers panel.
+    pub const HEXAGON: &str = "\u{e2ae}";
+    /// *Detach instance* — "no longer from the main" (§15 D981).
+    pub const LINK_BREAK: &str = "\u{e2e4}";
+    /// *Go to main component*.
+    pub const ARROW_SQUARE_OUT: &str = "\u{e5de}";
+    /// *Select all instances*.
+    pub const SELECTION_ALL: &str = "\u{e746}";
     /// A stack seen from the side. **Drawn by nothing since §15 D761**, which gave
     /// *Bring to front* and *Send to back* the [`ARROW_LINE_UP`]/[`ARROW_LINE_DOWN`]
     /// pair — this constant was on **both** of those rows, which is what the ruling
@@ -1014,6 +1024,10 @@ pub mod icon {
         ("copy", COPY),
         ("copy-simple", COPY_SIMPLE),
         ("clipboard", CLIPBOARD),
+        ("hexagon", HEXAGON),
+        ("link-break", LINK_BREAK),
+        ("arrow-square-out", ARROW_SQUARE_OUT),
+        ("selection-all", SELECTION_ALL),
         ("stack", STACK),
         ("stack-simple", STACK_SIMPLE),
         ("trash", TRASH),

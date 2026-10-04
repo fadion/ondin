@@ -347,6 +347,12 @@ impl Document {
         self.nodes.values()
     }
 
+    /// The node table itself, for `crate::component`'s rules and verbs, which ask
+    /// by id across the whole document (who links to this, whose chain ends where).
+    pub(crate) fn node_map(&self) -> &FxHashMap<NodeId, Node> {
+        &self.nodes
+    }
+
     /// [`Self::apply`] for a **history step** — an undo or a redo putting back
     /// values this document held before — with the layout operations' CSS
     /// validity check stood down (§15 D937).

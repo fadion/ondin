@@ -164,6 +164,12 @@ pub enum Action {
     /// has — `inspector::mask_action` decides which, and it is the same toggle
     /// the identity row's button and the context-menu row reach.
     Mask,
+    /// *Create component* (`Ctrl+Alt+K`, §15 D981): the selected frame or group
+    /// becomes a main, or the selection is framed and the frame becomes one.
+    CreateComponent,
+    /// *Detach instance* (`Ctrl+Alt+B`, §15 D981): the instances the selection
+    /// sits in become ordinary layers.
+    DetachInstance,
     /// Wrap the selection in a boolean container, or switch a selected one's
     /// operation — `inspector::apply_boolean` decides which from the selection.
     Boolean(ondin_core::BoolOp),
@@ -1087,6 +1093,23 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
         on(
             cmd && m.alt && !m.shift && i.key_pressed(egui::Key::M),
             Action::Mask,
+            &mut out,
+        );
+
+        // *Create component* and *Detach instance*, on Figma's chords (§15 D981,
+        // `shortcuts.md` §12). Both free: `K` is otherwise the Scale tool and
+        // `Ctrl+Shift+K` placing an image; `B` has `Ctrl+B` only inside text.
+        // ⚠️ `Ctrl+Alt` is `AltGr` on many European layouts, which may type a
+        // character instead — a question for the whole keymap, not these two
+        // (`shortcuts.md` §12).
+        on(
+            cmd && m.alt && !m.shift && i.key_pressed(egui::Key::K),
+            Action::CreateComponent,
+            &mut out,
+        );
+        on(
+            cmd && m.alt && !m.shift && i.key_pressed(egui::Key::B),
+            Action::DetachInstance,
             &mut out,
         );
 
@@ -2426,6 +2449,40 @@ mod tests {
         assert!(
             actions(Mode::Normal, vec![key(egui::Key::M, cmd)], cmd).is_empty(),
             "Ctrl+M is not an alias — one chord, and the Figma one"
+        );
+    }
+
+    /// **`Ctrl+Alt+K` creates a component and `Ctrl+Alt+B` detaches an instance**
+    /// (§15 D981, `shortcuts.md` §12) — and neither steals its letter's neighbours:
+    /// `Ctrl+Shift+K` still places an image and plain `K` is still not this.
+    #[test]
+    fn the_component_chords_land_and_leave_their_neighbours_alone() {
+        let cmd_alt = egui::Modifiers {
+            alt: true,
+            ..egui::Modifiers::COMMAND
+        };
+        assert_eq!(
+            actions(Mode::Normal, vec![key(egui::Key::K, cmd_alt)], cmd_alt),
+            vec![Action::CreateComponent]
+        );
+        assert_eq!(
+            actions(Mode::Normal, vec![key(egui::Key::B, cmd_alt)], cmd_alt),
+            vec![Action::DetachInstance]
+        );
+        let cmd_shift = egui::Modifiers {
+            shift: true,
+            ..egui::Modifiers::COMMAND
+        };
+        assert_eq!(
+            actions(Mode::Normal, vec![key(egui::Key::K, cmd_shift)], cmd_shift),
+            vec![Action::PlaceImage],
+            "the neighbouring chord is untouched"
+        );
+        let cmd = egui::Modifiers::COMMAND;
+        assert!(
+            !actions(Mode::Normal, vec![key(egui::Key::B, cmd)], cmd)
+                .contains(&Action::DetachInstance),
+            "Ctrl+B is not an alias"
         );
     }
 

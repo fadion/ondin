@@ -352,3 +352,252 @@ fn a_copied_main_and_instance_stay_linked_to_each_other() {
     let (copy, _) = ondin_core::remap_subtree(&alone, &mut f.ids).unwrap();
     assert_eq!(copy[0].link(), Some(f.m));
 }
+
+/// Only a link **straight to a main** is placed freely. A layer at the canvas root
+/// linked to the nested instance *inside* another main is an instance root by its
+/// chain, but it was never copied with that main, so it belongs nowhere and is
+/// refused. Flip: exempting every instance root from membership (the first build,
+/// `is_root(n)` → `continue`) accepts it — `arch-scribe` found that looseness by
+/// reading the rule against §5.3d.
+#[test]
+fn a_link_to_a_nested_copy_is_held_to_membership() {
+    let mut f = fixture();
+    let [outer, n, stray] = [(); 3].map(|_| f.ids.mint());
+    f.doc
+        .apply(&Transaction(vec![
+            create(outer, f.root, 2, frame()),
+            create(n, outer, 0, frame()),
+            Operation::SetComponent {
+                id: outer,
+                component: true,
+            },
+            Operation::SetLink {
+                id: n,
+                link: Some(f.m),
+            },
+        ]))
+        .expect("a main holding a nested instance");
+    let (id, rule) = refused(
+        &mut f.doc,
+        vec![
+            create(stray, f.root, 3, frame()),
+            Operation::SetLink {
+                id: stray,
+                link: Some(n),
+            },
+        ],
+    );
+    assert_eq!((id, rule), (stray, LinkRule::Membership));
+}
+
+// ── The verbs (build step 2) ───────────────────────────────────────────────────
+
+/// Main `outer` holding a nested instance `n` (of `m`, children `na`/`nb`), and
+/// an instance `io_` of `outer` holding the copy `cn` (children `cna`/`cnb`).
+fn nested(f: &mut Fixture) -> [NodeId; 8] {
+    let ids @ [outer, n, na, nb, io_, cn, cna, cnb] = [(); 8].map(|_| f.ids.mint());
+    let link = |id, to| Operation::SetLink { id, link: Some(to) };
+    f.doc
+        .apply(&Transaction(vec![
+            create(outer, f.root, 2, frame()),
+            create(n, outer, 0, frame()),
+            create(na, n, 0, rect()),
+            create(nb, n, 1, rect()),
+            Operation::SetComponent {
+                id: outer,
+                component: true,
+            },
+            link(n, f.m),
+            link(na, f.a),
+            link(nb, f.b),
+            create(io_, f.root, 3, frame()),
+            create(cn, io_, 0, frame()),
+            create(cna, cn, 0, rect()),
+            create(cnb, cn, 1, rect()),
+            link(io_, outer),
+            link(cn, n),
+            link(cna, na),
+            link(cnb, nb),
+        ]))
+        .expect("the nested fixture");
+    ids
+}
+
+fn link_of(doc: &Document, id: NodeId) -> Option<NodeId> {
+    doc.get(id).unwrap().link()
+}
+
+/// Deleting a main detaches its instances (§15 D979 (c)) and a nested instance
+/// copied with them **climbs to its own main** rather than detaching. Flip:
+/// `relink_past` cutting every link into the deleted set instead of climbing
+/// leaves `cn` unlinked, and the nested instance is lost.
+#[test]
+fn deleting_a_main_detaches_its_instances_and_keeps_nested_ones() {
+    let mut f = fixture();
+    let [outer, _, _, _, io_, cn, cna, cnb] = nested(&mut f);
+    let mut ops = vec![Operation::DeleteNode { id: outer }];
+    ops.extend(ondin_core::component::relink_for_delete(&f.doc, &[outer]));
+    f.doc
+        .apply(&Transaction(ops))
+        .expect("the delete with its relinks");
+    assert_eq!(link_of(&f.doc, io_), None, "the instance detaches");
+    assert_eq!(
+        link_of(&f.doc, cn),
+        Some(f.m),
+        "the nested copy climbs to m"
+    );
+    assert_eq!(link_of(&f.doc, cna), Some(f.a));
+    assert_eq!(link_of(&f.doc, cnb), Some(f.b));
+}
+
+/// Deleting a node inside a main leaves its counterpart as the instance's own
+/// layer, never deleted with it — until build step 4 can tell untouched from
+/// changed.
+#[test]
+fn deleting_a_mains_child_keeps_its_counterpart_as_a_local_layer() {
+    let mut f = fixture();
+    let mut ops = vec![Operation::DeleteNode { id: f.b }];
+    ops.extend(ondin_core::component::relink_for_delete(&f.doc, &[f.b]));
+    f.doc.apply(&Transaction(ops)).unwrap();
+    assert!(f.doc.get(f.ib).is_some());
+    assert_eq!(link_of(&f.doc, f.ib), None);
+    assert_eq!(link_of(&f.doc, f.ia), Some(f.a), "the rest still follow");
+}
+
+/// Detaching an instance cuts its own links and lets a nested instance climb.
+#[test]
+fn detaching_an_instance_keeps_a_nested_one() {
+    let mut f = fixture();
+    let [_, _, _, _, io_, cn, cna, _] = nested(&mut f);
+    let tx = ondin_core::component::detach(&f.doc, io_).unwrap();
+    f.doc.apply(&tx).unwrap();
+    assert_eq!(link_of(&f.doc, io_), None);
+    assert_eq!(link_of(&f.doc, cn), Some(f.m));
+    assert_eq!(link_of(&f.doc, cna), Some(f.a));
+}
+
+/// Detaching the **nested** instance alone cuts it and its members — it does not
+/// climb them, which would hand each member a link with no instance root above
+/// it. Flip: climbing every link past the source (the first draft) is refused by
+/// `apply` as `Membership`.
+#[test]
+fn detaching_a_nested_instance_cuts_its_members_too() {
+    let mut f = fixture();
+    let [_, _, _, _, io_, cn, cna, cnb] = nested(&mut f);
+    let tx = ondin_core::component::detach(&f.doc, cn).unwrap();
+    f.doc.apply(&tx).expect("a valid detach");
+    for id in [cn, cna, cnb] {
+        assert_eq!(link_of(&f.doc, id), None, "{id:?}");
+    }
+    assert!(
+        link_of(&f.doc, io_).is_some(),
+        "the outer instance is untouched"
+    );
+}
+
+fn duplicate(f: &mut Fixture, id: NodeId) -> (Transaction, NodeId) {
+    duplicate_as(f, id, ondin_core::component::MainCopy::Instance)
+}
+
+fn duplicate_as(
+    f: &mut Fixture,
+    id: NodeId,
+    mains: ondin_core::component::MainCopy,
+) -> (Transaction, NodeId) {
+    let parent = f.doc.get(id).unwrap().parent().unwrap();
+    let placements = [ondin_core::Placement {
+        nodes: f.doc.capture_subtree(id).unwrap(),
+        parent,
+        index: None,
+    }];
+    let (tx, created) = ondin_core::build::insert_subtrees_as(
+        &f.doc,
+        &mut f.ids,
+        &placements,
+        Default::default(),
+        mains,
+    );
+    (tx, created[0])
+}
+
+/// A copy of a main is an **instance** of it (§15 D979 (e)): every copied node
+/// links to its original and the names are the main's. Flip: `settle_copy`'s
+/// instance arm removed leaves a second main, refused nowhere and wrong.
+#[test]
+fn duplicating_a_main_makes_an_instance_of_it() {
+    let mut f = fixture();
+    let m = f.m;
+    let (tx, copy) = duplicate(&mut f, m);
+    f.doc.apply(&tx).unwrap();
+    let c = f.doc.get(copy).unwrap();
+    assert!(!c.component());
+    assert_eq!(c.link(), Some(f.m));
+    assert_eq!(
+        c.name(),
+        f.doc.get(f.m).unwrap().name(),
+        "no copy numbering"
+    );
+    let kids: Vec<_> = c.children().iter().map(|k| link_of(&f.doc, *k)).collect();
+    assert_eq!(kids, vec![Some(f.a), Some(f.b)]);
+    assert_eq!(ondin_core::component::instances_of(&f.doc, f.m).len(), 2);
+}
+
+/// *Duplicate as component* makes a new, unlinked main.
+#[test]
+fn duplicating_as_component_makes_a_new_main() {
+    let mut f = fixture();
+    let m = f.m;
+    let (tx, copy) = duplicate_as(&mut f, m, ondin_core::component::MainCopy::NewMain);
+    f.doc.apply(&tx).unwrap();
+    let c = f.doc.get(copy).unwrap();
+    assert!(c.component());
+    assert_eq!(c.link(), None);
+}
+
+/// A member duplicated inside its own instance becomes the instance's own layer:
+/// keeping the link would give two nodes of one instance one source. Flip: keeping
+/// a lone member's link is refused as `SharedSource`.
+#[test]
+fn duplicating_a_member_inside_its_instance_makes_a_local_layer() {
+    let mut f = fixture();
+    let ia = f.ia;
+    let (tx, copy) = duplicate(&mut f, ia);
+    f.doc.apply(&tx).expect("a local copy");
+    assert_eq!(link_of(&f.doc, copy), None);
+    assert_eq!(link_of(&f.doc, f.ia), Some(f.a));
+}
+
+/// An instance duplicated is another instance of the same main.
+#[test]
+fn duplicating_an_instance_makes_another_instance() {
+    let mut f = fixture();
+    let i = f.i;
+    let (tx, copy) = duplicate(&mut f, i);
+    f.doc.apply(&tx).unwrap();
+    assert_eq!(link_of(&f.doc, copy), Some(f.m));
+    let kid = f.doc.get(copy).unwrap().children()[0];
+    assert_eq!(link_of(&f.doc, kid), Some(f.a));
+}
+
+/// A paste from another document drops links it cannot resolve (§15 D979 (d)):
+/// the instance arrives as plain layers.
+#[test]
+fn pasting_an_instance_into_another_document_drops_its_links() {
+    let f = fixture();
+    let template = f.doc.capture_subtree(f.i).unwrap();
+    let mut ids = IdSource::new(0xDA);
+    let root = ids.mint();
+    let mut other = Document::new(root);
+    let (tx, created) = ondin_core::insert_subtrees(
+        &other,
+        &mut ids,
+        &[ondin_core::Placement {
+            nodes: template,
+            parent: root,
+            index: None,
+        }],
+        Default::default(),
+    );
+    other.apply(&tx).expect("plain layers");
+    assert_eq!(link_of(&other, created[0]), None);
+}

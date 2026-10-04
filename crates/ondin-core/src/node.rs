@@ -185,9 +185,10 @@ pub struct Node {
     /// The node this one was **copied from**, when it is part of an instance
     /// (§5.3d, §15 D978) — one level up: a main component's node, or a node of a
     /// nested instance inside an outer main. `None` for every ordinary layer and for
-    /// an instance's local additions. The first node-to-node reference in the model
-    /// besides a guide's owner, and checked the way that one is: after the last op
-    /// of every transaction (`crate::component::check`).
+    /// an instance's local additions. The first reference from one node to another
+    /// (a guide's owner, the only earlier one, runs from a guide), and checked the
+    /// way that one is: after the last op of every transaction
+    /// (`crate::component::check`).
     pub(crate) link: Option<NodeId>,
 }
 

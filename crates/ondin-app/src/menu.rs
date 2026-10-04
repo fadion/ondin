@@ -302,6 +302,18 @@ pub enum Item {
     /// selections until frames could be grouped (§15 D870); now they differ only
     /// in what they make.
     FrameSelection,
+    /// *Create component* (`Ctrl+Alt+K`, §15 D981) — on an ordinary layer or a
+    /// selection; a frame or group becomes the main, anything else is framed first.
+    CreateComponent,
+    /// *Duplicate as component* (§15 D981) — on a main: a copy that is a new main,
+    /// where *Duplicate* makes an instance.
+    DuplicateAsComponent,
+    /// *Select all instances* (§15 D981) — on a main.
+    SelectAllInstances,
+    /// *Go to main component* (§15 D981) — on an instance, or a linked layer in one.
+    GoToMain,
+    /// *Detach instance* (`Ctrl+Alt+B`, §15 D981) — on an instance.
+    DetachInstance,
     Ungroup,
     /// *Use as mask* — the layer clips the ones above it (`build::mask`, §15
     /// D282, D286).
@@ -671,6 +683,11 @@ impl Item {
         Item::PasteProperties,
         Item::Group,
         Item::FrameSelection,
+        Item::CreateComponent,
+        Item::DuplicateAsComponent,
+        Item::SelectAllInstances,
+        Item::GoToMain,
+        Item::DetachInstance,
         Item::Ungroup,
         Item::Mask,
         Item::EvenOdd,
@@ -812,6 +829,39 @@ impl Item {
                 // invented at a menu row is a chord that file does not know about
                 // (§15 D249).
                 None,
+                Group::Structure,
+            ),
+            // D981's rows and chords (`shortcuts.md` §12). Filed under Structure
+            // beside *Frame selection* for now: `context-menus.md` §7 places them
+            // when components are built, and that placement is not decided here.
+            Item::CreateComponent => s(
+                "Create component",
+                icon::HEXAGON,
+                Some("Ctrl+Alt+K"),
+                Group::Structure,
+            ),
+            Item::DuplicateAsComponent => s(
+                "Duplicate as component",
+                icon::HEXAGON,
+                None,
+                Group::Structure,
+            ),
+            Item::SelectAllInstances => s(
+                "Select all instances",
+                icon::SELECTION_ALL,
+                None,
+                Group::Structure,
+            ),
+            Item::GoToMain => s(
+                "Go to main component",
+                icon::ARROW_SQUARE_OUT,
+                None,
+                Group::Structure,
+            ),
+            Item::DetachInstance => s(
+                "Detach instance",
+                icon::LINK_BREAK,
+                Some("Ctrl+Alt+B"),
                 Group::Structure,
             ),
             Item::Ungroup => s(
@@ -1301,6 +1351,26 @@ pub struct Context<'a> {
     /// row's presence test knew only kinds. Every other refusal `mask_action` makes
     /// dims the row the same way.
     pub mask_refused: Option<&'static str>,
+    /// What a single selected layer is to the components machinery (§15 D978),
+    /// which decides D981's rows: *Create component* on an ordinary layer, the
+    /// main's two rows, the instance's two, the child's one.
+    pub role: Role,
+}
+
+/// A layer's part in a component, for D981's menu rows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Role {
+    /// Not a main and not inside an instance — or a selection of several.
+    #[default]
+    Plain,
+    /// A main component.
+    Main,
+    /// An instance root.
+    Instance,
+    /// A layer inside an instance, linked to its counterpart in the main.
+    Member,
+    /// A layer inside an instance that exists only there.
+    Local,
 }
 
 /// The parts of the layer under the pointer that decide a row's label or its
@@ -1656,6 +1726,24 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
             )
             .dim_if(locked, why),
     );
+    // D981's rows, by what the layer is to the components machinery (§15 D981):
+    // *Create component* on anything that is not already part of one, the main's
+    // two, the instance's two, a linked child's one. *Reset* waits for build
+    // step 5, which is what makes it mean something.
+    match cx.role {
+        Role::Plain | Role::Local => {
+            rows.push(Row::new(Item::CreateComponent).dim_if(locked, why));
+        }
+        Role::Main => {
+            rows.push(Row::new(Item::DuplicateAsComponent).dim_if(locked, why));
+            rows.push(Row::new(Item::SelectAllInstances));
+        }
+        Role::Instance => {
+            rows.push(Row::new(Item::GoToMain));
+            rows.push(Row::new(Item::DetachInstance).dim_if(locked, why));
+        }
+        Role::Member => rows.push(Row::new(Item::GoToMain)),
+    }
     // *Ungroup* and *Flatten* on a group or boolean are **promoted into the
     // head** (§3) and must not appear twice, which is the first thing that makes
     // a menu look generated rather than designed.
@@ -2565,6 +2653,7 @@ impl OndinApp {
                 .is_some_and(|s| s.editor.content().is_empty()),
             can_frame: build::can_frame(&self.session.doc, self.session.selection.ids()),
             mask_refused: self.mask_refusal(),
+            role: self.component_role(),
             // A walk of the tree per frame the menu is up, which is the same shape
             // `any_guides` above has and cheaper than it looks: it stops at the
             // first layer with a spec on it in every document that has one.
@@ -2687,6 +2776,12 @@ impl OndinApp {
             // `Action` because nothing binds a chord to it (§15 D249) — if
             // `shortcuts.md` ever does, this becomes a `dispatch` like its sibling.
             Item::FrameSelection => self.frame_selection(),
+            Item::CreateComponent => self.dispatch(ctx, Action::CreateComponent),
+            Item::DetachInstance => self.dispatch(ctx, Action::DetachInstance),
+            // No chord, so no `Action` — `FrameSelection`'s reason.
+            Item::DuplicateAsComponent => self.duplicate_as_component(),
+            Item::SelectAllInstances => self.select_all_instances(),
+            Item::GoToMain => self.go_to_main(),
             Item::Ungroup => self.dispatch(ctx, Action::Ungroup),
             Item::Boolean(op) => self.dispatch(ctx, Action::Boolean(op)),
             Item::Flatten => self.dispatch(ctx, Action::Flatten),
@@ -3091,6 +3186,7 @@ mod tests {
             // `None`, for `can_frame`'s reason: a refusal by default would dim the
             // row in every fixture and make the test that cares pass by accident.
             mask_refused: None,
+            role: Role::Plain,
             // **True**, for `can_frame`'s reason: the page menu's fixtures are not
             // about the export row, and a `false` default would leave it dim in all
             // of them and make a test that cares pass by accident.
@@ -3388,9 +3484,10 @@ mod tests {
     /// 22. **23 is *Use as mask*** (§15 D286), which is the first row to move this
     /// number since — and it moves it the honest way, a verb `context-menus.md`
     /// listed as a deliberate non-row becoming a real one because the model grew
-    /// what it was waiting for.
+    /// what it was waiting for. **24 is *Create component*** (§15 D981), on any
+    /// layer that is not already part of a component — a shape is framed first.
     #[test]
-    fn a_primitives_menu_is_twenty_three_rows_in_canonical_group_order() {
+    fn a_primitives_menu_is_twenty_four_rows_in_canonical_group_order() {
         let sel = [id(1)];
         let kinds = [Kind::Shape];
         let groups = build(&open(
@@ -3401,7 +3498,7 @@ mod tests {
             &sel,
             &kinds,
         ));
-        assert_eq!(flat(&groups).len(), 23, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 24, "{:?}", labels(&groups));
         assert_eq!(groups.len(), 8, "the head is empty and must collapse");
 
         // **Asserting the sequence, not that it is sorted.** `build` buckets by
@@ -3428,6 +3525,9 @@ mod tests {
                 // Directly after its sibling, which is §4's order for it, and the
                 // row that took this menu from 17 to 18 (§15 D249).
                 "Frame selection",
+                // D981's row for an ordinary layer, beside the verb it uses to
+                // wrap one (23 → 24). Placement provisional: `context-menus.md` §7.
+                "Create component",
                 // After the group verbs and before the booleans, which is where it
                 // belongs on the merits: with the group-wrapping arm it *is* one of
                 // the container-making verbs. Took this menu from 22 to 23
@@ -3533,7 +3633,8 @@ mod tests {
             &sel,
             &kinds,
         ));
-        assert_eq!(flat(&groups).len(), 29, "{:?}", labels(&groups));
+        // 30 since *Create component* (§15 D981); 29 before it.
+        assert_eq!(flat(&groups).len(), 30, "{:?}", labels(&groups));
     }
 
     /// **The whole menu is present on a locked layer and every editing row is
@@ -3560,10 +3661,11 @@ mod tests {
             ..LayerState::default()
         };
         let groups = build(&cx);
-        // The fixture: exactly the 23 rows an unlocked primitive has. Nothing is
+        // The fixture: exactly the 24 rows an unlocked primitive has (23 before
+        // *Create component*, §15 D981 — dimmed here with the rest). Nothing is
         // *missing* because it is locked — that is the claim; the whole menu is
         // present and it is the enabling that changes.
-        assert_eq!(flat(&groups).len(), 23, "{:?}", labels(&groups));
+        assert_eq!(flat(&groups).len(), 24, "{:?}", labels(&groups));
 
         let row = |item: Item| {
             groups
@@ -4173,7 +4275,8 @@ mod tests {
             .map(|r| r.item)
             .collect();
         let all = flat(&groups).len();
-        assert_eq!(all, 23, "{:?}", labels(&groups));
+        // 24 since *Create component* joined the primitive's menu (§15 D981).
+        assert_eq!(all, 24, "{:?}", labels(&groups));
         assert!(
             live.len() > 1 && live.len() < all,
             "the fixture needs live rows *and* dimmed ones, and has {} of {all}",

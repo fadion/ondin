@@ -263,6 +263,21 @@ pub enum Operation {
         id: NodeId,
         item: crate::container::LayoutItem,
     },
+    /// Make a frame or group a main component, or stop it being one (§15 D978).
+    /// The rules — which kinds, never inside a main or an instance — are checked
+    /// after the last op (`crate::component::check`), so a verb can make the
+    /// change and its consequences in either order.
+    SetComponent {
+        id: NodeId,
+        component: bool,
+    },
+    /// Link a node to the node it was copied from, or cut the link (§15 D978) —
+    /// how an instance is made, detached, and relinked one level up. Checked after
+    /// the last op, as [`Self::SetComponent`] is.
+    SetLink {
+        id: NodeId,
+        link: Option<NodeId>,
+    },
     /// The ground behind and around the frames — the one operation with no node
     /// to name, because the ground belongs to the document rather than to
     /// anything in it (§15 D18). A solid colour, not a `Brush`: there is
@@ -387,7 +402,9 @@ impl Operation {
             | Operation::SetLayoutGrids { id, .. }
             | Operation::SetInsets { id, .. }
             | Operation::SetDisplay { id, .. }
-            | Operation::SetLayoutItem { id, .. } => Some(*id),
+            | Operation::SetLayoutItem { id, .. }
+            | Operation::SetComponent { id, .. }
+            | Operation::SetLink { id, .. } => Some(*id),
             Operation::CreateNode { .. }
             | Operation::DeleteNode { .. }
             | Operation::InsertSubtree { .. }
@@ -481,8 +498,9 @@ impl Operation {
     /// panel and a tag over a frame, and a guide is a line over the artwork rather
     /// than part of it.
     ///
-    /// **The same eleven operations `RenderOverrides::absorb` treats as a no-op**, and
-    /// deliberately the same list: "the renderer has nothing to do with this" and
+    /// **The thirteen operations of `RenderOverrides::absorb`'s chrome no-op arm**
+    /// (its no-ops are fifteen: the image pair is the other arm, a no-op there
+    /// without being invisible — §15 D659), and deliberately the same list: "the renderer has nothing to do with this" and
     /// "this changes nothing drawn" are one fact asked by two callers. They are not
     /// one function because `absorb` also has to separate the *patchable* ops from
     /// the structural ones, which is a distinction this question does not make —
@@ -511,6 +529,12 @@ impl Operation {
             // node, no export, nothing in the snapshot. The same sentence the
             // guide arms below are filed under.
             | Operation::SetLayoutGrids { .. }
+            // Being a main, or being linked, is what a layer *is* to the
+            // components machinery, not anything it draws: the main's label chip
+            // and the instance glyph are chrome (§15 D981), and an instance looks
+            // exactly like the nodes it holds.
+            | Operation::SetComponent { .. }
+            | Operation::SetLink { .. }
             | Operation::AddGuide { .. }
             | Operation::RemoveGuide { .. }
             | Operation::SetGuidePosition { .. }
@@ -770,6 +794,10 @@ impl Operation {
                 node(id).is_some_and(|n| n.display() == display.as_ref())
             }
             Operation::SetLayoutItem { id, item } => node(id).is_some_and(|n| n.item() == item),
+            Operation::SetComponent { id, component } => {
+                node(id).is_some_and(|n| n.component() == *component)
+            }
+            Operation::SetLink { id, link } => node(id).is_some_and(|n| n.link() == *link),
 
             Operation::SetCanvasBackground { background } => doc.canvas_background() == *background,
             Operation::SetGuidePosition { id, position } => {
@@ -1117,6 +1145,13 @@ pub enum OpError {
     /// [`Self::BadGuideOwner`] is.
     #[error("node {0:?} has item id {1:?} twice in one list")]
     DuplicateItemId(NodeId, crate::item::ItemId),
+    /// A component or instance rule broken (§15 D978, `crate::component::check`) —
+    /// a link to nothing, a main inside an instance, an instance of a main inside
+    /// itself. Checked after the last op, as [`Self::BadGuideOwner`] is, so a
+    /// transaction that deletes a main and detaches its instances in either order
+    /// is judged by where it ends.
+    #[error("node {0:?} {1}")]
+    BadLink(NodeId, crate::component::LinkRule),
     /// A number that is `NaN` or infinite — in a node's geometry, in its
     /// transform, in its **pivot** (§15 D639), in an **effect** it carries — a
     /// shadow's offset, blur, spread and colour, a layer blur's radius, the four
@@ -1162,7 +1197,7 @@ mod changes_ink_tests {
     use super::*;
     use crate::id::IdSource;
 
-    /// **Exactly eleven operations change nothing drawn**, and the set is what the
+    /// **Exactly thirteen operations change nothing drawn**, and the set is what the
     /// inspector's chrome hide turns on (§15 D128): an edit with no visible result
     /// has nothing to get the selection box out of the way *for*, and an edit whose
     /// only result *is* chrome would have that result taken away by hiding it.
@@ -1170,10 +1205,11 @@ mod changes_ink_tests {
     /// Pinned as a list rather than left to `changes_ink`'s own `match`, because the
     /// `match` is wildcard-free — so a new operation stops the build there and the
     /// author has to choose an arm, but nothing stops them choosing the *wrong* one.
-    /// This is where the choice is checked against what the eleven have in common.
+    /// This is where the choice is checked against what the thirteen have in common.
     ///
-    /// They are the same eleven `RenderOverrides::absorb` treats as a no-op. If
-    /// the two ever disagree, one of them is wrong.
+    /// They are the thirteen of `RenderOverrides::absorb`'s chrome no-op arm; its
+    /// image arm is two more, which change ink (§15 D659). If the chrome arm and
+    /// this list ever disagree, one of them is wrong.
     ///
     /// ⚠️ **This said "nine" and listed nine while the `match` held ten**, having
     /// missed `SetExports` when that op arrived — the exact drift the paragraph
@@ -1191,6 +1227,9 @@ mod changes_ink_tests {
     /// length could not see it, because the number it asserts against is the
     /// fixture's and not the prose's. **A count written in prose beside a count
     /// the code checks is not covered by the code checking it.**
+    ///
+    /// **Thirteen with `SetComponent` and `SetLink`** (§15 D978), 2026-10-04 — prose
+    /// and fixture recounted together, the fixture's assertion moved first.
     #[test]
     fn only_the_chrome_operations_change_no_ink() {
         let mut ids = IdSource::new(1);
@@ -1209,6 +1248,11 @@ mod changes_ink_tests {
                 exports: vec![],
             },
             Operation::SetLayoutGrids { id, grids: vec![] },
+            Operation::SetComponent {
+                id,
+                component: true,
+            },
+            Operation::SetLink { id, link: None },
             Operation::AddGuide {
                 guide: crate::guide::Guide {
                     id: guide,
@@ -1237,7 +1281,11 @@ mod changes_ink_tests {
         // makes the count in this test's doc comment checkable by anything but a
         // reader — and that comment has been wrong once, by exactly this
         // mechanism.
-        assert_eq!(invisible.len(), 11, "the chrome list is eleven operations");
+        assert_eq!(
+            invisible.len(),
+            13,
+            "the chrome list is thirteen operations"
+        );
         for op in &invisible {
             assert!(
                 !op.changes_ink(),

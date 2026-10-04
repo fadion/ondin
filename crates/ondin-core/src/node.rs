@@ -176,11 +176,32 @@ pub struct Node {
     /// (`crate::container::LayoutItem`). At CSS's defaults on every layer until
     /// set; read only when its parent has a `display`.
     pub(crate) item: crate::container::LayoutItem,
+    /// Whether this layer is a **main component** (§5.3d, §15 D978) — the source
+    /// its instances are linked copies of. Only on an `Artboard` or a `Group`, and
+    /// never on a layer that is itself linked or sits inside a main or an
+    /// instance; `Document::apply` and the loader refuse the rest
+    /// (`crate::component::check`).
+    pub(crate) component: bool,
+    /// The node this one was **copied from**, when it is part of an instance
+    /// (§5.3d, §15 D978) — one level up: a main component's node, or a node of a
+    /// nested instance inside an outer main. `None` for every ordinary layer and for
+    /// an instance's local additions. The first node-to-node reference in the model
+    /// besides a guide's owner, and checked the way that one is: after the last op
+    /// of every transaction (`crate::component::check`).
+    pub(crate) link: Option<NodeId>,
 }
 
 impl Node {
     pub fn id(&self) -> NodeId {
         self.id
+    }
+    /// Whether this layer is a main component (§15 D978).
+    pub fn component(&self) -> bool {
+        self.component
+    }
+    /// The node this one was copied from, if it is part of an instance (§15 D978).
+    pub fn link(&self) -> Option<NodeId> {
+        self.link
     }
     /// Refuse a node whose five item lists repeat an item id within one list
     /// (§15 D980) — `Document::apply`'s post-condition and the loader's check.

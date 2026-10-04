@@ -2379,7 +2379,9 @@ fn a_ghost_of_a_shadowed_stroked_shape_reserves_the_strokes_reach() {
 }
 
 /// **`absorb` treats thirteen operations as a no-op, not eleven** — §15 D659,
-/// `[S19.2-L2-04]`.
+/// `[S19.2-L2-04]`. (Fifteen and thirteen since `SetComponent` and `SetLink`
+/// joined the chrome arm, §15 D978; the paragraphs below keep the counts of the
+/// finding they record.)
 ///
 /// 🚨 **The design said the two lists were the same eleven, and a review pass
 /// certified that they were.** `op::changes_ink` answers `false` for eleven
@@ -2428,7 +2430,8 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
     let guide = ondin_core::guide::GuideId(ids.mint());
     let pic = ondin_core::ImageId("pic".into());
 
-    // The eleven `changes_ink` answers `false` for, in `op.rs`'s own order.
+    // The thirteen `changes_ink` answers `false` for, in `op.rs`'s own order —
+    // eleven until `SetComponent` and `SetLink` (§15 D978).
     let chrome = [
         Operation::SetName {
             id,
@@ -2442,6 +2445,11 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
             exports: vec![],
         },
         Operation::SetLayoutGrids { id, grids: vec![] },
+        Operation::SetComponent {
+            id,
+            component: false,
+        },
+        Operation::SetLink { id, link: None },
         Operation::AddGuide {
             guide: ondin_core::guide::Guide {
                 id: guide,
@@ -2483,7 +2491,7 @@ fn every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink() {
     // The fixture asserts its own lengths, for the reason `op.rs`'s does: it is
     // the only thing that makes the counts in the comment above checkable by
     // anything but a reader, and those counts have been wrong before.
-    assert_eq!(chrome.len(), 11, "the chrome list is eleven operations");
+    assert_eq!(chrome.len(), 13, "the chrome list is thirteen operations");
     assert_eq!(images.len(), 2, "and the image pair is two");
 
     let res = Resolved::rebuild(&f.doc);

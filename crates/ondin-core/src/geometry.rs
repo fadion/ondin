@@ -1556,6 +1556,8 @@ mod tests {
             insets: Default::default(),
             display: None,
             item: Default::default(),
+            component: false,
+            link: None,
         }
     }
 

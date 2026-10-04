@@ -227,6 +227,16 @@ pub(crate) struct NodeDto {
         skip_serializing_if = "crate::container::LayoutItem::is_default"
     )]
     pub item: crate::container::LayoutItem,
+    /// Whether the layer is a main component (§15 D978), absent when not. Additive,
+    /// but it arrived with schema v5 so that an older build refuses a file holding
+    /// components rather than silently dropping them (§5.3d).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub component: bool,
+    /// The node this one was copied from, as a wire id (§15 D978), absent for a
+    /// layer outside any instance. Checked on load like a guide's owner: a link to
+    /// nothing is refused, not dropped (`crate::component::check`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<String>,
 }
 
 /// What a file written before `clip` existed meant: frames clipped.
@@ -309,6 +319,8 @@ impl NodeDto {
             insets: *n.insets(),
             display: n.display().cloned(),
             item: *n.item(),
+            component: n.component(),
+            link: n.link().map(NodeId::to_wire),
         }
     }
 
@@ -323,6 +335,7 @@ impl NodeDto {
     pub(crate) fn into_node(self) -> Result<Node, IoError> {
         let id = parse_id(&self.id)?;
         let parent = self.parent.as_deref().map(parse_id).transpose()?;
+        let link = self.link.as_deref().map(parse_id).transpose()?;
         let children = self
             .children
             .iter()
@@ -395,6 +408,8 @@ impl NodeDto {
             insets: self.insets,
             display: self.display,
             item: self.item,
+            component: self.component,
+            link,
         })
     }
 }
@@ -803,6 +818,13 @@ fn verify_integrity(nodes: &FxHashMap<NodeId, Node>, root: NodeId) -> Result<(),
             orphan.copied().unwrap_or(root)
         )));
     }
+
+    // The component rules (§15 D978), after the tree is known to be a tree — the
+    // ancestor walks in `component::check` assume parents resolve and end. A link
+    // to nothing is refused rather than dropped, a guide owner's answer (§5.11):
+    // dropping it would turn an instance into a detached copy without a word.
+    crate::component::check(nodes)
+        .map_err(|(id, rule)| IoError::Integrity(format!("node {id:?} {rule}")))?;
 
     Ok(())
 }

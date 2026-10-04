@@ -108,6 +108,8 @@ impl Document {
             insets: Default::default(),
             display: None,
             item: Default::default(),
+            component: false,
+            link: None,
         };
         let mut nodes = FxHashMap::default();
         nodes.insert(root_id, root);
@@ -435,6 +437,14 @@ impl Document {
             }
         }
 
+        // The component rules (§15 D978): every link resolves, a main is a frame
+        // or a group outside any main or instance, an instance's nodes belong to
+        // it, no main holds an instance of itself. Over the whole document rather
+        // than `dirty`, because a link breaks when its *target* goes — a delete
+        // dirties the deleted node, not the instance pointing at it — and free
+        // when nothing is a main or linked (`component::check`).
+        crate::component::check(&working.nodes).map_err(|(id, rule)| OpError::BadLink(id, rule))?;
+
         // All ops succeeded — commit the working copy.
         *self = working;
 
@@ -513,6 +523,21 @@ impl Document {
             Operation::SetInsets { id, insets } => self.op_set_insets(*id, insets, dirty),
             Operation::SetDisplay { id, display } => self.op_set_display(*id, display, dirty),
             Operation::SetLayoutItem { id, item } => self.op_set_layout_item(*id, item, dirty),
+            Operation::SetComponent { id, component } => {
+                let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
+                let old = std::mem::replace(&mut node.component, *component);
+                dirty.0.insert(*id);
+                Ok(Operation::SetComponent {
+                    id: *id,
+                    component: old,
+                })
+            }
+            Operation::SetLink { id, link } => {
+                let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
+                let old = std::mem::replace(&mut node.link, *link);
+                dirty.0.insert(*id);
+                Ok(Operation::SetLink { id: *id, link: old })
+            }
             Operation::SetCanvasBackground { background } => {
                 Ok(self.op_set_canvas_background(*background))
             }
@@ -622,6 +647,8 @@ impl Document {
             insets: Default::default(),
             display: None,
             item: Default::default(),
+            component: false,
+            link: None,
         };
         self.nodes.insert(id, node);
         self.nodes
@@ -2003,6 +2030,15 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
             // a flex row the way it did.
             display: n.display.clone(),
             item: n.item,
+            // A copy of a main component is a main component, and a copy of a
+            // linked node keeps its link (§15 D978) — **remapped when it points
+            // inside this template**, so a copied main and a copied instance of it
+            // stay linked to each other rather than the copy pointing at the
+            // original main (§5.3d, D979's ruling (e)). Whether a copy of a main
+            // should *be* an instance instead is the verb's decision, not this
+            // function's.
+            component: n.component,
+            link: n.link.map(|l| map.get(&l).copied().unwrap_or(l)),
         });
     }
     Some((out, new_root?))
@@ -2217,6 +2253,8 @@ mod tests {
             insets: Default::default(),
             display: None,
             item: Default::default(),
+            component: false,
+            link: None,
         }
     }
 

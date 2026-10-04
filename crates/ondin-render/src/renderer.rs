@@ -1478,6 +1478,10 @@ impl RenderOverrides {
             // the same plain case as the exports above: the app draws it, this
             // does not, and there is nothing here to preview.
             | Operation::SetLayoutGrids { .. }
+            // Being a main or being linked draws nothing (`changes_ink` says the
+            // same): the instance looks exactly like the nodes it holds.
+            | Operation::SetComponent { .. }
+            | Operation::SetLink { .. }
             | Operation::AddGuide { .. }
             | Operation::RemoveGuide { .. }
             | Operation::SetGuidePosition { .. }
@@ -1509,7 +1513,9 @@ impl RenderOverrides {
             // invisible to `cancel_gesture`'s gate, and `[A1-L2-02]`'s repair list
             // has to be derived from *this* function rather than from the design.
             // `overrides.rs · every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink`
-            // is the sibling of `op.rs`'s eleven-item fixture.
+            // is the sibling of `op.rs`'s eleven-item fixture. (Both counts are
+            // two higher since `SetComponent` and `SetLink` joined the chrome arm,
+            // §15 D978: fifteen no-ops here, thirteen of them `changes_ink`'s.)
             Operation::AddImage { .. } | Operation::RemoveImage { .. } => {}
             // **Structural in the sense that matters here**: a mask changes which
             // *other* nodes the walk clips, and an override is a patch on one

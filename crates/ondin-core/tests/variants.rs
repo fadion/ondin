@@ -347,9 +347,9 @@ fn a_main_moved_into_a_set_is_settled_as_a_variant() {
 }
 
 /// Renaming a value renames the variants holding it, and through the compare
-/// rule the instances still carrying the variant's name (§15 D982: names are
-/// copied verbatim, D979 (e)'s rule held). Flip: running `settle` after
-/// `propagate` leaves the instance named "Small".
+/// rule the instances still carrying the variant's name (names are copied
+/// verbatim — §5.3d's rule under D979 (e), held by D982). Flip, run: `settle`
+/// after `propagate` leaves the instance named "Small".
 #[test]
 fn renaming_a_value_renames_its_variants_and_their_instances() {
     let mut f = fixture();
@@ -598,4 +598,32 @@ fn adding_a_variant_takes_the_next_free_combination() {
     assert_eq!(bound.len(), 2);
     assert_eq!(f.doc.get(bound[1]).unwrap().parent(), Some(new));
     assert!(variant::clashes(&f.doc, f.s).is_empty());
+}
+
+/// **Duplicating a whole set makes a new set of new variants**, not a set of
+/// instances: `component::settle_copy` turns a copy into an instance only when
+/// the copied root is itself a main, and a set is a frame. (`arch-scribe` read it
+/// the other way from the code; this is the measurement.)
+#[test]
+fn a_duplicated_set_is_a_new_set_of_new_variants() {
+    let mut f = fixture();
+    let (tx, made) = ondin_core::insert_subtrees(
+        &f.doc,
+        &mut f.ids,
+        &[Placement {
+            nodes: f.doc.capture_subtree(f.s).unwrap(),
+            parent: f.root,
+            index: None,
+        }],
+        Default::default(),
+    );
+    f.commit(tx.0);
+    let copy = made[0];
+    let vs = variant::variants(&f.doc, copy);
+    assert_eq!(vs.len(), 2);
+    for v in vs {
+        let n = f.doc.get(v).unwrap();
+        assert!(n.component() && n.link().is_none(), "a new main");
+        assert!(!n.variant().is_empty(), "with its values");
+    }
 }

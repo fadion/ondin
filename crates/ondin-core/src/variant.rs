@@ -11,8 +11,8 @@
 //! **A variant's name is derived** — its values joined by `", "` — and kept so by
 //! [`settle`], the commit-time pass, so a rename of a value renames every variant
 //! holding it, and through the compare rule every instance that still carries the
-//! variant's name (§15 D982: an instance's name is copied verbatim, §15 D979 (e)'s
-//! ruling held over the mockup's set-name label).
+//! variant's name (an instance's name is copied verbatim — §5.3d's rule under §15
+//! D979 (e), held by the maintainer over the mockup's set-name label, §15 D982).
 //!
 //! **A component property is a view over fields** (the session's): a boolean is
 //! the visibility of the layers it is bound to, a text property their content.
@@ -995,8 +995,9 @@ pub fn can_switch(doc: &Document, root: NodeId) -> bool {
 ///   does; a list item matches by id, else by position;
 /// - a counterpart with no match goes if it still equals its source, else stays as
 ///   the instance's own layer (§15 D979 (b)'s rule); a layer of the new main with
-///   no match is copied in at its anchor, unless the instance had removed the
-///   layer it matched;
+///   no match is copied in at its anchor under its parent's counterpart, and not
+///   at all where the instance removed that parent; one whose match the instance
+///   had removed stays removed;
 /// - the order follows where the instance still had the old main's.
 ///
 /// The root's placement is its own, as always. `None` unless [`can_switch`].

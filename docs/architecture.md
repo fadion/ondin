@@ -84,7 +84,8 @@
 - ~~Components/instances~~ **left this list on 2026-10-04 and are designed** (§5.3d, §15 D978,
   D979) — as linked copies kept in step at the commit, not on layout's derive-from-specified pipeline
   as this bullet said: the maintainer ruled instances stored, every reader here being keyed by a stored
-  id. **Variants, component properties, instance swap and shared libraries stay on it.**
+  id. **Variants and component properties left it on 2026-10-05** (§5.3d, §15 D982), their core
+  built; **instance swap and shared libraries stay on it.**
   ~~Auto-layout/constraints~~ **left this list on 2026-09-23 and are
   designed**: CSS flexbox, CSS grid and absolute insets (§5.3c, §15 D867, D871) — insets on frames
   built 2026-09-24, inspector card included (§15 D874); flex built the same day — its model, engine
@@ -628,6 +629,11 @@ pub struct Node {
     component: bool,           // a MAIN component — frames and groups only; skipped when false —
                                // §5.3d, §15 D978
     link: Option<NodeId>,      // the node this one was copied from, ONE level up; skipped when None
+    set: Option<VariantSet>,   // a COMPONENT SET's variant properties — a frame, never a main; the
+                               // three fields from here are §5.3d step 7, §15 D982, each skipped
+                               // when empty
+    variant: Vec<String>,      // a variant's values, one per property of the set around it
+    props: Vec<Keyed<Property>>, // the component properties a main or a set defines
 }
 
 pub enum NodeKind {
@@ -1059,11 +1065,12 @@ pub fn next_grid_color(existing: &[LayoutGrid]) -> Color;    // the first of GRI
   answers **false** to `changes_ink` beside the guide operations, for the reason that list already
   gives — *a guide is a line over the artwork rather than part of it* — and `RenderOverrides::absorb`
   treats it as a no-op. ⚠️ **Those two lists are *not* the same, which this bullet asserted
-  until 2026-09-09** (§15 D659): `changes_ink`'s **thirteen** are a **subset** of `absorb`'s
-  **fifteen** no-ops, the two extras being `AddImage`/`RemoveImage`, which are absorbed for want of an
+  until 2026-09-09** (§15 D659): `changes_ink`'s **sixteen** are a **subset** of `absorb`'s
+  **eighteen** no-ops, the two extras being `AddImage`/`RemoveImage`, which are absorbed for want of an
   image table to patch rather than for being invisible (§6.2). (Eleven and thirteen until 2026-10-04,
-  when `SetComponent` and `SetLink` joined both lists — §15 D978.) The test that pins the thirteen
-  asserts its own length, and `overrides.rs` has the sibling that pins the fifteen.
+  when `SetComponent` and `SetLink` joined both lists — §15 D978 — and thirteen and fifteen until
+  2026-10-05, when `SetVariantSet`, `SetVariant` and `SetProperties` did — §15 D982.) The test that pins
+  the sixteen asserts its own length, and `overrides.rs` has the sibling that pins the eighteen.
 - **A field on the node, offered on a frame.** `Node::grids` sits beside `exports`: empty on every
   layer until somebody adds one, skipped by the save format, ignored by every walk. That is `clip`'s
   arrangement — a property of the layer, inert on kinds nobody offers it for — and what confines the
@@ -1607,7 +1614,7 @@ first was, it saved only the track list.
 `track_lines` merges an edge with the last one only, the spans being laid in order — it searched every
 edge, quadratic in the track count.
 
-### 5.3d Components and overrides (designed 2026-10-04; build steps 1–5 built; §15 D978–D981)
+### 5.3d Components and overrides (designed 2026-10-04; steps 1–6 and 7's core built; §15 D978–D982)
 
 > **Design ahead of code, part of it** — decided with the maintainer on 2026-10-04 (session 47). **Build
 > steps 1–4 are built** the same day — the list items' ids (§15 D980, `a83adc8`), the component model,
@@ -1616,15 +1623,18 @@ edge, quadratic in the track count.
 > propagation (§15 D979 (a), `45730f6`) and structural propagation (§15 D979 (b), `6ac7d0d`) — and the
 > paragraphs on those say so; so is step 5 — the reset family in core, its two menu rows, the
 > inspector's component card and the override look on the inspector's cards and lists (`26c8434` to
-> `6210953`, then session 49; §15 D979's and D981's amendments). The live preview and the canvas and
-> layers chrome are not. It sits
+> `6210953`, then session 49; §15 D979's and D981's amendments); so is step 6, the live preview
+> (session 49); and so is step 7's core half, variants and component properties (`3fa5276`, §15 D982,
+> 2026-10-05). Step 7's app half and the canvas and layers chrome are not. It sits
 > beside §5.3c
 > because what it changes is the node model. Every other passage of this document still describes `HEAD`; where one states a rule this
 > design will change, it carries a forward pointer here — §4's invariants 4 and 8, §5.11's bump rule
 > and §12's fourth property. **When a step below lands, this section is rewritten in the present
 > tense and the pointers go.** The maintainer's rulings are §15 D978 (linked copies), D979
 > (overrides, free structure, a main's deletion, document-local, what a copy of a main makes) and
-> D980 (list items compared one by one, by id), and the chrome is D981, accepted from a mockup.
+> D980 (list items compared one by one, by id), and the chrome is D981, accepted from a mockup; D982 is
+> variants and properties, a second mockup accepted with its three contradictions of D979 ruled for
+> D979.
 > Everything else here — the model fields, where a link
 > points, the post-conditions, the item ids' shape, the save-format bump, the preview — is the
 > session's design under those rulings, open to overturning, and each paragraph says which it is.
@@ -1724,8 +1734,8 @@ Three rules the session adds to it:
   operations or their inverses.
 
 ✅ **Built 2026-10-04 — build step 3, fields** (`45730f6`, §15 D979's amendment): `propagate::propagate`,
-run **last** in `commit_inner`, after `keep_insets`, `keep_flex_sizes` and `settle_links`, so what those
-append to a main propagates too. For each of the transaction's edits to a node that has copies — the
+run **last** in `commit_inner`, after `keep_insets`, `keep_flex_sizes` and `settle_links` — and, since
+step 7, `variant::settle` — so what those append to a main propagates too. For each of the transaction's edits to a node that has copies — the
 last edit per `shape_key`, against the value before the transaction — it walks the copies at every
 depth through the reverse link map, each level compared with its own old value. **No reader per
 field**: an operation's inverse carries the old value of the field it writes, so `Document::peek`
@@ -1954,8 +1964,10 @@ day). Copy and paste, duplicate and Alt-drag of a main make an instance of it; a
 component* makes a new main. **A copy of a whole instance is another instance of the same main** (the
 session's): duplicating, pasting or Alt-dragging one keeps its links. A payload holding a main and an
 instance of it has the instance's links remapped with the ids, so the pasted instance links to the
-pasted main. **Creating an instance copies the main's names verbatim** (the session's): §5.7b's
-duplicate numbering does not apply, or every renumbered name would start life as an override.
+pasted main. **Creating an instance copies the main's names verbatim** (the session's, held by the
+maintainer on 2026-10-05 over the variants mockup, which named an instance of a variant after its set —
+§15 D982): §5.7b's duplicate numbering does not apply, or every renumbered name would start life as an
+override.
 ✅ **Built** (`0ae3cd7`) as `component::settle_copy`, run by `build::insert_subtrees_as` on each copy
 `remap_subtree` makes — `insert_subtrees` is `MainCopy::Instance`, *Duplicate as component*
 `MainCopy::NewMain`: a copy of a main in this document becomes an instance, each node linked to its
@@ -1971,7 +1983,8 @@ a plain instance of that main (`f75dcc5`). A layer *moved* out of its instance i
 **`apply`'s post-conditions** (the session's; §15 D491's shape — after the last op, before
 `*self = working`, so a transaction may pass *through* a state that breaks one). ✅ **Built** —
 `component::check`, refused as `OpError::BadLink(NodeId, LinkRule)`, `LinkRule` naming which of eight
-rules broke: **`Dangling`**, a link to a node not in the document or to itself; **`ComponentKind`**,
+rules broke — or, as a ninth arm, `Variant(VariantRule)`, the six variant and property rules
+`variant::check` runs first (§15 D982, below): **`Dangling`**, a link to a node not in the document or to itself; **`ComponentKind`**,
 `component` on a kind that is not a frame or a group; **`ComponentLinked`**, a node both a main and
 linked; **`NestedMain`**, a main beneath a main or a linked node; **`Membership`**, a linked node —
 **any but one linked straight to a main** — with no instance root above it, or with its source not
@@ -1983,7 +1996,8 @@ member (tightened with build step 2, §15 D979's amendment); **`LinkCycle`**, a 
 a depth-first search over a graph from each main to the mains of the instance roots inside it. 🚨 **It
 runs over the whole document, not over `dirty`**: a link breaks when its *target* goes, and a delete
 dirties the deleted node, not the instance pointing at it. **Free when nothing is a main or linked** —
-one scan. The item-id rule (§15 D980) is the other check at the same place, over `dirty`, since only a
+one scan, and one more for `variant::check`'s own exit when nothing is a set, a variant or an owner of
+properties. The item-id rule (§15 D980) is the other check at the same place, over `dirty`, since only a
 node an op wrote can have gained a duplicate. **The loader runs `component::check` too**, at the end of
 `schema::verify_integrity` once the tree is known to be a tree, and refuses a file that fails it, as it
 refuses a guide's dangling owner (§5.11). It does not compare values: under the compare rule there is
@@ -2180,8 +2194,69 @@ the bundled icon font is Phosphor Regular alone, and §15 D10, which hand-drew t
 glyph the app needed, says *"at two, ship the font"* — so the card's main face draws the outline one.
 The canvas labels and markers and the layers marks are not built.
 
-**Variants, component properties, instance swap, and pushing an instance's changes to its main come
-later.** So does real-time collaboration, the one place §15 D978's cost (a) arrives: a non-goal for
+**Variants and component properties** (build step 7; §15 D982). ✅ **The core is built**
+(`3fa5276`, `ondin-core/src/variant.rs`); the app half is not. The chrome is a second mockup,
+`design/Variants.dc.html`, **accepted by the maintainer on 2026-10-05 except where it contradicted §15
+D979**, and there they ruled that *"what we decided … takes precedence over design"*: **deleting a
+variant detaches its instances**, as any main's deletion does (D979 (c)) — and deleting a value deletes
+the variants holding it, so theirs detach too; **`Ctrl+D` on a variant makes an instance of it** (D979
+(e)), a plain layer in the set, *Add variant* being the verb that takes the next free combination; and
+**an instance's name is copied verbatim**, above, so an instance of *Large, Hover* is named *Large,
+Hover*, never the set's name. D982 carries the rest of the chrome in words. Everything below is the
+session's design under those rulings, open to overturning.
+
+**A component set is a frame around mains, never a main itself, and a variant is a main whose parent is
+a set.** `Node::set: Option<VariantSet>` holds the set's variant properties, each a `VariantProp { name,
+values }`; `Node::variant: Vec<String>` a variant's values, one per property in the set's order; and
+`Node::props: Vec<Keyed<Property>>` the **component properties** a main or a set defines,
+`Property { name, kind: PropKind::{Boolean, Text}, bound: Vec<NodeId> }`. So `NestedMain` is unchanged,
+and an instance of a variant is an instance of a main, which everything above holds for as it is.
+`SetVariantSet`, `SetVariant` and `SetProperties` write them, each inverting to the old value; they
+change no ink (§5.7), are no-ops in `absorb` (§6.2), `propagate::mode` skips them and `reset::state_ops`
+never writes them, so **none is ever followed or overridden**. `Node::make_copy_of` is the one place a
+node becomes a linked copy — linked, and the flag, values and properties cleared — and every door that
+makes an instance node goes through it. They save in v5, unbumped (§5.11). **`variant::check`**, run
+first inside `component::check` as `LinkRule::Variant`, holds six rules — `SetKind` (a set only on an
+`Artboard`, never a main or linked, never inside a main, an instance or a set), `SetNames`, `Values` (a
+main in a set fits it; values on anything else are refused), `PropertyOwner` (a main not in a set, or a
+set), `PropertyName` (unique, non-empty, not a variant property's name) and `Binding` (a bound layer
+exists, strictly inside the owner's main — for a set, inside one of its variants, never a variant's
+root — text for a text property, bound once per field).
+
+**`variant::settle`**, a commit pass in `commit_inner` after `settle_links` and 🚨 **before
+`propagate`**, settles what any door leaves: a variant's values fitted to its set — kept where they fit,
+a property's first value where one does not, the first free combination when the count is wrong — values
+dropped off anything not a variant, **each variant's name derived from its values**, joined by `", "`, a
+variant's properties moved to its set, and stale bindings pruned. Before `propagate` because a renamed
+value renames its variants here and the propagation pass carries that name onto every instance still
+holding the old one; swapped, the instance keeps the old name (measured,
+`renaming_a_value_renames_its_variants_and_their_instances`). Gated, like `settle_links`, so an edit that
+cannot break a variant rule pays no scratch clone — the reparent included in the gate, or a main dragged
+into a set is refused. **The verbs**: `combine` (*Combine as variants* — the mains framed, one property
+named *Property 1*, each name a value, shared names clashing), `add_variant` (*Duplicate as component* of
+a variant, `VARIANT_GAP` below it, the first free combination, the set's bindings extended), and the
+set's renames, adds, moves and deletes — `delete_value` deleting the variants holding it through
+`relink_for_delete`.
+
+**The variant switch is made in place** (`variant::switch`), so every matched id, the selection and a
+nested copy's own copies survive it. Layers below the two mains match by name path, the k-th same-named
+sibling to the k-th, within one kind; a matched counterpart is relinked and each field goes through
+`propagate::follow` as though the old main had become the new one, so **overrides carry and nothing else
+does**; a keyed list's items match by id, else by position; an unmatched counterpart goes where
+`propagate::untouched`, else stays as the instance's own; a new layer is copied in at its anchor; the
+order follows where the instance still had the old main's; the root's placement is its own. **A variant
+choice is never an override** — it is the root's `link`, which no reset compares. **A component property
+is a view over fields**: a boolean is its bound layers' visibility, a text property their content;
+nothing stores its value on an instance, its default is the main's own bound field, an overridden
+property is a bound field differing from its source, and resetting one is resetting that field — so a
+switch carries properties with every other override, and undo, the preview and propagation need nothing
+new. 🚨 **Open, for the maintainer**: only an instance linked straight to a main can switch
+(`propagate::linked_to_main`); a nested copy inside an outer instance cannot, and **instance swap**
+cannot be built, because the link model has no place for *"the counterpart of N in the outer main, but
+an instance of main B"* — §15 D982 has why, and the session's unbuilt sketch.
+
+**Instance swap, a nested copy's switch, exposing nested properties, and pushing an instance's changes
+to its main come later.** So does real-time collaboration, the one place §15 D978's cost (a) arrives: a non-goal for
 now and open for the future, in the maintainer's words, and D978's verdict is to revisit linked copies
 if it is built.
 
@@ -2210,16 +2285,21 @@ Effects (`d2beb37`, `d39f7c1`, `6033571`, `a345b81`, `c292b50`, `6210953`), then
 fields, `size_field`'s W and H, and the exports and layout-grid lists (session 49), with the fields
 §15 D981 lists left unmarked on purpose; (6) ✅ **built** (session 49, §15 D979's amendment) — the
 live preview of main-component edits, the field pass run over the preview's transaction after the
-holds, structure still following on release; (7) **next** — variants and properties. A design for them
-landed in `design/` on 2026-10-04 and awaits the maintainer's ruling; nothing of it is recorded here.
+holds, structure still following on release; (7) ✅ **core built 2026-10-05** (`3fa5276`, §15 D982) —
+variants and component properties: the model, the rules, `variant::settle`, the verbs, the in-place
+switch and properties as views, above. **Next**: its app half — the set's Variants card and the
+variant face of the Component card, an instance's variant dropdowns and property rows, the overflow
+split, the Properties definitions with their bind buttons, the menu rows and toasts, and the canvas and
+layers marks.
 
 **Handoff, 2026-10-04 (session 47's close)** — what is built, next and owed, in one place. **Built**:
 steps 1–4 above, `Ctrl+Alt+K`/`Ctrl+Alt+B`, five menu rows filed provisionally, D981's two toasts;
 then step 5's resets in core, the two *Reset* menu rows, the component card and the override look in
 part (`26c8434`, `7cf242e`, `7b5961e`, `a18b0b5`, `d66044c`, `5fcff6b`, `d2beb37`, `d39f7c1`,
 `6033571`, `a345b81`, `c292b50`, `6210953`); then, in session 49, the rest of that look — every other
-card's fields and the exports and layout-grid lists; then step 6, the live preview. **Next**: step 7,
-whose design awaits a ruling. Step 6's three defects — a main's pivot preview naming a copy, pinned
+card's fields and the exports and layout-grid lists; then step 6, the live preview; then, on
+2026-10-05, step 7's core (`3fa5276`, §15 D982). **Next**: step 7's app half, in the build order above;
+its open question — a nested copy's switch and instance swap — is the maintainer's. Step 6's three defects — a main's pivot preview naming a copy, pinned
 copies and roots previewed off their release, an in-flow move dragging the copies — are fixed (§15
 D979's amendment), and so is a fourth read in the fix, a pinned copy with its own value for every
 inset a main's move changes; step 6 owes nothing known.
@@ -3799,6 +3879,11 @@ pub enum Operation {
                                                       // the old value; `changes_ink` false; both
                                                       // checked by `component::check` after the
                                                       // last op, over the whole document
+    SetVariantSet { id: NodeId, set: Option<VariantSet> }, // make a frame a component set, or not —
+    SetVariant  { id: NodeId, values: Vec<String> },  // §5.3d step 7, §15 D982. The three invert to
+    SetProperties { id: NodeId, props: Vec<Keyed<Property>> }, // the old value, change no ink, and
+                                                      // are held by `variant::check`, run first
+                                                      // inside `component::check`
     // the ops with no node to name — the ground and the guides belong to the document (§5.5):
     SetCanvasBackground { background: peniko::Color },
     AddGuide    { guide: Guide },
@@ -3919,17 +4004,19 @@ pub enum OpError {
   without both, a file's value could not be undone back to or edited around (§15 D937).
 - **`Operation::changes_ink` classifies an op by whether applying it changes what is *drawn*** — the
   artwork, not the chrome round it — and `Transaction::changes_ink` is **any** of its ops, not all,
-  since a transaction that moves a layer *and* renames it has a visible result. Exactly **thirteen**
+  since a transaction that moves a layer *and* renames it has a visible result. Exactly **sixteen**
   answer `false`: `SetName`, `SetLocked`, `SetProportionsLocked`, `SetPivot`, `SetExports`,
   `SetLayoutGrids`, the five guide ops, and — since 2026-10-04, when the list was eleven —
-  `SetComponent` and `SetLink` (§5.3d, §15 D978), and every one of them
+  `SetComponent` and `SetLink` (§5.3d, §15 D978), and — since 2026-10-05, when it was thirteen —
+  `SetVariantSet`, `SetVariant` and `SetProperties` (§15 D982), and every one of them
   is **a no-op in `RenderOverrides::absorb`** (§6.2), deliberately — "the renderer
   has nothing to do with this" and "this changes nothing drawn" are one fact asked by two callers. Not
   one function, because `absorb` also has to separate the *patchable* ops from the structural ones and
   this question does not. ⚠️ **It is a subset and not an equality, and this bullet said *"the same
   eleven … if the two lists ever disagree, one of them is wrong"* until 2026-09-09** (§15 D659):
   `absorb` has a **second** no-op arm further down the same `match`, `AddImage | RemoveImage`, so its
-  no-ops are **fifteen** (thirteen until the component ops joined the first arm). The two image ops answer `true` here and are absorbed there because
+  no-ops are **eighteen** (thirteen until the component ops joined the first arm, fifteen until the
+  variant ops did). The two image ops answer `true` here and are absorbed there because
   `RenderOverrides` has no image table to patch — *"cannot preview this"* rather than *"nothing to
   preview"* — which is written out at both ends. That matters beyond tidiness:
   `EditorSession::has_gesture_preview` is `!overrides.is_empty() && …`, so **every** transaction
@@ -5056,7 +5143,9 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   `migrate_4_to_5` (below). The component fields (§15 D978, built the same day) share v5 because an
   *older build* would drop their links in silence, which a version it does not know it refuses
   instead — a reason that held only if no release shipped between the two, and none did, so v5 is
-  complete (§5.3d).
+  complete (§5.3d). **The variant fields joined it unbumped** (`set`, `variant`, `props`; §15 D982,
+  2026-10-05) on the same reasoning: no release carries v5's components, so no released v5 reader
+  drops them.
 - **Guides are verified too, but not against a tree** — there is none for one to corrupt. The loader
   rejects a malformed guide id, a duplicate one, and a non-finite position; a guide far off the side
   of the artwork is legal, because panning reaches it. Their ids come out of the same reservation
@@ -5530,9 +5619,10 @@ pub trait ScenePainter {
   cannot be scrubbed at all (§15 D245, D247).
 
   ⚠️ **There is a *second* no-op arm and no document mentioned it until 2026-09-09** (§15 D659):
-  `AddImage | RemoveImage`, which brings `absorb`'s no-ops to **fifteen** against `changes_ink`'s
-  thirteen (§5.7) — thirteen and eleven until `SetComponent` and `SetLink` joined the chrome arm on
-  2026-10-04 (§15 D978). It is **the only no-op here that is not also invisible** — an image op changes what is
+  `AddImage | RemoveImage`, which brings `absorb`'s no-ops to **eighteen** against `changes_ink`'s
+  sixteen (§5.7) — thirteen and eleven until `SetComponent` and `SetLink` joined the chrome arm on
+  2026-10-04 (§15 D978), fifteen and thirteen until the three variant ops did on 2026-10-05 (§15
+  D982). It is **the only no-op here that is not also invisible** — an image op changes what is
   drawn — and it is a no-op because `RenderOverrides` has no image table to patch, the two honest
   answers being this or refusing the whole preview. Refusing is worse: a transaction that places an
   image is `AddImage` *and* a `CreateNode`, so declining would blank the preview of the shape as well
@@ -5540,7 +5630,7 @@ pub trait ScenePainter {
   which nothing exercises yet — placing is a click, not a drag. *If something ever drags one, the fix
   is a preview table on the overrides, the shape `canvas_background` already has here.*
   `overrides.rs · every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink` pins all
-  thirteen and asserts its own list lengths; what it cannot do is prove there is no fourteenth, which
+  eighteen and asserts its own list lengths; what it cannot do is prove there is no nineteenth, which
   needs a value of every `Operation` variant and is `op.rs`'s fixture's job.
 
   Empty overrides reduce the walk to the committed document exactly — the world transforms it

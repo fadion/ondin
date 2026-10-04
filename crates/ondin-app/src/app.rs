@@ -4354,6 +4354,31 @@ impl OndinApp {
         self.session.selection.set(all);
     }
 
+    /// A reset of everything selected that sits in an instance (§5.3d's reset
+    /// family, §15 D981) — each selected layer is the scope of its own reset, so
+    /// an instance resets whole and a child resets itself (*Reset Label*). One
+    /// transaction, so one `Ctrl+Z`. No toast: the dots going out is the answer,
+    /// D981's rule for its other verbs.
+    pub(crate) fn reset_selection(&mut self, kind: ondin_core::reset::Kind) {
+        let doc = &self.session.doc;
+        let scopes: Vec<NodeId> = build::outermost(doc, self.session.selection.ids())
+            .into_iter()
+            .filter(|id| ondin_core::component::instance_root(doc, *id).is_some())
+            .collect();
+        if scopes.is_empty() {
+            self.session.info("Select an instance to reset");
+            return;
+        }
+        let ops = ondin_core::reset::reset(doc, kind, &scopes, &mut self.session.ids);
+        if ops.is_empty() {
+            self.session.info("Nothing differs from the main component");
+            return;
+        }
+        if let Err(e) = self.session.try_commit(Transaction(ops)) {
+            self.session.fail(format!("Cannot reset: {e}"));
+        }
+    }
+
     /// Select a freshly made group, and leave it **shut** in the layers tree.
     ///
     /// Grouping is an act of tidying: the whole point is to turn several rows
@@ -19698,5 +19723,80 @@ mod component_verb_tests {
             !app.session.doc.get(rect).unwrap().component(),
             "a rect inside a main is refused, not made a main"
         );
+    }
+
+    /// **A reset through the commit comes back exact** — the exact-equality risk
+    /// asked of the reset family (§5.3d). The rect is pinned right; the instance is
+    /// resized, renamed, and its rect moved, which `keep_insets` turns into new
+    /// insets. *Reset all* writes the main's size, name, transform and insets back
+    /// in one transaction, and the instance must come back with no drift at all,
+    /// its own placement untouched. One `Ctrl+Z` takes it all back.
+    ///
+    /// ⚠️ **What holds it is `keep_insets` leaving alone a layer whose insets the
+    /// transaction sets itself** — and a reset always sets them, `state_ops`
+    /// writing every field. Not the order of the ops: emitting `SetInsets` before
+    /// `SetTransform` was flipped and stayed green.
+    #[test]
+    fn reset_all_through_the_commit_leaves_no_drift_and_undoes_in_one_step() {
+        use ondin_core::reset;
+        let ctx = egui::Context::default();
+        let (mut app, m, i) = main_and_instance(&ctx);
+        let r = app.session.doc.get(m).unwrap().children()[0];
+        let ir = app.session.doc.get(i).unwrap().children()[0];
+        let pin = ondin_core::Insets {
+            right: Some(ondin_core::LengthPct::Px(12.0)),
+            top: Some(ondin_core::LengthPct::Px(8.0)),
+            ..Default::default()
+        };
+        assert!(app.session.commit(Transaction(vec![Operation::SetInsets {
+            id: r,
+            insets: pin,
+        }])));
+        let placed = ondin_core::kurbo::Affine::translate((400.0, 0.0));
+        for op in [
+            Operation::SetTransform {
+                id: i,
+                transform: placed,
+            },
+            Operation::SetGeometry {
+                id: i,
+                geometry: ondin_core::GeometryPatch::Size(Size::new(260.0, 90.0)),
+            },
+            Operation::SetName {
+                id: i,
+                name: "Mine".into(),
+            },
+            Operation::SetTransform {
+                id: ir,
+                transform: ondin_core::kurbo::Affine::translate((5.0, 6.0)),
+            },
+        ] {
+            assert!(app.session.commit(Transaction(vec![op])));
+        }
+        assert_ne!(
+            app.session.doc.get(ir).unwrap().insets(),
+            &pin,
+            "the fixture: the move re-pinned the instance's rect"
+        );
+        let drifted = reset::drift(&app.session.doc, i);
+        assert!(drifted.fields >= 3, "{drifted:?}");
+
+        app.session.selection.set_one(i);
+        app.reset_selection(reset::Kind::All);
+        let doc = &app.session.doc;
+        assert_eq!(reset::drift(doc, i), reset::Drift::default());
+        assert_eq!(doc.get(ir).unwrap().insets(), doc.get(r).unwrap().insets());
+        assert_eq!(
+            doc.get(ir).unwrap().transform(),
+            doc.get(r).unwrap().transform()
+        );
+        assert_eq!(
+            doc.get(i).unwrap().transform(),
+            placed,
+            "its own place stays"
+        );
+
+        assert!(app.session.undo());
+        assert_eq!(reset::drift(&app.session.doc, i), drifted, "one step back");
     }
 }

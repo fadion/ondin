@@ -314,6 +314,12 @@ pub enum Item {
     GoToMain,
     /// *Detach instance* (`Ctrl+Alt+B`, §15 D981) — on an instance.
     DetachInstance,
+    /// *Reset all* (§15 D981) — on an instance: its fields, its removed children
+    /// and its order back to the main's, its own layers kept (`reset::reset_all`).
+    ResetInstance,
+    /// *Reset* named for the child — *Reset Label* (§15 D981) — on a linked layer
+    /// inside an instance: [`Self::ResetInstance`] scoped to that layer.
+    ResetChild,
     Ungroup,
     /// *Use as mask* — the layer clips the ones above it (`build::mask`, §15
     /// D282, D286).
@@ -688,6 +694,8 @@ impl Item {
         Item::SelectAllInstances,
         Item::GoToMain,
         Item::DetachInstance,
+        Item::ResetInstance,
+        Item::ResetChild,
         Item::Ungroup,
         Item::Mask,
         Item::EvenOdd,
@@ -862,6 +870,20 @@ impl Item {
                 "Detach instance",
                 icon::LINK_BREAK,
                 Some("Ctrl+Alt+B"),
+                Group::Structure,
+            ),
+            Item::ResetInstance => s(
+                "Reset all",
+                icon::ARROW_COUNTER_CLOCKWISE,
+                None,
+                Group::Structure,
+            ),
+            // The row renames itself for its layer (`Row::label`); this is the
+            // label `Item::ALL`'s table sees.
+            Item::ResetChild => s(
+                "Reset",
+                icon::ARROW_COUNTER_CLOCKWISE,
+                None,
                 Group::Structure,
             ),
             Item::Ungroup => s(
@@ -1132,8 +1154,9 @@ impl Item {
 pub struct Row {
     pub item: Item,
     /// Usually the spec's, overridden where the state renames the verb — *Show*
-    /// for *Hide*, *Unlock* for *Lock*.
-    pub label: &'static str,
+    /// for *Hide*, *Unlock* for *Lock* — or names its subject: *Reset Label*
+    /// (§15 D981), which is why it can be an owned string.
+    pub label: std::borrow::Cow<'static, str>,
     /// `Some` on a checkable row; the glyph column carries it (see
     /// [`crate::ui::MenuRow::checked`]).
     pub checked: Option<bool>,
@@ -1161,7 +1184,7 @@ impl Row {
     fn new(item: Item) -> Self {
         Self {
             item,
-            label: item.spec().label,
+            label: item.spec().label.into(),
             checked: None,
             enabled: true,
             why: None,
@@ -1173,8 +1196,8 @@ impl Row {
         self.group = Some(Group::Head);
         self
     }
-    fn label(mut self, label: &'static str) -> Self {
-        self.label = label;
+    fn label(mut self, label: impl Into<std::borrow::Cow<'static, str>>) -> Self {
+        self.label = label.into();
         self
     }
     /// Give this row a tick box in the state `on`.
@@ -1353,8 +1376,14 @@ pub struct Context<'a> {
     pub mask_refused: Option<&'static str>,
     /// What a single selected layer is to the components machinery (§15 D978),
     /// which decides D981's rows: *Create component* on an ordinary layer, the
-    /// main's two rows, the instance's two, the child's one.
+    /// main's two rows, the instance's three, the child's two.
     pub role: Role,
+    /// Whether a reset of that one layer would change anything
+    /// (`reset::Drift::any`) — what dims *Reset all* and *Reset Label*, which D981
+    /// disables rather than hides at zero.
+    pub drifted: bool,
+    /// That one layer's name, which *Reset Label* is named for. Empty for several.
+    pub layer_name: String,
 }
 
 /// A layer's part in a component, for D981's menu rows.
@@ -1728,8 +1757,9 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
     );
     // D981's rows, by what the layer is to the components machinery (§15 D981):
     // *Create component* on anything that is not already part of one, the main's
-    // two, the instance's two, a linked child's one. *Reset* waits for build
-    // step 5, which is what makes it mean something.
+    // two, the instance's three, a linked child's two. A reset with nothing to do
+    // is dimmed, not hidden — D981's rule for the card's counted rows, kept here.
+    const NOTHING_DIFFERS: &str = "Nothing here differs from the main component";
     match cx.role {
         Role::Plain | Role::Local => {
             rows.push(Row::new(Item::CreateComponent).dim_if(locked, why));
@@ -1740,9 +1770,22 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
         }
         Role::Instance => {
             rows.push(Row::new(Item::GoToMain));
+            rows.push(
+                Row::new(Item::ResetInstance)
+                    .dim_if(!cx.drifted, NOTHING_DIFFERS)
+                    .dim_if(locked, why),
+            );
             rows.push(Row::new(Item::DetachInstance).dim_if(locked, why));
         }
-        Role::Member => rows.push(Row::new(Item::GoToMain)),
+        Role::Member => {
+            rows.push(Row::new(Item::GoToMain));
+            rows.push(
+                Row::new(Item::ResetChild)
+                    .label(format!("Reset {}", cx.layer_name))
+                    .dim_if(!cx.drifted, NOTHING_DIFFERS)
+                    .dim_if(locked, why),
+            );
+        }
     }
     // *Ungroup* and *Flatten* on a group or boolean are **promoted into the
     // head** (§3) and must not appear twice, which is the first thing that makes
@@ -2504,7 +2547,7 @@ impl OndinApp {
                         }
                         for row in group {
                             let spec = row.item.spec();
-                            let mut style = crate::ui::MenuRow::new(spec.glyph, row.label)
+                            let mut style = crate::ui::MenuRow::new(spec.glyph, &row.label)
                                 .accel(spec.accel)
                                 .danger(spec.danger)
                                 .enabled(row.enabled);
@@ -2654,6 +2697,18 @@ impl OndinApp {
             can_frame: build::can_frame(&self.session.doc, self.session.selection.ids()),
             mask_refused: self.mask_refusal(),
             role: self.component_role(),
+            drifted: self
+                .session
+                .selection
+                .single()
+                .is_some_and(|id| ondin_core::reset::drift(&self.session.doc, id).any()),
+            layer_name: self
+                .session
+                .selection
+                .single()
+                .and_then(|id| self.session.doc.get(id))
+                .map(|n| n.name().to_string())
+                .unwrap_or_default(),
             // A walk of the tree per frame the menu is up, which is the same shape
             // `any_guides` above has and cheaper than it looks: it stops at the
             // first layer with a spec on it in every document that has one.
@@ -2782,6 +2837,11 @@ impl OndinApp {
             Item::DuplicateAsComponent => self.duplicate_as_component(),
             Item::SelectAllInstances => self.select_all_instances(),
             Item::GoToMain => self.go_to_main(),
+            // Both are the selection's reset: the row is offered on one selected
+            // layer, and `reset_selection` scopes to exactly it.
+            Item::ResetInstance | Item::ResetChild => {
+                self.reset_selection(ondin_core::reset::Kind::All)
+            }
             Item::Ungroup => self.dispatch(ctx, Action::Ungroup),
             Item::Boolean(op) => self.dispatch(ctx, Action::Boolean(op)),
             Item::Flatten => self.dispatch(ctx, Action::Flatten),
@@ -3187,6 +3247,10 @@ mod tests {
             // row in every fixture and make the test that cares pass by accident.
             mask_refused: None,
             role: Role::Plain,
+            // **True**, for `can_frame`'s reason: a reset row dim by default would
+            // make a test about its dimming pass by accident.
+            drifted: true,
+            layer_name: String::new(),
             // **True**, for `can_frame`'s reason: the page menu's fixtures are not
             // about the export row, and a `false` default would leave it dim in all
             // of them and make a test that cares pass by accident.
@@ -3346,8 +3410,8 @@ mod tests {
         groups.iter().flatten().map(|r| r.item).collect()
     }
 
-    fn labels(groups: &[Vec<Row>]) -> Vec<&'static str> {
-        groups.iter().flatten().map(|r| r.label).collect()
+    fn labels(groups: &[Vec<Row>]) -> Vec<&str> {
+        groups.iter().flatten().map(|r| &*r.label).collect()
     }
 
     /// **Every row a menu can produce is in `Item::ALL`, and every entry there
@@ -3598,11 +3662,11 @@ mod tests {
         assert!(head.iter().any(|r| r.item == Item::Ungroup));
 
         // The four operations are checkable here, and exactly one is ticked.
-        let ticked: Vec<&'static str> = groups
+        let ticked: Vec<&str> = groups
             .iter()
             .flatten()
             .filter(|r| r.checked == Some(true))
-            .map(|r| r.label)
+            .map(|r| &*r.label)
             .collect();
         assert_eq!(ticked, ["Subtract"]);
     }
@@ -3975,6 +4039,40 @@ mod tests {
             "{:?}",
             labels(&groups)
         );
+    }
+
+    /// D981's reset rows: *Reset all* on an instance, *Reset* named for a linked
+    /// child, each **dimmed, not hidden**, when nothing differs from the main.
+    #[test]
+    fn the_reset_rows_name_their_layer_and_dim_at_zero() {
+        let sel = [id(1)];
+        let kinds = [Kind::Shape];
+        let target = Target::Layer {
+            id: id(1),
+            door: Door::Canvas,
+        };
+        let row = |cx: &Context<'_>, item: Item| {
+            build(cx)
+                .into_iter()
+                .flatten()
+                .find(|r| r.item == item)
+                .unwrap_or_else(|| panic!("no {item:?} row"))
+        };
+        let mut cx = open(target, &sel, &kinds);
+        cx.role = Role::Instance;
+        assert!(row(&cx, Item::ResetInstance).enabled);
+        cx.drifted = false;
+        let still = row(&cx, Item::ResetInstance);
+        assert!(
+            !still.enabled && still.why.is_some(),
+            "dimmed, with a reason"
+        );
+
+        cx.role = Role::Member;
+        cx.drifted = true;
+        cx.layer_name = "Label".into();
+        assert_eq!(row(&cx, Item::ResetChild).label, "Reset Label");
+        assert!(!flat(&build(&cx)).contains(&Item::ResetInstance));
     }
 
     /// **`height` counts what the rows actually paint.**
@@ -4567,11 +4665,11 @@ mod tests {
 
         for cell in 0..3u8 {
             let m = menu(1, Some(cell));
-            let ticked: Vec<&'static str> = m
+            let ticked: Vec<&str> = m
                 .iter()
                 .flatten()
                 .filter(|r| r.checked == Some(true))
-                .map(|r| r.label)
+                .map(|r| &*r.label)
                 .collect();
             assert_eq!(
                 ticked,

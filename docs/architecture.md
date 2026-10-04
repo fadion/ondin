@@ -1607,14 +1607,15 @@ first was, it saved only the track list.
 `track_lines` merges an edge with the last one only, the spans being laid in order — it searched every
 edge, quadratic in the track count.
 
-### 5.3d Components and overrides (designed 2026-10-04; build steps 1–2 built; §15 D978–D981)
+### 5.3d Components and overrides (designed 2026-10-04; build steps 1–3 built; §15 D978–D981)
 
-> **Design ahead of code, most of it** — decided with the maintainer on 2026-10-04 (session 47). **Build
-> steps 1 and 2 are built** the same day — the list items' ids (§15 D980, `a83adc8`), the component
-> model, its two fields, two operations and post-conditions (§15 D978, `e3df69d`), and the verbs —
-> create, detach, delete, copy, and their keys and menu rows (§15 D979, D981, `0ae3cd7`) — and the
-> paragraphs on those say so; propagation and most of the chrome are not. It sits beside §5.3c because
-> what it changes is the node model. Every other passage of this document still describes `HEAD`; where one states a rule this
+> **Design ahead of code, part of it** — decided with the maintainer on 2026-10-04 (session 47). **Build
+> steps 1–3 are built** the same day — the list items' ids (§15 D980, `a83adc8`), the component model,
+> its two fields, two operations and post-conditions (§15 D978, `e3df69d`), the verbs — create, detach,
+> delete, copy, and their keys and menu rows (§15 D979, D981, `0ae3cd7`, then `settle_links`) — and
+> field propagation (§15 D979 (a), `45730f6`) — and the paragraphs on those say so; structural
+> propagation, the resets, the live preview and most of the chrome are not. It sits beside §5.3c
+> because what it changes is the node model. Every other passage of this document still describes `HEAD`; where one states a rule this
 > design will change, it carries a forward pointer here — §4's invariants 4 and 8, §5.11's bump rule
 > and §12's fourth property. **When a step below lands, this section is rewritten in the present
 > tense and the pointers go.** The maintainer's rulings are §15 D978 (linked copies), D979
@@ -1718,7 +1719,29 @@ Three rules the session adds to it:
   through `commit_inner`'s passes (§5.3c), and the step it applies already holds the propagated
   operations or their inverses.
 
-**List items carry ids, and are matched by them** (§15 D980 — per item the maintainer's ruling, the
+✅ **Built 2026-10-04 — build step 3, fields** (`45730f6`, §15 D979's amendment): `propagate::propagate`,
+run **last** in `commit_inner`, after `keep_insets`, `keep_flex_sizes` and `settle_links`, so what those
+append to a main propagates too. For each of the transaction's edits to a node that has copies — the
+last edit per `shape_key`, against the value before the transaction — it walks the copies at every
+depth through the reverse link map, each level compared with its own old value. **No reader per
+field**: an operation's inverse carries the old value of the field it writes, so `Document::peek`
+applies an op to a scratch clone, keeps the inverse and restores (as undo does) — one clone per commit,
+and only when the document has links. `propagate::mode`, wildcard-free, picks the comparison: **whole**
+for transform, geometry (a patch's inverse is its old field), text with its spans, the two span ops,
+name, visibility, opacity, pivot, clip, mask, mask mode and fill rule; **fields** for text, paragraph
+and block style, insets, display and layout item — a JSON merge that recurses only while old, new and
+current have the same keys, so two variants are never mixed; **items** for the five keyed lists (§15
+D980); and **skip** for locks, the links themselves and everything structural (step 4). **An instance
+root's placement is its own** — `SetTransform`, `SetInsets`, `SetLayoutItem` and `SetVisible`, a main
+hidden on a components page hiding no instance — and **spans follow only onto a copy with the same
+content**. 🚨 **Two places it falls short of this section, noted by the record and not yet fixed** (§15
+D979's amendment): the fields merge needs the *same keys*, and `TextStyle`, `ParagraphStyle`,
+`BlockStyle`, `Insets`, `LayoutItem` and `Flex` skip default-valued fields when serialized — so wherever
+the main or the copy moves a field to or from its default, the merge sees different shapes and compares
+the struct **whole**, and a copy that overrode one field stops following the others; and the placement
+skip asks `component::instance_root`, whose instance root is any node whose chain ends at a main — which
+includes a nested copy in an outer instance, so moving or hiding a nested instance inside its outer main
+does **not** reach the outer instances, where the bullet above says it must. (§15 D980 — per item the maintainer's ruling, the
 shape and the migration the session's). ✅ **Built 2026-10-04** (`a83adc8`), the first half of build
 step 1 below, in `ondin-core/src/item.rs` — **the one part of this section that is built**, and this
 paragraph describes it in the present tense. Five lists have ids: `Paint::fills`, `Paint::strokes`,
@@ -1917,15 +1940,16 @@ as a `Resolved` map it is a decision rather than an optimisation (§5.9, §15 D7
 
 **The preview** (the session's). The pass also runs over the pending transaction, so `RenderOverrides`
 shows the copies following a main-component drag live; operations that add nodes stay ghosts by the
-existing preview rule (§6.2).
+existing preview rule (§6.2). **Not built** (build step 6): during a drag the copies update on release.
 
 **The snapshot** (the session's). No `snapshot_version` bump in the first build: a copy reads as an
 ordinary node, which is not a misreading of it. Exposing `component` and `link` is the parked MCP
 work's question, and so is whether a fill in the snapshot carries its item id (§15 D980) — a change
 of the snapshot's own shape, if it is made, owes its own bump.
 
-🚨 **The pass lives in `ondin-core`, beside `keep_insets` in `build.rs`, and `EditorSession`'s commit
-is the only door that runs it** (the session's). MCP's write tools and Command Mode's scripts commit
+🚨 **The pass lives in `ondin-core` — `propagate.rs` since `45730f6`, where this design put it beside
+`keep_insets` in `build.rs` — and `EditorSession`'s commit is the only door that runs it** (the
+session's). MCP's write tools and Command Mode's scripts commit
 through that door too (invariant 10). **A door that edits a document holding components and bypasses
 it is a defect**, because a skipped propagation corrupts nothing visibly: structure is guarded — a
 deletion that would leave a link dangling is refused by the post-conditions — but a field edit to a
@@ -1935,8 +1959,9 @@ stands in for one.
 
 **Where the pass runs among the commit's passes** (the session's): after `keep_insets` and
 `keep_flex_sizes` — `kept_flow_translations` included, which `keep_flex_sizes` runs first — so that
-what they append to a main node propagates. Whether they must then also run over the propagated
-operations is the resize question below.
+what they append to a main node propagates. ✅ **As built it runs last**, after `settle_links` too
+(`45730f6`). Whether those passes must also run over the propagated operations is the resize question
+below — measured for one path, not settled in general.
 
 **Open, and recorded as open:**
 
@@ -1947,7 +1972,15 @@ operations is the resize question below.
   those children differ from the main and stop following its moves — and whether the commit's passes
   must also run over the propagated operations is the same question. **To be measured at build step 3**,
   before choosing between deriving a copy's value from the main's *specified* values and a tolerance in
-  the comparison.
+  the comparison. ✅ **Measured at step 3 for the pinned-child path, not proved in general**
+  (`45730f6`, `app::component_verb_tests::a_pinned_child_still_follows_after_the_instance_is_resized`):
+  a rect pinned right and top; the instance resized wider, nothing written to its rect (asserted); the
+  main's rect moved and `keep_insets` re-pinning it (asserted); and the instance's rect following
+  **both the transform and the insets exactly**. Why it holds there: the commit's passes write only what
+  an edit touches, `keep_insets` never rewrites a resized frame's children — they re-place in used
+  geometry — and a copy is compared with the values it was copied from. **Neither choice was needed for
+  that path.** ⚠️ **Unmeasured**: `keep_flex_sizes` and the kept flow translations on a flex instance,
+  and any other pass that recomputes a copy's stored value.
 - **Guides.** A guide scoped to a main frame (§5.5) is not copied into its instances — noted by the
   record, not ruled.
 
@@ -2002,12 +2035,13 @@ amendment); (2) ✅ **built 2026-10-04** (`0ae3cd7`, §15 D979's and D981's amen
 component, create an instance, detach, a main's deletion detaching, copies settled, the two chords and
 five menu rows — then `settle_links` and the nested-copy climb (`66b48a5`, `f75dcc5`), closing a
 layer moved out of its instance, the other delete doors and a nested instance copied alone; leaving
-the delete-or-keep for a main's child, which is step 4's; (3) **next** — the propagation pass for **fields** — the compare
-rule, list items by id, nested chains,
-user operations winning — with a property-based test of its specification: after a main edit, each
-counterpart's field equals the new value if and only if it equalled the old; and the exact-equality
-risk measured here, above; (4) propagation for **structure** — insert at
-an anchor, reorder, reparent, delete or unlink; (5) the reset family, and the inspector showing
+the delete-or-keep for a main's child, which is step 4's; (3) ✅ **built 2026-10-04** (`45730f6`, §15
+D979's amendment) — the propagation pass for **fields**: the compare rule, list items by id, nested
+chains, user operations winning, and the exact-equality risk measured for the pinned-child path, above.
+⚠️ **The property-based test this step was to carry** — after a main edit, each counterpart's field
+equals the new value if and only if it equalled the old — **is not among its tests**, which are
+fixed scenarios; and the fields merge and the nested placement skip fall short, above; (4) **next** —
+propagation for **structure** — insert at an anchor, reorder, reparent, delete or unlink; (5) the reset family, and the inspector showing
 overridden fields; (6) the live preview of main-component edits; (7) then variants and properties.
 
 ### 5.4 Text node

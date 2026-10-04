@@ -1379,8 +1379,8 @@ pub struct Context<'a> {
     /// main's two rows, the instance's three, the child's two.
     pub role: Role,
     /// Whether a reset of that one layer would change anything
-    /// (`reset::Drift::any`) — what dims *Reset all* and *Reset Label*, which D981
-    /// disables rather than hides at zero.
+    /// (`reset::Drift::any`) — what offers *Reset all* and *Reset Label*, omitted
+    /// at zero by §3's exception for a row that only undoes a non-default state.
     pub drifted: bool,
     /// That one layer's name, which *Reset Label* is named for. Empty for several.
     pub layer_name: String,
@@ -1757,9 +1757,11 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
     );
     // D981's rows, by what the layer is to the components machinery (§15 D981):
     // *Create component* on anything that is not already part of one, the main's
-    // two, the instance's three, a linked child's two. A reset with nothing to do
-    // is dimmed, not hidden — D981's rule for the card's counted rows, kept here.
-    const NOTHING_DIFFERS: &str = "Nothing here differs from the main component";
+    // two, the instance's three, a linked child's two. **A reset is omitted when
+    // nothing differs**, by §3's one exception — a row whose only purpose is to undo
+    // a non-default state, *Reset origin*'s rule — since a fresh instance has no
+    // drift and a row dim on most opens reads as broken. D981's disabled-not-hidden
+    // is the *card's* counted rows, where the count is the point.
     match cx.role {
         Role::Plain | Role::Local => {
             rows.push(Row::new(Item::CreateComponent).dim_if(locked, why));
@@ -1770,21 +1772,20 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
         }
         Role::Instance => {
             rows.push(Row::new(Item::GoToMain));
-            rows.push(
-                Row::new(Item::ResetInstance)
-                    .dim_if(!cx.drifted, NOTHING_DIFFERS)
-                    .dim_if(locked, why),
-            );
+            if cx.drifted {
+                rows.push(Row::new(Item::ResetInstance).dim_if(locked, why));
+            }
             rows.push(Row::new(Item::DetachInstance).dim_if(locked, why));
         }
         Role::Member => {
             rows.push(Row::new(Item::GoToMain));
-            rows.push(
-                Row::new(Item::ResetChild)
-                    .label(format!("Reset {}", cx.layer_name))
-                    .dim_if(!cx.drifted, NOTHING_DIFFERS)
-                    .dim_if(locked, why),
-            );
+            if cx.drifted {
+                rows.push(
+                    Row::new(Item::ResetChild)
+                        .label(format!("Reset {}", cx.layer_name))
+                        .dim_if(locked, why),
+                );
+            }
         }
     }
     // *Ungroup* and *Flatten* on a group or boolean are **promoted into the
@@ -4042,9 +4043,10 @@ mod tests {
     }
 
     /// D981's reset rows: *Reset all* on an instance, *Reset* named for a linked
-    /// child, each **dimmed, not hidden**, when nothing differs from the main.
+    /// child, each **omitted** when nothing differs from the main — §3's
+    /// *Reset origin* exception, not the card's disabled-not-hidden.
     #[test]
-    fn the_reset_rows_name_their_layer_and_dim_at_zero() {
+    fn the_reset_rows_name_their_layer_and_go_at_zero() {
         let sel = [id(1)];
         let kinds = [Kind::Shape];
         let target = Target::Layer {
@@ -4062,10 +4064,10 @@ mod tests {
         cx.role = Role::Instance;
         assert!(row(&cx, Item::ResetInstance).enabled);
         cx.drifted = false;
-        let still = row(&cx, Item::ResetInstance);
+        assert!(!flat(&build(&cx)).contains(&Item::ResetInstance));
         assert!(
-            !still.enabled && still.why.is_some(),
-            "dimmed, with a reason"
+            flat(&build(&cx)).contains(&Item::DetachInstance),
+            "only the reset goes"
         );
 
         cx.role = Role::Member;
@@ -4073,6 +4075,8 @@ mod tests {
         cx.layer_name = "Label".into();
         assert_eq!(row(&cx, Item::ResetChild).label, "Reset Label");
         assert!(!flat(&build(&cx)).contains(&Item::ResetInstance));
+        cx.drifted = false;
+        assert!(!flat(&build(&cx)).contains(&Item::ResetChild));
     }
 
     /// **`height` counts what the rows actually paint.**

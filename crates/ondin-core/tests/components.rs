@@ -602,17 +602,17 @@ fn pasting_an_instance_into_another_document_drops_its_links() {
     assert_eq!(link_of(&other, created[0]), None);
 }
 
-/// `tx` plus the links its moves cut, as `commit_inner` assembles it.
+/// `tx` plus the links its structural edits owe, as `commit_inner` assembles it.
 fn settled(doc: &Document, ops: Vec<Operation>) -> Transaction {
     let mut tx = Transaction(ops);
-    let cuts = ondin_core::component::settle_moves(doc, &tx);
+    let cuts = ondin_core::component::settle_links(doc, &tx);
     tx.0.extend(cuts);
     tx
 }
 
 /// A member dragged out of its instance becomes its own layer: the bare move is
 /// refused (`Membership`), the settled one goes through with the link cut. Flip:
-/// `settle_moves` answering nothing leaves the settled move refused too.
+/// `settle_links` answering nothing leaves the settled move refused too.
 #[test]
 fn a_member_moved_out_of_its_instance_loses_its_link() {
     let mut f = fixture();
@@ -671,4 +671,82 @@ fn a_nested_copy_moved_out_takes_its_members_links_with_it() {
     for id in [cn, cna, cnb] {
         assert_eq!(link_of(&f.doc, id), None, "{id:?}");
     }
+}
+
+/// A nested instance duplicated on its own climbs to its own main — it was never
+/// going to belong to the outer instance a second time (`SharedSource`), nor to
+/// nothing (`Membership`). Flip: dropping `settle_copy`'s climb is refused.
+#[test]
+fn a_nested_instance_copied_alone_becomes_an_instance_of_its_own_main() {
+    let mut f = fixture();
+    let [_, _, _, _, _, cn, _, _] = nested(&mut f);
+    let (tx, copy) = duplicate(&mut f, cn);
+    f.doc.apply(&tx).expect("a plain instance of m");
+    assert_eq!(link_of(&f.doc, copy), Some(f.m));
+    let kids: Vec<_> = f
+        .doc
+        .get(copy)
+        .unwrap()
+        .children()
+        .iter()
+        .map(|k| link_of(&f.doc, *k))
+        .collect();
+    assert_eq!(kids, vec![Some(f.a), Some(f.b)]);
+}
+
+/// **Ungrouping a main** by any door — its children lifted out, the main itself
+/// deleted — leaves its instances unlinked rather than refused: the root's link
+/// climbs to nothing and its members, with no instance around them, are cut. No
+/// verb relinked here; `settle_links` did. Flip: dropping the climb leaves the
+/// instance linked to a node that is gone (`Dangling`).
+#[test]
+fn ungrouping_a_main_by_raw_ops_detaches_its_instances() {
+    let mut f = fixture();
+    let tx = settled(
+        &f.doc,
+        vec![
+            Operation::Reparent {
+                id: f.a,
+                new_parent: f.root,
+                index: 0,
+            },
+            Operation::Reparent {
+                id: f.b,
+                new_parent: f.root,
+                index: 1,
+            },
+            Operation::DeleteNode { id: f.m },
+        ],
+    );
+    f.doc.apply(&tx).expect("the ungroup with its relinks");
+    for id in [f.i, f.ia, f.ib] {
+        assert_eq!(link_of(&f.doc, id), None, "{id:?}");
+    }
+}
+
+/// A member moved into another instance of the same main, where that instance's
+/// own counterpart already holds the source, is the one cut — not the counterpart
+/// the transaction never touched.
+#[test]
+fn moving_a_member_into_a_sibling_instance_cuts_the_mover() {
+    let mut f = fixture();
+    let i = f.i;
+    let (tx, other) = duplicate(&mut f, i);
+    f.doc.apply(&tx).unwrap();
+    let theirs = f.doc.get(other).unwrap().children()[0];
+    let tx = settled(
+        &f.doc,
+        vec![Operation::Reparent {
+            id: f.ia,
+            new_parent: other,
+            index: 0,
+        }],
+    );
+    f.doc.apply(&tx).expect("the move with its cut");
+    assert_eq!(link_of(&f.doc, f.ia), None, "the mover is cut");
+    assert_eq!(
+        link_of(&f.doc, theirs),
+        Some(f.a),
+        "the counterpart keeps its source"
+    );
 }

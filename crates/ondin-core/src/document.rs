@@ -462,6 +462,18 @@ impl Document {
         })
     }
 
+    /// Apply `tx` to `self` **without** the post-conditions — for a scratch copy
+    /// a commit-time pass inspects to see the tree a transaction would leave
+    /// (`component::settle_links`). Never the path an edit takes: [`Self::apply`]
+    /// is, and it is what refuses a transaction this lets through.
+    pub(crate) fn apply_unchecked(&mut self, tx: &Transaction) -> Result<(), OpError> {
+        let mut dirty = DirtySet::default();
+        for op in &tx.0 {
+            self.apply_one(op, &mut dirty)?;
+        }
+        Ok(())
+    }
+
     /// Apply a single op to `self` (already a working copy), returning the op
     /// that would undo it. Validates before mutating.
     fn apply_one(&mut self, op: &Operation, dirty: &mut DirtySet) -> Result<Operation, OpError> {

@@ -295,7 +295,8 @@ pub fn main_of(doc: &Document, root: NodeId) -> Option<NodeId> {
 ///   nothing, so they detach and keep their look, while a nested instance copied
 ///   with them climbs to *its* main and stays an instance;
 /// - **deleting a node inside a main**: each counterpart is cut loose and kept as
-///   the instance's own layer, so instance-side work is never destroyed by an
+///   the instance's own layer (or climbs, when the deleted child was itself a
+///   nested copy, to the nested main's node — the first bullet's case), so instance-side work is never destroyed by an
 ///   edit to the main — until build step 4 can tell an untouched counterpart from
 ///   a changed one, which is when the untouched ones start being deleted with it;
 /// - **detaching** ([`detach`]) is the same climb, past the instance's own main.
@@ -397,74 +398,101 @@ pub fn detach(doc: &Document, root: NodeId) -> Option<Transaction> {
     Some(Transaction(ops))
 }
 
-/// The links a transaction's **moves** cut (§5.3d): a linked layer reparented out
-/// of its instance, into another instance of the same main whose counterpart is
-/// already there, or into a nested instance, becomes the copy's own layer rather
-/// than a link [`check`] would refuse. A commit-time pass, `build::keep_insets`'
-/// shape: `EditorSession::commit_inner` runs it over every transaction, so every
-/// door that moves a layer — the layers panel, a canvas drop, the structural
-/// verbs — is covered without each knowing about components.
+/// The links a transaction's **structural** edits owe (§5.3d), so that no door
+/// that moves, deletes or regroups layers has to know about components. A
+/// commit-time pass, `build::keep_insets`' shape: `EditorSession::commit_inner`
+/// runs it over every transaction.
 ///
-/// The transaction's `Reparent`s are simulated over the document's parents, then
-/// every linked node under a moved one is asked, top-down, whether it still
-/// belongs to the instance around it: an instance root above it whose source
-/// contains its source, and no other node of that instance on the same source. A
-/// link straight to a main is placed anywhere, as [`check`] allows. Cutting a
-/// nested copy's root cuts its members too, because the top-down order asks them
-/// after it with its link already gone. Empty in a document with no links, and
-/// for a transaction that moves nothing.
-pub fn settle_moves(doc: &Document, tx: &Transaction) -> Vec<Operation> {
-    let nodes = doc.node_map();
-    let moved: Vec<(NodeId, NodeId)> =
-        tx.0.iter()
-            .filter_map(|op| match op {
-                Operation::Reparent { id, new_parent, .. } => Some((*id, *new_parent)),
-                _ => None,
-            })
-            .collect();
-    if moved.is_empty() || !nodes.values().any(|n| n.link.is_some()) {
+/// The transaction is applied to a scratch copy (`Document::apply_unchecked`) and
+/// the tree it leaves is asked two things:
+/// - **links into deleted nodes climb past them** ([`relink_past`]'s rule) — the
+///   Delete verb does this itself, but `build::ungroup`, *Flatten*, *Outline* and
+///   text-on-a-new-path delete nodes too, and an ungrouped main is a deleted main;
+/// - **every linked node still belongs to its instance**: an instance root above
+///   it whose source contains its source, and no other node of that instance on
+///   the same source. What fails is cut — a layer dragged out of its instance, the
+///   members of an instance whose root an ungroup dissolved. Asked top-down, so a
+///   cut nested root cuts its members; and where two nodes of one instance share a
+///   source, **the one the transaction did not touch keeps it**.
+///
+/// A link straight to a main is placed anywhere, as [`check`] allows. Empty for
+/// a document with no links or a transaction with no structural op.
+pub fn settle_links(doc: &Document, tx: &Transaction) -> Vec<Operation> {
+    let before = doc.node_map();
+    let structural = tx.0.iter().any(|op| {
+        matches!(
+            op,
+            Operation::Reparent { .. }
+                | Operation::DeleteNode { .. }
+                | Operation::InsertSubtree { .. }
+                | Operation::CreateNode { .. }
+        )
+    });
+    if !structural || !before.values().any(|n| n.link.is_some()) {
         return Vec::new();
     }
-    // Parents as the transaction leaves them: its moves, and the nodes it creates
-    // — a group made in the same transaction to hold a moved layer is an ancestor
-    // the document does not have yet, and a chain that stops at it would read as
-    // "outside every instance".
-    let mut parent: FxHashMap<NodeId, NodeId> = FxHashMap::default();
+    let mut scratch = doc.clone();
+    if scratch.apply_unchecked(tx).is_err() {
+        return Vec::new(); // `apply` will refuse it with the reason
+    }
+    let mut ops = Vec::new();
+
+    // Links into deleted nodes climb past them.
+    let gone: FxHashSet<NodeId> = before
+        .keys()
+        .filter(|id| scratch.get(**id).is_none())
+        .copied()
+        .collect();
+    if !gone.is_empty() {
+        let mut climbs: Vec<Operation> = scratch
+            .node_map()
+            .values()
+            .filter_map(|n| {
+                let link = n.link.filter(|l| gone.contains(l))?;
+                let mut to = Some(link);
+                for _ in 0..=before.len() {
+                    match to {
+                        Some(s) if gone.contains(&s) => to = before.get(&s).and_then(|s| s.link),
+                        _ => break,
+                    }
+                }
+                Some(Operation::SetLink { id: n.id, link: to })
+            })
+            .collect();
+        climbs.sort_by_key(set_link_id);
+        if scratch
+            .apply_unchecked(&Transaction(climbs.clone()))
+            .is_err()
+        {
+            return Vec::new();
+        }
+        ops.extend(climbs);
+    }
+
+    // Membership on the tree the transaction leaves.
+    let nodes = scratch.node_map();
+    let parent_of = |id: NodeId| nodes.get(&id).and_then(|n| n.parent);
+    let inside = |id: NodeId, outer: NodeId| {
+        std::iter::successors(parent_of(id), |a| parent_of(*a)).any(|a| a == outer)
+    };
+    let depth = |id: NodeId| std::iter::successors(Some(id), |a| parent_of(*a)).count();
+    let mut touched: FxHashSet<NodeId> = FxHashSet::default();
     for op in &tx.0 {
         match op {
-            Operation::Reparent { id, new_parent, .. } => {
-                parent.insert(*id, *new_parent);
+            Operation::Reparent { id, .. } => {
+                touched.extend(crate::build::subtree_nodes(&scratch, &[*id]));
             }
-            Operation::CreateNode { id, parent: p, .. } => {
-                parent.insert(*id, *p);
+            Operation::CreateNode { id, .. } => {
+                touched.insert(*id);
             }
             Operation::InsertSubtree {
-                nodes: inserted,
-                parent: p,
-                ..
+                nodes: inserted, ..
             } => {
-                let set: FxHashSet<NodeId> = inserted.iter().map(|n| n.id).collect();
-                for n in inserted {
-                    match n.parent.filter(|q| set.contains(q)) {
-                        Some(q) => parent.insert(n.id, q),
-                        None => parent.insert(n.id, *p),
-                    };
-                }
+                touched.extend(inserted.iter().map(|n| n.id));
             }
             _ => {}
         }
     }
-    let parent_of = |id: NodeId| {
-        parent
-            .get(&id)
-            .copied()
-            .or_else(|| nodes.get(&id).and_then(|n| n.parent))
-    };
-    let depth = |id: NodeId| std::iter::successors(Some(id), |a| parent_of(*a)).count();
-    let inside = |id: NodeId, outer: NodeId| {
-        std::iter::successors(parent_of(id), |a| parent_of(*a)).any(|a| a == outer)
-    };
-    let mut cut: FxHashSet<NodeId> = FxHashSet::default();
     // Whether `id`'s chain ends at a main, given the links cut so far.
     let is_root = |id: NodeId, cut: &FxHashSet<NodeId>| {
         let mut at = id;
@@ -482,33 +510,61 @@ pub fn settle_moves(doc: &Document, tx: &Transaction) -> Vec<Operation> {
         }
         false
     };
-    let mut candidates: Vec<NodeId> =
-        crate::build::subtree_nodes(doc, &moved.iter().map(|(id, _)| *id).collect::<Vec<_>>())
-            .into_iter()
-            .filter(|id| nodes.get(id).is_some_and(|n| n.link.is_some()))
-            .collect();
-    candidates.sort_by_key(|id| (depth(*id), *id));
-    let mut ops = Vec::new();
-    for id in candidates {
-        let src = nodes[&id].link.expect("filtered to linked nodes");
-        if nodes.get(&src).is_some_and(|s| s.component) {
-            continue;
+    let mut members: Vec<NodeId> = nodes
+        .values()
+        .filter(|n| {
+            n.link
+                .is_some_and(|s| nodes.get(&s).is_some_and(|s| !s.component))
+        })
+        .map(|n| n.id)
+        .collect();
+    members.sort_by_key(|id| (depth(*id), *id));
+    let mut cut: FxHashSet<NodeId> = FxHashSet::default();
+    for _ in 0..=members.len() {
+        let mut changed = false;
+        let mut claims: FxHashMap<(NodeId, NodeId), Vec<NodeId>> = FxHashMap::default();
+        for &id in &members {
+            if cut.contains(&id) {
+                continue;
+            }
+            let src = nodes[&id].link.expect("filtered to linked nodes");
+            let root =
+                std::iter::successors(parent_of(id), |a| parent_of(*a)).find(|a| is_root(*a, &cut));
+            match root {
+                Some(r) if inside(src, nodes[&r].link.expect("a root is linked")) => {
+                    claims.entry((r, src)).or_default().push(id);
+                }
+                _ => {
+                    cut.insert(id);
+                    changed = true;
+                }
+            }
         }
-        let root =
-            std::iter::successors(parent_of(id), |a| parent_of(*a)).find(|a| is_root(*a, &cut));
-        let belongs = root.is_some_and(|r| {
-            let root_src = nodes[&r].link.expect("an instance root is linked");
-            let shared = nodes.values().any(|o| {
-                o.id != id && o.link == Some(src) && !cut.contains(&o.id) && inside(o.id, r)
-            });
-            inside(src, root_src) && !shared
-        });
-        if !belongs {
-            cut.insert(id);
-            ops.push(Operation::SetLink { id, link: None });
+        for mut sharing in claims.into_values().filter(|v| v.len() > 1) {
+            sharing.sort_by_key(|id| (touched.contains(id), *id));
+            for id in &sharing[1..] {
+                cut.insert(*id);
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
         }
     }
+    let mut cuts: Vec<Operation> = cut
+        .into_iter()
+        .map(|id| Operation::SetLink { id, link: None })
+        .collect();
+    cuts.sort_by_key(set_link_id);
+    ops.extend(cuts);
     ops
+}
+
+fn set_link_id(op: &Operation) -> NodeId {
+    match op {
+        Operation::SetLink { id, .. } => *id,
+        _ => unreachable!("only SetLinks are sorted here"),
+    }
 }
 
 /// How a copy of a **main** lands (§15 D979 (e)): as an instance of it, which is
@@ -577,6 +633,31 @@ pub(crate) fn settle_copy(
         let keep = nodes.contains_key(&link) && (is_instance_root(nodes, t) || root_above(t));
         if !keep {
             c.link = None;
+        }
+    }
+    // A **nested instance copied on its own** — its root linked to the nested copy
+    // inside some outer main, with no outer instance coming along — belongs to no
+    // instance where it lands, so it climbs one level up, `detach`'s rule for a
+    // nested instance: its root and its members relink past that nested copy to
+    // the nested main's own nodes, and it lands as a plain instance of that main.
+    if let Some(t) = root
+        && !root_above(t)
+        && is_instance_root(nodes, t)
+        && let Some(src) = t.link
+        && nodes.get(&src).is_some_and(|s| !s.component)
+    {
+        let past: FxHashSet<NodeId> = crate::build::subtree_nodes(doc, &[src])
+            .into_iter()
+            .collect();
+        for c in copy.iter_mut() {
+            let mut to = c.link;
+            for _ in 0..=nodes.len() {
+                match to {
+                    Some(s) if past.contains(&s) => to = nodes.get(&s).and_then(|s| s.link),
+                    _ => break,
+                }
+            }
+            c.link = to;
         }
     }
     false

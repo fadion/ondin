@@ -408,19 +408,25 @@ jobs:
           ls -l assets
 
       # Uncompressed: every asset is an archive or an installer already.
-      - uses: actions/upload-artifact@v4
+      # `overwrite`, so *Re-run all jobs* replaces what an earlier attempt of
+      # this leg uploaded instead of failing on the name. Pinned by commit like
+      # every action that touches the assets (§15 D976).
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-${{ matrix.channel }}
           path: assets/
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
+          overwrite: true
 
   # ── The one job that writes ─────────────────────────────────────────────
   # Downloads what the three legs staged and attaches it to the tag's Release,
   # creating the Release if it does not exist yet. Nothing here builds, and the
-  # action is the only third-party code in the job — pinned by commit, because
-  # a tag can be moved (`v2` → `v2.6.2`, resolved 2026-10-04, §15 D974).
+  # job runs two actions beside the write token, both pinned by commit because
+  # a tag can be moved (`v2` → `v2.6.2`, resolved 2026-10-04, §15 D974): the
+  # release action, and GitHub's own artifact download — first-party, but code
+  # in the writing job all the same (§15 D976).
   #
   # ⚠️ **Strict by saying so** (§15 D974, `[X3-L3-01]`): the action's default
   # for `fail_on_unmatched_files` is `false`, which once let a missing archive
@@ -434,7 +440,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: release-*
           path: assets

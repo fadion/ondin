@@ -85,7 +85,7 @@
   D979) — as linked copies kept in step at the commit, not on layout's derive-from-specified pipeline
   as this bullet said: the maintainer ruled instances stored, every reader here being keyed by a stored
   id. **Variants and component properties left it on 2026-10-05** (§5.3d, §15 D982), their core
-  built; **instance swap and shared libraries stay on it.**
+  and inspector built; **instance swap and shared libraries stay on it.**
   ~~Auto-layout/constraints~~ **left this list on 2026-09-23 and are
   designed**: CSS flexbox, CSS grid and absolute insets (§5.3c, §15 D867, D871) — insets on frames
   built 2026-09-24, inspector card included (§15 D874); flex built the same day — its model, engine
@@ -1614,7 +1614,7 @@ first was, it saved only the track list.
 `track_lines` merges an edge with the last one only, the spans being laid in order — it searched every
 edge, quadratic in the track count.
 
-### 5.3d Components and overrides (designed 2026-10-04; steps 1–6 and 7's core built; §15 D978–D982)
+### 5.3d Components and overrides (designed 2026-10-04; steps 1–6 and most of 7 built; §15 D978–D982)
 
 > **Design ahead of code, part of it** — decided with the maintainer on 2026-10-04 (session 47). **Build
 > steps 1–4 are built** the same day — the list items' ids (§15 D980, `a83adc8`), the component model,
@@ -1625,7 +1625,9 @@ edge, quadratic in the track count.
 > inspector's component card and the override look on the inspector's cards and lists (`26c8434` to
 > `6210953`, then session 49; §15 D979's and D981's amendments); so is step 6, the live preview
 > (session 49); and so is step 7's core half, variants and component properties (`3fa5276`, §15 D982,
-> 2026-10-05). Step 7's app half and the canvas and layers chrome are not. It sits
+> 2026-10-05), and its app half in the inspector and the context menu (`a313b2c`, the same day), then
+> a set's canvas tab and two layers marks (`0ff8f16`). The rest of the canvas and layers chrome, D981's
+> and step 7's, is not. It sits
 > beside §5.3c
 > because what it changes is the node model. Every other passage of this document still describes `HEAD`; where one states a rule this
 > design will change, it carries a forward pointer here — §4's invariants 4 and 8, §5.11's bump rule
@@ -2195,7 +2197,9 @@ glyph the app needed, says *"at two, ship the font"* — so the card's main face
 The canvas labels and markers and the layers marks are not built.
 
 **Variants and component properties** (build step 7; §15 D982). ✅ **The core is built**
-(`3fa5276`, `ondin-core/src/variant.rs`); the app half is not. The chrome is a second mockup,
+(`3fa5276`, `ondin-core/src/variant.rs`), and ✅ **the app half in the inspector and the context menu**
+(`a313b2c`, below), and ✅ a set's canvas tab and two layers marks (`0ff8f16`, below); the set's `+`
+edge control and value-named variant rows are not. The chrome is a second mockup,
 `design/Variants.dc.html`, **accepted by the maintainer on 2026-10-05 except where it contradicted §15
 D979**, and there they ruled that *"what we decided … takes precedence over design"*: **deleting a
 variant detaches its instances**, as any main's deletion does (D979 (c)) — and deleting a value deletes
@@ -2255,6 +2259,51 @@ new. 🚨 **Open, for the maintainer**: only an instance linked straight to a ma
 cannot be built, because the link model has no place for *"the counterpart of N in the outer main, but
 an instance of main B"* — §15 D982 has why, and the session's unbuilt sketch.
 
+✅ **The app half, in the inspector and the context menu** (`a313b2c`; `panels/variants.rs`,
+`panels/component.rs`; §15 D982's amendment). **A set** gets its own card, *Variants*, in the Component
+card's place (`OndinApp::set_body`): *Component set* and its name, *N variants · M instances* with
+*Select all* — every variant's instances — the clash note with a warning glyph, each variant property
+as a name field with a ×, disabled for the last, and its values as chips; a chip's popup renames, moves
+and deletes its value, a value variants hold confirming with exact counts in D979 (c)'s words — *N
+variants use it and are deleted with it. M instances will detach.* — and *Property* and *Add variant*
+sit under them. **A variant** gets the Component card with *Variant in* and the set as a link, its
+derived, read-only name, a dropdown per property — a taken combination not refused but noted, *Another
+variant is also X* with *Select it* — then a main's count and verbs. **An instance's card** gains, between
+*Instance of* and *Reset all*, a dropdown per variant property with **no dot**, switching through
+`variant::switch` (several selected together, *Mixed* where they disagree, a missing combination greyed
+with *No Large, Disabled variant in Button*, the dropdown disabled where any selected root fails
+`can_switch`), then each component property — a boolean as a switch row, a text as a field — with its
+override mark; several instances get the rows when they share one owner. **The drift summary counts
+properties apart**, a property's field units subtracted from the overrides (`PropDrift`, *2 properties ·
+1 override*), the overflow gains *Reset properties N*, and *Reset fields* leaves the property-driven
+fields alone; several instances' summary reads *K with changes*. **A lone main or a set** gets a
+*Properties* card under the Component card — each property's kind glyph, name and ×, its default and
+what it is bound to; *Boolean*, *Text*, and on a lone main *Variant*, which combines it alone into a set
+— and **a layer inside a main** one line, *Bind to a component property*: a *Visibility* dropdown and,
+for text, *Content* — *None*, each property of that kind, *New property…*. **The menu** gains
+`menu::Role::Set` (no *Create component* on a set, nor on any selection holding a main or a set —
+`menu::Context::holds_main`, `adc5f66`), *Combine as variants* on two or more mains outside any set
+under one parent, *Add variant* on a set or a variant, a set's *Select all instances*, and *Reset
+<property>* on a linked layer whose bound field differs; the toast *Combined N mains into set “Button” ·
+Ctrl+Z to undo*; no new chords. **Four places depart from the mockup**, the session's and open to
+overturning — values edited from a chip's popup rather than in place and dragged; binding from that one
+line rather than `{}` buttons on the layers row, Appearance and Type; the define popover as two buttons,
+with no *Default* row and no *Preferred mains*; a set's property name as a field with a × — and D982 has
+each. *Reset properties* is drawn wherever the component defines a property, at "—" and disabled at
+zero like the card's other counted resets (`adc5f66`; the first cut hid it, D982's amendment).
+
+✅ **A set's tab and two layers marks** (`0ff8f16`, §15 D982's second amendment). **A set's tag is a
+tab** (`canvas::frame_label`): the four-squares glyph and the name in a box padded by `SET_TAB_PAD`
+that **sits on the frame's top edge** — pinned by `a_sets_tag_is_a_tab_with_its_count_and_its_clash` —
+painted in the card colour and border with a resting hairline round the set, its text 🚨 **never the
+selection blue**, D981's component rule kept for a set; *N variants* while the set is selected, and on
+a clash the warning glyph and `panels::clash_text`'s sentence in the count's place; a clashing
+variant's own tag leads with the warning glyph. **The layers badge slot** shows *N variants* on a
+collapsed set's row, and `{}` on a layer bound to a property of the owner above it; the mask wins the
+slot, then the set count, then `{}`, then a frame's size or a subtract base. **Not built**: the `+` on
+the set's bottom edge — the canvas has no hit route for a control of its own, and *Add variant* is on
+the card and the menu — and a variant's row named by its values with the filled hexagon (§15 D10).
+
 **Instance swap, a nested copy's switch, exposing nested properties, and pushing an instance's changes
 to its main come later.** So does real-time collaboration, the one place §15 D978's cost (a) arrives: a non-goal for
 now and open for the future, in the maintainer's words, and D978's verdict is to revisit linked copies
@@ -2287,10 +2336,9 @@ fields, `size_field`'s W and H, and the exports and layout-grid lists (session 4
 live preview of main-component edits, the field pass run over the preview's transaction after the
 holds, structure still following on release; (7) ✅ **core built 2026-10-05** (`3fa5276`, §15 D982) —
 variants and component properties: the model, the rules, `variant::settle`, the verbs, the in-place
-switch and properties as views, above. **Next**: its app half — the set's Variants card and the
-variant face of the Component card, an instance's variant dropdowns and property rows, the overflow
-split, the Properties definitions with their bind buttons, the menu rows and toasts, and the canvas and
-layers marks.
+switch and properties as views, above — ✅ and its app half in the inspector and the menu the same
+day (`a313b2c`), then the set's tab and the layers panel's set count and `{}` (`0ff8f16`, `adc5f66`).
+**Left**: the set's `+` edge control and value-named variant rows, beside D981's chrome.
 
 **Handoff, 2026-10-04 (session 47's close)** — what is built, next and owed, in one place. **Built**:
 steps 1–4 above, `Ctrl+Alt+K`/`Ctrl+Alt+B`, five menu rows filed provisionally, D981's two toasts;
@@ -2298,8 +2346,9 @@ then step 5's resets in core, the two *Reset* menu rows, the component card and 
 part (`26c8434`, `7cf242e`, `7b5961e`, `a18b0b5`, `d66044c`, `5fcff6b`, `d2beb37`, `d39f7c1`,
 `6033571`, `a345b81`, `c292b50`, `6210953`); then, in session 49, the rest of that look — every other
 card's fields and the exports and layout-grid lists; then step 6, the live preview; then, on
-2026-10-05, step 7's core (`3fa5276`, §15 D982). **Next**: step 7's app half, in the build order above;
-its open question — a nested copy's switch and instance swap — is the maintainer's. Step 6's three defects — a main's pivot preview naming a copy, pinned
+2026-10-05, step 7's core (`3fa5276`, §15 D982) and its app half in the inspector and the menu
+(`a313b2c`), and a set's tab and two layers marks (`0ff8f16`). **Next**: step 7's `+` edge control
+and value-named variant rows, beside D981's chrome below; its open question — a nested copy's switch and instance swap — is the maintainer's. Step 6's three defects — a main's pivot preview naming a copy, pinned
 copies and roots previewed off their release, an in-flow move dragging the copies — are fixed (§15
 D979's amendment), and so is a fourth read in the fix, a pinned copy with its own value for every
 inset a main's move changes; step 6 owes nothing known.

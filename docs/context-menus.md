@@ -901,6 +901,13 @@ Recorded so they are not re-argued, the way `shortcuts.md`'s *Deliberately unbou
   `Member`'s, renamed per layer — *Reset Label* — through `Row::label`. **They are omitted when
   nothing differs from the main** (`d66044c`), the second case of §3's one exception — a row whose
   only purpose is to undo a non-default state; dimmed in their first commit, which broke it.
+  **Variants added three rows and one placement on 2026-10-05** (`a313b2c`, §15 D982's amendment), by
+  the variants mockup's acceptance: `Item::CombineAsVariants` on two or more mains outside any set under one parent;
+  `Item::AddVariant` on a set — a new `Role::Set`, which is not offered *Create component* — or a
+  variant; *Select all instances* on a set, every variant's; and `Item::ResetProperty`, *Reset* named
+  for the property — *Reset Label text* — on a `Member` whose bound field differs, omitted otherwise by
+  the same exception. No chords. And *Create component* is withheld from any selection holding a main
+  or a set (`menu::Context::holds_main`, `adc5f66`), which it would nest and be refused.
   ⚠️ **They are filed in `Group::Structure`
   after *Frame selection* provisionally** — the build's choice, not a ruling and not this file's yet:
   where each belongs in §5's heads or §4's tail, and its §9 score, are still this file's to decide.

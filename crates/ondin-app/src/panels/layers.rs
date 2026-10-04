@@ -1874,9 +1874,16 @@ impl OndinApp {
         // only place in the app that says the layer is still there. The other two
         // are annotations on a layer you can already see.
         //
-        // No row can want two of them. A frame cannot be a mask
+        // No row could want two of those three. A frame cannot be a mask
         // (`NodeKind::can_mask`), and a boolean's operands are consumed by the
         // operation rather than painted, so a mask among them would clip nothing.
+        //
+        // ⚠️ **Five states since §15 D982, and a row *can* now want two**, so the
+        // order below is the rule rather than exclusivity: mask, then a folded
+        // set's count, then `{}`, then a frame's size or a subtract's base. A
+        // frame bound for visibility wants `{}` and its size, and `{}` wins; a
+        // bound mask wants both, and the mask wins.
+        //
         // A collapsed set carries its variant count where a frame carries its size,
         // and a layer bound to a component property carries `{}` (§15 D982, the
         // design's 2A and 2C) — the count is what the folded row hides, and the

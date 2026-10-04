@@ -25582,6 +25582,17 @@ in *The README and the release skill* now bites only after a `publish` that died
 dnf branch is `--setopt=localpkg_gpgcheck=0`: dnf5 was measured, at 5.2 and 5.4 beside dnf4 at 4.22,
 and reads the option as dnf4 does. Neither is open in `roadmap.md` any longer.
 
+**Amended again 2026-10-04: its version-pin test was red on its first CI run, on Windows only.**
+`update::tests::the_release_packs_with_the_clients_own_velopack_version` found the `velopack` block
+in `Cargo.lock` by `contains("\nname = \"velopack\"\n")`. The Windows runner checks out with
+`core.autocrlf=true`, so the lock arrives there with CRLF endings and that pattern matches no block;
+this machine's `autocrlf` is false, which is why the whole local bar was green on the same commit.
+It now compares line by line (`str::lines` drops the `\r`). Measured both ways on a CRLF copy of the
+lock: the old predicate finds nothing, the new one reads `1.2.161`, and both read it from the LF
+file. ⚠️ **A test that reads a checked-in file through `include_str!` reads whatever line endings
+the checkout wrote**, so a `\n` inside a search pattern is a Windows-CI-only failure; the one other
+such pattern in `crates/` (`goldens.rs`'s `find("\n}")`) survives CRLF because `\r\n}` contains it.
+
 **D976 — The Release workflow builds under a read-only token and publishes from the one job that can
 write. *Built 2026-10-04, committed as `23c3c10`; Keep — the session's, the shape `[X3-L5-03]`
 sketched. Not run.***

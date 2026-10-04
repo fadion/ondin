@@ -639,12 +639,19 @@ mod tests {
     ///
     /// **Flip-check, run**: the workflow's `--version 1.2.161` edited to
     /// `1.2.160` fails with both versions named.
+    ///
+    /// ⚠️ **Line by line, never a `\n` in a pattern** (§15 D974's amendment).
+    /// The Windows CI runner checks out with `core.autocrlf=true`, so
+    /// `Cargo.lock` arrives there with CRLF endings, and the
+    /// `contains("\nname = \"velopack\"\n")` this test first used matched no
+    /// block: green here, where `autocrlf` is false, and red on its first CI
+    /// run. `str::lines` drops the `\r`.
     #[test]
     fn the_release_packs_with_the_clients_own_velopack_version() {
         let lock = include_str!("../../../Cargo.lock");
         let client = lock
             .split("[[package]]")
-            .find(|p| p.contains("\nname = \"velopack\"\n"))
+            .find(|p| p.lines().any(|l| l == "name = \"velopack\""))
             .and_then(|p| p.lines().find_map(|l| l.strip_prefix("version = \"")))
             .and_then(|v| v.strip_suffix('"'))
             .expect("Cargo.lock has a velopack package");

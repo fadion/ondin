@@ -3,7 +3,9 @@
 //! An instance is a linked copy, so a main's edit reaches its copies as more
 //! operations in the same transaction — written here, at the commit, by
 //! [`propagate`], which `EditorSession::commit_inner` runs after its other
-//! passes. Nothing is recorded about which values a copy overrides
+//! passes; the live preview runs it too, over the gesture's transaction as that
+//! door rewrites it (build step 6, `EditorSession::preview_follows`), and commits
+//! nothing. Nothing is recorded about which values a copy overrides
 //! (§15 D979 (a)): **a copy follows wherever it still holds the main's old value,
 //! and keeps its own value everywhere else.** That one comparison is the whole
 //! of the override model.
@@ -121,6 +123,19 @@ fn writes_spans(op: &Operation) -> bool {
     )
 }
 
+/// Whether `tx` writes to any node something is copied from — whether
+/// [`propagate`] can owe it anything. A scan of the links and nothing more, so a
+/// caller can skip the work around the pass (the live preview's door rewrites)
+/// for the nearly every edit that touches no main.
+pub fn touches_copied(doc: &Document, tx: &Transaction) -> bool {
+    let written: FxHashSet<NodeId> = tx.0.iter().filter_map(Operation::overwrites).collect();
+    !written.is_empty()
+        && doc
+            .node_map()
+            .values()
+            .any(|n| n.link.is_some_and(|l| written.contains(&l)))
+}
+
 /// The operations `tx`'s edits to mains owe their instances: for every copy, at
 /// every depth, the main's change written onto whatever the copy still shares with
 /// it. Empty in a document with no instances.
@@ -164,6 +179,12 @@ pub fn propagate(doc: &Document, tx: &Transaction) -> Vec<Operation> {
         last.push((i, op));
     }
     last.retain(|(i, op)| op.shape_key().and_then(|k| seen.get(&k)) == Some(i));
+    // **No edit to anything copied, no scratch document.** The clone below is the
+    // pass's whole cost, and the live preview runs this on every frame of every
+    // gesture (build step 6) — nearly all of which edit nothing a copy follows.
+    if last.is_empty() {
+        return Vec::new();
+    }
 
     let mut scratch = doc.clone();
     let mut out = Vec::new();

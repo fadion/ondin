@@ -584,11 +584,34 @@ impl RenderOverrides {
         tx: &Transaction,
         shaped: Option<(NodeId, TextLayout)>,
     ) -> Option<Self> {
+        Self::from_transaction_following(doc, res, tx, &Transaction::default(), shaped)
+    }
+
+    /// [`Self::from_transaction_shaped`] with `follows` — a main's edit written
+    /// onto its instances' copies (`ondin_core::propagate`, §5.3d's build step 6) —
+    /// absorbed after `tx` and **laid out, never taken for the hand's own**.
+    ///
+    /// `tx` is the gesture: a `SetTransform` in it is where the pointer wants a
+    /// layer drawn, so [`Self::flex_relayout`] leaves a dragged item at it and
+    /// [`Self::relayout`] leaves a pinned layer placed by it. A follow is not that.
+    /// It is the main's value carried onto a copy, which the commit then draws
+    /// where the copy's own container places it — a right-pinned copy against its
+    /// instance's width, a copy's root by its own insets, a flex copy in its slot.
+    /// Read as the hand's, a pinned copy previewed at its main's local placement
+    /// and a moved flex item's copies were dragged along with it — none of which
+    /// the release delivers (`arch-scribe`, reading build step 6).
+    pub fn from_transaction_following(
+        doc: &Document,
+        res: &Resolved,
+        tx: &Transaction,
+        follows: &Transaction,
+        shaped: Option<(NodeId, TextLayout)>,
+    ) -> Option<Self> {
         let mut out = Self {
             prepared_text: shaped,
             ..Self::default()
         };
-        for op in &tx.0 {
+        for op in tx.0.iter().chain(&follows.0) {
             out.absorb(doc, res, op)?;
         }
         // Cleared before anything can observe it — see the field.

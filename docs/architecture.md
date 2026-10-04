@@ -2014,13 +2014,42 @@ The clipboard needs nothing: `io::clip::read` already
 refuses every version but its own.
 
 **Finding counterparts** (the session's). The map from a source to the nodes linked to it is computed
-by a scan of the document per commit in the first build. A maintained index is a later question for a
+by a scan of the document per commit in the first build — and, since build step 6, per preview frame.
+A maintained index is a later question for a
 measurement: as a `Document` field it owes §15 D301's question, `apply` cloning the document whole, and
-as a `Resolved` map it is a decision rather than an optimisation (§5.9, §15 D778).
+as a `Resolved` map it is a decision rather than an optimisation (§5.9, §15 D778). **The scan is not
+what costs**: `propagate::propagate` returns before its scratch `doc.clone()` when no operation touches
+a node anything is copied from — measured in release at 5,000 nodes, ~4.6 µs a call for such an edit
+against ~2.3 ms for an edit to a main's layer, which is the clone (§15 D979's step-6 amendment).
 
 **The preview** (the session's). The pass also runs over the pending transaction, so `RenderOverrides`
 shows the copies following a main-component drag live; operations that add nodes stay ghosts by the
-existing preview rule (§6.2). **Not built** (build step 6): during a drag the copies update on release.
+existing preview rule (§6.2). ✅ **Built** (build step 6, session 49, §15 D979's amendment):
+`EditorSession::preview_follows` runs `propagate::propagate` over the transaction `set_preview`
+composes — a live text session's ops, the gesture's, then `build::flex_holds` — **as the commit door
+rewrites it**, `keep_flex_sizes(keep_insets(tx))`, so a pinned layer's move reaches its copies as
+insets too and an in-flow item's move reaches them as nothing; `set_session_preview` runs it over the
+session's own transaction, so text typed into a main's layer reaches its copies as it is typed, and
+keeps that transaction rather than the follows so a rebuild runs the pass afresh. Gated on
+`propagate::touches_copied`, a scan of the links, so an edit to no main pays nothing more. 🚨 **The
+follows travel beside the gesture, not in it**: `RenderOverrides::from_transaction_following`
+absorbs them after the gesture's ops but hands only the gesture's to `flex_relayout` and `relayout`,
+so no follow is taken for a drag or a placement and each copy is laid out by its own container, as
+the commit's resolve lays it. 🚨 **After the holds**, as the commit runs it after `keep_flex_sizes`:
+run before them, a flex copy previewed stretched where the commit holds it (§15 D904's defect on the
+copy, flip run). **Only the field pass** — `propagate_structure` and `settle_links` remove and move
+nodes, which overrides cannot say and refuse whole, and what they add would be a ghost minted from the
+session's `IdSource` every frame — so a main's gained or lost child still reaches its instances on
+release. The pivot preview is read from the gesture's ops, never the follows. ⚠️ **The door rewrite
+and the layout split are two defences, and a main's in-flow move needs only one of them**: its copy
+previews out of its slot only with both removed (flip run) — while a pinned copy in a wider instance
+needs both and a pinned instance root needs the split, so neither is redundant (§15 D979's amendment,
+which has the three defects the first cut had and a fourth read in the fix, each fixed and pinned by
+its own test). ⚠️ **A pinned copy the follows give a transform and no insets has its own insets
+restated** by `preview_follows`: a copy with its own value for every inset a move changes takes the
+transform and not the insets, and `relayout` re-places only a layer with an insets or kind override,
+so without the restatement it previewed at its main's placement while the commit left it where its
+insets put it.
 
 **The snapshot** (the session's). No `snapshot_version` bump in the first build: a copy reads as an
 ordinary node, which is not a misreading of it. Exposing `component` and `link` is the parked MCP
@@ -2029,7 +2058,8 @@ of the snapshot's own shape, if it is made, owes its own bump.
 
 🚨 **The pass lives in `ondin-core` — `propagate.rs` since `45730f6`, where this design put it beside
 `keep_insets` in `build.rs` — and `EditorSession`'s commit is the only door that runs it** (the
-session's). MCP's write tools and Command Mode's scripts commit
+session's) — the only one that *writes* through it: the preview runs the field pass too since build
+step 6, and commits nothing. MCP's write tools and Command Mode's scripts commit
 through that door too (invariant 10). **A door that edits a document holding components and bypasses
 it is a defect**, because a skipped propagation corrupts nothing visibly: structure is guarded — a
 deletion that would leave a link dangling is refused by the post-conditions — but a field edit to a
@@ -2060,7 +2090,13 @@ below — measured for one path, not settled in general.
   an edit touches, `keep_insets` never rewrites a resized frame's children — they re-place in used
   geometry — and a copy is compared with the values it was copied from. **Neither choice was needed for
   that path.** ⚠️ **Unmeasured**: `keep_flex_sizes` and the kept flow translations on a flex instance,
-  and any other pass that recomputes a copy's stored value. ✅ **Measured for a *Reset all* of a pinned
+  and any other pass that recomputes a copy's stored value. ✅ **One flex case measured at step 6**
+  (`session::tests::a_mains_edit_reaches_its_copy_in_the_preview_as_the_commit_will_place_it`, §15
+  D979's amendment): a main's flex item resized and held by `keep_flex_sizes` — the copy lands at the
+  held size, where the preview drew it, within 1e-9. ⚠️ It compares the copy's previewed box with its
+  committed one, not the copy's stored values with the main's. **One case, not the class**:
+  `kept_flow_translations` on a flex instance is still unmeasured, no move inside a flex container
+  being among the test's three. ✅ **Measured for a *Reset all* of a pinned
   child too** (step 5, the reset paragraph above), and held: `keep_insets` leaves alone a layer whose
   insets the transaction sets itself, and a reset always sets them. ✅ **And for the Transform card's
   field and header resets, measured and fixed** (`c292b50`, §15 D981's amendment): written without the
@@ -2172,23 +2208,29 @@ order* disabled rather than hidden at zero, the drift summary; `5fcff6b`) and th
 card headers' counts, Transform's field marks, the trailing slot and ghost rows on Fill, Stroke and
 Effects (`d2beb37`, `d39f7c1`, `6033571`, `a345b81`, `c292b50`, `6210953`), then every other card's
 fields, `size_field`'s W and H, and the exports and layout-grid lists (session 49), with the fields
-§15 D981 lists left unmarked on purpose; (6) **next** — the
-live preview of main-component
-edits, which today reach the copies only on release; (7) then variants and properties.
+§15 D981 lists left unmarked on purpose; (6) ✅ **built** (session 49, §15 D979's amendment) — the
+live preview of main-component edits, the field pass run over the preview's transaction after the
+holds, structure still following on release; (7) **next** — variants and properties. A design for them
+landed in `design/` on 2026-10-04 and awaits the maintainer's ruling; nothing of it is recorded here.
 
 **Handoff, 2026-10-04 (session 47's close)** — what is built, next and owed, in one place. **Built**:
 steps 1–4 above, `Ctrl+Alt+K`/`Ctrl+Alt+B`, five menu rows filed provisionally, D981's two toasts;
 then step 5's resets in core, the two *Reset* menu rows, the component card and the override look in
 part (`26c8434`, `7cf242e`, `7b5961e`, `a18b0b5`, `d66044c`, `5fcff6b`, `d2beb37`, `d39f7c1`,
 `6033571`, `a345b81`, `c292b50`, `6210953`); then, in session 49, the rest of that look — every other
-card's fields and the exports and layout-grid lists. **Next**: step 6.
+card's fields and the exports and layout-grid lists; then step 6, the live preview. **Next**: step 7,
+whose design awaits a ruling. Step 6's three defects — a main's pivot preview naming a copy, pinned
+copies and roots previewed off their release, an in-flow move dragging the copies — are fixed (§15
+D979's amendment), and so is a fourth read in the fix, a pinned copy with its own value for every
+inset a main's move changes; step 6 owes nothing known.
 **Owed, outside the numbered steps**: D981's chrome — the canvas labels,
 chips, glyphs and markers (a group main's label included; a group *instance*'s label is unruled), the
 layers panel's dot and **+**, `Enter` into an instance (`shortcuts.md` §12 ➕) and
 an instance's group-style picking (§15 D981 (b)); the **filled hexagon**, which has no glyph in the
 bundled Phosphor Regular (§15 D10's *"at two, ship the font"*); the menu rows' final place
 (`context-menus.md` §7) and the text menus' counts, which no test pins; the flex instance's
-exact-equality path, unmeasured; and a verb that un-makes a component, which would owe a detach.
+exact-equality path, measured for a held resize and unmeasured for the kept flow translations; and a
+verb that un-makes a component, which would owe a detach.
 
 ### 5.4 Text node
 
@@ -5432,8 +5474,12 @@ pub trait ScenePainter {
      from the same `parts()`, and it does. ⚠️ **And `set_preview` projects the gesture's transaction
      plus `build::flex_holds`** (§15 D904), the half of the commit door's `keep_flex_sizes` a
      re-laid item's drawing depends on; not `kept_flow_translations`, which would drop the
-     translation a drag's preview draws. The differential applies a transaction raw (§15 D896), so
-     it sees neither commit-door rewrite.
+     translation a drag's preview draws. **And beside it, not in it, `propagate::propagate`'s
+     follows** (§5.3d's preview, build step 6): the field pass run over all of that as the door
+     rewrites it — `keep_flex_sizes(keep_insets(…))` — and handed to
+     `RenderOverrides::from_transaction_following`, which absorbs the follows but lays them out
+     rather than taking them for the gesture's drags and placements; not the structural pass. The
+     differential applies a transaction raw (§15 D896), so it sees none of these commit-door passes.
   2. **It refuses what it cannot represent.** The line runs *through* the structural ops rather
      than around them: one that only **adds** artwork is a ghost (`CreateNode`, `InsertSubtree`),
      because nothing in the committed tree changes and there is no node whose absence the walk has
@@ -5512,7 +5558,8 @@ pub trait ScenePainter {
 
   ⚠️ **That harness commits the raw transaction, which the app never does**, so it has a twin,
   `assert_preview_matches_commit_through_the_doors`: the preview built from the transaction plus
-  `build::flex_holds`, as `session::set_preview` builds it, and the commit made of
+  `build::flex_holds`, as `session::set_preview` builds it less the propagation pass, which neither
+  side of the harness runs, and the commit made of
   `build::keep_flex_sizes(build::keep_insets(tx))`, as `commit_inner` makes it — a change making the
   two doors disagree passed every test through the first (the release review's `[X4.2-L6-01]`,
   `overrides.rs`). It returns the committed document, and each caller asserts **the hold held** as
@@ -7966,7 +8013,12 @@ input event (winit/egui)
   asserts the **outcome** over all six and not the route, and a seventh arm added later has to join the
   table or fail it.
 - The preview step costs O(nodes the gesture touches), not O(document): `set_preview` projects the
-  pending transaction into `RenderOverrides` rather than cloning and re-resolving. **It composes over
+  pending transaction into `RenderOverrides` rather than cloning and re-resolving. ⚠️ **Except while a
+  main component's layer is edited**: the propagation it runs then (§5.3d's preview) clones the
+  document — ~2.3 ms a call at 5,000 nodes in release for the pass alone as first built, against
+  ~4.6 µs for an edit touching nothing a copy follows — and since the fix also runs `keep_insets` and
+  `keep_flex_sizes` first, not re-measured; an edit to no main pays one scan of the links
+  (`propagate::touches_copied`, §15 D979's amendment). **It composes over
   a live text session's transaction rather than replacing it** (§15 D609) — the session's operations
   first, the gesture's after, `RenderOverrides::absorb` being last-one-wins per field, so a field
   editing the session's own node wins the transform and leaves the uncommitted text alone.

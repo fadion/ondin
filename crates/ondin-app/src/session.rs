@@ -442,7 +442,10 @@ pub struct EditorSession {
     /// Costs O(nodes the gesture touches). The earlier implementation cloned
     /// the whole document, applied the pending transaction and re-resolved it
     /// every frame — correct, but O(nodes) including re-shaping every text
-    /// node, on every mouse move.
+    /// node, on every mouse move. ⚠️ Except while a main component's layer is
+    /// edited: [`Self::preview_follows`] clones the document each frame then
+    /// (§5.3d's preview), and is one scan of the links otherwise
+    /// (`propagate::touches_copied`).
     overrides: RenderOverrides,
     /// The live text-editing session's own transaction, kept for as long as the
     /// session's content is what `overrides` stands for — see
@@ -937,13 +940,87 @@ impl EditorSession {
         ops.extend(holds);
         let composed = Transaction(ops);
         let tx = &composed;
-        self.overrides =
-            RenderOverrides::from_transaction(&self.doc, &self.resolved, tx).unwrap_or_default();
+        let follows = self.preview_follows(tx);
+        self.overrides = RenderOverrides::from_transaction_following(
+            &self.doc,
+            &self.resolved,
+            tx,
+            &follows,
+            None,
+        )
+        .unwrap_or_default();
         self.preview_holds_gesture = true;
+        // From the gesture's own operations, never the follows: a `SetPivot` on
+        // a main's layer follows onto its copies, and the last of those would
+        // name a copy, leaving the main's origin fields scrubbing against a node
+        // their preview is not on (§15 D245's shape; `arch-scribe`, step 6).
         self.pivot_preview = tx.0.iter().rev().find_map(|op| match op {
             Operation::SetPivot { id, pivot } => Some((*id, *pivot)),
             _ => None,
         });
+    }
+
+    /// What a previewed edit owes the copies of whatever mains it touches — the
+    /// commit door's field pass (`propagate::propagate`) run over the edit **as the
+    /// door rewrites it** (§5.3d's *preview*, build step 6), handed to
+    /// `RenderOverrides::from_transaction_following` to be laid out rather than
+    /// taken for the hand's.
+    ///
+    /// **As the door rewrites it**, because the commit runs `keep_insets` and
+    /// `keep_flex_sizes` before the pass: a pinned layer's move reaches its copies
+    /// as insets as well as a transform, and an in-flow item's move reaches them
+    /// as nothing (`kept_flow_translations` drops it). Over the raw edit a pinned
+    /// copy previewed at its main's local placement — off by an instance's extra
+    /// width — and a flex item's copies were dragged along with it (`arch-scribe`,
+    /// reading step 6). The holds are in `tx` already, so a held size reaches the
+    /// copies as it does in the commit — the pass run before them previewed the
+    /// copy stretched (§15 D904's defect, arriving on the copy).
+    ///
+    /// **The field pass only.** What the structural pass removes or moves is not
+    /// representable as overrides and would blank the whole preview (§6.2), and
+    /// what it adds it mints ids for — so a main's gained or lost child reaches its
+    /// instances on release. Empty, at the cost of one scan of the links, for an
+    /// edit that touches no main (`propagate::touches_copied`).
+    ///
+    /// ⚠️ **A pinned copy the follows give a transform and no insets has its own
+    /// insets restated.** A copy with its own value for the inset a move changes
+    /// takes the move's transform (it still held its main's) and not its insets
+    /// (it overrides them), and `RenderOverrides::relayout` re-places only a layer
+    /// with an insets or kind override — so it previewed at its main's placement
+    /// while the commit, which places a pinned layer by its insets, left it where
+    /// it was. Read by `arch-scribe` as the case the layout split could not reach,
+    /// then reproduced (`a_copy_pinned_by_its_own_inset_previews_unmoved_by_its_mains_move`).
+    fn preview_follows(&self, tx: &Transaction) -> Transaction {
+        if !ondin_core::propagate::touches_copied(&self.doc, tx) {
+            return Transaction::default();
+        }
+        let (doc, res) = (&self.doc, &self.resolved);
+        let door = ondin_core::build::keep_flex_sizes(
+            doc,
+            res,
+            ondin_core::build::keep_insets(doc, res, tx.clone()),
+        );
+        let mut follows = ondin_core::propagate::propagate(doc, &door);
+        let restated: Vec<Operation> = follows
+            .iter()
+            .filter_map(|op| match op {
+                Operation::SetTransform { id, .. }
+                    if !follows
+                        .iter()
+                        .any(|o| matches!(o, Operation::SetInsets { id: i, .. } if i == id)) =>
+                {
+                    doc.get(*id).filter(|n| n.insets().is_authored()).map(|n| {
+                        Operation::SetInsets {
+                            id: *id,
+                            insets: *n.insets(),
+                        }
+                    })
+                }
+                _ => None,
+            })
+            .collect();
+        follows.extend(restated);
+        Transaction(follows)
     }
 
     /// Preview the uncommitted state of a **live text-editing session**.
@@ -958,9 +1035,20 @@ impl EditorSession {
     /// (§15 D592). `None` is correct and merely slower; it is what a caller with
     /// no layout in hand passes.
     pub fn set_session_preview(&mut self, tx: &Transaction, shaped: Option<(NodeId, TextLayout)>) {
-        self.overrides =
-            RenderOverrides::from_transaction_shaped(&self.doc, &self.resolved, tx, shaped)
-                .unwrap_or_default();
+        // Text typed into a main's layer reaches its copies as it is typed (build
+        // step 6, [`Self::preview_follows`]) — the copies shaped afresh, the
+        // session's own node from `shaped`. The session's own transaction is what
+        // is kept below, so a rebuild of it (`clear_gesture_preview`) runs the pass
+        // afresh rather than over its result.
+        let follows = self.preview_follows(tx);
+        self.overrides = RenderOverrides::from_transaction_following(
+            &self.doc,
+            &self.resolved,
+            tx,
+            &follows,
+            shaped,
+        )
+        .unwrap_or_default();
         self.pivot_preview = tx.0.iter().rev().find_map(|op| match op {
             Operation::SetPivot { id, pivot } => Some((*id, *pivot)),
             _ => None,
@@ -1963,6 +2051,337 @@ mod tests {
             s.resolved.world_bounds(r),
             Some(before),
             "the resolved layer must not have moved"
+        );
+    }
+
+    /// That two boxes agree to 1e-9 — a previewed one and the one the commit gave.
+    fn same_box(what: &str, shown: Rect, landed: Rect) {
+        assert!(
+            (shown.min_x() - landed.min_x()).abs() < 1e-9
+                && (shown.min_y() - landed.min_y()).abs() < 1e-9
+                && (shown.width() - landed.width()).abs() < 1e-9
+                && (shown.height() - landed.height()).abs() < 1e-9,
+            "{what}: previewed {shown:?}, committed {landed:?}"
+        );
+    }
+
+    /// The instance root a copy sits directly under, in `main_and_instance`'s.
+    fn instance_of(s: &EditorSession, copy: NodeId) -> NodeId {
+        s.doc.get(copy).unwrap().parent().unwrap()
+    }
+
+    /// A main frame laid out by `display` holding two rects, the first with
+    /// `insets`, and an instance of it beside — for the live preview of a main's
+    /// edit (build step 6).
+    /// Returns the session, the main's first rect and its copy in the instance.
+    fn main_and_instance(
+        display: Option<ondin_core::container::Display>,
+        insets: ondin_core::Insets,
+    ) -> (EditorSession, NodeId, NodeId) {
+        let mut s = EditorSession::new();
+        let root = s.doc.root();
+        let [m, a, b] = [(); 3].map(|_| s.ids.mint());
+        let rect = |id, index, w| Operation::CreateNode {
+            id,
+            parent: m,
+            index,
+            kind: NodeKind::Rect {
+                size: Size::new(w, 30.0),
+                corner_radii: RoundedRectRadii::default(),
+            },
+            transform: Some(Affine::translate((20.0, 20.0))),
+            name: None,
+        };
+        assert!(s.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: m,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(300.0, 200.0),
+                },
+                transform: Some(Affine::translate((1000.0, 0.0))),
+                name: Some("Card".into()),
+            },
+            rect(a, 0, 40.0),
+            rect(b, 1, 60.0),
+            Operation::SetDisplay { id: m, display },
+            Operation::SetInsets { id: a, insets },
+            Operation::SetComponent {
+                id: m,
+                component: true,
+            },
+        ])));
+        let (tx, made) = ondin_core::insert_subtrees(
+            &s.doc,
+            &mut s.ids,
+            &[ondin_core::Placement {
+                nodes: s.doc.capture_subtree(m).unwrap(),
+                parent: root,
+                index: None,
+            }],
+            Default::default(),
+        );
+        assert!(s.commit(tx));
+        let copy = s.doc.get(made[0]).unwrap().children()[0];
+        assert_eq!(
+            s.doc.get(copy).unwrap().link(),
+            Some(a),
+            "the fixture: linked"
+        );
+        (s, a, copy)
+    }
+
+    /// **A main's edit reaches its instance's copy while it is made, and lands where
+    /// the commit puts it** (build step 6, §5.3d's *preview*). Three edits of the
+    /// main's first rect, each previewed and then committed: a move in a plain
+    /// frame, a move of a layer pinned by insets (which the commit turns into new
+    /// insets, `keep_insets`), and a resize of a flex item (which the commit holds,
+    /// `keep_flex_sizes` — the flex instance's exact-equality path §5.3d records as
+    /// unmeasured). In each, the copy's previewed box moved, and it equals the box
+    /// the commit then gives it. Flips, both run: `set_preview` without its
+    /// `propagate` call leaves the copy unmoved and fails *"the copy follows the
+    /// preview"* on the first edit; the pass run *before* the flex holds are added
+    /// fails the third, the copy previewed stretched to its frame's 200 where the
+    /// commit holds it at 45 — §15 D904's defect, arriving on the copy.
+    #[test]
+    fn a_mains_edit_reaches_its_copy_in_the_preview_as_the_commit_will_place_it() {
+        use ondin_core::container::{Display, Flex};
+        let pinned = ondin_core::Insets {
+            left: Some(ondin_core::LengthPct::Px(20.0)),
+            top: Some(ondin_core::LengthPct::Px(20.0)),
+            ..Default::default()
+        };
+        let cases: [(&str, Option<Display>, ondin_core::Insets, bool); 3] = [
+            ("a move", None, ondin_core::Insets::default(), false),
+            ("a pinned move", None, pinned, false),
+            (
+                "a flex resize",
+                Some(Display::Flex(Flex::default())),
+                ondin_core::Insets::default(),
+                true,
+            ),
+        ];
+        for (what, display, insets, resize) in cases {
+            let (mut s, a, copy) = main_and_instance(display, insets);
+            let before = s.preview_world_bounds(copy).expect("bounds");
+            let tx = Transaction(vec![match resize {
+                true => Operation::SetGeometry {
+                    id: a,
+                    geometry: ondin_core::GeometryPatch::Size(Size::new(90.0, 45.0)),
+                },
+                false => Operation::SetTransform {
+                    id: a,
+                    transform: Affine::translate((55.0, 35.0)),
+                },
+            }]);
+            s.set_preview(&tx);
+            let shown = s.preview_world_bounds(copy).expect("preview bounds");
+            assert_ne!(shown, before, "{what}: the copy follows the preview");
+            assert!(s.commit(tx));
+            let landed = s.resolved.world_bounds(copy).expect("committed bounds");
+            assert!(
+                (shown.min_x() - landed.min_x()).abs() < 1e-9
+                    && (shown.min_y() - landed.min_y()).abs() < 1e-9
+                    && (shown.width() - landed.width()).abs() < 1e-9
+                    && (shown.height() - landed.height()).abs() < 1e-9,
+                "{what}: previewed {shown:?}, committed {landed:?}"
+            );
+        }
+    }
+
+    /// **Where the copy's own container places it, the preview places it too**
+    /// (build step 6 — the three defects `arch-scribe` read in its first cut, each
+    /// reproduced here before it was fixed):
+    /// - a **right-pinned copy in an instance wider than its main**, the main's
+    ///   layer moved: the commit's `keep_insets` makes the move insets, which the
+    ///   copy follows and is pinned by against its own width — previewed from the
+    ///   raw move it was drawn at the main's local placement, 100 to the left;
+    /// - an **instance root pinned right in a host frame**, its main resized: the
+    ///   root's follow is its size alone, and the commit's resolve keeps its right
+    ///   edge — taken for the hand's resize, it grew from its left;
+    /// - a **main's in-flow flex item moved**: the commit drops the translation
+    ///   (`kept_flow_translations`), so the copy stays in its slot — previewed from
+    ///   the raw move, with the follow taken for a drag, it was dragged along with
+    ///   the main's.
+    ///
+    /// And a `SetPivot` on a main's layer, which follows onto the copy: the pivot
+    /// preview names the main's layer, not the copy the last follow names. One
+    /// test per case, so a flip says which of them it reaches.
+    ///
+    /// Flips, each run over all four:
+    /// - `from_transaction_following` handing the follows to the layout passes as
+    ///   the hand's fails this one (x0 1055 where the commit puts 1155) and the
+    ///   pinned root's (x0 470 against 410 — grown from its left), not the flex
+    ///   one;
+    /// - `preview_follows` over the raw edit rather than the door's fails this one
+    ///   alone, the same 100;
+    /// - **the flex case fails only with both**, the copy previewed dragged to
+    ///   (1150, 90): the door drops the move's follow and the layout passes take no
+    ///   follow for a drag, two defences, either enough;
+    /// - the pivot read from the follows as well fails *"the main's pivot"*.
+    #[test]
+    fn a_pinned_copy_in_a_wider_instance_previews_where_its_insets_place_it() {
+        use ondin_core::{Insets, LengthPct};
+        let right = Insets {
+            right: Some(LengthPct::Px(20.0)),
+            top: Some(LengthPct::Px(20.0)),
+            ..Default::default()
+        };
+        let (mut s, a, copy) = main_and_instance(None, right);
+        let inst = instance_of(&s, copy);
+        assert!(s.commit(Transaction(vec![Operation::SetGeometry {
+            id: inst,
+            geometry: ondin_core::GeometryPatch::Size(Size::new(400.0, 200.0)),
+        }])));
+        let tx = Transaction(vec![Operation::SetTransform {
+            id: a,
+            transform: Affine::translate((55.0, 35.0)),
+        }]);
+        s.set_preview(&tx);
+        let shown = s.preview_world_bounds(copy).expect("preview bounds");
+        assert!(s.commit(tx));
+        same_box(
+            "a pinned copy, wider",
+            shown,
+            s.resolved.world_bounds(copy).unwrap(),
+        );
+    }
+
+    /// `a_pinned_copy_in_a_wider_instance_previews_where_its_insets_place_it`'s
+    /// second case: an instance root pinned right in a host frame, its main resized.
+    #[test]
+    fn a_pinned_instance_root_previews_its_mains_resize_from_its_far_edge() {
+        use ondin_core::{Insets, LengthPct};
+        let (mut s, a, copy) = main_and_instance(None, Insets::default());
+        let (inst, main) = (
+            instance_of(&s, copy),
+            s.doc.get(a).unwrap().parent().unwrap(),
+        );
+        let host = s.ids.mint();
+        let doc_root = s.doc.root();
+        assert!(s.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: host,
+                parent: doc_root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(800.0, 400.0),
+                },
+                transform: Some(Affine::translate((0.0, 500.0))),
+                name: None,
+            },
+            Operation::Reparent {
+                id: inst,
+                new_parent: host,
+                index: 0,
+            },
+            Operation::SetInsets {
+                id: inst,
+                insets: Insets {
+                    right: Some(LengthPct::Px(30.0)),
+                    top: Some(LengthPct::Px(30.0)),
+                    ..Default::default()
+                },
+            },
+        ])));
+        let before = s.preview_world_bounds(inst).unwrap();
+        let tx = Transaction(vec![Operation::SetGeometry {
+            id: main,
+            geometry: ondin_core::GeometryPatch::Size(Size::new(360.0, 200.0)),
+        }]);
+        s.set_preview(&tx);
+        let shown = s.preview_world_bounds(inst).expect("preview bounds");
+        assert_ne!(shown, before, "the fixture: the root follows the resize");
+        assert!(s.commit(tx));
+        same_box(
+            "a pinned root",
+            shown,
+            s.resolved.world_bounds(inst).unwrap(),
+        );
+    }
+
+    /// `a_pinned_copy_in_a_wider_instance_previews_where_its_insets_place_it`'s
+    /// third case: a main's in-flow flex item moved.
+    #[test]
+    fn a_flex_copy_stays_in_its_slot_while_its_mains_item_is_dragged() {
+        use ondin_core::container::{Display, Flex};
+        let (mut s, a, copy) = main_and_instance(
+            Some(Display::Flex(Flex::default())),
+            ondin_core::Insets::default(),
+        );
+        let before = s.preview_world_bounds(copy).unwrap();
+        let tx = Transaction(vec![Operation::SetTransform {
+            id: a,
+            transform: Affine::translate((150.0, 90.0)),
+        }]);
+        s.set_preview(&tx);
+        let shown = s.preview_world_bounds(copy).expect("preview bounds");
+        same_box("a flex copy stays in its slot", shown, before);
+        assert!(s.commit(tx));
+        same_box("a flex copy", shown, s.resolved.world_bounds(copy).unwrap());
+    }
+
+    /// `a_pinned_copy_in_a_wider_instance_previews_where_its_insets_place_it`'s
+    /// fourth case: a `SetPivot` on a main's layer.
+    #[test]
+    fn the_pivot_preview_names_the_mains_layer_not_its_copy() {
+        let (mut s, a, _) = main_and_instance(None, ondin_core::Insets::default());
+        s.set_preview(&Transaction(vec![Operation::SetPivot {
+            id: a,
+            pivot: Some(ondin_core::Pivot::Normalized(ondin_core::kurbo::Vec2::new(
+                0.0, 0.0,
+            ))),
+        }]));
+        assert_eq!(
+            s.pivot_preview.map(|(id, _)| id),
+            Some(a),
+            "the main's pivot"
+        );
+    }
+
+    /// A pinned copy with **its own value for the inset a move changes** and its
+    /// main's transform: the move's insets reach it as nothing (it overrides that
+    /// inset) while its transform follows, and the commit draws it by its own
+    /// insets, unmoved. `arch-scribe` read this as the case the layout split could
+    /// not reach — a copy with a transform follow and no insets override is never
+    /// queued for re-placing. Run before `preview_follows` restated the insets, it
+    /// failed: previewed x0 1055, the main's placement, where the commit leaves
+    /// 1070.
+    #[test]
+    fn a_copy_pinned_by_its_own_inset_previews_unmoved_by_its_mains_move() {
+        use ondin_core::{Insets, LengthPct};
+        let left = Insets {
+            left: Some(LengthPct::Px(20.0)),
+            top: Some(LengthPct::Px(20.0)),
+            ..Default::default()
+        };
+        let (mut s, a, copy) = main_and_instance(None, left);
+        // The copy's own left, written as an inset alone so its transform stays
+        // its main's.
+        assert!(s.commit(Transaction(vec![Operation::SetInsets {
+            id: copy,
+            insets: Insets {
+                left: Some(LengthPct::Px(70.0)),
+                ..left
+            },
+        }])));
+        assert_eq!(
+            s.doc.get(copy).unwrap().transform(),
+            s.doc.get(a).unwrap().transform(),
+            "the fixture: the copy's transform is its main's"
+        );
+        let tx = Transaction(vec![Operation::SetTransform {
+            id: a,
+            transform: Affine::translate((55.0, 20.0)),
+        }]);
+        s.set_preview(&tx);
+        let shown = s.preview_world_bounds(copy).expect("preview bounds");
+        assert!(s.commit(tx));
+        same_box(
+            "a copy pinned by its own inset",
+            shown,
+            s.resolved.world_bounds(copy).unwrap(),
         );
     }
 

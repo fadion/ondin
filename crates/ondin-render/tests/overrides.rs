@@ -148,7 +148,8 @@ fn assert_preview_matches_commit(doc: &Document, tx: &Transaction, what: &str) {
 
 /// **`assert_preview_matches_commit` through the doors the app uses** (the
 /// release review's `[X4.2-L6-01]`): the preview built from `tx` plus
-/// `build::flex_holds`, as `session::set_preview` builds it, and the commit made
+/// `build::flex_holds`, as `session::set_preview` builds it less its propagation to a
+/// main's instances, which neither side here runs, and the commit made
 /// of `build::keep_flex_sizes(build::keep_insets(tx))`, as `session::commit_inner`
 /// makes it. Returns the committed document, so a caller can also ask whether
 /// the hold held.

@@ -454,8 +454,11 @@ permission.
    *through* a state with an orphan in it: frame-then-guides ends perfectly valid, and a per-op check
    would refuse it (§5.5, §5.7). ⚠️ **"The only one" is no longer true since 2026-10-04**: an item id
    repeated within one of a node's five item lists is refused the same way, after the last op, over the
-   nodes the transaction dirtied (`OpError::DuplicateItemId`, §5.3d, §15 D980) — and the component
-   model, not built, adds its links' checks to the same place.
+   nodes the transaction dirtied (`OpError::DuplicateItemId`, §5.3d, §15 D980) — and a **third**, the
+   same day: the component rules, `component::check`, refused as `OpError::BadLink` (§5.3d, §15 D978).
+   ⚠️ **That one runs over the whole document, not the dirty set**, because a link breaks when its
+   *target* goes and a delete dirties the deleted node rather than the instance pointing at it; it is
+   one scan and nothing more when no node is a main or linked.
 9. **Serialization is versioned and deterministic.** Every saved document carries `schema_version`;
    the loader migrates any older version to current. Saving the same document twice produces
    identical bytes (nodes serialized in sorted-id order, stable field order) — the property the golden
@@ -603,13 +606,14 @@ pub struct Node {
     mask: bool,                // this layer paints nothing and clips the SIBLINGS above it (see below)
     mask_mode: MaskMode,       // HOW it masks; remembered while `mask` is off — §15 D288
     paint: Paint,              // shape/text kinds AND frames; empty for Root/Group — §15 D400
-    effects: Vec<Effect>,      // shadows, blur, colour filters — §5.3a. Meaningful on CONTAINERS
-                               // too, unlike `paint`; empty until someone adds one, and skipped
-                               // by the save format
+    effects: Vec<Keyed<Effect>>, // shadows, blur, colour filters — §5.3a; each item keyed by its id,
+                               // as are paint's two lists, exports and grids (§5.3d, §15 D980).
+                               // Meaningful on CONTAINERS too, unlike `paint`; empty until
+                               // someone adds one, and skipped by the save format
     pivot: Option<Pivot>,      // transform origin; None = the centre of its own box (see below)
-    exports: Vec<ExportSpec>,  // the files this layer produces — §7, §15 D274; empty on every
+    exports: Vec<Keyed<ExportSpec>>, // the files this layer produces — §7, §15 D274; empty on every
                                // node until someone adds one, and skipped by the save format
-    grids: Vec<LayoutGrid>,    // the columns and rows drawn over this layer — §5.3b, §15 D385;
+    grids: Vec<Keyed<LayoutGrid>>, // the columns and rows drawn over this layer — §5.3b, §15 D385;
                                // empty and skipped on `exports`' terms, offered on frames only
     insets: Insets,            // CSS top/right/bottom/left + auto margins inside its frame — §5.3c,
                                // §15 D874; SPECIFIED, unset and skipped until pinned, inert
@@ -621,6 +625,9 @@ pub struct Node {
                                // -row, width/height and limits — one record for both layouts
                                // (§15 D914); read only where the parent has a layout; skipped at
                                // CSS's defaults
+    component: bool,           // a MAIN component — frames and groups only; skipped when false —
+                               // §5.3d, §15 D978
+    link: Option<NodeId>,      // the node this one was copied from, ONE level up; skipped when None
 }
 
 pub enum NodeKind {
@@ -636,7 +643,7 @@ pub enum NodeKind {
     Text    { content: String, style: TextStyle, sizing: TextSizing },
 }
 
-pub struct Paint { pub fills: Vec<Fill>, pub strokes: Vec<Stroke> } // any number of each; the list
+pub struct Paint { pub fills: Vec<Keyed<Fill>>, pub strokes: Vec<Keyed<Stroke>> } // any number; the list
                                                                    // order is the paint order
 
 pub enum Pivot {
@@ -1051,11 +1058,12 @@ pub fn next_grid_color(existing: &[LayoutGrid]) -> Color;    // the first of GRI
   node, nothing in any export writer, nothing in the snapshot. `Operation::SetLayoutGrids` therefore
   answers **false** to `changes_ink` beside the guide operations, for the reason that list already
   gives — *a guide is a line over the artwork rather than part of it* — and `RenderOverrides::absorb`
-  treats it as a no-op. ⚠️ **Those two lists are *not* the same eleven, which this bullet asserted
-  until 2026-09-09** (§15 D659): `changes_ink`'s eleven are a **subset** of `absorb`'s thirteen
-  no-ops, the two extras being `AddImage`/`RemoveImage`, which are absorbed for want of an image table
-  to patch rather than for being invisible (§6.2). The test that pins the eleven asserts its own
-  length, and `overrides.rs` has the sibling that pins the thirteen.
+  treats it as a no-op. ⚠️ **Those two lists are *not* the same, which this bullet asserted
+  until 2026-09-09** (§15 D659): `changes_ink`'s **thirteen** are a **subset** of `absorb`'s
+  **fifteen** no-ops, the two extras being `AddImage`/`RemoveImage`, which are absorbed for want of an
+  image table to patch rather than for being invisible (§6.2). (Eleven and thirteen until 2026-10-04,
+  when `SetComponent` and `SetLink` joined both lists — §15 D978.) The test that pins the thirteen
+  asserts its own length, and `overrides.rs` has the sibling that pins the fifteen.
 - **A field on the node, offered on a frame.** `Node::grids` sits beside `exports`: empty on every
   layer until somebody adds one, skipped by the save format, ignored by every walk. That is `clip`'s
   arrangement — a property of the layer, inert on kinds nobody offers it for — and what confines the
@@ -1599,11 +1607,12 @@ first was, it saved only the track list.
 `track_lines` merges an edge with the last one only, the spans being laid in order — it searched every
 edge, quadratic in the track count.
 
-### 5.3d Components and overrides (designed 2026-10-04; item ids built, the rest not; §15 D978–D981)
+### 5.3d Components and overrides (designed 2026-10-04; build step 1 built; §15 D978–D981)
 
-> **Design ahead of code, nearly all of it** — decided with the maintainer on 2026-10-04 (session 47),
-> and nothing of it is built **but the list items' ids** (§15 D980, `a83adc8`, the same day), whose
-> paragraphs below say so. It sits beside §5.3c because what it changes is the node
+> **Design ahead of code, most of it** — decided with the maintainer on 2026-10-04 (session 47). **Build
+> step 1 is built** the same day — the list items' ids (§15 D980, `a83adc8`) and the component model,
+> its two fields, two operations and post-conditions (§15 D978, `e3df69d`) — and the paragraphs on those
+> say so; propagation, the verbs and the chrome are not. It sits beside §5.3c because what it changes is the node
 > model. Every other passage of this document still describes `HEAD`; where one states a rule this
 > design will change, it carries a forward pointer here — §4's invariants 4 and 8, §5.11's bump rule
 > and §12's fourth property. **When a step below lands, this section is rewritten in the present
@@ -1642,15 +1651,22 @@ model gets for free; and invariant 4's D788 clause stops naming the only derived
 stores. (b) File size grows with the number of instances. (c) One main-component edit fans out into
 operations on every copy.
 
-**The model** (the session's; names provisional). A main component is **a flag on an `Artboard` or a
-`Group`** — `Node.component: bool` — and not a new `NodeKind`: a new kind would fall through the six
-`matches!` predicates that answer `false` for a variant nobody added (§5.3, §15 D668's matrix) and
-through every layout and paint applicability check, where a flag leaves a frame a frame and a group a
-group, so §15 D869's *paint and clip stay frame-only* holds as it is. Every node gains
-`Node.link: Option<NodeId>`, the node it was copied from. An **instance root** is a linked node whose
-source is a component root, or — nested, below — an instance root itself. Two operations write the
-fields, `SetComponent { id, component: bool }` and `SetLink { id, link: Option<NodeId> }`, names
-provisional.
+**The model** (the session's). ✅ **Built 2026-10-04** (`e3df69d`, §15 D978's amendment), the second
+half of build step 1, and described here as it is. A main component is **a flag on an `Artboard` or a
+`Group`** — `Node::component`, read by `component()` — and not a new `NodeKind`: a new kind would fall
+through the six `matches!` predicates that answer `false` for a variant nobody added (§5.3, §15 D668's
+matrix) and through every layout and paint applicability check, where a flag leaves a frame a frame and
+a group a group, so §15 D869's *paint and clip stay frame-only* holds as it is. Every node has
+`Node::link: Option<NodeId>`, read by `link()`, the node it was copied from. `NodeDto` saves
+`component` skipped when false and `link` as a wire string skipped when none. Two operations write them,
+`SetComponent { id, component }` and `SetLink { id, link }`, handled inline in `apply_one`, each
+inverting to the old value; both answer `false` to `changes_ink` and are no-ops in
+`RenderOverrides::absorb`'s chrome arm (§5.7, §6.2). **An instance root, as built, is a linked node
+whose chain of links ends at a main**; a member's chain ends instead at an unlinked node inside a main,
+which is how `component::is_instance_root` tells the two apart. **`remap_subtree` copies `component`
+verbatim and remaps a link that points inside the template**, keeping one that points outside it — so
+a pasted payload holding a main and its instance links the pasted instance to the pasted main (§15 D979
+(e)'s payload rule, at the lowest seam), and a duplicated whole instance stays an instance of its main.
 
 ⚠️ **A link is a cross-node reference, which §15 D405 declined for text-on-path** — an id at a
 sibling would have been *"the first cross-node reference in this model … dangling, delete, duplicate
@@ -1814,15 +1830,27 @@ pasted main. **Creating an instance copies the main's names verbatim** (the sess
 duplicate numbering does not apply, or every renumbered name would start life as an override.
 
 **`apply`'s post-conditions** (the session's; §15 D491's shape — after the last op, before
-`*self = working`, so a transaction may pass *through* a state that breaks one). Every link resolves; a
-linked node, unless its source is a component root, has its source inside the subtree that its nearest
-ancestor instance root's link names (*membership*); at most one node per instance links to a given
-source; `component` only on an `Artboard` or a `Group`; no node both `component` and linked at its own
-root; no main component inside a main component or an instance; no component containing,
-transitively, an instance of itself; and every list item's id unique within its list (§15 D980).
-**The loader runs the same checks and refuses a file that fails them**, as it refuses a guide's
-dangling owner (§5.11). It does not compare values: under the compare
-rule there is nothing to drift.
+`*self = working`, so a transaction may pass *through* a state that breaks one). ✅ **Built** —
+`component::check`, refused as `OpError::BadLink(NodeId, LinkRule)`, `LinkRule` naming which of eight
+rules broke: **`Dangling`**, a link to a node not in the document or to itself; **`ComponentKind`**,
+`component` on a kind that is not a frame or a group; **`ComponentLinked`**, a node both a main and
+linked; **`NestedMain`**, a main beneath a main or a linked node; **`Membership`**, a linked node that
+is not an instance root with no instance root above it, or with its source not **strictly inside** its
+nearest ancestor instance root's source; **`SharedSource`**, two such members of one instance root
+linked to one source — instance roots themselves exempt, so two local instances of another main inside
+one instance are legal; **`LinkCycle`**, a chain of links that never reaches a main; and
+**`ComponentCycle`**, a main containing at some depth an instance whose chain ends at itself, found by
+a depth-first search over a graph from each main to the mains of the instance roots inside it. 🚨 **It
+runs over the whole document, not over `dirty`**: a link breaks when its *target* goes, and a delete
+dirties the deleted node, not the instance pointing at it. **Free when nothing is a main or linked** —
+one scan. The item-id rule (§15 D980) is the other check at the same place, over `dirty`, since only a
+node an op wrote can have gained a duplicate. **The loader runs `component::check` too**, at the end of
+`schema::verify_integrity` once the tree is known to be a tree, and refuses a file that fails it, as it
+refuses a guide's dangling owner (§5.11). It does not compare values: under the compare rule there is
+nothing to drift. ⚠️ **As built, every instance root is exempt from membership**, where this paragraph
+read *"unless its source is a component root"*: a nested instance's copy (a node linked to a nested
+copy inside a main) is an instance root and is not held to sit inside its outer instance — noted by the
+record, not ruled (§15 D978's amendment).
 
 **The save format is v5** (the session's), on two counts. **The item-id half is built** (§15 D980,
 `a83adc8`): `CURRENT_SCHEMA_VERSION` is 5, and it is §5.11's own case — a v4 list item has no id, so
@@ -1834,16 +1862,16 @@ migrated id from colliding with a minted one is `reserve_existing_ids`, not acto
 actor is an unguarded hash (`session::random_actor`), so 0 is improbable rather than excluded, and
 three of the inspector's tests mint from `IdSource::new(0)`. The reservation sweeps item ids as it
 sweeps guide ids, so a session that drew actor 0 mints past the highest migrated index. **The
-component half is not built**: `component` and `link` are additive and §5.11's rule would not bump for
-them — but the loader has no `deny_unknown_fields`, so a build that predates components would open a
-file holding them, drop every link and flag in silence, and save every instance back as a detached
-copy, where a version it does not know it refuses outright (`IoError::UnsupportedVersion`). ⚠️ **That
-half is a bump for an *older build's* sake, which §5.11's rule has never made**: the rule asks only
-whether old files keep their meaning, and a build older than container layout drops `display` and the
-insets in exactly this way, unbumped. 🚨 **And it now depends on the release order**: v5 exists
-without the component fields, so the two only share one number safely if no release ships between
-them — a released v5 build with no `link` would be exactly the older reader this half exists to stop,
-and the component model would then owe v6. The clipboard needs nothing: `io::clip::read` already
+component half is built too** (`e3df69d`, the same day), so **v5 is complete**: `component` and `link`
+are additive and §5.11's rule would not bump for them — but the loader has no `deny_unknown_fields`, so
+a build that predates components would open a file holding them, drop every link and flag in silence,
+and save every instance back as a detached copy, where a version it does not know it refuses outright
+(`IoError::UnsupportedVersion`). ⚠️ **That half is a bump for an *older build's* sake, which §5.11's
+rule has never made**: the rule asks only whether old files keep their meaning, and a build older than
+container layout drops `display` and the insets in exactly this way, unbumped. **The release-order
+risk this paragraph carried is discharged**: v5 existed without the component fields between
+`a83adc8` and `e3df69d`, and no release went out between them, so no released v5 reader lacks `link`.
+The clipboard needs nothing: `io::clip::read` already
 refuses every version but its own.
 
 **Finding counterparts** (the session's). The map from a source to the nodes linked to it is computed
@@ -1924,12 +1952,17 @@ later.** So does real-time collaboration, the one place §15 D978's cost (a) arr
 now and open for the future, in the maintainer's words, and D978's verdict is to revisit linked copies
 if it is built.
 
-**Build order** (the session's): (1) the model — `component`, `link`, `SetComponent` and `SetLink`, the
-post-conditions, the loader's checks — **not built, and next**; and the five lists' item ids (§15
-D980), `Keyed<T>`, schema v5 and its migration — ✅ **built 2026-10-04** (`a83adc8`), a sweep the design
-estimated at about 330 construction sites from grep counts and the build measured at about 290 sites the
-compiler reported, across 40 test files plus production (the caller's figure); (2) create a component,
-create an instance, detach, and a main's deletion detaching; (3) the propagation pass for **fields** — the compare rule, list items by id, nested chains,
+**Build order** (the session's): (1) ✅ **built 2026-10-04** — the five lists' item ids (§15 D980),
+`Keyed<T>`, schema v5 and its migration (`a83adc8`), a sweep the design estimated at about 330
+construction sites from grep counts and the build measured at about 290 sites the compiler reported,
+across 40 test files plus production (the caller's figure); then the model — `component`, `link`,
+`SetComponent` and `SetLink`, the post-conditions and the loader's check (`e3df69d`, §15 D978's
+amendment); (2) **next** — create a component, create an instance, detach, and a main's deletion
+detaching, owing what step 1 left refused rather than handled (§15 D978's amendment): a child
+duplicated or pasted inside its own instance has to lose its link, a cross-document paste has to drop
+the links it cannot resolve, the Delete verb has to detach a main's instances, relinking nested chains
+one level up, a member moved or pasted out of its instance has to lose its link, and a copy of a main
+has to make an instance rather than the second main `remap_subtree` makes today; (3) the propagation pass for **fields** — the compare rule, list items by id, nested chains,
 user operations winning — with a property-based test of its specification: after a main edit, each
 counterpart's field equals the new value if and only if it equalled the old; and the exact-equality
 risk measured here, above; (4) propagation for **structure** — insert at
@@ -3467,9 +3500,9 @@ pub enum Operation {
                                                       // shape are inside is a geometry question wearing
                                                       // a paint-shaped op — and `absorb` refuses it
                                                       // (§6.2).
-    SetFills    { id: NodeId, fills: Vec<Fill> },
-    SetStrokes  { id: NodeId, strokes: Vec<Stroke> },
-    SetEffects  { id: NodeId, effects: Vec<Effect> },  // the whole stack — §5.3a, §15 D333. For
+    SetFills    { id: NodeId, fills: Vec<Keyed<Fill>> },     // each item with its id — §5.3d, D980
+    SetStrokes  { id: NodeId, strokes: Vec<Keyed<Stroke>> },
+    SetEffects  { id: NodeId, effects: Vec<Keyed<Effect>> },  // the whole stack — §5.3a, §15 D333. For
                                                        // SetStrokes' reason: a reorder, a removal, a
                                                        // visibility toggle and a tuned number are one
                                                        // op with one inverse. Gated on the ROOT only,
@@ -3478,7 +3511,7 @@ pub enum Operation {
                                                        // is true, and it is the one paint-adjacent op
                                                        // that changes ink OUTSIDE the layer it names.
     // SetArtboardBackground was here and is gone: SetFills targets a frame — §15 D400
-    SetExports  { id: NodeId, exports: Vec<ExportSpec> }, // the files this layer produces — §7, §15 D274.
+    SetExports  { id: NodeId, exports: Vec<Keyed<ExportSpec>> }, // the files this layer produces — §7, D274.
                                                           // The whole list, for SetStrokes' reason: a
                                                           // reorder, a removal and an edit are then one
                                                           // op with one inverse. No kind gate — "can this
@@ -3498,6 +3531,11 @@ pub enum Operation {
                                                       // dirties the PARENT too — an item's
                                                       // properties move its siblings.
                                                       // `SetFlexItem` until §15 D914
+    SetComponent { id: NodeId, component: bool },     // a main component's flag — §5.3d, §15 D978.
+    SetLink     { id: NodeId, link: Option<NodeId> }, // what this node was copied from. Both invert to
+                                                      // the old value; `changes_ink` false; both
+                                                      // checked by `component::check` after the
+                                                      // last op, over the whole document
     // the ops with no node to name — the ground and the guides belong to the document (§5.5):
     SetCanvasBackground { background: peniko::Color },
     AddGuide    { guide: Guide },
@@ -3518,7 +3556,10 @@ pub enum OpError {
     NoSuchNode(NodeId), DuplicateId(NodeId), InvalidParent, WouldCycle, IndexOutOfRange,
     BadOpacity, BadExportSpec, BadLayout, WrongKindForOp, ArtboardPlacement, MalformedSubtree,
     EmptyGeometry, BooleanAbandoned,  // §15 D736 — empty is the user's to fix; abandoned is not
-    NoSuchGuide(GuideId), DuplicateGuide(GuideId), BadGuideOwner(NodeId), /* ... */
+    NoSuchGuide(GuideId), DuplicateGuide(GuideId), BadGuideOwner(NodeId),
+    DuplicateItemId(NodeId, ItemId), BadLink(NodeId, LinkRule),   // §5.3d, §15 D980, D978 — after
+                                                                  // the last op, like BadGuideOwner
+    /* ... */
 }
 ```
 
@@ -3615,16 +3656,17 @@ pub enum OpError {
   without both, a file's value could not be undone back to or edited around (§15 D937).
 - **`Operation::changes_ink` classifies an op by whether applying it changes what is *drawn*** — the
   artwork, not the chrome round it — and `Transaction::changes_ink` is **any** of its ops, not all,
-  since a transaction that moves a layer *and* renames it has a visible result. Exactly **eleven**
+  since a transaction that moves a layer *and* renames it has a visible result. Exactly **thirteen**
   answer `false`: `SetName`, `SetLocked`, `SetProportionsLocked`, `SetPivot`, `SetExports`,
-  `SetLayoutGrids` and the five guide ops, and every one of them
+  `SetLayoutGrids`, the five guide ops, and — since 2026-10-04, when the list was eleven —
+  `SetComponent` and `SetLink` (§5.3d, §15 D978), and every one of them
   is **a no-op in `RenderOverrides::absorb`** (§6.2), deliberately — "the renderer
   has nothing to do with this" and "this changes nothing drawn" are one fact asked by two callers. Not
   one function, because `absorb` also has to separate the *patchable* ops from the structural ones and
   this question does not. ⚠️ **It is a subset and not an equality, and this bullet said *"the same
   eleven … if the two lists ever disagree, one of them is wrong"* until 2026-09-09** (§15 D659):
   `absorb` has a **second** no-op arm further down the same `match`, `AddImage | RemoveImage`, so its
-  no-ops are **thirteen**. The two image ops answer `true` here and are absorbed there because
+  no-ops are **fifteen** (thirteen until the component ops joined the first arm). The two image ops answer `true` here and are absorbed there because
   `RenderOverrides` has no image table to patch — *"cannot preview this"* rather than *"nothing to
   preview"* — which is written out at both ends. That matters beyond tidiness:
   `EditorSession::has_gesture_preview` is `!overrides.is_empty() && …`, so **every** transaction
@@ -4748,9 +4790,10 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   meaning of an existing field, or whose default would silently alter old documents.
   ⚠️ **v5 is this rule's own case, and components add a reason it does not name** (§5.3d). The
   list-item ids (§15 D980, built 2026-10-04) changed the five lists' shape, with a real
-  `migrate_4_to_5` (below). The component fields, not built, are meant to share v5 because an *older
-  build* would drop their links in silence, which a version it does not know it refuses instead — and
-  that only holds if no release ships between the two (§5.3d).
+  `migrate_4_to_5` (below). The component fields (§15 D978, built the same day) share v5 because an
+  *older build* would drop their links in silence, which a version it does not know it refuses
+  instead — a reason that held only if no release shipped between the two, and none did, so v5 is
+  complete (§5.3d).
 - **Guides are verified too, but not against a tree** — there is none for one to corrupt. The loader
   rejects a malformed guide id, a duplicate one, and a non-finite position; a guide far off the side
   of the artwork is legal, because panning reaches it. Their ids come out of the same reservation
@@ -5220,8 +5263,9 @@ pub trait ScenePainter {
   cannot be scrubbed at all (§15 D245, D247).
 
   ⚠️ **There is a *second* no-op arm and no document mentioned it until 2026-09-09** (§15 D659):
-  `AddImage | RemoveImage`, which brings `absorb`'s no-ops to **thirteen** against `changes_ink`'s
-  eleven (§5.7). It is **the only no-op here that is not also invisible** — an image op changes what is
+  `AddImage | RemoveImage`, which brings `absorb`'s no-ops to **fifteen** against `changes_ink`'s
+  thirteen (§5.7) — thirteen and eleven until `SetComponent` and `SetLink` joined the chrome arm on
+  2026-10-04 (§15 D978). It is **the only no-op here that is not also invisible** — an image op changes what is
   drawn — and it is a no-op because `RenderOverrides` has no image table to patch, the two honest
   answers being this or refusing the whole preview. Refusing is worse: a transaction that places an
   image is `AddImage` *and* a `CreateNode`, so declining would blank the preview of the shape as well

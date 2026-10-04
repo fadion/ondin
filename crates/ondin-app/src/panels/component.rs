@@ -107,6 +107,23 @@ impl OndinApp {
                 }
             }
         }
+        // **Reset transform carries the main's insets**, as a field's reset does
+        // (`OndinApp::transform_marks`): on a pinned layer the insets are the
+        // placement, and a transform or size written without them is re-pinned
+        // where it lands by `keep_insets`. Counted under Position, not here.
+        if let Some((_, _, ops)) = cards.iter_mut().find(|(t, ..)| *t == "Transform") {
+            let mut placed: Vec<NodeId> = ops.iter().filter_map(Operation::overwrites).collect();
+            placed.sort();
+            placed.dedup();
+            for id in placed {
+                if let Some(src) = ondin_core::reset::source_of(doc, id).and_then(|s| doc.get(s)) {
+                    ops.push(Operation::SetInsets {
+                        id,
+                        insets: *src.insets(),
+                    });
+                }
+            }
+        }
         self.card_overrides = cards;
     }
 
@@ -1263,6 +1280,198 @@ mod tests {
                 .find(|k| k.id == main[0].id)
                 .unwrap(),
             &main[0]
+        );
+    }
+
+    /// The main's rect pinned top-right and the instance's copy moved along x
+    /// from where it is drawn — `keep_insets` turning the move into new insets on
+    /// the copy. Answers the main's insets.
+    fn pinned_and_moved(f: &mut F) -> ondin_core::Insets {
+        let r = f.app.session.doc.get(f.m).unwrap().children()[0];
+        let pin = ondin_core::Insets {
+            right: Some(ondin_core::LengthPct::Px(12.0)),
+            top: Some(ondin_core::LengthPct::Px(8.0)),
+            ..Default::default()
+        };
+        // Pinned with the placement written beside the insets, as the app's own
+        // pin does (`toggle_pin` writes `baked_placement` with the `SetInsets`):
+        // right 12 and top 8 in a 100-wide frame put
+        // the 10-wide rect at (78, 8). Pinned by insets alone the stored transform
+        // stays (0, 0), the copy's moved transform then differs from it on y as
+        // well, and the X reset leaves that one unit behind — a fixture the app
+        // cannot make, measured the first time this test ran.
+        assert!(f.app.session.commit(Transaction(vec![
+            Operation::SetInsets { id: r, insets: pin },
+            Operation::SetTransform {
+                id: r,
+                transform: ondin_core::kurbo::Affine::translate((78.0, 8.0)),
+            },
+        ])));
+        // **The instance wider than its main** — the case that needs the insets
+        // in a reset. At the main's size, the main's stored transform is where
+        // the main draws the rect, and `keep_insets` re-derives the main's insets
+        // from it with or without them; at 260 wide the same point is `right
+        // 172`, and only an explicit `SetInsets` keeps the pin at 12.
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![Operation::SetGeometry {
+                    id: f.i,
+                    geometry: ondin_core::GeometryPatch::Size(ondin_core::kurbo::Size::new(
+                        260.0, 100.0
+                    )),
+                }]))
+        );
+        // Moved from where it is *drawn*, as a tool moves it — the stored
+        // transform of a pinned layer is not its placement.
+        let placed = f
+            .app
+            .session
+            .resolved
+            .used_local_of(f.app.session.doc.get(f.ir).unwrap());
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![Operation::SetTransform {
+                    id: f.ir,
+                    transform: ondin_core::kurbo::Affine::translate((-17.25, 0.0)) * placed,
+                }]))
+        );
+        assert_ne!(
+            f.app.session.doc.get(f.ir).unwrap().insets(),
+            &pin,
+            "the fixture: the move re-pinned the copy"
+        );
+        pin
+    }
+
+    /// A press and release at `at`, the pointer arriving first.
+    fn click_at(app: &mut OndinApp, ctx: &egui::Context, at: egui::Pos2) {
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(app, ctx, vec![egui::Event::PointerMoved(at)]);
+        frame(app, ctx, vec![press(true)]);
+        frame(app, ctx, vec![press(false)]);
+    }
+
+    /// **A field reset on a pinned layer comes back exact** — the exact-equality
+    /// risk asked of the field marks (§5.3d). X's reset writes the main's x **and
+    /// the main's horizontal insets**, so `keep_insets` leaves the layer to it.
+    /// Flip: drop the `SetInsets` from `transform_marks`' resets and *"the insets
+    /// came back"* fails — the bare transform re-pinned where it lands in the
+    /// wider instance.
+    ///
+    /// ⚠️ **Two first readings, both of the fixture.** Pinned by insets alone (the
+    /// main's stored transform left at the origin, which the app's pin never does)
+    /// the bare reset came back `right 90, top 0`; pinned honestly but at the
+    /// main's own size, it came back exact *without* the insets, because the
+    /// main's stored transform is then where the main draws it — so the flip
+    /// stayed green. The instance has to be a different size for the insets to
+    /// matter, which is why `pinned_and_moved` widens it.
+    #[test]
+    fn an_x_reset_on_a_pinned_layer_leaves_no_drift() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let pin = pinned_and_moved(&mut f);
+        f.app.session.selection.set_one(f.ir);
+        let mut out = frame(&mut f.app, &ctx, Vec::new());
+        for _ in 0..3 {
+            out = frame(&mut f.app, &ctx, Vec::new());
+        }
+        let at = inks(&out)
+            .into_iter()
+            .find(|(t, _, c)| t == "X" && *c == theme::text::STRONG)
+            .map(|(_, r, _)| r.center())
+            .expect("a marked X");
+        click_at(&mut f.app, &ctx, at);
+        let doc = &f.app.session.doc;
+        assert_eq!(
+            doc.get(f.ir).unwrap().insets(),
+            &pin,
+            "the insets came back"
+        );
+        // The root's own size is the fixture's override; the copy has none left.
+        assert_eq!(ondin_core::reset::overrides(doc, f.ir), Vec::new());
+    }
+
+    /// **And the Transform card's header reset**, which `gather_card_overrides`
+    /// gives the main's insets for the same reason. Flip: dropping that append
+    /// fails *"the insets came back"* with `right 172` — the main's point, pinned
+    /// against the wider instance.
+    #[test]
+    fn a_transform_header_reset_on_a_pinned_layer_leaves_no_drift() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let pin = pinned_and_moved(&mut f);
+        f.app.session.selection.set_one(f.ir);
+        let mut out = frame(&mut f.app, &ctx, Vec::new());
+        for _ in 0..3 {
+            out = frame(&mut f.app, &ctx, Vec::new());
+        }
+        let head = texts(&out)
+            .into_iter()
+            .find(|(t, _)| t == "TRANSFORM")
+            .map(|(_, r)| r.center())
+            .expect("the Transform header");
+        frame(&mut f.app, &ctx, vec![egui::Event::PointerMoved(head)]);
+        let out = frame(&mut f.app, &ctx, Vec::new());
+        let chip = texts(&out)
+            .into_iter()
+            .find(|(t, _)| t == "Reset transform")
+            .map(|(_, r)| r.center())
+            .expect("the hovered header's chip");
+        click_at(&mut f.app, &ctx, chip);
+        let doc = &f.app.session.doc;
+        assert_eq!(
+            doc.get(f.ir).unwrap().insets(),
+            &pin,
+            "the insets came back"
+        );
+        assert_eq!(ondin_core::reset::overrides(doc, f.ir), Vec::new());
+    }
+
+    /// **A collapsed card keeps its count and offers no chip.** A collapsed card is
+    /// one whole-card target registered after its header, which would cover the
+    /// chip — hovered, it drew *Reset appearance* and a click expanded the card
+    /// and reset nothing (`arch-scribe`, reading `panel_badged`). Flip: dropping
+    /// `sense &&` in `section_head_full` draws the chip again.
+    #[test]
+    fn a_collapsed_card_counts_but_offers_no_reset() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![Operation::SetOpacity {
+                    id: f.ir,
+                    opacity: 0.5,
+                }]))
+        );
+        f.app.collapsed_panels.insert("Appearance");
+        f.app.session.selection.set_one(f.ir);
+        let mut out = frame(&mut f.app, &ctx, Vec::new());
+        for _ in 0..3 {
+            out = frame(&mut f.app, &ctx, Vec::new());
+        }
+        let painted = texts(&out);
+        let head = painted
+            .iter()
+            .position(|(t, _)| t == "APPEARANCE")
+            .expect("the collapsed header");
+        assert_eq!(painted[head + 1].0, "1", "the count stays");
+        frame(
+            &mut f.app,
+            &ctx,
+            vec![egui::Event::PointerMoved(painted[head].1.center())],
+        );
+        let out = frame(&mut f.app, &ctx, Vec::new());
+        assert!(
+            !texts(&out).iter().any(|(t, _)| t == "Reset appearance"),
+            "no chip on a collapsed card"
         );
     }
 

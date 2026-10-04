@@ -4522,11 +4522,7 @@ impl OndinApp {
         }
         Transaction(ops)
     }
-    /// `world` is the node's world transform coefficients. X/Y/rotation are
-    /// shown and edited in world space (Figma semantics); each edit rebuilds the
-    /// desired world transform and projects it back with
-    /// `build::local_for_world`, so the node lands exactly where the number says
-    /// regardless of what containers it sits in.
+
     /// The Transform card's override marks for `id` (§15 D981): which of X, Y,
     /// rotation, W and H an instance's copy holds differently from its source, each
     /// with the reset that writes that one number back and the tooltip naming what
@@ -4555,22 +4551,81 @@ impl OndinApp {
         let cur = copy.transform().as_coeffs();
         let theirs = src.transform().as_coeffs();
         let parent = Affine::new(world) * copy.transform().inverse();
-        let set = |c: [f64; 6]| {
-            Transaction(vec![Operation::SetTransform {
-                id,
-                transform: Affine::new(c),
-            }])
+        // **A placement reset carries the main's insets on its axis.** For a
+        // pinned layer the insets *are* the placement and the stored transform is
+        // whatever was last written beside them, so a reset that wrote only the
+        // main's transform was read by `keep_insets` as *"draw it here"* and
+        // re-pinned the layer there — measured: a copy moved along x came back
+        // `right 90, top 0` against the main's `right 12, top 8`
+        // (`an_x_reset_on_a_pinned_layer_leaves_no_drift`). With the insets in the
+        // transaction `keep_insets` leaves the layer to it, the shape *Reset all*
+        // already had. For an unpinned layer the insets are the default on both
+        // sides and the op changes nothing.
+        let (mine_in, main_in) = (*copy.insets(), *src.insets());
+        let insets = |horizontal: bool, vertical: bool| {
+            let mut i = mine_in;
+            if horizontal {
+                i.left = main_in.left;
+                i.right = main_in.right;
+                i.margin_auto.left = main_in.margin_auto.left;
+                i.margin_auto.right = main_in.margin_auto.right;
+            }
+            if vertical {
+                i.top = main_in.top;
+                i.bottom = main_in.bottom;
+                i.margin_auto.top = main_in.margin_auto.top;
+                i.margin_auto.bottom = main_in.margin_auto.bottom;
+            }
+            Operation::SetInsets { id, insets: i }
+        };
+        let set = |c: [f64; 6], horizontal: bool, vertical: bool| {
+            Transaction(vec![
+                Operation::SetTransform {
+                    id,
+                    transform: Affine::new(c),
+                },
+                insets(horizontal, vertical),
+            ])
+        };
+        // Whether an axis's insets differ — on a pinned layer that *is* the axis's
+        // placement, whatever the stored coefficient says.
+        let pinned_differs = |horizontal: bool| {
+            if horizontal {
+                (
+                    mine_in.left,
+                    mine_in.right,
+                    mine_in.margin_auto.left,
+                    mine_in.margin_auto.right,
+                ) != (
+                    main_in.left,
+                    main_in.right,
+                    main_in.margin_auto.left,
+                    main_in.margin_auto.right,
+                )
+            } else {
+                (
+                    mine_in.top,
+                    mine_in.bottom,
+                    mine_in.margin_auto.top,
+                    mine_in.margin_auto.bottom,
+                ) != (
+                    main_in.top,
+                    main_in.bottom,
+                    main_in.margin_auto.top,
+                    main_in.margin_auto.bottom,
+                )
+            }
         };
         if !ondin_core::reset::placement_is_own(doc, id) {
             for (axis, slot) in [(4usize, &mut marks.x), (5, &mut marks.y)] {
-                if cur[axis] != theirs[axis] {
+                if cur[axis] != theirs[axis] || pinned_differs(axis == 4) {
                     let mut c = cur;
                     c[axis] = theirs[axis];
                     let shown = parent * Affine::new(c) * box_min;
                     let v = if axis == 4 { shown.x } else { shown.y };
                     *slot = Some(Mark {
                         tip: format!("Reset to main · {}", num(v)),
-                        tx: set(c),
+                        tx: set(c, axis == 4, axis == 5),
                     });
                 }
             }
@@ -4583,7 +4638,7 @@ impl OndinApp {
                     .angle;
                 marks.r = Some(Mark {
                     tip: format!("Reset to main · {}°", num(shown_degrees(angle))),
-                    tx: set(c),
+                    tx: set(c, true, true),
                 });
             }
         }
@@ -4596,28 +4651,38 @@ impl OndinApp {
             _ => None,
         };
         if let (Some(mine), Some(main)) = (size_of(copy.kind()), size_of(src.kind())) {
-            let resize = |s: Size| {
-                Transaction(vec![Operation::SetGeometry {
-                    id,
-                    geometry: GeometryPatch::Size(s),
-                }])
+            // A size is a placement too to `keep_insets` (a layer pinned both
+            // sides is sized by its insets), so it carries its axis's insets.
+            let resize = |s: Size, horizontal: bool| {
+                Transaction(vec![
+                    Operation::SetGeometry {
+                        id,
+                        geometry: GeometryPatch::Size(s),
+                    },
+                    insets(horizontal, !horizontal),
+                ])
             };
             if mine.width != main.width {
                 marks.w = Some(Mark {
                     tip: format!("Reset to main · {}", num(main.width)),
-                    tx: resize(Size::new(main.width, mine.height)),
+                    tx: resize(Size::new(main.width, mine.height), true),
                 });
             }
             if mine.height != main.height {
                 marks.h = Some(Mark {
                     tip: format!("Reset to main · {}", num(main.height)),
-                    tx: resize(Size::new(mine.width, main.height)),
+                    tx: resize(Size::new(mine.width, main.height), false),
                 });
             }
         }
         marks
     }
 
+    /// `world` is the node's world transform coefficients. X/Y/rotation are
+    /// shown and edited in world space (Figma semantics); each edit rebuilds the
+    /// desired world transform and projects it back with
+    /// `build::local_for_world`, so the node lands exactly where the number says
+    /// regardless of what containers it sits in.
     pub(super) fn inspector_transform(
         &mut self,
         ui: &mut egui::Ui,
@@ -12184,6 +12249,17 @@ impl OndinApp {
         body: impl FnOnce(&mut Self, &mut egui::Ui),
     ) -> bool {
         let open = !self.collapsed_panels.contains(title);
+        // The card's overrides (§15 D981) — its header's dot and count, and the
+        // card-level reset — looked up by title, so no card has to pass them.
+        let (count, resets) = self
+            .card_override(title)
+            .map(|(n, ops)| (n, ops.to_vec()))
+            .unwrap_or_default();
+        let reset_label = format!("Reset {}", title.to_lowercase());
+        let overrides = (count > 0).then_some(ui::HeadOverrides {
+            count,
+            reset: &reset_label,
+        });
         // **Salted by title**, so every id inside this card is derived from
         // *which panel it is* rather than from where it happens to sit in the
         // column.
@@ -12196,17 +12272,6 @@ impl OndinApp {
         // collide on one id — which egui reports by flashing a red rectangle
         // round the offender for a frame (`Context::check_for_id_clash`). It
         // looked like the Appearance header briefly growing a border.
-        // The card's overrides (§15 D981) — its header's dot and count, and the
-        // card-level reset — looked up by title, so no card has to pass them.
-        let (count, resets) = self
-            .card_override(title)
-            .map(|(n, ops)| (n, ops.to_vec()))
-            .unwrap_or_default();
-        let reset_label = format!("Reset {}", title.to_lowercase());
-        let overrides = (count > 0).then_some(ui::HeadOverrides {
-            count,
-            reset: &reset_label,
-        });
         let (mut clicks, card_rect) = ui
             .push_id(title, |ui| {
                 ui::card_at(ui, |ui| {

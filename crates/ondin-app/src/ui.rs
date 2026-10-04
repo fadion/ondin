@@ -996,7 +996,12 @@ pub fn section_head_full(
     if let (Some(o), Some(slot)) = (overrides, chip) {
         let mut over = row.rect;
         over.max.x = over.max.x.max(ui.max_rect().right());
-        let hovered = ui.rect_contains_pointer(over);
+        // **Only where the header is its own target (`sense`).** A collapsed card
+        // is one whole-card target registered after this row, which would cover
+        // the chip and take its press — the card expanding, nothing reset — so a
+        // collapsed card keeps its dot and count and offers the reset once open.
+        // Found by `arch-scribe` reading `panel_badged`.
+        let hovered = sense && ui.rect_contains_pointer(over);
         let p = ui.painter();
         if hovered {
             let target = ui

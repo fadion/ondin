@@ -869,8 +869,13 @@ Recorded so they are not re-argued, the way `shortcuts.md`'s *Deliberately unbou
   argued from a *mechanism* expires when the mechanism does.
 - **Blend modes, effects, components, auto layout.** Blend modes are deferred in
   `architecture.md` §1, and a menu row is not the place a deferred feature first appears. Components
-  left that list on 2026-10-04 and are designed and not built (§5.3d, §15 D978, D979); which rows
-  and shortcuts they get is one of that design's open questions, and none is decided here. ⚠️ **The
+  left that list on 2026-10-04 and are designed and not built (§5.3d, §15 D978–D981). Their rows
+  were accepted with the chrome (§15 D981) — *Create component* on an ordinary layer; *Duplicate as
+  component* and *Select all instances* on a main; *Go to main component*, *Reset all* and *Detach
+  instance* on an instance; *Go to main component* and a *Reset* named for the child on a child inside
+  one — and **they are not placed in §5's heads or scored in §9 yet**: where each sits in its head, the
+  invariant tail (§4) and the cost score are this file's rules to apply when components are built,
+  not a mockup's. ⚠️ **The
   other two are not deferred and are still not rows**: effects were built on 2026-08-24 and are
   authored in the inspector's Effects card (§5.3a), and auto layout left §1's list on 2026-09-23 and
   is designed (§5.3c, §15 D867) — its absolute insets built on 2026-09-24 and authored in the

@@ -3,7 +3,7 @@
 **Status: agreed 2026-08-03; §1–§6, §9 and §10's cheap rows built 2026-08-18, §7 and §8's export
 rows 2026-08-20, §8a — the library's own keys — 2026-08-28, and `Ctrl+N`/`Ctrl+W`/`F2`/`Ctrl+D` the
 same day.** **Three** rows in §8 and two in §10 are
-what is left; the count is kept here rather than only in the ledger because this is the line a
+what is left — plus §12's three, agreed on 2026-10-04 with components and waiting on that feature; the count is kept here rather than only in the ledger because this is the line a
 reader checks first. ⚠️ **It was five until 2026-08-28**, when `Ctrl+N` and `Ctrl+W` — the two that
 had been waiting on a dashboard that arrived two days earlier — were bound (§15 D383); the three
 left all wait on the command registry, which is one blocker rather than three. ⚠️ **§8a did not
@@ -34,7 +34,7 @@ hand-written spec would be lost with the next regeneration.
 
 **§1–§10 are the sections that were reviewed and agreed, and keep their numbers from that
 review. §11 completes the inventory** — the history, structure and navigation keys that were
-already built and never in question. The file is the whole keymap, not the new part of it.
+already built and never in question. §12 is components' three rows, agreed 2026-10-04 and unbuilt. The file is the whole keymap, not the new part of it.
 
 **Where the bindings come from.** Figma and Sketch agree with each other far more often
 than either agrees with Adobe, so the rule applied throughout was: take the Figma/Sketch
@@ -802,6 +802,24 @@ chord that ends in either key is added. Note also that on Windows `Shift+Delete`
 intercepted as `Event::Cut` by `egui_winit` and never arrives as a key — cut rather than
 delete, which is arguably correct and is certainly not what the binding says.
 
+## 12. Components — agreed 2026-10-04, not built
+
+Agreed with the components chrome (`decisions.md` §15 D981; `architecture.md` §5.3d). All three rows
+wait on components being built, not on the command registry, so they are outside §8's blocker.
+
+| Key | Action | |
+|---|---|---|
+| `Ctrl+Alt+K` | ➕ create component | Figma's. Free in this keymap; the dashboard's `Ctrl+Alt+K` is deliberately inert (*Deliberately unbound*, below), and the editor's `K` alone is the Scale tool |
+| `Ctrl+Alt+B` | ➕ detach instance | Figma's. Free in this keymap |
+| `Enter` | ➕ step **into** an instance | Not a new chord — §11's `Enter` gains instances as a target, ruled 2026-10-04 (§15 D981): a group instance is a group `Enter` already enters, a frame instance one it does not reach today. It enters as the double-click does, by §15 D228's rule that the two agree; §11's row stays as built until this is |
+
+⚠️ **`Ctrl+Alt` is `AltGr` on many European layouts**, which §10 already meets from the other side (an
+`AltGr` character arriving as a chord). The mockup offered a `Ctrl+Shift` fallback for these two and it
+does not work here — `Ctrl+Shift+K` is §8's *place image* — and the keymap already binds `Ctrl+Alt`
+chords for the mask, the booleans, the properties clipboard and *export all*, so this is a question
+about the whole keymap rather than about components. It is open, and this file has no section for open
+questions; it is recorded here, beside the two rows that raised it.
+
 ---
 
 ## Deliberately unbound
@@ -875,7 +893,8 @@ dropdowns render their rows *from*: they were keyed by the row's own string
 for as long as nobody typed a different string, and the chords are a second caller that never
 sees the row at all. One enum, two callers, one `label()`.
 
-**Still to build**: `New`, `Close`, `Export`, `Palette`, `Cheatsheet`. ~~`PasteInPlace`,
+**Still to build**: `New`, `Close`, `Export`, `Palette`, `Cheatsheet`; and §12's three, with
+components. ~~`PasteInPlace`,
 `CopyProperties`, `PasteProperties` (§7, deferred whole)~~ — **all three built 2026-08-20**
 (§15 D248, D257); this line outlived them by two days, and §7's own heading said so while this
 one did not.

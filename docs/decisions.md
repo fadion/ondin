@@ -1354,8 +1354,9 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D976** — **The Release workflow builds under a read-only token and publishes from the one job that can write.** `[X3-L5-03]`'s last bullet, which D974 left open. Top-level `contents: read`; the matrix job is `build`, each leg staging every file it ships by its exact name — a missing one fails the leg, the `.nupkg` scoped to `$VPK_VERSION` because the feed's fetch leaves the previous one in `Releases/` — and uploading them as the artifact `release-<channel>`; `publish`, `needs: build`, on a tag only, `contents: write`, runs the pinned `softprops` action once with `fail_on_unmatched_files: true`; `pages` is `needs: publish`. `vpk download` keeps the token, read-only now, for the authenticated rate limit. **A Release is every platform's assets or none** — a failed macOS leg had left Windows and Linux published — no step tolerates a missing file, and `[X3-L1-04]`'s re-run hazard narrows to a `publish` that died part-way and a leg re-run after it. 🚨 **A compromised build tool can still poison what it builds**; what it loses is any write to the repository. *(Built 2026-10-04, committed as `23c3c10`; **Keep**, the session's, the shape the finding sketched. 🚨 Not run — **ran 2026-10-04**: a dispatch dry run built all three legs and left the fourteen assets under their shipping names, then **v0.4.1** ran it whole — three builds, `publish`, `pages`, all green, fourteen assets, every feed listing 0.4.1 over 0.4.0. D956, D957, D974 amended. **Amended** the same day: both artifact actions pinned by commit at their current majors, the upload `overwrite: true`)*
 - **D977** — **install.sh's single-package rpm route waives the signature check for the downloaded file only.** `[X3-L5-04]`, which D974 left open. `install_rpm_direct`'s dnf branch is `--setopt=localpkg_gpgcheck=0`, was `--nogpgcheck`, which waived the check for every dependency in the transaction; zypper's `--allow-unsigned-rpm` and `rpm -i --nosignature` already scoped to the file and are unchanged. **Set, not dropped**: both dnf generations default it off, but a policy turning it on refuses the file with no flag. Measured in containers on Fedora 40 (dnf 4.22.0), 42 (dnf5 5.2.18.0) and 44 (dnf5 5.4.3.0), identically: an unsigned dependency from a `gpgcheck=1` repository installs under `--nogpgcheck` and is refused under the setopt; end to end, the published v0.4.0 rpm installed through `ONDIN_NO_REPO=1` on all three, under the strict policy too. `README.md`'s release-files table drops the flag. *(Fixed 2026-10-04, committed as `bd6ff4f`; **Keep**, the session's. The zypper and plain-`rpm` branches not run. D974 amended)*
 - **D978** — **An instance is a linked copy written at the commit, not a subtree derived in `Resolved` — which reinterprets D868's shared pipeline as layout's write-back.** Every reader in Ondin is keyed by a stored `NodeId` — every `Resolved` map, `container::lay_out` through `LayoutView`, selection, hit-testing, `scene::build` and the SVG writer, the snapshot, the layers panel, `RenderOverrides` — so a derived child would need path ids or an expanded-document view in all of them and every edit verb re-targeted into *override at path*. Instance subtrees are ordinary `Node`s with their own ids, each linked to the node it was copied from, and a commit-time pass writes main-component changes into them as ops in the same transaction — `keep_insets`' shape in `commit_inner`, which is what components share with layout. No new `Resolved` map. Penpot's model; Figma and Sketch derive. ⚠️ **Costs**: copies are derived data stored in the document, bending §12's fourth property — replay converges, concurrent collaboration would need a resync on merge — and invariant 4's D788 clause gains a second member; file size grows with instances; a main edit fans out into ops on every copy. A link is the cross-node reference D405 declined, its semantics written down after the guide owner's precedent (D491). *(Decided 2026-10-04 by the maintainer; **not built**. **Keep** — *revisit if* real-time collaboration is built, the maintainer's verdict: collaboration *"currently a non-goal, but open for the future"*. The model and its post-conditions, the v5 bump, preview and snapshot are the session's design in `architecture.md` §5.3d, open to overturning. D868 and D867 amended, D869 noted; §5.3d written, §1, §5.3c, invariants 4 and 8, §5.11 and §12 amended or pointed; `roadmap.md` step 5 rewritten; `context-menus.md` §7 corrected)*
-- **D979** — **An override is a value that differs from its source, an instance's structure is free, a main's deletion detaches, components are document-local, and a copy of a main is an instance.** (a) Nothing records an override: when a main node's field goes `old` → `new`, each linked node takes `new` iff it still holds `old` — per field inside `TextStyle`, `ParagraphStyle`, `BlockStyle`, `LayoutItem`, `Display`, `Insets` and `GeometryPatch`'s parts, per item by id in the five item lists (D980), and 🚨 a text's `content` as one unit with its spans, which index into it; drift cannot exist, *reset* copies the source back, and setting a copy equal to the main makes it follow again. (b) Structure is free — the maintainer overruled locking it, slots being *"more of a workaround than a real solution"*: local additions, deletions, reorders and reparents inside an instance, with a main's structural edits followed only where the instance still matches, and a main's removed child deleted only where its counterpart's whole subtree still equals its sources with no local additions, else kept unlinked — the session's rule, open to overturning. (c) Deleting a main detaches its instances in the same transaction, nested chains relinking one level up. (d) Document-local; a paste into another document drops unresolvable links; shared libraries deferred, not a non-goal. (e) Copy, paste, duplicate and Alt-drag of a main make an instance; *Duplicate as component* makes a new main. *(Decided 2026-10-04 by the maintainer; **not built**. **Keep.** `architecture.md` §5.3d; `roadmap.md` gains the parked shared-libraries entry. Amended the same day: lists per item (D980), overturning the record's first reading of (a), and (e) added)*
+- **D979** — **An override is a value that differs from its source, an instance's structure is free, a main's deletion detaches, components are document-local, and a copy of a main is an instance.** (a) Nothing records an override: when a main node's field goes `old` → `new`, each linked node takes `new` iff it still holds `old` — per field inside `TextStyle`, `ParagraphStyle`, `BlockStyle`, `LayoutItem`, `Display`, `Insets` and `GeometryPatch`'s parts, per item by id in the five item lists (D980), and 🚨 a text's `content` as one unit with its spans, which index into it; drift cannot exist, *reset* copies the source back, and setting a copy equal to the main makes it follow again. (b) Structure is free — the maintainer overruled locking it, slots being *"more of a workaround than a real solution"*: local additions, deletions, reorders and reparents inside an instance, with a main's structural edits followed only where the instance still matches, and a main's removed child deleted only where its counterpart's whole subtree still equals its sources with no local additions, else kept unlinked — the session's rule, confirmed by the maintainer the same day (D981). (c) Deleting a main detaches its instances in the same transaction, nested chains relinking one level up. (d) Document-local; a paste into another document drops unresolvable links; shared libraries deferred, not a non-goal. (e) Copy, paste, duplicate and Alt-drag of a main make an instance; *Duplicate as component* makes a new main. *(Decided 2026-10-04 by the maintainer; **not built**. **Keep.** `architecture.md` §5.3d; `roadmap.md` gains the parked shared-libraries entry. Amended the same day: lists per item (D980), overturning the record's first reading of (a), and (e) added; (b)'s keep rule confirmed by the maintainer with the chrome, D981)*
 - **D980** — **The five item lists carry ids, in a wrapper beside each item rather than a field inside it, and an instance's items follow its main's item by item.** The maintainer overturned the record's first reading of D979 (a), a list compared whole: *"Rather do it right first time than do it twice."* `Paint::fills`, `Paint::strokes`, `Node::effects`, `Node::exports` and `Node::grids` become `Vec<Keyed<T>>`, `Keyed<T> { id: ItemId, value: T }`; a template's tracks, gradient stops, path points, `corner_radii` and spans stay single values. 🚨 **Not an `id` inside `Fill`/`Stroke`/`Effect`**: all derive `PartialEq`, and every *same look* comparison — *Mixed*, `changes_nothing`, `overwrites` and run merging, dedupes — would change meaning in silence; ⚠️ five whole-list *Mixed* readings (grids, effects, exports, and fills and strokes through `build::paint_shown`) still compare ids through the wrapper and must compare values. `ItemId` over `NodeId`, minted from `IdSource`, unique within its list, copied verbatim on duplicate — which is the match — and global so local and main additions never collide. The structural rule one level down. `migrate_4_to_5` gives `ItemId { actor: 0, seq: index }`; ⚠️ actor 0 is improbable, not excluded, so `reserve_existing_ids` must sweep item ids. ~330 construction sites, in build step 1. *(Per item decided 2026-10-04 by the maintainer; shape and migration the session's; **not built**. **Keep.** D979 amended; `architecture.md` §5.3d, invariant 3 and §5.11 amended or pointed; `roadmap.md` step 5 amended)*
+- **D981** — **Components' chrome: component-ness is carried by shape and never by the accent, an override is a bright label and a dot, and the kept child reads as local.** From `design/Components.dc.html` — untracked and regenerated, so the body carries the design in words. A main's label has a filled hexagon on a neutral chip, an instance's an outline hexagon and a bare label, a renamed one trailing its main's name in grey; selection is geometry only, and 🚨 component labels never change hue on selection — for components only, ordinary frame labels unchanged (the maintainer's ruling); a click selects the instance, a double-click enters it under a path label, a context tag and a dashed neutral boundary. Layers: neutral icons, a dot for overrides that bubbles to a collapsed ancestor, + for local; 🚨 a kept child shows as + (the maintainer's ruling — no provenance is stored), and D979 (b)'s keep rule is confirmed. The component card per selection state, its resets disabled rather than hidden; an override is a 4px neutral dot and a bright label, ↺ on hover with the main's value in a tooltip; list items' 14px slot and a deleted item's dashed ghost with *Restore*; header counts and resets; Mixed (value) and override (label) coexist. Rows, `Ctrl+Alt+K` *Create component* and `Ctrl+Alt+B` *Detach instance*, and two text-only toasts naming `Ctrl+Z`. Clarifications: no reset deletes a local addition; restores asymmetric on purpose; `AltGr` is the keymap's question; the per-frame lookups want a cache on `revision`. Six conflicts the record noted, all ruled the same day by the maintainer: D130 stands over the mockup's dashed Mixed segments; 🚨 an instance picks like a group whatever its kind, an exception to D22 that leaves ordinary frames alone; `Enter` steps into an instance (D228); toasts stay text-only; a collapsed row's dot means any difference from the main; a group main gets a canvas label. ⚠️ A group *instance*'s label is unruled. *(Accepted 2026-10-04 by the maintainer; **not built**. **Keep.** The six conflicts ruled the same day, amending the entry. D979 amended; `architecture.md` §5.3d; `roadmap.md` step 5; `context-menus.md` §7; `shortcuts.md` §12)*
 
 ---
 
@@ -20134,8 +20135,8 @@ siblings; a main's reorder is followed only where the instance's linked siblings
 main's old order; a main's internal reparent only where the copy is still under the old parent's
 counterpart. **A main losing a child deletes the counterpart only if it and its whole subtree still
 equal their sources and it holds no local additions**; otherwise it is kept, unlinked, as local
-content. That last rule is the session's recommendation made under the free-structure ruling, not the
-maintainer's own words, and is recorded as the design's rule open to overturning; its reason is that
+content. That last rule was the session's recommendation under the free-structure ruling, and **the
+maintainer confirmed it the same day**, with the chrome (D981), so it is theirs now; its reason is that
 with structure free an instance can hold work the main never had, and **a main-component edit must
 never destroy instance-side work**. A *reset* family — a field, structure, all — is part of the design.
 §5.3d has the rules case by case, with the readings the session settled the same day where they were
@@ -20159,8 +20160,8 @@ new main. The session's design carries it to a whole instance — copying one ma
 the same main — and to a payload holding a main and its instance, whose links are remapped with the
 ids (`architecture.md` §5.3d).
 
-*(Decided 2026-10-04 by the maintainer, in session 47 — all five rulings theirs, (b)'s
-delete-or-unlink excepted as above; **not built**, and no code cites this number. **Keep.** The
+*(Decided 2026-10-04 by the maintainer, in session 47 — all five rulings theirs, and (b)'s
+delete-or-unlink theirs too since they confirmed it with the chrome (D981); **not built**, and no code cites this number. **Keep.** The
 property-based test of (a) — after a main edit, each counterpart's field equals the new value iff it
 equalled the old — is the build order's step 3, and is the spec this entry hangs on.
 `architecture.md` §5.3d carries all five; `roadmap.md` gains the parked shared-libraries entry.
@@ -20230,6 +20231,140 @@ and the migration the session's, open to overturning; **not built**, and no code
 **Keep.** D979 (a) amended in body and index; `architecture.md` §5.3d's overrides paragraph, a new
 list-items paragraph, the save-format paragraph and build step 1, invariant 3 and §5.11's bump rule
 pointed; `roadmap.md`'s step 5 amended)*
+
+**D981 — Components' chrome: component-ness is carried by shape and never by the accent, an
+override is a bright label and a dot, and the kept child reads as local. *Accepted 2026-10-04 by the
+maintainer; not built.*** The mockup is `design/Components.dc.html`, landed and accepted the same day.
+⚠️ **That folder is untracked and regenerated between sessions**, so the file is where this came from
+and not where it lives: everything a builder needs is written below, and a reader who finds the file
+gone or changed builds from this entry.
+
+**The governing rule: the accent means *selected*, and component-ness is carried by shape, never by
+hue.** ⚠️ Read it as *component-ness never takes the accent*, not as a census of the accent: D13's
+`color::SELECT` family is everything that is *the app talking* — hover outline, marquee, the size
+badge, drop hints as well as selection — and the mockup itself keeps hover outlines as accent hairlines.
+What the rule forbids is a hue, a tint or a selected-colour label that means *main* or *instance*.
+Three alternatives the mockup drew and rejected, so they are not re-proposed: **line styles** (main
+dashed, instance dotted) — dashed already means *inside this* (context) and *ghost* elsewhere, and three
+line styles on one selected frame are noise; **accent tint steps** — three blues, and the accent stops
+meaning selected; **a glyph alone** — too weak at 25% zoom.
+
+**The canvas.** A main's label carries a **filled hexagon** glyph and sits on a neutral chip; an
+instance's carries an **outline hexagon** and a bare label. A renamed instance trails its main's name in
+grey after its own, so *instance of …* stays readable — the name is a field under D979 (a), so that
+instance holds a name override. Selection draws geometry only, outline and handles, in the accent.
+🚨 **Component labels never change hue on selection — for components only** (the maintainer's ruling):
+an ordinary frame's label goes on turning the selection colour as it does today
+(`canvas::draw_frame_labels`, `color::SELECT`, D13's *"a selected frame's name tag"*). *Do not* level
+the two in either direction. Hover outlines are accent hairlines, as on any layer. **A click selects the
+whole instance, like a group; a double-click enters it** and selects the child under the pointer — the
+label becomes a path, *Button › Label*; a quiet context tag sits under the frame, *Editing inside
+instance · Esc to exit*; and the instance keeps a **dashed neutral boundary** while entered, so it is
+clear where *inside* ends. A selected main shows its instance count in its label, only while selected,
+and every instance of it in view gets a neutral hairline.
+
+**The layers panel.** Icons stay neutral, selected rows included: filled hexagon for a main, outline
+for an instance. Trailing marks at the row's right edge, the same marks the inspector uses: a **dot**
+for overrides — on the row or anywhere inside it, so it bubbles up to a collapsed ancestor and moves to
+the owning rows when expanded, and on a collapsed row counting local layers and removed children too,
+(e) below — and **+** for local. The dot sits after the lock and eye icons, so it
+never shifts them, and is visible in every row state. 🚨 **A kept child reads as local, with +** (the
+maintainer's ruling). The mockup drew a third mark for a child the main removed and an instance kept
+because it had been changed — a link-break glyph, tooltip *"Removed from main · kept here because you
+changed it"*. Under D979 that child is unlinked at the moment it is kept and is then indistinguishable
+from a local addition, nothing recording provenance; showing it would take a stored field, which is
+exactly what D979 (a)'s no-marks ruling refuses. **That mark and its tooltip are not built.** And the
+rule beneath it — **a child the main removes is kept, unlinked, in an instance that changed it, rather
+than deleted** — was the session's under D979 (b) and **the maintainer confirmed it** with this mockup.
+
+**The inspector's component card**, above Transform. *A main selected*: **Main component** and its
+name; *N instances* with **Select all**; **Duplicate as component**. *An instance selected*: **Instance
+of Button**, the name the link to the main; a grey drift summary at the right, *3 overrides · 1 local
+layer*, gone at zero; **Reset all** and **Detach**; and an overflow menu of **Reset fields N**,
+**Restore removed children N** and **Reset order**, each with a count of what it would do — 🚨 **a reset
+with nothing to do is disabled, not hidden**. *A child inside an instance*: one line, not a card — *In
+Button instance · Go to main*, or *Local to this instance · no counterpart*. *Several instances of one
+main*: *3 instances of Button*, *2 with overrides*, **Reset all**, **Detach**. *Instances of different
+mains*: *Instances of 2 components*, no name link, **Reset all**, **Detach**. *Instances mixed with
+ordinary layers*: summarised rather than hidden — *2 instances · 3 other layers*, with **Select
+instances**.
+
+**How an override looks.** The mark is a **4px neutral dot and a full-brightness label**; a following
+value keeps the dim label every field has today. Hovering an overridden control swaps the dot for **↺**
+in the same box — nothing moves or resizes — and lifts the field's border one step, with a tooltip
+naming the main's value before the click, *Reset to main · 168*. An inline-labelled field (X, Y, W, H)
+is marked by its bright label and dot; a row-labelled control (a segmented row, a dropdown) carries the
+dot after its label. **A list item** (D980) has a reserved **14px trailing slot** — empty for
+following, dot for overridden, + for local — and an item the instance deleted while the main still has
+its id draws as a **dashed ghost row with *Restore***. **A card header** shows a dot and a count of its
+overrides, and hovering the header turns the count into a card-level reset (*Reset effects*). **Mixed
+and override are different things in different places and can coexist**: Mixed is about the *value*,
+an override about the *label*. Over several instances where some override a field, the dot shows, and a
+reset resets every one of them.
+
+**The context menu and the keys.** An ordinary layer: *Create component*, `Ctrl+Alt+K`. A main:
+*Duplicate as component*, *Select all instances*. An instance: *Go to main component*, *Reset all*,
+*Detach instance*, `Ctrl+Alt+B`. A child inside an instance: *Go to main component*, and a *Reset*
+named for the child — *Reset Label*.
+
+**Feedback.** Deleting a main with instances toasts *Deleted "Button" — 4 instances detached · Ctrl+Z
+to undo*. Creating a component toasts **only when it wrapped something**, *Created "Button" — 3 layers
+wrapped in a frame · Ctrl+Z to undo*. Detaching toasts nothing. *(The mockup ended both on an *Undo*
+button; ruled text-only the same day, (d) below.)*
+
+**Four clarifications the session made, accepted with it.** (1) **No reset deletes a local addition** —
+*Reset all*, *Reset fields* and a card header's reset alike; the mockup left open whether *Reset
+effects* removes a local effect, and it does not, which is §5.3d's reset family. (2) 🚨 **The restores
+are asymmetric on purpose**: a deleted list item gets an inline ghost row with *Restore*, and a deleted
+child layer gets **no** ghost row in the layers panel, only the overflow's *Restore removed children*
+count — ghost rows in the tree would be noise. *Do not "fix" the asymmetry.* (3) `Ctrl+Alt+K` and
+`Ctrl+Alt+B` are free in `shortcuts.md`. The mockup notes that `Ctrl+Alt` is `AltGr` on many European
+layouts and offers a `Ctrl+Shift` fallback, but `Ctrl+Shift+K` is already *place image*; and the
+keymap already binds many `Ctrl+Alt` chords — the mask, the four booleans, copy and paste properties,
+*export all* among them — so `AltGr` is a question about the whole keymap and not about components, and these stay
+`Ctrl+Alt`. (4) **Cost, recorded rather than ruled**: the bubbling dot, a main's instance count and the
+hairlines on instances in view each need a *source → instances* lookup every frame, so they want a
+cache keyed on `EditorSession::revision`, not the per-commit scan §5.3d describes for propagation.
+
+**Six places the mockup met an older rule or left a gap** — noted by the record when this entry was
+written, and **all six ruled by the maintainer the same day**, each on the session's recommendation.
+(a) **D130 stands.** The mockup draws a mixed segmented row with every cell outlined in a dashed line
+(*"grey Mixed, dashed segments"*); the app's rule is `ui::segment_mixed` — no cell raised, one dash
+painted, one of D130's exactly two dashes, and the layout cards' rule since D892 (`architecture.md`
+§9.4). **The dashed cells are not built.** The mockup's point — Mixed is about the value, an override
+about the label — holds under the app's drawing. (b) 🚨 **An instance picks like a group, whatever its
+kind**: a click anywhere on it, its empty background included, selects the whole instance. For an
+instance whose root is a frame this is **an exception to D22**, not a change to it — D22's frame that
+holds anything is not directly clickable, and every ordinary frame keeps that. (c) **`Enter` steps into
+an instance**, as the double-click does — D228's rule that the two agree, `shortcuts.md` §11; the row
+is in `shortcuts.md` §12. (d) **Toasts stay text-only**: no *Undo* button. The two toasts are
+`EditorSession::info` lines naming the key, as written under *Feedback* above. Their em dashes are
+punctuation and not D130's business — D130 counts the dash that stands in for *Mixed*, and the present
+mode toast already reads *"Present mode — Escape to leave"*. (e) **A collapsed row's dot means *differs
+from its main in any way*** — overrides, local layers and removed children alike, matching the card's
+drift summary. Expanded, each mark sits on the row that owns it, a dot for an override and + for local.
+A removed child has no row, so it shows only as the instance root's bubbled dot and the overflow's
+*Restore removed children* count. (f) **A group that is a main gets a canvas label**, as a frame does,
+so it can carry the chip and the glyph — `canvas::draw_frame_labels` walks `artboards()` alone today.
+⚠️ **Whether a group *instance* gets one was not ruled.** The record's reading of the mockup, flagged
+and not decided: it draws an instance's label (outline hexagon, bare label, the main's name trailing in
+grey after a rename) on frame instances only, and draws no group at all, so it neither shows nor rules
+out a group instance's label. For one: that label is the canvas's only cue that a layer is an instance,
+and a renamed group instance would otherwise lose *instance of …*. Against: a frame's label is also how
+D22's unclickable frame is picked, and under (b) an instance is picked anywhere, so a group instance
+needs no label to be selectable.
+
+**D884 holds**: every label is sentence case — *Main component*, *Duplicate as component*, *Restore
+removed children*, *Go to main component*. *(Accepted 2026-10-04 by the maintainer, in session 47; **not
+built**, and no code cites this number. **Keep.** Two rulings in it are the maintainer's own — the kept
+child reading as local, and component labels never changing hue, for components only — with their
+confirmation of D979 (b)'s keep rule; the four clarifications are the session's, accepted with it.
+D979 amended in body and index; `architecture.md` §5.3d's chrome summary and its delete-or-unlink
+attribution; `roadmap.md` step 5's open line; `context-menus.md` §7; `shortcuts.md` gains §12.
+**Amended the same day**: the six noted conflicts ruled by the maintainer, (a)–(f) above — D130 stands,
+an instance picks like a group as an exception to D22, `Enter` steps in, toasts text-only, a collapsed
+dot for any difference, a label for a group main — with a group instance's label left unruled;
+`shortcuts.md` §12 gains the `Enter` row)*
 
 **D870 — A frame may sit inside any group, and `paint_targets` already stops at one. *Decided
 2026-09-23 by the maintainer; built and tested 2026-09-24 (D876), committed 2026-09-24 (session 34).*** `build::can_parent` lets a frame hang off the root or

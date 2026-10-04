@@ -1596,7 +1596,7 @@ first was, it saved only the track list.
 `track_lines` merges an edge with the last one only, the spans being laid in order — it searched every
 edge, quadratic in the track count.
 
-### 5.3d Components and overrides (designed 2026-10-04, not built; §15 D978–D980)
+### 5.3d Components and overrides (designed 2026-10-04, not built; §15 D978–D981)
 
 > **Design ahead of code, all of it** — decided with the maintainer on 2026-10-04 (session 47), and
 > no line of `crates/` implements any of it. It sits beside §5.3c because what it changes is the node
@@ -1605,7 +1605,8 @@ edge, quadratic in the track count.
 > and §12's fourth property. **When a step below lands, this section is rewritten in the present
 > tense and the pointers go.** The maintainer's rulings are §15 D978 (linked copies), D979
 > (overrides, free structure, a main's deletion, document-local, what a copy of a main makes) and
-> D980 (list items compared one by one, by id). Everything else here — the model fields, where a link
+> D980 (list items compared one by one, by id), and the chrome is D981, accepted from a mockup.
+> Everything else here — the model fields, where a link
 > points, the post-conditions, the item ids' shape, the save-format bump, the preview — is the
 > session's design under those rulings, open to overturning, and each paragraph says which it is.
 
@@ -1752,8 +1753,8 @@ node in an instance linked to a given main node.
   **only if it and its whole subtree still equal their sources and it holds no local additions**;
   otherwise it is kept and unlinked, and becomes local content — by the one rule above, so a nested
   instance inside it relinks to its own main rather than detaching. **A main-component edit never
-  destroys instance-side work.** The session's recommendation under the free-structure ruling, recorded
-  as the design's rule and open to the maintainer overturning it.
+  destroys instance-side work.** The session's recommendation under the free-structure ruling,
+  **confirmed by the maintainer** the same day with the chrome (§15 D981), so it is theirs now.
 - *Instance-side edits*: a linked node reparented out of its instance loses its link; a linked node
   duplicated or pasted inside its own instance becomes local — so **at most one node per instance
   links to a given source**. ⚠️ *Out of its instance* includes **into a nested instance inside it**:
@@ -1849,11 +1850,40 @@ operations is the resize question below.
   must also run over the propagated operations is the same question. **To be measured at build step 3**,
   before choosing between deriving a copy's value from the main's *specified* values and a tolerance in
   the comparison.
-- **The chrome.** A canvas click selecting the instance root as it does a group, and a double-click
-  entering; a layers-panel mark for local additions; context-menu rows and shortcuts. None is decided,
-  and `context-menus.md` §7 adds no row.
 - **Guides.** A guide scoped to a main frame (§5.5) is not copied into its instances — noted by the
   record, not ruled.
+
+**The chrome is accepted** (§15 D981, the maintainer's, 2026-10-04 — the mockup was
+`design/Components.dc.html`, and D981 carries it in words because that folder is regenerated). In
+brief: **component-ness is shape, never the accent** — a filled hexagon on a neutral chip for a main's
+label, an outline hexagon and a bare label for an instance's, a renamed instance trailing its main's
+name in grey — and 🚨 **a component's label never changes hue on selection**, for components only,
+where an ordinary frame's label still does (the maintainer's ruling). A group that is a main gets a
+canvas label as a frame does, which no group has today (`canvas::draw_frame_labels` walks `artboards()`
+alone); ⚠️ whether a group *instance* gets one is **not ruled** — D981 has the record's reading of the
+mockup. 🚨 **An instance picks like a group, whatever its kind**: a click anywhere on it, its empty
+background included, selects the whole instance — for a frame instance an exception to §15 D22, which
+every ordinary frame keeps. A double-click or `Enter` enters it (§15 D228's agreement), with a path
+label, a context tag and a dashed neutral boundary. The layers panel keeps its icons neutral; expanded,
+a row carries a **dot** for its own override and **+** if it is local, and **a collapsed row's dot means
+it differs from its main in any way** — overrides, local layers and removed children alike, as the
+card's drift summary counts them, a removed child having no row of its own; 🚨 **a kept child shows as local** (the maintainer's ruling), since nothing records
+provenance. The inspector gains a **component card** above Transform per selection state, its resets —
+*Reset all*, *Reset fields*, *Restore removed children*, *Reset order*, each with a count — disabled
+rather than hidden when there is nothing to do, and **no reset deletes a local addition**. An override
+is marked by a **4px neutral dot and a full-brightness label**, swapped for ↺ on hover with the main's
+value in a tooltip; a list item has a 14px trailing slot (empty, dot, +), and an item the instance
+deleted is a dashed ghost row with *Restore* — 🚨 **a deleted child layer gets no ghost row**, on purpose.
+**Mixed keeps §15 D130's drawing** (`ui::segment_mixed` on a segmented row, no cell raised, one dash),
+not the mockup's dashed cells; Mixed is about the value and an override about the label under either.
+Rows and keys: *Create component* `Ctrl+Alt+K`, *Detach instance* `Ctrl+Alt+B`, *Duplicate as
+component*, *Select all instances*, *Go to main component*, *Reset all*, and *Reset* named for a child.
+**Toasts stay text-only** — `EditorSession::info` lines naming `Ctrl+Z`, no *Undo* button: *Deleted
+"Button" — 4 instances detached · Ctrl+Z to undo*, and, only when wrapping happened, *Created "Button"
+— 3 layers wrapped in a frame · Ctrl+Z to undo*. The per-frame *source → instances* lookups the dot,
+the count and the hairlines need want a cache keyed on `EditorSession::revision`, not the per-commit
+scan above. The six places the mockup met an older rule were all ruled by the maintainer on
+2026-10-04, as above; D981 has each.
 
 **Variants, component properties, instance swap, and pushing an instance's changes to its main come
 later.** So does real-time collaboration, the one place §15 D978's cost (a) arrives: a non-goal for

@@ -1134,6 +1134,11 @@ impl EditorSession {
         // — every door that moves, deletes or regroups comes through here, so none
         // of them has to know `component::check` exists.
         let mut tx = tx;
+        // A main's children gained, lost, moved or reordered reach its instances
+        // (§5.3d build step 4) — before the settling below, which tidies any link
+        // these leave behind.
+        let structure = ondin_core::propagate::propagate_structure(&self.doc, &tx, &mut self.ids);
+        tx.0.extend(structure);
         let cuts = ondin_core::component::settle_links(&self.doc, &tx);
         tx.0.extend(cuts);
         // And last, what the edit owes the instances (§5.3d build step 3): a main's

@@ -181,7 +181,7 @@ pub fn propagate(doc: &Document, tx: &Transaction) -> Vec<Operation> {
                 if probe.shape_key().is_some_and(|k| user.contains(&k)) {
                     continue;
                 }
-                if is_placement(op) && is_instance_root(doc, m) {
+                if is_placement(op) && linked_to_main(doc, m) {
                     continue;
                 }
                 if writes_spans(op) && !same_content(doc, src, m) {
@@ -200,8 +200,348 @@ pub fn propagate(doc: &Document, tx: &Transaction) -> Vec<Operation> {
     out
 }
 
-fn is_instance_root(doc: &Document, id: NodeId) -> bool {
-    crate::component::instance_root(doc, id) == Some(id)
+/// The operations a transaction's **structural** edits to mains owe their
+/// instances (§5.3d build step 4, §15 D979 (b)), worked out from the tree the
+/// transaction leaves (applied to a scratch copy):
+///
+/// - **A child a main gained** is copied into every copy of its parent, at every
+///   depth, each copied node linked to the one it was copied from — after the
+///   counterpart of its preceding sibling, else before the counterpart of its next
+///   one, else topmost. A copy that has lost the parent's counterpart gets nothing.
+/// - **A child a main lost** takes each counterpart with it **only if the
+///   counterpart and everything under it still equal their sources** — the same
+///   fields, the same children in the same order, no layer of the instance's own
+///   among them. A changed counterpart stays, as the instance's own layer
+///   (`component::settle_links` cuts its link). Recursively: a deleted counterpart
+///   is itself a lost child for its own copies.
+/// - **A reorder** follows onto a copy whose linked children are still in the
+///   main's old order, a layer of the copy's own keeping its place after the
+///   sibling it followed.
+/// - **A move within a main** follows onto a copy still under the counterpart of
+///   the old parent, when the copy has a counterpart of the new one.
+///
+/// Mints ids for what it copies, so it runs where an `IdSource` is: before
+/// `settle_links`, which then settles any link these leave behind.
+pub fn propagate_structure(
+    doc: &Document,
+    tx: &Transaction,
+    ids: &mut crate::id::IdSource,
+) -> Vec<Operation> {
+    let before = doc.node_map();
+    let mut copies: FxHashMap<NodeId, Vec<NodeId>> = FxHashMap::default();
+    for n in before.values() {
+        if let Some(src) = n.link {
+            copies.entry(src).or_default().push(n.id);
+        }
+    }
+    if copies.is_empty() {
+        return Vec::new();
+    }
+    for list in copies.values_mut() {
+        list.sort();
+    }
+    let structural = tx.0.iter().any(|op| {
+        matches!(
+            op,
+            Operation::CreateNode { .. }
+                | Operation::DeleteNode { .. }
+                | Operation::InsertSubtree { .. }
+                | Operation::Reparent { .. }
+                | Operation::Reorder { .. }
+        )
+    });
+    if !structural {
+        return Vec::new();
+    }
+    let mut after = doc.clone();
+    if after.apply_unchecked(tx).is_err() {
+        return Vec::new();
+    }
+    let after_nodes = after.node_map();
+    let mut out = Vec::new();
+
+    // Parents whose children changed, among nodes that have copies.
+    let mut parents: Vec<NodeId> = copies
+        .keys()
+        .copied()
+        .filter(|p| {
+            let b = before.get(p).map(|n| &n.children);
+            let a = after_nodes.get(p).map(|n| &n.children);
+            a.is_some() && b != a
+        })
+        .collect();
+    parents.sort();
+
+    // Lost children: delete the untouched counterparts, recursively.
+    let mut lost: Vec<NodeId> = Vec::new();
+    for p in &parents {
+        let a: FxHashSet<NodeId> = after_nodes[p].children.iter().copied().collect();
+        lost.extend(before[p].children.iter().filter(|c| !a.contains(c)));
+    }
+    // A child moved to another parent inside the same main is a move, not a loss.
+    // (A new parent made by the same transaction is not in `doc`, so it has no main
+    // there and the move reads as a loss and a gain — the subtree is re-copied.)
+    let moved_within: FxHashMap<NodeId, NodeId> = lost
+        .iter()
+        .filter_map(|c| Some((*c, after_nodes.get(c)?.parent?)))
+        .filter(|(c, np)| {
+            main_of_node(doc, *c).is_some() && main_of_node(doc, *c) == main_of_node(doc, *np)
+        })
+        .collect();
+    let mut deleted: FxHashSet<NodeId> = FxHashSet::default();
+    let mut queue: Vec<NodeId> = lost
+        .iter()
+        .copied()
+        .filter(|c| !moved_within.contains_key(c))
+        .collect();
+    while let Some(gone) = queue.pop() {
+        for &c in copies.get(&gone).into_iter().flatten() {
+            if deleted.contains(&c) || !untouched(doc, c, gone) {
+                continue;
+            }
+            deleted.insert(c);
+            out.push(Operation::DeleteNode { id: c });
+            queue.push(c);
+        }
+    }
+
+    // Moves within a main.
+    for (x, np) in &moved_within {
+        let op = before[x].parent.expect("a lost child had a parent");
+        for &c in copies.get(x).into_iter().flatten() {
+            let Some(root) = crate::component::instance_root(doc, c) else {
+                continue;
+            };
+            if before[&c].parent != counterpart(doc, root, op) {
+                continue; // the instance moved it itself
+            }
+            let Some(target) = counterpart(doc, root, *np) else {
+                continue;
+            };
+            let kids: Vec<NodeId> = before[&target]
+                .children
+                .iter()
+                .copied()
+                .filter(|k| !deleted.contains(k) && *k != c)
+                .collect();
+            let index = anchor(&after_nodes[np].children, *x, &kids, |s| {
+                counterpart(doc, root, s)
+            });
+            out.push(Operation::Reparent {
+                id: c,
+                new_parent: target,
+                index,
+            });
+        }
+    }
+
+    // Gained children: copy them in, recursively. Each parent's children are
+    // simulated as the inserts land — the deletes above taken out, every insert put
+    // in — so a second child gained in the same edit, and a copy one level further
+    // down, are placed against what is really there.
+    let mut sim: FxHashMap<NodeId, Vec<NodeId>> = FxHashMap::default();
+    let mut new_links: FxHashMap<NodeId, NodeId> = FxHashMap::default();
+    let children_of = |sim: &FxHashMap<NodeId, Vec<NodeId>>, p: NodeId| -> Vec<NodeId> {
+        sim.get(&p).cloned().unwrap_or_else(|| {
+            after_nodes
+                .get(&p)
+                .map(|n| n.children.clone())
+                .or_else(|| before.get(&p).map(|n| n.children.clone()))
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|k| !deleted.contains(k))
+                .collect()
+        })
+    };
+    for p in &parents {
+        let b: FxHashSet<NodeId> = before[p].children.iter().copied().collect();
+        let gained: Vec<NodeId> = after_nodes[p]
+            .children
+            .iter()
+            .copied()
+            .filter(|c| !b.contains(c) && !moved_within.contains_key(c))
+            .collect();
+        for x in gained {
+            let Some(template) = after.capture_subtree(x) else {
+                continue;
+            };
+            // (source parent, the subtree as it stands at that level)
+            let mut level = vec![(*p, template)];
+            while let Some((src_parent, nodes)) = level.pop() {
+                for &pc in copies.get(&src_parent).into_iter().flatten() {
+                    if deleted.contains(&pc) {
+                        continue;
+                    }
+                    let Some((mut copy, _)) = crate::document::remap_subtree(&nodes, ids) else {
+                        continue;
+                    };
+                    for (c, t) in copy.iter_mut().zip(&nodes) {
+                        c.link = Some(t.id);
+                        c.component = false;
+                    }
+                    let siblings = children_of(&sim, src_parent);
+                    let kids = children_of(&sim, pc);
+                    let link_of = |k: NodeId| {
+                        new_links
+                            .get(&k)
+                            .copied()
+                            .or_else(|| before.get(&k).and_then(|n| n.link))
+                    };
+                    let index = anchor(&siblings, nodes[0].id, &kids, |s| {
+                        kids.iter().copied().find(|k| link_of(*k) == Some(s))
+                    });
+                    let new_root = copy[0].id;
+                    new_links.insert(new_root, nodes[0].id);
+                    let mut placed = kids.clone();
+                    placed.insert(index.min(placed.len()), new_root);
+                    sim.insert(pc, placed);
+                    out.push(Operation::InsertSubtree {
+                        nodes: copy.clone(),
+                        parent: pc,
+                        index,
+                    });
+                    // The copy's own copies take it in turn, one level down.
+                    level.push((pc, copy));
+                }
+            }
+        }
+    }
+
+    // Reorders: a parent whose children are the same set in a new order.
+    for p in &parents {
+        let (b, a) = (&before[p].children, &after_nodes[p].children);
+        let bs: FxHashSet<_> = b.iter().collect();
+        if b.len() != a.len() || !a.iter().all(|c| bs.contains(c)) {
+            continue;
+        }
+        for &pc in copies.get(p).into_iter().flatten() {
+            let kids = &before[&pc].children;
+            let linked: Vec<NodeId> = kids
+                .iter()
+                .filter_map(|k| before.get(k).and_then(|n| n.link))
+                .filter(|s| bs.contains(s))
+                .collect();
+            let old: Vec<NodeId> = b.iter().copied().filter(|s| linked.contains(s)).collect();
+            if linked != old {
+                continue; // the instance reordered them itself
+            }
+            let new: Vec<NodeId> = a.iter().copied().filter(|s| linked.contains(s)).collect();
+            // The copy's linked children take the main's new order in the slots
+            // they occupy; its own layers stay where they are.
+            let mut target = kids.clone();
+            let slots: Vec<usize> = (0..kids.len())
+                .filter(|&i| {
+                    before
+                        .get(&kids[i])
+                        .and_then(|n| n.link)
+                        .is_some_and(|s| bs.contains(&s))
+                })
+                .collect();
+            for (slot, src) in slots.into_iter().zip(&new) {
+                if let Some(k) = kids
+                    .iter()
+                    .find(|k| before.get(k).and_then(|n| n.link) == Some(*src))
+                {
+                    target[slot] = *k;
+                }
+            }
+            if target == *kids {
+                continue;
+            }
+            for (i, id) in target.iter().enumerate() {
+                out.push(Operation::Reorder { id: *id, index: i });
+            }
+        }
+    }
+    out
+}
+
+/// The main a node sits in (the nearest main at or above it), if any.
+fn main_of_node(doc: &Document, id: NodeId) -> Option<NodeId> {
+    let mut at = doc.get(id);
+    while let Some(n) = at {
+        if n.component {
+            return Some(n.id);
+        }
+        at = n.parent.and_then(|p| doc.get(p));
+    }
+    None
+}
+
+/// The node of the instance rooted at `root` that is linked to `src` — `root`
+/// itself when `src` is its source.
+fn counterpart(doc: &Document, root: NodeId, src: NodeId) -> Option<NodeId> {
+    if doc.get(root)?.link == Some(src) {
+        return Some(root);
+    }
+    crate::build::subtree_nodes(doc, &[root])
+        .into_iter()
+        .find(|id| doc.get(*id).and_then(|n| n.link) == Some(src))
+}
+
+/// Where a node placed at `x` among `main_siblings` lands among `copy_children`:
+/// after the counterpart of its nearest preceding sibling, else before the
+/// counterpart of its nearest following one, else at the end (topmost).
+fn anchor(
+    main_siblings: &[NodeId],
+    x: NodeId,
+    copy_children: &[NodeId],
+    counterpart_of: impl Fn(NodeId) -> Option<NodeId>,
+) -> usize {
+    let at = main_siblings.iter().position(|c| *c == x).unwrap_or(0);
+    let find =
+        |s: NodeId| counterpart_of(s).and_then(|c| copy_children.iter().position(|k| *k == c));
+    if let Some(i) = main_siblings[..at].iter().rev().find_map(|s| find(*s)) {
+        return i + 1;
+    }
+    if let Some(i) = main_siblings[at + 1..].iter().find_map(|s| find(*s)) {
+        return i;
+    }
+    copy_children.len()
+}
+
+/// Whether the counterpart `copy` and everything under it still equal `src` and
+/// its subtree — the test for deleting it with its source (§15 D979 (b)).
+fn untouched(doc: &Document, copy: NodeId, src: NodeId) -> bool {
+    let (Some(c), Some(s)) = (doc.get(copy), doc.get(src)) else {
+        return false;
+    };
+    let same = c.kind == s.kind
+        && c.transform == s.transform
+        && c.name == s.name
+        && c.visible == s.visible
+        && c.opacity == s.opacity
+        && c.clip == s.clip
+        && c.mask == s.mask
+        && c.mask_mode == s.mask_mode
+        && c.fill_rule == s.fill_rule
+        && c.paint == s.paint
+        && c.effects == s.effects
+        && c.pivot == s.pivot
+        && c.exports == s.exports
+        && c.grids == s.grids
+        && c.insets == s.insets
+        && c.display == s.display
+        && c.item == s.item
+        && c.children.len() == s.children.len();
+    same && c
+        .children
+        .iter()
+        .zip(&s.children)
+        .all(|(cc, sc)| doc.get(*cc).and_then(|n| n.link) == Some(*sc) && untouched(doc, *cc, *sc))
+}
+
+/// Whether `id` is linked **straight to a main** — an instance placed by itself,
+/// whose placement is its own. Not every instance root: a nested copy inside an
+/// outer main is an instance root by its chain, and its place inside that main is
+/// the main's to move, so its outer instances follow it (`check`'s and
+/// `settle_links`' predicate — the first build asked `instance_root` here, and a
+/// nested instance moved inside its outer main stayed put in every outer instance).
+fn linked_to_main(doc: &Document, id: NodeId) -> bool {
+    doc.get(id)
+        .and_then(|n| n.link)
+        .and_then(|s| doc.get(s))
+        .is_some_and(|s| s.component)
 }
 
 fn same_content(doc: &Document, a: NodeId, b: NodeId) -> bool {
@@ -354,22 +694,75 @@ fn fields<T: Serialize + DeserializeOwned + Clone + PartialEq>(old: &T, new: &T,
 }
 
 fn merge(old: &Value, new: &Value, cur: &Value) -> Value {
+    merge_present(Some(old), Some(new), Some(cur)).unwrap_or(Value::Null)
+}
+
+/// [`merge`] with a field's **absence** as a value of its own. Most of these
+/// structs skip a field at its default when serialized (`skip_serializing_if`), so
+/// the same struct writes different keys depending on what is at its default — a
+/// side pinned or not, an item given growth or not. Merging over the **union** of
+/// keys, with "absent" compared like any value and written back as absence, needs
+/// no knowledge of what any default is: the copy's missing key equals the main's
+/// old missing key, so it takes the main's new one, and a key the main dropped is
+/// dropped from a copy that still held the main's old value.
+///
+/// ⚠️ **The first build recursed only when all three had the same keys**, so any
+/// field at or moving to its default made the struct compare whole and a copy with
+/// one override stopped following every other field — the common case, and
+/// `arch-scribe` found it by reading the merge against D979 (a). A test struct that
+/// skips nothing could not see it; `fields_follow_with_skipped_defaults` uses one
+/// that does.
+///
+/// **An enum is never mixed**: an object keyed by a variant name (serde's external
+/// tagging, an upper-case key) whose variant changed is one value, followed whole,
+/// as is one whose internal `"type"` tag changed. Anything this still mixes into an
+/// invalid shape fails to deserialize, and [`fields`] then keeps the copy's value —
+/// the safe direction.
+fn merge_present(old: Option<&Value>, new: Option<&Value>, cur: Option<&Value>) -> Option<Value> {
     if old == new {
-        return cur.clone();
+        return cur.cloned();
     }
-    match (old, new, cur) {
-        (Value::Object(o), Value::Object(n), Value::Object(c))
-            if o.keys().eq(n.keys()) && o.keys().eq(c.keys()) =>
-        {
-            let mut out = c.clone();
-            for (k, ov) in o {
-                out.insert(k.clone(), merge(ov, &n[k], &c[k]));
+    if let (Some(Value::Object(o)), Some(Value::Object(n)), Some(Value::Object(c))) =
+        (old, new, cur)
+        && !variant_changed(o, n)
+        && !variant_changed(o, c)
+    {
+        let mut out = serde_json::Map::new();
+        let keys: std::collections::BTreeSet<&String> =
+            o.keys().chain(n.keys()).chain(c.keys()).collect();
+        for k in keys {
+            if let Some(v) = merge_present(o.get(k), n.get(k), c.get(k)) {
+                out.insert(k.clone(), v);
             }
-            Value::Object(out)
         }
-        _ if old == cur => new.clone(),
-        _ => cur.clone(),
+        return Some(Value::Object(out));
     }
+    if old == cur {
+        new.cloned()
+    } else {
+        cur.cloned()
+    }
+}
+
+/// Whether two objects are different variants of one enum — different single
+/// upper-case keys, or different internal `"type"` tags.
+fn variant_changed(a: &serde_json::Map<String, Value>, b: &serde_json::Map<String, Value>) -> bool {
+    let tagged = |m: &serde_json::Map<String, Value>| {
+        (m.len() == 1)
+            .then(|| {
+                m.keys()
+                    .next()
+                    .filter(|k| k.starts_with(|c: char| c.is_ascii_uppercase()))
+            })
+            .flatten()
+            .cloned()
+    };
+    let external = match (tagged(a), tagged(b)) {
+        (Some(x), Some(y)) => x != y,
+        (Some(_), None) | (None, Some(_)) => true,
+        (None, None) => false,
+    };
+    external || a.get("type").is_some_and(|t| b.get("type") != Some(t))
 }
 
 /// A keyed list's edit `old` → `new`, carried onto `cur` item by item (§15 D980):
@@ -409,11 +802,14 @@ fn items<T: Serialize + DeserializeOwned + Clone + PartialEq>(
             .map_or(0, |p| p + 1);
         out.insert(at, n.clone());
     }
-    // Reorder of the shared items, if the copy still has the main's old order.
+    // Reorder of the shared items, if the copy still has the main's old order —
+    // read over the **survivors**, the items in both of the main's lists that the
+    // copy still has, which is the children's rule (§5.3d): a copy that deleted one
+    // of them still follows a reorder of the rest.
     let shared: Vec<ItemId> = old
         .iter()
         .map(|k| k.id)
-        .filter(|id| find(new, *id).is_some())
+        .filter(|id| find(new, *id).is_some() && find(&out, *id).is_some())
         .collect();
     let new_order: Vec<ItemId> = new
         .iter()
@@ -505,5 +901,99 @@ mod tests {
         assert_eq!(items(&old, &new, &old), new);
         let mine = vec![old[1], old[0], old[2]];
         assert_eq!(items(&old, &new, &mine), mine, "the copy's own order stays");
+    }
+
+    /// A struct that skips its defaults, as `Insets`, `LayoutItem` and the text
+    /// styles do.
+    #[derive(Clone, Debug, Default, PartialEq, Serialize, serde::Deserialize)]
+    struct Skips {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        a: Option<u32>,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        b: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        c: Option<u32>,
+    }
+    fn is_zero(v: &u32) -> bool {
+        *v == 0
+    }
+
+    /// The case the first build got wrong: the copy overrode `c`, the main pins `a`
+    /// (from its default) and drops `b` (to its default) — the copy takes both and
+    /// keeps its `c`. Flip: recursing only on identical key sets keeps all of `cur`.
+    #[test]
+    fn fields_follow_with_skipped_defaults() {
+        let old = Skips {
+            b: 3,
+            ..Default::default()
+        };
+        let new = Skips {
+            a: Some(7),
+            ..Default::default()
+        };
+        let cur = Skips {
+            b: 3,
+            c: Some(9),
+            ..Default::default()
+        };
+        assert_eq!(
+            fields(&old, &new, &cur),
+            Skips {
+                a: Some(7),
+                b: 0,
+                c: Some(9)
+            }
+        );
+    }
+
+    /// **The rule as a property** — the build order's test for step 3: after a main
+    /// edit, each field of a copy equals the main's new value **if and only if** it
+    /// equalled the main's old value (or already equalled the new one), and is
+    /// otherwise unchanged. Over every combination of three values per field, at
+    /// and away from the skipped defaults.
+    #[test]
+    fn every_field_follows_iff_it_held_the_old_value() {
+        let vals = [None, Some(1u32), Some(2)];
+        let bs = [0u32, 1, 2];
+        let mk = |a: usize, b: usize, c: usize| Skips {
+            a: vals[a],
+            b: bs[b],
+            c: vals[c],
+        };
+        let mut cases = 0;
+        for o in 0..27 {
+            for n in 0..27 {
+                for c in 0..27 {
+                    let split = |i: usize| (i / 9, (i / 3) % 3, i % 3);
+                    let ((oa, ob, oc), (na, nb, nc), (ca, cb, cc)) = (split(o), split(n), split(c));
+                    let (old, new, cur) = (mk(oa, ob, oc), mk(na, nb, nc), mk(ca, cb, cc));
+                    let got = fields(&old, &new, &cur);
+                    fn expect<V: PartialEq>(o: V, n: V, c: V) -> V {
+                        if c == o { n } else { c }
+                    }
+                    assert_eq!(
+                        got,
+                        Skips {
+                            a: expect(old.a, new.a, cur.a),
+                            b: expect(old.b, new.b, cur.b),
+                            c: expect(old.c, new.c, cur.c),
+                        },
+                        "old {old:?} new {new:?} cur {cur:?}"
+                    );
+                    cases += 1;
+                }
+            }
+        }
+        assert_eq!(cases, 27 * 27 * 27);
+    }
+
+    /// A reorder is read over the survivors: a copy that deleted one shared item
+    /// still follows the reorder of the rest.
+    #[test]
+    fn a_reorder_follows_over_the_survivors() {
+        let old = keyed_by_position([1u32, 2, 3]);
+        let new = vec![old[2], old[1], old[0]];
+        let cur = vec![old[0], old[2]]; // the copy deleted item 2
+        assert_eq!(items(&old, &new, &cur), vec![old[2], old[0]]);
     }
 }

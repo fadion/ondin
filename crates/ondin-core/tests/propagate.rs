@@ -400,3 +400,235 @@ fn spans_follow_onto_the_same_content() {
         _ => unreachable!(),
     }
 }
+
+// ── Structure (build step 4) ───────────────────────────────────────────────────
+
+/// `ops` with everything `commit_inner` appends: structure, settled links, fields.
+fn commit_all(f: &mut F, ops: Vec<Operation>) {
+    let mut tx = Transaction(ops);
+    let s = ondin_core::propagate::propagate_structure(&f.doc, &tx, &mut f.ids);
+    tx.0.extend(s);
+    let l = ondin_core::component::settle_links(&f.doc, &tx);
+    tx.0.extend(l);
+    let p = ondin_core::propagate::propagate(&f.doc, &tx);
+    tx.0.extend(p);
+    f.doc.apply(&tx).expect("the edit and everything it owes");
+}
+
+fn rect_kind() -> NodeKind {
+    NodeKind::Rect {
+        size: Size::new(5.0, 5.0),
+        corner_radii: RoundedRectRadii::default(),
+    }
+}
+
+fn kids(doc: &Document, id: NodeId) -> Vec<NodeId> {
+    doc.get(id).unwrap().children().to_vec()
+}
+
+fn link(doc: &Document, id: NodeId) -> Option<NodeId> {
+    doc.get(id).unwrap().link()
+}
+
+/// A child the main gains is copied into the instance, linked to it, placed after
+/// its preceding sibling's counterpart — and two gained at once keep their order.
+/// Flip: `propagate_structure` answering nothing leaves the instance at two.
+#[test]
+fn children_a_main_gains_reach_its_instance_in_order() {
+    let mut f = fixture();
+    let [x, y] = [(); 2].map(|_| f.ids.mint());
+    let (m, a) = (f.m, f.a);
+    commit_all(
+        &mut f,
+        vec![
+            Operation::CreateNode {
+                id: x,
+                parent: m,
+                index: 1,
+                kind: rect_kind(),
+                transform: None,
+                name: None,
+            },
+            Operation::CreateNode {
+                id: y,
+                parent: m,
+                index: 2,
+                kind: rect_kind(),
+                transform: None,
+                name: None,
+            },
+        ],
+    );
+    assert_eq!(kids(&f.doc, m), vec![a, x, y, f.t], "the fixture");
+    let links: Vec<_> = kids(&f.doc, f.i).iter().map(|k| link(&f.doc, *k)).collect();
+    assert_eq!(links, vec![Some(a), Some(x), Some(y), Some(f.t)]);
+}
+
+/// A child the main loses takes an **untouched** counterpart with it and leaves a
+/// **changed** one as the instance's own layer (§15 D979 (b)). Flip: deleting
+/// regardless of `untouched` deletes the changed one too.
+#[test]
+fn a_lost_child_takes_untouched_counterparts_and_leaves_changed_ones() {
+    let mut f = fixture();
+    let i = f.i;
+    let (tx, made) = ondin_core::insert_subtrees(
+        &f.doc,
+        &mut f.ids,
+        &[Placement {
+            nodes: f.doc.capture_subtree(f.m).unwrap(),
+            parent: f.root,
+            index: None,
+        }],
+        Default::default(),
+    );
+    f.doc.apply(&tx).unwrap();
+    let changed_copy = kids(&f.doc, made[0])[0];
+    f.doc
+        .apply(&Transaction(vec![Operation::SetName {
+            id: changed_copy,
+            name: "mine".into(),
+        }]))
+        .unwrap();
+    let a = f.a;
+    commit_all(&mut f, vec![Operation::DeleteNode { id: a }]);
+    let ia_gone = !kids(&f.doc, i).iter().any(|k| link(&f.doc, *k) == Some(a));
+    assert!(
+        ia_gone && f.doc.get(f.ia).is_none(),
+        "the untouched counterpart went"
+    );
+    assert!(f.doc.get(changed_copy).is_some(), "the changed one stays");
+    assert_eq!(
+        link(&f.doc, changed_copy),
+        None,
+        "as the instance's own layer"
+    );
+}
+
+/// A reorder in the main follows onto an instance still in the old order.
+#[test]
+fn a_reorder_in_the_main_follows() {
+    let mut f = fixture();
+    let (t, m) = (f.t, f.m);
+    commit_all(&mut f, vec![Operation::Reorder { id: t, index: 0 }]);
+    assert_eq!(kids(&f.doc, m), vec![f.t, f.a], "the fixture");
+    assert_eq!(kids(&f.doc, f.i), vec![f.it, f.ia]);
+}
+
+/// A child gained by an inner main reaches the outer main's instances through
+/// the nested copy, two levels down, each linked one level up.
+#[test]
+fn a_gained_child_reaches_through_a_nested_instance() {
+    let mut f = fixture();
+    let outer = f.ids.mint();
+    f.doc
+        .apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: outer,
+                parent: f.root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(300.0, 300.0),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::Reparent {
+                id: f.i,
+                new_parent: outer,
+                index: 0,
+            },
+            Operation::SetComponent {
+                id: outer,
+                component: true,
+            },
+        ]))
+        .unwrap();
+    let (tx, made) = ondin_core::insert_subtrees(
+        &f.doc,
+        &mut f.ids,
+        &[Placement {
+            nodes: f.doc.capture_subtree(outer).unwrap(),
+            parent: f.root,
+            index: None,
+        }],
+        Default::default(),
+    );
+    f.doc.apply(&tx).unwrap();
+    let nested_copy = kids(&f.doc, made[0])[0];
+    let x = f.ids.mint();
+    let m = f.m;
+    commit_all(
+        &mut f,
+        vec![Operation::CreateNode {
+            id: x,
+            parent: m,
+            index: 2,
+            kind: rect_kind(),
+            transform: None,
+            name: None,
+        }],
+    );
+    let in_i = *kids(&f.doc, f.i).last().unwrap();
+    assert_eq!(link(&f.doc, in_i), Some(x), "one level");
+    let deep = *kids(&f.doc, nested_copy).last().unwrap();
+    assert_eq!(
+        link(&f.doc, deep),
+        Some(in_i),
+        "two levels, linked one level up"
+    );
+}
+
+/// A nested instance moved inside its outer main moves in every outer instance:
+/// its place there is the outer main's, not its own. Only an instance linked
+/// **straight to a main** keeps its placement. Flip: asking `instance_root` for
+/// the placement rule (the first build) leaves the outer instance's copy put.
+#[test]
+fn a_nested_instance_moved_inside_its_outer_main_moves_in_its_instances() {
+    let mut f = fixture();
+    let outer = f.ids.mint();
+    f.doc
+        .apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: outer,
+                parent: f.root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(300.0, 300.0),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::Reparent {
+                id: f.i,
+                new_parent: outer,
+                index: 0,
+            },
+            Operation::SetComponent {
+                id: outer,
+                component: true,
+            },
+        ]))
+        .unwrap();
+    let (tx, made) = ondin_core::insert_subtrees(
+        &f.doc,
+        &mut f.ids,
+        &[Placement {
+            nodes: f.doc.capture_subtree(outer).unwrap(),
+            parent: f.root,
+            index: None,
+        }],
+        Default::default(),
+    );
+    f.doc.apply(&tx).unwrap();
+    let nested_copy = kids(&f.doc, made[0])[0];
+    let to = Affine::translate((40.0, 0.0));
+    let i = f.i;
+    commit_all(
+        &mut f,
+        vec![Operation::SetTransform {
+            id: i,
+            transform: to,
+        }],
+    );
+    assert_eq!(f.doc.get(nested_copy).unwrap().transform(), to);
+}

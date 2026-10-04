@@ -585,12 +585,21 @@ fn missing(doc: &Document, nodes: &[NodeId]) -> Vec<(NodeId, NodeId)> {
 /// alone found it missing and restored a second node on the same source, under a
 /// different root, where `LinkRule::SharedSource` cannot see it. Found by
 /// `arch-scribe`; `a_member_dragged_out_of_a_nested_copy_is_not_restored_twice`.
+///
+/// ⚠️ **And it climbs only out of nested copies**, stopping at a root linked
+/// straight to a main — an instance, or a local instance placed inside one. The
+/// first fix climbed through every root, so a local instance's deleted child was
+/// masked by the outer instance's own counterpart of the same source and never
+/// restored (`a_local_instances_removed_child_is_not_masked_by_its_host`, also
+/// `arch-scribe`'s). A member dragged out of a local instance is cut by
+/// `settle_links` anyway, so nothing past that root can hold its links.
 fn outermost_root(doc: &Document, id: NodeId) -> Option<NodeId> {
     let mut root = crate::component::instance_root(doc, id)?;
-    while let Some(outer) = doc
-        .get(root)
-        .and_then(|n| n.parent)
-        .and_then(|p| crate::component::instance_root(doc, p))
+    while !crate::propagate::linked_to_main(doc, root)
+        && let Some(outer) = doc
+            .get(root)
+            .and_then(|n| n.parent)
+            .and_then(|p| crate::component::instance_root(doc, p))
     {
         root = outer;
     }

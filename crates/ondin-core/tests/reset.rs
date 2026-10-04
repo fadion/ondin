@@ -583,6 +583,26 @@ fn a_member_dragged_out_of_a_nested_copy_is_not_restored_twice() {
     assert!(reset::restore_children(&f.doc, &[oi], &mut f.ids).is_empty());
 }
 
+/// **A local instance's removed child is not masked by the instance around it.**
+/// An instance of `m` holds a local instance of `m` too; the local one deletes its
+/// copy of the rect. The outer instance's own copy of the rect links to the same
+/// source, so a restore that looked for held links under the outer root found it
+/// "held" and restored nothing. The climb to the outermost root is for a nested
+/// copy's members; it stops at a root linked straight to a main. Found by
+/// `arch-scribe` reading the fix for the test above; failed with `removed` 0 before.
+#[test]
+fn a_local_instances_removed_child_is_not_masked_by_its_host() {
+    let mut f = fixture();
+    let local = instance(&mut f.doc, &mut f.ids, f.m, f.i);
+    let local_rect = kids(&f.doc, local)[0];
+    assert_eq!(link(&f.doc, local_rect), Some(f.a), "the fixture");
+    f.edit(vec![Operation::DeleteNode { id: local_rect }]);
+    assert_eq!(reset::drift(&f.doc, local).removed, 1);
+    let ops = reset::restore_children(&f.doc, &[local], &mut f.ids);
+    f.commit_all(ops);
+    assert_eq!(link(&f.doc, kids(&f.doc, local)[0]), Some(f.a));
+}
+
 /// **Overlapping scopes reset once.** An outer instance and the nested copy
 /// inside it, scoped together, with a child of the nested copy deleted: one
 /// restore, not two (the second would be cut by `settle_links` and land an

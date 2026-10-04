@@ -494,6 +494,11 @@ struct RowCtx {
     /// Set on the one row that stands for every paint in a disagreeing selection,
     /// and `None` on every row that stands for exactly one paint.
     mixed: Option<MixedRow>,
+    /// What the item is to an instance (§15 D981), for the row's reserved 14-pt
+    /// trailing slot — empty while it follows, the dot when overridden, `+` when
+    /// it is the instance's own. `None` outside an instance, where no slot is
+    /// reserved.
+    item: Option<ondin_core::reset::ItemState>,
 }
 /// What a paint row cannot say about its subject, because it is standing for many
 /// paints at once.
@@ -594,6 +599,8 @@ struct RowOut {
     toggle: bool,
     /// A Group Colors row's reticle was clicked: select every layer using it.
     select: bool,
+    /// An instance's overridden item asked for its main's value back (§15 D981).
+    reset: bool,
     /// What the row occupied, for the reorder to measure a drop against.
     rect: egui::Rect,
 }
@@ -603,6 +610,7 @@ impl Default for RowOut {
             remove: false,
             toggle: false,
             select: false,
+            reset: false,
             // `egui::Rect` has no `Default`, and `NOTHING` is the right stand-in
             // anyway: a row that was never laid out claims no space.
             rect: egui::Rect::NOTHING,
@@ -3433,6 +3441,7 @@ impl OndinApp {
                         // A census row knows its colour exactly — being *keyed* by
                         // it is what a Group Colors row is.
                         mixed: None,
+                        item: None,
                     },
                     &brush,
                 );
@@ -3456,6 +3465,7 @@ impl OndinApp {
                         reorderable: false,
                         census: Some(use_.nodes.len()),
                         mixed: None,
+                        item: None,
                     },
                     &use_.brush,
                 );
@@ -5624,7 +5634,16 @@ impl OndinApp {
                 return;
             }
             let anchor = scope.anchor(app);
-            let (mut remove, mut toggle) = (None, None);
+            // An instance's list read against its source's (§15 D981): each row's
+            // trailing slot, and the ghost rows of the items it removed.
+            let source = match scope {
+                PaintScope::Node(id) => app.source_list(id, |n| &n.paint().fills),
+                PaintScope::Selection => None,
+            };
+            let states = source
+                .as_ref()
+                .map(|s| ondin_core::reset::item_states(s, fills));
+            let (mut remove, mut toggle, mut reset) = (None, None, None);
             let carrying = app.carrying(PaintList::Fill, anchor);
             // **Top of the stack first**, so the row on top is the paint you see on
             // top: the renderer walks the list forward, so the last element is the
@@ -5645,6 +5664,7 @@ impl OndinApp {
                             reorderable: fills.len() > 1,
                             census: None,
                             mixed: None,
+                            item: states.as_ref().map(|s| s[index]),
                         },
                         &fills[index].brush,
                     )
@@ -5652,6 +5672,19 @@ impl OndinApp {
                 slots.push(rect.top(), rect.bottom());
                 remove = remove.or(out.remove.then_some(index));
                 toggle = toggle.or(out.toggle.then_some(index));
+                reset = reset.or(out.reset.then_some(index));
+            }
+            // The main's fills this instance removed, as ghost rows (§15 D981).
+            let mut restore = None;
+            for gone in source
+                .as_deref()
+                .map(|s| ondin_core::reset::removed_items(s, fills))
+                .unwrap_or_default()
+            {
+                let w = ui.available_width() - 28.0 - ui::CARD_COL_GAP;
+                if super::component::ghost_row(ui, &paint::label_of(&gone.brush), w) {
+                    restore = Some(gone.id);
+                }
             }
             if let Some((from, to)) = app.finish_paint_drag(ui, PaintList::Fill, anchor, slots) {
                 app.write_fill_list(scope, paint::reordered(fills, from, to));
@@ -5659,6 +5692,10 @@ impl OndinApp {
                 app.remap_paint_indices(anchor, PaintList::Fill, |i| {
                     paint::reordered_index(n, from, to, i)
                 });
+            } else if let (Some(item), Some(src)) =
+                (reset.map(|i| fills[i].id).or(restore), source.as_deref())
+            {
+                app.write_fill_list(scope, ondin_core::reset::reset_item(src, fills, item));
             } else if let Some(i) = toggle {
                 let mut next = fills.to_vec();
                 next[i].visible = !next[i].visible;
@@ -5744,7 +5781,15 @@ impl OndinApp {
                 return;
             }
             let anchor = scope.anchor(app);
-            let (mut remove, mut toggle) = (None, None);
+            // `inspector_fill`'s reading of an instance's list, for strokes.
+            let source = match scope {
+                PaintScope::Node(id) => app.source_list(id, |n| &n.paint().strokes),
+                PaintScope::Selection => None,
+            };
+            let states = source
+                .as_ref()
+                .map(|s| ondin_core::reset::item_states(s, strokes));
+            let (mut remove, mut toggle, mut reset) = (None, None, None);
             let mut edit: Option<(usize, Stroke)> = None;
             let carrying = app.carrying(PaintList::Stroke, anchor);
             let order = app.paint_order(ui, PaintList::Stroke, anchor, strokes.len());
@@ -5774,6 +5819,7 @@ impl OndinApp {
                                         reorderable: strokes.len() > 1,
                                         census: None,
                                         mixed: None,
+                                        item: states.as_ref().map(|s| s[index]),
                                     },
                                     &s.brush,
                                 )
@@ -5785,6 +5831,19 @@ impl OndinApp {
                 remove = remove.or(out.remove.then_some(index));
                 toggle = toggle.or(out.toggle.then_some(index));
                 edit = edit.or(changed.map(|s| (index, s)));
+                reset = reset.or(out.reset.then_some(index));
+            }
+            // The main's strokes this instance removed, as ghost rows (§15 D981).
+            let mut restore = None;
+            for gone in source
+                .as_deref()
+                .map(|s| ondin_core::reset::removed_items(s, strokes))
+                .unwrap_or_default()
+            {
+                let w = ui.available_width() - 28.0 - ui::CARD_COL_GAP;
+                if super::component::ghost_row(ui, &paint::label_of(&gone.brush), w) {
+                    restore = Some(gone.id);
+                }
             }
             if let Some((from, to)) = app.finish_paint_drag(ui, PaintList::Stroke, anchor, slots) {
                 app.write_strokes(scope, paint::reordered(strokes, from, to));
@@ -5798,6 +5857,10 @@ impl OndinApp {
                 app.remap_paint_indices(anchor, PaintList::Stroke, |i| {
                     paint::reordered_index(n, from, to, i)
                 });
+            } else if let (Some(item), Some(src)) =
+                (reset.map(|i| strokes[i].id).or(restore), source.as_deref())
+            {
+                app.write_strokes(scope, ondin_core::reset::reset_item(src, strokes, item));
             } else if let Some(i) = toggle {
                 let mut next = strokes.to_vec();
                 next[i].visible = !next[i].visible;
@@ -5865,6 +5928,7 @@ impl OndinApp {
                 reorderable: false,
                 census: None,
                 mixed: Some(mixed),
+                item: None,
             },
             &brush,
         );
@@ -8758,6 +8822,7 @@ impl OndinApp {
             reorderable,
             census,
             mixed,
+            item,
         } = ctx;
         let targeted = self
             .picker
@@ -8783,6 +8848,11 @@ impl OndinApp {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
                 let size = egui::vec2(ui.available_width() - 28.0 - ui::CARD_COL_GAP, 28.0);
+                // The whole row under the pointer — what turns an overridden item's
+                // dot into ↺ — asked of the field's box before it is laid out, since
+                // the slot sits in a right-to-left run that begins past the label.
+                let hot =
+                    ui.rect_contains_pointer(egui::Rect::from_min_size(ui.cursor().min, size));
                 field_row_active(ui, size, targeted, |ui| {
                     ui.spacing_mut().item_spacing.x = 9.0;
                     if let Some((list, index)) = grip {
@@ -9006,6 +9076,14 @@ impl OndinApp {
                                 .color(theme::text::DIM),
                             );
                             return;
+                        }
+                        // **An instance's item, in its reserved 14-pt slot at the
+                        // far end** (§15 D981, 4D): nothing while it follows its
+                        // main, the dot when it differs, `+` when it is the
+                        // instance's own — and on an overridden row under the
+                        // pointer, ↺, whose click puts the main's item back.
+                        if let Some(state) = item {
+                            out.reset = super::component::item_slot(ui, state, hot);
                         }
                         if icon_button(ui, icon::X, 18.0, 13.0, false, true)
                             .on_hover_text("Remove")

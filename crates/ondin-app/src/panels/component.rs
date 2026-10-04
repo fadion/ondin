@@ -261,6 +261,118 @@ impl OndinApp {
             Some(Act::DuplicateAsComponent) => self.duplicate_as_component(),
         }
     }
+
+    /// The list `read` takes from the node `id` is compared with — its source's
+    /// (`reset::source_of`) — or `None` outside an instance. What a list card
+    /// reads its rows' trailing slots and its ghost rows against (§15 D981, 4D).
+    pub(super) fn source_list<T: Clone>(
+        &self,
+        id: NodeId,
+        read: impl Fn(&ondin_core::Node) -> &[ondin_core::Keyed<T>],
+    ) -> Option<Vec<ondin_core::Keyed<T>>> {
+        let doc = &self.session.doc;
+        ondin_core::reset::source_of(doc, id)
+            .and_then(|s| doc.get(s))
+            .map(|s| read(s).to_vec())
+    }
+}
+
+/// A list item's reserved 14-pt trailing slot (§15 D981, 4D), laid out by a
+/// right-to-left row: empty while the item follows its main, the dot when it
+/// differs, `+` when it is the instance's own. On an overridden item whose row is
+/// `hot` — the pointer anywhere on it — the dot becomes ↺; answers whether that
+/// was clicked.
+///
+/// ⚠️ **`hot` comes from the caller**, because this sits in a right-to-left run
+/// whose own box begins past the row's label: asked of that box, a pointer on the
+/// label was not on the row, and the ↺ never showed (measured by
+/// `a_fill_list_marks_restores_and_resets_item_by_item`).
+pub(super) fn item_slot(ui: &mut egui::Ui, state: ondin_core::reset::ItemState, hot: bool) -> bool {
+    use ondin_core::reset::ItemState;
+    let (rect, resp) = ui.allocate_exact_size(
+        egui::vec2(14.0, ui.max_rect().height().min(ui::CONTROL_H)),
+        egui::Sense::click(),
+    );
+    let p = ui.painter();
+    match state {
+        ItemState::Follows => false,
+        ItemState::Local => {
+            p.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                icon::PLUS,
+                theme::icon_font(11.0),
+                theme::text::MUTED,
+            );
+            resp.on_hover_text("This instance's own — not in the main");
+            false
+        }
+        ItemState::Overridden if hot => {
+            p.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                icon::ARROW_COUNTER_CLOCKWISE,
+                theme::icon_font(12.0),
+                theme::text::STRONG,
+            );
+            resp.on_hover_text("Reset to main").clicked()
+        }
+        ItemState::Overridden => {
+            ui::override_dot(p, rect.center());
+            false
+        }
+    }
+}
+
+/// A **ghost row**: an item the instance removed while its main still has it,
+/// drawn dashed and dim with *Restore* (§15 D981, 4D) — the list half of the
+/// reset family. `label` is the item's own words (a hex, *Linear*, *Drop
+/// shadow*). Answers whether *Restore* was clicked.
+///
+/// ⚠️ **Lists only.** A deleted child *layer* gets no ghost row in the layers
+/// panel — D981's asymmetry, ruled: only the card's *Restore removed children*.
+pub(super) fn ghost_row(ui: &mut egui::Ui, label: &str, width: f32) -> bool {
+    let h = ui::CONTROL_H;
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, h), egui::Sense::hover());
+    let p = ui.painter();
+    let dash = egui::Stroke::new(1.0, theme::text::FAINT);
+    let r = rect.shrink(0.5);
+    for (a, b) in [
+        (r.left_top(), r.right_top()),
+        (r.right_top(), r.right_bottom()),
+        (r.right_bottom(), r.left_bottom()),
+        (r.left_bottom(), r.left_top()),
+    ] {
+        p.extend(egui::Shape::dashed_line(&[a, b], dash, 3.0, 3.0));
+    }
+    let chip = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + ui::FIELD_PAD_X + 8.0, rect.center().y),
+        egui::vec2(12.0, 12.0),
+    );
+    p.rect_filled(chip, 2.0, theme::text::FAINT.gamma_multiply(0.5));
+    p.text(
+        egui::pos2(chip.right() + 9.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        egui::FontId::proportional(12.0),
+        theme::text::FAINT,
+    );
+    let word = "Restore";
+    let w = ui::action_button_w(ui.ctx(), word) - 8.0;
+    let at = egui::Rect::from_min_size(
+        egui::pos2(rect.right() - w - 4.0, rect.top() + 4.0),
+        egui::vec2(w, h - 8.0),
+    );
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(at));
+    ui::action_button(
+        &mut child,
+        icon::ARROW_COUNTER_CLOCKWISE,
+        word,
+        FieldButton::Off,
+        at.size(),
+    )
+    .on_hover_text("Put the main's item back")
+    .clicked()
 }
 
 /// The inspector card that shows the field `op` writes — its title, as `panel`
@@ -979,6 +1091,96 @@ mod tests {
             doc.get(main_rect).unwrap().transform(),
             "the main's x is back"
         );
+    }
+
+    /// **A list reads item by item against the main's** (§15 D981, 4D). The main's
+    /// rect has two fills; the instance recolours the first, removes the second and
+    /// adds one of its own. The removed one draws as a ghost row whose *Restore*
+    /// puts it back by its id; the own one shows `+`; and the recoloured one's
+    /// slot, under the pointer, is ↺, whose click takes the main's colour back.
+    #[test]
+    fn a_fill_list_marks_restores_and_resets_item_by_item() {
+        use ondin_core::{Fill, Keyed, keyed_by_position};
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let r = f.app.session.doc.get(f.m).unwrap().children()[0];
+        let solid = |g: u8| Fill {
+            brush: ondin_core::Brush::Solid(ondin_core::peniko::Color::from_rgb8(10, g, 30)),
+            visible: true,
+        };
+        let main = keyed_by_position([solid(1), solid(2)]);
+        assert!(f.app.session.commit(Transaction(vec![Operation::SetFills {
+            id: r,
+            fills: main.clone(),
+        }])));
+        assert_eq!(fills_of(&f.app, f.ir), main, "the fixture: it propagated");
+        let own = Keyed::new(f.app.session.ids.mint_item(), solid(3));
+        assert!(f.app.session.commit(Transaction(vec![Operation::SetFills {
+            id: f.ir,
+            fills: vec![main[0].map(|_| solid(9)), own.clone()],
+        }])));
+        f.app.session.selection.set_one(f.ir);
+        let mut out = frame(&mut f.app, &ctx, Vec::new());
+        for _ in 0..3 {
+            out = frame(&mut f.app, &ctx, Vec::new());
+        }
+        let painted = texts(&out);
+        let gone_hex = crate::ui::hex_of(ondin_core::peniko::Color::from_rgb8(10, 2, 30));
+        assert!(painted.iter().any(|(t, _)| *t == gone_hex), "a ghost row");
+        let pluses = painted.iter().filter(|(t, _)| t == icon::PLUS).count();
+        assert!(
+            pluses >= 2,
+            "the header's + and the own fill's: {painted:?}"
+        );
+        // *Restore* on the ghost row.
+        let click = |app: &mut OndinApp, at: egui::Pos2| {
+            let press = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            };
+            frame(app, &ctx, vec![egui::Event::PointerMoved(at)]);
+            frame(app, &ctx, vec![press(true)]);
+            frame(app, &ctx, vec![press(false)]);
+        };
+        let restore = painted
+            .iter()
+            .find(|(t, _)| t == "Restore")
+            .map(|(_, r)| r.center())
+            .expect("the ghost row's Restore");
+        click(&mut f.app, restore);
+        let now = fills_of(&f.app, f.ir);
+        assert!(now.iter().any(|k| k.id == main[1].id), "restored by its id");
+        assert!(now.contains(&own), "the own fill stays");
+        // ↺ on the recoloured row.
+        let changed_hex = crate::ui::hex_of(ondin_core::peniko::Color::from_rgb8(10, 9, 30));
+        let out = frame(&mut f.app, &ctx, Vec::new());
+        let row = texts(&out)
+            .into_iter()
+            .find(|(t, _)| *t == changed_hex)
+            .map(|(_, r)| r)
+            .expect("the recoloured row");
+        frame(
+            &mut f.app,
+            &ctx,
+            vec![egui::Event::PointerMoved(row.center())],
+        );
+        let out = frame(&mut f.app, &ctx, Vec::new());
+        let undo = texts(&out)
+            .into_iter()
+            .find(|(t, r)| {
+                t == icon::ARROW_COUNTER_CLOCKWISE && (r.center().y - row.center().y).abs() < 4.0
+            })
+            .map(|(_, r)| r.center())
+            .expect("↺ in the hovered row's slot");
+        click(&mut f.app, undo);
+        let now = fills_of(&f.app, f.ir);
+        assert_eq!(now.iter().find(|k| k.id == main[0].id).unwrap(), &main[0]);
+    }
+
+    fn fills_of(app: &OndinApp, id: NodeId) -> Vec<ondin_core::Keyed<ondin_core::Fill>> {
+        app.session.doc.get(id).unwrap().paint().fills.clone()
     }
 
     /// **A card header counts its overrides and resets them** (§15 D981, 4E). The

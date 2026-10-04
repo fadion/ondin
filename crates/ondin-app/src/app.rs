@@ -2364,6 +2364,9 @@ impl eframe::App for OndinApp {
         // deliberate** — it is above this return now (§15 D526).
         if self.view == View::Dashboard {
             self.dashboard_ui(ui);
+            // Last of the library's frame, after every card: see the editor's
+            // twin at the end of this function.
+            crate::chrome::above_modal(ui.ctx(), crate::chrome::Chrome::current());
             // 🚨 **`chrome_focus` is written here too, because this return is
             // above the only other write** (§15 D850, `[X1.2-L6-01]`). The flag
             // otherwise kept whatever the last editor frame recorded for the whole
@@ -2722,6 +2725,11 @@ impl eframe::App for OndinApp {
         if took_tab && let Some(focused) = ctx.memory(|m| m.focused()) {
             ctx.memory_mut(|m| m.surrender_focus(focused));
         }
+
+        // **The window's controls over a card, last, once every card and the
+        // bar have been laid this pass** (§15 D973): a modal otherwise leaves
+        // the mouse no way to move, resize or close the window.
+        crate::chrome::above_modal(&ctx, crate::chrome::Chrome::current());
 
         // **After the surrender above, which is the only ordering that is true**
         // (§15 D821). A frame whose `Tab` was ours ends with nothing focused, so
@@ -7813,7 +7821,7 @@ impl OndinApp {
                 // The bar is the window's title bar too (§15 D952): its empty
                 // parts drag the window, laid first so every control added below
                 // keeps its own clicks.
-                crate::chrome::drag_strip(ui, crate::chrome::bar_rect(ui, 14.0, chrome));
+                crate::chrome::drag_strip(ui, crate::chrome::bar_rect(ui, 14.0, chrome), true);
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 8.0;
 
@@ -7895,7 +7903,7 @@ impl OndinApp {
                         // The window's own buttons, hard against the right edge
                         // where the system's were, then the bar's 14 points of
                         // margin before its own content (§15 D952).
-                        crate::chrome::caption_buttons(ui, chrome);
+                        crate::chrome::caption_buttons(ui, chrome, true);
                         crate::chrome::after_buttons(ui, 14.0, TOP_GAP);
 
                         // Rightmost in the cluster, because it is added first into a

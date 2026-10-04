@@ -452,6 +452,10 @@ pub(crate) fn card<R>(
     card_modal(id).show(ctx, |ui| {
         let out = body(ui);
         ui::focus_ring(ui);
+        // Where the card is, frame included, so the window's own controls laid
+        // over its backdrop keep clear of it (`chrome::above_modal`, §15 D973).
+        let rect = ui.min_rect().expand(PAD);
+        crate::chrome::note_card(ui.ctx(), rect);
         out
     })
 }

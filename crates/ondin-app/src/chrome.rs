@@ -206,13 +206,32 @@ fn maximized(ctx: &egui::Context) -> bool {
 /// no system caption does. So the press arms the strip only when nothing else
 /// interactive is under the pointer (`armed`), and a drag starts the window's
 /// move only from an armed press.
-pub(crate) fn drag_strip(ui: &mut egui::Ui, rect: Rect) {
-    let id = Id::new("window-drag-strip");
+///
+/// **`act` false makes it inert for the frame** — sensing, so it still stands
+/// under the bar's widgets, and sending nothing. The library passes
+/// `!menu_was_up`: a click that dismisses one of its menus is spent doing so
+/// (§15 D558, D973), and a double-click that closed a menu with its first half
+/// would otherwise maximize the window with its second.
+pub(crate) fn drag_strip(ui: &mut egui::Ui, rect: Rect, act: bool) {
+    strip(ui, rect, act, Id::new("window-drag-strip"));
+}
+
+/// [`drag_strip`] under `id` — its own, or [`above_modal`]'s, which lays a
+/// second strip in the same pass and must not clash with the first.
+fn strip(ui: &mut egui::Ui, rect: Rect, act: bool, id: Id) {
     let strip = ui.interact(rect, id, POINTER_ONLY);
     let ctx = ui.ctx().clone();
-    let armed_key = id.with("armed");
-    if strip.contains_pointer() && ctx.input(|i| i.pointer.primary_pressed()) {
-        // Read into locals: two `Context` accessors nested deadlock (CLAUDE.md).
+    // Where this pass's bar is, for `above_modal`, which lays the same strip
+    // and buttons again over a card's backdrop. Read into a local first: two
+    // `Context` accessors nested deadlock (CLAUDE.md).
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|d| d.insert_temp(bar_key(), (rect, pass)));
+    // The last press, as `(armed, spent, the press before it was spent)`:
+    // armed when it was on the strip over nothing else that answers a press,
+    // spent when `act` was false.
+    let press_key = id.with("press");
+    let pressed = ctx.input(|i| i.pointer.primary_pressed());
+    if pressed && (strip.contains_pointer() || !act) {
         let hovered: Vec<Id> = ctx.interaction_snapshot(|s| s.hovered.iter().copied().collect());
         let other = hovered.into_iter().any(|h| {
             h != id
@@ -220,14 +239,121 @@ pub(crate) fn drag_strip(ui: &mut egui::Ui, rect: Rect) {
                     .read_response(h)
                     .is_some_and(|r| r.sense.senses_click() || r.sense.senses_drag())
         });
-        ctx.data_mut(|d| d.insert_temp(armed_key, !other));
+        let (_, spent, _) = ctx.data(|d| {
+            d.get_temp::<(bool, bool, bool)>(press_key)
+                .unwrap_or_default()
+        });
+        ctx.data_mut(|d| d.insert_temp(press_key, (act && !other, !act, spent)));
     }
+    if !act {
+        return;
+    }
+    let (armed, spent, spent_before) = ctx.data(|d| {
+        d.get_temp::<(bool, bool, bool)>(press_key)
+            .unwrap_or_default()
+    });
+    // ⚠️ **Neither press of a double-click spent**, not only the second: the
+    // first may be the one a menu was dismissed by, and then the pair is not a
+    // double-click on the bar but a dismissal and a click.
     if strip.double_clicked() {
-        ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized(&ctx)));
-    } else if strip.drag_started_by(egui::PointerButton::Primary)
-        && ctx.data(|d| d.get_temp::<bool>(armed_key).unwrap_or(false))
-    {
+        if !spent && !spent_before {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized(&ctx)));
+        }
+    } else if strip.drag_started_by(egui::PointerButton::Primary) && armed {
         ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
+    }
+}
+
+/// The key `drag_strip` notes its rectangle under, with the pass it was laid
+/// in.
+fn bar_key() -> Id {
+    Id::new("window-drag-strip").with("rect")
+}
+
+/// The key `settings::card` notes a card's rectangle under ([`note_card`]).
+fn card_key() -> Id {
+    Id::new("chrome-modal-card")
+}
+
+/// Note that a modal card was drawn this pass, at `rect`, for [`above_modal`].
+/// `settings::card` calls it, which every card in the app goes through.
+pub(crate) fn note_card(ctx: &egui::Context, rect: Rect) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|d| d.insert_temp(card_key(), (rect, pass)));
+}
+
+/// **The window's own controls, over a modal card's backdrop** (§15 D973,
+/// `[X2-L1-02]`). Call once a frame, after every card.
+///
+/// `egui::Modal` refuses interaction to every layer below its own, and the
+/// top bar is a panel and the resize zones older areas — so while any card
+/// was up, the caption buttons, the drag strip and the resize edges were dead,
+/// and the mouse could not move, resize, minimize, maximize or close the
+/// window. The system's frame, which these stand in for, is never blocked by an
+/// app's own dialog. So with a card drawn this pass the zones are raised above
+/// it, and the bar's strip and buttons are laid again in an area of their own
+/// on top — **unless the card reaches into the bar**, on a window short enough
+/// for a tall card to, where the card's own top edge wins.
+///
+/// **Close is still a close request**, so with *Unsaved changes* up a click on
+/// ✕ re-arms that same card rather than closing anything
+/// (`OndinApp::handle_close_request`).
+pub(crate) fn above_modal(ctx: &egui::Context, chrome: Chrome) {
+    let pass = ctx.cumulative_pass_nr();
+    let card = ctx.data(|d| d.get_temp::<(Rect, u64)>(card_key()));
+    let Some((card, _)) = card.filter(|&(_, at)| at == pass) else {
+        return;
+    };
+    let bar = ctx.data(|d| d.get_temp::<(Rect, u64)>(bar_key()));
+    let bar = bar.filter(|&(r, at)| at == pass && !r.intersects(card));
+    if let (true, Some((bar, _))) = (chrome.draws_own_controls(), bar) {
+        let id = Id::new("chrome-above-modal");
+        egui::Area::new(id)
+            .order(Order::Foreground)
+            .fixed_pos(bar.min)
+            .constrain(false)
+            .show(ctx, |ui| {
+                ui.scope_builder(
+                    egui::UiBuilder::new()
+                        .max_rect(bar)
+                        .layout(egui::Layout::right_to_left(egui::Align::Center)),
+                    |ui| {
+                        strip(ui, bar, true, id.with("strip"));
+                        caption_buttons(ui, chrome, true);
+                    },
+                );
+                // ⚠️ **The zones' share of the bar, again, in this area and
+                // after the strip and buttons**, so they win there as they do
+                // with no card. Laid only in the separate zone areas, the
+                // lifted strip covered the top edge, both top corners and the
+                // sides down to the bar's height, and a press there moved the
+                // window instead of resizing it (found by `arch-scribe` reading
+                // this, §15 D973). Raising the zone areas *after* this one does
+                // not fix it: egui keeps the layers asking to be on top in a
+                // hash set and sorts stably, so among them the order is their
+                // age, never the order of the `move_to_top` calls — measured,
+                // the first repair of this was green in no test.
+                if chrome.draws_own_resize_border() && !maximized(ctx) {
+                    for (i, (direction, rect)) in zones(ctx.content_rect()).into_iter().enumerate()
+                    {
+                        if rect.intersects(bar) {
+                            let resp = ui.interact(rect, id.with(("zone", i)), POINTER_ONLY);
+                            zone_acts(ui, resp, direction);
+                        }
+                    }
+                }
+            });
+        ctx.move_to_top(egui::LayerId::new(Order::Foreground, id));
+    }
+    // And every zone above the card, which is what lets the edges below the
+    // bar resize the window at all with a card up.
+    if chrome.draws_own_resize_border() && !maximized(ctx) {
+        for (i, (direction, _)) in zones(ctx.content_rect()).iter().enumerate() {
+            ctx.move_to_top(egui::LayerId::new(
+                Order::Foreground,
+                zone_id(i, *direction),
+            ));
+        }
     }
 }
 
@@ -242,7 +368,10 @@ pub(crate) fn drag_strip(ui: &mut egui::Ui, rect: Rect) {
 /// **Close sends [`egui::ViewportCommand::Close`]**, which is the same request
 /// the system's button makes, so it passes through `handle_close_request` and
 /// unsaved work is asked about exactly as it is for Alt+F4.
-pub(crate) fn caption_buttons(ui: &mut egui::Ui, chrome: Chrome) {
+///
+/// **`act` false draws them and sends nothing** — [`drag_strip`]'s `act`, for
+/// the same click that dismisses a menu (§15 D973, `[R1-L2-02]`).
+pub(crate) fn caption_buttons(ui: &mut egui::Ui, chrome: Chrome, act: bool) {
     if !chrome.draws_own_controls() {
         return;
     }
@@ -250,11 +379,11 @@ pub(crate) fn caption_buttons(ui: &mut egui::Ui, chrome: Chrome) {
     // spacing neither separates them nor is changed for what follows.
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
-        three_buttons(ui);
+        three_buttons(ui, act);
     });
 }
 
-fn three_buttons(ui: &mut egui::Ui) {
+fn three_buttons(ui: &mut egui::Ui, act: bool) {
     let ctx = ui.ctx().clone();
     let height = ui.available_height();
     let glyph = |ui: &egui::Ui, rect: Rect, hovered: bool, close: bool| {
@@ -284,7 +413,7 @@ fn three_buttons(ui: &mut egui::Ui) {
     let h = 5.0;
     p.line_segment([c + Vec2::new(-h, -h), c + Vec2::new(h, h)], stroke);
     p.line_segment([c + Vec2::new(-h, h), c + Vec2::new(h, -h)], stroke);
-    if resp.on_hover_text("Close").clicked() {
+    if resp.on_hover_text("Close").clicked() && act {
         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
     }
 
@@ -309,6 +438,7 @@ fn three_buttons(ui: &mut egui::Ui) {
     if resp
         .on_hover_text(if max { "Restore" } else { "Maximize" })
         .clicked()
+        && act
     {
         ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
     }
@@ -317,7 +447,7 @@ fn three_buttons(ui: &mut egui::Ui) {
     let (rect, resp) = button(ui, false);
     let (p, stroke, c) = glyph(ui, rect, resp.hovered(), false);
     p.line_segment([c + Vec2::new(-5.0, 0.0), c + Vec2::new(5.0, 0.0)], stroke);
-    if resp.on_hover_text("Minimize").clicked() {
+    if resp.on_hover_text("Minimize").clicked() && act {
         ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
     }
 }
@@ -383,8 +513,8 @@ pub(crate) fn present_strip(ctx: &egui::Context, chrome: Chrome) {
                     .max_rect(strip)
                     .layout(egui::Layout::right_to_left(egui::Align::Center)),
                 |ui| {
-                    drag_strip(ui, strip);
-                    caption_buttons(ui, chrome);
+                    drag_strip(ui, strip, true);
+                    caption_buttons(ui, chrome, true);
                 },
             );
         });
@@ -396,15 +526,27 @@ fn snap(p: Pos2) -> Pos2 {
     Pos2::new(p.x.floor() + 0.5, p.y.floor() + 0.5)
 }
 
-/// The eight zones a window is resized from, as `(direction, rect)` within the
+/// The zones a window is resized from, as `(direction, rect)` within the
 /// window's `screen`: four edges [`EDGE`] deep, each stopping [`CORNER`] short of
-/// its ends, and four [`CORNER`]-sided corners. Corners come last, so where an
-/// edge and a corner meet the corner is the one hit.
-fn zones(screen: Rect) -> [(ResizeDirection, Rect); 8] {
+/// its ends, and four corners, each an **L** of two [`EDGE`]-deep arms
+/// [`CORNER`] long.
+///
+/// ⚠️ **Two rectangles per corner, because an L is not a rectangle** (§15 D973,
+/// `[X2-L3-01]`). Each corner was written `a.union(b)` — read as an L, and the
+/// tests' prose said so — but `Rect::union` is the bounding box, so every
+/// corner was a full 14-point square and its inner 9×9 resized the window: a
+/// press 7 points in from the top-right corner, on the close button, began a
+/// north-east resize. Ruled an L under the maintainer's delegation: the corner
+/// a thrown pointer lands on is the close button's, and the thickness of the
+/// frame it stands in for is [`EDGE`], not [`CORNER`].
+fn zones(screen: Rect) -> [(ResizeDirection, Rect); 12] {
     let (l, t, r, b) = (screen.min.x, screen.min.y, screen.max.x, screen.max.y);
     let rect = |x0: f32, y0: f32, x1: f32, y1: f32| {
         Rect::from_min_max(Pos2::new(x0, y0), Pos2::new(x1, y1))
     };
+    // Each corner's horizontal arm takes the square where the arms meet, and
+    // its vertical arm starts below it, so no point is in both.
+    use ResizeDirection::{NorthEast, NorthWest, SouthEast, SouthWest};
     [
         (
             ResizeDirection::North,
@@ -422,23 +564,21 @@ fn zones(screen: Rect) -> [(ResizeDirection, Rect); 8] {
             ResizeDirection::East,
             rect(r - EDGE, t + CORNER, r, b - CORNER),
         ),
-        (
-            ResizeDirection::NorthWest,
-            rect(l, t, l + CORNER, t + EDGE).union(rect(l, t, l + EDGE, t + CORNER)),
-        ),
-        (
-            ResizeDirection::NorthEast,
-            rect(r - CORNER, t, r, t + EDGE).union(rect(r - EDGE, t, r, t + CORNER)),
-        ),
-        (
-            ResizeDirection::SouthWest,
-            rect(l, b - EDGE, l + CORNER, b).union(rect(l, b - CORNER, l + EDGE, b)),
-        ),
-        (
-            ResizeDirection::SouthEast,
-            rect(r - CORNER, b - EDGE, r, b).union(rect(r - EDGE, b - CORNER, r, b)),
-        ),
+        (NorthWest, rect(l, t, l + CORNER, t + EDGE)),
+        (NorthWest, rect(l, t + EDGE, l + EDGE, t + CORNER)),
+        (NorthEast, rect(r - CORNER, t, r, t + EDGE)),
+        (NorthEast, rect(r - EDGE, t + EDGE, r, t + CORNER)),
+        (SouthWest, rect(l, b - EDGE, l + CORNER, b)),
+        (SouthWest, rect(l, b - CORNER, l + EDGE, b - EDGE)),
+        (SouthEast, rect(r - CORNER, b - EDGE, r, b)),
+        (SouthEast, rect(r - EDGE, b - CORNER, r, b - EDGE)),
     ]
+}
+
+/// The area id of the `i`th of [`zones`] — by index as well as direction,
+/// since each corner direction names two areas.
+fn zone_id(i: usize, direction: ResizeDirection) -> Id {
+    Id::new(("window-resize", i, format!("{direction:?}")))
 }
 
 fn cursor(direction: ResizeDirection) -> CursorIcon {
@@ -474,19 +614,26 @@ pub(crate) fn resize_zones(ctx: &egui::Context, chrome: Chrome) {
         return;
     }
     let screen = ctx.content_rect();
-    for (direction, rect) in zones(screen) {
-        egui::Area::new(Id::new(("window-resize", format!("{direction:?}"))))
+    for (i, (direction, rect)) in zones(screen).into_iter().enumerate() {
+        egui::Area::new(zone_id(i, direction))
             .order(Order::Foreground)
             .fixed_pos(rect.min)
             .constrain(false)
             .show(ctx, |ui| {
                 let (_, resp) = ui.allocate_exact_size(rect.size(), POINTER_ONLY);
-                let resp = resp.on_hover_cursor(cursor(direction));
-                if resp.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_pressed()) {
-                    ui.ctx()
-                        .send_viewport_cmd(egui::ViewportCommand::BeginResize(direction));
-                }
+                zone_acts(ui, resp, direction);
             });
+    }
+}
+
+/// One resize zone's behaviour, on the response of whatever senses it: the
+/// direction's cursor on hover, and the system's resize loop on the press —
+/// sent on the press, because `BeginResize` needs the button still down.
+fn zone_acts(ui: &egui::Ui, resp: egui::Response, direction: ResizeDirection) {
+    let resp = resp.on_hover_cursor(cursor(direction));
+    if resp.is_pointer_button_down_on() && ui.input(|i| i.pointer.primary_pressed()) {
+        ui.ctx()
+            .send_viewport_cmd(egui::ViewportCommand::BeginResize(direction));
     }
 }
 
@@ -529,9 +676,17 @@ mod tests {
     }
 
     /// **The zones cover the frame and contest no point**: every edge is
-    /// [`EDGE`] deep, each corner a [`CORNER`] square's L, and no two zones
-    /// overlap — so a press has one answer — while every point of the window's
-    /// border belongs to one of them.
+    /// `EDGE` deep, each corner an L of two `EDGE`-deep arms `CORNER` long, and
+    /// no two zones overlap — so a press has one answer — while every point of
+    /// the window's border belongs to one of them.
+    ///
+    /// **And the L is an L** (§15 D973, `[X2-L3-01]`): the inside of the
+    /// corner, 8 points in from both edges, is nobody's — on the top right that
+    /// is the close button. The corners were `Rect::union`s, which are bounding
+    /// boxes, and this test sampled only the border, so a square passed it.
+    /// **Flip-check, run**: each corner back to the square
+    /// `rect(r - CORNER, t, r, t + CORNER)` and its vertical arm dropped fails
+    /// on *"the inside of the top-right corner"*.
     #[test]
     fn the_resize_zones_tile_the_border() {
         let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(800.0, 600.0));
@@ -553,10 +708,28 @@ mod tests {
                 );
             }
         }
+        for y in [0.5, 7.0, 300.0, 593.0, 599.5] {
+            for x in [0.5, 799.5] {
+                let p = Pos2::new(x, y);
+                assert!(
+                    z.iter().any(|(_, r)| r.contains(p)),
+                    "the border point {p:?} has a zone"
+                );
+            }
+        }
         assert!(
             !z.iter().any(|(_, r)| r.contains(Pos2::new(400.0, 300.0))),
             "and the middle has none"
         );
+        let at = |p: Pos2| z.iter().find(|(_, r)| r.contains(p)).map(|(d, _)| *d);
+        assert_eq!(
+            at(Pos2::new(792.0, 8.0)),
+            None,
+            "the inside of the top-right corner"
+        );
+        assert_eq!(at(Pos2::new(797.0, 12.0)), Some(ResizeDirection::NorthEast));
+        assert_eq!(at(Pos2::new(788.0, 2.0)), Some(ResizeDirection::NorthEast));
+        assert_eq!(at(Pos2::new(8.0, 592.0)), None, "nor of the bottom-left");
     }
 
     const SCREEN: Rect = Rect::from_min_max(Pos2::ZERO, Pos2::new(800.0, 600.0));
@@ -571,6 +744,19 @@ mod tests {
         ctx: &egui::Context,
         events: Vec<egui::Event>,
         maximized: bool,
+    ) -> Vec<egui::ViewportCommand> {
+        frame_with(ctx, events, maximized, true, None)
+    }
+
+    /// `frame` with the bar's `act`, and with `card` — `Some(lifted)` puts a
+    /// modal card up after the bar, through `settings::card` as every card in
+    /// the app goes, and then calls `above_modal` when `lifted`.
+    fn frame_with(
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+        maximized: bool,
+        act: bool,
+        card: Option<bool>,
     ) -> Vec<egui::ViewportCommand> {
         let mut input = egui::RawInput {
             screen_rect: Some(SCREEN),
@@ -593,13 +779,22 @@ mod tests {
                     .max_rect(BAR)
                     .layout(egui::Layout::right_to_left(egui::Align::Center)),
                 |ui| {
-                    drag_strip(ui, BAR);
+                    drag_strip(ui, BAR, act);
                     ui.spacing_mut().item_spacing.x = 5.0;
-                    caption_buttons(ui, chrome);
+                    caption_buttons(ui, chrome, act);
                     after_buttons(ui, 14.0, 5.0);
                     let _ = ui.button("Settings");
                 },
             );
+            if let Some(lifted) = card {
+                let _ = crate::settings::card("probe-card", ui.ctx(), |ui| {
+                    ui.set_width(200.0);
+                    ui.label("A card");
+                });
+                if lifted {
+                    above_modal(ui.ctx(), chrome);
+                }
+            }
         });
         out.viewport_output
             .get(&egui::ViewportId::ROOT)
@@ -911,5 +1106,106 @@ mod tests {
             "maximized, the strip restores: {sent:?}"
         );
         assert!(!canvas);
+    }
+
+    /// A click at `at` over the frames egui needs, with the bar's `act` and a
+    /// `card` as `frame_with` takes them.
+    fn click_with(
+        ctx: &egui::Context,
+        at: Pos2,
+        act: bool,
+        card: Option<bool>,
+    ) -> Vec<egui::ViewportCommand> {
+        let mut sent = frame_with(ctx, vec![egui::Event::PointerMoved(at)], false, act, card);
+        sent.extend(frame_with(ctx, vec![press(at, true)], false, act, card));
+        sent.extend(frame_with(ctx, vec![press(at, false)], false, act, card));
+        sent.extend(frame_with(ctx, Vec::new(), false, act, card));
+        sent
+    }
+
+    /// **A modal card leaves the window's controls working** (§15 D973,
+    /// `[X2-L1-02]`): close, maximize and the west edge each send their command
+    /// with a card up, where `egui::Modal`'s refusal of every layer beneath it
+    /// had left all three dead.
+    ///
+    /// **Flip-check, run**: the card without `above_modal` (`Some(false)`) is
+    /// the control, and it sends nothing — asserted below, so a harness that
+    /// stopped putting a card up would fail here rather than pass vacuously.
+    /// And without the zones laid again inside the lifted area (the `zone`
+    /// widgets in `above_modal`), it fails on the top edge, `[400.0 1.0]`
+    /// sending nothing — the strip takes the press. That is also how the
+    /// first draft failed, which raised the zone areas after the lifted one
+    /// and could not order them by doing so.
+    #[test]
+    fn a_modal_card_leaves_the_windows_controls_working() {
+        use egui::ViewportCommand as C;
+        // The top edge, a top corner and a side within the bar's height are
+        // where the lifted strip and buttons overlap the zones, and the zones
+        // must win there as they do with no card.
+        let cases = [
+            (Pos2::new(790.0, 23.0), C::Close),
+            (Pos2::new(731.0, 23.0), C::Maximized(true)),
+            (Pos2::new(1.0, 300.0), C::BeginResize(ResizeDirection::West)),
+            (
+                Pos2::new(400.0, 1.0),
+                C::BeginResize(ResizeDirection::North),
+            ),
+            (
+                Pos2::new(799.0, 1.0),
+                C::BeginResize(ResizeDirection::NorthEast),
+            ),
+            (Pos2::new(1.0, 30.0), C::BeginResize(ResizeDirection::West)),
+        ];
+        for (at, want) in cases {
+            let ctx = fresh();
+            let _ = frame_with(&ctx, Vec::new(), false, true, Some(false));
+            let blocked = click_with(&ctx, at, true, Some(false));
+            assert!(
+                !blocked.contains(&want),
+                "the control: {at:?} sent {blocked:?}"
+            );
+
+            let ctx = fresh();
+            let _ = frame_with(&ctx, Vec::new(), false, true, Some(true));
+            let sent = click_with(&ctx, at, true, Some(true));
+            assert!(sent.contains(&want), "with a card up, {at:?} sent {sent:?}");
+        }
+    }
+
+    /// **A click that dismisses a menu is spent doing so** (§15 D558, D973,
+    /// `[R1-L2-02]`): with `act` false the caption buttons send nothing, and a
+    /// double-click whose first press was spent maximizes nothing.
+    ///
+    /// **Flip-check, run**: `three_buttons` ignoring `act` fails on *"close"*;
+    /// `strip` ignoring the earlier spent press fails on *"a dismissal and a
+    /// click"* with `[Maximized(true)]`.
+    #[test]
+    fn a_spent_click_moves_no_window() {
+        use egui::ViewportCommand as C;
+        let ctx = fresh();
+        let sent = click_with(&ctx, Pos2::new(790.0, 23.0), false, None);
+        assert!(!sent.contains(&C::Close), "close: {sent:?}");
+        let sent = click_with(&ctx, Pos2::new(731.0, 23.0), false, None);
+        assert!(!sent.contains(&C::Maximized(true)), "maximize: {sent:?}");
+
+        // A press that dismissed a menu, then one that did not, quickly enough
+        // to be a double-click on the empty bar.
+        let ctx = fresh();
+        let at = Pos2::new(300.0, 23.0);
+        let mut sent = frame_with(
+            &ctx,
+            vec![egui::Event::PointerMoved(at)],
+            false,
+            false,
+            None,
+        );
+        sent.extend(frame_with(&ctx, vec![press(at, true)], false, false, None));
+        sent.extend(frame_with(&ctx, vec![press(at, false)], false, true, None));
+        sent.extend(frame_with(&ctx, vec![press(at, true)], false, true, None));
+        sent.extend(frame_with(&ctx, vec![press(at, false)], false, true, None));
+        assert!(
+            !sent.contains(&C::Maximized(true)),
+            "a dismissal and a click: {sent:?}"
+        );
     }
 }

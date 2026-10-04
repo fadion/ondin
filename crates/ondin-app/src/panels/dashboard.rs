@@ -124,6 +124,34 @@ fn card_width(width: f32) -> f32 {
 }
 /// The search field, from the design.
 const SEARCH_W: f32 = 340.0;
+
+/// The narrowest the search field is squeezed to before it is allowed to
+/// overlap — wide enough for its glyph and a few letters of a query.
+const SEARCH_MIN_W: f32 = 120.0;
+
+/// The search field's rectangle in the library's top bar: [`SEARCH_W`] wide,
+/// centred on the window's `centre_x`, and **kept clear of the brand on the
+/// left (`left`) and of the right-hand cluster (`right`)**, by a gap each side —
+/// slid off centre first, then narrowed down to [`SEARCH_MIN_W`].
+///
+/// ⚠️ **Both halves are §15 D973's** (`[X2-L1-01]`, `[X2-L1-03]`). It was
+/// centred on the bar's `max_rect`, which [`crate::chrome::bar_frame`] leaves
+/// with a left margin and no right one, so it sat 7 points right of the
+/// window's centre (43 on macOS). And it was placed with no regard for the
+/// cluster, which the caption buttons (§15 D952) and the update chip (D954)
+/// had grown by about 230 points: at 683 points wide or less the field lay
+/// over the Settings gear — its only door — and, with an update staged, over
+/// the chip up to about 873, and took their clicks, being registered after
+/// them.
+fn search_rect(centre_x: f32, centre_y: f32, left: f32, right: f32) -> egui::Rect {
+    const GAP: f32 = 12.0;
+    let (lo, hi) = (left + GAP, right - GAP);
+    let w = SEARCH_W.min(hi - lo).max(SEARCH_MIN_W);
+    // Centred if it fits there; else as near the centre as the room allows —
+    // and on a window too narrow even for the minimum, against the brand.
+    let x = centre_x.min(hi - w / 2.0).max(lo + w / 2.0);
+    egui::Rect::from_center_size(egui::pos2(x, centre_y), egui::vec2(w, 28.0))
+}
 /// A row in the search dropdown.
 const SEARCH_ROW_H: f32 = 30.0;
 /// Where the search field's text starts, measured from the field's left edge —
@@ -819,8 +847,12 @@ impl OndinApp {
             .resizable(false)
             .frame(crate::chrome::bar_frame(color::TOPBAR, 14.0, chrome))
             .show(ui, |ui| {
-                // The window's title bar, as the editor's is (§15 D952).
-                crate::chrome::drag_strip(ui, crate::chrome::bar_rect(ui, 14.0, chrome));
+                // The window's title bar, as the editor's is (§15 D952) — and,
+                // like every door on this screen, inert for the click that
+                // dismisses a menu (§15 D558, D973).
+                let chrome_acts = !self.dash.menu_was_up;
+                let bar = crate::chrome::bar_rect(ui, 14.0, chrome);
+                crate::chrome::drag_strip(ui, bar, chrome_acts);
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 12.0;
                     // The same mark as the editor's, at rest rather than as a
@@ -832,89 +864,98 @@ impl OndinApp {
                     crate::ui::logo(ui, mark, false);
                     // 12 points from the mark — this row's spacing, and the
                     // editor's bar matches it (§15 D962).
-                    ui.label(
-                        egui::RichText::new("Ondin")
-                            .size(13.0)
-                            .color(theme::text::STRONG),
-                    );
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        // The window's own buttons first, rightmost (§15 D952).
-                        crate::chrome::caption_buttons(ui, chrome);
-                        crate::chrome::after_buttons(ui, 14.0, 12.0);
-                        // ⚠️ **Its own modal, not the editor's.** The two settings
-                        // screens answer different questions — where the library
-                        // lives and how it opens, against how the editor behaves
-                        // — so joining them would put six sections behind one
-                        // button, of which four are about a document that is not
-                        // open.
-                        //
-                        // The editor's settings button, size for size — and, with
-                        // the update pill beside it, the editor's gap to the pill,
-                        // `TOP_GAP` rather than this row's 12 (§15 D966). egui adds
-                        // an item's gap when the item is placed, so the gap to the
-                        // pill is set here, on Settings, and only when the pill
-                        // will be drawn: with none, the status dot comes next and
-                        // keeps the row's 12.
-                        let pill = self.updater.state().label().is_some();
-                        ui.spacing_mut().item_spacing.x =
-                            if pill { crate::app::TOP_GAP } else { 12.0 };
-                        if icon_button(
-                            ui,
-                            icon::SLIDERS,
-                            crate::settings::SETTINGS_BOX,
-                            crate::settings::SETTINGS_GLYPH,
-                            false,
-                            true,
+                    let brand = ui
+                        .label(
+                            egui::RichText::new("Ondin")
+                                .size(13.0)
+                                .color(theme::text::STRONG),
                         )
-                        .on_hover_text("Library settings")
-                        .clicked()
-                            && !self.dash.menu_was_up
-                        {
-                            self.library_settings =
-                                Some(LibrarySettings::from_prefs(&self.prefs, &self.library.root));
-                        }
-                        // The row's own 12 again, for the gap after the pill.
-                        ui.spacing_mut().item_spacing.x = 12.0;
-                        // The update offer, as the editor's bar has it (§15 D954).
-                        if crate::update::chip(ui, self.updater.state()) {
-                            self.restart_to_update();
-                        }
-                        // ⚠️ **The library's half of the status line, and it did
-                        // not exist.** `EditorSession::status` had one production
-                        // reader — the editor's top bar, which is below
-                        // `OndinApp::ui`'s `View::Dashboard` return — so all
-                        // **22** messages this file writes were painted nowhere.
-                        // A *Delete project* that could not read `projects.json`
-                        // closed its confirmation, left the project in the
-                        // sidebar and said nothing; a *Delete files too* that
-                        // failed to trash some members removed the row and left
-                        // those documents on disk carrying a project id nothing
-                        // lists. The message was not cleared either — it
-                        // surfaced later, out of context, in the editor.
-                        //
-                        // Same function as the editor's, so the two screens
-                        // cannot disagree about what a failure looks like
-                        // (`crate::app::status_label`).
-                        //
-                        // 🚨 **A dot with the message on hover, not the message**
-                        // (§15 D751). This read
-                        // `status_label(ui, self.session.status(), room)` with
-                        // `room = (ui.max_rect().width() - SEARCH_W) / 2.0 - 48.0`
-                        // — half the leftover space beside the painted search
-                        // field, less the gear — under a comment calling it
-                        // *"bounded, because the search field is painted across
-                        // the centre of this bar rather than laid out in it"*.
-                        // The bound was right and it is a **function of the
-                        // window**: 382pt at the default 1200, 22pt at 500, zero
-                        // at 436, and nothing stops the window being any of them.
-                        // So the message faded out exactly where present mode says
-                        // the user is working — a laptop screen with the panels in
-                        // the way. A dot is the same size at every width and the
-                        // tooltip carries the sentence whole rather than an
-                        // ellipsis of it.
-                        crate::app::status_dot(ui, self.session.status());
-                    });
+                        .rect;
+
+                    let cluster = ui
+                        .with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            // The window's own buttons first, rightmost (§15 D952).
+                            crate::chrome::caption_buttons(ui, chrome, chrome_acts);
+                            crate::chrome::after_buttons(ui, 14.0, 12.0);
+                            // ⚠️ **Its own modal, not the editor's.** The two settings
+                            // screens answer different questions — where the library
+                            // lives and how it opens, against how the editor behaves
+                            // — so joining them would put six sections behind one
+                            // button, of which four are about a document that is not
+                            // open.
+                            //
+                            // The editor's settings button, size for size — and, with
+                            // the update pill beside it, the editor's gap to the pill,
+                            // `TOP_GAP` rather than this row's 12 (§15 D966). egui adds
+                            // an item's gap when the item is placed, so the gap to the
+                            // pill is set here, on Settings, and only when the pill
+                            // will be drawn: with none, the status dot comes next and
+                            // keeps the row's 12.
+                            let pill = self.updater.state().label().is_some();
+                            ui.spacing_mut().item_spacing.x =
+                                if pill { crate::app::TOP_GAP } else { 12.0 };
+                            if icon_button(
+                                ui,
+                                icon::SLIDERS,
+                                crate::settings::SETTINGS_BOX,
+                                crate::settings::SETTINGS_GLYPH,
+                                false,
+                                true,
+                            )
+                            .on_hover_text("Library settings")
+                            .clicked()
+                                && !self.dash.menu_was_up
+                            {
+                                self.library_settings = Some(LibrarySettings::from_prefs(
+                                    &self.prefs,
+                                    &self.library.root,
+                                ));
+                            }
+                            // The row's own 12 again, for the gap after the pill.
+                            ui.spacing_mut().item_spacing.x = 12.0;
+                            // The update offer, as the editor's bar has it (§15 D954).
+                            if crate::update::chip(ui, self.updater.state())
+                                && !self.dash.menu_was_up
+                            {
+                                self.restart_to_update();
+                            }
+                            // ⚠️ **The library's half of the status line, and it did
+                            // not exist.** `EditorSession::status` had one production
+                            // reader — the editor's top bar, which is below
+                            // `OndinApp::ui`'s `View::Dashboard` return — so all
+                            // **22** messages this file writes were painted nowhere.
+                            // A *Delete project* that could not read `projects.json`
+                            // closed its confirmation, left the project in the
+                            // sidebar and said nothing; a *Delete files too* that
+                            // failed to trash some members removed the row and left
+                            // those documents on disk carrying a project id nothing
+                            // lists. The message was not cleared either — it
+                            // surfaced later, out of context, in the editor.
+                            //
+                            // Same function as the editor's, so the two screens
+                            // cannot disagree about what a failure looks like
+                            // (`crate::app::status_label`).
+                            //
+                            // 🚨 **A dot with the message on hover, not the message**
+                            // (§15 D751). This read
+                            // `status_label(ui, self.session.status(), room)` with
+                            // `room = (ui.max_rect().width() - SEARCH_W) / 2.0 - 48.0`
+                            // — half the leftover space beside the painted search
+                            // field, less the gear — under a comment calling it
+                            // *"bounded, because the search field is painted across
+                            // the centre of this bar rather than laid out in it"*.
+                            // The bound was right and it is a **function of the
+                            // window**: 382pt at the default 1200, 22pt at 500, zero
+                            // at 436, and nothing stops the window being any of them.
+                            // So the message faded out exactly where present mode says
+                            // the user is working — a laptop screen with the panels in
+                            // the way. A dot is the same size at every width and the
+                            // tooltip carries the sentence whole rather than an
+                            // ellipsis of it.
+                            crate::app::status_dot(ui, self.session.status());
+                        })
+                        .response
+                        .rect;
 
                     // **Painted into the middle of the bar rather than laid out
                     // between the two clusters**, so it is centred on the
@@ -922,10 +963,11 @@ impl OndinApp {
                     // left over. The design centres it, and a field that drifts
                     // when a project name gets longer would be the version of
                     // this that layout gives you for free.
-                    let bar = ui.max_rect();
-                    let field = egui::Rect::from_center_size(
-                        egui::pos2(bar.center().x, bar.center().y),
-                        egui::vec2(SEARCH_W, 28.0),
+                    let field = search_rect(
+                        ui.ctx().content_rect().center().x,
+                        ui.max_rect().center().y,
+                        brand.right(),
+                        cluster.left(),
                     );
                     self.search_field(ui, field, act);
                 });
@@ -3049,7 +3091,7 @@ impl OndinApp {
     /// `pick_or_open` alone; `arch-scribe` then found three more doors, then two
     /// more, and the sweep that finally settled it was **every `.clicked()` in
     /// this file checked against what it does**, not a re-reading of the change.
-    /// Eight doors, and three of them *create* a document:
+    /// Nine doors, and three of them *create* a document:
     ///
     /// 1. [`OndinApp::pick_or_open`] — the file card and the file row.
     /// 2. `file_grid`'s dashed *New file* card. **Creates.**
@@ -3063,6 +3105,10 @@ impl OndinApp {
     /// 7. `project_cards`' call of [`Self::project_card`], on *Recent*.
     /// 8. The body header's *Library settings*, search, *Delete project*,
     ///    *Edit project* and sort-cycle controls.
+    /// 9. The top bar's update chip, caption buttons and drag strip — added to
+    ///    this bar by §15 D952 and D954 without joining this list, so a click
+    ///    that closed a menu also restarted, closed or maximized the window
+    ///    (§15 D973, `[R1-L2-02]`). The chrome takes it as `act`.
     ///
     /// ⚠️ **Three things deliberately do *not* read it, and each would be a bug
     /// if it did.** [`Self::file_menu_button`] is the ⋮ *anchor* — both dismissals
@@ -11584,5 +11630,100 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **At half a screen the search field leaves the gear and the chip their
+    /// clicks** (§15 D973, `[X2-L1-01]`): at 640 points a click on the Settings
+    /// gear opened the search and not Library settings, and with an update
+    /// staged so did a click on *Restart to update*, up to about 873. And at
+    /// the default width the field is centred on the *window* (`[X2-L1-03]`),
+    /// where it sat 7 points right of it.
+    ///
+    /// **Flip-check, run**: `search_rect` returning the old placement —
+    /// `SEARCH_W` wide on the bar's own centre — fails on *"the gear opens
+    /// Library settings"* at 640 with the search open instead, the reported
+    /// symptom.
+    #[test]
+    fn at_half_a_screen_the_search_field_leaves_the_gear_and_the_chip_their_clicks() {
+        let find = |out: &egui::FullOutput, want: &dyn Fn(&str) -> bool| {
+            out.shapes.iter().find_map(|cs| match &cs.shape {
+                egui::Shape::Text(t) if want(&t.galley.job.text) => {
+                    Some(t.pos + t.galley.size() / 2.0)
+                }
+                _ => None,
+            })
+        };
+        for (width, staged) in [(640.0, false), (640.0, true), (760.0, true), (1320.0, true)] {
+            let ctx = egui::Context::default();
+            crate::theme::install(&ctx);
+            let (mut app, root) = app(&ctx, &format!("narrow-{width}-{staged}"));
+            if staged {
+                app.updater = crate::update::Updater::ready("9.9.9");
+            }
+            let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 820.0));
+            let run = |app: &mut OndinApp, events: Vec<egui::Event>| {
+                let input = egui::RawInput {
+                    screen_rect: Some(screen),
+                    events,
+                    ..Default::default()
+                };
+                ctx.run_ui(input, |ui| app.dashboard_ui(ui))
+            };
+            let mut out = run(&mut app, vec![]);
+            for _ in 0..3 {
+                out = run(&mut app, vec![]);
+            }
+            let click = |app: &mut OndinApp, at: egui::Pos2| {
+                let button = |pressed| egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Default::default(),
+                };
+                run(app, vec![egui::Event::PointerMoved(at)]);
+                run(app, vec![button(true)]);
+                run(app, vec![button(false)]);
+                run(app, vec![]);
+            };
+
+            // The field is the one stroked 28-point-high rect in the bar.
+            let field = out.shapes.iter().find_map(|cs| match &cs.shape {
+                egui::Shape::Rect(r)
+                    if (r.rect.height() - 28.0).abs() < 0.01 && r.rect.center().y < 46.0 =>
+                {
+                    Some(r.rect)
+                }
+                _ => None,
+            });
+            let field = field.expect("the search field is drawn");
+            if width >= 1320.0 {
+                assert!(
+                    (field.center().x - width / 2.0).abs() < 0.5,
+                    "centred on the window: {field:?} in {width}"
+                );
+            }
+
+            if staged {
+                let chip = find(&out, &|t| t.contains("RESTART")).expect("the chip is drawn");
+                assert!(
+                    !field.contains(chip),
+                    "{width}: the field lies over the chip"
+                );
+                click(&mut app, chip);
+                assert_eq!(
+                    app.dash.search, None,
+                    "{width}: the chip does not open the search"
+                );
+            }
+            let gear = find(&out, &|t| t == crate::theme::icon::SLIDERS).expect("the gear");
+            click(&mut app, gear);
+            assert!(
+                app.library_settings.is_some(),
+                "{width}: the gear opens Library settings (search: {:?})",
+                app.dash.search
+            );
+            assert_eq!(app.dash.search, None);
+            let _ = std::fs::remove_dir_all(&root);
+        }
     }
 }

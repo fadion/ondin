@@ -155,20 +155,38 @@ enum Msg {
     Progress(i16),
     /// A round settled.
     Settled(CheckGate, Result<Option<VelopackAsset>, String>),
-    /// The updater was launched — or was not, and this asset goes back up.
-    Handover(Result<(), String>, VelopackAsset),
+}
+
+/// What a click on the chip did ([`Updater::restart`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Restart {
+    /// Nothing is staged, or nothing can apply it.
+    Nothing,
+    /// The window was asked to close, and the update applies once it has.
+    Closing,
+    /// This many other Ondin processes are running, and applying would stop
+    /// them; nothing was done (§15 D970).
+    OthersOpen(usize),
 }
 
 /// The background updater, owned by the app and polled once a frame.
 pub(crate) struct Updater {
     state: UpdateState,
-    /// The asset a round staged, taken by a click on the chip.
+    /// The asset a round staged, applied by [`Self::on_exit`] once the chip
+    /// has asked for it.
     staged: Option<VelopackAsset>,
-    /// Whether Velopack's updater has been launched and is waiting for this
-    /// process to exit. A close the user then cancels — the unsaved-work
-    /// question answered *Cancel* — leaves the offer standing, and the next
-    /// click must close again rather than do nothing (§15 D954's amendment).
-    handed_over: bool,
+    /// Whether the chip asked for a restart and the window's close has not
+    /// been called off since. Read once, by [`Self::on_exit`].
+    ///
+    /// 🚨 **A flag, and Velopack's updater is not launched until the close has
+    /// happened** (§15 D970). It used to be launched at the click: the updater
+    /// waits sixty seconds for this process and then applies regardless,
+    /// ending every Ondin process on Windows — so a user who answered the
+    /// unsaved-work card *Cancel*, or took over a minute to answer it, had the
+    /// window killed under them, and the cancelled close this field's
+    /// predecessor (`handed_over`) was built to survive was the one it could
+    /// not.
+    restart_on_exit: bool,
     /// `None` for an updater that never checks — a headless app's.
     live: Option<Live>,
 }
@@ -191,7 +209,7 @@ impl Default for Updater {
         Self {
             state: UpdateState::Idle,
             staged: None,
-            handed_over: false,
+            restart_on_exit: false,
             live: None,
         }
     }
@@ -231,7 +249,7 @@ impl Updater {
         Self {
             state: UpdateState::Idle,
             staged: None,
-            handed_over: false,
+            restart_on_exit: false,
             live: Some(Live {
                 ctx: ctx.clone(),
                 tx,
@@ -286,64 +304,109 @@ impl Updater {
                     };
                     if should_recheck(gate, &self.state) {
                         live.next = Some(Instant::now() + RECHECK_INTERVAL);
-                        live.ctx.request_repaint_after(RECHECK_INTERVAL);
                     }
-                }
-                Msg::Handover(Ok(()), _) => {
-                    // **A close, not Velopack's restart-now**, which exits the
-                    // process on the spot and would skip the close request — the
-                    // unsaved-work question and the recovery snapshot. The
-                    // updater just launched is waiting for this process to go.
-                    self.handed_over = true;
-                    live.ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                }
-                Msg::Handover(Err(e), asset) => {
-                    // **The offer goes back up**: nothing took the staged files,
-                    // so a retry is as good as the first try — and `Failed`
-                    // would make a click the user did make remove the update.
-                    log::error!(target: "ondin", "could not launch the updater: {e}");
-                    self.state = UpdateState::Ready {
-                        version: asset.Version.clone(),
-                    };
-                    self.staged = Some(asset);
                 }
             }
         }
-        if live.next.is_some_and(|at| Instant::now() >= at) {
-            live.next = None;
-            self.state = UpdateState::Checking;
-            spawn_check(live);
+        let now = Instant::now();
+        match live.next {
+            Some(at) if now >= at => {
+                live.next = None;
+                self.state = UpdateState::Checking;
+                spawn_check(live);
+            }
+            // ⚠️ **Asked for again on every pass, not once when the round is
+            // armed** (`[X1-L1-03]`). eframe keeps one "repaint at" per
+            // viewport and the next input's immediate repaint overwrites it, so
+            // a wake requested once was erased by the first mouse move and a
+            // window then left alone never checked again until touched. egui
+            // keeps the earliest of a pass's requests, so this costs nothing
+            // when something sooner is due.
+            Some(at) => live.ctx.request_repaint_after(at - now),
+            None => {}
         }
     }
 
-    /// The chip's click: hand the staged update to Velopack's updater, which
-    /// waits for this process to exit, applies it and relaunches. **Taken, not
-    /// cloned** — a second click while the first is handing over is then a
-    /// no-op rather than a second updater racing the first for the same files.
-    pub(crate) fn apply(&mut self) {
-        // Handed over already and the close was cancelled: the updater is still
-        // waiting, so the restart is only the close again.
-        if let (Some(live), true) = (&self.live, self.handed_over) {
-            live.ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+    /// The chip's click: ask the window to close, and apply the staged update
+    /// once it has ([`Self::on_exit`]).
+    ///
+    /// **A close, not Velopack's restart-now**, which exits the process on the
+    /// spot and would skip the close request — the unsaved-work question and
+    /// the recovery snapshot. A close the user calls off is
+    /// [`Self::restart_called_off`], and a later click asks again.
+    ///
+    /// **Refused while another Ondin is running** (§15 D970): the updater would
+    /// stop it too — see [`crate::instances`]. The caller says so.
+    pub(crate) fn restart(&mut self) -> Restart {
+        self.restart_with(crate::instances::others)
+    }
+
+    /// [`Self::restart`] with the count of other processes given, so a test
+    /// can ask for either answer.
+    fn restart_with(&mut self, others: impl FnOnce() -> usize) -> Restart {
+        let (Some(live), Some(_)) = (&self.live, &self.staged) else {
+            return Restart::Nothing;
+        };
+        let others = others();
+        if others > 0 {
+            return Restart::OthersOpen(others);
+        }
+        self.restart_on_exit = true;
+        live.ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        Restart::Closing
+    }
+
+    /// The close a restart asked for was answered *Cancel*: nothing applies
+    /// when the window does close, later, for some other reason.
+    pub(crate) fn restart_called_off(&mut self) {
+        self.restart_on_exit = false;
+    }
+
+    /// The window is going: hand the staged update to Velopack's updater if the
+    /// chip asked for it, so it waits for this process, applies, and relaunches.
+    ///
+    /// **From `eframe::App::on_exit`, after `disk_settle`**, which is the one
+    /// point the close can no longer be called off — so the updater's sixty
+    /// seconds of waiting cover only eframe's teardown, never a question still
+    /// on screen. And the count of other processes is taken **again**: a
+    /// window opened since the click would be stopped as surely as one open
+    /// at it, and then the update simply waits for the next restart.
+    pub(crate) fn on_exit(&mut self) {
+        self.on_exit_with(crate::instances::others, |asset| {
+            manager()
+                .and_then(|um| {
+                    // `silent = false` so a failure is visible; `restart = true`
+                    // so the user lands back where they were.
+                    um.wait_exit_then_apply_updates(asset, false, true, Vec::<String>::new())
+                })
+                .map_err(|e| e.to_string())
+        });
+    }
+
+    /// [`Self::on_exit`] with the count and the launch given, so a test can see
+    /// whether it would launch without launching anything.
+    fn on_exit_with(
+        &mut self,
+        others: impl FnOnce() -> usize,
+        launch: impl FnOnce(&VelopackAsset) -> Result<(), String>,
+    ) {
+        if !std::mem::take(&mut self.restart_on_exit) {
             return;
         }
-        let (Some(live), Some(asset)) = (&self.live, self.staged.take()) else {
+        let Some(asset) = self.staged.take() else {
             return;
         };
-        let (tx, ctx) = (live.tx.clone(), live.ctx.clone());
-        std::thread::Builder::new()
-            .name("ondin-update-apply".to_owned())
-            .spawn(move || {
-                // `silent = false` so a failure is visible; `restart = true` so
-                // the user lands back where they were.
-                let launched = manager().map_err(|e| e.to_string()).and_then(|um| {
-                    um.wait_exit_then_apply_updates(&asset, false, true, Vec::<String>::new())
-                        .map_err(|e| e.to_string())
-                });
-                let _ = tx.send(Msg::Handover(launched, asset));
-                ctx.request_repaint();
-            })
-            .ok();
+        let running = others();
+        if running > 0 {
+            log::warn!(target: "ondin", "update {} not applied: {running} other Ondin running", asset.Version);
+            return;
+        }
+        match launch(&asset) {
+            Ok(()) => log::info!(target: "ondin", "update {} handed to the updater", asset.Version),
+            // Nothing took the staged files, so the next launch's check finds
+            // the same update already downloaded and offers it again.
+            Err(e) => log::error!(target: "ondin", "could not launch the updater: {e}"),
+        }
     }
 }
 
@@ -636,25 +699,14 @@ mod tests {
         assert!(idle.width() <= 0.0, "nothing drawn while idle: {idle:?}");
     }
 
-    /// **After the handover, a cancelled close leaves the chip working**: the
-    /// updater launched closes the window, the user cancels at the unsaved-work
-    /// question, the chip still offers the restart — and a click on it closes
-    /// again, rather than finding nothing staged and doing nothing while
-    /// Velopack's updater waits on (§15 D954's amendment, found reading `apply`).
-    ///
-    /// **Flip run**, the `handed_over` arm of `apply` removed: fails on *"the
-    /// second click closes again"*, 0 closes — the predicted site.
-    #[test]
-    fn a_cancelled_close_after_the_handover_leaves_the_restart_working() {
-        let ctx = egui::Context::default();
+    /// A live updater over a channel the test holds the sending end of.
+    fn live(ctx: &egui::Context) -> (Updater, Sender<Msg>) {
         let (tx, rx) = channel();
         let (progress, _ticks) = channel();
-        let mut u = Updater {
-            state: UpdateState::Ready {
-                version: "0.4.0".into(),
-            },
+        let u = Updater {
+            state: UpdateState::Idle,
             staged: None,
-            handed_over: false,
+            restart_on_exit: false,
             live: Some(Live {
                 ctx: ctx.clone(),
                 tx: tx.clone(),
@@ -663,35 +715,190 @@ mod tests {
                 next: None,
             }),
         };
-        let closes = |out: egui::FullOutput| {
-            out.viewport_output
-                .get(&egui::ViewportId::ROOT)
-                .map_or(0, |v| {
-                    v.commands
-                        .iter()
-                        .filter(|c| matches!(c, egui::ViewportCommand::Close))
-                        .count()
-                })
-        };
-        tx.send(Msg::Handover(Ok(()), VelopackAsset::default()))
+        (u, tx)
+    }
+
+    fn asset(version: &str) -> VelopackAsset {
+        VelopackAsset {
+            Version: version.into(),
+            ..Default::default()
+        }
+    }
+
+    fn closes(out: &egui::FullOutput) -> usize {
+        out.viewport_output
+            .get(&egui::ViewportId::ROOT)
+            .map_or(0, |v| {
+                v.commands
+                    .iter()
+                    .filter(|c| matches!(c, egui::ViewportCommand::Close))
+                    .count()
+            })
+    }
+
+    /// **The `Settled` arm stages what a click will apply, and re-arms only
+    /// while the answer can change** (`[X1-L6-01]`): a found update is `Ready`
+    /// *and* staged, with no round after it; nothing found and a failure each
+    /// arm the next round.
+    ///
+    /// **Flip-check, run**: deleting `self.staged = Some(asset)` fails on
+    /// *"a found update is what a click applies"* — the chip it leaves says
+    /// *Restart to update* and does nothing, which was the finding; deleting
+    /// the re-arm fails on *"nothing found arms the next round"*.
+    #[test]
+    fn a_settled_round_stages_the_update_and_rearms_only_while_it_can_change() {
+        let ctx = egui::Context::default();
+        let (mut u, tx) = live(&ctx);
+        let next = |u: &Updater| u.live.as_ref().unwrap().next;
+        // What `poll` does as a round starts, which is what a settle answers.
+        let start_round = |u: &mut Updater| u.live.as_mut().unwrap().next = None;
+
+        tx.send(Msg::Settled(CheckGate::Allowed, Ok(None))).unwrap();
+        let _ = ctx.run_ui(Default::default(), |_| u.poll());
+        assert_eq!(u.state(), &UpdateState::Idle);
+        assert!(next(&u).is_some(), "nothing found arms the next round");
+
+        start_round(&mut u);
+        tx.send(Msg::Settled(CheckGate::Allowed, Err("offline".into())))
             .unwrap();
-        let first = closes(ctx.run_ui(Default::default(), |_| u.poll()));
-        assert_eq!(first, 1, "the handover closes the window");
-        assert!(
-            u.state().is_actionable(),
-            "a cancelled close leaves the offer up"
+        let _ = ctx.run_ui(Default::default(), |_| u.poll());
+        assert!(matches!(u.state(), UpdateState::Failed { .. }));
+        assert!(next(&u).is_some(), "a failure arms the next round");
+
+        start_round(&mut u);
+        tx.send(Msg::Settled(CheckGate::Allowed, Ok(Some(asset("0.5.0")))))
+            .unwrap();
+        let _ = ctx.run_ui(Default::default(), |_| u.poll());
+        assert_eq!(
+            u.state(),
+            &UpdateState::Ready {
+                version: "0.5.0".into()
+            }
         );
-        let again = closes(ctx.run_ui(Default::default(), |_| u.apply()));
-        assert_eq!(again, 1, "the second click closes again");
+        assert_eq!(
+            u.staged.as_ref().map(|a| a.Version.as_str()),
+            Some("0.5.0"),
+            "a found update is what a click applies"
+        );
+        assert_eq!(next(&u), None, "a staged update ends the polling");
+    }
+
+    /// **The recheck's wake is asked for on every pass** (`[X1-L1-03]`): eframe
+    /// keeps one repaint deadline and an input's repaint overwrites it, so a
+    /// wake requested once, when the round was armed, was gone at the first
+    /// mouse move.
+    ///
+    /// **Flip-check, run**: the `Some(at) =>` arm of `poll` emptied leaves no
+    /// request at all, and this fails on **pass 1** with `repaint_delay` at
+    /// `Duration::MAX` — pass 0 is a fresh context's first frame, which egui
+    /// repaints whatever is asked, so it is the second pass that has teeth.
+    #[test]
+    fn the_recheck_wake_is_asked_for_on_every_pass() {
+        let ctx = egui::Context::default();
+        let (mut u, _tx) = live(&ctx);
+        u.live.as_mut().unwrap().next = Some(Instant::now() + RECHECK_INTERVAL);
+        for pass in 0..3 {
+            let out = ctx.run_ui(Default::default(), |_| u.poll());
+            let delay = out.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+            assert!(
+                delay <= RECHECK_INTERVAL,
+                "pass {pass}: the next repaint is {delay:?} away"
+            );
+        }
+    }
+
+    /// 🚨 **A restart launches nothing until the window has gone, and a
+    /// cancelled close launches nothing at all** (§15 D970, `[R3-L5-02]`). The
+    /// click used to launch Velopack's updater at once, which waits sixty
+    /// seconds and then applies regardless — on Windows by killing every Ondin
+    /// process, the window whose close was just answered *Cancel* included.
+    ///
+    /// **Flip-check, run**: `restart_called_off` emptied fails on *"a cancelled
+    /// close applies nothing"* with one launch; `on_exit_with`'s
+    /// `restart_on_exit` check removed fails the same assertion.
+    #[test]
+    fn a_restart_applies_at_the_exit_and_a_cancelled_close_applies_nothing() {
+        let ctx = egui::Context::default();
+        let (mut u, _tx) = live(&ctx);
+        u.state = UpdateState::Ready {
+            version: "0.5.0".into(),
+        };
+        u.staged = Some(asset("0.5.0"));
+        let mut launched = Vec::new();
+
+        let mut said = Restart::Nothing;
+        let out = ctx.run_ui(Default::default(), |_| said = u.restart_with(|| 0));
+        assert_eq!(said, Restart::Closing);
+        assert_eq!(closes(&out), 1, "the click asks the window to close");
+
+        // The unsaved-work card, answered *Cancel*; the window closes later for
+        // an unrelated reason.
+        u.restart_called_off();
+        u.on_exit_with(
+            || 0,
+            |a| {
+                launched.push(a.Version.clone());
+                Ok(())
+            },
+        );
+        assert!(launched.is_empty(), "a cancelled close applies nothing");
+        assert!(u.staged.is_some(), "and the offer stands");
+
+        let _ = ctx.run_ui(Default::default(), |_| said = u.restart_with(|| 0));
+        assert_eq!(said, Restart::Closing, "a second click asks again");
+        u.on_exit_with(
+            || 0,
+            |a| {
+                launched.push(a.Version.clone());
+                Ok(())
+            },
+        );
+        assert_eq!(launched, ["0.5.0"], "a close that went through applies");
+    }
+
+    /// 🚨 **Another Ondin running holds the update back, at the click and again
+    /// at the exit** (§15 D970, `[R1-L2-01]`): the updater stops every process
+    /// running from the install, and a second window's unsaved work was never
+    /// asked about.
+    ///
+    /// **Flip-check, run**: `restart_with` ignoring the count fails on *"the
+    /// click is refused"*; `on_exit_with` ignoring it fails on *"a window opened
+    /// since the click holds it back too"*.
+    #[test]
+    fn another_ondin_running_holds_the_update_back() {
+        let ctx = egui::Context::default();
+        let (mut u, _tx) = live(&ctx);
+        u.staged = Some(asset("0.5.0"));
+        let mut said = Restart::Nothing;
+        let out = ctx.run_ui(Default::default(), |_| said = u.restart_with(|| 2));
+        assert_eq!(said, Restart::OthersOpen(2), "the click is refused");
+        assert_eq!(closes(&out), 0, "and the window stays");
+
+        let _ = ctx.run_ui(Default::default(), |_| said = u.restart_with(|| 0));
+        assert_eq!(said, Restart::Closing);
+        let mut launched = 0;
+        u.on_exit_with(
+            || 1,
+            |_| {
+                launched += 1;
+                Ok(())
+            },
+        );
+        assert_eq!(
+            launched, 0,
+            "a window opened since the click holds it back too"
+        );
     }
 
     /// A headless app's updater never checks and never stages anything, so a
-    /// test can poll it every frame and see nothing.
+    /// test can poll it every frame and see nothing — and its restart asks
+    /// nobody how many processes are running.
     #[test]
     fn the_default_updater_is_inert() {
         let mut u = Updater::default();
         u.poll();
-        u.apply();
+        assert_eq!(u.restart_with(|| panic!("counted")), Restart::Nothing);
+        u.on_exit();
         assert_eq!(u.state(), &UpdateState::Idle);
     }
 }

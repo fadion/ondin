@@ -47,6 +47,7 @@ mod expr;
 mod fonts;
 mod grid;
 mod input;
+mod instances;
 // **The receipt is spent** (§15 D699, `[S16.5-L3-04]`). It read *"unwired on
 // purpose … delete this attribute the moment the first real caller lands —
 // leaving it is how an abandoned module comes to look finished"*, and the
@@ -138,15 +139,23 @@ impl ExportFormat {
     }
 }
 
-/// Whether `args` name one of the headless subcommands — an **allowlist on the
-/// first argument**, never "are there any arguments": Velopack's `--veloapp-*`
-/// re-invocations carry arguments too, and they are exactly what must *not* be
-/// taken for a command (§15 D954).
-fn cli_command(args: &[String]) -> bool {
-    matches!(
-        args.first().map(String::as_str),
-        Some("export" | "serve" | "mcp-proxy")
-    )
+/// Whether `args` are a launch Velopack's startup hook must see: the GUI's
+/// (nothing, or `gui`) and Velopack's own `--veloapp-*` re-invocations — an
+/// **allowlist on the first argument**, never "are there any arguments", since
+/// the re-invocations carry arguments too (§15 D954).
+///
+/// ⚠️ **An allowlist of what reaches the hook, not of what avoids it**
+/// (`[X1-L1-02]`). It was the second: the three subcommands skipped the hook
+/// and everything else went through it, so a mistyped `ondin exprot …`, an
+/// `ondin --version` or an `ondin help` reached a hook that, with an update
+/// staged, applied it and exited 0 where `parse` would have refused with 2.
+/// The hook no longer applies anything at startup (§15 D970), and this is the
+/// half that keeps a command line nobody meant for it away from it anyway.
+fn hook_runs(args: &[String]) -> bool {
+    match args.first() {
+        None => true,
+        Some(first) => first == "gui" || first.to_ascii_lowercase().starts_with("--veloapp-"),
+    }
 }
 
 fn parse(args: &[String]) -> Result<Command, String> {
@@ -328,15 +337,27 @@ fn main() {
     // `--veloapp-updated`, `--veloapp-uninstall` and the like; `run` services
     // the flag and **ends the process**, so it has to come before `parse` —
     // which would refuse the flag as an unknown subcommand and break every
-    // install. With no such flag it returns at once, having applied an update a
-    // previous session staged and never restarted for.
+    // install. With no such flag it returns at once.
     //
-    // **Not for a CLI command**, so a staged update cannot exit and relaunch the
-    // process in the middle of an `export` a script is waiting on.
-    if !cli_command(&args) {
+    // 🚨 **And it applies nothing at startup** (§15 D970). Velopack's default
+    // applies an update a previous session staged, before anything is drawn —
+    // and its updater stops every Ondin process running from the install, so a
+    // second window opened beside a dirty first one killed the first with no
+    // question. An update now applies only through the chip, when the window
+    // that clicked it has closed and nothing else is running
+    // (`update::Updater::on_exit`); a staged one is found again by the next
+    // check and offered.
+    //
+    // **Not for anything else** — see `hook_runs`.
+    if hook_runs(&args) {
         logging::init();
-        velopack::VelopackApp::build().run();
+        velopack::VelopackApp::build()
+            .set_auto_apply_on_startup(false)
+            .run();
     }
+    // Counted by any other Ondin's updater before it applies (§15 D970) — the
+    // GUI and a headless export alike, since the updater stops both.
+    instances::register();
     let result = match parse(&args) {
         Ok(Command::Gui) => run_gui().map_err(|e| format!("ondin gui failed: {e}")),
         Ok(Command::Export {
@@ -687,28 +708,36 @@ fn run_gui() -> eframe::Result<()> {
 mod tests {
     use super::*;
 
-    /// **Velopack's re-invocations are not commands** (§15 D954): the installer
-    /// runs the binary with `--veloapp-install` and the like, and those must
-    /// reach the hook — and a CLI command must not, or a staged update could
-    /// relaunch the process mid-export. An allowlist on the first argument.
+    /// **Only a GUI launch and Velopack's own re-invocations reach the install
+    /// hook** (§15 D954, `[X1-L1-02]`): the installer runs the binary with
+    /// `--veloapp-install` and the like, and those must reach it; a CLI command
+    /// must not, and neither must a command line that is not one — a typo, a
+    /// `--version` — which `parse` refuses with exit 2.
+    ///
+    /// **Flip-check, run**: the old shape (`!` of a three-subcommand
+    /// allowlist) fails on `["exprot", "a.ondin"]`.
     #[test]
-    fn only_a_named_subcommand_skips_the_install_hook() {
+    fn only_a_gui_launch_or_velopack_reaches_the_install_hook() {
         let args = |s: &[&str]| s.iter().map(|a| a.to_string()).collect::<Vec<_>>();
-        for cli in [
+        for not in [
             &["export", "a.ondin"][..],
             &["serve", "a.ondin"],
             &["mcp-proxy"],
+            &["exprot", "a.ondin"],
+            &["--version"],
+            &["help"],
         ] {
-            assert!(cli_command(&args(cli)), "{cli:?}");
+            assert!(!hook_runs(&args(not)), "{not:?}");
         }
-        for gui in [
+        for hook in [
             &[][..],
             &["gui"],
             &["--veloapp-install", "0.4.0"],
             &["--veloapp-updated", "0.4.0"],
             &["--veloapp-uninstall"],
+            &["--VELOAPP-OBSOLETE", "0.4.0"],
         ] {
-            assert!(!cli_command(&args(gui)), "{gui:?}");
+            assert!(hook_runs(&args(hook)), "{hook:?}");
         }
     }
 

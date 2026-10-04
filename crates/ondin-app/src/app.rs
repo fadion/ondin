@@ -2289,6 +2289,10 @@ impl eframe::App for OndinApp {
     /// [`Self::handle_close_request`]: OndinApp::handle_close_request
     fn on_exit(&mut self) {
         self.disk_settle();
+        // After the settle, so Velopack's updater — which waits for this
+        // process and then stops it regardless — is launched only once nothing
+        // is left to write (§15 D970).
+        self.updater.on_exit();
     }
 
     /// The frame body: everything the app draws and decides, once per pass.
@@ -6478,6 +6482,23 @@ impl OndinApp {
             == rfd::MessageDialogResult::Yes
     }
 
+    /// The update chip's click, from either screen's bar: ask the window to
+    /// close and apply the update once it has, or say why not (§15 D970).
+    pub(crate) fn restart_to_update(&mut self) {
+        // "Ondin running", not "windows": the count is of processes, and a
+        // headless `ondin export` is one the update would stop too.
+        if let crate::update::Restart::OthersOpen(n) = self.updater.restart() {
+            let (count, them) = if n == 1 {
+                ("Another Ondin is", "it")
+            } else {
+                ("Other copies of Ondin are", "them")
+            };
+            self.session.info(format!(
+                "{count} running: close {them} first, since installing the update stops every Ondin"
+            ));
+        }
+    }
+
     /// Intercept the window close so unsaved work is never lost silently.
     ///
     /// ⚠️ **Re-armed on every close request, not only the first.** The title bar
@@ -6599,7 +6620,14 @@ impl OndinApp {
             Some(CloseChoice::Save) => {
                 self.save_file(false);
                 self.confirming_close = false;
-                // Only actually close if the save went through.
+                // Only actually close if the save went through — and a save
+                // that did not (a cancelled dialog, a refused write) leaves the
+                // window open, which calls a chip-asked restart off exactly as
+                // *Cancel* does, or the next close for any reason would apply
+                // the update (§15 D970).
+                if self.session.is_dirty() {
+                    self.updater.restart_called_off();
+                }
                 if !self.session.is_dirty() {
                     // ⚠️ **Here rather than left to `recovery_tick`'s clean
                     // branch, because there is no next frame.** Both arms of this
@@ -6633,7 +6661,12 @@ impl OndinApp {
                 );
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
-            Some(CloseChoice::Cancel) => self.confirming_close = false,
+            Some(CloseChoice::Cancel) => {
+                self.confirming_close = false;
+                // A restart the chip asked for is called off with the close,
+                // or the next close for any reason would apply the update.
+                self.updater.restart_called_off();
+            }
             None => {}
         }
     }
@@ -7872,7 +7905,7 @@ impl OndinApp {
                         // about the app, not the document (§15 D954).
                         if crate::update::chip(ui, self.updater.state()) {
                             self.finish_text_first();
-                            self.updater.apply();
+                            self.restart_to_update();
                         }
                         // The design's `margin-left:15px`, of which `TOP_GAP`
                         // supplies 5. The one gap in the cluster that is not the

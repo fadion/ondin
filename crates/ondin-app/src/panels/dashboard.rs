@@ -878,7 +878,7 @@ impl OndinApp {
                         ui.spacing_mut().item_spacing.x = 12.0;
                         // The update offer, as the editor's bar has it (§15 D954).
                         if crate::update::chip(ui, self.updater.state()) {
-                            self.updater.apply();
+                            self.restart_to_update();
                         }
                         // ⚠️ **The library's half of the status line, and it did
                         // not exist.** `EditorSession::status` had one production

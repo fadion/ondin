@@ -331,6 +331,10 @@ the dispatch arm), which `roadmap.md` had already corrected on 2026-08-21, and s
   every open is indistinguishable from one that is broken. **The contrast is now one-sided for the
   crop**: *Reset crop* was a menu row obeying the omission rule until 2026-08-23 and is the card's
   alone since (§5.7, §15 D305), so the rule keeps its example and loses its live demonstration.
+  **Components' *Reset all* and *Reset Label* are its second case** (2026-10-04, §7's components
+  bullet, §15 D981's amendment): omitted when nothing differs from the main. ⚠️ They were dimmed for a
+  commit (`a18b0b5`), the build carrying over D981's *disabled, not hidden* — which is the inspector
+  card's rule, as image editing's dimming is its card's.
 
 **A row a kind promotes into its head is *moved*, not duplicated.** *Ungroup* on a group and
 *Flatten* on a boolean belong to Structure and appear in the head instead, where the eye goes on
@@ -892,7 +896,12 @@ Recorded so they are not re-argued, the way `shortcuts.md`'s *Deliberately unbou
   DuplicateAsComponent, SelectAllInstances, GoToMain, DetachInstance}`, shown by a `menu::Role` —
   `Plain` or `Local` gets *Create component*, `Main` *Duplicate as component* and *Select all
   instances*, `Instance` *Go to main component* and *Detach instance*, `Member` *Go to main
-  component*; the two *Reset* rows wait on build step 5. ⚠️ **They are filed in `Group::Structure`
+  component*. **The two *Reset* rows are built too** (`a18b0b5`, §15 D981's amendment):
+  `Item::ResetInstance`, *Reset all*, between `Instance`'s two, and `Item::ResetChild` after
+  `Member`'s, renamed per layer — *Reset Label* — through `Row::label`. **They are omitted when
+  nothing differs from the main** (`d66044c`), the second case of §3's one exception — a row whose
+  only purpose is to undo a non-default state; dimmed in their first commit, which broke it.
+  ⚠️ **They are filed in `Group::Structure`
   after *Frame selection* provisionally** — the build's choice, not a ruling and not this file's yet:
   where each belongs in §5's heads or §4's tail, and its §9 score, are still this file's to decide.
   *Create component* took a primitive's menu to 24 and a boolean's to 30 (§3). ⚠️ **The

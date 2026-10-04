@@ -1607,14 +1607,17 @@ first was, it saved only the track list.
 `track_lines` merges an edge with the last one only, the spans being laid in order — it searched every
 edge, quadratic in the track count.
 
-### 5.3d Components and overrides (designed 2026-10-04; build steps 1–4 built; §15 D978–D981)
+### 5.3d Components and overrides (designed 2026-10-04; build steps 1–4 built, step 5's resets and card built; §15 D978–D981)
 
 > **Design ahead of code, part of it** — decided with the maintainer on 2026-10-04 (session 47). **Build
 > steps 1–4 are built** the same day — the list items' ids (§15 D980, `a83adc8`), the component model,
 > its two fields, two operations and post-conditions (§15 D978, `e3df69d`), the verbs — create, detach,
 > delete, copy, and their keys and menu rows (§15 D979, D981, `0ae3cd7`, then `settle_links`) — field
 > propagation (§15 D979 (a), `45730f6`) and structural propagation (§15 D979 (b), `6ac7d0d`) — and the
-> paragraphs on those say so; the resets, the live preview and most of the chrome are not. It sits beside §5.3c
+> paragraphs on those say so; so is most of step 5 — the reset family in core, its two menu rows, the
+> inspector's component card and part of the override look (`26c8434` to `6210953`, §15 D979's and
+> D981's amendments). The rest of that look, the live preview and most of the chrome are not. It sits
+> beside §5.3c
 > because what it changes is the node model. Every other passage of this document still describes `HEAD`; where one states a rule this
 > design will change, it carries a forward pointer here — §4's invariants 4 and 8, §5.11's bump rule
 > and §12's fourth property. **When a step below lands, this section is rewritten in the present
@@ -1855,6 +1858,63 @@ A **reset** family belongs to the design: reset a field; reset structure — re-
 counterparts at their anchors, local additions left alone; and reset all — the fields, the missing
 counterparts and the main's order.
 
+✅ **Built 2026-10-04 in core — build step 5's first half** (`26c8434`, three defects the record found
+in it fixed in `7cf242e`, and one in that fix in `7b5961e`; `ondin-core/src/reset.rs`; §15 D979's amendment). The design above is all the design said; **every mechanic below is the session's**,
+open to overturning. **A copy is compared with its source, one link up** (`reset::source_of`), never
+with the main at the chain's far end, and **`reset::state_ops`** writes a node's whole state as the
+operations that would set it — destructuring `Node` with no wildcard, so a new field stops the build
+until its author says whether a copy can override it. An override is a field whose op differs between
+copy and source, and its reset is the source's op aimed at the copy (`Operation::retargeted`) — the
+currency `propagate` deals in, so the two cannot disagree about what a field is. Locks, `component` and
+`link` are not fields; **an instance root linked straight to a main never overrides its placement**
+(`propagate::is_placement` through `linked_to_main`, the propagation rule above); and a copy whose kind
+variant is not its source's compares only the fields every node has. **What a count counts**
+(`Override::units`, the figure *Reset fields N* and a card header show): a plain value is one; a struct
+payload — the three text styles, insets, display, layout item — counts each differing leaf, read
+through JSON as the fields merge reads it, absence a value and a changed variant one; a keyed list
+counts each of its source's items the copy changed or removed, plus one if the shared items' order
+differs, and **the copy's own items count nothing**. A list's reset is the source's list with the
+copy's own items reinserted after the item they followed, or first if they led; `reset::reset_item`
+restores one item (a ghost row's *Restore*) after its predecessor's counterpart, else before its
+successor's, else **first** — the list rule `propagate::items` and the list reset follow, where a
+child's last resort is topmost — and `item_states`/`removed_items` are what the trailing slot and ghost
+rows will read. **Scope** (`scope_nodes`): the nodes at or under the scope whose link lies inside the source
+subtree of its instance root — a nested copy's members included, since they are the outer main's
+content, and **a local instance of another main placed inside excluded**, since it is a local
+addition. **`reset::Drift`** counts four things: field units; **removed** children — a source child with
+no counterpart anywhere in the copy's instance, so one moved elsewhere is not missing, and a missing
+subtree counts once. ⚠️ *The copy's instance* is its **outermost** instance root
+(`reset::outermost_root`), not the nearest: a nested copy is an instance root itself, and a member
+dragged out of one into the outer instance keeps its link (`settle_links`), so read under the nested
+copy alone it was missing and was restored a second time (§15 D979's amendment,
+`a_member_dragged_out_of_a_nested_copy_is_not_restored_twice`). ⚠️ **But it climbs only out of nested
+copies**, stopping at a root linked straight to a main (`propagate::linked_to_main`): climbing past a
+local instance made its host the owner, and the host's counterparts masked the local instance's removed
+children (`a_local_instances_removed_child_is_not_masked_by_its_host`, `7b5961e`). Then parents whose
+linked children are out of their sources' **order**; and outermost
+**local** layers, which no reset touches. *Restore removed children* (`restore_children`) copies the
+missing child in with fresh ids, each node linked one level up, at `propagate::anchor`, **pruned by
+`propagate::only_new` of every node whose counterpart the instance holds elsewhere** — ⚠️ load-bearing:
+without the prune the commit is *not* refused, because `settle_links` cuts the duplicate the
+transaction touched, and an unlinked copy would land in silence
+(`a_child_moved_elsewhere_is_not_restored_twice`, flip run). *Reset order* re-slots the linked children
+into their sources' order and leaves local layers in their slots. *Reset all* is restore, then order,
+then fields, each computed on the document the one before leaves, in one transaction. `reset::reset`
+takes the **outermost** of its scopes (`build::outermost`), so an instance and a layer inside it reset
+together restore a missing child once (`overlapping_scopes_restore_a_child_once`). **Every reset is
+an ordinary commit**, so resetting a nested copy inside a main reaches that main's instances by
+propagation. ⚠️ **Not moved back**: a counterpart the instance reparented elsewhere inside itself — the
+reset-all list above names fields, missing counterparts and order, and a move is none of them. And a
+layer once a counterpart and since cut — moved into a nested instance, say — is local with nothing
+recording its past (§15 D981's kept-child ruling), so a restore puts a fresh linked copy beside it.
+
+**The exact-equality risk, measured for a reset**: a *Reset all* through the real commit, of an
+instance whose child is pinned by insets and was moved, comes back with zero drift
+(`app::component_verb_tests::reset_all_through_the_commit_leaves_no_drift_and_undoes_in_one_step`). What
+holds it is `build::keep_insets` leaving alone a layer whose insets the transaction sets itself — and a
+reset always sets them, `state_ops` writing every field. **Not the order of the ops**: emitting
+`SetInsets` before `SetTransform` was flipped and stayed green.
+
 **Deleting a main component detaches its instances** (§15 D979's ruling (c), the maintainer's), in the
 same transaction: each instance becomes a plain copy that keeps its current look, and undo restores
 the main and the links. Nested chains relink one level up, above, so a nested instance survives its
@@ -1999,7 +2059,13 @@ below — measured for one path, not settled in general.
   an edit touches, `keep_insets` never rewrites a resized frame's children — they re-place in used
   geometry — and a copy is compared with the values it was copied from. **Neither choice was needed for
   that path.** ⚠️ **Unmeasured**: `keep_flex_sizes` and the kept flow translations on a flex instance,
-  and any other pass that recomputes a copy's stored value.
+  and any other pass that recomputes a copy's stored value. ✅ **Measured for a *Reset all* of a pinned
+  child too** (step 5, the reset paragraph above), and held: `keep_insets` leaves alone a layer whose
+  insets the transaction sets itself, and a reset always sets them. ✅ **And for the Transform card's
+  field and header resets, measured and fixed** (`c292b50`, §15 D981's amendment): written without the
+  main's insets they were re-pinned against the copy's own frame — `right 172` against the main's 12 —
+  so each now carries its axis's insets. It shows only on an instance **wider than its main**; at the
+  main's own size the bare reset came back exact.
 - **Guides.** A guide scoped to a main frame (§5.5) is not copied into its instances — noted by the
   record, not ruled.
 
@@ -2035,10 +2101,34 @@ the count and the hairlines need want a cache keyed on `EditorSession::revision`
 scan above. The six places the mockup met an older rule were all ruled by the maintainer on
 2026-10-04, as above; D981 has each. ✅ **Built with step 2** (`0ae3cd7`): the two chords, five of the
 rows — filed in Structure after *Frame selection* **provisionally**, `context-menus.md` §7 still to
-place them — and the two toasts; the *Reset* rows wait on step 5. ⚠️ **The filled hexagon has no glyph**:
+place them — and the two toasts. ✅ **The two *Reset* rows built with step 5** (`a18b0b5`, §15 D981's
+amendment): *Reset all* on an instance and *Reset <name>* on a linked child, through
+`OndinApp::reset_selection`, **omitted** when `reset::Drift::any` is false (`d66044c`) — the second
+case of `context-menus.md` §3's exception for a row that only undoes a non-default state, *Reset
+origin*'s rule; the first build dimmed them, which broke it. D981's *disabled, not hidden* is the
+card's counted rows alone. ✅ **The component card is built** (`5fcff6b`, `panels/component.rs`, §15
+D981's amendment), **directly under the identity card** on one layer and on several, with D981's faces:
+a main, an instance, several instances of one main or of several, instances among other layers, and a
+child's one line. Its counts are `reset::Drift`, cached on `EditorSession::revision`
+(`OndinApp::drift_cache` — the cache the sentence above asks for, for drift alone, which the menu's
+rows read too), its resets commit through `commit_edit` as every ink-changing inspector edit does
+(`OndinApp::reset_tx`), and **its drift summary counts fields, removed children and order** —
+everything *Reset all* undoes — not fields alone (the session's, open to overturning). ✅ **The
+override look, in part** (`d2beb37`, `d39f7c1`, `6033571`, `a345b81`, `c292b50`, `6210953`; §15 D981's
+amendments): **card header counts** on every card — the dot and a unit count after the title, and on an
+open card a hover chip *↺ Reset fill* committing the card's resets — from `reset::overrides` grouped by
+`component::card_of`; **field marks** on the Transform card's X, Y, rotation and plain W and H, ⚠️
+compared on the **stored local** values — and for X and Y the axis's insets — never the world readings
+the fields show, since a copy sits wherever its instance does; 🚨 **a placement reset carries the main's
+insets on its axis**, or `keep_insets` re-pins it where it lands — except on an **instance root**,
+whose insets are its own placement and which writes its own back unchanged (`6210953`; the first fix
+gave it the main's and unpinned it); and the **trailing slot and ghost
+rows** on Fill, Stroke and Effects, an item reset written verbatim and never through a retargeting
+writer, which mints a fresh id and lands the restored item as a local one. Not yet: the other cards' fields, W and H through a layout's
+`size_field`, and the exports and layout-grid lists. ⚠️ **The filled hexagon has no glyph**:
 the bundled icon font is Phosphor Regular alone, and §15 D10, which hand-drew the one Fill-weight
-glyph the app needed, says *"at two, ship the font"*. The canvas labels and markers, the layers marks,
-the card and the override look are not built.
+glyph the app needed, says *"at two, ship the font"* — so the card's main face draws the outline one.
+The canvas labels and markers and the layers marks are not built.
 
 **Variants, component properties, instance swap, and pushing an instance's changes to its main come
 later.** So does real-time collaboration, the one place §15 D978's cost (a) arrives: a non-goal for
@@ -2060,18 +2150,27 @@ chains, user operations winning, and the exact-equality risk measured for the pi
 ⚠️ The property-based test this step was to carry was not among its first tests, and the fields
 merge and the nested placement skip fell short — all three fixed in `6ac7d0d`; (4) ✅ **built
 2026-10-04** (`6ac7d0d`, then `e38603d`) — propagation for **structure**: insert at an anchor, reorder,
-move (into a parent the same edit made, too), delete or keep; (5) **next** — the reset family (reset a
-field, reset structure, reset all; *Reset fields N*, *Restore removed children N*, *Reset order*, each
-counted and disabled rather than hidden at zero, and none deleting a local addition) and the
-inspector's override look (D981's 4px dot and bright label, ↺ on hover, the list items' trailing slot
-and ghost rows, the card headers' counts); (6) **next after it** — the live preview of main-component
+move (into a parent the same edit made, too), delete or keep; (5) **mostly built** — ✅ the reset
+family in core (reset a field, reset structure, reset all, none deleting a local addition; `26c8434`,
+`7cf242e`, `7b5961e`), the context menu's two rows (`a18b0b5`, `d66044c`), the inspector's component
+card (*Reset all*, *Detach*, the overflow's *Reset fields N*, *Restore removed children N* and *Reset
+order* disabled rather than hidden at zero, the drift summary; `5fcff6b`) and the override look in
+part — the card headers' counts, Transform's field marks, the trailing slot and ghost rows on Fill,
+Stroke and Effects (`d2beb37`, `d39f7c1`, `6033571`, `a345b81`, `c292b50`, `6210953`); **next**, the rest of that
+look: the other cards' fields, `size_field`'s W and H, and the exports and layout-grid lists; (6)
+**next after it** — the
+live preview of main-component
 edits, which today reach the copies only on release; (7) then variants and properties.
 
 **Handoff, 2026-10-04 (session 47's close)** — what is built, next and owed, in one place. **Built**:
-steps 1–4 above, `Ctrl+Alt+K`/`Ctrl+Alt+B`, five menu rows filed provisionally, D981's two toasts.
-**Next**: step 5, then step 6. **Owed, outside the numbered steps**: D981's chrome — the canvas labels,
+steps 1–4 above, `Ctrl+Alt+K`/`Ctrl+Alt+B`, five menu rows filed provisionally, D981's two toasts;
+then step 5's resets in core, the two *Reset* menu rows, the component card and the override look in
+part (`26c8434`, `7cf242e`, `7b5961e`, `a18b0b5`, `d66044c`, `5fcff6b`, `d2beb37`, `d39f7c1`,
+`6033571`, `a345b81`, `c292b50`, `6210953`). **Next**: the rest of step 5 — the override look on the cards and lists not yet marked —
+then step 6.
+**Owed, outside the numbered steps**: D981's chrome — the canvas labels,
 chips, glyphs and markers (a group main's label included; a group *instance*'s label is unruled), the
-layers panel's dot and **+**, the component card, `Enter` into an instance (`shortcuts.md` §12 ➕) and
+layers panel's dot and **+**, `Enter` into an instance (`shortcuts.md` §12 ➕) and
 an instance's group-style picking (§15 D981 (b)); the **filled hexagon**, which has no glyph in the
 bundled Phosphor Regular (§15 D10's *"at two, ship the font"*); the menu rows' final place
 (`context-menus.md` §7) and the text menus' counts, which no test pins; the flex instance's

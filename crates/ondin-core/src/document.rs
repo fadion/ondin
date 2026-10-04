@@ -474,6 +474,24 @@ impl Document {
         Ok(())
     }
 
+    /// What `op` would replace — its inverse — leaving `self` as it was: the op is
+    /// applied and undone again. `None` when `op` would be refused. The propagation
+    /// pass's reader (`crate::propagate`): an operation's inverse carries the old
+    /// value of exactly the field it writes, so this reads any field any operation
+    /// can write without a reader per field.
+    pub(crate) fn peek(&mut self, op: &Operation) -> Option<Operation> {
+        let mut dirty = DirtySet::default();
+        let inverse = self.apply_one(op, &mut dirty).ok()?;
+        // Restored the way undo restores (`apply_restoring`): the old value may be
+        // one the CSS checks now refuse, carried in from a file, and it was valid
+        // enough to be there a moment ago.
+        let was = std::mem::replace(&mut self.restoring, true);
+        let restored = self.apply_one(&inverse, &mut dirty);
+        self.restoring = was;
+        restored.expect("an inverse applies to the state it was taken from");
+        Some(inverse)
+    }
+
     /// Apply a single op to `self` (already a working copy), returning the op
     /// that would undo it. Validates before mutating.
     fn apply_one(&mut self, op: &Operation, dirty: &mut DirtySet) -> Result<Operation, OpError> {

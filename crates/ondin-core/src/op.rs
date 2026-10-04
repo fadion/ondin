@@ -423,6 +423,47 @@ impl Operation {
         }
     }
 
+    /// The same edit aimed at `to` — every operation [`Self::overwrites`] names a
+    /// node for, with its payload untouched; `None` for the rest. How the
+    /// propagation pass (`crate::propagate`) carries a main's edit to a copy, and
+    /// how it reads a copy's current value through the inverse.
+    pub(crate) fn retargeted(&self, to: NodeId) -> Option<Operation> {
+        let mut op = self.clone();
+        let id = match &mut op {
+            Operation::SetTransform { id, .. }
+            | Operation::SetGeometry { id, .. }
+            | Operation::SetText { id, .. }
+            | Operation::SetTextStyle { id, .. }
+            | Operation::SetTextSpans { id, .. }
+            | Operation::SetParagraphStyle { id, .. }
+            | Operation::SetParagraphSpans { id, .. }
+            | Operation::SetBlockStyle { id, .. }
+            | Operation::SetName { id, .. }
+            | Operation::SetVisible { id, .. }
+            | Operation::SetLocked { id, .. }
+            | Operation::SetProportionsLocked { id, .. }
+            | Operation::SetOpacity { id, .. }
+            | Operation::SetPivot { id, .. }
+            | Operation::SetClip { id, .. }
+            | Operation::SetMask { id, .. }
+            | Operation::SetMaskMode { id, .. }
+            | Operation::SetFillRule { id, .. }
+            | Operation::SetFills { id, .. }
+            | Operation::SetStrokes { id, .. }
+            | Operation::SetEffects { id, .. }
+            | Operation::SetExports { id, .. }
+            | Operation::SetLayoutGrids { id, .. }
+            | Operation::SetInsets { id, .. }
+            | Operation::SetDisplay { id, .. }
+            | Operation::SetLayoutItem { id, .. }
+            | Operation::SetComponent { id, .. }
+            | Operation::SetLink { id, .. } => id,
+            _ => return None,
+        };
+        *id = to;
+        Some(op)
+    }
+
     /// The key `History` merges a run on: the operation, the **field** inside it
     /// where there is one, and the subject (§15 D482).
     ///

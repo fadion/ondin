@@ -39,6 +39,7 @@ pub mod meta;
 pub mod naming;
 pub mod node;
 pub mod op;
+pub mod propagate;
 pub mod query;
 pub mod resolve;
 pub mod svg_in;

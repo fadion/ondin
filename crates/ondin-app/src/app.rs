@@ -19604,6 +19604,87 @@ mod component_verb_tests {
         );
     }
 
+    /// **Through the commit**: resizing the main's rect reaches the instance's rect
+    /// (§5.3d build step 3, `propagate` in `commit_inner`). Flip: the pass removed
+    /// from `commit_inner` leaves the instance's rect at 10.
+    #[test]
+    fn a_main_edit_reaches_its_instance_through_the_commit() {
+        let ctx = egui::Context::default();
+        let (mut app, m, i) = main_and_instance(&ctx);
+        let r = app.session.doc.get(m).unwrap().children()[0];
+        let ir = app.session.doc.get(i).unwrap().children()[0];
+        assert!(app.session.commit(Transaction(vec![Operation::SetGeometry {
+            id: r,
+            geometry: ondin_core::GeometryPatch::Size(Size::new(40.0, 40.0)),
+        }])));
+        match app.session.doc.get(ir).unwrap().kind() {
+            NodeKind::Rect { size, .. } => assert_eq!(*size, Size::new(40.0, 40.0)),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// **The build's main risk, measured** (§5.3d: exact equality against the
+    /// commit's arithmetic). The rect is pinned right; the instance is resized
+    /// wider, which re-places its rect in used geometry and writes nothing to it;
+    /// then the main's rect is moved, which `keep_insets` turns into new insets.
+    /// The instance's rect must follow both the transform and the insets exactly —
+    /// a single ulp of drift in either and it would read as an override from then
+    /// on, silently. It follows: the commit's passes write only what an edit
+    /// touches, and the copy is compared with the same values it was copied from.
+    #[test]
+    fn a_pinned_child_still_follows_after_the_instance_is_resized() {
+        let ctx = egui::Context::default();
+        let (mut app, m, i) = main_and_instance(&ctx);
+        let r = app.session.doc.get(m).unwrap().children()[0];
+        let ir = app.session.doc.get(i).unwrap().children()[0];
+        let pin = ondin_core::Insets {
+            right: Some(ondin_core::LengthPct::Px(12.0)),
+            top: Some(ondin_core::LengthPct::Px(8.0)),
+            ..Default::default()
+        };
+        assert!(app.session.commit(Transaction(vec![Operation::SetInsets {
+            id: r,
+            insets: pin,
+        }])));
+        assert_eq!(
+            app.session.doc.get(ir).unwrap().insets(),
+            &pin,
+            "the pin followed"
+        );
+        assert!(app.session.commit(Transaction(vec![Operation::SetGeometry {
+            id: i,
+            geometry: ondin_core::GeometryPatch::Size(Size::new(260.0, 100.0)),
+        }])));
+        let before = *app.session.doc.get(ir).unwrap().insets();
+        assert_eq!(
+            before, pin,
+            "resizing the instance wrote nothing to its rect"
+        );
+        let moved = ondin_core::kurbo::Affine::translate((31.25, 17.5));
+        assert!(
+            app.session
+                .commit(Transaction(vec![Operation::SetTransform {
+                    id: r,
+                    transform: moved,
+                }]))
+        );
+        let (main_r, inst_r) = (
+            app.session.doc.get(r).unwrap(),
+            app.session.doc.get(ir).unwrap(),
+        );
+        assert_ne!(
+            main_r.insets(),
+            &pin,
+            "the fixture: the move re-pinned the main's rect"
+        );
+        assert_eq!(
+            inst_r.insets(),
+            main_r.insets(),
+            "the insets followed exactly"
+        );
+        assert_eq!(inst_r.transform(), main_r.transform(), "and the transform");
+    }
+
     /// *Create component* on a layer inside a main is refused — the frame it would
     /// wrap the layer in would be a main inside a main (`LinkRule::NestedMain`).
     #[test]

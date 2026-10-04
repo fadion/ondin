@@ -1136,6 +1136,11 @@ impl EditorSession {
         let mut tx = tx;
         let cuts = ondin_core::component::settle_links(&self.doc, &tx);
         tx.0.extend(cuts);
+        // And last, what the edit owes the instances (§5.3d build step 3): a main's
+        // change written onto every copy that still holds the main's old value —
+        // after the passes above, so what they append to a main propagates too.
+        let follows = ondin_core::propagate::propagate(&self.doc, &tx);
+        tx.0.extend(follows);
         let held = self.growth_held(&tx, &asked);
         // And either can empty a transaction outright — `keep_insets` one pinned
         // layer written back where it already is, `keep_flex_sizes` a translation

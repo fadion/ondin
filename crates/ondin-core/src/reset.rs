@@ -396,8 +396,13 @@ pub fn removed_items<T: Clone>(src: &[Keyed<T>], cur: &[Keyed<T>]) -> Vec<Keyed<
 /// `cur` with the source's item `id` put back — its value the source's, placed
 /// after the counterpart of the item before it in the source, else before the
 /// counterpart of the one after, else first: the children's anchor rule one level
-/// down (§15 D980). The *Restore* of a ghost row, and of one overridden item's
-/// reset. `cur` unchanged when the source has no such item.
+/// down (§15 D980), except that a list's last resort is **first**, as
+/// `propagate::items` and [`reset_items`] place an item with nothing to follow —
+/// where a child's is topmost. The *Restore* of a ghost row, and of one overridden
+/// item's reset. `cur` unchanged when the source has no such item.
+///
+/// ⚠️ It called `propagate::anchor` until `arch-scribe` read the fallback: that
+/// one ends at the end of the list, and this doc already said first.
 pub fn reset_item<T: Clone>(src: &[Keyed<T>], cur: &[Keyed<T>], id: ItemId) -> Vec<Keyed<T>> {
     let Some(at_src) = src.iter().position(|s| s.id == id) else {
         return cur.to_vec();
@@ -407,10 +412,15 @@ pub fn reset_item<T: Clone>(src: &[Keyed<T>], cur: &[Keyed<T>], id: ItemId) -> V
         out[at] = src[at_src].clone();
         return out;
     }
-    let ids: Vec<NodeId> = src.iter().map(|s| s.id.0).collect();
-    let mine: Vec<NodeId> = out.iter().map(|c| c.id.0).collect();
-    let index = crate::propagate::anchor(&ids, id.0, &mine, Some);
-    out.insert(index.min(out.len()), src[at_src].clone());
+    let find = |sid: ItemId| out.iter().position(|c| c.id == sid);
+    let index = src[..at_src]
+        .iter()
+        .rev()
+        .find_map(|p| find(p.id))
+        .map(|i| i + 1)
+        .or_else(|| src[at_src + 1..].iter().find_map(|n| find(n.id)))
+        .unwrap_or(0);
+    out.insert(index, src[at_src].clone());
     out
 }
 
@@ -548,7 +558,7 @@ fn missing(doc: &Document, nodes: &[NodeId]) -> Vec<(NodeId, NodeId)> {
     for &p in nodes {
         let (Some(src), Some(owner)) = (
             source_of(doc, p).and_then(|s| doc.get(s)),
-            crate::component::instance_root(doc, p),
+            outermost_root(doc, p),
         ) else {
             continue;
         };
@@ -563,6 +573,28 @@ fn missing(doc: &Document, nodes: &[NodeId]) -> Vec<(NodeId, NodeId)> {
         );
     }
     out
+}
+
+/// The **outermost** instance root at or above `id` — where a restore looks for
+/// counterparts the instance still holds.
+///
+/// ⚠️ **Not the nearest** (`component::instance_root`), which is what this read
+/// first: a nested copy is an instance root itself, and a member dragged out of it
+/// into the outer instance keeps its link — `settle_links` claims it for the outer
+/// root, whose source contains its source — so a search under the nested copy
+/// alone found it missing and restored a second node on the same source, under a
+/// different root, where `LinkRule::SharedSource` cannot see it. Found by
+/// `arch-scribe`; `a_member_dragged_out_of_a_nested_copy_is_not_restored_twice`.
+fn outermost_root(doc: &Document, id: NodeId) -> Option<NodeId> {
+    let mut root = crate::component::instance_root(doc, id)?;
+    while let Some(outer) = doc
+        .get(root)
+        .and_then(|n| n.parent)
+        .and_then(|p| crate::component::instance_root(doc, p))
+    {
+        root = outer;
+    }
+    Some(root)
 }
 
 /// Every link held at or under `root`.
@@ -627,7 +659,8 @@ pub fn restore_children(doc: &Document, scopes: &[NodeId], ids: &mut IdSource) -
     for scope in scopes {
         let nodes = scope_nodes(doc, *scope);
         for (p, c) in missing(doc, &nodes) {
-            let Some(owner) = crate::component::instance_root(doc, p) else {
+            // `missing`'s owner, for its reason (`outermost_root`).
+            let Some(owner) = outermost_root(doc, p) else {
                 continue;
             };
             let Some(template) = doc.capture_subtree(c) else {
@@ -711,7 +744,14 @@ pub enum Kind {
 }
 
 /// The operations the reset `kind` at each of `scopes` owes.
+///
+/// **The outermost of the scopes only**: a scope inside another is already
+/// covered by it, and resetting both restored a missing child twice — the second
+/// copy cut loose by `settle_links` and landing as an unlinked duplicate.
+/// `overlapping_scopes_restore_a_child_once`; found by `arch-scribe`. The four
+/// functions below take their scopes as given and are this one's parts.
 pub fn reset(doc: &Document, kind: Kind, scopes: &[NodeId], ids: &mut IdSource) -> Vec<Operation> {
+    let scopes = &crate::build::outermost(doc, scopes);
     match kind {
         Kind::All => reset_all(doc, scopes, ids),
         Kind::Fields => reset_fields(doc, scopes),

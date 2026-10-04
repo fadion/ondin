@@ -317,6 +317,13 @@ fn reset_item_restores_one_item_at_its_anchor() {
     );
     let changed = vec![src[0].map(|_| 5), src[1], src[2]];
     assert_eq!(reset::reset_item(&src, &changed, src[0].id), src);
+    // With no counterpart on either side, first — the list rule
+    // (`propagate::items`, `reset_items`), where the children's anchor falls back
+    // to topmost. `arch-scribe` found the doc and the code disagreeing here.
+    assert_eq!(
+        reset::reset_item(&src, &[local], src[1].id),
+        vec![src[1], local]
+    );
 }
 
 /// A child the instance deleted is a removed child: counted once, restored at its
@@ -520,6 +527,81 @@ fn a_reset_reaches_a_nested_copy_and_not_a_local_instance() {
         "local",
         "the local instance is the outer instance's own"
     );
+}
+
+/// The outer main from the two tests above: `outer` holds the instance `f.i` of
+/// `m`, and the answer is an instance of `outer` with its nested copy of `f.i`.
+fn outer_instance(f: &mut F) -> (NodeId, NodeId) {
+    let outer = f.ids.mint();
+    f.edit(vec![
+        create(
+            outer,
+            f.root,
+            0,
+            NodeKind::Artboard {
+                size: Size::new(300.0, 300.0),
+            },
+        ),
+        Operation::Reparent {
+            id: f.i,
+            new_parent: outer,
+            index: 0,
+        },
+        Operation::SetComponent {
+            id: outer,
+            component: true,
+        },
+    ]);
+    let oi = instance(&mut f.doc, &mut f.ids, outer, f.root);
+    let nested = kids(&f.doc, oi)[0];
+    (oi, nested)
+}
+
+/// **A member dragged out of a nested copy into the outer instance is not
+/// missing.** `settle_links` keeps its link — the outer root's source contains
+/// its source — so a restore that looked for it only under the nested copy (the
+/// nearest instance root) found it absent and inserted a second node on the same
+/// source, under another root, where `LinkRule::SharedSource` cannot see it.
+/// Found by `arch-scribe` reading `missing` against `settle_links`; failed before
+/// the held links were read under the outermost root.
+#[test]
+fn a_member_dragged_out_of_a_nested_copy_is_not_restored_twice() {
+    let mut f = fixture();
+    let (oi, nested) = outer_instance(&mut f);
+    let deep = kids(&f.doc, nested)[0];
+    f.commit_all(vec![Operation::Reparent {
+        id: deep,
+        new_parent: oi,
+        index: 0,
+    }]);
+    assert_eq!(
+        link(&f.doc, deep),
+        Some(f.ia),
+        "the fixture: it kept its link"
+    );
+    assert_eq!(reset::drift(&f.doc, oi).removed, 0);
+    assert!(reset::restore_children(&f.doc, &[oi], &mut f.ids).is_empty());
+}
+
+/// **Overlapping scopes reset once.** An outer instance and the nested copy
+/// inside it, scoped together, with a child of the nested copy deleted: one
+/// restore, not two (the second would be cut by `settle_links` and land an
+/// unlinked duplicate). Found by `arch-scribe`; failed before `reset` took the
+/// outermost of its scopes. ⚠️ The scope inside must be a **parent of the missing
+/// child** — the first spelling of this test scoped a childless rect beside it
+/// and passed against the defect.
+#[test]
+fn overlapping_scopes_restore_a_child_once() {
+    let mut f = fixture();
+    let (oi, nested) = outer_instance(&mut f);
+    let deep = kids(&f.doc, nested)[0];
+    f.edit(vec![Operation::DeleteNode { id: deep }]);
+    let ops = reset::reset(&f.doc, reset::Kind::All, &[oi, nested], &mut f.ids);
+    let inserts = ops
+        .iter()
+        .filter(|op| matches!(op, Operation::InsertSubtree { .. }))
+        .count();
+    assert_eq!(inserts, 1);
 }
 
 /// A reset scoped to one child resets that child and nothing beside it — the

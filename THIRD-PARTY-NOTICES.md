@@ -120,5 +120,6 @@ cargo deny check licenses
 ```
 
 which fails if a dependency's license falls outside the allow-list — so a future
-`cargo update` cannot silently pull in a GPL/AGPL crate. ⚠️ **There is no CI, so
-nothing runs this for you**; the `release` skill's Phase 0 is where it belongs.
+`cargo update` cannot silently pull in a GPL/AGPL crate. CI runs it on every push
+to `main` and every pull request — the *License policy* step of
+[`ci.yml`](.github/workflows/ci.yml)'s lint job.

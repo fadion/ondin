@@ -753,7 +753,7 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D375** — **A sync client's conflict copy is marked.** ⚠️ **A conflict copy is a copy of the *file*, so it carries §5.11a's metadata block** — the same typed name, project and id — leaving two cards a user cannot tell apart by anything the dashboard shows. `scan::conflict_marker` reads the stem and `Library::conflict` decides, with an amber `CONFLICT` pill on the copy. *(Built and tested 2026-08-28; Keep. Two tiers: **Stated** — Dropbox's and Nextcloud's two spellings of "conflicted copy", plus a **dated** Syncthing marker — stands alone; **Suspected** — `<base> (N)`, `<base> - Copy` — counts only when the document it claims to copy is beside it, in the **same directory**, compared case-insensitively. **The load-bearing fact is that every pattern is one `naming::slug` cannot emit**: slug writes lowercase alphanumerics and `-`, collisions take `-1`, `-2`, so a space, a `(` or eight digits is proof the name came from elsewhere — which is why `document-2.ondin` is not on the list and why the roadmap's own `document-conflict-2` is Suspected at best. ⚠️ **But that argument protects the app's own files and not a hand-made one**, which is the class a loose arm hits: a third, broader `(conflict` arm was there for a day, no client is known to write that shape, and `Notes (conflict resolution).ondin` — typeable only by hand — was told it was a sync artefact. Removed; a pattern has to be paid for by a client that actually writes it, and the test's third block is three raw negatives for that class. ⚠️ **OneDrive's shape is a stated non-goal for the same reason**: it appends the machine name, which is exactly what a typed name slugs to, so this reports nothing rather than guessing. The chip is drawn rather than hung off a tooltip, because the confusion happens while the eye is *scanning*; amber because `theme::color::WARN` already means "a thing to fix rather than a mistake in the document". ⚠️ On a card it takes two passes, black then amber, since a cover is arbitrary artwork; in a list row it takes its width out of the *Name* column **before** the name is elided)*
 - **D376** — **The *New file in {project}* card, and an empty project that is not a dead end.** The design's dashed card at the end of a project's grid and *New file* row at the end of its list, built as `OndinApp::new_file_card` and `new_file_row`. **A shortcut, not a capability**: `Act::NewFile` still has one meaning and the sidebar button already filed into the project being viewed. *(Built and tested 2026-08-28; Keep. ⚠️ **Gated on the project *resolving*, not on the nav being `Nav::Project`** — `new_library_document` files into the project it can look up, so a dangling id would leave the document unfiled while the card named a project; a dangling id gets the ordinary empty state instead. ⚠️ **`file_grid` counts slots rather than `entries.chunks(GRID_COLS)`**, because the card is a *cell* and must be able to finish a short last row — a chunks loop can only give it a row of its own, which is worst exactly when the project holds one to three files. **Departure from the code that was there**: an empty project shows the card **instead of** `empty_state`, whose sentence and base-folder path are about the *library* rather than about a project with no files. ⚠️ The "same row" y-assertion only has teeth because its threshold is `CARD_THUMB_H` at 116 — the labels come out 138pt apart under the `chunks` layout, so the card's full height of 158, which is the number a reader reaches for first, would have been green for exactly the layout it rules out. **Amended 2026-10-03** (D964): `GRID_COLS` is gone and a row is as many cards as the window's width lays, so *one to three files* is *fewer than a row*, and the 138pt and the flip's coordinates were measured at four fixed columns. **Amended 2026-10-03** (D965): the card's full height is 162, not 158)*
 - **D377** — **Crash recovery is a snapshot, not a journal.** `roadmap.md` said a journal was the answer; `ondin_core::Operation` derives no `Serialize`, so that means a second versioned on-disk format over the whole op tree in exchange for the last ten seconds of work. `library::recovery` writes the whole document to `<root>/.recovery/<key>.ondin` through `io::save` instead, adding no format at all. The fork was put to the maintainer and the snapshot chosen. *(Built and tested 2026-08-28; Keep. **Three gates on the tick**: `is_dirty`, `SNAPSHOT_SECS = 10`, and ⚠️ the *revision* having moved — without which an edited-then-idle document rewrites identical bytes every ten seconds forever. ⚠️ **No `path.is_none()` gate, which is the deliberate departure from autosave and the most valuable thing here**: a snapshot is not a document, so it covers the never-filed canvas autosave refuses to create, and the test asserts `scan` still sees an empty library. ⚠️ **A constant, not `prefs.autosave_secs`** — a setting could only buy the chance to switch off the thing that saves them, and `autosave_secs = 0` means off (D364). ⚠️ **Temp file and rename**, where `store::write_document` was a plain `fs::write`; the same exposure for the real document was left open on purpose and recorded rather than left silently inconsistent, and was answered the same day by D378. ⚠️ **Recovering does not write the user's file** — `EditorSession::mark_unsaved` (which replaces `mark_dirty_for_test`) and the next move is theirs; the snapshot being recovered *from* is *kept*. ⚠️ **But *Discard* is no longer the only thing that deletes** (D681 → **D768**): `recover` drops the **outgoing** session's key too, which it used to strand, and that drop is safe only because `may_replace_current_document` runs in front of it. **Dropped in five places**, because the tick is an editor frame's job, and ⚠️ `go_to_dashboard`'s is gated on `!is_dirty()` or the unfiled document loses the only copy it has. ⚠️ **`Entry::modified` is whole seconds**, so *save, edit, crash* inside one second lost its recovery until the tie was decided by comparing bytes — and the unit test stays green under that flip, only the app-level one catches it. ⚠️ **It lives in the base folder rather than the cache, against D366's own line**, so the library stays one directory to back up or move — and `RECOVERY_DIR` therefore travels in `relocate`'s tree loop, the one of the three whose absence would be *silent*. **The modal offers three answers behind two buttons**: ⚠️ the ✕, Escape and the backdrop are `Later` — popped from `pending`, snapshot **kept**, offered again next launch — and must never collapse into *Discard*, since those are the dismissals a hand reaches for without reading and this is the only card in the app where that reflex could destroy an hour's only copy; it nearly shipped with no ✕ at all, which also swallowed Escape and read as a hang rather than as a question insisting on an answer, so the code changed and D368's rule stands for all seven. ⚠️ **`should_close` gates Escape on `is_top_modal`, from the *previous* pass's modal stack**, so a single-pass probe reports nothing — the test pumps a frame first, and runs through `eframe::App::ui` so the card's reachability from a dashboard launch is pinned too)*
-- **D378** — **Every record the app keeps is written atomically.** D377 gave the crash snapshot a temp file and a rename and then had to record that `store::write_document` — the user's actual document — was still a plain `fs::write`. Put to the maintainer as an open question; the answer was *make every save atomic*. `crate::atomic::write` creates the parent directory, writes `<path>.writing`, `sync_all`s it and renames over the target. *(Built and tested 2026-08-28; Keep. A top-level module rather than one under `library/`, because five modules reach it from two subtrees — `store`, `project`, `cache`, `recovery` and `prefs` — and it is a filesystem primitive. ⚠️ **The window was neither small nor rare**: every one of these files is read back and *believed*, and `write_document` truncates the document before writing a byte, so the exposure was the whole of every save, the thirty-second autosave included. **What it gives, stated precisely because this rots into "saves are safe now"**: `rename` is atomic on POSIX and on Windows (`MoveFileEx` with `REPLACE_EXISTING`), and the `sync_all` extends that from process death to power loss — ⚠️ but **the directory entry is not synced**, which POSIX asks for and Rust does not portably expose, so a cut just after the rename can leave the old name on the old data. That is the pre-write state: nothing here can produce a torn file, and the residual risk is losing the new version, not corrupting the old one. ⚠️ **The temp name is derived rather than randomised, which is what bounds the debris** — one `.writing` per file ever written, consumed by that file's next save; 🚨 **reversed by D548**, that premise being about the *process* where the file is addressed by absolute path, so two Ondin instances saving one document tore the destination and the name carries a pid and a counter now, with the self-clearing replaced by a swept-and-age-gated one; and its extension keeps it out of `scan`, which matches exactly `ondin`. Appending rather than replacing is deliberate, or `landing-v4.writing` would collide with a document named that. ⚠️ `Projects::write` **has the most to lose**: `may_write_projects` exists because an unreadable `projects.json` must never be overwritten by the empty list that failure produced, and a half-killed save is precisely how a readable one becomes unreadable. ⚠️ `LocalIndex::save` is a cache and **not** exempt — the covers and font data are exempt because they are *derived*, and **the rule is that a file worth an fsync is one nothing else can reconstruct**; nothing reconstructs which documents this machine has opened. ⚠️ **`pin_version` nearly escaped the sweep** on the grounds that a fresh never-colliding name cannot destroy anything — true, and beside the point, since `versions` lists that directory by the `ondin` extension, so a half-copied pin is offered for restore and fails when taken; `Ctrl+S` is *save and pin*, so a pin is a save. The un-converted set is now exactly the two derived caches and the export paths, **CLI and panel alike**. ⚠️ `recovery::remove` alone calls `atomic::forget`, since after *Discard* there may never be a next save to consume the debris. ⚠️ ``[`fn@write`]`` throughout, because a bare ``[`write`]`` is ambiguous with `std::write!` and the crate roots deny broken links — a build failure, caught by the doc gate. ⚠️ **`sync_all` has no flip and cannot have one**, recorded as a stated gap; the `fs::copy` flip bites both `atomic` tests at their temp-file assertions with the content assertions green. ⚠️ New `a_pin_holds_the_documents_bytes`, because **nothing asserted a pin's contents** — the two tests around it count files in `.versions` and never open one — and it deliberately does *not* assert atomicity: the same flip leaves every `library::store` test green. ⚠️ **A test asserting a file is absent must derive the name from the code under test** — `recovery`'s checked for `<key>.writing` and would have passed forever once the scheme became `<key>.ondin.writing`; it asks `atomic::temp_path` now — `atomic::leftover_temps` since D548, the scheme having changed a second time and the same habit having saved the same test twice)*
+- **D378** — **Every record the app keeps is written atomically.** D377 gave the crash snapshot a temp file and a rename and then had to record that `store::write_document` — the user's actual document — was still a plain `fs::write`. Put to the maintainer as an open question; the answer was *make every save atomic*. `crate::atomic::write` creates the parent directory, writes `<path>.writing`, `sync_all`s it and renames over the target. *(Built and tested 2026-08-28; Keep. A top-level module rather than one under `library/`, because five modules reach it from two subtrees — `store`, `project`, `cache`, `recovery` and `prefs` — and it is a filesystem primitive. ⚠️ **The window was neither small nor rare**: every one of these files is read back and *believed*, and `write_document` truncates the document before writing a byte, so the exposure was the whole of every save, the thirty-second autosave included. **What it gives, stated precisely because this rots into "saves are safe now"**: `rename` is atomic on POSIX and on Windows (`MoveFileEx` with `REPLACE_EXISTING`), and the `sync_all` extends that from process death to power loss — ⚠️ but **the directory entry is not synced**, which POSIX asks for and Rust does not portably expose, so a cut just after the rename can leave the old name on the old data. That is the pre-write state: nothing here can produce a torn file, and the residual risk is losing the new version, not corrupting the old one. ⚠️ **The temp name is derived rather than randomised, which is what bounds the debris** — one `.writing` per file ever written, consumed by that file's next save; 🚨 **reversed by D548**, that premise being about the *process* where the file is addressed by absolute path, so two Ondin instances saving one document tore the destination and the name carries a pid and a counter now, with the self-clearing replaced by a swept-and-age-gated one; and its extension keeps it out of `scan`, which matches exactly `ondin`. Appending rather than replacing is deliberate, or `landing-v4.writing` would collide with a document named that. ⚠️ `Projects::write` **has the most to lose**: `may_write_projects` exists because an unreadable `projects.json` must never be overwritten by the empty list that failure produced, and a half-killed save is precisely how a readable one becomes unreadable. ⚠️ `LocalIndex::save` is a cache and **not** exempt — the covers and font data are exempt because they are *derived*, and **the rule is that a file worth an fsync is one nothing else can reconstruct**; nothing reconstructs which documents this machine has opened. ⚠️ **`pin_version` nearly escaped the sweep** on the grounds that a fresh never-colliding name cannot destroy anything — true, and beside the point, since `versions` lists that directory by the `ondin` extension, so a half-copied pin is offered for restore and fails when taken; `Ctrl+S` is *save and pin*, so a pin is a save. The un-converted set is now exactly the two derived caches and the export paths, **CLI and panel alike**. ⚠️ `recovery::remove` alone calls `atomic::forget`, since after *Discard* there may never be a next save to consume the debris. ⚠️ ``[`fn@write`]`` throughout, because a bare ``[`write`]`` is ambiguous with `std::write!` and the crate roots deny broken links — a build failure, caught by the doc gate. ⚠️ **`sync_all` has no flip and cannot have one**, recorded as a stated gap; the `fs::copy` flip bites both `atomic` tests at their temp-file assertions with the content assertions green. ⚠️ New `a_pin_holds_the_documents_bytes`, because **nothing asserted a pin's contents** — the two tests around it count files in `.versions` and never open one — and it deliberately does *not* assert atomicity: the same flip leaves every `library::store` test green. ⚠️ **A test asserting a file is absent must derive the name from the code under test** — `recovery`'s checked for `<key>.writing` and would have passed forever once the scheme became `<key>.ondin.writing`; it asks `atomic::temp_path` now — `atomic::leftover_temps` since D548, the scheme having changed a second time and the same habit having saved the same test twice. **Amended 2026-10-04** (`[R2-L8-05]`): the un-converted set has a third member D954 added and nobody named — `ondin.log`, appended and rotated by a bare `rename`; exempt because an append-only diagnostic stream has no atomic form worth having and a torn last line is the whole of what a crash costs it)*
 - **D379** — ***Edit project*, and archiving as a flag on the project.** The design grew an *Edit project* button and the idea of archiving; both are built. `Project` gains `archived: bool`, written to `projects.json` only when true, so a library that has never archived anything produces the file it produced before the field existed. `Projects::active` is the predicate every project *list* reads. *(Built and tested 2026-08-28; Keep. **The rename is the part that was not free**: this is the first thing in the app that renames a project, and `library::project`'s module doc had promised for two days that a rename takes the folder with it — `project::rename_folder` is that promise, with the project's **own** folder excluded from the collision test and ⚠️ **the stem the move actually produced** returned rather than the one asked for, since the record and the directory holding the files are two separate things. A folder deleted in Explorer is adopted rather than recreated; the open document follows its folder. ⚠️ **`Projects::get` is deliberately unfiltered** — a list is a set of things to choose between and a lookup is "what is this id", so a document filed in an archived project still resolves to its name and colour. **The maintainer chose "out of every project list" over the design's sidebar-and-cards-only**, cost stated: a document cannot be filed into an archived project without unarchiving it. ⚠️ Two exceptions, both because the ask is not a choice among projects — **search** still matches an archived project by name, and *Move to project* still shows the archived project a document is **already in**, or the sheet draws as though it were unfiled. ⚠️ **Archiving the project a filter names clears the filter**, or it stays in force with no row left to unset it and `filter_applies` then hides the control entirely. **Three deliberate departures**: the card's *Description* is dropped (the design writes `desc` and nothing reads it; confirmed a mock artefact rather than add a write-only key to a synced file), the group is **collapsed on every launch** and deliberately not a preference, and *Create folder* is not in the Edit card. **Two buttons rather than the ⋮**, which that button's own note said it would become the day a rename arrived — an overflow menu earns its place by hiding a *list*, and two items are not one; `roadmap.md`'s *Projects have no rename* is struck. **And *Delete project* became the design's icon button**, a divergence carried unrecorded since D365 that was invisible while it was the only control there and wrong the moment a second one sat beside it — 32×28 with `icon::TRASH`, the hovered face repainted in `theme::color::DANGER` (⚠️ between the face and the glyph, and rounded to the new `ui::BUTTON_R`) rather than in the design's two fresh hexes, and ⚠️ **its words now live only in a tooltip no probe can read**, so both tests assert the glyph instead of the string. ⚠️ **Two flips fail at the same assertion with the same numbers** — forcing the group open and listing every project in the sidebar — which is one failure message for two unrelated bugs; and discarding `rename_folder`'s answer fails at the **recorded stem**, not at the moved file, predicted the wrong way round)*
 - **D380** — **The library after a walk-through: nine reports, one of them a feature that did not work at all.** Renaming a file was *impossible*: `rename_field` asked for focus on every frame it drew, so the pass that surrendered the caret took it straight back and `lost_focus()` — the only thing that commits — was never true. Enter did nothing, a click away did nothing and did not even leave the field, and Escape discarded. *(Fixed and tested 2026-08-28; Keep. ⚠️ **D367's own lesson in the one field left behind when it was learned** — `NewProject::name_focused` is a latch for exactly this, and `panels::layers` has had a test for it since its own rename landed; `rename_entry` carries the latch now. Two more faults in the same function: the field was **justified into a 20pt box**, so its galley sat 2.5pt high (a one-row rect now, which is D367's search-field fix on the other axis), and `Ui::put` ends in `advance_cursor_after_rect` — the name box is well *behind* the grid row's cursor, so the next card was laid out **34pt to the left, on top of it**; `Ui::new_child` places at an absolute rect and never touches the parent's placer. The blue ring in the report was the app's own `ACCENT_700`, now `ui::field_frame`'s hairline. **Three things about *Recent***: the sort control was exempt on an argument that mistakes the *set* for the *order* (⚠️ stated cost — `Sort` has no *Last opened*, so "in the order I opened them" is no longer reachable); a project with **no files** loses its card and keeps its sidebar row; and ⚠️ **`Duplicate` stamps its copy as opened here**, since `new_library_document` never had this problem because it *opens* what it creates. **The star is filled**, drawn as a ten-vertex `convex_polygon` — D365's "a second font for one mark is not worth it" was true and ruled out *bundling*, not *filling*. **The *Delete project* card** loses its "they move to Trash" reassurance and its folder line, and its confirm is the new **`FieldButton::Danger`** on a `DANGER_900`/`_700`/`_200` ramp computed by the accent ramp's own ratios. Plus the ghost card's dashed outline following its own corner (⚠️ only because `Shape::dashed_line` carries the dash phase across the whole polyline rather than restarting per segment), a folder button beside *Base folder* (`panels::show_in_file_browser`, lifted out of `export.rs`, disabled while the typed path is not a folder), and the drop-import outline square on the rect `CentralPanel::show` returns rather than inset by the panel's own margin. ⚠️ **One flip corrected a test rather than confirming it** — exempting Recent from the sort failed at the `assert_ne!` rather than at the `Sort::Name` assertion above it, because three `mark_opened` calls land in the same second and `recent()` breaks that tie on the stem, so its order was already alphabetical and the interesting assertion was vacuous)*
 - **D381** — **Seven more from the same walk-through, and two of them undo decisions three days old.** A **click opens** a document; D372's pointer selection is reversed, because nothing on the screen ever *acted* on it — every action a card offers is on its own ⋮ menu, so it was a state the user could enter, see, and do nothing with, and opening cost a second click on top of it. *(Fixed and tested 2026-08-28; Keep. ⚠️ **`double_clicked` is now read nowhere here**, the first click having already put the editor up. ⚠️ **D374's keymap survives, and that was put to the maintainer rather than assumed** — the arrows, `Enter`, `Delete` and `Escape` had that selection as their only subject, so "no selection outline" read literally would have deleted them; the answer was *keep it as a keyboard-only cursor*, so `selected` is written **only** by `dashboard_keys` and the outline draws for it. **The sort on *Recent* went back the way it came, one turn later** — D380 made it work because a visible control that does nothing is a bug; the answer was that the *control* is what does not belong. ⚠️ The lesson is the pairing: `sort_applies` is one predicate read by the header and by `visible_entries`, which is the shape `filter_applies` has had since D369 and the reason the filter never had this bug. **A project card is a mosaic** of up to five covers, newest first — first cell takes a column at full height, the rest fill the columns after it two at a time, ⚠️ and a column holding only one runs full height too, which reproduces all four of the design's hand-authored layouts and answers the four-cell case it has none for; the arithmetic is the free `mosaic_cells` (D269) and ⚠️ the flip that matters, dropping the alone-is-full-height arm, leaves one and three green and fails at **two**. The project card's coloured band goes with it. **The filled buttons had no hover at all** — `On` and `Danger` matched on `(state, _)` so a filled button would not fall through to the neutral grey, and *Create project*, *Save changes* and *Delete project* were inert to the pointer in every modal; one step up their own ramp, **ground only**, since the danger ramp has no twin of `ACCENT_100`. **The star** gains `STAR_INNER` 0.5 and ⚠️ **`STAR_ROUND`, a fillet at every corner** — the thing an icon font gives free and a polygon does not — capped at half the shorter edge or a valley rounds past its neighbour and the fan draws a wedge. Plus *Delete file*'s confirm in `Danger`, and the Settings card's Drive/Dropbox/OneDrive caption removed as an advertisement rather than an explanation)*
@@ -1327,23 +1327,30 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D949** — **A press outside a turned container is judged against its turned box.** D944's ⚠️: the pressed-outside rule asked whether the item's landed box meets the container through `res.world_bounds(p)`, the **upright** bounds a turned container covers, larger than its box on every side, where `pointer_in` beside it answers for the turned box. New `OndinApp::box_meets(id, r)`, `pointer_in`'s twin for a box: a separating-axis test between the container's turned quad and the world rectangle — the rectangle's two axes and the quad's two — on open intervals, so a box that only touches an edge does not meet it. *(Fixed and tested 2026-10-03, committed as `a5214c5`; **Fixed**, closing D944's ⚠️. Test `a_rotated_container_answers_for_its_turned_box` extended: a 20 × 10 box at (120, 0), inside the upright bounds of a 200 × 100 row turned 45° and wholly past its top edge, y = x; `box_meets` answering from the upright bounds fails on *"a box past the turned edge does not meet it"*, the predicted site. ⚠️ Not verified in the GUI. D944 amended; §9.4)*
 - **D950** — **The cases D944 left untested, and a grid ghost's release measured.** Tests only, in `canvas::flex_canvas_tests` through real drags. A lone in-flow item pressed inside its container leaves when the pointer does; an Alt-drag of an in-flow item puts the copy where a move would put the item — kept in the row, just after the original; dragged clear, on the root, the original keeping its slot; and a copy kept in a grid is laid into a cell on release, measuring what §6.2 had only read: in three `100px` columns it is auto-placed at (100, 0), where the drop alone would put it at (20, 10). A helper, `alt_drag`, holds Alt from the press to the release. *(Tested 2026-10-03, committed as `662d061`; **Keep**. `a_lone_item_pressed_inside_leaves_when_the_pointer_does`, `pointer_in` answering true failing on *"dragged clear, it leaves"*, predicted; `an_alt_drag_copies_an_in_flow_item_where_a_move_would_put_it`, `clone_tx` placing every copy in its source's parent predicted on *"the copy dragged clear lands on the root"* and failing one assertion sooner, on *"the original keeps its slot"*; `an_alt_drag_copy_kept_in_a_grid_is_laid_into_a_cell_on_release`, the insert index forced to 0 failing on *"a first"*, one sooner than predicted. ⚠️ The ghost's preview half — `absorb` leaving it unpatched — still read. D944 amended; §6.2)*
 - **D951** — **The grid lines' container-wide cull runs before the layout pass, and a count says it saves it.** D946's ⚠️: `draw_grid_tracks` laid each container's grid and then culled one wholly off the view, which saved only the track list, and no shape count could see it — the cull's flip did not bite. The cull comes first now, on the box the lines are drawn in, so a container off screen costs no layout pass, the cost the function's doc prices per item. Under `cfg(test)` a thread-local `GRIDS_LAID` counts the grids `draw_grid_tracks` lays — a count, not a clock, `svg::def_count_tests`' precedent. *(Fixed and tested 2026-10-03, committed as `341e21c`; **Fixed**, closing D946's ⚠️. Test `grid_track_tests · the_lines_are_cut_to_the_view_and_hold_their_dashes_still` extended, one pass on screen and none off; the cull off fails on *"and no layout pass for it either"*, 5 against 4, the predicted site. ⚠️ Counted, not timed. D946 amended; §5.3c)*
-- **D952** — **The window draws its own title bar on Windows and Linux and keeps the system's on macOS.** At the maintainer's direction, ported from Schemaic. `chrome::Host::current` holds the module's one `cfg!`, and everything else asks a `Chrome` a capability. Windows and Linux open undecorated — egui-winit keeps the DWM shadow on its own — with `caption_buttons` (46pt, flush right and touching in a zero-spacing scope, close hovering Windows' red and sending `ViewportCommand::Close`, so `handle_close_request` asks about unsaved work as it does for Alt+F4), `drag_strip` laid first under each top bar (a double-click maximizes, a drag sends `StartDrag`) and `resize_zones`, eight `Order::Foreground` areas, 5pt edges and 14pt corners, none while maximized. macOS keeps its traffic lights under a transparent title bar, the bars starting 72pt in. `with_app_id("io.github.fadion.Ondin")` on every host. ⚠️ **The strip arms itself on the press**: egui hands a click-only widget's drag to the drag-sensing strip beneath it, so a press-drag that began on a bar button moved the window. ⚠️ **`POINTER_ONLY`, never `click_and_drag()`**: `FOCUSABLE` put the first Tab on the strip, which both bars draw under one id, and `chrome_focus_write_tests` went red. ⚠️ Present mode hides the top bar, so on those two hosts it hides the window's buttons and drag strip with it — read, not ruled; **ruled by D958**, a strip that comes out at the top edge on hover. *(Built and tested 2026-10-03, committed as `da3d4d4`; **Keep**, the session's, ported from Schemaic at the maintainer's direction. Tests `chrome::tests`, three flips at their predicted sites, a first press at 663 passing its flip by sitting where both layouts agree. 🚨 Not seen on a real window on any host, and not yet compiled on macOS or Linux — **compiled on both by CI's first run (D967)**, still not seen. §9.1, §9.2, §9.4, §9.5)*
-- **D953** — **A release `ondin.exe` is a GUI-subsystem binary, and `ondin.com` is its console twin.** v0.3.0's opened a console beside the window when launched from Explorer or the Start menu. `#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]`, release only; the cost is that `ondin export …` at a prompt has nowhere to print. `src/bin/ondin-cli.rs` runs the sibling `ondin` with the same arguments and inherited standard handles and exits with its status; it ships as `ondin.com`, which `PATHEXT` prefers to the `.exe` — `devenv.com`'s trick. **A launcher with no logic of its own, where Schemaic's twin is a CLI crate.** *(Built 2026-10-03, committed as `6fc61e8`; **Keep**, the session's at the maintainer's direction. Measured by the session, not tested: `ondin.com export` printed and exited 0, a missing file exited 1. §7, §9.2)*
-- **D954** — **The app checks GitHub Releases, downloads an update unasked, and offers a restart to apply it.** Ported from Schemaic: `velopack` 1.2 (1.2.161 in the lock) and `log` 0.4. `update.rs`'s decisions — `check_gate` (the opt-out `ONDIN_NO_UPDATE_CHECK` first; no Velopack install, no check), `UpdateState` (only *Downloading* and *Ready* show, only *Ready* is a button), `should_recheck`, `with_progress` — and `Updater`: worker threads reporting over a channel `poll` drains once a frame, a progress forwarder built once, a round at startup and every three hours. The chip sits beside Settings in both top bars. Apply is `wait_exit_then_apply_updates` then `ViewportCommand::Close`, not Velopack's restart-now, so the close request asks about unsaved work; a failed handover puts the offer back. `main` runs `VelopackApp::run` **before** `parse`, which would refuse `--veloapp-*`, and not for a CLI command (`cli_command`, an allowlist on the first argument). `logging.rs` writes `config_dir/ondin/ondin.log` — `info` for the `ondin`, `ondin::…` and `velopack…` targets, `warn` otherwise, rotated once past 1 MB, a panic hook — started from `main` alone. A headless app's `Updater::default()` is inert. ⚠️ **A cancelled close leaves the chip dead and the update armed** — read, not tried. ⚠️ **§5.4a's network rule reads as broken**: the updater answers to an environment variable, not the web-font switch, and holds no cancel flag — **ruled by D960**: the rule is the web-font source's and the updater is outside it. *(Built and tested 2026-10-03, committed as `90eba39`; **Keep**, the session's, ported from Schemaic at the maintainer's direction; the network rule ***Fix*** — its scope or the updater, not ruled at the time; **its scope, by D960**. Tests in `update::tests`, `logging::tests` and `main::tests`, flips at their predicted sites. 🚨 Never run against a real feed. §9.1, §9.2; §5.4a not amended)*
-- **D955** — **CI lints on Linux, and builds and tests on Linux, Windows and macOS.** `.github/workflows/ci.yml`: fmt, workspace and per-package clippy `-D warnings`, rustdoc `--document-private-items`, cargo-deny `check licenses` only (`advisories` deliberately red, `deny.toml`); a matrix running clippy again off Linux, then `cargo test --workspace` and `--release`; apt bounded and retried. The gate D732 said its platform arms wanted. 🚨 **Has not run** — nothing is pushed — and it is the first time most of the tree would compile anywhere but Windows. **First run 2026-10-03, D967**: lint green, the three test legs red on thirteen failures, all tests that had only run on Windows. *(Built 2026-10-03, committed as `5bde584`; **Keep**, the session's at the maintainer's direction. D732 amended; §10)*
-- **D956** — **A tag builds, packs and publishes Windows, Linux and macOS, and the app's distribution identity never changes.** `release.yml`, ported from Schemaic: a `v*` tag, or a dispatch dry run that publishes nothing; channels `win-x64`, `linux-x64` and `osx-arm64` behind an allowlist step; the tag must equal the workspace version. Linux through cargo-zigbuild at glibc 2.31; Windows builds `ondin` and `ondin-cli` and ships `ondin.com`; a portable zip and tar.gz; a `.deb` and `.rpm` from `packaging/linux/` — one shared payload, hicolor 16–256 (one 512 since D961), every `licenses/*.txt` with a guard against an unlisted one; `vpk pack --packId Ondin --delta None`, **deltas off for correctness**, Schemaic's second consecutive delta update having failed; a macOS `.icns` from the 256 PNG, the mark having no 512 or 1024 — **closed by D961**, the whole set from a 1024 — and a `.dmg`. **Unsigned, deliberately**, as Schemaic decided. `.gitattributes` pins LF on scripts and packaging metadata. The release skill rewritten to push, wait for CI, tag and check the assets; v0.3.0 was the last release built locally. **The identity values are `architecture.md` §4's twelfth invariant**, and `--packId` and the app id are guarded by nothing. ⚠️ `local_offset`'s `0` ships now, so a Linux or macOS date column reads UTC — **closed by D959**, `localtime_r` on both. *(Built 2026-10-03, committed as `8c5f5b9`, the skill as `2592ce1`; **Keep**, the session's, ported from Schemaic at the maintainer's direction; signing ***Revisit if*** a certificate exists. 🚨 Has not run. §1, §4, §9.1)*
-- **D957** — **Signed apt and dnf repositories on GitHub Pages, and an install script — not yet operational.** `pages.yml` rebuilds the site from the last five releases' `.deb` and `.rpm` with no gh-pages branch, is called by `release.yml` after every leg rather than triggered, fails closed with no key, compares the repositories' identity values across the files that carry them, and checks the built fingerprint against `install.sh` and `README.md`. Secrets `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE`; RSA-4096, no expiry. `install.sh` picks the macOS `.pkg`, the apt repository, the dnf/zypper one or the AppImage, pinning the key to `KEY_FINGERPRINT`; **asset names are anchored on the `/` and spelled out, where Schemaic's matched a suffix**. 🚨 **No key existed** at the build: `KEY_FINGERPRINT` held a placeholder `install.sh` fails closed on and `README.md` carried no fingerprint, so every tagged Release run would have ended red at Pages while its assets published — **the key generated 2026-10-03**, fingerprint `456BA115B1DA8E1DBF93299454AC6F3C915023EA`, both secrets set, Pages on with source *GitHub Actions*, the fingerprint in `install.sh`'s `KEY_FINGERPRINT` and on its own line in `README.md`, both passing `pages.yml`'s `grep -qx` checks locally. ⚠️ Whether the secret's key is the one that fingerprint names is first checked on the first tagged run. *(Built 2026-10-03, committed as `be406b0`; **Keep**, the session's, ported from Schemaic at the maintainer's direction; the key the maintainer's — **open** at the build, **generated 2026-10-03**, `roadmap.md`'s *Now · Distribution* item struck. 🚨 Not run: nothing pushed, the site never built or published, no apt or dnf client installed from it. **Amended 2026-10-03**: the rewritten `README.md` carried the placeholder too, alone on its line under *Adding the repository by hand*, where the fingerprint now stands; **amended again** the same day for the key)*
-- **D958** — **Present mode's way to the window's buttons is a slim strip at the top edge, on hover.** D952's ⚠️, ruled by the maintainer: present mode hid the top bar, which on Windows and Linux is the title bar, so the window could not be closed, moved, maximized or minimized with the mouse until Escape. `chrome::present_strip`, called from `OndinApp::ui`'s present-mode arm: a 32pt strip (`STRIP_H`, Windows 11's caption height) of the top bar's fill, a divider, `drag_strip` and `caption_buttons`; nothing on macOS. Revealed only when the pointer comes within `REVEAL`, 6pt, of the top edge with no button held — so arriving from the canvas below shows nothing and a drag to the top opens nothing — kept while the pointer is on it or a button is held, gone when it leaves. ⚠️ **`Order::Middle`, not `Foreground`**: on the resize zones' layer the strip sat above the North zone, and the edge that reveals it could no longer resize the window. *(Built and tested 2026-10-03, not yet committed; **Keep**, the maintainer's ruling, closing D952's ⚠️. Tests `the_present_strip_comes_out_at_the_top_edge_and_closes`, `a_held_button_does_not_bring_the_strip_out`, `the_top_edge_still_resizes_under_the_strip`; the edge band widened to the whole strip predicted on *"not from below"* and failing one assertion later, on *"the canvas keeps its click there"*; `!down` dropped and `Order::Foreground` each at the predicted site. Left alone: no way out of present mode on the strip, Escape the only one; macOS untouched. 🚨 Not seen on a real window. §9.1, §9.2, §9.4)*
-- **D959** — **Library dates are local time on Linux and macOS too, through `localtime_r`.** D956's ⚠️, ruled by the maintainer: `local_offset` answered `0` off Windows, so a Linux or macOS *Created* column would read UTC — about to ship, not shipped, no build for either having been published. A `cfg(any(target_os = "linux", target_os = "macos"))` arm returns `tm_gmtoff` from `libc::localtime_r` — the offset for that instant, history included, the zone `TZ`'s or `/etc/localtime`'s; out of `time_t` or a null return is `0`; no `tzset`. Any other host still `0`. `libc = "0.2"`, an edge both targets already compiled. 🚨 **`days_from_civil` was dead code on Linux and macOS**, so D955's `-D warnings` lint would have gone red on its first run regardless; `cfg(any(windows, test))` now. *(Built and tested 2026-10-03, not yet committed; **Keep**, the maintainer's ruling, closing D956's ⚠️. Test `the_unix_offset_is_the_zones_for_the_instant` re-runs itself as a child at `TZ=CET-1CEST,M3.5.0,M10.5.0/3` — CI's runners being at UTC, where D384's tests pass on a `0` — asserting 3600, 7200 and 7200 and that the child ran `1 passed`; a child because `set_var` is `unsafe` in edition 2024. Spawn checked on Windows with the cfg lifted, red with January at 7200. 🚨 **The Unix arm has never been compiled** — not verified until CI's Linux and macOS legs are green; the fallback arm compiles nowhere. **Compiled by CI's first run, its test passing on both (D967)**, the legs red on other tests. Census: a new `3 any`, `target_os` and `not` unchanged. D384, D732, D955, D956 amended; §9.5)*
+- **D952** — **The window draws its own title bar on Windows and Linux and keeps the system's on macOS.** At the maintainer's direction, ported from Schemaic. `chrome::Host::current` holds the module's one `cfg!`, and everything else asks a `Chrome` a capability. Windows and Linux open undecorated — egui-winit keeps the DWM shadow on its own — with `caption_buttons` (46pt, flush right and touching in a zero-spacing scope, close hovering Windows' red and sending `ViewportCommand::Close`, so `handle_close_request` asks about unsaved work as it does for Alt+F4), `drag_strip` laid first under each top bar (a double-click maximizes, a drag sends `StartDrag`) and `resize_zones`, eight `Order::Foreground` areas, 5pt edges and 14pt corners, none while maximized. macOS keeps its traffic lights under a transparent title bar, the bars starting 72pt in. `with_app_id("io.github.fadion.Ondin")` on every host. ⚠️ **The strip arms itself on the press**: egui hands a click-only widget's drag to the drag-sensing strip beneath it, so a press-drag that began on a bar button moved the window. ⚠️ **`POINTER_ONLY`, never `click_and_drag()`**: `FOCUSABLE` put the first Tab on the strip, which both bars draw under one id, and `chrome_focus_write_tests` went red. ⚠️ Present mode hides the top bar, so on those two hosts it hides the window's buttons and drag strip with it — read, not ruled; **ruled by D958**, a strip that comes out at the top edge on hover. *(Built and tested 2026-10-03, committed as `da3d4d4`; **Keep**, the session's, ported from Schemaic at the maintainer's direction. Tests `chrome::tests`, three flips at their predicted sites, a first press at 663 passing its flip by sitting where both layouts agree. 🚨 Not seen on a real window on any host, and not yet compiled on macOS or Linux — **compiled on both by CI's first run (D967)**, still not seen. The body's ⚠️ that a test asserts the app id off macOS only is stale: `21feb8c` added the macOS assert. §9.1, §9.2, §9.4, §9.5. **Amended 2026-10-04** (D973): each corner was a 14pt square, `Rect::union` being a bounding box — twelve areas now, each corner an L; and the chrome was dead under any modal card and acted on a click that dismissed a library menu, both fixed)*
+- **D953** — **A release `ondin.exe` is a GUI-subsystem binary, and `ondin.com` is its console twin.** v0.3.0's opened a console beside the window when launched from Explorer or the Start menu. `#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]`, release only; the cost is that `ondin export …` at a prompt has nowhere to print. `src/bin/ondin-cli.rs` runs the sibling `ondin` with the same arguments and inherited standard handles and exits with its status; it ships as `ondin.com`, which `PATHEXT` prefers to the `.exe` — `devenv.com`'s trick. **A launcher with no logic of its own, where Schemaic's twin is a CLI crate.** *(Built 2026-10-03, committed as `6fc61e8`; **Keep**, the session's at the maintainer's direction. Measured by the session, not tested: `ondin.com export` printed and exited 0, a missing file exited 1. §7, §9.2. **Amended 2026-10-04** (D971): the clamp to a byte made a crash's NTSTATUS a success, and the child outlived a Ctrl+C — the code passes through whole and a job object ties the child to the twin, so *"no logic of its own"* is about arguments only)*
+- **D954** — **The app checks GitHub Releases, downloads an update unasked, and offers a restart to apply it.** Ported from Schemaic: `velopack` 1.2 (1.2.161 in the lock) and `log` 0.4. `update.rs`'s decisions — `check_gate` (the opt-out `ONDIN_NO_UPDATE_CHECK` first; no Velopack install, no check), `UpdateState` (only *Downloading* and *Ready* show, only *Ready* is a button), `should_recheck`, `with_progress` — and `Updater`: worker threads reporting over a channel `poll` drains once a frame, a progress forwarder built once, a round at startup and every three hours. The chip sits beside Settings in both top bars. Apply is `wait_exit_then_apply_updates` then `ViewportCommand::Close`, not Velopack's restart-now, so the close request asks about unsaved work; a failed handover puts the offer back. `main` runs `VelopackApp::run` **before** `parse`, which would refuse `--veloapp-*`, and not for a CLI command (`cli_command`, an allowlist on the first argument). `logging.rs` writes `config_dir/ondin/ondin.log` — `info` for the `ondin`, `ondin::…` and `velopack…` targets, `warn` otherwise, rotated once past 1 MB, a panic hook — started from `main` alone. A headless app's `Updater::default()` is inert. ⚠️ **A cancelled close leaves the chip dead and the update armed** — read, not tried. ⚠️ **§5.4a's network rule reads as broken**: the updater answers to an environment variable, not the web-font switch, and holds no cancel flag — **ruled by D960**: the rule is the web-font source's and the updater is outside it. *(Built and tested 2026-10-03, committed as `90eba39`; **Keep**, the session's, ported from Schemaic at the maintainer's direction; the network rule ***Fix*** — its scope or the updater, not ruled at the time; **its scope, by D960**. Tests in `update::tests`, `logging::tests` and `main::tests`, flips at their predicted sites. 🚨 Never run against a real feed. §9.1, §9.2; §5.4a not amended. **Superseded in part 2026-10-04 by D970**: the ⚠️ was false at its own commit — a `handed_over` flag this entry never recorded closed again on a second click — and that fix rested on an updater *"still waiting"*, which Velopack bounds at sixty seconds before applying regardless; the click no longer launches it, `on_exit` does, never while another Ondin runs and never at startup, and `hook_runs` replaces `cli_command`)*
+- **D955** — **CI lints on Linux, and builds and tests on Linux, Windows and macOS.** `.github/workflows/ci.yml`: fmt, workspace and per-package clippy `-D warnings`, rustdoc `--document-private-items`, cargo-deny `check licenses` only (`advisories` deliberately red, `deny.toml`); a matrix running clippy again off Linux, then `cargo test --workspace` and `--release`; apt bounded and retried. The gate D732 said its platform arms wanted. 🚨 **Has not run** — nothing is pushed — and it is the first time most of the tree would compile anywhere but Windows. **First run 2026-10-03, D967**: lint green, the three test legs red on thirteen failures, all tests that had only run on Windows; two more on its second run (D968); **green on all three legs at `e1f1842`**, the v0.4.0 release commit. *(Built 2026-10-03, committed as `5bde584`; **Keep**, the session's at the maintainer's direction. D732 amended; §10)*
+- **D956** — **A tag builds, packs and publishes Windows, Linux and macOS, and the app's distribution identity never changes.** `release.yml`, ported from Schemaic: a `v*` tag, or a dispatch dry run that publishes nothing; channels `win-x64`, `linux-x64` and `osx-arm64` behind an allowlist step; the tag must equal the workspace version. Linux through cargo-zigbuild at glibc 2.31; Windows builds `ondin` and `ondin-cli` and ships `ondin.com`; a portable zip and tar.gz; a `.deb` and `.rpm` from `packaging/linux/` — one shared payload, hicolor 16–256 (one 512 since D961), every `licenses/*.txt` with a guard against an unlisted one; `vpk pack --packId Ondin --delta None`, **deltas off for correctness**, Schemaic's second consecutive delta update having failed; a macOS `.icns` from the 256 PNG, the mark having no 512 or 1024 — **closed by D961**, the whole set from a 1024 — and a `.dmg`. **Unsigned, deliberately**, as Schemaic decided. `.gitattributes` pins LF on scripts and packaging metadata. The release skill rewritten to push, wait for CI, tag and check the assets; v0.3.0 was the last release built locally. **The identity values are `architecture.md` §4's twelfth invariant**, and `--packId` and the app id are guarded by nothing — **`--packId` is since D969**, by a test reading `release.yml`, the pack id being the Windows install folder the app's own files had shared. ⚠️ `local_offset`'s `0` ships now, so a Linux or macOS date column reads UTC — **closed by D959**, `localtime_r` on both. *(Built 2026-10-03, committed as `8c5f5b9`, the skill as `2592ce1`; **Keep**, the session's, ported from Schemaic at the maintainer's direction; signing ***Revisit if*** a certificate exists. 🚨 Has not run — **ran 2026-10-04 for v0.4.0**, every leg building and publishing its assets. §1, §4, §9.1)*
+- **D957** — **Signed apt and dnf repositories on GitHub Pages, and an install script — not yet operational.** `pages.yml` rebuilds the site from the last five releases' `.deb` and `.rpm` with no gh-pages branch, is called by `release.yml` after every leg rather than triggered, fails closed with no key, compares the repositories' identity values across the files that carry them, and checks the built fingerprint against `install.sh` and `README.md`. Secrets `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE`; RSA-4096, no expiry. `install.sh` picks the macOS `.pkg`, the apt repository, the dnf/zypper one or the AppImage, pinning the key to `KEY_FINGERPRINT`; **asset names are anchored on the `/` and spelled out, where Schemaic's matched a suffix**. 🚨 **No key existed** at the build: `KEY_FINGERPRINT` held a placeholder `install.sh` fails closed on and `README.md` carried no fingerprint, so every tagged Release run would have ended red at Pages while its assets published — **the key generated 2026-10-03**, fingerprint `456BA115B1DA8E1DBF93299454AC6F3C915023EA`, both secrets set, Pages on with source *GitHub Actions*, the fingerprint in `install.sh`'s `KEY_FINGERPRINT` and on its own line in `README.md`, both passing `pages.yml`'s `grep -qx` checks locally. ⚠️ Whether the secret's key is the one that fingerprint names is first checked on the first tagged run. *(Built 2026-10-03, committed as `be406b0`; **Keep**, the session's, ported from Schemaic at the maintainer's direction; the key the maintainer's — **open** at the build, **generated 2026-10-03**, `roadmap.md`'s *Now · Distribution* item struck. 🚨 Not run: nothing pushed, the site never built or published, no apt or dnf client installed from it — **run 2026-10-04 for v0.4.0**: the tag's publish was refused by the `github-pages` environment's `main`-only rule and the site published from `main`, past `pages.yml`'s fingerprint check; the environment admits `v*` tags since `430ed7e`. No client install is recorded. **Amended 2026-10-03**: the rewritten `README.md` carried the placeholder too, alone on its line under *Adding the repository by hand*, where the fingerprint now stands; **amended again** the same day for the key)*
+- **D958** — **Present mode's way to the window's buttons is a slim strip at the top edge, on hover.** D952's ⚠️, ruled by the maintainer: present mode hid the top bar, which on Windows and Linux is the title bar, so the window could not be closed, moved, maximized or minimized with the mouse until Escape. `chrome::present_strip`, called from `OndinApp::ui`'s present-mode arm: a 32pt strip (`STRIP_H`, Windows 11's caption height) of the top bar's fill, a divider, `drag_strip` and `caption_buttons`; nothing on macOS. Revealed only when the pointer comes within `REVEAL`, 6pt, of the top edge with no button held — so arriving from the canvas below shows nothing and a drag to the top opens nothing — kept while the pointer is on it or a button is held, gone when it leaves. ⚠️ **`Order::Middle`, not `Foreground`**: on the resize zones' layer the strip sat above the North zone, and the edge that reveals it could no longer resize the window. *(Built and tested 2026-10-03, committed in session 44's range `e88d30b`…`b7cfaee`; **Keep**, the maintainer's ruling, closing D952's ⚠️. Tests `the_present_strip_comes_out_at_the_top_edge_and_closes`, `a_held_button_does_not_bring_the_strip_out`, `the_top_edge_still_resizes_under_the_strip`; the edge band widened to the whole strip predicted on *"not from below"* and failing one assertion later, on *"the canvas keeps its click there"*; `!down` dropped and `Order::Foreground` each at the predicted site. Left alone: no way out of present mode on the strip, Escape the only one; macOS untouched. 🚨 Not seen on a real window. §9.1, §9.2, §9.4. **Amended 2026-10-04** (D973): with a modal card up, `above_modal`'s strip first lay over the zones, so the top edge moved the window rather than resizing it; the zones that meet it are laid again inside that area now, `move_to_top` being unable to order layers raised in one pass)*
+- **D959** — **Library dates are local time on Linux and macOS too, through `localtime_r`.** D956's ⚠️, ruled by the maintainer: `local_offset` answered `0` off Windows, so a Linux or macOS *Created* column would read UTC — about to ship, not shipped, no build for either having been published. A `cfg(any(target_os = "linux", target_os = "macos"))` arm returns `tm_gmtoff` from `libc::localtime_r` — the offset for that instant, history included, the zone `TZ`'s or `/etc/localtime`'s; out of `time_t` or a null return is `0`; no `tzset`. Any other host still `0`. `libc = "0.2"`, an edge both targets already compiled. 🚨 **`days_from_civil` was dead code on Linux and macOS**, so D955's `-D warnings` lint would have gone red on its first run regardless; `cfg(any(windows, test))` now. *(Built and tested 2026-10-03, committed in session 44's range `e88d30b`…`b7cfaee`; **Keep**, the maintainer's ruling, closing D956's ⚠️. Test `the_unix_offset_is_the_zones_for_the_instant` re-runs itself as a child at `TZ=CET-1CEST,M3.5.0,M10.5.0/3` — CI's runners being at UTC, where D384's tests pass on a `0` — asserting 3600, 7200 and 7200 and that the child ran `1 passed`; a child because `set_var` is `unsafe` in edition 2024. Spawn checked on Windows with the cfg lifted, red with January at 7200. 🚨 **The Unix arm has never been compiled** — not verified until CI's Linux and macOS legs are green; the fallback arm compiles nowhere. **Compiled by CI's first run, its test passing on both (D967)**, the legs red on other tests. Census: a new `3 any`, `target_os` and `not` unchanged. D384, D732, D955, D956 amended; §9.5)*
 - **D960** — **§5.4a's network rule is the web-font source's, and the auto-updater is outside it.** D954's ***Fix***, ruled by the maintainer: *"anything new that reaches the network must either be startable only while the switch is on, or hold a cancel flag"* read as covering the updater, which answers to `ONDIN_NO_UPDATE_CHECK` alone and holds no flag. The rule governs font traffic; the updater's one gate is the environment variable. D720 wrote the rule in the font section with a one-module grep as its enumeration, so this is a scope, not an exemption. ⚠️ **The Settings caption reads wider** — *"Nothing is downloaded and no request is made"*, written for a user on a metered connection — and is false of the app whenever the updater runs — **ruled and fixed the same day**, the maintainer's wording: *"… no font request is made."* *(Ruled 2026-10-03, session 44; **Resolved**, the maintainer's ruling, closing D954's ***Fix***; the caption ***Fix***, its wording, **ruled and *Fixed***. Record-only, its number planted on `update::OPT_OUT_VAR` and cited from the caption's comment in `settings.rs`. D720, D954 amended; §5.4a, §9.1)*
-- **D961** — **The app's icon set is Schemaic's, and its 64 is the top bars' brand mark.** The maintainer replaced `icons/` with Schemaic's set — `icon.ico` (16–256), `icon.png` (512), `icon-64.png`, `icon-1024.png`, RGBA on a transparent ground — deleting the `convertico-Ondin` files and the store squares, which broke the build. Wired as Schemaic uses it: `build.rs` the `.ico`; `window_icon` the 512, was the 256; the `.icns` from the 1024, 16 to 512@2x; Velopack's `--icon` the `.ico` on Windows and the 512 on Linux; one hicolor icon, the 512, in the packages and `install.sh`'s AppImage route, where there were six; the Pages site the 512. **The top bars' placeholder** — an `ACCENT_900` square with a `DIAMOND` — is `ui::logo` painting the 64 into the same 26pt slot, uploaded once with mipmaps and kept in egui's temp memory; the editor's mark keeps its click-through, its hover a `color::HOVER` fill behind the artwork where the square lightened. ⚠️ An AppImage installed before this keeps a stale 256 icon its uninstall line does not name. *(Built and tested 2026-10-03, not yet committed; **Keep**, the maintainer's set and ruling, the wiring the session's after Schemaic; closing D956's ⚠️. Tests `window_icon_is_the_ondin_mark_at_the_size_windows_scales_from` and `ui::logo_tests::the_logo_is_the_64px_mark_and_uploads_once`, the `insert_temp` removed failing on *"the texture is kept"*, predicted. Typed into two comments before its block was reserved, the only sites. 🚨 Not seen on a real window, nor on Linux or macOS. D956 amended; §9.1)*
-- **D962** — **The editor's top bar: a save dot, no open or save buttons, and the library's mark-to-name gap on both screens.** Three rulings from screenshots of D961's mark. `OndinApp::save_pill` is `save_dot`: a 7pt dot after the document name, no ground, no text — `color::UNSAVED` (`DANGER`'s value under its own name, since a dirty document is not a destructive click) while `saved_ago` is `None`, a write in flight included, and `color::SAVED` `#45b070`, the app's first green, once the file matches; D393's two colours kept, amber and accent become red and green. ⚠️ **The dot sits at its 14pt hover target's *left* edge**, so the gap to the name is the row's 8pt spacing rather than 8 + 3.5. The folder and disk buttons are gone — `Ctrl+O`, `Ctrl+S` (the same `finish_text_first` and `save_file(true)`), autosave and the mark's click-through are unchanged — so D365's doors are two and `Ctrl+W` D383's third. The mark-to-name gap is the library's 12 on both screens, the editor setting it just before placing its mark — 🚨 a first repair set 8 *after* the library's mark was placed and changed nothing, egui spacing an item when it is placed; `the_mark_and_the_name_are_as_far_apart_on_both_screens` measures both, its flip failing 12 against 8. *(Built 2026-10-03, session 44, not yet committed; **Keep**, the maintainer's rulings. **The tooltip is the session's, not the ruling's, and removable** — `save_label`'s sentence on hover; removing it orphans `save_label`, D678's ladder and three tests. The pill's twenty-second repaint is dropped; a still-held tooltip may read a minute stale, accepted. ⚠️ **`SAVED`'s first pick, `#6bc48a`, claimed a like lightness and measured 0.75 OKLCH against `DANGER`'s 0.68**; replaced the same session by `#45b070`, computed to `DANGER`'s lightness and chroma; *Revisit if* either state reads louder. The gap is pinned by `the_mark_and_the_name_are_as_far_apart_on_both_screens`; nothing pins the dot or the buttons' absence. 🚨 Not seen on a real window. D365, D383, D393 amended; §9.1, §9.4, §9.5; `shortcuts.md` §8)*
-- **D963** — **The top bar's menu heads answer the pointer as its icon buttons do, and stay lit while their menu is open.** The maintainer's ruling, from a screenshot: undo, redo and Settings lit under the pointer and the rest of the top-right cluster did not, against *"a policy of 'everything needs to have a hover effect'"*. The three that did not — View, Snap and the zoom readout — are `ui::menu_head`, which painted its mark and caret and nothing else. It now takes `icon_button_padded`'s hover exactly: `color::HOVER` over its whole 26pt allocation at radius 5, the lead and the caret drawn in `color::TEXT`. The bar's own icon buttons are the precedent, not `menu_check`'s `text_a(20)` fill, which is a row inside an open menu rather than a head in the bar. ⚠️ **`galley_with_override_text_color`, not `galley`'s colour argument**: both galleys bake their resting colours, and that argument is a fallback the tessellator only uses on `PLACEHOLDER`. **Held lit while its menu is open**, the maintainer's second ruling: `menu_head`'s `open`, from `open_menu`. **The policy is written nowhere in the record**; D246 and D381 are its nearest precedents. *(Built and tested 2026-10-03, session 44, not yet committed; **Keep**, the maintainer's two rulings — **the ground is the session's**, beyond the maintainer's fallback of *"a simple lighter color … on the icon/text"*. Test `ui::head_tests::a_menu_head_lights_under_the_pointer_like_an_icon_button`, `open` ignored failing on *"an open head stays lit with the pointer away"*, predicted; the fill dropped failed on *"a hovered head paints the HOVER ground"* when run, before the open case was added ahead of it, and re-run after, on the open case with `(0, 2)` as predicted. 🚨 Not seen on a real window. §9.1, §9.2, §9.4)*
-- **D964** — **The library's card grid fits its columns to the window, and no card is wider than 300 points.** The maintainer's ruling, from a screenshot of a very wide window's four cards a row, each stretched past 500pt: *"a max-width (up to 300px they seem to look fine) and a 'responsive' design"*. `GRID_COLS = 4` — the design's `repeat(4,1fr)`, its doc arguing *"fixed rather than fitted"* because a grid that reflows makes one library look different on two monitors, an argument the record carried nowhere else — is `CARD_MAX_W` 300 and `GRID_GAP` 14: `grid_cols` is the fewest columns that keep every card at the ceiling, `card_width` fills the row exactly, so a wider window adds a column rather than a gutter, and *Recent*'s project row lays with the same pair. Heights unchanged; the 120pt floor gone. `↓` steps `DashboardState::grid_cols`, written by `file_grid` and read by `dashboard_keys` before the grid is drawn — last frame's count — through `arrow_target`'s new parameter, `0` reading as one. ⚠️ **No minimum width but a column's arrival**: an `n + 1`th column drops each card to `(300n − 14)/(n + 1)`, 143 at the step from one to two. 🚨 **D864's 128 is no longer twice a screen of file cards** — about 72 at a 1,600pt body, 132 past 3,126 — and its recency guard holds there as on *Recent*. *(Built and tested 2026-10-03, session 44, not yet committed; **Keep**, the maintainer's ruling, the two monitors' difference the accepted cost; *Revisit if* the step's narrow cards read too narrow. Tests `the_grid_adds_columns_rather_than_stretching_cards` — `floor` for `ceil` predicted to fail at 1,600 and failing first at 900, 443pt cards, the loop running narrowest first — and `the_arrows_step_a_row_of_the_grid_as_laid`, the fixed 4 restored failing on *"down is a row of six"*, predicted. 🚨 Not seen on a real window. D374, D376, D864 amended; §9.5; `shortcuts.md` §8a)*
-- **D965** — **The file card's caption band is 46 points, not 42.** The maintainer's ruling, from a screenshot of one card: *"The last seen text has less padding bottom than the title has padding top … maybe 3-4px (not measured)."* `dashboard::CARD_CAPTION_H` 42 → 46. The name stays centred 15 below the thumbnail and the date 31, so all four points go under the date: its line box ended ~4.5 above the card's edge against the name's ~7.5 below the thumbnail, and ends ~8.5 above it now — arithmetic from the centres and the 12.5/11pt sizes, not measured ink. The ⋮ stays centred at +22. ⚠️ `file_card` and `new_file_card` both allocate `CARD_THUMB_H + CARD_CAPTION_H`, so the dashed *New file* card grows too, its plus and label 2 lower, placed from its centre; project cards do not. Rows are 176 apart, were 172. *(Built and tested 2026-10-03, session 44, not yet committed; **Keep**, the maintainer's ruling and upper figure. **Nothing pins the height** — no test written. D864's ~twelve rows to a 2,160pt window hold at 176, so no cover figure moves. Typed into three comments before its block was reserved, the only sites. 🚨 Not seen on a real window. D374, D376, D864 amended)*
-- **D966** — **The library's Settings sits `TOP_GAP` from the update pill, as the editor's does.** The maintainer's ruling, from the forced pill on both screens: *"Let's make them equal (keeping the editor's distance)."* The editor's cluster spaces every item `app::TOP_GAP`, 5; the library's spaces at 12. `TOP_GAP` is `pub(crate)`, and `dashboard_top_bar` sets it immediately before allocating Settings and 12 again before the chip — ⚠️ **on Settings, not the pill**, egui spacing an item when it is placed (D962's mechanism) — and only when `updater.state().label().is_some()`, `chip`'s own test; with no pill the status dot keeps the row's 12. *(Built and tested 2026-10-03, session 44, not yet committed; **Keep**, the maintainer's ruling. Test `settings_sits_as_far_from_the_update_pill_on_both_screens` over the `#[cfg(test)]` `Updater::ready`, the pill found as the outline around its *RESTART* label — a first draft took the search field's and read 4643; the library's Settings at 12 again failing *"the library's gap 12 against the editor's 5"*, predicted. Nothing pins the no-pill 12. `the_forced_update_chip_is_off_in_a_committed_tree` red only for the working tree's temporary forced chip, not this change. Typed into two comments before its block was reserved, the fourth time this session, the only sites. 🚨 Not seen on a real window. §9.1)*
-- **D967** — **What the first CI run off Windows found: four tests that assumed Windows, a guard that did, and a search whose order was the folder's.** The first push, 2026-10-03 (`bb3ea31..e65d118`, run 37156274426): lint green on Linux, build and test red on all three legs — 1 failure on Windows, 3 on Linux, 9 on macOS, each a test that had only ever run on Windows, none in the session's new code. (1) `theme`'s icon-catalogue test splits its own source on `"\n}\n"` and the Windows runner checks out CRLF: `.gitattributes` gains `*.rs text eol=lf`, every blob already LF, closing D858's *Fix*. (2) A read-only destination does not refuse a rename on Unix, where the directory governs: the `atomic` tests' `lock`/`unlock` make the parent `0o555` there, so on Unix they stage a refused *create*, and the cleanup flip, D715's `map_err` flip and D480's headline flip bite on Windows only. (3) `is_folder_stem` asked `Path::components`, for which `\` is an ordinary character on Unix, so `sub\dir`, `C:\Users\Public` and `\\server\share` passed — it refuses any `\` on every platform now. (4) APFS refuses a name that is not UTF-8 (`EILSEQ`), so five D809/D848 tests are `ignore`d on macOS. (5) **A real defect**: the search's file matches were in directory-read order, alphabetical on NTFS and not on APFS, so an unsteered `Enter` opened a different document by platform — **the maintainer's ruling, most recently edited first, ties by name**, sorted by `Library::sort_entries(…, Sort::Edited)` before the `SEARCH_MAX` cap. *(Fixed and tested 2026-10-04, session 44, not yet committed; **Keep**, the search order the maintainer's ruling and the rest the session's. Its block, D967–D972, was reserved and grep-checked clean before any citation was typed. Search test over set mtimes; the sort removed fails on *"the most recently edited document is the one Enter opens"* on Windows, predicted, and its tie assertion is the macOS half, reasoned from the CI run. Windows gates green, 1,487 app tests. 🚨 **No fix verified on Linux or macOS** until the next CI run; the Unix lock never compiled here. D382, D420, D480, D706, D715, D732, D809, D848, D858, D952, D955, D959 amended; §1, §9.5, §10, §11)*
-- **D968** — **The JSON snapshot writes a path the way the SVG writer does: four decimal places.** CI's second run reached two targets the first never did. Windows: `ondin-mcp`'s tool-list test reads `docs/architecture.md` on a CRLF checkout — `.gitattributes` gains `*.md text eol=lf`, every Markdown blob already LF. Linux and macOS: `every-kind.json` differed in one path's 16th digit (`13.98114035132503` against `…5028`), the platforms' math libraries rounding the corner arithmetic's last bit apart, while the SVG golden — rounded to four places by `svg::fmt` — passed everywhere. The snapshot's path was `BezPath::to_svg`, full `f64`, though its comment said *"as the SVG writer emits"* (D119). **The maintainer's ruling, of rounding or a tolerant golden: rounding** — the snapshot's path is `svg::path_d`, now `pub(crate)`, and the golden stays byte-exact (§11). One line of the golden changed. ⚠️ `path_d`'s doc had opened with `fmt`'s summary line, a doc-comment theft; restored to `fmt`. *(Built and tested 2026-10-04, session 44; **Keep**, the maintainer's ruling; block D968–D973 reserved and grep-checked before any citation. Workspace tests, debug and `--release`, green on Windows. 🚨 Not verified on Linux or macOS until CI's third run. §11)*
+- **D961** — **The app's icon set is Schemaic's, and its 64 is the top bars' brand mark.** The maintainer replaced `icons/` with Schemaic's set — `icon.ico` (16–256), `icon.png` (512), `icon-64.png`, `icon-1024.png`, RGBA on a transparent ground — deleting the `convertico-Ondin` files and the store squares, which broke the build. Wired as Schemaic uses it: `build.rs` the `.ico`; `window_icon` the 512, was the 256; the `.icns` from the 1024, 16 to 512@2x; Velopack's `--icon` the `.ico` on Windows and the 512 on Linux; one hicolor icon, the 512, in the packages and `install.sh`'s AppImage route, where there were six; the Pages site the 512. **The top bars' placeholder** — an `ACCENT_900` square with a `DIAMOND` — is `ui::logo` painting the 64 into the same 26pt slot, uploaded once with mipmaps and kept in egui's temp memory; the editor's mark keeps its click-through, its hover a `color::HOVER` fill behind the artwork where the square lightened. ⚠️ An AppImage installed before this keeps a stale 256 icon its uninstall line does not name. *(Built and tested 2026-10-03, committed in session 44's range `e88d30b`…`b7cfaee`; **Keep**, the maintainer's set and ruling, the wiring the session's after Schemaic; closing D956's ⚠️. Tests `window_icon_is_the_ondin_mark_at_the_size_windows_scales_from` and `ui::logo_tests::the_logo_is_the_64px_mark_and_uploads_once`, the `insert_temp` removed failing on *"the texture is kept"*, predicted. Typed into two comments before its block was reserved, the only sites. 🚨 Not seen on a real window, nor on Linux or macOS. D956 amended; §9.1)*
+- **D962** — **The editor's top bar: a save dot, no open or save buttons, and the library's mark-to-name gap on both screens.** Three rulings from screenshots of D961's mark. `OndinApp::save_pill` is `save_dot`: a 7pt dot after the document name, no ground, no text — `color::UNSAVED` (`DANGER`'s value under its own name, since a dirty document is not a destructive click) while `saved_ago` is `None`, a write in flight included, and `color::SAVED` `#45b070`, the app's first green, once the file matches; D393's two colours kept, amber and accent become red and green. ⚠️ **The dot sits at its 14pt hover target's *left* edge**, so the gap to the name is the row's 8pt spacing rather than 8 + 3.5. The folder and disk buttons are gone — `Ctrl+O`, `Ctrl+S` (the same `finish_text_first` and `save_file(true)`), autosave and the mark's click-through are unchanged — so D365's doors are two and `Ctrl+W` D383's third. The mark-to-name gap is the library's 12 on both screens, the editor setting it just before placing its mark — 🚨 a first repair set 8 *after* the library's mark was placed and changed nothing, egui spacing an item when it is placed; `the_mark_and_the_name_are_as_far_apart_on_both_screens` measures both, its flip failing 12 against 8. *(Built 2026-10-03, session 44, committed in its range `e88d30b`…`b7cfaee`; **Keep**, the maintainer's rulings. **The tooltip is the session's, not the ruling's, and removable** — `save_label`'s sentence on hover; removing it orphans `save_label`, D678's ladder and three tests. The pill's twenty-second repaint is dropped; a still-held tooltip may read a minute stale, accepted. ⚠️ **`SAVED`'s first pick, `#6bc48a`, claimed a like lightness and measured 0.75 OKLCH against `DANGER`'s 0.68**; replaced the same session by `#45b070`, computed to `DANGER`'s lightness and chroma; *Revisit if* either state reads louder. The gap is pinned by `the_mark_and_the_name_are_as_far_apart_on_both_screens`; nothing pins the dot or the buttons' absence. 🚨 Not seen on a real window. D365, D383, D393 amended; §9.1, §9.4, §9.5; `shortcuts.md` §8)*
+- **D963** — **The top bar's menu heads answer the pointer as its icon buttons do, and stay lit while their menu is open.** The maintainer's ruling, from a screenshot: undo, redo and Settings lit under the pointer and the rest of the top-right cluster did not, against *"a policy of 'everything needs to have a hover effect'"*. The three that did not — View, Snap and the zoom readout — are `ui::menu_head`, which painted its mark and caret and nothing else. It now takes `icon_button_padded`'s hover exactly: `color::HOVER` over its whole 26pt allocation at radius 5, the lead and the caret drawn in `color::TEXT`. The bar's own icon buttons are the precedent, not `menu_check`'s `text_a(20)` fill, which is a row inside an open menu rather than a head in the bar. ⚠️ **`galley_with_override_text_color`, not `galley`'s colour argument**: both galleys bake their resting colours, and that argument is a fallback the tessellator only uses on `PLACEHOLDER`. **Held lit while its menu is open**, the maintainer's second ruling: `menu_head`'s `open`, from `open_menu`. **The policy is written nowhere in the record**; D246 and D381 are its nearest precedents. *(Built and tested 2026-10-03, session 44, committed in its range `e88d30b`…`b7cfaee`; **Keep**, the maintainer's two rulings — **the ground is the session's**, beyond the maintainer's fallback of *"a simple lighter color … on the icon/text"*. Test `ui::head_tests::a_menu_head_lights_under_the_pointer_like_an_icon_button`, `open` ignored failing on *"an open head stays lit with the pointer away"*, predicted; the fill dropped failed on *"a hovered head paints the HOVER ground"* when run, before the open case was added ahead of it, and re-run after, on the open case with `(0, 2)` as predicted. 🚨 Not seen on a real window. §9.1, §9.2, §9.4)*
+- **D964** — **The library's card grid fits its columns to the window, and no card is wider than 300 points.** The maintainer's ruling, from a screenshot of a very wide window's four cards a row, each stretched past 500pt: *"a max-width (up to 300px they seem to look fine) and a 'responsive' design"*. `GRID_COLS = 4` — the design's `repeat(4,1fr)`, its doc arguing *"fixed rather than fitted"* because a grid that reflows makes one library look different on two monitors, an argument the record carried nowhere else — is `CARD_MAX_W` 300 and `GRID_GAP` 14: `grid_cols` is the fewest columns that keep every card at the ceiling, `card_width` fills the row exactly, so a wider window adds a column rather than a gutter, and *Recent*'s project row lays with the same pair. Heights unchanged; the 120pt floor gone. `↓` steps `DashboardState::grid_cols`, written by `file_grid` and read by `dashboard_keys` before the grid is drawn — last frame's count — through `arrow_target`'s new parameter, `0` reading as one. ⚠️ **No minimum width but a column's arrival**: an `n + 1`th column drops each card to `(300n − 14)/(n + 1)`, 143 at the step from one to two. 🚨 **D864's 128 is no longer twice a screen of file cards** — about 72 at a 1,600pt body, 132 past 3,126 — and its recency guard holds there as on *Recent*. *(Built and tested 2026-10-03, session 44, committed in its range `e88d30b`…`b7cfaee`; **Keep**, the maintainer's ruling, the two monitors' difference the accepted cost; *Revisit if* the step's narrow cards read too narrow. Tests `the_grid_adds_columns_rather_than_stretching_cards` — `floor` for `ceil` predicted to fail at 1,600 and failing first at 900, 443pt cards, the loop running narrowest first — and `the_arrows_step_a_row_of_the_grid_as_laid`, the fixed 4 restored failing on *"down is a row of six"*, predicted. 🚨 Not seen on a real window. D374, D376, D864 amended; §9.5; `shortcuts.md` §8a)*
+- **D965** — **The file card's caption band is 46 points, not 42.** The maintainer's ruling, from a screenshot of one card: *"The last seen text has less padding bottom than the title has padding top … maybe 3-4px (not measured)."* `dashboard::CARD_CAPTION_H` 42 → 46. The name stays centred 15 below the thumbnail and the date 31, so all four points go under the date: its line box ended ~4.5 above the card's edge against the name's ~7.5 below the thumbnail, and ends ~8.5 above it now — arithmetic from the centres and the 12.5/11pt sizes, not measured ink. The ⋮ stays centred at +22. ⚠️ `file_card` and `new_file_card` both allocate `CARD_THUMB_H + CARD_CAPTION_H`, so the dashed *New file* card grows too, its plus and label 2 lower, placed from its centre; project cards do not. Rows are 176 apart, were 172. *(Built and tested 2026-10-03, session 44, committed in its range `e88d30b`…`b7cfaee`; **Keep**, the maintainer's ruling and upper figure. **Nothing pins the height** — no test written. D864's ~twelve rows to a 2,160pt window hold at 176, so no cover figure moves. Typed into three comments before its block was reserved, the only sites. 🚨 Not seen on a real window. D374, D376, D864 amended)*
+- **D966** — **The library's Settings sits `TOP_GAP` from the update pill, as the editor's does.** The maintainer's ruling, from the forced pill on both screens: *"Let's make them equal (keeping the editor's distance)."* The editor's cluster spaces every item `app::TOP_GAP`, 5; the library's spaces at 12. `TOP_GAP` is `pub(crate)`, and `dashboard_top_bar` sets it immediately before allocating Settings and 12 again before the chip — ⚠️ **on Settings, not the pill**, egui spacing an item when it is placed (D962's mechanism) — and only when `updater.state().label().is_some()`, `chip`'s own test; with no pill the status dot keeps the row's 12. *(Built and tested 2026-10-03, session 44, committed in its range `e88d30b`…`b7cfaee`; **Keep**, the maintainer's ruling. Test `settings_sits_as_far_from_the_update_pill_on_both_screens` over the `#[cfg(test)]` `Updater::ready`, the pill found as the outline around its *RESTART* label — a first draft took the search field's and read 4643; the library's Settings at 12 again failing *"the library's gap 12 against the editor's 5"*, predicted. Nothing pins the no-pill 12. `the_forced_update_chip_is_off_in_a_committed_tree` red only for the working tree's temporary forced chip, not this change. Typed into two comments before its block was reserved, the fourth time this session, the only sites. 🚨 Not seen on a real window. §9.1)*
+- **D967** — **What the first CI run off Windows found: four tests that assumed Windows, a guard that did, and a search whose order was the folder's.** The first push, 2026-10-03 (`bb3ea31..e65d118`, run 37156274426): lint green on Linux, build and test red on all three legs — 1 failure on Windows, 3 on Linux, 9 on macOS, each a test that had only ever run on Windows, none in the session's new code. (1) `theme`'s icon-catalogue test splits its own source on `"\n}\n"` and the Windows runner checks out CRLF: `.gitattributes` gains `*.rs text eol=lf`, every blob already LF, closing D858's *Fix*. (2) A read-only destination does not refuse a rename on Unix, where the directory governs: the `atomic` tests' `lock`/`unlock` make the parent `0o555` there, so on Unix they stage a refused *create*, and the cleanup flip, D715's `map_err` flip and D480's headline flip bite on Windows only. (3) `is_folder_stem` asked `Path::components`, for which `\` is an ordinary character on Unix, so `sub\dir`, `C:\Users\Public` and `\\server\share` passed — it refuses any `\` on every platform now. (4) APFS refuses a name that is not UTF-8 (`EILSEQ`), so five D809/D848 tests are `ignore`d on macOS. (5) **A real defect**: the search's file matches were in directory-read order, alphabetical on NTFS and not on APFS, so an unsteered `Enter` opened a different document by platform — **the maintainer's ruling, most recently edited first, ties by name**, sorted by `Library::sort_entries(…, Sort::Edited)` before the `SEARCH_MAX` cap. *(Fixed and tested 2026-10-04, session 44, committed as `afc12b4`; **Keep**, the search order the maintainer's ruling and the rest the session's. Its block, D967–D972, was reserved and grep-checked clean before any citation was typed. Search test over set mtimes; the sort removed fails on *"the most recently edited document is the one Enter opens"* on Windows, predicted, and its tie assertion is the macOS half, reasoned from the CI run. Windows gates green, 1,487 app tests. 🚨 **No fix verified on Linux or macOS** until the next CI run; the Unix lock never compiled here — **verified 2026-10-04**: CI green on all three legs at `e1f1842`. D382, D420, D480, D706, D715, D732, D809, D848, D858, D952, D955, D959 amended; §1, §9.5, §10, §11)*
+- **D968** — **The JSON snapshot writes a path the way the SVG writer does: four decimal places.** CI's second run reached two targets the first never did. Windows: `ondin-mcp`'s tool-list test reads `docs/architecture.md` on a CRLF checkout — `.gitattributes` gains `*.md text eol=lf`, every Markdown blob already LF. Linux and macOS: `every-kind.json` differed in one path's 16th digit (`13.98114035132503` against `…5028`), the platforms' math libraries rounding the corner arithmetic's last bit apart, while the SVG golden — rounded to four places by `svg::fmt` — passed everywhere. The snapshot's path was `BezPath::to_svg`, full `f64`, though its comment said *"as the SVG writer emits"* (D119). **The maintainer's ruling, of rounding or a tolerant golden: rounding** — the snapshot's path is `svg::path_d`, now `pub(crate)`, and the golden stays byte-exact (§11). One line of the golden changed. ⚠️ `path_d`'s doc had opened with `fmt`'s summary line, a doc-comment theft; restored to `fmt`. *(Built and tested 2026-10-04, session 44; **Keep**, the maintainer's ruling; block D968–D973 reserved and grep-checked before any citation. Workspace tests, debug and `--release`, green on Windows. 🚨 Not verified on Linux or macOS until CI's third run — **verified**: CI green on all three legs at `e1f1842`. §11. **Amended 2026-10-04** (D972): it left `SNAPSHOT_VERSION` at 10 though every path's bytes changed, and the transforms and bounds beside the path at full precision from the same arithmetic; D972 rounded them and bumped to 11)*
+- **D969** — **On Windows the app's own folder is `OndinData`, because `%LocalAppData%\Ondin` is the installer's.** `[R3-L5-01]`, Critical. `dirs::cache_dir()/ondin` is `%LocalAppData%\ondin`, which NTFS compares equal to Velopack's install root `%LocalAppData%\Ondin` (`--packId Ondin`, D956): Setup over a root that is not empty renames it aside and deletes it, a repair the same, uninstall empties it — and `library.json`, every star on the machine, went with it. New `machine_dir::root()`: `cache_dir()/ondin` on Linux and macOS, `cache_dir()/OndinData` on Windows, for the index, the covers and the font cache. `adopt_legacy` carries the old index across once — a copy, not a move, and the bytes, not a parse — and `Blocked`, an old file that cannot be read, latches as D418's `unreadable`. **The location is the session's ruling under the maintainer's delegation.** ⚠️ It cannot help anyone who runs Setup before running a build with it; an in-app update needs nothing — read, not run. *(Fixed and tested 2026-10-04, session 45, not yet committed; **Keep**, the location overturnable. Tests `machine_dir::tests`, the Windows folder read against every `--packId` in `release.yml` with `"ondin"` and `"ONDIN"` failing, and the four adopt cases, two flips at their sites. 🚨 Not run against a real installer. D366, D956 amended; §4, §5.4a, §9.2, §9.5)*
+- **D970** — **An update applies at the exit the chip asked for, never at startup, and never while another Ondin runs.** `[R3-L5-02]`, `[R1-L2-01]` (both High), `[R3-L5-04]`, `[X1-L1-02]`, `[X1-L6-01]`, `[X1-L1-03]`; `[R2-L6-02]` moot. Velopack's updater waits sixty seconds for the process and then applies regardless, on Windows stopping every process under the install root: the chip launched it at the click, so a *Cancel* on *Unsaved changes* had the window killed a minute later; any other window or headless export went too; and the startup auto-apply did the same from a new launch. `Updater::restart` sets `restart_on_exit` and sends `Close`, *Cancel* calls it off, and `on_exit` launches the updater after `disk_settle` — refused with `Restart::OthersOpen(n)` while `instances::others()`, a held lock file per GUI or headless process under `machine_dir::root()/instances`, counts anything, and counted again at the exit. `set_auto_apply_on_startup(false)`; `hook_runs` admits only no arguments, `gui` and `--veloapp-*`; `poll` asks for the recheck's wake on every pass. `Msg::Handover` and `handed_over` deleted. **The session's, under the maintainer's delegation.** A *Save and close* whose save does not go through calls the restart off as *Cancel* does — found left armed by `arch-scribe`, fixed the same day, read and not tested; the refusal names *Ondin* rather than *windows*, the count being of processes. *(Fixed and tested 2026-10-04, session 45, not yet committed; **Keep**, overturnable; the failed-Save arm ***Fixed***. Tests in `update::tests`, `instances::tests` and `main::tests`, each flip at its predicted site. 🚨 Never run against a real install. D954 amended; §9.1, §9.2)*
+- **D971** — **`ondin.com` passes the child's exit code through whole and takes the child down with it; `cargo run -p ondin-app` runs the app; a non-Unicode argument is refused.** `[R2-L6-01]`, `[X1-L1-01]`, `[R2-L8-01]`, `[X1-L1-04]`. The clamp to a byte turned a crash's NTSTATUS into 0, a success; and a GUI-subsystem child never sees the console's Ctrl+C, so a cancelled `export --all` went on writing behind the prompt. `exit_code` is the whole `i32`; `tie_to_this_process` puts the child in a kill-on-close job object, measured with a control, Ctrl+C not driven; `windows-sys` gains three declaration modules. `default-run = "ondin"`. `unicode_args` refuses with exit 2 where `std::env::args` panicked. *(Fixed and tested 2026-10-04, session 45, not yet committed; **Keep**, the refusal over carrying such a path through the session's ruling under the maintainer's delegation. Tests `a_crashed_childs_status_is_not_success`, the old clamp failing with 0, and `an_argument_that_is_not_unicode_is_refused`, its `unix` arm compiled only by CI. D953 amended; §7)*
+- **D972** — **The snapshot's transforms and bounds are written at four places too, and `SNAPSHOT_VERSION` is 11.** `[R1-L2-03]`, `[R1-L2-04]`, `[R2-L8-09]`. D968 rounded the path and left `local_transform`, `world_transform` and `world_bounds` at full `f64` from the same arithmetic — the Triangle's bounds carried sixteen digits, and §11's byte-exactness sentence was false of the golden it was written for. `round4` at those four sites, a non-finite value and `−0` written `0`. **Bumped, the session's ruling under the maintainer's delegation**, on §7's precedent at 6 and 9: an untouched document's snapshot changes bytes. §7 had said *"currently 9"* since the code reached 10. ⚠️ `pivot` is not rounded — read. *(Fixed and tested 2026-10-04, session 45, not yet committed; **Keep**, overturnable. Golden regenerated; test `a_rotated_layers_numbers_are_written_at_four_places`, `round4` as the identity failing on `0.8660254037844387`. D968 amended; §7, §11)*
+- **D973** — **The window's own controls work over a modal card and are spent by a menu's dismissing click; each resize corner is an L; the library's search field keeps off the cluster.** `[X2-L1-02]`, `[R1-L2-02]`, `[X2-L3-01]`, `[X2-L1-01]`, `[X2-L1-03]`, `[R2-L8-08]`. `egui::Modal` refuses every layer beneath it, so a card left the mouse no way to move, resize or close the window: `chrome::above_modal`, last on both screens, raises the zones and lays the strip and buttons again over the backdrop unless the card reaches the bar. `drag_strip` and `caption_buttons` take `act`, the library passing `!menu_was_up` and gating the chip the same way — a double-click refused if either press was spent. `Rect::union` is a bounding box, so each corner was a 14-point square that resized from the close button: twelve zones now, **an L ruled under the maintainer's delegation**. `search_rect` centres the field on the window and slides and narrows it, to 120, 12 points off the brand and the cluster — at 683 or less it took the gear's clicks, and it sat 7 right of centre. 🚨 The lifted strip first covered the zones where the bar meets the edge, and raising the zone areas after it did not help — egui orders the layers raised in one pass by age, not by the order of `move_to_top` — so the zones that meet the bar are laid again inside the lifted area, after the strip. *(Fixed and tested 2026-10-04, session 45, not yet committed; **Keep**, the session's under the delegation, overturnable; the top edge ***Fixed***. Tests `a_modal_card_leaves_the_windows_controls_working`, `a_spent_click_moves_no_window`, `the_resize_zones_tile_the_border` and `at_half_a_screen_the_search_field_leaves_the_gear_and_the_chip_their_clicks`, each flip run. 🚨 Not seen on a real window. D952, D958 amended; §9.1, §9.5)*
+- **D974** — **install.sh writes its repository configurations itself, the rpm route trusts only the key it verified, a Pages build keeps a released rpm's bytes, and the Release workflow pins what runs beside its token.** `[X3-L5-01]`, `[X3-L5-02]`, `[X3-L5-03]`, `[X3-L1-01]`–`[X3-L1-06]`, `[X3-L3-01]`, `[R2-L8-06]`, `[R2-L8-03]`. Configs accepted if the expected lines were *present* let a site-controlling attacker add their own stanza beside the genuine key: `write_apt_source` and `write_rpm_repo` write both from constants, `require_expected_line` deleted. dnf fetched `gpgkey=` from the same origin and `-y` imported it: the verified key goes to `/etc/pki/rpm-gpg/RPM-GPG-KEY-ondin` and `gpgkey=file://` names it. `autorefresh=1` for zypper. Each rpm signed at `--faked-system-time max(BUILDTIME, key creation)!`, deterministic under RSA PKCS#1 v1.5, so a Pages rebuild no longer changes a released package's checksum — **not run anywhere**. `libxcursor1`/`libxi6` and their sonames, which winit's X11 backend opens. `release.yml`: `persist-credentials: false`, `cargo-zigbuild 0.23.4` and `vpk 1.2.161` from the v0.4.0 run's logs, softprops pinned by sha, `fail_on_unmatched_files: true` on two steps, plain `X.Y.Z` only. AppImage to `.partial`, ELF and `AI\x02` checked, renamed over. README's openSUSE `zypper addrepo`; the skill's one tolerant step and re-run rule. ⚠️ **Not done**: the release job's read/write split, and `[X3-L5-04]`'s `--nogpgcheck` — open in `roadmap.md`. *(Fixed 2026-10-04, session 45, not yet committed; **Keep**, the session's under the maintainer's delegation, overturnable; the two left ***Fix***. Test `the_release_packs_with_the_clients_own_velopack_version`, the pin at `1.2.160` failing. 🚨 Nothing run in a distribution container or a dry run. D956, D957 amended)*
+- **D975** — **`atomic::write` keeps the document's mode, and writes through its symbolic link.** `[R3-L5-03]`, pre-existing, first shipped to Linux and macOS by D956. The temp was `0644` under the usual umask and the rename replaced the inode, so a `0600` document came back world-readable; and a rename replaces a link, so a document reached through one became a plain file its target never saw again. `through_link` writes at the `canonicalize`d target of a link that resolves; the replaced file's permissions are copied onto the temp after `sync_all`. On Windows that is the read-only flag, whose destination refuses the rename anyway (D967). ⚠️ **Only the mode**: ownership, ACLs, extended attributes and hard links are not kept. *(Fixed and tested 2026-10-04, session 45, not yet committed; **Keep**, the session's. Test `atomic::tests::a_save_keeps_the_documents_mode_and_its_link`, `cfg(unix)`, run and flip-checked under WSL Ubuntu 24.04 — the copy disabled failing with `420` against `384`, `through_link` skipped on *"the link is still a link"*; no local gate compiles it. D378 amended in the same pass for the log file; §9.5)*
 
 ---
 
@@ -17732,6 +17739,77 @@ moved the render onto a worker; read them as history. And since §15 **D845** th
 nothing on an **empty** list: an unlistable root scans as no documents, and the directory is shared
 by every library on the machine (§15 D708), so sweeping on it took all of their covers.
 
+**Amended 2026-10-04 (§15 D969): on Windows the folder is `dirs::cache_dir()/OndinData`.** There
+`dirs::cache_dir()/ondin` was the Velopack installer's root under another case, which Setup and
+uninstall delete; Linux and macOS keep `ondin`.
+
+**D969 — On Windows the app's own folder is `OndinData`, because `%LocalAppData%\Ondin` is the
+installer's. *Fixed and tested 2026-10-04, session 45, not yet committed; Keep — the location the
+session's ruling, under the maintainer's delegation. Not run against a real installer.***
+
+`[R3-L5-01]`, Critical, from the release review of v0.4.0. D366 put what does not travel — last-opened
+times, stars, covers — in `dirs::cache_dir()/ondin`, beside the font cache, and on Windows
+`dirs::cache_dir()` is `%LocalAppData%`. D956 then packed the app with `vpk pack --packId Ondin`, and
+Velopack's installer roots an install at `%LocalAppData%` joined with the pack id. **NTFS compares
+names without regard to case, so the two were one folder.** Read by the review in Velopack 1.2.0's
+installer source, the version `vpk` vendors: Setup over a root that is not empty shows an
+overwrite-or-repair dialog for an *existing installation*, renames the folder aside, installs into a
+fresh one and on success deletes the renamed copy whole; a repair does the same; uninstall empties the
+root. The covers and the fonts would come back. **`library.json` would not**: it is every star on the
+machine, which `library::cache`'s own module doc says nothing else records — the loss D418's latch
+exists to stop by another road, arriving here behind a dialog that asked about an *application*.
+Documents were never at risk: the library is under the home folder and the preferences under the
+roaming `config_dir()`.
+
+**New module `machine_dir`.** `root()` is `cache_dir()/ondin` on Linux and macOS, where nothing else
+owns it and so nothing moves, and **`cache_dir()/OndinData` on Windows**; `root_or_temp()` is the font
+cache's form, keeping the fallback to the temporary folder it had on a machine with no cache folder.
+The index (`library::cache::path`), the covers (`library::cover::covers_dir`) and the font files and
+catalog (`FontService::new`) all read it. ⚠️ **Another name *under* the root would not do** — the
+installer owns `%LocalAppData%\Ondin` whole, so the first component has to differ — **and the pack id
+cannot move instead**: it is the identity every installed copy updates by (D956, §4's twelfth
+invariant). **The location is the session's ruling under the maintainer's delegation, and open to
+overturning**: `OndinData`, all three caches rather than the index alone, and Windows only. The review
+offered the index beside `prefs.json` in `config_dir()` as the other route.
+
+**The old index is carried across once.** `legacy_root()` is the old Windows spelling and `None`
+elsewhere, and `LocalIndex::load` asks `adopt_legacy(old, new)` before its first read: `Nothing` when
+the new file exists or the old one does not, `Copied` when only the old one does. **A copy of the
+bytes, not a parse**, so a damaged old file arrives damaged and the three-way read at the new path
+latches on it exactly as it would have at the old one; **and a copy, not a move**, because the old
+folder is the installer's to delete on its own schedule and an older build run meanwhile still finds
+its file. 🚨 **`Blocked` — an old file that is there and cannot be read or copied — returns
+`unreadable: true`**: D418's write latch, reached one step earlier. An empty index written at the new
+path would be read from then on, and the stars at the old one never looked at again. The old covers
+and fonts are left for the installer to remove; both rebuild. ⚠️ An older build run after the copy
+writes the old file, which is not read again once the new one exists.
+
+🚨 **It cannot help anyone who runs Setup before running a build with this in it** — the installer
+deletes the folder first — and v0.4.0's `Setup.exe` is published with the old path. Nobody is known
+to have installed any release, so the population is the maintainer's own machines, where running a
+fixed build once before Setup carries the index across. **An in-app update needs nothing**: by the
+review's reading, Velopack's apply replaces only the install's `current\` folder, so an index sitting
+inside a v0.4.0 install root is still there for the updated build to adopt — read, not run.
+
+**The evidence.** `machine_dir::tests::the_windows_folder_is_not_the_installers_root` asks for the
+Windows folder from any host and compares its first component against the pack id as NTFS compares,
+then reads `release.yml` and demands every `--packId` in it be that id — so a renamed pack id fails
+the test rather than leaving it comparing against a folder nothing installs to. **Flip run**:
+`WINDOWS_DIR_NAME = "ondin"`, every earlier build's spelling, fails the first assertion; so does
+`"ONDIN"`. `the_old_index_is_copied_once_and_never_over_a_new_one` drives the four cases through a
+parent that does not exist yet, `atomic::write` creating it; **flips run**: dropping the
+`new.exists()` return fails the third case with `Copied` — the old bytes over an index written since —
+and answering `Nothing` on an error other than `NotFound` fails the fourth. And
+`the_folder_off_windows_did_not_move`. ⚠️ **`LocalIndex::load`'s call is read, not tested**: under
+`cfg(test)` `load` answers before it reaches the path (D807).
+
+*(Fixed and tested 2026-10-04, session 45, not yet committed; **Keep**, the location ***the session's
+ruling under the maintainer's delegation***, overturnable. 🚨 **Not run against a real installer**,
+which would destroy the index this exists to keep; the installer's behaviour is the review's reading
+of Velopack's source. Recorded from the brief, `[R3-L5-01]`, and a read of `machine_dir.rs` with its
+tests, `LocalIndex::load`, `cache::path`, `cover::covers_dir`, `FontService::new` and
+`atomic::write`. D366 and D956 amended; `architecture.md` §4, §5.4a, §9.2 and §9.5 amended)*
+
 **D367 — The dashboard's controls are the app's controls. *Fixed and tested 2026-08-26; the screen is
 still worth a look on the machine.*** Eight defects were reported on D365's library screen and they
 were one defect. It had been built in a single pass from `design/Dashboard.dc.html`, and towards the end
@@ -18392,7 +18470,7 @@ so, and they are not re-measured. **Amended 2026-10-03** (D965): the card's full
 158, the caption 4 points taller; the test's doc gives both.
 
 **D964 — The library's card grid fits its columns to the window, and no card is wider than 300 points.
-*Built and tested 2026-10-03, session 44, not yet committed; Keep — the maintainer's ruling, overturning
+*Built and tested 2026-10-03, session 44, since committed; Keep — the maintainer's ruling, overturning
 `GRID_COLS`' fixed four. Not seen on a real window.***
 
 The maintainer, from a screenshot of the dashboard on a very wide window — four cards to a row, each
@@ -18463,7 +18541,7 @@ covers a card, thirty a row at six columns, so five rows pass 128 where D864 cou
 recency guard is what holds a wide screen**, as it already held a tall *Recent*: the cap is exceeded
 rather than churned. Arithmetic on the two functions and D864's row count, not measured.
 
-*(Built and tested 2026-10-03, session 44, not yet committed; **Keep**, the maintainer's ruling and the
+*(Built and tested 2026-10-03, session 44, since committed; **Keep**, the maintainer's ruling and the
 maintainer's 300, overturning `GRID_COLS`' *"fixed rather than fitted"*; the fit's arithmetic and the
 arrows' field the session's. 🚨 **Not seen on a real window.** Recorded from the brief and a read of
 `CARD_MAX_W`, `grid_cols`, `card_width`, `project_cards`, `file_grid`, `DashboardState::grid_cols`,
@@ -18473,7 +18551,7 @@ computed here. D374, D376 and D864 amended; `architecture.md` §9.5 amended; `sh
 amended; nothing struck from `roadmap.md`, which held no entry for it)*
 
 **D965 — The file card's caption band is 46 points, not 42. *Built and tested 2026-10-03, session 44,
-not yet committed; Keep — the maintainer's ruling. Not seen on a real window.***
+since committed; Keep — the maintainer's ruling. Not seen on a real window.***
 
 The maintainer, from a screenshot of one file card: *"The last seen text has less padding bottom than
 the title has padding top. Which makes for an unbalanced look. Just add some more padding-bottom, maybe
@@ -18501,7 +18579,7 @@ Beside it, 1,486 tests green, clippy under `-D warnings`, the doc gate and `chec
 typed into three comments in `dashboard.rs` a minute before session 44's block was reserved; the
 negative grep run straight after found those three sites and nothing else.
 
-*(Built and tested 2026-10-03, session 44, not yet committed; **Keep**, the maintainer's ruling, the
+*(Built and tested 2026-10-03, session 44, since committed; **Keep**, the maintainer's ruling, the
 four points the upper of the maintainer's two figures. 🚨 **Not seen on a real window.** Recorded from
 the brief and a read of `CARD_CAPTION_H`, `file_card`, `new_file_card` and the two tests' docs; the
 line-box figures and the row count are arithmetic. D374, D376 and D864 amended; `architecture.md`
@@ -18842,6 +18920,59 @@ or a rename turns it into an assertion about nothing.** ⚠️ **The scheme chan
 D548, and that helper is `atomic::leftover_temps` now** — every temp for a path rather than one name,
 because the question became *"is there any"*. The same test was saved by the same habit twice, which
 is what makes the rule worth keeping rather than merely worth having written down once.
+
+**Amended 2026-10-04 (`[R2-L8-05]`): the un-converted set has a third member, and it was named
+nowhere.** §15 D954's `logging::init` writes `config_dir()/ondin/ondin.log` by plain append and
+rotates it with a bare `fs::rename` to `ondin.log.1` — so *"exactly the two derived caches and the
+exports"* above was false from that entry on, and by this entry's own rule, *a file worth an fsync is
+one nothing else can reconstruct*, a log falls on the atomic side, since nothing reconstructs one.
+**Exempt, and the reason is the stream's shape rather than the rule**: an append-only diagnostic
+stream has no atomic form worth having — a temp-and-rename per record would rewrite the whole file
+each time — and a torn last line is the whole of what a crash can cost it. The set is the two derived
+caches, the exports and the log. And it is written on every launch §15 D970's `hook_runs` admits —
+the GUI, `gui` and Velopack's `--veloapp-*` — in any profile, not by a release build alone.
+
+**D975 — `atomic::write` keeps the document's mode, and writes through its symbolic link. *Fixed and
+tested 2026-10-04, session 45, not yet committed; Keep — the session's. Ownership is not kept.***
+
+`[R3-L5-03]`, Medium, from the release review — pre-existing since this module was written, and first
+shipped to Linux and macOS by §15 D956. `write` creates a temp with `File::create`, which is
+`0o666 & ~umask` — `0644` under the usual `022` — and renames it over the destination, so on Unix
+every save replaced the document's inode with a new one carrying the process's default mode: a file
+the user had restricted to `0600` came back world-readable, with nothing said. And a rename replaces
+a *link*, not its target, so a document reached through a symbolic link — `~/Ondin/brand.ondin`
+pointing into a synced folder — became a plain file at the first save, and the target, and the other
+machine syncing it, never saw another edit. D967 records that a read-only destination is replaced on
+Unix, *"which is how editors there ordinarily save"*; those editors copy the original's mode onto the
+temp first, which is the half this lacked. The review found no entry deciding either: nothing in the
+record named symlinks, the umask or mode bits.
+
+**`through_link`** resolves `path` first: when `symlink_metadata` says it is a link, its
+`canonicalize`d target, and `path` itself otherwise or when the link does not resolve, which is
+written as before. The temp is then made beside the **target**, so the rename stays on one volume,
+and the age-gated sweep runs in the target's directory. **The replaced file's permissions are copied
+onto the temp**, after `sync_all` and before the rename, through the open handle; a failure to copy
+is ignored, the bytes being what the write is for. ⚠️ **On Windows `Permissions` is the read-only
+flag**, so the copy carries it, and a read-only destination refuses the rename there anyway (D967) —
+leaving a read-only temp for the failure's cleanup to remove, which
+`a_failed_write_leaves_the_old_file_intact`'s *no temp left behind* is the assertion about.
+⚠️ **Only the mode is kept**: ownership (uid and gid), ACLs, extended attributes — macOS Finder tags
+among them — and a hard link's sharing of the inode are not, the last because a rename makes a new
+inode by construction. A save therefore still gives the document the saving process's user and,
+where the directory does not decide it, its group.
+
+**The evidence.** `atomic::tests::a_save_keeps_the_documents_mode_and_its_link`, `cfg(unix)` — a
+`0600` file saved stays `0600`; a save through a link leaves the link a link, writes its target, and
+leaves no temp beside the target. **Run and flip-checked under WSL Ubuntu 24.04 on this machine**,
+2026-10-04: the permissions copy disabled fails on *"the mode is kept"* with `420` (`0o644`) against
+`384`; `write` skipping `through_link` fails on *"the link is still a link"*. ⚠️ **No local gate
+compiles it** — a Windows build skips it — so it is the newest member of the class `cfg`-gated arms
+belong to, run by CI's Linux and macOS legs and by hand under WSL once.
+
+*(Fixed and tested 2026-10-04, session 45, not yet committed; **Keep**, the session's. Recorded from
+the brief, `[R3-L5-03]`, and a read of `atomic::write`, `through_link` and the test. D378's *what
+it gives* paragraph is about atomicity, which this leaves as it was, and is not amended for it;
+`architecture.md` §9.5 amended)*
 
 **D379 — *Edit project*, and archiving as a flag on the project. *Built and tested 2026-08-28; Keep.***
 `design/Dashboard.dc.html` grew an *Edit project* button on a project's page and the idea of archiving:
@@ -24780,7 +24911,16 @@ with `[StartDrag]`; the zones kept while maximized fails *"none while maximized"
 `Maximized(true)`. ⚠️ **A first draft of that last test pressed at 663**, inside minimize under both
 layouts, and its flip passed: the press has to sit where the two layouts disagree. ⚠️
 `each_host_opens_the_window_it_draws_around` asserts the app id for Windows and Linux only, where
-its doc says every host.
+its doc says every host. **Stale since `21feb8c`**, committed in the same second as this entry, which
+added the macOS assert (`[R2-L8-04]`).
+
+**Amended 2026-10-04 (§15 D973): three of the bullets above were not true of the window.** The
+corners were never *"14pt corners"* in the sense meant: each was written as the union of two strips,
+and `Rect::union` is the bounding box, so every corner was a 14-point square whose inside resized the
+window from the close button. `zones` returns twelve areas now, each corner an L of two `EDGE`-deep
+arms. The resize zones, the caption buttons and the drag strip were dead under any modal card, which
+refuses every layer beneath it; `chrome::above_modal` lays them over the backdrop. And on the
+library they acted on the click that dismissed a menu, against D558; both take `act` now.
 
 *(Built and tested 2026-10-03, committed as `da3d4d4`, the brief's sha; **Keep**, the session's,
 ported from Schemaic at the maintainer's direction. 🚨 **Not seen on a real window on any host, and
@@ -24821,6 +24961,68 @@ maintainer's direction. **Measured by the session, not by a test** — nothing i
 brief and a read of `main.rs`' crate doc and attribute, `bin/ondin-cli.rs` and `release.yml`'s
 Windows steps. `architecture.md` §7 and §9.2 amended)*
 
+**Amended 2026-10-04 (§15 D971): two sentences above were wrong about the child.** *"Clamped to a
+byte"* made every crash a success — a Windows process ends with its NTSTATUS, negative as an `i32`,
+which the clamp turned into 0 — and the code now passes through whole. And Ctrl+C at the prompt
+reached the twin and not a GUI-subsystem child, so a cancelled export went on writing; a job object
+now ends the child with the twin. *"No logic of its own"* is true of arguments only. Neither was in
+this entry's measurement: it ran no crash, and a debug `ondin.exe` is a console process that receives
+the Ctrl+C by itself.
+
+**D971 — `ondin.com` passes the child's exit code through whole and takes the child down with it;
+`cargo run -p ondin-app` runs the app; a non-Unicode argument is refused. *Fixed and tested
+2026-10-04, session 45, not yet committed; Keep — the session's, the refusal ruled under the
+maintainer's delegation. Ctrl+C not driven.***
+
+The release review's RC-8, `[R2-L6-01]` and `[X1-L1-01]`, with `[R2-L8-01]` and `[X1-L1-04]` beside
+them: four ways the command line D953 put behind a console twin failed the person or script running it.
+
+**A crash read as success** (`[R2-L6-01]`). `ondin-cli` exited with
+`status.code().map_or(1, |c| c.clamp(0, 255) as u8)` — D953's *"clamped to a byte"* — and a crashed
+Windows process exits with its NTSTATUS, `0xC0000005` for an access violation, negative as an `i32`,
+which the clamp made **0**. Every NTSTATUS error has the high bit set, so every crash of `ondin.exe`
+told the script that ran it that the export had worked. `exit_code(status.code())` hands the whole
+`i32` to `std::process::exit`, which Windows keeps at 32 bits; `None`, a Unix child ended by a signal,
+is `1`. Test `a_crashed_childs_status_is_not_success`; **flip run**, the old clamp, failing on the
+access violation with 0 — the reported symptom.
+
+**Ctrl+C left the export running** (`[X1-L1-01]`). A release `ondin.exe` is a GUI-subsystem process
+attached to no console, so a console's Ctrl+C, or its closing, reaches the twin and not the child: the
+prompt came back while a cancelled `ondin export --all` went on overwriting files behind it.
+`tie_to_this_process` assigns the child to a job object with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`
+whose one handle is the twin's and is deliberately never closed, so the kernel closes it when the twin
+ends — Ctrl+C, the console closed, a kill — and the child goes with it. ⚠️ **Assigned after the
+spawn**, so a child that ends in its first instant is never in the job, which costs nothing; spawning
+it suspended would close the gap and needs the main thread's handle, which `std` does not give.
+Failure is silent and leaves the old behaviour. Off Windows it does nothing, a terminal's Ctrl+C
+reaching the whole foreground process group. **Measured by the session with a control, not tested**:
+`ping.exe` copied as `ondin.exe` beside a debug `ondin-cli.exe`, running `-n 30`, the twin killed with
+`Stop-Process -Force` 1.5 s in — with the function the child had ended within 0.8 s; with
+`AssignProcessToJobObject` removed it was still running. 🚨 **A real console's Ctrl+C was not
+driven.** The workspace `windows-sys` gains `Win32_Security`, `Win32_System_JobObjects` and
+`Win32_System_Threading`, declarations and no code, and the root manifest's comment says whose they
+are.
+
+**`cargo run -p ondin-app` ran nothing** (`[R2-L8-01]`). `src/bin/ondin-cli.rs` is discovered beside
+the one declared `[[bin]]`, and with two binaries and no `default-run` cargo refuses to pick — which
+broke the README's build command and CLAUDE.md's headless `export` recipe. `default-run = "ondin"` in
+`ondin-app`'s `[package]`. Invariant 10's *"declares only `[[bin]] name = "ondin"`"* stays literally
+true of the manifest.
+
+**A non-Unicode argument panicked** (`[X1-L1-04]`). `main` collected `std::env::args()`, which panics
+on one, so `ondin export` of a Latin-1-named file on Linux — legal there, and first shipped there by
+D956 — exited 101 with a panic message. `unicode_args(std::env::args_os())` refuses it with `parse`'s
+exit 2 and a sentence naming it lossily. **Refused rather than carried through, the session's ruling
+under the maintainer's delegation**: carrying it would want `OsString` down the whole export path,
+and nothing has asked for that. Test `an_argument_that_is_not_unicode_is_refused`, a lone surrogate on
+Windows and an invalid byte on Unix — ⚠️ its `unix` arm compiled only by CI.
+
+*(Fixed and tested 2026-10-04, session 45, not yet committed; **Keep**, the session's; the refusal
+***the session's ruling under the maintainer's delegation***, overturnable. The job object measured
+with a control, not tested. Recorded from the brief, the four findings, and a read of
+`bin/ondin-cli.rs` with its test, the root and `ondin-app` manifests, `main`, `unicode_args` and its
+test. D953 amended; `architecture.md` §7 amended)*
+
 **D954 — The app checks GitHub Releases for updates, downloads one unasked, and offers a restart to
 apply it. *Built and tested 2026-10-03, committed as `90eba39`; Keep — the session's, ported from
 Schemaic at the maintainer's direction. Never run against a real feed.***
@@ -24846,6 +25048,9 @@ clone. The first round runs at startup and the next every three hours — two re
 the anonymous API's sixty an hour. The feed is `RELEASE_REPO`, `https://github.com/fadion/ondin`; a
 downgrade is never walked into. `FORCE_UPDATE_CHIP` pins the state at *Ready* to look at the chip and
 **must stay `false`**, which a test enforces.
+**Amended 2026-10-04 (§15 D970, `[X1-L1-03]`):** asked for once, the wake was erased by the next
+input's repaint, eframe keeping one deadline a viewport, so a window left idle never checked again
+until touched; `poll` asks for it on every pass now.
 
 **Apply goes through the window's close.** The chip's click hands the staged asset to
 `wait_exit_then_apply_updates(asset, false, true, [])` on a worker, which launches Velopack's updater
@@ -24859,6 +25064,18 @@ dead and the update armed** — read, not tried: the state stays *Ready* while t
 the chip still reads *Restart to update* and a click does nothing, and the launched updater is still
 waiting on this process; what it does while it waits is Velopack's and not measured here.
 
+**Superseded 2026-10-04 (§15 D970) — and this paragraph was wrong twice before that.** The ⚠️ was
+false at its own commit: `94a2b9f`, committed in the same second as this entry, added a `handed_over`
+flag so a click after a cancelled close sent `Close` again, and the code cited *"§15 D954's
+amendment"* for it — an amendment never written (`[R2-L8-02]`). And that repair rested on *"the
+updater is still waiting"*, which Velopack bounds: it waits sixty seconds and then applies regardless,
+on Windows by stopping every process under the install root, so a *Cancel* on the unsaved-work card,
+or a minute spent reading it, had the window killed under the user (`[R3-L5-02]`). *"What it does
+while it waits … not measured here"* is where both versions went wrong. The click now only sets
+`restart_on_exit` and sends `Close`, *Cancel* calls it off, and `on_exit` launches the updater after
+`disk_settle`, never while another Ondin process runs; `Msg::Handover`, `handed_over` and the offer
+put back on a failed launch are gone.
+
 **The chip** is an outlined pill, an arrow and the label in capitals, in the `right_to_left` cluster
 beside Settings in **both** top bars, so an update staged while the library is open is offered there.
 
@@ -24870,6 +25087,12 @@ auto-apply on startup, Velopack's default, read in its `app.rs`. **Not for a CLI
 staged update cannot exit and relaunch the process in the middle of an `export` a script is waiting
 on: `cli_command` is an **allowlist on the first argument** — `export`, `serve`, `mcp-proxy` — and
 never "are there arguments", because Velopack's re-invocations carry arguments too.
+**Superseded 2026-10-04 (§15 D970).** The startup auto-apply stops every Ondin process under the
+install root, so opening a second window killed a dirty first one (`[R1-L2-01]`); the hook is built
+with `set_auto_apply_on_startup(false)`, and a staged update is offered again by the next check. And
+an allowlist of the CLI sent every *other* command line through the hook, so `ondin --version` or a
+typo applied the update and exited 0 (`[X1-L1-02]`): `hook_runs` admits only no arguments, `gui` and
+`--veloapp-*`.
 
 **`logging.rs` is the log file**, `ondin.log` beside `prefs.json` under `dirs::config_dir()/ondin`,
 rotated once to `ondin.log.1` at startup past a megabyte. `info` and above from the `ondin` and
@@ -24907,7 +25130,121 @@ not ruled at the time; **its scope, by D960**. 🚨 **Never run against a real f
 I/O half cannot be driven without one. Recorded from the brief and a read of `update.rs`,
 `logging.rs`, `main.rs`' `main`, `cli_command` and `run_gui`, the chip's two call sites, and
 Velopack 1.2.161's `VelopackApp`; flips as the tests' docs record them, not re-run. `architecture.md`
-§9.1 and §9.2 amended)*
+§9.1 and §9.2 amended. **Superseded in part 2026-10-04 by D970**, each of the three paragraphs it
+replaces carrying the line)*
+
+**D970 — An update applies at the exit the chip asked for, never at startup, and never while another
+Ondin is running. *Fixed and tested 2026-10-04, session 45, not yet committed; Keep — the session's,
+under the maintainer's delegation. Never run against a real install.***
+
+The release review's RC-1 and RC-2: `[R3-L5-02]` and `[R1-L2-01]`, both High, with `[R3-L5-04]`,
+`[X1-L1-02]`, `[X1-L6-01]` and `[X1-L1-03]`; `[R2-L6-02]` is moot. **D954's design point was that the
+restart goes through the window's close**, so the unsaved-work question decides — and Velopack's
+updater, as the review read it in Velopack's source at the shipped tag and in the vendored binary's
+strings, does not wait for that question. `wait_exit_then_apply_updates` launches
+`Update.exe apply --waitPid <pid>`, which waits **sixty seconds** for the process and then carries on
+regardless; on Windows it then `force_stop_package`s the install root — a `TerminateProcess` on every
+process running from it but its own — and on Linux and macOS it swaps the app under them and starts
+the new version beside them. So three routes ended an Ondin window with no question asked:
+
+- **The chip, then *Cancel*.** The click launched the updater at once and sent `Close`; a user who
+  answered *Unsaved changes* with *Cancel*, or took over a minute to answer, had the window killed
+  under them sixty seconds after the click (`[R3-L5-02]`). The `handed_over` flag D954 never recorded
+  was built for exactly that cancelled close, on the premise that the updater *"is still waiting"*.
+- **Any other Ondin.** The kill reaches every process under the root, so a second window's unsaved
+  work, or an `ondin export` a script was waiting on, went with the window that clicked
+  (`[R1-L2-01]`, `[R3-L5-04]` — a kill inside `run_export`'s `fs::write`, which truncates first,
+  leaves a torn file where the last good export stood).
+- **A launch.** Velopack's `VelopackApp::run` applies a staged update before anything is drawn and
+  exits, by default, so opening a second window beside a dirty first one killed the first; and
+  `cli_command`'s allowlist sent every command line that was not one of three subcommands through
+  that hook, so `ondin --version` or a typo applied the update and exited 0 where `parse` would have
+  refused with 2 (`[X1-L1-02]`).
+
+**The updater is launched from `on_exit` and from nowhere else.** `Updater::restart` — the chip, by
+way of `OndinApp::restart_to_update` — sets `restart_on_exit` and sends `ViewportCommand::Close`;
+`CloseChoice::Cancel` calls `restart_called_off`; and `eframe::App::on_exit` calls `updater.on_exit()`
+**after `disk_settle`**, the one point at which the close can no longer be called off, which is the
+first time `wait_exit_then_apply_updates` is called. The sixty seconds now cover eframe's teardown
+and nothing on screen. `Msg::Handover` and `handed_over` are deleted, and with them `[R2-L6-02]`'s
+untested `Handover(Err)` arm: a launch that fails now only logs, the process being on its way out,
+and the next launch's check finds the same update and offers it again.
+
+**And not while another Ondin is running.** New module `instances`. `main` calls
+`instances::register()` for every process past the hook, the GUI and a headless one alike, which takes
+an exclusive `File::try_lock` on `machine_dir::root()/instances/<pid>.lock` and holds it in a
+`static` for the process's life — created as `<pid>.tmp`, locked, then renamed, so a counter never
+sees a `.lock` whose lock is not yet held and sweeps it from under the process making it.
+`others()` counts the `.lock` files whose lock is held, other than its own, and removes those whose
+lock it can take: **the operating system drops the lock however the process ends**, a crash and a kill
+included, so a lock that can be taken is a leftover. ⚠️ **A file that cannot be opened or tested
+counts as running** — *could not tell* is not *no*. `restart` answers `Restart::OthersOpen(n)` and does
+nothing while `others()` is not zero, and the app says *"Close the other n Ondin windows first:
+installing the update stops them"* — reworded the same day, below; `on_exit` counts **again**, a window opened between the click and
+the exit being stopped as surely. **A lock file per process rather than a list of processes** because
+it is one path on every platform, compiled and tested here, where enumerating processes would have
+been three, two of them compiled only by CI. ⚠️ **It counts every build that registers**, a
+`cargo run` window outside the install folder included, which the updater would not touch: that costs
+a developer a click, and the other way costs somebody's work. Under `cfg(test)` its folder is `None` —
+a count sweeps, so a test reaching the real folder would delete files in it — which is
+`cover::covers_dir`'s seam, for the same reason (D845).
+
+**Nothing applies at startup.** `main` builds the hook with `set_auto_apply_on_startup(false)`, so an
+update a previous session staged and never restarted for is found again by the startup round and
+offered on the chip. **And the hook's gate is inverted**: `hook_runs` is true for no arguments, for
+`gui`, and for a first argument beginning `--veloapp-` in any case, and `cli_command` is gone — so a
+command line nobody meant for the hook never reaches it, whatever the hook would now do with it.
+
+**The idle recheck** (`[X1-L1-03]`). `poll` asked for the three-hour wake once, from the round that
+armed it, and eframe keeps one repaint deadline a viewport, which the next input's immediate repaint
+overwrites: one mouse move after a round, and a window left alone overnight never checked again until
+it was touched. `poll`'s `Some(at)` arm asks `request_repaint_after(at - now)` on **every** pass;
+egui keeps the earliest of a pass's requests, so it costs nothing when something sooner is due.
+
+**The rulings, the session's under the maintainer's delegation and each open to overturning**: the
+apply at the exit rather than at the click; the refusal while others run, rather than an apply that
+stops them; counting every registered build; and no startup apply.
+
+**A *Save and close* whose save does not go through calls the restart off too.** As first written,
+`close_confirmation`'s `Save` arm cleared `confirming_close` and closed only once the session was
+clean, calling no `restart_called_off`, so after a cancelled save dialog or a refused write the window
+stayed with `restart_on_exit` set and its next close for any reason applied the update — the outcome
+the `Cancel` arm's comment exists to prevent; found by `arch-scribe` reading the arm. It calls
+`restart_called_off` when the session is still dirty after `save_file`. ⚠️ **Read, not tested.** **And
+the refusal names processes, not windows**: *"Another Ondin is running: close it first, since
+installing the update stops every Ondin"*, or *"Other copies of Ondin are running…"* — the count
+includes a headless export, which the first wording called a window.
+
+⚠️ **Left, read and not tested: a window opened between the click and the exit makes the restart a
+plain close** — `on_exit` declines, the window goes, nothing relaunches, and only the log says why.
+
+**The evidence**, every flip run and recorded on its test. In `update::tests`, over a hand-built live
+`Updater` whose channel the test holds: `a_settled_round_stages_the_update_and_rearms_only_while_it_can_change`
+(`[X1-L6-01]`) — deleting `self.staged = Some(asset)` fails on *"a found update is what a click
+applies"*, the dead chip the finding described, and deleting the re-arm on *"nothing found arms the
+next round"*; `the_recheck_wake_is_asked_for_on_every_pass`, the `Some(at)` arm emptied failing on
+**pass 1** with `repaint_delay` at `Duration::MAX` — pass 0 is a fresh context's first frame, which
+egui repaints whatever is asked, so the second pass is the one with teeth;
+`a_restart_applies_at_the_exit_and_a_cancelled_close_applies_nothing`, `restart_called_off` emptied
+failing on *"a cancelled close applies nothing"* with one launch, and `on_exit_with`'s flag check
+removed failing the same assertion; `another_ondin_running_holds_the_update_back`, `restart_with`
+ignoring the count failing on *"the click is refused"* and `on_exit_with` ignoring it on *"a window
+opened since the click holds it back too"*. `instances::tests::a_held_lock_counts_and_a_leftover_is_swept`
+— one process's two handles conflict as two processes' would, `flock` per open file description and
+`LockFileEx` per handle — with a taken lock counted failing on *"a leftover is not running"* and no
+file skipped as its own failing on *"one's own registration is not another"*; and
+`only_lock_files_are_registrations`. `main::tests::only_a_gui_launch_or_velopack_reaches_the_install_hook`,
+the old allowlist failing on `["exprot", "a.ondin"]`. ⚠️ **The launch, the real folder and the call in
+`OndinApp::on_exit` are read, not run**: `restart_with` and `on_exit_with` take the count and the
+launch as arguments, and `instances`' folder is `None` in a test.
+
+*(Fixed and tested 2026-10-04, session 45, not yet committed; **Keep**, ***the session's rulings under
+the maintainer's delegation***, overturnable; the failed-Save arm ***Fixed*** the same day, read
+and not tested. 🚨 **Never run against a real install or feed**: the sixty-second wait, the kill and the Linux and macOS relaunch are the
+review's reading of Velopack 1.2's source. Recorded from the brief, the six findings, and a read of
+`update.rs` with its tests, `instances.rs` with its tests, `main`, `hook_runs`, `OndinApp::on_exit`,
+`restart_to_update` and `close_confirmation`. D954 amended in three places; `architecture.md` §9.1
+and §9.2 amended)*
 
 **D955 — CI lints on Linux, and builds and tests on Linux, Windows and macOS. *Built 2026-10-03,
 committed as `5bde584`; Keep — the session's, at the maintainer's direction. Has not run.***
@@ -24947,7 +25284,9 @@ The first push, 2026-10-03 (run 37156274426): lint green; build and test red on 
 failure on Windows, three on Linux and nine on macOS, every one a test that had only ever run on
 Windows — a CRLF checkout, a read-only lock Unix does not honour, `is_folder_stem` asking
 `Path::components`, APFS refusing a non-UTF-8 name, and a search ordered by the folder. All fixed on
-Windows; the next run is the first verification of the fixes off it.
+Windows; the next run is the first verification of the fixes off it. **It verified them**: the second
+run reached two targets the first never did (§15 D968), and CI was green on all three legs at
+`e1f1842`, the v0.4.0 release commit (`[R2-L8-04]`).
 
 *(Built 2026-10-03, committed as `5bde584`, the brief's sha; **Keep**, the session's at the
 maintainer's direction. 🚨 **Not run**: nothing pushed — **first run 2026-10-03, D967**. Recorded from the brief and a read of
@@ -25014,6 +25353,11 @@ the feed and the opt-out `the_feed_and_the_opt_out_keep_their_published_names`, 
 `pages.yml` step comparing their copies — and **`--packId` and the app id have nothing**: the id is
 spelled in `chrome.rs`, `release.yml`, `stage-payload.sh` and `install.sh` among others, and in two
 file names under `packaging/linux/`, and no check compares them.
+**Amended 2026-10-04 (§15 D969): `--packId` has one now**, and it came from the value turning out to
+be a folder as well. On Windows Velopack installs to `%LocalAppData%\Ondin`, which was the app's own
+`dirs::cache_dir()/ondin` under another case, so Setup and uninstall deleted the library index; the
+test that keeps the app's folder off it reads every `--packId` out of `release.yml` and demands
+`Ondin`. The app id still has nothing.
 
 ⚠️ **D732's stub arms ship now, not only compile.** `library::clock::local_offset` answers `0` off
 Windows, so the dashboard's *Created* column on a Linux or macOS build reads UTC — `architecture.md`
@@ -25028,6 +25372,10 @@ and the first tag is the first time zigbuild, `vpk`, `rpmbuild`, `sips` and `hdi
 Recorded from the brief and a read of `release.yml`, `packaging/linux/stage-payload.sh`,
 `.gitattributes`, `icons/` and the release skill's phase headings. `architecture.md` §1, §4 and §9.1
 amended)*
+
+**Amended 2026-10-04 (`[R2-L8-04]`): it has run.** v0.4.0's tag ran the workflow on 2026-10-04, and
+every leg built, packed and published its assets — the first release not built on the maintainer's
+machine. Its hardening after the release review is §15 D974.
 
 **D957 — Signed apt and dnf repositories on GitHub Pages, and an install script. *Built 2026-10-03,
 committed as `be406b0`; Keep — the session's, ported from Schemaic at the maintainer's direction. Not
@@ -25106,6 +25454,117 @@ headings; the second amendment from the brief and a read of `install.sh`'s `KEY_
 `require_fingerprint_configured`, `README.md`'s code block and `pages.yml`'s fingerprint step.
 `roadmap.md` gains *Now · Distribution*, and its one item is struck with the key)*
 
+**Amended 2026-10-04 (`[R2-L8-04]`): it has run.** v0.4.0's Release run called `pages.yml` on the
+tag, and the `github-pages` environment refused the deploy, admitting `main` alone; the site was
+published from `main` instead, past the fingerprint check that compares the built site's key with
+`install.sh` and `README.md`, and the environment admits `v*` tags since `430ed7e`. So the ⚠️ above —
+whether the secret holds the key the fingerprint names — is answered: it does. No apt or dnf client
+is recorded as having installed from the site. Its hardening after the release review is §15 D974.
+
+**D974 — install.sh writes its repository configurations itself, the rpm route trusts only the key it
+verified, a Pages build keeps a released rpm's bytes, and the Release workflow pins what runs beside
+its token. *Fixed 2026-10-04, session 45, not yet committed; Keep — the session's, under the
+maintainer's delegation. Not run in any distribution or in a dry run.***
+
+The release review's RC-5 and RC-7: `[X3-L5-01]`, `[X3-L5-02]`, `[X3-L5-03]`, `[X3-L1-01]` to
+`[X3-L1-06]`, `[X3-L3-01]`, `[R2-L8-06]` and `[R2-L8-03]` — every one in what D956 and D957 built,
+read by the review against the scripts and against Velopack, dnf, zypper, rpm and winit.
+
+**install.sh's configurations are written, never downloaded** (`[X3-L5-01]`). Both were fetched from
+the same origin as the key and accepted if the expected lines were *present* (`require_expected_line`,
+a `grep -qx`). An attacker who controls what the site serves — the one install.sh's own comments name
+— could serve the genuine key, so the fingerprint passed, beside a config carrying a second stanza or
+section of their own: a `URIs:` or `baseurl=` on their host with `gpgcheck=0`, or an inline armoured
+key in `Signed-By:`. The review ran both crafted files through the functions and both were accepted,
+installed as root, and would have fed every later `apt-get upgrade` or `dnf upgrade`. Both files are
+wholly determined by `SITE` and `KEYRING`, which the script holds, so there was never anything to learn
+by downloading them: `write_apt_source` and `write_rpm_repo` write them, and `require_expected_line`
+is deleted. The apt source is byte-for-byte the one `build-site.sh` publishes.
+
+**The rpm route trusts only the key it verified** (`[X3-L5-02]`). The `.repo`'s `gpgkey=` named an
+https URL on the same untrusted origin, and dnf fetches `gpgkey=` itself — to verify `repomd.xml.asc`
+and to import a key a package needs — and `dnf install -y` answers its import prompt yes: the
+fingerprint install.sh pinned never constrained what dnf trusted. The verified key is installed to
+`RPM_KEY`, `/etc/pki/rpm-gpg/RPM-GPG-KEY-ondin`, and `rpm --import`ed from there; the written `.repo`
+says `gpgkey=file://` that path, and the uninstall lines remove it. ⚠️ **The published `ondin.repo`
+keeps the https `gpgkey=`**, for adding the repository by hand, where the README's fingerprint is the
+check — so the two files differ in that one line on purpose, and `build-site.sh`'s comment says to
+keep the rest in step. **`autorefresh=1` in both** (`[X3-L1-02]`): without it `zypper update` never
+refreshes the repository and never offers a new Ondin, though install.sh says it will; dnf ignores
+the key.
+
+**A Pages build no longer changes a released rpm's bytes** (`[X3-L1-01]`). Every run downloads the
+unsigned release assets and signs them afresh, and a signature packet carries its creation time — so
+each `packages/ondin-X.Y.Z-1.x86_64.rpm` had new bytes at the same URL after every release, and a dnf
+client whose cached index (48 hours by default) still held the old checksum failed its whole system
+`dnf upgrade` on the mismatch. `build-rpm-repo.sh` signs each with gpg's clock frozen —
+`--faked-system-time <t>!` — at the package's own `BUILDTIME`, or at the key's creation if that is
+later, since a signature dated before its key is one a strict verifier (rpm's Sequoia backend)
+refuses. The key is RSA, and an RSA PKCS#1 v1.5 signature is deterministic, so the same package, key
+and time give the same bytes. 🚨 **Not run anywhere**: this machine and its WSL have no rpm tooling,
+so the determinism is that argument and not a measurement. The review's test — build twice, compare
+the packages' `sha256sum`s — would say so, and the first evidence otherwise is a Pages run that
+rebuilds an rpm already published.
+
+**A package that installed and could not open a window** (`[X3-L1-03]`). winit 0.30.13's
+`XConnection::new` opens `libXcursor.so.1` and `libXi.so.6` and fails without either, and neither the
+`.deb`'s `Depends` nor the spec's `Requires` named them, the list having been measured on Schemaic's
+binary. `libxcursor1, libxi6`, and `libXcursor.so.1()(64bit)` and `libXi.so.6()(64bit)` — read in
+winit's source, not measured against Ondin's binary, whose list `build-deb.sh` still calls unmeasured.
+
+**The Release workflow** (`[X3-L5-03]`, `[X3-L3-01]`, `[X3-L1-05]`). It holds a `contents: write`
+token, which can rewrite the update feed every installed copy applies, while running code nothing
+pinned. `actions/checkout` has `persist-credentials: false`, so the token is not left in
+`.git/config` for every later step. `cargo-zigbuild` is pinned to `0.23.4` and `vpk` to `1.2.161`,
+both read from the v0.4.0 Release run's logs — the finding's *"vpk 1.2.0"* was wrong — the second being
+the `velopack` crate's own version, since Velopack asks the CLI and the client to match.
+`softprops/action-gh-release` is pinned to `3bb12739c298aeb8a4eeaf626c5b8d85266b0e65`, what `v2`
+resolved to on 2026-10-04 (`v2.6.2`): it is the one third-party action here that writes, and a tag can
+be moved. `fail_on_unmatched_files: true` on the portable-archive and distribution-package steps —
+the archive step's comment called it strict while the action's default is `false`, so a missing
+archive shipped green; the Velopack step stays tolerant, each leg naming every platform's files. And
+the version gate refuses anything but plain `X.Y.Z`: `v0.5.0-rc.1` passed the tag-equals-version
+check and then died in rpmbuild, whose `Version` refuses `-`, after Windows and macOS had published.
+
+**The AppImage route** (`[X3-L1-06]`). It downloaded straight over `~/.local/bin/Ondin.AppImage`, so a
+re-run that failed mid-download left a truncated app where a working one had been, and a captive
+portal's page landed as the "AppImage". It downloads to `Ondin.AppImage.partial`, checks the ELF magic
+and the AppImage type-2 bytes `AI\x02` at offset 8, and renames over the old one. ⚠️ **A truncated
+download still carries both**, so the rename is what makes a partial download harmless, and the check
+only turns away a file that is not an AppImage at all.
+
+**The README and the release skill** (`[R2-L8-03]`, `[R2-L8-06]`, `[X3-L1-04]`). The README's by-hand
+openSUSE route put the repository file in `/etc/yum.repos.d`, which zypper does not read; it is
+`zypper addrepo` now, as the Pages page has it. The skill said two publish steps tolerate a missing
+file; it is one now, and the skill says so. And it states the re-run rule: a leg that has already
+published its Velopack files cannot simply be re-run, its fetch bringing back the release it just
+published and `vpk pack` then refusing a version equal to the channel's latest. The workflow itself is
+unchanged there.
+
+**The evidence.** `update::tests::the_release_packs_with_the_clients_own_velopack_version` reads
+`release.yml`'s `vpk` pin against `Cargo.lock`'s `velopack`; **flip run**, the pin edited to `1.2.160`,
+fails naming both. Nothing else here is tested: it is shell, YAML and an rpm spec.
+
+**Not done, and where it is.** The release job is not split into a build job holding a read-only
+token and a publish job holding the write one — `[X3-L5-03]`'s last bullet; the pins and
+`persist-credentials` are what landed, and `vpk download` is still handed the token by name. And
+`[X3-L5-04]` is left: the single-package rpm route's `dnf install --nogpgcheck` waives signature
+checking for the whole transaction, dependencies included. dnf4's `localpkg_gpgcheck` already defaults
+off, so the flag is wider than the local file needs there, but dnf5's behaviour on a local unsigned
+rpm is unverified, and changing the flag without a Fedora container could break the route. Both are
+open items in `roadmap.md`'s *Now · Distribution*.
+
+*(Fixed 2026-10-04, session 45, not yet committed; **Keep**, ***the session's under the maintainer's
+delegation*** — the configurations written rather than downloaded, the local `gpgkey=`, signing at a
+fixed time, a pre-release refused — each overturnable; the job split and `[X3-L5-04]` ***Fix***, open
+in `roadmap.md`. 🚨 **Nothing here has run in a distribution container or a `workflow_dispatch` dry
+run**: the first verification is the next Release and Pages run. Recorded from the brief, the twelve
+findings, and a read of `install.sh`'s `write_apt_source`, `write_rpm_repo`, `install_rpm`,
+`install_rpm_direct` and `install_appimage`, `build-site.sh`'s `.repo`, `build-rpm-repo.sh`'s signing
+loop, `build-deb.sh`'s `DEPENDS`, `ondin.spec`'s `Requires`, `release.yml`'s checkout, version gate,
+tool installs and publish steps, the README's openSUSE lines, the skill's Phase 3 and the test. D956
+and D957 amended; `architecture.md` names none of these files and is not amended)*
+
 **D958 — Present mode's way to the window's buttons is a slim strip at the top edge, on hover.
 *Built and tested 2026-10-03; Keep — the maintainer's ruling on D952's open consequence. Not seen on
 a real window.***
@@ -25142,6 +25601,13 @@ North zone: the edge that reveals the strip would be the one edge the window cou
 resized from, since reaching it is what puts the strip there. `Middle` is above the canvas and below
 the zones, where the top bar is. A maximized window has no zones (D952), and there the edge is the
 strip's.
+**Amended 2026-10-04 (§15 D973): with a modal card up this was undone, and is restored.**
+`chrome::above_modal` lays the drag strip and the buttons again over the card's backdrop in a
+`Foreground` area of its own, at the rectangle `drag_strip` noted that pass — the top bar's, or this
+strip's in present mode — and as first written that area covered the zones wherever the rectangle met
+the window's edge, so a press there moved the window rather than resizing it. The zones that meet it
+are laid again inside that area, after the strip; raising the zone areas above it does not work, egui
+ordering layers raised in one pass by age (D973).
 
 **The evidence**, `chrome::tests`, through a harness that lays a click-and-drag canvas under the zones
 and the strip: `the_present_strip_comes_out_at_the_top_edge_and_closes` — a click at close's position
@@ -25159,11 +25625,111 @@ reveals nothing"*, and the strip on `Order::Foreground` on *"the top edge resize
 **Left alone, and not ruled**: the strip offers no way *out* of present mode — Escape stays the only
 one, as §9.4 has it — and macOS's present mode is untouched.
 
-*(Built and tested 2026-10-03, not yet committed; **Keep**, the maintainer's ruling, closing D952's
+*(Built and tested 2026-10-03, since committed; **Keep**, the maintainer's ruling, closing D952's
 ⚠️. 🚨 **Not seen on a real window** — the maintainer is to look. Recorded from the brief and a read
 of `chrome::present_strip` with its doc, `STRIP_H` and `REVEAL`, its call site in `app.rs`, and the
 three tests with their docs and harness; flips as the brief and those docs record them, not re-run.
 D952 amended; `architecture.md` §9.1, §9.2 and §9.4 amended)*
+
+**D973 — The window's own controls work over a modal card and are spent by a menu's dismissing
+click; each resize corner is an L; the library's search field keeps off the cluster. *Fixed and
+tested 2026-10-04, session 45, not yet committed; Keep — the session's, under the maintainer's
+delegation. Not seen on a real window.***
+
+The release review's RC-4: `[X2-L1-02]`, `[R1-L2-02]`, `[X2-L3-01]`, `[X2-L1-01]`, `[X2-L1-03]` and
+`[R2-L8-08]`, each a consequence of D952's chrome and D954's chip arriving in layers and a bar that
+had been laid out without them.
+
+**A card left the window with no mouse controls** (`[X2-L1-02]`). `egui::Modal` refuses interaction
+to every layer below its own, and the caption buttons and the drag strip are in a `Panel::top` and the
+resize zones are `Order::Foreground` areas older than any card — so while *Settings*, *Unsaved
+changes*, *Recover unsaved work* or any other card was up, the mouse could not move, resize, minimize,
+maximize or close the window. The system's frame, which D952 says these stand in for, is never
+blocked by an app's own dialog. `settings::card`, which every card in the app goes through, notes its
+rectangle each pass (`chrome::note_card`), and `chrome::above_modal`, called last in `OndinApp::ui` on
+both screens, then moves the zones' layers to the top and lays the drag strip and the caption buttons
+again in a `Foreground` area of its own over the backdrop, at the rectangle `drag_strip` noted that
+pass — **unless the card reaches into the bar**, on a window short enough for a tall card to, where
+the card's top edge wins. **Close is still a close request**, so with *Unsaved changes* up a click on
+✕ re-arms that card: §9.5's re-arm, reachable by a click again and not only by Alt+F4. ⚠️ **It has to
+be the frame's last call**, after every card, which is why both screens end on it; nothing in the
+function can check that.
+
+🚨 **The first version left the window unresizable where the bar meets its edge, and the obvious
+repair does not work.** `above_modal` raised the zones and then its own area, whose strip covers the
+bar's whole rectangle from the window's top edge — so with a card up the top edge, both top corners
+and each side edge as far down as the bar lay under the strip or a button, and a press there moved
+the window rather than resizing it: the shape D958 avoided with `Order::Middle`, by another door, found
+by `arch-scribe` reading the function. **Raising the zone areas *after* the lifted one changed
+nothing** — measured: a press at (400, 1) still sent `[]`. ⚠️ **`move_to_top` does not order layers
+raised in the same pass**: egui 0.35's `Areas::end_pass` sorts its `order` by `(layer.order,
+wants_to_be_on_top.contains(layer))`, `wants_to_be_on_top` being a hash set and the sort stable, so
+among the layers raised in one pass the order is their age, never the order of the calls. *Anyone
+reaching for `move_to_top` to stack two areas should know that first.* **The repair lays the zones
+that meet the bar again inside the lifted area, after its strip and buttons** —
+`ui.interact(rect, id.with(("zone", i)), POINTER_ONLY)` — so they win there as they do with no card,
+both spellings sharing `zone_acts` for the cursor and the press; every zone area is still raised above
+the card, for the edges below the bar.
+
+**A dismissing click acted on the window** (`[R1-L2-02]`). The library's Settings door reads
+`!menu_was_up` (D558), and the chip, the caption buttons and the drag strip D952 and D954 put in the
+same bar did not: a click on *Restart to update* to get rid of a ⋮ menu restarted the app, and one on
+a caption button closed, maximized or minimized the window. `drag_strip` and `caption_buttons` take
+`act`, false making them inert for the frame while still sensing, so the bar's own widgets stay above
+the strip; the library passes `!menu_was_up` to both and gates the chip the same way. ⚠️ **A
+double-click is refused if either press was spent**, not only the second: the strip keeps its last
+press as `(armed, spent, spent_before)`, since a double-click whose first half closed a menu is a
+dismissal and a click, not a double-click on the bar. `library_menu_open`'s list of the doors that
+read the flag gains a ninth. The editor's bar passes `true`; whether its own menus owe the same was not
+examined.
+
+**Each corner was a square** (`[X2-L3-01]`). `zones` wrote each corner as `a.union(b)`, read — and
+the test's prose said — as an L of two strips; `Rect::union` is the bounding box, so every corner was
+a full 14-point square and its inner 9 × 9 resized the window: a press 7 points in from the top-right
+corner, on the close button, began a north-east resize. **Ruled an L, the session's ruling under the
+maintainer's delegation**: the corner a thrown pointer lands on is the close button's, and the frame
+these stand in for is `EDGE` thick, not `CORNER`. An `Area` is a rectangle, so `zones` returns
+**twelve** — the four edges and two arms a corner, the horizontal arm taking the square where they
+meet and the vertical one starting below it, so no point is in both — and `zone_id` keys each by
+index as well as direction, two areas sharing a corner's. The test's doc carried intra-doc links in a
+`cfg(test)` module's prose, which nothing checks, and has plain backticks now (`[R2-L8-08]`, D319).
+
+**The search field** (`[X2-L1-01]`, `[X2-L1-03]`). It was centred on the bar's `max_rect`, which
+`bar_frame` leaves with a left margin and no right one, so it sat 7 points right of the window's
+centre, 43 on macOS; and it was placed with no regard for the right-hand cluster, which the caption
+buttons and the chip had grown by about 230 points — so at 683 points wide or less it lay over the
+Settings gear, the library settings' only door, and with an update staged over the chip up to about
+873, and took their clicks, being registered after them. `dashboard::search_rect` centres `SEARCH_W`
+on the window (`content_rect`), then slides it, then narrows it down to `SEARCH_MIN_W`, 120, to keep 12
+points off the brand and off the cluster's left edge; on a window too narrow even for that it sits
+against the brand and may still overlap the cluster. **The slide and the floor are the session's,
+under the maintainer's delegation.**
+
+**The evidence**, each flip run and recorded on its test. `chrome::tests::a_modal_card_leaves_the_windows_controls_working`:
+close, maximize and the west edge each send their command with a card up through `settings::card`,
+and so do the top edge at (400, 1), the north-east corner at (799, 1) and the west edge within the
+bar at (1, 30); the same harness without `above_modal` sends none of them — asserted as the control,
+so a harness that stopped putting a card up fails rather than passes — and with the in-area zones
+disabled it fails on `[400.0 1.0]` sending nothing, which is how the `move_to_top` repair failed too. `a_spent_click_moves_no_window`: `three_buttons`
+ignoring `act` fails on *"close"*, and the strip ignoring the earlier spent press fails on *"a
+dismissal and a click"* with `[Maximized(true)]`. `the_resize_zones_tile_the_border` gains the L — 8
+points in from the top-right corner is nobody's, and so is the bottom-left's — each corner back to the
+square failing on *"the inside of the top-right corner"*.
+`dashboard::tests::at_half_a_screen_the_search_field_leaves_the_gear_and_the_chip_their_clicks`, at
+640, 760 and 1,320 points with and without a staged update: the old placement fails on *"the gear
+opens Library settings"* at 640 with the search open instead, the reported symptom. ⚠️ **Not pinned**:
+the chip's `!menu_was_up` — `Updater::ready` is inert, so a gated click and an ungated one both do
+nothing; the drag strip and minimize over a card; and a card reaching into the bar.
+
+*(Fixed and tested 2026-10-04, session 45, not yet committed; **Keep**, ***the session's rulings under
+the maintainer's delegation*** — the corner an L, the controls lifted over a card, the field's slide
+and floor — each overturnable; the edges under a card ***Fixed*** the same day. 🚨 **Not seen on a
+real window.**
+Recorded from the brief, the six findings, and a read of `chrome.rs`' `drag_strip`, `strip`,
+`note_card`, `above_modal`, `caption_buttons`, `zones` and `resize_zones` with their tests,
+`settings::card`, both `above_modal` call sites in `app.rs`, `dashboard_top_bar`, `search_rect`, the
+search test and `library_menu_open`'s list. D952 and D958 amended; `architecture.md` §9.1 and §9.5
+amended)*
 
 **D959 — Library dates are local time on Linux and macOS too, through `localtime_r`. *Built and
 tested 2026-10-03; Keep — the maintainer's ruling. The Unix arm has never been compiled.***
@@ -25207,7 +25773,7 @@ a name that matched nothing cannot pass as a child that passed. ⚠️ **A child
 `std::env::set_var`**, which is `unsafe` in edition 2024 for the reason that applies here: other test
 threads are reading the environment.
 
-*(Built and tested 2026-10-03, not yet committed; **Keep**, the maintainer's ruling, closing D956's
+*(Built and tested 2026-10-03, since committed; **Keep**, the maintainer's ruling, closing D956's
 ⚠️. 🚨 **The Unix arm has never been compiled** — `cargo check --target x86_64-unknown-linux-gnu`
 stops at `ring`'s C compiler here — **and it is not verified until D955's Linux and macOS legs are
 green.** The spawn was checked on Windows with the `cfg` lifted: green, the machine being at Central
@@ -25271,7 +25837,7 @@ row; the caption's amendment from the brief and a read of that row and its comme
 amended; `architecture.md` §5.4a and §9.1 amended)*
 
 **D961 — The app's icon set is Schemaic's, and its 64 is the top bars' brand mark. *Built and tested
-2026-10-03, not yet committed; Keep — the maintainer's set and ruling, wired by the session after
+2026-10-03, since committed; Keep — the maintainer's set and ruling, wired by the session after
 Schemaic. Not seen on a real window.***
 
 The maintainer replaced `icons/` with the set Schemaic uses: `icon.ico`, PNG-compressed entries at 16,
@@ -25325,7 +25891,7 @@ asserts 64 × 64, a transparent corner and middle and ink at (7, 37), then draws
 asserts one texture id across them. **Flip**: the `insert_temp` that keeps the handle removed fails on
 *"the texture is kept"*, the predicted site.
 
-*(Built and tested 2026-10-03, not yet committed; **Keep**, the maintainer's set and the maintainer's
+*(Built and tested 2026-10-03, since committed; **Keep**, the maintainer's set and the maintainer's
 ruling on the mark, the wiring the session's after Schemaic; closing D956's ⚠️. 🚨 **Not seen on a real
 window, and nothing of it seen on Linux or macOS** — the `.icns`, the hicolor icon and the AppImage's
 are untried until a tag runs D956's legs. ⚠️ The number was typed into two code comments, `app.rs`'s
@@ -25337,7 +25903,7 @@ AppImage route, `build-site.sh` and the notices; the placeholder's colours and t
 brief. D956 amended; `architecture.md` §9.1 amended)*
 
 **D962 — The editor's top bar: a save dot, no open or save buttons, and the library's mark-to-name
-gap. *Built 2026-10-03, not yet committed; Keep — the maintainer's three rulings, from screenshots of
+gap. *Built 2026-10-03, since committed; Keep — the maintainer's three rulings, from screenshots of
 D961's mark. Not seen on a real window.***
 
 The maintainer looked at D961's new mark in screenshots of both screens and ruled three things, in
@@ -25417,7 +25983,7 @@ under `-D warnings`. The three `save_label` tests still pin every sentence the t
 **nothing pins the dot's colour, its left-edge placement or the buttons' absence**, and nothing has
 seen the dot drawn.
 
-*(Built 2026-10-03, session 44, not yet committed; **Keep**, the maintainer's three rulings; the
+*(Built 2026-10-03, session 44, since committed; **Keep**, the maintainer's three rulings; the
 tooltip the session's own, open to removal. 🚨 **Not seen on a real window** — the maintainer is to
 look. Recorded from the brief and a read of `save_dot`, `save_label`, `status_text`, `top_bar`'s call
 site and its comment, the `Action::Save` and `Action::Open` arms, `UNSAVED` and `SAVED`, and
@@ -25427,7 +25993,7 @@ D393 amended; `architecture.md` §9.1, §9.4 and §9.5 amended; `shortcuts.md` �
 struck from `roadmap.md`, which held no entry for any of it)*
 
 **D963 — The top bar's menu heads answer the pointer as its icon buttons do, and stay lit while
-their menu is open. *Built and tested 2026-10-03, session 44, not yet committed; Keep — the
+their menu is open. *Built and tested 2026-10-03, session 44, since committed; Keep — the
 maintainer's two rulings, the precedent the session's. Not seen on a real window.***
 
 The maintainer, from a screenshot of the editor's top-right cluster: *"settings and undo/redo have a
@@ -25495,7 +26061,7 @@ to the fallback spelling would leave the override unset and fail the first lit c
 run. Beside it, `cargo test -p ondin-app` green at 1484, clippy under `-D warnings`, the doc gate and
 `check --release` green.
 
-*(Built and tested 2026-10-03, session 44, not yet committed; **Keep**, the maintainer's two rulings; the
+*(Built and tested 2026-10-03, session 44, since committed; **Keep**, the maintainer's two rulings; the
 icon-button precedent and its ground the session's, the ground removable to the maintainer's own
 fallback. 🚨 **Not seen on a real window.** Recorded from the brief and a read of `menu_head` and its
 test, `menu_check`, `icon_button_padded`, `settings_button`, both call sites in `app.rs`, D44, D246
@@ -25504,7 +26070,7 @@ and D381; the override's behaviour from epaint 0.35's `tessellate_text`. No §15
 for it)*
 
 **D966 — The library's Settings sits `TOP_GAP` from the update pill, as the editor's does. *Built and
-tested 2026-10-03, session 44, not yet committed; Keep — the maintainer's ruling. Not seen on a real
+tested 2026-10-03, session 44, since committed; Keep — the maintainer's ruling. Not seen on a real
 window.***
 
 The maintainer, after seeing the forced update pill on both screens: *"The [restart pill] -> settings
@@ -25538,15 +26104,15 @@ holds the forced chip for the maintainer to look at — temporary, and not this 
 doc and the Settings comment in `dashboard.rs`, before session 44's block was reserved — the fourth
 time this session; the negative grep run straight after found those two and nothing else.
 
-*(Built and tested 2026-10-03, session 44, not yet committed; **Keep**, the maintainer's ruling, the
+*(Built and tested 2026-10-03, session 44, since committed; **Keep**, the maintainer's ruling, the
 editor's 5 kept. 🚨 **Not seen on a real window.** Recorded from the brief and a read of `TOP_GAP`,
 the editor's cluster in `top_bar`, `dashboard_top_bar`'s right cluster, `UpdateState::label`,
 `update::chip`, `Updater::ready` and the test. No §15 entry amended; `architecture.md` §9.1 amended;
 nothing struck from `roadmap.md`, which held no entry for it)*
 
 **D967 — What the first CI run off Windows found: four tests that assumed Windows, a guard that did,
-and a search whose order was the folder's. *Fixed and tested 2026-10-04, session 44, not yet
-committed; Keep — the search order the maintainer's ruling. Not yet re-run off Windows.***
+and a search whose order was the folder's. *Fixed and tested 2026-10-04, session 44, committed as
+`afc12b4`; Keep — the search order the maintainer's ruling. Green off Windows at `e1f1842`.***
 
 Sessions 43 and 44 were pushed for the first time on 2026-10-03 (`bb3ea31..e65d118`, run
 37156274426), and D955's workflow ran for the first time. **Lint passed** — `fmt`, clippy under
@@ -25632,11 +26198,12 @@ citation was typed — session 44, 2026-10-04 — and only D967 is spent: it is 
 `.gitattributes`, `atomic.rs`, `library/project.rs`, `library/scan.rs`, `library/relocate.rs` and
 `panels/dashboard.rs`. The `.gitattributes` site is outside the census's `.rs`/`.toml`/`.wgsl` sieve.
 
-*(Fixed and tested 2026-10-04, session 44, not yet committed; **Keep** — the search order **the
+*(Fixed and tested 2026-10-04, session 44, committed as `afc12b4`; **Keep** — the search order **the
 maintainer's ruling**, the line-ending rule, the per-platform locks, the backslash refusal and the
 macOS ignores the session's. Gates on Windows: `cargo test -p ondin-app` 1,487 passed, clippy under
 `-D warnings` for the workspace and per package, the doc gate and `check --release` green. 🚨 **No
-fix's Linux or macOS behaviour is verified until CI's next run.** Recorded from the brief and a read of
+fix's Linux or macOS behaviour is verified until CI's next run** — verified: CI green on all three
+legs at `e1f1842` (`[R2-L8-04]`). Recorded from the brief and a read of
 `.gitattributes`, `atomic::write` with the tests' `lock`, `unlock` and docs, `is_folder_stem`,
 `naming::slug`, `scan::unnameable_doc_name`, the macOS `cfg_attr`s, `search_results`,
 `Library::sort_entries` and the search test. D382, D420, D480, D706, D715, D732, D809, D848, D858,
@@ -25674,9 +26241,66 @@ exactly. It is back on `fmt`.
 **The evidence.** On Windows, `cargo test --workspace` 40 targets green, and `--release` too — the
 step CI's two runs never reached — clippy `-D warnings` for the workspace and `ondin-export`, the doc
 gate and fmt. Nothing new is asserted: the golden is the test, and it now holds four places on every
-leg by construction. 🚨 **Not verified on Linux or macOS until CI's third run.** *(Built and tested
+leg by construction. 🚨 **Not verified on Linux or macOS until CI's third run** — verified: CI green on
+all three legs at `e1f1842` (`[R2-L8-04]`). *(Built and tested
 2026-10-04, session 44; **Keep**, the maintainer's ruling between the two; its block, D968–D973,
 reserved and grep-checked before any citation was typed. §11 amended)*
+
+**Amended 2026-10-04 (§15 D972): it rounded one number of several, and moved no version.** The
+`local_transform`, `world_transform` and `world_bounds` beside the path went on carrying full `f64`s
+from the same arithmetic — the Triangle's bounds sixteen digits long — so *"holds four places on every
+leg by construction"* above was true of the path alone, and §11's sentence written for this entry was
+false of the golden. And every path's bytes changed in every untouched document's snapshot with
+`SNAPSHOT_VERSION` left at 10, against §7's precedent at 6 and 9. D972 rounds the three and bumps to
+11.
+
+**D972 — The snapshot's transforms and bounds are written at four places too, and the version is 11.
+*Fixed and tested 2026-10-04, session 45, not yet committed; Keep — the bump the session's ruling,
+under the maintainer's delegation.***
+
+The release review's RC-6: `[R1-L2-03]`, `[R1-L2-04]` and `[R2-L8-09]`, three findings on D968 and the
+paragraph it amended.
+
+**D968 rounded one number of several** (`[R1-L2-03]`). It wrote the path's `geometry.svg` through
+`svg::path_d`, and `local_transform`, `world_transform` and `world_bounds` beside it went on
+serialising full `f64`s from the same arithmetic: the Triangle — the node whose 16th digit had
+differed between platforms — carried `world_bounds` of `[176.25700676110398, 113.94101629613779,
+210.0, 150.52304455586304]`, measured from that rounded-corner outline, and a rotated node's
+transforms carry `sin` and `cos`. CI agreed only because those extrema happened to come out alike, and
+§11's *"no file carries a full-precision float from transcendental arithmetic"* was false of the
+golden the day it was written. `snapshot::round4` writes `v` at four decimal places — the SVG
+writer's precision, kept a number so the JSON shape does not change — with a non-finite value written
+`0`, `svg::fmt`'s floor and for its reason, JSON having no spelling for one, and `−0` written `0`; it
+is applied at the three fields' four sites. ⚠️ **`pivot` is not rounded.** It is a fraction of the
+node's local box, exact in the golden's one pivot (an ellipse's), and on a curved outline it would
+inherit the outline's arithmetic — read, not measured.
+
+**And the version moves** (`[R1-L2-04]`). D968 changed the bytes of every path in every untouched
+document's snapshot and left `SNAPSHOT_VERSION` at 10, against §7's own precedent: 6 was *"the first
+bump where an untouched document's snapshot changes bytes"*, and 9 moved on *"exactly what 6 moved
+for"* — and 9, too, went in without the bump on its first pass. **The session's ruling, under the
+maintainer's delegation and open to overturning: bump**, to **11**, one bump for D968's path and these
+three, the constant's history line saying both. The review offered the other route — record in D968
+why a precision-only change is exempt — and named it the maintainer's call, D968 being the
+maintainer's ruling; the session took the precedent's reading, that a consumer diffing snapshots
+reads the version first (D282).
+
+**§7 said *"currently 9"*** (`[R2-L8-09]`) while the code had been at 10 since D767 — the paragraph
+that records once claiming 7 *"four bumps after the code had done it"*, a second time. It says 11 now,
+and names 10 and 11.
+
+**The evidence.** `every-kind.json` regenerated: the version, a text node's right bound
+(`347.943359375` written `347.9434`) and the Triangle's three long bounds. New
+`tests/snapshot.rs · a_rotated_layers_numbers_are_written_at_four_places` turns the shared fixture's
+rect 30°, asserts first that it is rotated, and checks every number of every node's three fields has
+at most four decimals. **Flip run**: `round4` returning `v` fails on the rect's `local_transform`,
+its `cos 30°` printing as `0.8660254037844387`.
+
+*(Fixed and tested 2026-10-04, session 45, not yet committed; **Keep**, the bump ***the session's
+ruling under the maintainer's delegation***, overturnable. Recorded from the brief, the three
+findings, and a read of `snapshot.rs`' `SNAPSHOT_VERSION` doc, `node_snapshot` and `round4`,
+`svg::fmt`, the golden's pivot and bounds, and the test. D968 amended; `architecture.md` §7 and §11
+amended)*
 
 **D898 — The randomized `update`/`rebuild` guard authors layout inputs, and compares a laid group's
 box. *The session's; built 2026-09-27, committed as `da5b652`. Entry reconstructed 2026-09-27 from

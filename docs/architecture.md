@@ -110,9 +110,10 @@
   above.)
 - Web, mobile. ~~macOS~~ **is a release target since 2026-10-03, Apple Silicon only, at the
   maintainer's direction** (§15 D952, D956) — but nobody developing Ondin has a Mac: CI's macOS leg
-  is its only compiler, and neither it nor the release workflow has yet run (§15 D955). CI first ran
-  on 2026-10-03, and its macOS leg failed nine tests that had only ever run on Windows (§15 D967); the
-  release workflow has still not run.
+  is its only compiler (§15 D955). CI first ran on 2026-10-03, and its macOS leg failed nine tests
+  that had only ever run on Windows (§15 D967); it was green on all three legs at `e1f1842`, and
+  v0.4.0, on 2026-10-04, was the first release the Release workflow built and published for every
+  platform (§15 D956). No build has been run by hand on a Mac.
 
 ### Non-goals
 
@@ -497,9 +498,13 @@ permission.
     keyring path, `Origin: Ondin`/`Suite: stable` and `main`/`amd64`, which every user's source list
     names. *A new platform adds a channel; it never renames one.*
     ⚠️ **Not all of them are guarded.** `release.yml` refuses an unknown channel, a test pins the feed
-    and the opt-out, and a `pages.yml` step compares the repositories' values across their copies —
-    **`--packId` and the app id have no check at all**, the id being spelled in several files nothing
-    compares.
+    and the opt-out, a `pages.yml` step compares the repositories' values across their copies, and
+    since §15 D969 `machine_dir::tests` reads every `--packId` out of `release.yml` and demands
+    `Ondin` — **the app id has no check at all**, being spelled in several files nothing compares.
+    🚨 **The pack id is also a folder.** On Windows Velopack installs to `%LocalAppData%\<packId>`,
+    which Setup renames aside and deletes and uninstall empties, so nothing the app keeps may live
+    there — and NTFS compares names without regard to case, so `dirs::cache_dir()/ondin` *was* that
+    folder, the library index in it, until §15 D969 moved the app's own to `OndinData`.
 
 ---
 
@@ -2014,11 +2019,12 @@ Designers expect local fonts **plus the entire Google Fonts library** — this i
 2. **Google Fonts** — on-demand, **and the one source the user can switch off** (*Settings › Web
    fonts › Load web fonts*, `prefs::Prefs::web_fonts`, default on; see the bullet on the switch
    below). A catalog of family metadata is fetched from the Fontsource API,
-   cached on disk (`%LOCALAPPDATA%\ondin\catalog.json`) and read from there first on every later
+   cached on disk (`%LOCALAPPDATA%\OndinData\catalog.json` — `OndinData` because `…\Ondin` is the
+   installer's, §15 D969) and read from there first on every later
    launch (§15 D83), with the network asked again only once that copy is older than
    `CATALOG_MAX_AGE` — seven days, and the freshness of the copy that could actually be *read*
    (§15 D111). The font picker lists the full catalog, and selecting an uninstalled family
-   downloads the font files into a per-user disk cache (`%LOCALAPPDATA%\ondin\fonts` /
+   downloads the font files into a per-user disk cache (`%LOCALAPPDATA%\OndinData\fonts` /
    `$XDG_CACHE_HOME/ondin/fonts`). Cached fonts are registered into the `fontique` collection and
    behave exactly like system fonts thereafter — including offline. (Google Fonts are
    open-licensed — OFL/Apache — so caching and redistribution are fine; the library is far too large
@@ -2143,7 +2149,7 @@ Architectural consequences:
   `text::is_family_available` asks about faces; asking about the name reports a family that can no
   longer draw anything as available.
 - **The disk cache is bounded in the same unit, and swept once at startup.** Every family a picker row
-  previews leaves a file in `%LOCALAPPDATA%\ondin\fonts`, and until 2026-08-19 nothing ever removed one.
+  previews leaves a file in `%LOCALAPPDATA%\OndinData\fonts`, and until 2026-08-19 nothing ever removed one.
   `fonts::trim_font_cache` deletes least-recently-used faces until the directory is back under
   `FONT_CACHE_BYTES` — 256 MB, so the whole Latin catalog browsed end to end (~85 MB) is never touched,
   and what the budget is *for* is the browse through CJK families. What makes "least recently used" true
@@ -5781,11 +5787,12 @@ other were right, which is why both exist.
   adjustments that are not at rest, absent entirely when none is), full text style
   (family, size, weight, italic, line height, alignment, sizing), children ids, artboard membership,
   and a `warnings` list carrying font families the machine does not have. Versioned independently
-  (`snapshot_version`, currently **9**: 3 was the text attribute model, 4 the image detail and 5 its
+  (`snapshot_version`, currently **11**: 3 was the text attribute model, 4 the image detail and 5 its
   adjustments, both bumped on
   the precedent of 2 because a variant growing detail is what that bump was for, §15 D185, D186,
-  **6 is masks**, §15 D282, **7 the mask *mode***, §15 D288, **8 the effect stack**, §15 D335, and
-  **9 a frame's ground leaving `Geometry::Artboard`**, §15 D400);
+  **6 is masks**, §15 D282, **7 the mask *mode***, §15 D288, **8 the effect stack**, §15 D335,
+  **9 a frame's ground leaving `Geometry::Artboard`**, §15 D400, **10 a gradient's `opacity`**, §15
+  D767, and **11 the numbers platforms disagree about written at four places**, §15 D968, D972);
   decoupled from the save schema. 🚨 **`local_transform` and `geometry` are *used* values, not what
   the user set** (§15 D868) — `world_transform` and `world_bounds` come from `Resolved`, which
   composes used locals, and a document local would stop multiplying out to its own world transform
@@ -5833,6 +5840,12 @@ other were right, which is why both exist.
   this passage claiming the current version was **7** with a live "fix by bumping to 8" instruction,
   four bumps after the code had done it. Two stale version numbers in one paragraph, neither of which
   any gate can see.
+  **That is 11**, on 6's ground alone: a path's `geometry.svg` (§15 D968) and the `local_transform`,
+  `world_transform` and `world_bounds` beside it (§15 D972) are written at the SVG writer's four
+  places, because a platform's maths library can differ in their last digit — so no key moves and no
+  type changes, but an untouched document's snapshot changes bytes. ⚠️ **D968 went in without the
+  bump, as 9 first did, and this paragraph said *"currently 9"* the whole time the code was at 10**
+  (`[R2-L8-09]`) — the failure it records above, a third time. `pivot` is not rounded (§15 D972).
   `name` is *usually*
   distinguishing now that generated names are numbered (§5.7b) and is still **not unique** — the
   reason `id`, `parent` and `children` sit beside it, so a consumer can disambiguate by path or
@@ -5917,6 +5930,10 @@ other were right, which is why both exist.
   ⚠️ **On Windows a release `ondin.exe` has no console to print to** (§15 D953), being a
   GUI-subsystem binary, so the CLI is reached through `ondin.com` beside it — a console twin that
   runs `ondin.exe` with its own standard handles, and that a bare `ondin` at a prompt resolves to.
+  It exits with the child's code whole — a clamp to a byte had read a crash's NTSTATUS as 0 — and puts
+  the child in a kill-on-close job object, so Ctrl+C at the prompt ends the export too, a
+  GUI-subsystem child never receiving it (§15 D971). An argument that is not Unicode is refused with
+  exit 2 rather than panicked on.
   ⚠️ **One document, and `-o` takes a filename rather than whatever token comes next** (§15 D670).
   A second positional is **refused**, naming both files, rather than overwriting the first — a build
   step whose glob matched twice would otherwise export the wrong document into the right name — and
@@ -6006,8 +6023,10 @@ hosts the MCP endpoint**; agents connect to it. Concretely:
 
 - The running process listens on a local socket: **Unix domain socket** (Linux) / **named pipe**
   (Windows), at a well-known per-user path, with a discovery file
-  (`$XDG_RUNTIME_DIR/ondin/<pid>.json` / `%LOCALAPPDATA%\ondin\run\<pid>.json`) recording endpoint +
-  open document path.
+  (`$XDG_RUNTIME_DIR/ondin/<pid>.json` / `machine_dir::root()/run/<pid>.json` on Windows) recording
+  endpoint + open document path. ⚠️ **Not `%LOCALAPPDATA%\ondin\`**, which this line once said: that
+  is the Velopack installer's own folder under another case, which Setup deletes and uninstall
+  empties (§15 D969), and a non-empty one makes Setup ask about an *existing installation*.
 - A thin **stdio proxy** (`ondin mcp-proxy`) bridges agents that expect to spawn an MCP server over
   stdio: it connects to the running instance's socket and forwards. If no instance is running it
   exits with a clear error naming `ondin serve`.
@@ -6200,7 +6219,15 @@ the mark, since egui spaces an item when it is placed — so the two bars line t
 undecorated, and `chrome.rs` supplies what the system's frame did: `caption_buttons` — minimize,
 maximize or restore, close — flush against the right end of each top bar, `drag_strip` laid first
 under each bar so its empty parts move the window and a double-click maximizes it, and `resize_zones`,
-eight `Order::Foreground` areas round the edge, none while maximized. macOS keeps its decorations
+twelve `Order::Foreground` areas round the edge — the four edges, and two arms for each corner's L,
+an area being a rectangle and the bounding box that stood in for one having resized the window from
+the close button (§15 D973) — none while maximized. ⚠️ **A modal card refuses every layer beneath
+it**, so `chrome::above_modal`, the last call of each screen's frame, raises the zones and lays the
+strip and buttons again over the card's backdrop (§15 D973), with the zones that meet the bar laid
+again inside that area, after them — ⚠️ not by raising the zone areas, since egui orders layers
+raised in one pass by age, not by the order of `move_to_top`; and on the library they are inert for a
+click that dismisses a menu, as every other door there is (§15 D558).
+macOS keeps its decorations
 under a transparent title bar, so the traffic lights and the resize border are the system's, and the
 bars start 72pt in to clear them. **Which host draws what is decided once**, in `chrome::Host::current`
 — the module's one `cfg!` — and everything else asks a `chrome::Chrome` a capability, so every branch
@@ -6219,9 +6246,14 @@ The web-font switch does not: §5.4a's network rule is the font source's, and th
 it (§15 D960).
 A portable archive, a `.deb` or `.rpm` and a `cargo` build are not Velopack installs and never check,
 a `.deb` or `.rpm` being updated by its package manager instead (§15 D957). The restart goes through the window's close
-request, so unsaved work is asked about first. A release build writes a log to
-`config_dir()/ondin/ondin.log`, because on Windows it has no console (§15 D953) and a failed check
-shows nothing in the window. What it is released as, and which of those names may never change, is
+request, so unsaved work is asked about first — and 🚨 **Velopack's updater is launched only from
+`on_exit`**, once the close can no longer be called off, because once launched it waits sixty seconds
+and then applies regardless, on Windows stopping every Ondin process under the install root. For the
+same reason the chip refuses while another Ondin process is running, counted by `instances` at the
+click and again at the exit, and nothing is applied at startup (§15 D970). Every launch Velopack's
+hook sees — the GUI, `gui` and its `--veloapp-*` re-invocations, in any profile, since `hook_runs`
+(§15 D970) — writes a log to `config_dir()/ondin/ondin.log`, because a release build on Windows has no
+console (§15 D953) and a failed check shows nothing in the window; a CLI command does not. What it is released as, and which of those names may never change, is
 §15 D956 and §4's twelfth invariant.
 
 ### 9.2 Layout
@@ -6234,6 +6266,8 @@ ondin-app/src/
 │                  #   and present mode's strip (§15 D958)
 ├─ update.rs       # the Velopack updater and the top bars' chip (§15 D954)
 ├─ logging.rs      # the log file, config_dir()/ondin/ondin.log (§15 D954)
+├─ machine_dir.rs  # this machine's folder: cache_dir()/ondin, OndinData on Windows (§15 D969)
+├─ instances.rs    # a lock file per running Ondin, counted before an update applies (§15 D970)
 ├─ app.rs          # OndinApp: window layout, top bar, tool rail, Action dispatch, file IO
 ├─ session.rs      # EditorSession: Document, History, Resolved, IdSource, Selection, Camera,
 │                  #   save state, status. NO GPU — see below
@@ -12390,12 +12424,14 @@ where to open, or what a file is called on disk:
   thing here nobody would expect on their other laptop — in-flight work belonging to one machine and
   one run — and it lives in the base folder anyway, so the library stays one directory to back up,
   move or point a sync client at.
-- `dirs::cache_dir()/ondin/` — everything derived and local: last-opened times, stars, covers. **Not
+- `machine_dir::root()` — `dirs::cache_dir()/ondin/`, and `…/OndinData/` on Windows, where `ondin`
+  is the installer's own folder under another case and Setup deletes it (§15 D969) — everything
+  derived and local: last-opened times, stars, covers. **Not
   in the base folder, and that is the line**: what a user would expect on their other laptop goes in
   the document (§5.11a); what they would not, goes here (§15 D366).
   ⚠️ **The cover cache is one directory for every library, and `Covers::sweep` keeps only what the
   *current* one claims** (§15 D708). It runs once per entry into the dashboard, over
-  `dirs::cache_dir()/ondin/covers`, deleting every PNG whose stem is not `cover::key` — id plus mtime
+  `machine_dir::root()/covers`, deleting every PNG whose stem is not `cover::key` — id plus mtime
   — of a document in `library.entries`, which is also what removes the superseded covers of documents
   that are still here. Nothing in the path and nothing in the key namespaces per library, **so
   changing the base folder throws away the old library's covers and switching back re-renders all of
@@ -12754,14 +12790,20 @@ the microseconds after the rename can still leave the old name on the old data �
 which is the safe end. ⚠️ **The covers and the font cache deliberately do not use it**, and the rule
 that decides is that *a file worth an fsync is one nothing else can reconstruct*: those two are
 derived, regenerate when they fail to parse, and are written in bulk where a `sync_all` each would be
-felt. ⚠️ A `.writing` left behind by a process that died is not a document — `scan` matches an
-extension of exactly `ondin`, so it is not listed, not counted by a heading and cannot be opened by
-accident.
+felt. Nor do the exports, an output the user re-runs, nor `ondin.log`, an append-only stream whose
+worst crash is a torn last line (§15 D378's amendment). ⚠️ A `.writing` left behind by a process that
+died is not a document — `scan` matches an extension of exactly `ondin`, so it is not listed, not
+counted by a heading and cannot be opened by accident.
+⚠️ **A save keeps the file's mode and its symbolic link** (§15 D975): the temp is given the replaced
+file's permissions before the rename, so a `0600` document stays `0600`, and a path that is a link is
+written at its resolved target, with the temp beside it, so the link stays a link. Ownership, ACLs and
+extended attributes are not kept.
 ⚠️ **The temp name carries this process's id and a counter, because nothing prevents a second Ondin
 (§15 D548).** It used to be the target's name with `.writing` and nothing between, on the premise that
 this app has no two writers racing for one path — a claim about the *process*, where the file is
-addressed by an absolute path, and there is no lock file, no named mutex and no single-instance check
-in the app at all. Two instances with one document open both autosave and both snapshot through here,
+addressed by an absolute path, and there is no named mutex and no single-instance check in the app
+at all — `instances`' lock file per process (§15 D970) counts running copies for the updater and
+stops none of them. Two instances with one document open both autosave and both snapshot through here,
 and the loser's handle then follows its temp *through* the winner's rename and extends it: the
 destination ends up holding one payload, a hole, and then the other, **after both saves reported
 success**. A name unique per write makes that a lost update instead, which is the safe direction and
@@ -12888,9 +12930,10 @@ dialog appears — arrives while the card is already up; a guard on that state e
 which has exactly one emitter in the workspace, so nothing cancelled the close and eframe took the
 window down with the card still unanswered. Cancelling again is free: the flag is idempotent and the
 card is already drawn. ⚠️ **On Windows and Linux the ✕ is the app's own since §15 D952**, in a top
-bar the card's backdrop covers — egui's `Modal` is an `Order::Foreground` area over the whole window;
-read, not tried — so there the second request is a system close such as Alt+F4 rather than a click;
-macOS keeps its traffic lights. The re-arm is needed exactly as before.
+bar the card's backdrop covers, and egui's `Modal` refuses every layer beneath it — so until §15 D973
+the second request there could only be a system close such as Alt+F4. `chrome::above_modal` now lays
+the caption buttons again over the backdrop, so it is a click again, measured headlessly with a card
+up; macOS keeps its traffic lights. The re-arm is needed exactly as before.
 ⚠️ **The card offers three answers behind two buttons**: *Recover*, *Discard*, and `Later` for the ✕,
 Escape and the backdrop, which pop the question for this launch and leave the file for the next one.
 *Discard* is the only one of the three that deletes, and a free dismissal must never become one.
@@ -12968,7 +13011,12 @@ click on a sidebar nav row still navigated and one on the dashed *New file* card
 document*, which is the worst of them and the only door here that is not a navigation. **The
 sidebar's accent *New file* button and *Recent*'s project cards are the two left**, and the first is
 that same create-a-document case — seven hand-written copies of one predicate is what §9.3's rule
-costs on this screen, and nothing makes a new door join. ⚠️ **This reverses most of D372**, which made a click *select*: nothing on the screen ever
+costs on this screen, and nothing makes a new door join. **Both read it now**, as do the body header's
+controls: the list of every door, and how to re-check it, is `OndinApp::library_menu_open`'s doc —
+nine doors as of §15 D973 — and this paragraph's count went stale beside it. 🚨 **Which is how the top bar's joined late**:
+§15 D952 and D954 put the caption buttons, the drag strip and the update chip there without the flag,
+so a click that closed a menu also closed, maximized or restarted the window; they read it now, the
+chrome taking it as `act` (§15 D973). ⚠️ **This reverses most of D372**, which made a click *select*: nothing on the screen ever
 acted on a pointer-made selection, since every action a card offers is on its own ⋮ menu, so it was a
 state the user could enter, could see and could do nothing with — and opening cost a second click on top
 of it. `DashboardState::selected` is now written **only** by `OndinApp::dashboard_keys`. A cursored card
@@ -13225,7 +13273,8 @@ Versions pinned (verify §2 table against latest). CI: build + clippy + fmt + fo
 ✅ `cargo build` + `cargo test` green. ⚠️ **The CI half was not built until 2026-10-03** (§15 D955) —
 every gate until then a hand run on one Windows machine. It first ran on 2026-10-03 (§15 D967): lint
 green, and the three test legs red on thirteen failures, every one a test that had only ever run on
-Windows — fixed, and not yet re-run.
+Windows — fixed, with two more its second run reached (§15 D968), and green on all three legs at
+`e1f1842`, the v0.4.0 release commit.
 
 **M1 — Core model + ops + history + IO.** §5 minus Resolved. Includes the Text node model (layout
 comes in M2).
@@ -13280,7 +13329,10 @@ live on the canvas, participate in shared undo, and survive save/load.
   `NodeKind` breaks the compile when a variant is added. ⚠️ **Byte-exact across platforms only because
   no file carries a full-precision float from transcendental arithmetic**: the JSON snapshot's path
   did, and its 16th digit differed between Windows and Linux/macOS, so since §15 D968 it is written
-  through the SVG writer's four-place `path_d`. `.gitattributes` marks the directory `-text`
+  through the SVG writer's four-place `path_d` — 🚨 **and this sentence was false of the golden until
+  §15 D972**, `world_bounds` measured from that same outline still carrying sixteen digits and the
+  transforms their `sin` and `cos`; those three fields are rounded to four places now. ⚠️ `pivot` is
+  not, and is exact in the fixture's one pivot. `.gitattributes` marks the directory `-text`
   so a checkout cannot fail the comparison on line endings, and pins every `.rs` to LF, because
   `goldens.rs` and `theme.rs` each have a test that splits its own source on `"\n}\n"` — a CRLF
   checkout failed the second on CI's Windows runner (§15 D967). Every *other* export test still asserts on

@@ -8,7 +8,7 @@ documents, and is untracked.
 | --- | --- |
 | `docs/architecture.md` | The design and the invariants. **Source of truth.** ~13,000 lines. |
 | `docs/decisions.md` | **§15** — every deviation from that design, **from D1 with no gaps** — the last is §15.0's last index row, not a figure here (this cell read *"D1–D912"* fifteen numbers late) — each with a verdict. ~54,000 lines. |
-| `docs/roadmap.md` | Open work, decided non-goals, parked decisions, post-v1. **No `Now` section is open** — *Distribution*'s one item, the apt/dnf repository's signing key, opened and closed on 2026-10-03 (§15 D957: the key generated, both secrets set, Pages on, the fingerprint in `install.sh` and `README.md`). What is left is *Later* and §0. **v0.4.0, the first release built by CI, shipped on 2026-10-04** — CI green on all three platforms (after D967 and D968), every Release asset present, and the apt and dnf repositories published and verified against the fingerprint in `install.sh`. Its tag's Pages publish was refused by the `github-pages` environment's `main`-only rule and published from `main` instead; the environment now takes `v*` tags too. **Nobody has yet run the macOS or Linux build by hand.** **`Next · Container layout`** (flexbox, CSS grid and insets — `architecture.md` §5.3c, §15 D867–D883): steps 1–3 built and committed — step 3's cards (D878–D883), the maintainer's first-look fixes (D884–D891) and six rulings on what flex had left (D892–D897) all landed in session 36. Session 37 (D904–D912): a resize's holds in the preview, a top-edge resize aligning to the end, `Start`/`End` made `flex-start`/`flex-end` as the cards always drew (D909), and a layout nested in a plain group laid by both the preview and `keep_insets`. **Flex owes nothing** — its owed tests landed in session 39 (D901's amendment). **Step 4, grid, is built** (sessions 38–40, D913–D925): model and engine, preview and gestures, the cards, and the canvas track lines (D921), all committed; session 40 closed what was left beside them — a held `baseline` (D923), the two `MAX_TRACKS` (D924), the lines through a layout scrub (D925, D921's open question answered by the session and not ruled), and the last track-line tests. **The maintainer looked on 2026-10-02** over a ten-item list of the riskiest flex and grid cases and found two, both fixed that day (session 41): an in-flow item now leaves its layout by the pointer rather than by its box (D926), and a grid drop stops whole at the last track (D927). **The v0.2.0 release review's 59 findings were all closed on 2026-10-03** (session 42, D928–D946; fifteen rulings made under the maintainer's delegation, each open to overturning). **Steps 1–4 owe nothing; next is step 5, components and overrides — not designed.** |
+| `docs/roadmap.md` | Open work, decided non-goals, parked decisions, post-v1. **`Now · Distribution` is open again, with two items** (2026-10-04, §15 D974): splitting the release job so its build steps never hold the write token, and `install.sh`'s single-package `dnf install --nogpgcheck` (`[X3-L5-04]`), which wants a Fedora container on dnf4 and dnf5 before it changes. Its earlier item, the signing key, opened and closed on 2026-10-03 (§15 D957). **The v0.3.0..v0.4.0 release review (`review/release-v0.3.0/`) was fixed in session 45** — 38 of 39 findings closed by D969–D975 (the open one is `[X3-L5-04]`, above), its `▶▶ FIX PHASE` table the status; ⚠️ **those fixes are unreleased, and v0.4.0 still carries the Critical and both Highs** (its updater applies with its own code, so nobody should be given v0.4.0). **v0.4.0, the first release built by CI, shipped on 2026-10-04** — CI green on all three platforms (after D967 and D968), every Release asset present, and the apt and dnf repositories published and verified against the fingerprint in `install.sh`. Its tag's Pages publish was refused by the `github-pages` environment's `main`-only rule and published from `main` instead; the environment now takes `v*` tags too. **Nobody has yet run the macOS or Linux build by hand.** **`Next · Container layout`** (flexbox, CSS grid and insets — `architecture.md` §5.3c, §15 D867–D883): steps 1–3 built and committed — step 3's cards (D878–D883), the maintainer's first-look fixes (D884–D891) and six rulings on what flex had left (D892–D897) all landed in session 36. Session 37 (D904–D912): a resize's holds in the preview, a top-edge resize aligning to the end, `Start`/`End` made `flex-start`/`flex-end` as the cards always drew (D909), and a layout nested in a plain group laid by both the preview and `keep_insets`. **Flex owes nothing** — its owed tests landed in session 39 (D901's amendment). **Step 4, grid, is built** (sessions 38–40, D913–D925): model and engine, preview and gestures, the cards, and the canvas track lines (D921), all committed; session 40 closed what was left beside them — a held `baseline` (D923), the two `MAX_TRACKS` (D924), the lines through a layout scrub (D925, D921's open question answered by the session and not ruled), and the last track-line tests. **The maintainer looked on 2026-10-02** over a ten-item list of the riskiest flex and grid cases and found two, both fixed that day (session 41): an in-flow item now leaves its layout by the pointer rather than by its box (D926), and a grid drop stops whole at the last track (D927). **The v0.2.0 release review's 59 findings were all closed on 2026-10-03** (session 42, D928–D946; fifteen rulings made under the maintainer's delegation, each open to overturning). **Steps 1–4 owe nothing; next is step 5, components and overrides — not designed.** |
 | `docs/shortcuts.md` | The whole keymap — bound, unbound and agreed. |
 | `docs/context-menus.md` | The context-menu spec and its own deviation ledger. |
 | `docs/vm.md` | The language behind Command Mode. Nothing here is built. |
@@ -67,9 +67,21 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 968 index rows, 968 body headings, next free
-D969** (measured at the close of session 44) — but trust the procedure over any number written
+anywhere cited either. **The live figures: 975 index rows, 975 body headings, next free
+D976** (measured at the close of session 45) — but trust the procedure over any number written
 down here, including that one. **No block is reserved**: the next session reserves its own.
+⚠️ **Session 45 reserved D969–D990 as its first act, grep-checked before any citation, and
+spent seven** — D969 (the machine's data out of the Windows installer's folder), D970 (the
+updater applies at a committed exit with no other Ondin running), D971 (the console twin and
+the command line), D972 (snapshot 11), D973 (the window chrome over a modal), D974 (packaging
+and the release job), D975 (`atomic::write` keeps mode and symlink) — the release-v0.3.0
+review's fixes. The closing negative grep over **D976–D990 found zero sites** and they are
+released. Census: arrivals D969–D975, no departures, none unresolved, against `430ed7e`.
+⚠️ **`arch-scribe` found two live defects in the batch-1 code** (a failed *Save and close*
+left the restart armed; the lifted chrome covered the top resize edge), and its suggested
+repair for the second — `move_to_top` the zones *after* the lifted area — **does not work**:
+egui orders the layers raised in one pass by age, a hash set and a stable sort. Measured, and
+recorded in D973 as the trap it is.
 ⚠️ **Session 44 reserved D958–D969 and spent three** — D958 (present mode's hover strip),
 D959 (local dates on Linux and macOS through `localtime_r`), D960 (§5.4a's network rule scoped
 to the font source, the updater outside it) — the maintainer's rulings on session 43's
@@ -1266,7 +1278,15 @@ The real census cannot be scoped to its own answer:
 grep -rhoE 'cfg\(([a-z_]+)' crates/ --include=*.rs | sort | uniq -c
 ```
 
-Last run (2026-10-03, close of session 44, against `17ca12a`): **404 `test`, 6 `windows`, 3
+Last run (2026-10-04, close of session 45): **410 `test`, 10 `windows`, 8 `unix`, 4 `not`, 3
+`panic`, 3 `debug_assertions`, 3 `any`, 2 `target_os`, 2 `all`, 1 `debug`.** Against `430ed7e`
+(406/8/5/3, the rest equal — `[R2-L8-07]` measured it, and found the session-44 line below
+matched no commit): `windows` +2 and `not` +1 are `ondin.com`'s job-object arms (§15 D971) and
+`main::tests::an_argument_that_is_not_unicode_is_refused`'s Windows half; `unix` +3 is that
+test's Unix half, `atomic::tests::a_save_keeps_the_documents_mode_and_its_link` (§15 D975), and
+that test's own doc saying `` `cfg(unix)` ``; `test` +4 is three new test modules and prose.
+**Before that** (2026-10-03, close of session 44, against `17ca12a`, ⚠️ a figure no commit
+has): **404 `test`, 6 `windows`, 3
 `unix`, 3 `panic`, 3 `not`, 3 `debug_assertions`, 3 `any`, 2 `target_os`, 2 `all`, 1 `debug`.**
 `test` rose by 2, both `ui::logo_tests` (§15 D961) — the attribute and its module doc's own
 `` `cfg(test)` ``, prose being source to this sieve; ⚠️ this line first read 402, measured before that
@@ -1329,6 +1349,16 @@ first time — so **a change touching a `cfg`-gated arm is not verified until CI
 green**, and saying "all gates green" before the push is a claim about Windows only. A local
 `cargo check --target x86_64-unknown-linux-gnu` reaches the four library crates and **not
 `ondin-app`**: `ring` needs a Linux C compiler this machine does not have.
+The class has grown by **test** members that run only off Windows: D967's
+`atomic::tests::lock`/`unlock` `unix` arms (`[R2-L8-07]` found them missing here), D975's
+`a_save_keeps_the_documents_mode_and_its_link`, and the Unix half of
+`an_argument_that_is_not_unicode_is_refused`; and `ondin-cli`'s `tie_to_this_process` has a
+`cfg(not(windows))` twin. 🚨 **And "this machine never compiles" was not true**: WSL `Ubuntu`
+24.04 is installed here with Rust and `cc`, and it is a Linux host —
+`wsl.exe -d Ubuntu -- bash -lc 'cd /mnt/c/Users/jonid/Projects/ondin && CARGO_TARGET_DIR=$HOME/ondin-wsl-target cargo test -p ondin-app --bin ondin -- <filter>'`
+built `ondin-app` cold in 71 s and ran and flip-checked D975's Unix test (session 45). Pipe
+its output through `tr -d '\0'`. macOS arms still have CI alone; and it has no rpm tooling,
+so the rpm signing path still has none.
 
 ### Dead code has two blind spots
 

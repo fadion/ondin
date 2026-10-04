@@ -4316,6 +4316,9 @@ impl OndinApp {
         let Some(node) = doc.get(id) else {
             return Role::Plain;
         };
+        if node.set().is_some() {
+            return Role::Set;
+        }
         if node.component() {
             return Role::Main;
         }
@@ -4363,17 +4366,146 @@ impl OndinApp {
         }
     }
 
-    /// *Select all instances* (§15 D981) of the selected main.
+    /// *Select all instances* (§15 D981) of the selected main — or, on a set, of
+    /// every variant in it (§15 D982).
     pub(crate) fn select_all_instances(&mut self) {
         let Some(main) = self.session.selection.single() else {
             return;
         };
-        let all = ondin_core::component::instances_of(&self.session.doc, main);
+        let doc = &self.session.doc;
+        let mains = if ondin_core::variant::is_set(doc, main) {
+            ondin_core::variant::variants(doc, main)
+        } else {
+            vec![main]
+        };
+        let all: Vec<NodeId> = mains
+            .iter()
+            .flat_map(|m| ondin_core::component::instances_of(doc, *m))
+            .collect();
         if all.is_empty() {
             self.session.info("No instances of this component");
             return;
         }
         self.session.selection.set(all);
+    }
+
+    /// The selected mains, when *Combine as variants* could take them: two or
+    /// more, every one a main not already a variant, all under one parent (§15
+    /// D982; `build::frame`'s rule, which the verb wraps them with).
+    pub(crate) fn combinable_mains(&self) -> Option<Vec<NodeId>> {
+        let doc = &self.session.doc;
+        let ids = self.session.selection.ids();
+        let parent = doc.get(*ids.first()?)?.parent();
+        let ok = ids.len() >= 2
+            && ids.iter().all(|id| {
+                doc.get(*id)
+                    .is_some_and(|n| n.component() && n.parent() == parent)
+                    && ondin_core::variant::set_of(doc, *id).is_none()
+            });
+        ok.then(|| ids.to_vec())
+    }
+
+    /// *Combine as variants* (§15 D982): the selected mains wrapped in a set, one
+    /// property whose values are their names. The toast speaks because the tree
+    /// changed shape, D981's rule for *Create component*'s.
+    pub(crate) fn combine_as_variants(&mut self) {
+        let mains = self.combinable_mains().or_else(|| {
+            // A lone main from the Properties card's *Variant* offer.
+            let one = self.session.selection.single()?;
+            let doc = &self.session.doc;
+            (doc.get(one)?.component() && ondin_core::variant::set_of(doc, one).is_none())
+                .then(|| vec![one])
+        });
+        let Some(mains) = mains else {
+            self.session.info("Select main components to combine");
+            return;
+        };
+        match ondin_core::variant::combine(
+            &self.session.doc,
+            &self.session.resolved,
+            &mut self.session.ids,
+            &mains,
+        ) {
+            Ok((tx, set)) => {
+                if self.session.commit(tx) {
+                    self.session.selection.set_one(set);
+                    let name = self
+                        .session
+                        .doc
+                        .get(set)
+                        .map(|n| n.name().to_string())
+                        .unwrap_or_default();
+                    self.session.info(format!(
+                        "Combined {} main{} into set “{name}” · Ctrl+Z to undo",
+                        mains.len(),
+                        if mains.len() == 1 { "" } else { "s" }
+                    ));
+                }
+            }
+            Err(e) => self.session.fail(format!("Cannot combine: {e}")),
+        }
+    }
+
+    /// *Add variant* (§15 D982), on a set or a variant: a copy of the selected
+    /// variant (or the set's last) taking the first free combination, selected.
+    pub(crate) fn add_variant(&mut self) {
+        let Some(id) = self.session.selection.single() else {
+            return;
+        };
+        let doc = &self.session.doc;
+        let (set, from) = if ondin_core::variant::is_set(doc, id) {
+            (id, None)
+        } else if let Some(set) = ondin_core::variant::set_of(doc, id) {
+            (set, Some(id))
+        } else {
+            self.session.info("Select a component set or a variant");
+            return;
+        };
+        let Some((tx, new)) = ondin_core::variant::add_variant(
+            &self.session.doc,
+            &self.session.resolved,
+            &mut self.session.ids,
+            set,
+            from,
+        ) else {
+            self.session.info("This set has no variant to copy");
+            return;
+        };
+        if self.session.commit(tx) {
+            self.session.selection.set_one(new);
+        }
+    }
+
+    /// The component property the one selected linked layer drives whose field
+    /// differs from the main's — what *Reset Label text* resets (§15 D982).
+    pub(crate) fn overridden_property_of_selection(&self) -> Option<ondin_core::variant::Property> {
+        let doc = &self.session.doc;
+        let id = self.session.selection.single()?;
+        let root = ondin_core::component::instance_root(doc, id)?;
+        ondin_core::variant::instance_properties(doc, root)
+            .into_iter()
+            .map(|p| p.value)
+            .find(|p| {
+                ondin_core::variant::counterparts(doc, root, p).contains(&id)
+                    && ondin_core::variant::property_state(doc, root, p).is_some_and(|(_, o)| o)
+            })
+    }
+
+    /// *Reset Label text* — named for the property (§15 D982) — from the context menu: that property back to
+    /// the main's value on the instance the selected layer sits in.
+    pub(crate) fn reset_selected_property(&mut self) {
+        let doc = &self.session.doc;
+        let (Some(p), Some(root)) = (
+            self.overridden_property_of_selection(),
+            self.session
+                .selection
+                .single()
+                .and_then(|id| ondin_core::component::instance_root(doc, id)),
+        ) else {
+            return;
+        };
+        let ops = ondin_core::variant::reset_property(doc, &[root], &p);
+        self.session.commit(Transaction(ops));
     }
 
     /// A reset of everything selected that sits in an instance (§5.3d's reset
@@ -9919,7 +10051,7 @@ mod tests {
     /// fails naming `inspector.rs`. Predicted correctly.
     #[test]
     fn only_the_layers_panel_commits_without_the_committer() {
-        let panels: [(&str, &str); 10] = [
+        let panels: [(&str, &str); 11] = [
             ("component.rs", include_str!("panels/component.rs")),
             ("dashboard.rs", include_str!("panels/dashboard.rs")),
             ("export.rs", include_str!("panels/export.rs")),
@@ -9930,6 +10062,7 @@ mod tests {
             ("paint.rs", include_str!("panels/paint.rs")),
             ("picker.rs", include_str!("panels/picker.rs")),
             ("typography.rs", include_str!("panels/typography.rs")),
+            ("variants.rs", include_str!("panels/variants.rs")),
         ];
         let committing: Vec<&str> = panels
             .iter()

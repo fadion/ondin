@@ -738,6 +738,12 @@ pub mod icon {
     pub const ARROW_SQUARE_OUT: &str = "\u{e5de}";
     /// *Select all instances*.
     pub const SELECTION_ALL: &str = "\u{e746}";
+    /// A variant clash — two variants on one combination (§15 D982): the design's
+    /// warning glyph, in neutral ink, no new hue.
+    pub const WARNING: &str = "\u{e4e0}";
+    /// A component property's binding mark — `{}`, used only inside mains (§15
+    /// D982).
+    pub const BRACKETS_CURLY: &str = "\u{e860}";
     /// A stack seen from the side. **Drawn by nothing since §15 D761**, which gave
     /// *Bring to front* and *Send to back* the [`ARROW_LINE_UP`]/[`ARROW_LINE_DOWN`]
     /// pair — this constant was on **both** of those rows, which is what the ruling
@@ -1028,6 +1034,8 @@ pub mod icon {
         ("link-break", LINK_BREAK),
         ("arrow-square-out", ARROW_SQUARE_OUT),
         ("selection-all", SELECTION_ALL),
+        ("warning", WARNING),
+        ("brackets-curly", BRACKETS_CURLY),
         ("stack", STACK),
         ("stack-simple", STACK_SIMPLE),
         ("trash", TRASH),

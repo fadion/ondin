@@ -320,6 +320,14 @@ pub enum Item {
     /// *Reset* named for the child — *Reset Label* (§15 D981) — on a linked layer
     /// inside an instance: [`Self::ResetInstance`] scoped to that layer.
     ResetChild,
+    /// *Reset* named for a component property — *Reset Label text* (§15 D982) —
+    /// on a linked layer whose property-driven field differs from its main.
+    ResetProperty,
+    /// *Combine as variants* (§15 D982) — on several mains: wrap them in a set.
+    CombineAsVariants,
+    /// *Add variant* (§15 D982) — on a set or a variant: a copy taking the first
+    /// free combination.
+    AddVariant,
     Ungroup,
     /// *Use as mask* — the layer clips the ones above it (`build::mask`, §15
     /// D282, D286).
@@ -696,6 +704,9 @@ impl Item {
         Item::DetachInstance,
         Item::ResetInstance,
         Item::ResetChild,
+        Item::ResetProperty,
+        Item::CombineAsVariants,
+        Item::AddVariant,
         Item::Ungroup,
         Item::Mask,
         Item::EvenOdd,
@@ -886,6 +897,22 @@ impl Item {
                 None,
                 Group::Structure,
             ),
+            // Renamed for its property, as *Reset* is for its layer.
+            Item::ResetProperty => s(
+                "Reset property",
+                icon::ARROW_COUNTER_CLOCKWISE,
+                None,
+                Group::Structure,
+            ),
+            // §15 D982's two rows. No chords: the mockup gives none, *Combine* and
+            // *Add variant* being rare, and `shortcuts.md` binds neither.
+            Item::CombineAsVariants => s(
+                "Combine as variants",
+                icon::SQUARES_FOUR,
+                None,
+                Group::Structure,
+            ),
+            Item::AddVariant => s("Add variant", icon::PLUS, None, Group::Structure),
             Item::Ungroup => s(
                 "Ungroup",
                 icon::SELECTION_SLASH,
@@ -1385,6 +1412,14 @@ pub struct Context<'a> {
     pub drifted: bool,
     /// That one layer's name, which *Reset Label* is named for. Empty for several.
     pub layer_name: String,
+    /// The selection is two or more mains, none in a set, sharing a parent — what
+    /// offers *Combine as variants* (§15 D982).
+    pub combinable: bool,
+    /// The one selected main is a variant — what offers it *Add variant*.
+    pub in_set: bool,
+    /// The property the one selected linked layer drives, when its field differs
+    /// from the main's — what offers *Reset Label text* (§15 D982).
+    pub property_reset: Option<String>,
 }
 
 /// A layer's part in a component, for D981's menu rows.
@@ -1395,6 +1430,8 @@ pub enum Role {
     Plain,
     /// A main component.
     Main,
+    /// A component set — the frame around variants (§15 D982).
+    Set,
     /// An instance root.
     Instance,
     /// A layer inside an instance, linked to its counterpart in the main.
@@ -1764,11 +1801,25 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
     // fresh instance has no drift and a row dim on most opens reads as broken.
     // D981's disabled-not-hidden is the *card's* counted rows, where the count is
     // the point.
+    // §15 D982's rows sit with them: *Combine as variants* on several mains, *Add
+    // variant* on a set or a variant, a set's *Select all instances* covering every
+    // variant's, and a bound layer's reset named for its property. A set is a frame
+    // that can never be a main, so it is not offered *Create component*.
+    if cx.combinable {
+        rows.push(Row::new(Item::CombineAsVariants).dim_if(locked, why));
+    }
     match cx.role {
         Role::Plain | Role::Local => {
             rows.push(Row::new(Item::CreateComponent).dim_if(locked, why));
         }
+        Role::Set => {
+            rows.push(Row::new(Item::AddVariant).dim_if(locked, why));
+            rows.push(Row::new(Item::SelectAllInstances));
+        }
         Role::Main => {
+            if cx.in_set {
+                rows.push(Row::new(Item::AddVariant).dim_if(locked, why));
+            }
             rows.push(Row::new(Item::DuplicateAsComponent).dim_if(locked, why));
             rows.push(Row::new(Item::SelectAllInstances));
         }
@@ -1781,6 +1832,13 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
         }
         Role::Member => {
             rows.push(Row::new(Item::GoToMain));
+            if let Some(prop) = &cx.property_reset {
+                rows.push(
+                    Row::new(Item::ResetProperty)
+                        .label(format!("Reset {prop}"))
+                        .dim_if(locked, why),
+                );
+            }
             if cx.drifted {
                 rows.push(
                     Row::new(Item::ResetChild)
@@ -2717,6 +2775,13 @@ impl OndinApp {
                 .and_then(|id| self.session.doc.get(id))
                 .map(|n| n.name().to_string())
                 .unwrap_or_default(),
+            combinable: self.combinable_mains().is_some(),
+            in_set: self
+                .session
+                .selection
+                .single()
+                .is_some_and(|id| ondin_core::variant::set_of(&self.session.doc, id).is_some()),
+            property_reset: self.overridden_property_of_selection().map(|p| p.name),
             // A walk of the tree per frame the menu is up, which is the same shape
             // `any_guides` above has and cheaper than it looks: it stops at the
             // first layer with a spec on it in every document that has one.
@@ -2850,6 +2915,9 @@ impl OndinApp {
             Item::ResetInstance | Item::ResetChild => {
                 self.reset_selection(ondin_core::reset::Kind::All)
             }
+            Item::ResetProperty => self.reset_selected_property(),
+            Item::CombineAsVariants => self.combine_as_variants(),
+            Item::AddVariant => self.add_variant(),
             Item::Ungroup => self.dispatch(ctx, Action::Ungroup),
             Item::Boolean(op) => self.dispatch(ctx, Action::Boolean(op)),
             Item::Flatten => self.dispatch(ctx, Action::Flatten),
@@ -3259,6 +3327,9 @@ mod tests {
             // make a test about its dimming pass by accident.
             drifted: true,
             layer_name: String::new(),
+            combinable: false,
+            in_set: false,
+            property_reset: None,
             // **True**, for `can_frame`'s reason: the page menu's fixtures are not
             // about the export row, and a `false` default would leave it dim in all
             // of them and make a test that cares pass by accident.

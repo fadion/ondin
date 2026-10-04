@@ -14,6 +14,7 @@ mod layout;
 pub(crate) mod paint;
 mod picker;
 mod typography;
+mod variants;
 
 /// What an SVG export could not say exactly, worded once for every surface that
 /// reports it — the export card and *Copy as SVG* (§15 D780).

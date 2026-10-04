@@ -60,11 +60,23 @@ impl OverrideMark {
 enum Face {
     /// A main component, and how many instances it has.
     Main { name: String, instances: usize },
+    /// A component set — its own card, *Variants* (§15 D982).
+    Set { set: NodeId },
+    /// A variant: a main inside a set, named by its values (§15 D982).
+    Variant {
+        main: NodeId,
+        set: NodeId,
+        set_name: String,
+        instances: usize,
+    },
+    /// A layer inside a main, which can be bound to its properties (§15 D982).
+    InMain { node: NodeId },
     /// One instance root.
     Instance {
         main: NodeId,
         main_name: String,
         drift: Drift,
+        props: PropDrift,
     },
     /// A layer inside an instance — linked to a counterpart in the main, or the
     /// instance's own.
@@ -77,14 +89,51 @@ enum Face {
         mains: usize,
         drifted: usize,
         drift: Drift,
+        props: PropDrift,
+        /// The roots, when they share one owner — one main, or variants of one
+        /// set (4E, 4F): what earns them the variant and property rows.
+        shared: Option<Vec<NodeId>>,
     },
     /// Instances among ordinary layers — summarised, with a way to narrow to them.
     Mixed { roots: Vec<NodeId>, others: usize },
 }
 
+/// An instance's **properties** apart from its other overrides (§15 D982, 4A's
+/// *2 properties · 1 override*): how many of its component properties differ from
+/// the main, and how many of `Drift::fields`' units are those properties' fields —
+/// counted once, as properties, and not again as overrides.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct PropDrift {
+    pub(crate) props: usize,
+    pub(crate) units: usize,
+}
+
+/// [`PropDrift`] for the instance rooted at `root`.
+pub(crate) fn prop_drift(doc: &ondin_core::Document, root: NodeId) -> PropDrift {
+    use ondin_core::variant::{self, PropKind};
+    let props = variant::instance_properties(doc, root)
+        .iter()
+        .filter(|p| variant::property_state(doc, root, p).is_some_and(|(_, o)| o))
+        .count();
+    let units = variant::property_fields(doc, root)
+        .into_iter()
+        .filter(|(c, kind)| {
+            ondin_core::reset::overrides(doc, *c)
+                .iter()
+                .any(|o| match kind {
+                    PropKind::Boolean => matches!(o.reset, Operation::SetVisible { .. }),
+                    PropKind::Text => matches!(o.reset, Operation::SetText { .. }),
+                })
+        })
+        .count();
+    PropDrift { props, units }
+}
+
 /// What a click on the card asked for, acted on after it is drawn so nothing is
 /// borrowed while the document changes.
 enum Act {
+    /// Every component property of the selected instances back to the main's.
+    ResetProperties,
     Select(Vec<NodeId>),
     GoToMain(NodeId),
     /// The selected child's counterpart in the main — `OndinApp::go_to_main`'s
@@ -350,13 +399,28 @@ impl OndinApp {
         let main_of = |root: NodeId| component::main_of(doc, root);
         if let [one] = ids.as_slice() {
             let node = doc.get(*one)?;
+            if node.set().is_some() {
+                return Some(Face::Set { set: *one });
+            }
             if node.component() {
+                let instances = component::instances_of(doc, *one).len();
+                if let Some(set) = ondin_core::variant::set_of(doc, *one) {
+                    return Some(Face::Variant {
+                        main: *one,
+                        set,
+                        set_name: name(set),
+                        instances,
+                    });
+                }
                 return Some(Face::Main {
                     name: node.name().to_string(),
-                    instances: component::instances_of(doc, *one).len(),
+                    instances,
                 });
             }
-            let root = component::instance_root(doc, *one)?;
+            let Some(root) = component::instance_root(doc, *one) else {
+                return ondin_core::variant::owner_above(doc, *one)
+                    .map(|_| Face::InMain { node: *one });
+            };
             let main = main_of(root)?;
             let main_name = name(main);
             if root != *one {
@@ -366,10 +430,12 @@ impl OndinApp {
                 });
             }
             let drift = self.drift_of(root);
+            let props = prop_drift(&self.session.doc, root);
             return Some(Face::Instance {
                 main,
                 main_name,
                 drift,
+                props,
             });
         }
         let roots: Vec<NodeId> = ids
@@ -394,6 +460,27 @@ impl OndinApp {
             _ => None,
         };
         let count = roots.len();
+        // One owner — one main, or variants of one set — is one component (4F).
+        let mut owners: Vec<NodeId> = mains
+            .iter()
+            .filter_map(|m| ondin_core::variant::owner_of_main(doc, *m))
+            .collect();
+        owners.sort();
+        owners.dedup();
+        let shared = (owners.len() == 1).then(|| roots.clone());
+        // Variants of one set read as instances of the set (4E), named for it.
+        let main = main.or_else(|| {
+            let o = *owners.first().filter(|_| owners.len() == 1)?;
+            doc.get(o)?.set()?;
+            Some((o, name(o)))
+        });
+        let props = roots
+            .iter()
+            .map(|r| prop_drift(doc, *r))
+            .fold(PropDrift::default(), |a, b| PropDrift {
+                props: a.props + b.props,
+                units: a.units + b.units,
+            });
         let drifts: Vec<Drift> = roots.iter().map(|r| self.drift_of(*r)).collect();
         Some(Face::Instances {
             count,
@@ -401,6 +488,8 @@ impl OndinApp {
             mains: mains.len(),
             drifted: drifts.iter().filter(|d| d.any()).count(),
             drift: drifts.into_iter().fold(Drift::default(), sum),
+            props,
+            shared,
         })
     }
 
@@ -417,18 +506,53 @@ impl OndinApp {
             Face::Mixed { roots, others } => {
                 slim_row(ui, |ui| mixed_line(ui, roots, *others, &mut act));
             }
-            Face::Main { .. } | Face::Instance { .. } | Face::Instances { .. } => {
-                self.panel(ui, "Component", None, |_app, ui| match &face {
+            Face::InMain { node } => self.bind_line(ui, *node),
+            Face::Set { set } => {
+                let set = *set;
+                self.panel(ui, "Variants", None, |app, ui| app.set_body(ui, set));
+            }
+            Face::Main { .. }
+            | Face::Variant { .. }
+            | Face::Instance { .. }
+            | Face::Instances { .. } => {
+                self.panel(ui, "Component", None, |app, ui| match &face {
                     Face::Main { name, instances } => main_body(ui, name, *instances, &mut act),
+                    // 3D: *Variant in Button* over the derived, read-only name, a
+                    // dropdown per property, then the main's count and verbs.
+                    Face::Variant {
+                        main,
+                        set,
+                        set_name,
+                        instances,
+                    } => {
+                        let name = app
+                            .session
+                            .doc
+                            .get(*main)
+                            .map(|n| n.name().to_string())
+                            .unwrap_or_default();
+                        let link = Some((*set, set_name.as_str()));
+                        heading(ui, "Variant in", link, None, "", &mut act);
+                        ui.label(
+                            egui::RichText::new(name)
+                                .size(13.0)
+                                .color(theme::text::STRONG),
+                        );
+                        app.variant_rows(ui, *main);
+                        main_tail(ui, *instances, &mut act);
+                    }
                     Face::Instance {
                         main,
                         main_name,
                         drift,
+                        props,
                     } => {
-                        let summary = drift_summary(*drift);
+                        let summary = drift_summary(*drift, *props);
                         let link = Some((*main, main_name.as_str()));
                         heading(ui, "Instance of", link, None, &summary, &mut act);
-                        reset_row(ui, *drift, true, &mut act);
+                        let roots = app.session.selection.ids().to_vec();
+                        app.instance_rows(ui, &roots);
+                        reset_row(ui, *drift, *props, true, &mut act);
                     }
                     Face::Instances {
                         count,
@@ -436,32 +560,88 @@ impl OndinApp {
                         mains,
                         drifted,
                         drift,
+                        props,
+                        shared,
                     } => {
                         let summary = match drifted {
                             0 => String::new(),
-                            n => format!("{n} with overrides"),
+                            n => format!("{n} with changes"),
                         };
                         match main {
                             Some((m, n)) => {
                                 let caption = format!("{count} instances of");
                                 heading(ui, &caption, Some((*m, n)), None, &summary, &mut act);
-                                reset_row(ui, *drift, true, &mut act);
+                                if let Some(roots) = shared {
+                                    app.instance_rows(ui, roots);
+                                }
+                                reset_row(ui, *drift, *props, true, &mut act);
                             }
                             // 3F: no single main to go to, so no name link and no
                             // overflow of counted resets.
                             None => {
                                 let title = format!("Instances of {mains} components");
                                 heading(ui, "", None, Some(&title), &summary, &mut act);
-                                reset_row(ui, *drift, false, &mut act);
+                                reset_row(ui, *drift, *props, false, &mut act);
                             }
                         }
                     }
-                    Face::Child { .. } | Face::Mixed { .. } => {}
+                    Face::Child { .. }
+                    | Face::Mixed { .. }
+                    | Face::InMain { .. }
+                    | Face::Set { .. } => {}
                 });
             }
         }
+        // A main's or a set's own properties, under its card (3G).
+        self.inspector_properties(ui);
         match act {
             None => {}
+            Some(Act::ResetProperties) => {
+                let doc = &self.session.doc;
+                let roots: Vec<NodeId> =
+                    ondin_core::build::outermost(doc, self.session.selection.ids())
+                        .into_iter()
+                        .filter(|id| component::instance_root(doc, *id) == Some(*id))
+                        .collect();
+                let ops: Vec<Operation> = roots
+                    .iter()
+                    .flat_map(|r| {
+                        ondin_core::variant::instance_properties(doc, *r)
+                            .into_iter()
+                            .flat_map(|p| ondin_core::variant::reset_property(doc, &[*r], &p))
+                    })
+                    .collect();
+                if !ops.is_empty() {
+                    self.commit_reset(Transaction(ops));
+                }
+            }
+            // *Reset fields* leaves the properties alone (4C): their fields are
+            // counted, and reset, as properties.
+            Some(Act::Reset(Kind::Fields)) => {
+                if let Some(tx) = self.reset_tx(Kind::Fields) {
+                    let doc = &self.session.doc;
+                    let bound: std::collections::HashSet<(NodeId, bool)> = self
+                        .session
+                        .selection
+                        .ids()
+                        .iter()
+                        .filter_map(|id| component::instance_root(doc, *id))
+                        .flat_map(|r| ondin_core::variant::property_fields(doc, r))
+                        .map(|(c, k)| (c, k == ondin_core::variant::PropKind::Boolean))
+                        .collect();
+                    let kept: Vec<Operation> =
+                        tx.0.into_iter()
+                            .filter(|op| match op {
+                                Operation::SetVisible { id, .. } => !bound.contains(&(*id, true)),
+                                Operation::SetText { id, .. } => !bound.contains(&(*id, false)),
+                                _ => true,
+                            })
+                            .collect();
+                    if !kept.is_empty() {
+                        self.commit_reset(Transaction(kept));
+                    }
+                }
+            }
             Some(Act::Select(ids)) => self.session.selection.set(ids),
             Some(Act::GoToMain(main)) => {
                 self.session.selection.set_one(main);
@@ -777,10 +957,19 @@ fn sum(a: Drift, b: Drift) -> Drift {
     }
 }
 
-/// *3 overrides · 1 local layer* — empty at zero, which is how it disappears.
-fn drift_summary(d: Drift) -> String {
-    let overrides = d.fields + d.removed + d.order;
+/// *2 properties · 3 overrides · 1 local layer* — empty at zero, which is how it
+/// disappears. A property's fields count once, as the property (§15 D982, 4A:
+/// *"properties are the knobs you're meant to turn, so they shouldn't read as
+/// drift"*).
+fn drift_summary(d: Drift, p: PropDrift) -> String {
+    let overrides = d.fields.saturating_sub(p.units) + d.removed + d.order;
     let mut parts = Vec::new();
+    if p.props > 0 {
+        parts.push(match p.props {
+            1 => "1 property".to_string(),
+            n => format!("{n} properties"),
+        });
+    }
     if overrides > 0 {
         parts.push(plural(overrides, "override"));
     }
@@ -874,7 +1063,7 @@ fn heading(
 
 /// **Reset all**, **Detach**, and — where there is one main to count against —
 /// the overflow of counted resets (3B, 3C).
-fn reset_row(ui: &mut egui::Ui, d: Drift, overflow: bool, act: &mut Option<Act>) {
+fn reset_row(ui: &mut egui::Ui, d: Drift, p: PropDrift, overflow: bool, act: &mut Option<Act>) {
     let gap = ui::CARD_COL_GAP;
     let h = ui::CONTROL_H;
     let w = ui.available_width();
@@ -922,8 +1111,20 @@ fn reset_row(ui: &mut egui::Ui, d: Drift, overflow: bool, act: &mut Option<Act>)
                 .align(egui::RectAlign::BOTTOM_END)
                 .show(|ui| {
                     ui::menu_rows(ui);
+                    // 4C: properties and fields count, and reset, separately.
+                    if p.props > 0 {
+                        let count = p.props.to_string();
+                        let row = ui::MenuRow::new("", "Reset properties").accel(Some(&count));
+                        if ui::menu_row(ui, row, ui::MENU_ROW_H).clicked() {
+                            *act = Some(Act::ResetProperties);
+                        }
+                    }
                     for (kind, label, n) in [
-                        (Kind::Fields, "Reset fields", d.fields),
+                        (
+                            Kind::Fields,
+                            "Reset fields",
+                            d.fields.saturating_sub(p.units),
+                        ),
                         (Kind::Children, "Restore removed children", d.removed),
                         (Kind::Order, "Reset order", d.order),
                     ] {
@@ -964,6 +1165,12 @@ fn main_body(ui: &mut egui::Ui, name: &str, instances: usize, act: &mut Option<A
         });
         paint_glyph(ui, icon::HEXAGON, slot, block.response.rect);
     });
+    main_tail(ui, instances, act);
+}
+
+/// A main's count with *Select all*, and *Duplicate as component* — 3A's lower
+/// half, which a variant's face shares (3D).
+fn main_tail(ui: &mut egui::Ui, instances: usize, act: &mut Option<Act>) {
     let h = ui::CONTROL_H;
     ui.horizontal(|ui| {
         ui.label(
@@ -2062,5 +2269,284 @@ mod tests {
             !f.app.collapsed_panels.contains("Appearance"),
             "still open: the reset is the press, not the toggle"
         );
+    }
+
+    /// A set `Button` (`Size: Small, Large`) of two variants, each a frame holding
+    /// a text `Label` bound to the set's text property *Label text*, and an
+    /// instance of Small — adopted into a headless app (§15 D982).
+    struct V {
+        app: OndinApp,
+        set: NodeId,
+        small: NodeId,
+        large: NodeId,
+        label: NodeId,
+        i: NodeId,
+        ilabel: NodeId,
+    }
+
+    fn text_kind(content: &str) -> NodeKind {
+        NodeKind::Text {
+            content: content.into(),
+            style: Box::new(ondin_core::TextStyle {
+                font_family: "Inter".into(),
+                font_size: 12.0,
+                ..Default::default()
+            }),
+            spans: Default::default(),
+            para_spans: Default::default(),
+            paragraph: Default::default(),
+            block: Default::default(),
+            sizing: ondin_core::TextSizing::Auto,
+            on_path: None,
+            on_path_flip: false,
+            on_path_offset: 0.0,
+        }
+    }
+
+    fn variants_fixture(ctx: &egui::Context) -> V {
+        use ondin_core::variant::{PropKind, Property, VariantProp, VariantSet};
+        let mut app = OndinApp::headless(ctx);
+        let mut ids = IdSource::new(0xC6);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let [set, small, label, large, llabel] = [(); 5].map(|_| ids.mint());
+        let frame = |w| NodeKind::Artboard {
+            size: Size::new(w, 30.0),
+        };
+        let create = |id, parent, index, kind, name: &str| Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind,
+            transform: None,
+            name: Some(name.into()),
+        };
+        let item = ids.mint_item();
+        doc.apply(&Transaction(vec![
+            create(set, root, 0, frame(300.0), "Button"),
+            create(small, set, 0, frame(80.0), "Small"),
+            create(label, small, 0, text_kind("Go"), "Label"),
+            create(large, set, 1, frame(120.0), "Large"),
+            create(llabel, large, 0, text_kind("Go"), "Label"),
+            Operation::SetComponent {
+                id: small,
+                component: true,
+            },
+            Operation::SetComponent {
+                id: large,
+                component: true,
+            },
+            Operation::SetVariantSet {
+                id: set,
+                set: Some(VariantSet {
+                    props: vec![VariantProp {
+                        name: "Size".into(),
+                        values: vec!["Small".into(), "Large".into()],
+                    }],
+                }),
+            },
+            Operation::SetVariant {
+                id: small,
+                values: vec!["Small".into()],
+            },
+            Operation::SetVariant {
+                id: large,
+                values: vec!["Large".into()],
+            },
+            Operation::SetProperties {
+                id: set,
+                props: vec![ondin_core::Keyed::new(
+                    item,
+                    Property {
+                        name: "Label text".into(),
+                        kind: PropKind::Text,
+                        bound: vec![label, llabel],
+                    },
+                )],
+            },
+        ]))
+        .expect("a set of two variants");
+        let (tx, made) = ondin_core::insert_subtrees(
+            &doc,
+            &mut ids,
+            &[Placement {
+                nodes: doc.capture_subtree(small).unwrap(),
+                parent: root,
+                index: None,
+            }],
+            Default::default(),
+        );
+        doc.apply(&tx).expect("an instance of Small");
+        let i = made[0];
+        let ilabel = doc.get(i).unwrap().children()[0];
+        app.session.adopt_document(doc, None);
+        V {
+            app,
+            set,
+            small,
+            large,
+            label,
+            i,
+            ilabel,
+        }
+    }
+
+    fn content(app: &OndinApp, id: NodeId) -> String {
+        match app.session.doc.get(id).unwrap().kind() {
+            NodeKind::Text { content, .. } => content.clone(),
+            _ => panic!("not text"),
+        }
+    }
+
+    /// Step 7's faces (§15 D982): a set, a variant, a layer inside a variant, and
+    /// an instance of a variant.
+    #[test]
+    fn each_variant_selection_gets_its_face() {
+        let ctx = egui::Context::default();
+        let mut v = variants_fixture(&ctx);
+        assert!(matches!(face_of(&mut v.app, &[v.set]), Some(Face::Set { set }) if set == v.set));
+        assert!(matches!(
+            face_of(&mut v.app, &[v.small]),
+            Some(Face::Variant { set, instances: 1, .. }) if set == v.set
+        ));
+        assert!(matches!(
+            face_of(&mut v.app, &[v.label]),
+            Some(Face::InMain { node }) if node == v.label
+        ));
+        assert!(matches!(
+            face_of(&mut v.app, &[v.i]),
+            Some(Face::Instance { main, .. }) if main == v.small
+        ));
+    }
+
+    /// **A property counts as a property, not as an override** (4A): the
+    /// instance's label text set through the property reads *1 property* in the
+    /// summary and nothing as an override; renaming the label as well adds *1
+    /// override*. Flip, run: dropping `PropDrift::units` from `drift_summary`'s
+    /// subtraction paints *1 property · 1 override* in the first case.
+    #[test]
+    fn the_summary_counts_a_property_apart_from_the_overrides() {
+        let ctx = egui::Context::default();
+        let mut v = variants_fixture(&ctx);
+        let p = ondin_core::variant::instance_properties(&v.app.session.doc, v.i)[0]
+            .value
+            .clone();
+        let ops = ondin_core::variant::set_property(
+            &v.app.session.doc,
+            &[v.i],
+            &p,
+            &ondin_core::variant::PropValue::Text("Sign up".into()),
+        );
+        assert!(v.app.session.commit(Transaction(ops)));
+        assert_eq!(content(&v.app, v.ilabel), "Sign up");
+        v.app.session.selection.set_one(v.i);
+        let mut out = frame(&mut v.app, &ctx, Vec::new());
+        for _ in 0..3 {
+            out = frame(&mut v.app, &ctx, Vec::new());
+        }
+        let painted: Vec<String> = texts(&out).into_iter().map(|(t, _)| t).collect();
+        assert!(painted.contains(&"1 property".to_string()), "{painted:?}");
+        assert!(
+            painted.contains(&"Size".to_string()),
+            "the variant dropdown's label"
+        );
+        assert!(
+            painted.contains(&"Label text".to_string()),
+            "the property row"
+        );
+
+        assert!(
+            v.app
+                .session
+                .commit(Transaction(vec![Operation::SetOpacity {
+                    id: v.ilabel,
+                    opacity: 0.5,
+                }]))
+        );
+        for _ in 0..3 {
+            out = frame(&mut v.app, &ctx, Vec::new());
+        }
+        let painted: Vec<String> = texts(&out).into_iter().map(|(t, _)| t).collect();
+        assert!(
+            painted.contains(&"1 property · 1 override".to_string()),
+            "{painted:?}"
+        );
+    }
+
+    /// The set's card draws its counts and its property, and the context menu's
+    /// verbs land: *Add variant* after a third value takes it, and *Reset Label
+    /// text* puts the property back.
+    #[test]
+    fn the_set_card_and_the_menu_verbs() {
+        let ctx = egui::Context::default();
+        let mut v = variants_fixture(&ctx);
+        v.app.session.selection.set_one(v.set);
+        let mut out = frame(&mut v.app, &ctx, Vec::new());
+        for _ in 0..3 {
+            out = frame(&mut v.app, &ctx, Vec::new());
+        }
+        let painted: Vec<String> = texts(&out).into_iter().map(|(t, _)| t).collect();
+        assert!(
+            painted.contains(&"Component set".to_string()),
+            "{painted:?}"
+        );
+        assert!(
+            painted.contains(&"2 variants · 1 instance".to_string()),
+            "{painted:?}"
+        );
+        assert!(
+            painted.contains(&"PROPERTIES".to_string()),
+            "the set's own properties card"
+        );
+
+        let tx = ondin_core::variant::add_value(&v.app.session.doc, v.set, 0, "Huge").unwrap();
+        assert!(v.app.session.commit(tx));
+        v.app.session.selection.set_one(v.large);
+        v.app.add_variant();
+        let new = v.app.session.selection.single().unwrap();
+        assert_eq!(v.app.session.doc.get(new).unwrap().variant(), ["Huge"]);
+        assert_eq!(v.app.session.doc.get(new).unwrap().name(), "Huge");
+
+        let p = ondin_core::variant::instance_properties(&v.app.session.doc, v.i)[0]
+            .value
+            .clone();
+        let ops = ondin_core::variant::set_property(
+            &v.app.session.doc,
+            &[v.i],
+            &p,
+            &ondin_core::variant::PropValue::Text("Sign up".into()),
+        );
+        assert!(v.app.session.commit(Transaction(ops)));
+        v.app.session.selection.set_one(v.ilabel);
+        assert_eq!(
+            v.app.overridden_property_of_selection().map(|p| p.name),
+            Some("Label text".into())
+        );
+        v.app.reset_selected_property();
+        assert_eq!(content(&v.app, v.ilabel), "Go");
+        assert_eq!(v.app.overridden_property_of_selection(), None);
+    }
+
+    /// *Combine as variants* on two loose mains makes a set and selects it, with
+    /// the design's toast.
+    #[test]
+    fn combining_two_mains_selects_the_new_set() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        f.app.session.selection.set_one(f.m);
+        f.app.duplicate_as_component();
+        let copy = f.app.session.selection.single().unwrap();
+        f.app.session.selection.set(vec![f.m, copy]);
+        assert!(f.app.combinable_mains().is_some());
+        f.app.combine_as_variants();
+        let set = f.app.session.selection.single().unwrap();
+        assert!(ondin_core::variant::is_set(&f.app.session.doc, set));
+        assert_eq!(
+            ondin_core::variant::variants(&f.app.session.doc, set).len(),
+            2
+        );
+        // The instance of the first main is an instance of a variant now, named as
+        // it was.
+        assert_eq!(f.app.session.doc.get(f.i).unwrap().link(), Some(f.m));
     }
 }

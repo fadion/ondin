@@ -106,11 +106,16 @@ enum Face {
 pub(crate) struct PropDrift {
     pub(crate) props: usize,
     pub(crate) units: usize,
+    /// Whether the main defines any property at all — what puts *Reset
+    /// properties* in the overflow, disabled at zero by D981's rule for the
+    /// card's counted resets, and leaves it out for a component with none.
+    pub(crate) defined: bool,
 }
 
 /// [`PropDrift`] for the instance rooted at `root`.
 pub(crate) fn prop_drift(doc: &ondin_core::Document, root: NodeId) -> PropDrift {
     use ondin_core::variant::{self, PropKind};
+    let defined = !variant::instance_properties(doc, root).is_empty();
     let props = variant::instance_properties(doc, root)
         .iter()
         .filter(|p| variant::property_state(doc, root, p).is_some_and(|(_, o)| o))
@@ -126,7 +131,11 @@ pub(crate) fn prop_drift(doc: &ondin_core::Document, root: NodeId) -> PropDrift 
                 })
         })
         .count();
-    PropDrift { props, units }
+    PropDrift {
+        props,
+        units,
+        defined,
+    }
 }
 
 /// What a click on the card asked for, acted on after it is drawn so nothing is
@@ -480,6 +489,7 @@ impl OndinApp {
             .fold(PropDrift::default(), |a, b| PropDrift {
                 props: a.props + b.props,
                 units: a.units + b.units,
+                defined: a.defined || b.defined,
             });
         let drifts: Vec<Drift> = roots.iter().map(|r| self.drift_of(*r)).collect();
         Some(Face::Instances {
@@ -1112,10 +1122,18 @@ fn reset_row(ui: &mut egui::Ui, d: Drift, p: PropDrift, overflow: bool, act: &mu
                 .show(|ui| {
                     ui::menu_rows(ui);
                     // 4C: properties and fields count, and reset, separately.
-                    if p.props > 0 {
-                        let count = p.props.to_string();
-                        let row = ui::MenuRow::new("", "Reset properties").accel(Some(&count));
-                        if ui::menu_row(ui, row, ui::MENU_ROW_H).clicked() {
+                    // Present wherever the component has properties, and
+                    // disabled at zero like its neighbours (D981) — `arch-scribe`
+                    // read the first cut hiding it.
+                    if p.defined {
+                        let count = match p.props {
+                            0 => "—".to_string(),
+                            n => n.to_string(),
+                        };
+                        let row = ui::MenuRow::new("", "Reset properties")
+                            .accel(Some(&count))
+                            .enabled(p.props > 0);
+                        if ui::menu_row(ui, row, ui::MENU_ROW_H).clicked() && p.props > 0 {
                             *act = Some(Act::ResetProperties);
                         }
                     }
@@ -2421,8 +2439,8 @@ mod tests {
 
     /// **A property counts as a property, not as an override** (4A): the
     /// instance's label text set through the property reads *1 property* in the
-    /// summary and nothing as an override; renaming the label as well adds *1
-    /// override*. Flip, run: dropping `PropDrift::units` from `drift_summary`'s
+    /// summary and nothing as an override; dimming the label as well (opacity
+    /// 0.5) adds *1 override*. Flip, run: dropping `PropDrift::units` from `drift_summary`'s
     /// subtraction paints *1 property · 1 override* in the first case.
     #[test]
     fn the_summary_counts_a_property_apart_from_the_overrides() {
@@ -2469,6 +2487,37 @@ mod tests {
         let painted: Vec<String> = texts(&out).into_iter().map(|(t, _)| t).collect();
         assert!(
             painted.contains(&"1 property · 1 override".to_string()),
+            "{painted:?}"
+        );
+    }
+
+    /// The layers panel's two marks (§15 D982, 2A and 2C): a collapsed set's row
+    /// carries its variant count where a frame's carries its size, and a layer
+    /// bound to a property carries `{}`. Flip, run: answering `false` for `bound`
+    /// fails the second assertion.
+    #[test]
+    fn the_layers_panel_counts_a_folded_set_and_marks_a_bound_layer() {
+        let ctx = egui::Context::default();
+        let mut v = variants_fixture(&ctx);
+        let tree = |app: &mut OndinApp| {
+            let mut out = None;
+            for _ in 0..3 {
+                out = Some(ctx.run_ui(Default::default(), |ui| app.layers_tree(ui)));
+            }
+            texts(&out.expect("drawn"))
+                .into_iter()
+                .map(|(t, _)| t)
+                .collect::<Vec<_>>()
+        };
+        v.app.collapsed.insert(v.set);
+        let painted = tree(&mut v.app);
+        assert!(painted.contains(&"2 variants".to_string()), "{painted:?}");
+        v.app.collapsed.clear();
+        let painted = tree(&mut v.app);
+        assert!(
+            painted
+                .iter()
+                .any(|t| t == crate::theme::icon::BRACKETS_CURLY),
             "{painted:?}"
         );
     }
@@ -2527,8 +2576,9 @@ mod tests {
         assert_eq!(v.app.overridden_property_of_selection(), None);
     }
 
-    /// *Combine as variants* on two loose mains makes a set and selects it, with
-    /// the design's toast.
+    /// *Combine as variants* on two loose mains makes a set and selects it — and
+    /// the context menu no longer offers *Create component* on them, which would
+    /// nest mains in a main and be refused.
     #[test]
     fn combining_two_mains_selects_the_new_set() {
         let ctx = egui::Context::default();

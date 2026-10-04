@@ -228,8 +228,7 @@ impl OndinApp {
         }
         for (pi, p) in vs.props.iter().enumerate() {
             ui.add_space(2.0);
-            // The property's name, renamed in place; its delete in the chip row's
-            // last slot.
+            // The property's name, renamed in place, with its delete beside it.
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
                 let w = ui.available_width() - ui::CONTROL_H - ui::CARD_COL_GAP;
@@ -643,8 +642,8 @@ impl OndinApp {
 
     /// The **Properties** card on a main or a set (3G, 3H): each property's kind,
     /// name and default, and what it is bound to; a row's name renames it and its ×
-    /// deletes it; the header's `+` adds one, and on a lone main also offers
-    /// *Variant*, which wraps it in a set.
+    /// deletes it; *Boolean* and *Text* under the rows add one, and on a lone main
+    /// a third, *Variant*, wraps it in a set.
     pub(super) fn inspector_properties(&mut self, ui: &mut egui::Ui) {
         let Some(id) = self.session.selection.single() else {
             return;
@@ -664,6 +663,7 @@ impl OndinApp {
         let lone_main = doc.get(owner).is_some_and(|n| n.component());
         let mut out: Option<Transaction> = None;
         let mut combine = false;
+        let mut refused = None;
         self.panel(ui, "Properties", None, |app, ui| {
             let doc = &app.session.doc;
             if props.is_empty() {
@@ -676,7 +676,7 @@ impl OndinApp {
                 );
             }
             for p in &props {
-                property_row(ui, doc, owner, p, &mut out);
+                property_row(ui, doc, owner, p, &mut out, &mut refused);
             }
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
@@ -707,6 +707,9 @@ impl OndinApp {
                 }
             });
         });
+        if let Some(why) = refused {
+            self.session.info(why);
+        }
         if let Some(tx) = out {
             self.commit_edit(tx);
         }
@@ -843,6 +846,7 @@ fn property_row(
     owner: NodeId,
     p: &Keyed<Property>,
     out: &mut Option<Transaction>,
+    refused: &mut Option<&'static str>,
 ) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
@@ -858,10 +862,15 @@ fn property_row(
         let w = ui.available_width() - ui::CONTROL_H - ui::CARD_COL_GAP;
         let id = ui.id().with(("prop-name", owner, p.id));
         if let Some(n) = name_field(ui, id, &p.name, egui::vec2(w, ui::CONTROL_H), 12.0) {
-            let taken = doc
-                .get(owner)
-                .is_some_and(|o| o.props().iter().any(|q| q.id != p.id && q.name == n));
-            if !taken {
+            // Another property's name, or one of a set's variant properties —
+            // `variant::check`'s `PropertyName`, asked before the commit is.
+            let taken = doc.get(owner).is_some_and(|o| {
+                o.props().iter().any(|q| q.id != p.id && q.name == n)
+                    || o.set().is_some_and(|s| s.props.iter().any(|v| v.name == n))
+            });
+            if taken {
+                *refused = Some("That name is taken");
+            } else {
                 *out = variant::edit_property(doc, owner, p.id, |q| {
                     Some(Property {
                         name: n.clone(),

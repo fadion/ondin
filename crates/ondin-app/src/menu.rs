@@ -1417,6 +1417,8 @@ pub struct Context<'a> {
     pub combinable: bool,
     /// The one selected main is a variant — what offers it *Add variant*.
     pub in_set: bool,
+    /// The selection holds a main or a set — what withholds *Create component*.
+    pub holds_main: bool,
     /// The property the one selected linked layer drives, when its field differs
     /// from the main's — what offers *Reset Label text* (§15 D982).
     pub property_reset: Option<String>,
@@ -1809,9 +1811,14 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
         rows.push(Row::new(Item::CombineAsVariants).dim_if(locked, why));
     }
     match cx.role {
-        Role::Plain | Role::Local => {
+        // Not over a main or a set: wrapping one in a new main nests a main in a
+        // main, which `component::check` refuses — so several mains are offered
+        // *Combine as variants* and nothing else (`arch-scribe`'s reading, §15
+        // D982's amendment).
+        Role::Plain | Role::Local if !cx.holds_main => {
             rows.push(Row::new(Item::CreateComponent).dim_if(locked, why));
         }
+        Role::Plain | Role::Local => {}
         Role::Set => {
             rows.push(Row::new(Item::AddVariant).dim_if(locked, why));
             rows.push(Row::new(Item::SelectAllInstances));
@@ -2782,6 +2789,12 @@ impl OndinApp {
                 .single()
                 .is_some_and(|id| ondin_core::variant::set_of(&self.session.doc, id).is_some()),
             property_reset: self.overridden_property_of_selection().map(|p| p.name),
+            holds_main: self.session.selection.ids().iter().any(|id| {
+                self.session
+                    .doc
+                    .get(*id)
+                    .is_some_and(|n| n.component() || n.set().is_some())
+            }),
             // A walk of the tree per frame the menu is up, which is the same shape
             // `any_guides` above has and cheaper than it looks: it stops at the
             // first layer with a spec on it in every document that has one.
@@ -3329,6 +3342,7 @@ mod tests {
             layer_name: String::new(),
             combinable: false,
             in_set: false,
+            holds_main: false,
             property_reset: None,
             // **True**, for `can_frame`'s reason: the page menu's fixtures are not
             // about the export row, and a `false` default would leave it dim in all
@@ -4089,6 +4103,27 @@ mod tests {
         let groups = build(&cx);
         let rows = &groups[0];
         assert!(rows.iter().all(|r| r.enabled), "{:?}", labels(&groups));
+    }
+
+    /// Several mains are offered *Combine as variants* and not *Create component*,
+    /// which would nest them in a main and be refused (§15 D982's amendment). Flip,
+    /// run: dropping the `holds_main` guard offers both.
+    #[test]
+    fn several_mains_combine_and_are_not_made_a_component() {
+        let sel = [id(1), id(2)];
+        let kinds = [Kind::Frame, Kind::Frame];
+        let target = Target::Layer {
+            id: id(1),
+            door: Door::Canvas,
+        };
+        let mut cx = open(target, &sel, &kinds);
+        let plain = flat(&build(&cx));
+        assert!(plain.contains(&Item::CreateComponent), "two plain frames");
+        cx.combinable = true;
+        cx.holds_main = true;
+        let mains = flat(&build(&cx));
+        assert!(mains.contains(&Item::CombineAsVariants));
+        assert!(!mains.contains(&Item::CreateComponent));
     }
 
     /// **A row whose only purpose is to undo a non-default state is omitted when

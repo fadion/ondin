@@ -17,25 +17,34 @@ name: Release
 # Ported from Schemaic's `release.yml`, which has shipped through many releases;
 # the reasons below are its, kept because each one was paid for.
 #
-# `workflow_dispatch` runs everything *except* the publish steps, which are gated
-# on `github.ref_type == 'tag'`: a tag is the expensive way to discover a
-# packaging mistake, and a manual run builds and packs every leg with nothing at
-# stake.
+# **Two jobs, and only the second can write** (§15 D976, `[X3-L5-03]`). `build`
+# runs every third-party tool this workflow uses — the Rust toolchain and its
+# build scripts, Zig, `cargo-zigbuild`, .NET, `vpk` — under a read-only token,
+# and hands its finished files on as workflow artifacts. `publish` holds
+# `contents: write` and runs one pinned action over those files. A compromised
+# build tool can still poison what it builds; what it can no longer do is write
+# to the repository, move a tag, or edit an earlier Release's feed.
+#
+# `workflow_dispatch` runs `build` alone: `publish` and `pages` are gated on
+# `github.ref_type == 'tag'`. A tag is the expensive way to discover a packaging
+# mistake, and a manual run builds and packs every leg with nothing at stake —
+# and leaves each leg's assets on the run page, under the names they would ship
+# with.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
 
-# The workflow creates the Release and uploads to it.
+# Read-only unless a job says otherwise; `publish` is the one that does.
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  release:
-    name: Release (${{ matrix.target }})
+  build:
+    name: Build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -60,10 +69,9 @@ jobs:
             target: macos-arm64
             channel: osx-arm64
     steps:
-      # **No credentials left in `.git/config`** (§15 D974, `[X3-L5-03]`): this
-      # job's token can rewrite the update feed every installed copy applies,
-      # and a persisted one is readable by every later step — the build tools
-      # included. The two steps that need it are handed it by name.
+      # **No credentials left in `.git/config`** (§15 D974, `[X3-L5-03]`). The
+      # token is read-only here since D976, but nothing in this job needs it on
+      # disk, and a persisted one is readable by every later step.
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
@@ -147,9 +155,8 @@ jobs:
           version: 0.13.0
       - name: Install cargo-zigbuild (Linux)
         if: runner.os == 'Linux'
-        # Pinned (§15 D974): a new crates.io release would otherwise run in a
-        # job holding a write token at the next tag. The version the v0.4.0
-        # release built with.
+        # Pinned (§15 D974): a new crates.io release would otherwise run
+        # unreviewed at the next tag. The version the v0.4.0 release built with.
         run: cargo install --locked cargo-zigbuild --version 0.23.4
       - name: Build release binary (Linux, glibc 2.31)
         if: runner.os == 'Linux'
@@ -258,7 +265,7 @@ jobs:
           dotnet-version: "8.0.x"
       # **Pinned to the `velopack` crate's own version** (§15 D974): Velopack
       # asks for the CLI and the client library to match, and an unpinned
-      # NuGet release would run here holding the token `--token` hands it.
+      # NuGet release would run here unreviewed.
       # `update::tests` reads this line against `Cargo.lock`, so a client bump
       # without this one fails a test rather than a release.
       - name: Install the Velopack CLI
@@ -269,7 +276,9 @@ jobs:
       # `--timeout` is in **minutes** and defaults to 30, which with
       # `continue-on-error` would sit half an hour on an unreachable feed. Skipped
       # without a tag, where the workspace version would be refused as "equal or
-      # greater" than the channel's latest.
+      # greater" than the channel's latest. The token is this job's read-only
+      # one (§15 D976): the repository is public, and it is passed only for the
+      # authenticated rate limit, which a shared runner address can exhaust.
       - name: Fetch the previous release for the feed's history
         if: github.ref_type == 'tag'
         continue-on-error: true
@@ -337,9 +346,8 @@ jobs:
             --bundleId io.github.fadion.Ondin \
             --channel ${{ matrix.channel }} \
             --delta None
-          # Named, not globbed, in the publish step, which tolerates unmatched
-          # files — so a name vpk changes would drop silently. This is where it
-          # shows.
+          # The staging step below names each file and fails on a missing one;
+          # this listing is what to read when it does.
           ls -l Releases
 
       # A .dmg — the app beside a link to /Applications — is what a Mac user
@@ -357,50 +365,85 @@ jobs:
             "Releases/Ondin-${{ matrix.channel }}.dmg"
           ls -l Releases
 
-      # Strict, so a missing Linux or Windows archive fails the release. macOS
-      # builds no archive.
+      # ── Hand the leg's assets to `publish` ──────────────────────────────
+      # Every file this leg ships, each by its exact name, and **strict**: `cp`
+      # fails the leg on a missing one, and `publish` runs only once all three
+      # legs have succeeded, so a Release carries every platform's assets or
+      # none of them (§15 D976). Until then each leg published its own, and its
+      # Velopack files with `fail_on_unmatched_files: false` — each leg named
+      # all three platforms' files and produced one — so a name `vpk` changed
+      # would have dropped silently, and a failed macOS leg left Windows and
+      # Linux published beside a hole.
       #
-      # ⚠️ **Strict by saying so** (§15 D974, `[X3-L3-01]`): this comment read
-      # *"no `fail_on_unmatched_files: false`"*, as if strictness were the
-      # default — and the action's default is `false`, so a missing archive
-      # shipped green. All three publish steps pin the action by commit: it is
-      # the one piece of third-party code here that writes, and a tag can be
-      # moved (`v2` → `v2.6.2`, resolved 2026-10-04).
-      - name: Publish the portable archive
-        if: github.ref_type == 'tag' && runner.os != 'macOS'
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
-        with:
-          files: ondin-${{ github.ref_name }}-${{ matrix.target }}.*
-          fail_on_unmatched_files: true
+      # Scoped to this version: the fetch above leaves the previous release's
+      # .nupkg in `Releases/`, and a glob would re-attach it. No delta — see
+      # `--delta None`. `releases.<channel>.json` is the feed installed copies
+      # poll, the .deb and .rpm names each format's own version convention.
+      - name: Stage the release assets
+        shell: bash
+        env:
+          CHANNEL: ${{ matrix.channel }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          mkdir assets
+          cp "Releases/Ondin-$VPK_VERSION-$CHANNEL-full.nupkg" "Releases/releases.$CHANNEL.json" assets/
+          case "$RUNNER_OS" in
+            Windows)
+              cp "ondin-$GITHUB_REF_NAME-$TARGET.zip" "Releases/Ondin-$CHANNEL-Setup.exe" assets/
+              ;;
+            Linux)
+              cp "ondin-$GITHUB_REF_NAME-$TARGET.tar.gz" "Releases/Ondin-$CHANNEL.AppImage" assets/
+              cp "dist-packages/ondin_${VPK_VERSION}_amd64.deb" "dist-packages/ondin-$VPK_VERSION-1.x86_64.rpm" assets/
+              ;;
+            macOS)
+              # No archive: the .dmg is the macOS deliverable.
+              cp "Releases/Ondin-$CHANNEL-Setup.pkg" "Releases/Ondin-$CHANNEL.dmg" assets/
+              ;;
+            *)
+              echo "::error::No asset list for runner OS '$RUNNER_OS'."
+              exit 1
+              ;;
+          esac
+          ls -l assets
 
-      # Scoped to this version and channel: the fetch above leaves the previous
-      # release's .nupkg in `Releases/`, and a bare glob would re-attach it.
-      # `releases.<channel>.json` is the feed installed copies poll. No delta is
-      # listed — see `--delta None`. Each job names every platform's files and
-      # produces only its own, hence the tolerance.
-      - name: Publish the Velopack artifacts
-        if: github.ref_type == 'tag'
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+      # Uncompressed: every asset is an archive or an installer already.
+      - uses: actions/upload-artifact@v4
         with:
-          files: |
-            Releases/Ondin-${{ matrix.channel }}-Setup.exe
-            Releases/Ondin-${{ matrix.channel }}.AppImage
-            Releases/Ondin-${{ matrix.channel }}-Setup.pkg
-            Releases/Ondin-${{ matrix.channel }}.dmg
-            Releases/Ondin-${{ env.VPK_VERSION }}-${{ matrix.channel }}-full.nupkg
-            Releases/releases.${{ matrix.channel }}.json
-          fail_on_unmatched_files: false
+          name: release-${{ matrix.channel }}
+          path: assets/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
 
-      # Their names carry each format's own version convention
-      # (`ondin_0.4.0_amd64.deb`, `ondin-0.4.0-1.x86_64.rpm`).
-      - name: Publish the distribution packages
-        if: github.ref_type == 'tag' && runner.os == 'Linux'
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+  # ── The one job that writes ─────────────────────────────────────────────
+  # Downloads what the three legs staged and attaches it to the tag's Release,
+  # creating the Release if it does not exist yet. Nothing here builds, and the
+  # action is the only third-party code in the job — pinned by commit, because
+  # a tag can be moved (`v2` → `v2.6.2`, resolved 2026-10-04, §15 D974).
+  #
+  # ⚠️ **Strict by saying so** (§15 D974, `[X3-L3-01]`): the action's default
+  # for `fail_on_unmatched_files` is `false`, which once let a missing archive
+  # ship green. With one job holding every file, there is no longer a step that
+  # has to tolerate a platform's absence.
+  publish:
+    name: Publish the Release
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
         with:
-          files: |
-            dist-packages/*.deb
-            dist-packages/*.rpm
-          # Both are built on this leg, so either missing is a broken build.
+          pattern: release-*
+          path: assets
+          merge-multiple: true
+      - name: List the assets
+        run: ls -l assets
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          files: assets/*
           fail_on_unmatched_files: true
 
   # ── The Linux package repositories ──────────────────────────────────────
@@ -409,12 +452,12 @@ jobs:
   #
   # **Called, not triggered.** A release created with `GITHUB_TOKEN` fires no
   # `release` event, and a workflow listening for the tag would start beside
-  # this one, before any asset existed. `needs: release` is the only ordering
+  # this one, before any asset existed. `needs: publish` is the only ordering
   # that is true. A failure here retracts nothing — the Release is complete —
   # and is repaired by running the Pages workflow again from the Actions tab.
   pages:
     name: Publish the Linux package repositories
-    needs: release
+    needs: publish
     if: github.ref_type == 'tag'
     permissions:
       contents: read

@@ -10,8 +10,8 @@ name: Pages
 # already exists. An Actions deployment has no git history at all, so the
 # published size is the only size.
 #
-# It is *called* by release.yml after every leg of a tagged build has finished
-# — not triggered by the release event, which would never fire: a release
+# It is *called* by release.yml once its `publish` job has attached every leg's
+# assets to the tag's Release — not triggered by the release event, which would never fire: a release
 # created with GITHUB_TOKEN does not start another workflow. `workflow_dispatch`
 # is the repair path, and it is a real one: because the build is a rebuild, a
 # repository that has gone wrong is fixed by running this again.

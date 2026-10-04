@@ -4,6 +4,11 @@ edition.workspace = true
 version.workspace = true
 license.workspace = true
 repository.workspace = true
+# **`cargo run -p ondin-app` means the app** (`[R2-L8-01]`): `src/bin/ondin-cli.rs`
+# made this crate two binaries, and cargo refuses to pick between two without
+# this — which broke the README's build command and every headless `export`
+# recipe in CLAUDE.md with "could not determine which binary to run".
+default-run = "ondin"
 
 # The `ondin` binary: GUI shell + `serve`/`export` subcommands. Only this crate
 # may depend on egui/winit (§3). Ties the whole graph together.
@@ -50,9 +55,12 @@ woff2.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
-# The desktop cursor position a Windows file drag never sends (§15 D241). One
-# function, `GetCursorPos`, behind `canvas::os_cursor_desktop_px`; the crate and
-# both its features are already compiled here by `winit`.
+# Three uses, the workspace root's comment naming each feature and whose it is:
+# the desktop cursor position a Windows file drag never sends (`GetCursorPos`,
+# `canvas::os_cursor_desktop_px`, §15 D241); the library's local dates
+# (`library::clock::local_offset`, §15 D384); and `ondin.com`'s job object, which
+# ends the `ondin.exe` it started when it ends itself (`src/bin/ondin-cli.rs`,
+# §15 D971). The crate is compiled here by `winit` regardless.
 [target.'cfg(windows)'.dependencies]
 windows-sys.workspace = true
 

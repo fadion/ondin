@@ -169,8 +169,18 @@ libc = "0.2"
 # instant being shown rather than for today (`library::clock::local_offset`).
 # Windows keeps the zone's *history* and this is the API that asks it; the
 # alternative was a date-library dependency with its own copy of the tz database.
+#
+# **`Win32_Security`, `Win32_System_JobObjects` and `Win32_System_Threading` are
+# `ondin.com`'s** (`src/bin/ondin-cli.rs`, §15 D971): a job object that ends the
+# `ondin.exe` it started when the console twin itself ends, so Ctrl+C at the
+# prompt stops an export rather than leaving it writing. Three modules of
+# `extern` declarations — `CreateJobObjectW`'s signature names a `Security`
+# type and the extended limit struct a `Threading` one — and no code.
 windows-sys = { version = "0.52.0", features = [
   "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_JobObjects",
+  "Win32_System_Threading",
   "Win32_System_Time",
   "Win32_UI_WindowsAndMessaging",
 ] }

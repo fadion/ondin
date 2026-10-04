@@ -158,6 +158,26 @@ fn hook_runs(args: &[String]) -> bool {
     }
 }
 
+/// The command line as strings, or the refusal for one that is not Unicode.
+///
+/// ⚠️ **Not `std::env::args`, which panics** on such an argument
+/// (`[X1-L1-04]`): an `ondin export` of a Latin-1-named file on Linux — legal
+/// there, and first shipped there by §15 D956 — crashed with exit 101 and a
+/// panic message. It is refused with `parse`'s exit 2 and a sentence instead.
+/// Taking such a path *through* would mean `OsString` all the way down the
+/// export path; nothing has asked for it yet.
+fn unicode_args(args: impl Iterator<Item = std::ffi::OsString>) -> Result<Vec<String>, String> {
+    args.map(|a| {
+        a.into_string().map_err(|bad| {
+            format!(
+                "ondin: an argument is not valid Unicode: {}",
+                bad.to_string_lossy()
+            )
+        })
+    })
+    .collect()
+}
+
 fn parse(args: &[String]) -> Result<Command, String> {
     match args.first().map(String::as_str) {
         None | Some("gui") => Ok(Command::Gui),
@@ -331,7 +351,13 @@ fn parse_export(args: &[String]) -> Result<Command, String> {
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let args = match unicode_args(std::env::args_os().skip(1)) {
+        Ok(args) => args,
+        Err(msg) => {
+            eprintln!("{msg}");
+            std::process::exit(2);
+        }
+    };
     // **Velopack's hook, before anything else in a GUI launch** (§15 D954). The
     // installer and the updater re-run this binary with `--veloapp-install`,
     // `--veloapp-updated`, `--veloapp-uninstall` and the like; `run` services
@@ -739,6 +765,32 @@ mod tests {
         ] {
             assert!(hook_runs(&args(hook)), "{hook:?}");
         }
+    }
+
+    /// An argument that is not Unicode is refused, not panicked on
+    /// (`[X1-L1-04]`) — a lone surrogate on Windows, an invalid byte on Unix,
+    /// each the host's own way of spelling one.
+    #[test]
+    fn an_argument_that_is_not_unicode_is_refused() {
+        #[cfg(windows)]
+        let bad = {
+            use std::os::windows::ffi::OsStringExt;
+            // A lone trailing surrogate — `0xDC..`, whose letter after the D
+            // keeps it out of the D-number census's sieve.
+            std::ffi::OsString::from_wide(&[0x61, 0xDC00, 0x62])
+        };
+        #[cfg(unix)]
+        let bad = {
+            use std::os::unix::ffi::OsStringExt;
+            std::ffi::OsString::from_vec(vec![b'a', 0xE9, b'.', b'o'])
+        };
+        let ok = || std::ffi::OsString::from("export");
+        assert_eq!(
+            unicode_args([ok(), "a.ondin".into()].into_iter()),
+            Ok(vec!["export".to_string(), "a.ondin".to_string()])
+        );
+        let refused = unicode_args([ok(), bad].into_iter()).unwrap_err();
+        assert!(refused.contains("not valid Unicode"), "{refused}");
     }
 
     /// `window_icon` panics on a bad PNG, and the bytes are compiled in, so the

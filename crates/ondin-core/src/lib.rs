@@ -41,6 +41,7 @@ pub mod node;
 pub mod op;
 pub mod propagate;
 pub mod query;
+pub mod reset;
 pub mod resolve;
 pub mod svg_in;
 pub mod text;

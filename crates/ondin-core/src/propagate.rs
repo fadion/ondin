@@ -99,7 +99,7 @@ fn mode(op: &Operation) -> Mode {
 /// placement, never its main's: the transform (§5.3d), its insets and item
 /// properties inside its parent, and its visibility (a main hidden on a
 /// components page must not hide every instance of it).
-fn is_placement(op: &Operation) -> bool {
+pub(crate) fn is_placement(op: &Operation) -> bool {
     matches!(
         op,
         Operation::SetTransform { .. }
@@ -553,7 +553,7 @@ pub fn propagate_structure(
 /// `template` (a captured subtree, root first) without the nodes `existed` admits
 /// and anything under them — what an edit **made**, as opposed to what it moved in.
 /// Children lists are pruned to match, so `remap_subtree` still accepts the result.
-fn only_new(
+pub(crate) fn only_new(
     template: Vec<crate::node::Node>,
     existed: impl Fn(NodeId) -> bool,
 ) -> Vec<crate::node::Node> {
@@ -587,7 +587,7 @@ fn main_of_node(doc: &Document, id: NodeId) -> Option<NodeId> {
 
 /// The node of the instance rooted at `root` that is linked to `src` — `root`
 /// itself when `src` is its source.
-fn counterpart(doc: &Document, root: NodeId, src: NodeId) -> Option<NodeId> {
+pub(crate) fn counterpart(doc: &Document, root: NodeId, src: NodeId) -> Option<NodeId> {
     if doc.get(root)?.link == Some(src) {
         return Some(root);
     }
@@ -599,7 +599,7 @@ fn counterpart(doc: &Document, root: NodeId, src: NodeId) -> Option<NodeId> {
 /// Where a node placed at `x` among `main_siblings` lands among `copy_children`:
 /// after the counterpart of its nearest preceding sibling, else before the
 /// counterpart of its nearest following one, else at the end (topmost).
-fn anchor(
+pub(crate) fn anchor(
     main_siblings: &[NodeId],
     x: NodeId,
     copy_children: &[NodeId],
@@ -674,7 +674,7 @@ fn untouched(doc: &Document, copy: NodeId, src: NodeId, moved_out: &FxHashSet<No
 /// the main's to move, so its outer instances follow it (`check`'s and
 /// `settle_links`' predicate — the first build asked `instance_root` here, and a
 /// nested instance moved inside its outer main stayed put in every outer instance).
-fn linked_to_main(doc: &Document, id: NodeId) -> bool {
+pub(crate) fn linked_to_main(doc: &Document, id: NodeId) -> bool {
     doc.get(id)
         .and_then(|n| n.link)
         .and_then(|s| doc.get(s))
@@ -883,7 +883,10 @@ fn merge_present(old: Option<&Value>, new: Option<&Value>, cur: Option<&Value>) 
 
 /// Whether two objects are different variants of one enum — different single
 /// upper-case keys, or different internal `"type"` tags.
-fn variant_changed(a: &serde_json::Map<String, Value>, b: &serde_json::Map<String, Value>) -> bool {
+pub(crate) fn variant_changed(
+    a: &serde_json::Map<String, Value>,
+    b: &serde_json::Map<String, Value>,
+) -> bool {
     let tagged = |m: &serde_json::Map<String, Value>| {
         (m.len() == 1)
             .then(|| {

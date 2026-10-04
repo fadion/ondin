@@ -1456,9 +1456,8 @@ been run by hand — the maintainer's look, not items here. The signing-key item
 
 **Nothing open as of 2026-10-04.** The two items §15 D974 left opened and closed that day: the release
 job is split so its build steps hold a read-only token and one `publish` job writes (§15 D976), and the
-single-package rpm route waives the signature check for the downloaded file alone (§15 D977). The split
-has not run; its first run is the next tag or a dispatch, which is the release skill's to watch, not an
-item.
+single-package rpm route waives the signature check for the downloaded file alone (§15 D977). Both
+shipped in **v0.4.1** the same day, the first release built through the split, green end to end.
 
 ## Next · Container layout (flexbox, grid, absolute insets)
 

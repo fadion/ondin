@@ -8,7 +8,9 @@
 //! somebody else touched on another machine appearing at the top of this one's
 //! Recent list would be a bug rather than a feature.
 //!
-//! So this lives beside the font cache under `dirs::cache_dir()/ondin`.
+//! So this lives beside the font cache in [`crate::machine_dir::root`] —
+//! `dirs::cache_dir()/ondin`, except on Windows, where that folder is the
+//! installer's and this one is `OndinData` (§15 D969).
 //!
 //! ⚠️ **It is *local*, and that is not the same as disposable** — this paragraph
 //! said it was, and [`LocalIndex::load`] used to be written on that argument.
@@ -89,10 +91,22 @@ impl LocalIndex {
         if !index_is_reachable() {
             return Self::default();
         }
-        match path() {
-            Some(p) => Self::load_from(&p),
-            None => Self::default(),
+        let Some(p) = path() else {
+            return Self::default();
+        };
+        // The folder moved off the Windows installer's root (§15 D969); an index
+        // written at the old spelling is carried across once, before the first
+        // read. One that is there and cannot be carried latches, the same as an
+        // unreadable file here would.
+        if let Some(old) = crate::machine_dir::legacy_root().map(|r| r.join(FILE_NAME))
+            && crate::machine_dir::adopt_legacy(&old, &p) == crate::machine_dir::Adopted::Blocked
+        {
+            return Self {
+                unreadable: true,
+                ..Self::default()
+            };
         }
+        Self::load_from(&p)
     }
 
     /// [`Self::load`] against an explicit path, so the failure it is built
@@ -253,9 +267,13 @@ fn index_is_reachable() -> bool {
     !cfg!(test)
 }
 
+/// The index's file name, in [`crate::machine_dir::root`] now and in its
+/// legacy root before §15 D969.
+const FILE_NAME: &str = "library.json";
+
 /// Beside the font cache, which is the closest precedent for the path.
 fn path() -> Option<PathBuf> {
-    Some(dirs::cache_dir()?.join("ondin").join("library.json"))
+    Some(crate::machine_dir::root()?.join(FILE_NAME))
 }
 
 #[cfg(test)]
@@ -295,7 +313,7 @@ mod tests {
     fn the_machines_own_index_is_unreachable_from_a_test() {
         assert!(
             !index_is_reachable(),
-            "a test may not read or write `dirs::cache_dir()/ondin/library.json`"
+            "a test may not read or write the machine's own `library.json`"
         );
         assert_eq!(
             LocalIndex::load().recent_searches,

@@ -62,6 +62,7 @@ mod input;
 // throwaway `fn`, which the plain build duly reported.
 mod library;
 mod logging;
+mod machine_dir;
 mod measure;
 mod menu;
 mod panels;

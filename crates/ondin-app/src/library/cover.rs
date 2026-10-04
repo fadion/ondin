@@ -11,7 +11,7 @@
 //! ⚠️ **Rendering a document is expensive and there can be sixty of them.** So
 //! there are two caches with different jobs and different lifetimes:
 //!
-//! - **On disk**, under `dirs::cache_dir()/ondin/covers`, keyed by document id
+//! - **On disk**, under [`crate::machine_dir::root`]`/covers`, keyed by document id
 //!   *and* modification time. This is what survives a restart, and the mtime in
 //!   the key is what makes it correct rather than merely fast: a document edited
 //!   on another machine and synced in has a new mtime, so it gets a new key and
@@ -119,7 +119,7 @@ fn covers_dir() -> Option<PathBuf> {
     if cfg!(test) {
         return None;
     }
-    Some(dirs::cache_dir()?.join("ondin").join("covers"))
+    Some(crate::machine_dir::root()?.join("covers"))
 }
 
 /// Where a cover lives on disk.

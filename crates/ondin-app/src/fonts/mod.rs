@@ -662,9 +662,7 @@ impl FontService {
     /// finally* rather than *not yet*. See [`Self::set_web_fonts`] for the other
     /// half — the switch moving inside a session.
     pub fn new(ctx: &egui::Context, web_fonts: bool) -> Self {
-        let cache_dir = dirs::cache_dir()
-            .unwrap_or_else(std::env::temp_dir)
-            .join("ondin");
+        let cache_dir = crate::machine_dir::root_or_temp();
         let fonts_dir = cache_dir.join("fonts");
         let _ = std::fs::create_dir_all(&fonts_dir);
         let catalog_path = cache_dir.join("catalog.json");
@@ -2089,7 +2087,7 @@ fn read_catalog(path: &Path) -> Option<Vec<CatalogEntry>> {
 /// only the second is dangerous.** `static_face` builds
 /// `format!("{id}-{subset}-{weight}-{style}.ttf")` and then `dir.join(&key)`, so
 /// an id of `"../../../../AppData/Roaming/…"` writes font bytes outside
-/// `cache_dir()/ondin/fonts`, and an absolute one discards the base entirely.
+/// `machine_dir::root()/fonts`, and an absolute one discards the base entirely.
 /// The bytes must pass [`is_sfnt`], so the primitive is *write a valid font file
 /// to an arbitrary path* — bounded, and not nothing. It also poisons the
 /// legitimate cache: `"../fonts/inter"` collides two families onto one file, and

@@ -111,15 +111,37 @@ impl OndinApp {
         // (`OndinApp::transform_marks`): on a pinned layer the insets are the
         // placement, and a transform or size written without them is re-pinned
         // where it lands by `keep_insets`. Counted under Position, not here.
+        //
+        // ⚠️ **Not an instance root's**: its insets are its own placement in its
+        // own parent (`propagate::is_placement`), so it keeps them — written back
+        // unchanged, which still keeps `keep_insets` off the edit. `c292b50` gave a
+        // root the main's and unpinned a pinned instance
+        // (`a_transform_reset_keeps_an_instance_roots_own_pin`, `arch-scribe`'s).
+        // And only a node whose ops **place** it: a pivot alone moves nothing.
         if let Some((_, _, ops)) = cards.iter_mut().find(|(t, ..)| *t == "Transform") {
-            let mut placed: Vec<NodeId> = ops.iter().filter_map(Operation::overwrites).collect();
+            let mut placed: Vec<NodeId> = ops
+                .iter()
+                .filter(|op| {
+                    matches!(
+                        op,
+                        Operation::SetTransform { .. } | Operation::SetGeometry { .. }
+                    )
+                })
+                .filter_map(Operation::overwrites)
+                .collect();
             placed.sort();
             placed.dedup();
             for id in placed {
-                if let Some(src) = ondin_core::reset::source_of(doc, id).and_then(|s| doc.get(s)) {
+                let own = ondin_core::reset::placement_is_own(doc, id);
+                let from = if own {
+                    Some(id)
+                } else {
+                    ondin_core::reset::source_of(doc, id)
+                };
+                if let Some(n) = from.and_then(|s| doc.get(s)) {
                     ops.push(Operation::SetInsets {
                         id,
-                        insets: *src.insets(),
+                        insets: *n.insets(),
                     });
                 }
             }
@@ -1432,6 +1454,81 @@ mod tests {
             "the insets came back"
         );
         assert_eq!(ondin_core::reset::overrides(doc, f.ir), Vec::new());
+    }
+
+    /// **An instance root's insets are its own** — where it sits in its own
+    /// parent (`propagate::is_placement`). The instance is pinned inside a frame
+    /// and resized wider than its main; *Reset transform* puts the main's size back
+    /// and must leave the instance's pin alone. Found by `arch-scribe` reading
+    /// `c292b50`: that commit gave every Transform-card reset the **main's**
+    /// insets, which for a root describe where the main sits in *its* parent — the
+    /// instance was unpinned. Failed first with the main's (unset) insets written.
+    #[test]
+    fn a_transform_reset_keeps_an_instance_roots_own_pin() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let host = f.app.session.ids.mint();
+        let root = f.app.session.doc.root();
+        let pin = ondin_core::Insets {
+            right: Some(ondin_core::LengthPct::Px(5.0)),
+            top: Some(ondin_core::LengthPct::Px(5.0)),
+            ..Default::default()
+        };
+        assert!(f.app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: host,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(500.0, 500.0),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::Reparent {
+                id: f.i,
+                new_parent: host,
+                index: 0,
+            },
+        ])));
+        assert!(f.app.session.commit(Transaction(vec![
+            Operation::SetInsets {
+                id: f.i,
+                insets: pin
+            },
+            Operation::SetTransform {
+                id: f.i,
+                transform: ondin_core::kurbo::Affine::translate((395.0, 5.0)),
+            },
+            Operation::SetGeometry {
+                id: f.i,
+                geometry: ondin_core::GeometryPatch::Size(Size::new(260.0, 100.0)),
+            },
+        ])));
+        f.app.session.selection.set_one(f.i);
+        let mut out = frame(&mut f.app, &ctx, Vec::new());
+        for _ in 0..3 {
+            out = frame(&mut f.app, &ctx, Vec::new());
+        }
+        let head = texts(&out)
+            .into_iter()
+            .find(|(t, _)| t == "TRANSFORM")
+            .map(|(_, r)| r.center())
+            .expect("the Transform header");
+        frame(&mut f.app, &ctx, vec![egui::Event::PointerMoved(head)]);
+        let out = frame(&mut f.app, &ctx, Vec::new());
+        let chip = texts(&out)
+            .into_iter()
+            .find(|(t, _)| t == "Reset transform")
+            .map(|(_, r)| r.center())
+            .expect("the size override offers the reset");
+        click_at(&mut f.app, &ctx, chip);
+        let node = f.app.session.doc.get(f.i).unwrap();
+        assert!(
+            matches!(node.kind(), NodeKind::Artboard { size } if *size == Size::new(100.0, 100.0)),
+            "the main's size is back"
+        );
+        assert_eq!(node.insets(), &pin, "and the instance's own pin stays");
     }
 
     /// **A collapsed card keeps its count and offers no chip.** A collapsed card is

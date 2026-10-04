@@ -4561,7 +4561,13 @@ impl OndinApp {
         // transaction `keep_insets` leaves the layer to it, the shape *Reset all*
         // already had. For an unpinned layer the insets are the default on both
         // sides and the op changes nothing.
-        let (mine_in, main_in) = (*copy.insets(), *src.insets());
+        // ⚠️ **An instance root keeps its own** — its insets place it in its own
+        // parent, never the main's (`propagate::is_placement`); written back
+        // unchanged they still keep `keep_insets` off a W or H reset. `c292b50`
+        // wrote the main's and unpinned it (`arch-scribe`).
+        let own_place = ondin_core::reset::placement_is_own(doc, id);
+        let mine_in = *copy.insets();
+        let main_in = if own_place { mine_in } else { *src.insets() };
         let insets = |horizontal: bool, vertical: bool| {
             let mut i = mine_in;
             if horizontal {
@@ -4616,7 +4622,7 @@ impl OndinApp {
                 )
             }
         };
-        if !ondin_core::reset::placement_is_own(doc, id) {
+        if !own_place {
             for (axis, slot) in [(4usize, &mut marks.x), (5, &mut marks.y)] {
                 if cur[axis] != theirs[axis] || pinned_differs(axis == 4) {
                     let mut c = cur;

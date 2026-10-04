@@ -217,6 +217,29 @@ impl ImageCard {
     }
 }
 
+/// One overridden field's mark (§15 D981): its tooltip, *Reset to main · 168*,
+/// and the transaction that writes the main's value back into that field alone.
+struct Mark {
+    tip: String,
+    tx: Transaction,
+}
+
+impl Mark {
+    fn field(&self) -> ui::FieldMark<'_> {
+        ui::FieldMark { tip: &self.tip }
+    }
+}
+
+/// The Transform card's marks — `OndinApp::transform_marks`.
+#[derive(Default)]
+struct TransformMarks {
+    x: Option<Mark>,
+    y: Option<Mark>,
+    r: Option<Mark>,
+    w: Option<Mark>,
+    h: Option<Mark>,
+}
+
 /// A signed integer for an adjustment field: `+12`, `-8`, `0`.
 ///
 /// **The plus is the point.** These are offsets from a neutral zero, so what a
@@ -4492,6 +4515,97 @@ impl OndinApp {
     /// desired world transform and projects it back with
     /// `build::local_for_world`, so the node lands exactly where the number says
     /// regardless of what containers it sits in.
+    /// The Transform card's override marks for `id` (§15 D981): which of X, Y,
+    /// rotation, W and H an instance's copy holds differently from its source, each
+    /// with the reset that writes that one number back and the tooltip naming what
+    /// the field will then read.
+    ///
+    /// ⚠️ **Compared on the stored local values, never on the fields' readings.**
+    /// The card shows *world* numbers, and a copy sits wherever its instance does,
+    /// so its X differs from its main's X with nothing overridden at all. The local
+    /// translation is what an override changes; the tooltip then re-projects the
+    /// source's value through the copy's own parent so it names the number the
+    /// field will show. An instance root's placement is its own (`reset::
+    /// placement_is_own`), so it gets no X, Y or rotation mark.
+    fn transform_marks(&self, id: NodeId, world: [f64; 6], box_min: Point) -> TransformMarks {
+        let doc = &self.session.doc;
+        let (Some(copy), Some(src)) = (
+            doc.get(id),
+            ondin_core::reset::source_of(doc, id).and_then(|s| doc.get(s)),
+        ) else {
+            return TransformMarks::default();
+        };
+        let num = |v: f64| {
+            let s = format!("{v:.2}");
+            s.trim_end_matches('0').trim_end_matches('.').to_string()
+        };
+        let mut marks = TransformMarks::default();
+        let cur = copy.transform().as_coeffs();
+        let theirs = src.transform().as_coeffs();
+        let parent = Affine::new(world) * copy.transform().inverse();
+        let set = |c: [f64; 6]| {
+            Transaction(vec![Operation::SetTransform {
+                id,
+                transform: Affine::new(c),
+            }])
+        };
+        if !ondin_core::reset::placement_is_own(doc, id) {
+            for (axis, slot) in [(4usize, &mut marks.x), (5, &mut marks.y)] {
+                if cur[axis] != theirs[axis] {
+                    let mut c = cur;
+                    c[axis] = theirs[axis];
+                    let shown = parent * Affine::new(c) * box_min;
+                    let v = if axis == 4 { shown.x } else { shown.y };
+                    *slot = Some(Mark {
+                        tip: format!("Reset to main · {}", num(v)),
+                        tx: set(c),
+                    });
+                }
+            }
+            if cur[..4] != theirs[..4] {
+                let c = [theirs[0], theirs[1], theirs[2], theirs[3], cur[4], cur[5]];
+                let basis = parent * Affine::new(c);
+                let [a, b, cc, d, ..] = basis.as_coeffs();
+                let angle = build::Basis::of(Affine::new([a, b, cc, d, 0.0, 0.0]))
+                    .orientation
+                    .angle;
+                marks.r = Some(Mark {
+                    tip: format!("Reset to main · {}°", num(shown_degrees(angle))),
+                    tx: set(c),
+                });
+            }
+        }
+        let size_of = |k: &NodeKind| match k {
+            NodeKind::Rect { size, .. }
+            | NodeKind::Ellipse { size }
+            | NodeKind::Polygon { size, .. }
+            | NodeKind::Star { size, .. }
+            | NodeKind::Artboard { size } => Some(*size),
+            _ => None,
+        };
+        if let (Some(mine), Some(main)) = (size_of(copy.kind()), size_of(src.kind())) {
+            let resize = |s: Size| {
+                Transaction(vec![Operation::SetGeometry {
+                    id,
+                    geometry: GeometryPatch::Size(s),
+                }])
+            };
+            if mine.width != main.width {
+                marks.w = Some(Mark {
+                    tip: format!("Reset to main · {}", num(main.width)),
+                    tx: resize(Size::new(main.width, mine.height)),
+                });
+            }
+            if mine.height != main.height {
+                marks.h = Some(Mark {
+                    tip: format!("Reset to main · {}", num(main.height)),
+                    tx: resize(Size::new(mine.width, main.height)),
+                });
+            }
+        }
+        marks
+    }
+
     pub(super) fn inspector_transform(
         &mut self,
         ui: &mut egui::Ui,
@@ -4576,6 +4690,12 @@ impl OndinApp {
                 }
             })
         });
+        let box_min = self
+            .session
+            .preview_local_box(id)
+            .map(|b| Point::new(b.x0, b.y0))
+            .unwrap_or(Point::ZERO);
+        let marks = self.transform_marks(id, world, box_min);
         let toggled = self.panel(ui, "Transform", Some(action), |app, ui| {
             let fw = (ui.available_width() - ui::CARD_COL_GAP) / 2.0;
             // The basis — rotation, skew, flip, and whatever scale the ancestor chain has
@@ -4598,14 +4718,19 @@ impl OndinApp {
             // widget inside one reports no hover).
             let xy = ui::disable_unless(ui, !laid_out, |ui| ui.horizontal(|ui| {
                 let mut x = shown.x;
-                let rx = value_field(
+                let (rx, reset_x) = ui::value_field_marked(
                     ui,
                     row,
                     Prefix::Text("X"),
+                    marks.x.as_ref().map(Mark::field),
                     &mut x,
                     Scrub::whole(0.5),
                     |d| d.custom_formatter(ui::number(2)),
                 );
+                // An instance's overridden X, put back (§15 D981).
+                if let (true, Some(m)) = (reset_x, &marks.x) {
+                    app.commit_edit(m.tx.clone());
+                }
                 // **A world-space nudge, rather than a rebuilt transform.** The old form
                 // composed the typed number with the stripped basis, which only lands the
                 // *origin* on it; moving by the difference puts the reported point on the
@@ -4622,14 +4747,18 @@ impl OndinApp {
                     app.reveal_selection();
                 }
                 let mut y = shown.y;
-                let ry = value_field(
+                let (ry, reset_y) = ui::value_field_marked(
                     ui,
                     row,
                     Prefix::Text("Y"),
+                    marks.y.as_ref().map(Mark::field),
                     &mut y,
                     Scrub::whole(0.5),
                     |d| d.custom_formatter(ui::number(2)),
                 );
+                if let (true, Some(m)) = (reset_y, &marks.y) {
+                    app.commit_edit(m.tx.clone());
+                }
                 let ty = app.place_at(
                     id,
                     Affine::translate(Vec2::new(0.0, y - shown.y)) * Affine::new(world),
@@ -4800,14 +4929,19 @@ impl OndinApp {
                                 (e.resp, e.typed.is_some())
                             }
                             _ => {
-                                let r = value_field(
+                                let mark = if horizontal { &marks.w } else { &marks.h };
+                                let (r, reset) = ui::value_field_marked(
                                     ui,
                                     slot,
                                     Prefix::Text(letter),
+                                    mark.as_ref().map(Mark::field),
                                     &mut v,
                                     Scrub::whole(0.5).range(1.0..=f64::MAX),
                                     |d| d.custom_formatter(ui::number(2)),
                                 );
+                                if let (true, Some(m)) = (reset, mark) {
+                                    app.commit_edit(m.tx.clone());
+                                }
                                 // `size_field`'s latch (§15 D885): whether a number
                                 // moved at any point of this edit, held to its
                                 // committing frame.
@@ -5026,15 +5160,24 @@ impl OndinApp {
                 let scrub_id = egui::Id::new(("rotation-scrub", id));
                 let latch: Option<AngleScrub> = ui.data(|d| d.get_temp(scrub_id));
                 let mut angle_deg = latch.map_or(at_rest, |l| l.shown);
-                let ra = value_field(
+                let (ra, reset_r) = ui::value_field_marked(
                     ui,
                     row,
                     Prefix::Icon(icon::ARROW_CLOCKWISE),
+                    marks.r.as_ref().map(Mark::field),
                     &mut angle_deg,
                     Scrub::whole(0.5),
                     |d| d.suffix("°").custom_formatter(ui::number(2)),
-                )
-                .on_hover_text("Rotate about the transform origin");
+                );
+                // The mark's own tip names the main's angle instead; two tooltips
+                // over one field would stack.
+                let ra = match marks.r {
+                    None => ra.on_hover_text("Rotate about the transform origin"),
+                    Some(_) => ra,
+                };
+                if let (true, Some(m)) = (reset_r, &marks.r) {
+                    app.commit_edit(m.tx.clone());
+                }
                 // **The delta, not the value — measured from the gesture's own
                 // reference and *composed* onto the matrix rather than written into a
                 // rebuilt basis.** Three things, and the bug needed all three: a

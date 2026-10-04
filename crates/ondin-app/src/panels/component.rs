@@ -904,6 +904,83 @@ mod tests {
         );
     }
 
+    /// Every text the frame painted with its fallback colour — what a galley
+    /// painted in one colour carries.
+    fn inks(out: &egui::FullOutput) -> Vec<(String, egui::Rect, egui::Color32)> {
+        fn walk(shape: &egui::Shape, out: &mut Vec<(String, egui::Rect, egui::Color32)>) {
+            match shape {
+                egui::Shape::Text(t) => out.push((
+                    t.galley.text().to_string(),
+                    t.visual_bounding_rect(),
+                    t.fallback_color,
+                )),
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+                _ => {}
+            }
+        }
+        let mut v = Vec::new();
+        for s in &out.shapes {
+            walk(&s.shape, &mut v);
+        }
+        v
+    }
+
+    /// **A field's mark** (§15 D981, 4A–4B). The instance's rect is moved along
+    /// x only: its X label is painted bright, its Y dim — compared on the stored
+    /// local translation, since the card's numbers are world ones and the copy sits
+    /// elsewhere than its main with nothing overridden. A click on X's label slot
+    /// writes the main's x back and leaves y alone. Flip: comparing the whole
+    /// transform rather than one coefficient in `transform_marks` fails *"Y
+    /// follows"* — Y painted bright.
+    #[test]
+    fn an_overridden_field_is_bright_and_its_label_resets_it() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let main_rect = f.app.session.doc.get(f.m).unwrap().children()[0];
+        let moved = ondin_core::kurbo::Affine::translate((7.0, 0.0));
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![Operation::SetTransform {
+                    id: f.ir,
+                    transform: moved,
+                }]))
+        );
+        f.app.session.selection.set_one(f.ir);
+        let mut out = frame(&mut f.app, &ctx, Vec::new());
+        for _ in 0..3 {
+            out = frame(&mut f.app, &ctx, Vec::new());
+        }
+        let painted = inks(&out);
+        let ink_of = |s: &str| {
+            painted
+                .iter()
+                .find(|(t, ..)| t == s)
+                .map(|(_, r, c)| (*r, *c))
+                .unwrap_or_else(|| panic!("no {s} in {painted:?}"))
+        };
+        let (x_at, x_ink) = ink_of("X");
+        let (_, y_ink) = ink_of("Y");
+        assert_eq!(x_ink, theme::text::STRONG, "X is overridden");
+        assert_eq!(y_ink, theme::text::FAINT, "Y follows");
+        let at = x_at.center();
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(&mut f.app, &ctx, vec![egui::Event::PointerMoved(at)]);
+        frame(&mut f.app, &ctx, vec![press(true)]);
+        frame(&mut f.app, &ctx, vec![press(false)]);
+        let doc = &f.app.session.doc;
+        assert_eq!(
+            doc.get(f.ir).unwrap().transform(),
+            doc.get(main_rect).unwrap().transform(),
+            "the main's x is back"
+        );
+    }
+
     /// **A card header counts its overrides and resets them** (§15 D981, 4E). The
     /// instance's rect has its opacity overridden: the Appearance header shows `1`
     /// at rest; with the pointer on the header the count becomes *Reset

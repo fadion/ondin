@@ -2034,7 +2034,7 @@ pub fn value_field_unit<N: egui::emath::Numeric>(
     build: impl FnOnce(egui::DragValue<'_>) -> egui::DragValue<'_>,
 ) -> (egui::Response, Option<egui::Response>) {
     let mut v = value.to_f64();
-    let out = value_field_f64(ui, size, prefix, suffix, None, &mut v, scrub, build);
+    let out = value_field_f64(ui, size, prefix, suffix, None, None, &mut v, scrub, build);
     // Written back only on a real change, so a field whose type cannot hold its own
     // displayed value exactly — an `f32` opacity — is not rewritten every frame with
     // the round trip's error.
@@ -2120,7 +2120,48 @@ pub fn value_field_metered(
     scrub: Scrub,
     build: impl FnOnce(egui::DragValue<'_>) -> egui::DragValue<'_>,
 ) -> egui::Response {
-    value_field_f64(ui, size, prefix, None, Some(signed), value, scrub, build).0
+    value_field_f64(
+        ui,
+        size,
+        prefix,
+        None,
+        Some(signed),
+        None,
+        value,
+        scrub,
+        build,
+    )
+    .0
+}
+
+/// An overridden field's mark (§15 D981): the field's label at full brightness
+/// with a 4-pt dot beside it, and — with the pointer on the field — the label's
+/// slot turned into ↺, whose click is the field's reset. `tip` is the hover text
+/// naming the main's value, *Reset to main · 168*.
+#[derive(Clone, Copy)]
+pub struct FieldMark<'a> {
+    pub tip: &'a str,
+}
+
+/// [`value_field`] with an override mark, or without one when `mark` is `None`.
+/// The second return value is whether the ↺ was clicked.
+///
+/// **The ↺ is the prefix strip's own press**, which until now only scrubbed: a
+/// click with no drag on the label slot, while the field is marked, is the reset.
+/// So nothing new is laid out and nothing moves — the mockup's *"swaps the mark
+/// for ↺ in the same box"*.
+pub fn value_field_marked(
+    ui: &mut egui::Ui,
+    size: egui::Vec2,
+    prefix: Prefix,
+    mark: Option<FieldMark<'_>>,
+    value: &mut f64,
+    scrub: Scrub,
+    build: impl FnOnce(egui::DragValue<'_>) -> egui::DragValue<'_>,
+) -> (egui::Response, bool) {
+    let (resp, _, reset) =
+        value_field_f64_marked(ui, size, prefix, None, None, mark, value, scrub, build);
+    (resp, reset)
 }
 
 /// Height of a [`badge_field`] — the size badge's own pill height, because it takes
@@ -2356,10 +2397,31 @@ fn value_field_f64(
     prefix: Prefix,
     suffix: Option<Suffix<'_>>,
     meter: Option<f32>,
+    mark: Option<FieldMark<'_>>,
     value: &mut f64,
     scrub: Scrub,
     build: impl FnOnce(egui::DragValue<'_>) -> egui::DragValue<'_>,
 ) -> (egui::Response, Option<egui::Response>) {
+    let (resp, unit, _) =
+        value_field_f64_marked(ui, size, prefix, suffix, meter, mark, value, scrub, build);
+    (resp, unit)
+}
+
+/// [`value_field_f64`], also answering whether a marked field's ↺ was clicked
+/// ([`FieldMark`]).
+#[allow(clippy::too_many_arguments)]
+fn value_field_f64_marked(
+    ui: &mut egui::Ui,
+    size: egui::Vec2,
+    prefix: Prefix,
+    suffix: Option<Suffix<'_>>,
+    meter: Option<f32>,
+    mark: Option<FieldMark<'_>>,
+    value: &mut f64,
+    scrub: Scrub,
+    build: impl FnOnce(egui::DragValue<'_>) -> egui::DragValue<'_>,
+) -> (egui::Response, Option<egui::Response>, bool) {
+    let mut reset = false;
     let scope = ui.scope(|ui| {
         field_row(ui, size, |ui| {
             // Reserved here and filled at the bottom of this closure: this is the
@@ -2587,6 +2649,17 @@ fn value_field_f64(
                 // The same cursor the number shows, so the strip advertises what it
                 // does instead of looking like a label that happens to be draggable.
                 .on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+            // A marked field's label slot is its reset (`FieldMark`): a press that
+            // never became a drag. A scrub that starts there is still a scrub.
+            let lead_resp = match mark {
+                Some(m) => {
+                    if lead_resp.clicked() {
+                        reset = true;
+                    }
+                    lead_resp.on_hover_text(m.tip)
+                }
+                None => lead_resp,
+            };
             let mut nudged = false;
             if lead_resp.dragged() {
                 // The pointer's own delta at the field's own speed, which is what
@@ -2679,7 +2752,28 @@ fn value_field_f64(
             // Back into the strip reserved above. After the value, so a focused
             // field's selection block cannot land on top of the label.
             let at = egui::pos2(strip.left(), resp.rect.center().y - lead.size().y / 2.0);
-            ui.painter().galley(at, lead, theme::text::FAINT);
+            match mark {
+                None => {
+                    ui.painter().galley(at, lead, theme::text::FAINT);
+                }
+                // **Overridden** (§15 D981): the label at full brightness and the
+                // dot at its top right — and, with the pointer anywhere on the
+                // field, ↺ in the label's place, the same box, so nothing moves.
+                Some(_) if ui.rect_contains_pointer(strip.union(resp.rect)) => {
+                    ui.painter().text(
+                        strip.left_center() + egui::vec2(lead.size().x / 2.0, 0.0),
+                        egui::Align2::CENTER_CENTER,
+                        icon::ARROW_COUNTER_CLOCKWISE,
+                        theme::icon_font(12.0),
+                        theme::text::STRONG,
+                    );
+                }
+                Some(_) => {
+                    let w = lead.size().x;
+                    ui.painter().galley(at, lead, theme::text::STRONG);
+                    override_dot(ui.painter(), at + egui::vec2(w + 1.5, 3.0));
+                }
+            }
 
             let mut unit = None;
             if let Some((s, galley)) = trail {
@@ -2782,7 +2876,8 @@ fn value_field_f64(
             egui::StrokeKind::Inside,
         );
     }
-    scope.inner
+    let (resp, unit) = scope.inner;
+    (resp, unit, reset)
 }
 
 /// The right edge of the content box a field's row is laying out into.

@@ -719,7 +719,17 @@ install_rpm_direct() {
     warn "The .rpm on the Releases page is not GPG-signed; the install below waives the signature check."
     info "Installing (this needs root)"
     if has dnf; then
-        run_privileged dnf install -y --nogpgcheck "$tmp"
+        # **The waiver covers this file and nothing else** (§15 D977,
+        # `[X3-L5-04]`). `--nogpgcheck` waived the check for the whole
+        # transaction, so a dependency pulled from any repository the machine
+        # trusts installed unverified too. `localpkg_gpgcheck` governs only the
+        # files named on the command line, and the repositories keep their own
+        # `gpgcheck`. Measured in containers on dnf 4.22 (Fedora 40) and dnf5
+        # 5.2 and 5.4 (Fedora 42, 44): an unsigned dependency from a
+        # `gpgcheck=1` repository installs under `--nogpgcheck` and is refused
+        # under this. Both default the option off, but it is set rather than
+        # left out: a machine whose policy turns it on would refuse this file.
+        run_privileged dnf install -y --setopt=localpkg_gpgcheck=0 "$tmp"
     elif has zypper; then
         run_privileged zypper --non-interactive install --allow-unsigned-rpm "$tmp"
     else

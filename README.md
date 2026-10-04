@@ -136,11 +136,14 @@ fingerprint before you accept:
 | --- | --- | --- |
 | `Ondin-linux-x64.AppImage` | `chmod +x` and run | Yes |
 | `ondin_X.Y.Z_amd64.deb` | `sudo apt-get install ./ondin_*.deb` | No |
-| `ondin-X.Y.Z-1.x86_64.rpm` | `sudo dnf install --nogpgcheck ./ondin-*.rpm` | No |
+| `ondin-X.Y.Z-1.x86_64.rpm` | `sudo dnf install ./ondin-*.rpm` | No |
 | `ondin-vX.Y.Z-linux-x86_64.tar.gz` | Extract anywhere | No |
 
 The `.deb` and `.rpm` on the Releases page are unsigned; the repository copies
-are signed.
+are signed. dnf does not check a local file's signature unless the machine is
+set to (`localpkg_gpgcheck`); if yours is, add
+`--setopt=localpkg_gpgcheck=0`. Not `--nogpgcheck`, which also installs the
+dependencies dnf fetches without checking theirs.
 
 ## Command line
 

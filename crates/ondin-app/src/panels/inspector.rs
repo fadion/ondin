@@ -8113,8 +8113,9 @@ impl OndinApp {
     ) -> GridRowOut {
         let mut out = GridRowOut::default();
         // **The first subject in document order, and the panel is only drawn where
-        // they agree** — so the anchor's list *is* every subject's list, and the
-        // colour slot naming it names the same grid on all of them. `PaintSlot`
+        // they agree** — so the anchor's list *is* every subject's list in value
+        // (each keeps its own item ids, §15 D980), and the colour slot naming it
+        // names the same grid on all of them. `PaintSlot`
         // needs one node and the Effects panel resolves it the same way; the
         // premise is the load-bearing part, and it is the one the mixed message
         // above exists to keep true.
@@ -11482,7 +11483,9 @@ impl OndinApp {
             //
             // ⚠️ The premise is still the load-bearing part, and it is the same one:
             // the rows are drawn only where the frames **agree**, so the anchor's
-            // list is every subject's list. A panel that drew a row over a
+            // list is every subject's list — in value; each frame keeps its own item
+            // ids (§15 D980), which is why the arm below edits row `i` of each
+            // subject's own list rather than writing the anchor's. A panel that drew a row over a
             // disagreement would silently recolour a grid nobody was looking at —
             // which is why the mixed state has a sentence and no rows.
             //

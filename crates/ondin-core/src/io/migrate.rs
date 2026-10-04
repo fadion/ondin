@@ -203,8 +203,9 @@ fn migrate_3_to_4(value: &mut Value) {
 /// so a migrated document saves to the same bytes twice (invariant 9), and unique
 /// within the list it numbers, which is the only uniqueness an item id owes. A v4
 /// file holds no instances, so there is no match across nodes for a positional id
-/// to get wrong; the ids a session mints later are never actor 0's in practice and
-/// are reserved past in any case (`reserve_existing_ids`).
+/// to get wrong; the ids a session mints later are actor 0's only improbably
+/// (`session::random_actor` is an unguarded hash), and `reserve_existing_ids`
+/// starts such a session past every item id in use, which is the actual guard.
 ///
 /// An item that somehow already carries an `id` keeps it, and a list that is not
 /// an array, or an item that is not an object, is left for the loader to refuse

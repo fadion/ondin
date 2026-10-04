@@ -1562,11 +1562,10 @@ are chrome.
    meant to share layout's derive-from-specified path (§15 D868)"*: D978 reinterprets that, and what
    components share with layout is the commit-time write-back, not `Resolved`. **The order of work:**
    1. The model: `component` flag, `link`, `SetComponent`/`SetLink`, the `apply` post-conditions, the
-      loader's checks, schema v5 — and the five lists' item ids (§15 D980): `Keyed<T>`, the real
-      `migrate_4_to_5`, `reserve_existing_ids` over item ids, and about 330 construction sites (`Fill {`
-      ~195, `Stroke {` ~96, `LayoutGrid {` ~32, `ExportSpec {` ~9 — grep counts with the tests, rough),
-      a `rust-mechanic` sweep; the five whole-list *Mixed* readings (grids, effects, exports, and
-      fills and strokes through `build::paint_shown`) compare values.
+      loader's checks. **Next.** ~~The five lists' item ids, `Keyed<T>`, schema v5 and its migration~~
+      — **built 2026-10-04** (`a83adc8`); §15 D980's amendment is the record. ⚠️ v5 is in the code
+      without the component fields: if a release goes out before they land, they owe v6
+      (`architecture.md` §5.3d).
    2. Create component, create instance, detach, and a main's deletion detaching.
    3. The propagation pass for **fields** — the compare rule, list items by id, nested chains, user
       operations winning — with a property-based test of its spec: after a main edit, each

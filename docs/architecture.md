@@ -279,9 +279,10 @@ permission.
    the *caller* (via `IdSource`) and carried **inside** operations — `apply` never allocates ids.
    Deleting a node never invalidates other ids; undo of a delete restores the identical ids. This
    makes op replay deterministic, which is the property future multiplayer needs (§12).
-   ⚠️ **Components' list-item ids will be minted the same way and repeat by design** (designed, not
-   built — §5.3d, §15 D980): unique within one list, copied verbatim into an instance so a copy's fill
-   matches its source's, and written by the v4 → v5 migration rather than by a session.
+   ⚠️ **List-item ids are minted the same way and repeat by design** (built 2026-10-04 — §5.3d, §15
+   D980): `IdSource::mint_item`, unique within one list, copied verbatim when a node is duplicated so a
+   copy's fill matches its source's, and for every pre-v5 item written by the v4 → v5 migration rather
+   than by a session.
 4. **Document = truth; everything else derived.** `Document` is pure and serializable. `Resolved`
    (world transforms, bounds, R-tree, text layouts) and renderer scenes are derived artifacts —
    never serialized, always reconstructible. No render representation ever feeds back into the model.
@@ -451,8 +452,10 @@ permission.
    the document becomes real because the rule is about the document rather than about one operation —
    and it is **after the loop** rather than inside it because a transaction is allowed to pass
    *through* a state with an orphan in it: frame-then-guides ends perfectly valid, and a per-op check
-   would refuse it (§5.5, §5.7). ⚠️ **Components will end "the only one"** (designed, not built —
-   §5.3d): links between nodes are checked by the same kind of post-condition.
+   would refuse it (§5.5, §5.7). ⚠️ **"The only one" is no longer true since 2026-10-04**: an item id
+   repeated within one of a node's five item lists is refused the same way, after the last op, over the
+   nodes the transaction dirtied (`OpError::DuplicateItemId`, §5.3d, §15 D980) — and the component
+   model, not built, adds its links' checks to the same place.
 9. **Serialization is versioned and deterministic.** Every saved document carries `schema_version`;
    the loader migrates any older version to current. Saving the same document twice produces
    identical bytes (nodes serialized in sorted-id order, stable field order) — the property the golden
@@ -1596,10 +1599,11 @@ first was, it saved only the track list.
 `track_lines` merges an edge with the last one only, the spans being laid in order — it searched every
 edge, quadratic in the track count.
 
-### 5.3d Components and overrides (designed 2026-10-04, not built; §15 D978–D981)
+### 5.3d Components and overrides (designed 2026-10-04; item ids built, the rest not; §15 D978–D981)
 
-> **Design ahead of code, all of it** — decided with the maintainer on 2026-10-04 (session 47), and
-> no line of `crates/` implements any of it. It sits beside §5.3c because what it changes is the node
+> **Design ahead of code, nearly all of it** — decided with the maintainer on 2026-10-04 (session 47),
+> and nothing of it is built **but the list items' ids** (§15 D980, `a83adc8`, the same day), whose
+> paragraphs below say so. It sits beside §5.3c because what it changes is the node
 > model. Every other passage of this document still describes `HEAD`; where one states a rule this
 > design will change, it carries a forward pointer here — §4's invariants 4 and 8, §5.11's bump rule
 > and §12's fourth property. **When a step below lands, this section is rewritten in the present
@@ -1698,28 +1702,54 @@ Three rules the session adds to it:
   operations or their inverses.
 
 **List items carry ids, and are matched by them** (§15 D980 — per item the maintainer's ruling, the
-shape and the migration the session's). Five lists get ids: `Paint::fills`, `Paint::strokes`,
+shape and the migration the session's). ✅ **Built 2026-10-04** (`a83adc8`), the first half of build
+step 1 below, in `ondin-core/src/item.rs` — **the one part of this section that is built**, and this
+paragraph describes it in the present tense. Five lists have ids: `Paint::fills`, `Paint::strokes`,
 `Node::effects`, `Node::exports` and `Node::grids` (§5.3b's layout grids). What stays one value,
 compared whole: a grid template's track list (a template is one value, as a path is), a gradient's
 stops inside its brush, a `Path`'s points, `corner_radii`, and text spans, coupled with their content
-above. **The shape is a wrapper**, `Keyed<T> { id: ItemId, value: T }`, the lists becoming
-`Vec<Keyed<Fill>>` and so on — name provisional. 🚨 **Not an `id` field inside `Fill`, `Stroke` or
+above. **The shape is a wrapper**, `Keyed<T> { id: ItemId, #[serde(flatten)] value: T }`, the lists
+being `Vec<Keyed<Fill>>` and so on; it derefs to `T`, so a read (`fill.brush`) is unchanged, and it
+saves flattened, `{"id":"0:0","brush":…}`. 🚨 **Not an `id` field inside `Fill`, `Stroke` or
 `Effect`**, and that is the reason for the shape: all three derive `PartialEq`, so an id inside them
-makes two fills that look identical compare unequal, and every comparison that means *same look*
-changes meaning in silence — the inspector's *Mixed* across a multi-selection,
+would make two fills that look identical compare unequal, and every comparison that means *same look*
+would change meaning in silence — the inspector's *Mixed* across a multi-selection,
 `Transaction::changes_nothing`, `Operation::overwrites` and run merging, and any dedupe in export or
 import. The wrapper puts *same item* (`id`) and *same look* (`value`) in different places in the types.
-⚠️ **It does not decide a whole-list `==` for anyone**: `Vec<Keyed<T>>` compares ids too, and five
-*Mixed* readings compare whole lists across a selection today (`inspector.rs`' grids and effects,
-`panels/export.rs`' exports, and fills and strokes through `build::paint_shown`, under
-`shared_fills`/`shared_strokes`) — each has to compare values, or two layers given the same shadow
-separately read as *Mixed*. (This read *"three"* for an hour: the fill and stroke pair was found by
-reading `paint_shown`, which the first grep for list comparisons had not matched.) `ItemId` is a newtype over `NodeId`, as `GuideId` is, minted from the
-session's `IdSource` by the caller (invariant 3); unique **within its list** — a post-condition and a
-loader check — and deliberately not across nodes, since duplicating a node copies its item ids
-verbatim, and that is the match: a copy's fill matches its source's fill by id. Minted from the global
-stream rather than a per-list counter because an item added locally to an instance and one added later
-to its main must never collide, and two per-list counters would.
+⚠️ **It does not decide a whole-list `==` for anyone**: `Vec<Keyed<T>>` compares ids too, so all five
+*Mixed* readings compare values through `item::same_values` — fills and strokes in
+`build::paint_shown`, the inspector's `shared_effects` and `shared_grids_keyed`, the export panel's
+`shared_exports_keyed` — and so does the export plan's dedupe (`ondin-export/src/plan.rs`). (This read
+*"three"* for an hour: the fill and stroke pair was found by reading `paint_shown`, which the first grep
+for list comparisons had not matched.) `ItemId` is a newtype over `NodeId`, as `GuideId` is, written as
+the wire string and minted by the caller with `IdSource::mint_item` (invariant 3); unique **within its
+list** — `Node::check_item_ids`, run by `Document::apply` over the dirty nodes after the last op
+(`OpError::DuplicateItemId`) and by the loader's `schema::verify_integrity` — and deliberately not
+across nodes, since duplicating a node copies its item ids verbatim, and that is the match: a copy's
+fill matches its source's fill by id. Minted from the global stream rather than a per-list counter
+because an item added locally to an instance and one added later to its main must never collide, and
+two per-list counters would. ⚠️ **There is deliberately no `From<Vec<T>>`**: a site that clones the
+values out, changes one and collects them back would re-key every item by position and silently cut it
+from its counterpart. A keyed list is built one of three ways — keeping the ids it read (`Keyed::map`),
+minting for an item it adds, or `keyed_by_position` for a list built whole (a new node, an import, a
+migration, a test), which is **never** safe for an item appended to an existing list.
+
+**A write over a multi-selection has three shapes, and each keeps every layer's own ids** (§15 D980's
+amendment — found while building, not in the design). 🚨 **Before item ids a multi-selection write
+copied the first layer's whole list onto every layer**; harmless while a list had no identity, it
+would have given every layer the anchor's ids — on an instance's child, cutting each item from its
+counterpart. (1) **An edit of a list several layers share** is retargeted through the anchor
+(`item::retarget`; `build::retarget_fills_all`/`retarget_strokes_all`; the inspector's
+`write_fill_list`, `write_strokes`, `write_effects` and `retarget_grids`; the export panel's
+`retarget_exports`): an edited item takes the target's id at the anchor's position, and a row the user
+added is minted **per target**. (2) **A wholesale replacement** — *Paste properties*, the mixed row's
+clear, an export preset or paste, the mixed grid override — keeps each target's ids **by position**
+(`item::rekey_by_position`; `set_fills_all`/`set_strokes_all` take values and the `IdSource`;
+`build::Properties` holds plain values), so a paste onto an instance's child will read as overrides of
+its main's items rather than as every item deleted and new ones added. ⚠️ Not for an edit: deleting the
+first of two would hand the second the deleted one's id. (3) **One row changed in place over a
+selection** (`slot_transaction`'s Selection arm) edits row `i` on each target
+(`build::edit_fill_at_all`/`edit_stroke_at_all`), and no id moves.
 
 **The per-item rule is the structural rule one level down** — one algorithm at two levels, children
 and list items. Items match by id; within a matched item each field compares as above; an item the main
@@ -1794,23 +1824,27 @@ transitively, an instance of itself; and every list item's id unique within its 
 dangling owner (§5.11). It does not compare values: under the compare
 rule there is nothing to drift.
 
-**The save format goes to v5** (the session's), on two counts. `component` and `link` are additive
-and §5.11's rule would not bump for them — but the loader has no `deny_unknown_fields`, so a build that
-predates components would open a v4-numbered file holding them, drop every link and flag in silence,
-and save every instance back as a detached copy, where a version it does not know it refuses outright
-(`IoError::UnsupportedVersion`). ⚠️ **That half is a bump for an *older build's* sake, which §5.11's
-rule has never made**: the rule asks only whether old files keep their meaning, and a build older than
-container layout drops `display` and the insets in exactly this way, unbumped. **The other half is
-§5.11's own case** (§15 D980): a v4 list item has no id, so the five keyed lists change shape and an
-old file needs a real step. **`migrate_4_to_5` gives each existing item `ItemId { actor: 0, seq:
-index }`** — deterministic, so a re-save is byte-identical (invariant 9), and unique within its list;
-a v4 file holds no instance, so there is no cross-node match for the reused ids to break. ⚠️ **What
-keeps a migrated id from colliding with a minted one is `reserve_existing_ids`, not actor 0**: a live
-session's actor is an unguarded hash (`session::random_actor`), so 0 is improbable rather than
-excluded, and three of the inspector's tests mint from `IdSource::new(0)`. The reservation already
-sweeps guide ids for this reason and has to sweep item ids too, after which a session that drew actor
-0 mints past the highest migrated index — noted by the record, not ruled. The clipboard
-needs nothing: `io::clip::read` already refuses every version but its own.
+**The save format is v5** (the session's), on two counts. **The item-id half is built** (§15 D980,
+`a83adc8`): `CURRENT_SCHEMA_VERSION` is 5, and it is §5.11's own case — a v4 list item has no id, so
+the five keyed lists change shape and an old file needs a real step. **`migrate_4_to_5` gives each
+existing item `"id": "0:<index>"`**, `ItemId::positional`'s wire form, keeping an id an item already
+has — deterministic, so a re-save is byte-identical (invariant 9), and unique within its list; a v4
+file holds no instance, so there is no cross-node match for the reused ids to break. ⚠️ **What keeps a
+migrated id from colliding with a minted one is `reserve_existing_ids`, not actor 0**: a live session's
+actor is an unguarded hash (`session::random_actor`), so 0 is improbable rather than excluded, and
+three of the inspector's tests mint from `IdSource::new(0)`. The reservation sweeps item ids as it
+sweeps guide ids, so a session that drew actor 0 mints past the highest migrated index. **The
+component half is not built**: `component` and `link` are additive and §5.11's rule would not bump for
+them — but the loader has no `deny_unknown_fields`, so a build that predates components would open a
+file holding them, drop every link and flag in silence, and save every instance back as a detached
+copy, where a version it does not know it refuses outright (`IoError::UnsupportedVersion`). ⚠️ **That
+half is a bump for an *older build's* sake, which §5.11's rule has never made**: the rule asks only
+whether old files keep their meaning, and a build older than container layout drops `display` and the
+insets in exactly this way, unbumped. 🚨 **And it now depends on the release order**: v5 exists
+without the component fields, so the two only share one number safely if no release ships between
+them — a released v5 build with no `link` would be exactly the older reader this half exists to stop,
+and the component model would then owe v6. The clipboard needs nothing: `io::clip::read` already
+refuses every version but its own.
 
 **Finding counterparts** (the session's). The map from a source to the nodes linked to it is computed
 by a scan of the document per commit in the first build. A maintained index is a later question for a
@@ -1891,11 +1925,11 @@ now and open for the future, in the maintainer's words, and D978's verdict is to
 if it is built.
 
 **Build order** (the session's): (1) the model — `component`, `link`, `SetComponent` and `SetLink`, the
-post-conditions, the loader's checks, schema v5 — and the five lists' item ids (§15 D980), `Keyed<T>`
-and its migration, which is mechanical and wide: about 330 construction sites across the workspace
-(`Fill {` ~195, `Stroke {` ~96, `LayoutGrid {` ~32, `ExportSpec {` ~9 — grep counts with the tests, a
-rough figure), `rust-mechanic`'s kind of sweep; (2) create a component, create an instance, detach, and a main's deletion
-detaching; (3) the propagation pass for **fields** — the compare rule, list items by id, nested chains,
+post-conditions, the loader's checks — **not built, and next**; and the five lists' item ids (§15
+D980), `Keyed<T>`, schema v5 and its migration — ✅ **built 2026-10-04** (`a83adc8`), a sweep the design
+estimated at about 330 construction sites from grep counts and the build measured at about 290 sites the
+compiler reported, across 40 test files plus production (the caller's figure); (2) create a component,
+create an instance, detach, and a main's deletion detaching; (3) the propagation pass for **fields** — the compare rule, list items by id, nested chains,
 user operations winning — with a property-based test of its specification: after a main edit, each
 counterpart's field equals the new value if and only if it equalled the old; and the exact-equality
 risk measured here, above; (4) propagation for **structure** — insert at
@@ -3682,14 +3716,18 @@ pub fn repaint(doc, ids, from: &Brush, to: &Brush) -> Transaction;    // by whol
 pub enum PaintTarget { Fill, Stroke }
 pub fn paint_targets(doc, ids) -> Vec<NodeId>;               // through a group, stopping AT a frame
 pub enum PaintShown<T> { List(Vec<T>), Mixed }               // ::list / ::is_mixed / ::unpainted
-pub fn shared_fills(doc, ids) -> PaintShown<Fill>;           // the whole list, or a disagreement
-pub fn shared_strokes(doc, ids) -> PaintShown<Stroke>;
+pub fn shared_fills(doc, ids) -> PaintShown<Keyed<Fill>>;    // the whole list BY VALUE, or a disagreement
+pub fn shared_strokes(doc, ids) -> PaintShown<Keyed<Stroke>>; //   — the first target's, ids and all (D980)
 pub fn shared_over_fills<T>(doc, ids, of: impl Fn(&Fill) -> T) -> Option<T>;   // over *every* paint
 pub fn shared_over_strokes<T>(doc, ids, of: impl Fn(&Stroke) -> T) -> Option<T>;
 pub fn edit_fills_all(doc, ids, edit: impl Fn(&mut Fill)) -> Transaction;      // in place, each list
 pub fn edit_strokes_all(doc, ids, edit: impl Fn(&mut Stroke)) -> Transaction;  // keeping its own shape
-pub fn set_fills_all(doc, ids, fills: &[Fill]) -> Transaction;        // exactly this list, to each
-pub fn set_strokes_all(doc, ids, strokes: &[Stroke]) -> Transaction;
+pub fn set_fills_all(doc, ids, fills: &[Fill], src) -> Transaction;   // these values, to each, its ids
+pub fn set_strokes_all(doc, ids, strokes: &[Stroke], src) -> Transaction; //   kept by position (D980)
+pub fn retarget_fills_all(doc, ids, anchor, edited, src) -> Transaction;  // an EDIT of the shared list,
+pub fn retarget_strokes_all(doc, ids, anchor, edited, src) -> Transaction; //  each target's own ids
+pub fn edit_fill_at_all(doc, ids, index, edit) -> Transaction;      // one row in place; no id moves
+pub fn edit_stroke_at_all(doc, ids, index, edit) -> Transaction;
 pub fn set_opacity_all(doc, ids, opacity) -> Transaction;    // outermost only — opacity composes
 pub fn set_corner_radius_all(doc, ids, radius) -> Transaction;    // subtree — a radius does not
 pub fn shared_corner_radius(doc, ids) -> Option<f64>;        // agrees to RADIUS_AGREEMENT, not ==
@@ -3846,11 +3884,20 @@ rules this section already states rather than a third. Each of the three skips t
 already agree, so pasting an appearance a layer already has is an empty transaction and no undo step.
 
 **What is shared is the whole list, not the first brush.** `shared_fills` and `shared_strokes` answer
-with the `Vec<Fill>` / `Vec<Stroke>` every target agrees on, so two layers that
+with the list every target agrees on, so two layers that
 both start red but differ in their second fill do **not** share a fill list — a panel claiming they
-did would delete one of them on the next edit. `set_fills_all` and `set_strokes_all` give every
-target *exactly* the list, which is what keeps the reading believable: what was shown is then true of
-all of them.
+did would delete one of them on the next edit. ⚠️ **They agree by value, not by item** (§15 D980):
+two layers given the same fill separately carry different item ids, so `paint_shown` compares through
+`item::same_values`, and the list it returns is the **first** target's, ids and all — the anchor a
+write retargets from, never a list to write verbatim onto the others. Every write leaves each target
+its own ids and gives it the values shown, which is what keeps the reading believable: what was shown
+is then true of all of them. Three shapes (§5.3d): an edit of the shared list goes through
+`retarget_fills_all` / `retarget_strokes_all`, mapping each item through the anchor to the target's
+own and minting an added row per target; a wholesale replacement — *Paste properties*, the mixed row's
+clear — through `set_fills_all` / `set_strokes_all`, which take values and keep each target's ids by
+position; and one row changed in place through `edit_fill_at_all` / `edit_stroke_at_all`. 🚨 **Until
+2026-10-04 the multi-selection write copied the first target's whole list onto every target**, which
+with item ids would have handed every layer the anchor's ids.
 
 **Any disagreement at all is `Mixed`, and the only empty panel is one where nothing in scope is
 painted.** `paint_shown` returns `Mixed` the moment two targets differ and needs no second pass to
@@ -4470,8 +4517,9 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
 
 ### 5.11 IO
 
-- Native format = JSON, currently **v4** (`io::CURRENT_SCHEMA_VERSION`). `schema.rs` defines a
-  versioned DTO decoupled from in-memory types.
+- Native format = JSON, currently **v5** (`io::CURRENT_SCHEMA_VERSION`; v4 until 2026-10-04, when
+  list items gained ids — §15 D980, the v4 → v5 bullet below). `schema.rs` defines a versioned DTO
+  decoupled from in-memory types.
 - ⚠️ **The schema has a *second reader*, and it is not the on-disk format's alone** (§15 D823).
   `io::clip` writes a copied subtree for the system clipboard using the same `NodeDto` and `ImageDto`
   a file goes through — `from_node`/`into_node` and `from_entry`/`into_entry` are lifted out of
@@ -4520,7 +4568,8 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   reachable from the root**; **no node is deeper than `io::MAX_TREE_DEPTH` (256)**; every
   parent/child pair obeys the same kind rules operations do; and **no frame sits anywhere under a
   boolean or a mask** (§5.3, §15 D876) — the ancestor rule the pairwise check cannot see, riding the
-  reachability walk as a flag per stack entry, as the depth does.
+  reachability walk as a flag per stack entry, as the depth does — and **no item id twice in one of a
+  node's item lists** (`Node::check_item_ids`, the rule `apply` checks, §15 D980).
   Reachability and the duplicate check are what make cycles and orphan components impossible — without
   them a hand-edited file can satisfy parent/child consistency and hang the app.
 - ⚠️ **The depth bound is the one check that is about the *stack* rather than about the tree, and it
@@ -4697,10 +4746,11 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   else in that file.
   A bump is still required for anything that changes the
   meaning of an existing field, or whose default would silently alter old documents.
-  ⚠️ **Components are designed to bump to v5 on a reason this rule does not name** (§5.3d, not
-  built): an *older build* would drop their links in silence, which a version it does not know it
-  refuses instead. Their list-item ids (§15 D980) are this rule's own case besides, with a real
-  `migrate_4_to_5`.
+  ⚠️ **v5 is this rule's own case, and components add a reason it does not name** (§5.3d). The
+  list-item ids (§15 D980, built 2026-10-04) changed the five lists' shape, with a real
+  `migrate_4_to_5` (below). The component fields, not built, are meant to share v5 because an *older
+  build* would drop their links in silence, which a version it does not know it refuses instead — and
+  that only holds if no release ships between the two (§5.3d).
 - **Guides are verified too, but not against a tree** — there is none for one to corrupt. The loader
   rejects a malformed guide id, a duplicate one, and a non-finite position; a guide far off the side
   of the artwork is legal, because panning reaches it. Their ids come out of the same reservation
@@ -4765,6 +4815,14 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   *kind* assertion green and fails only the colour assertion, with `left: []`. That is the shape of a
   migration that silently never ran, and nothing else would say so, there being no
   `deny_unknown_fields` here.
+- **v4 → v5** gives every item of a node's five item lists an id (§5.3d, §15 D980): `paint.fills`,
+  `paint.strokes`, `effects`, `exports` and `grids`, each item gaining `"id": "0:<index>"` —
+  `ItemId::positional`'s wire form — and keeping an `id` it already has. Deterministic, so a migrated
+  document re-saves byte-identical (invariant 9), and unique within its list, the only uniqueness an
+  item id owes; a v4 file holds no instance, so no cross-node match can be wrong. A list that is not an
+  array, or an item that is not an object, is left for the loader to refuse with a message, as
+  `migrate_3_to_4` does. `reserve_existing_ids` sweeps item ids, so nothing a session mints lands on a
+  migrated one.
 
 ### 5.11a The library block (§15 D362)
 
@@ -9489,10 +9547,13 @@ untested until §15 D607.
 list of paints with rows to add, edit and remove, and differ only in who the list is written to. So a
 selection gets add-and-remove for free and there is no second set of multi-selection paint panels to
 drift from the first. Over a selection the list shown is `build::shared_fills` / `shared_strokes`,
-which answer with a `PaintShown` — the `List` every target agrees on, or `Mixed`. Adding from an empty
-panel gives every target that one fill. Writes for a shared list go through
-`build::set_fills_all` / `set_strokes_all`, which give every target *exactly* the list, so what the
-panel shows is true of all of them. Both are hidden outright when nothing in scope can take paint
+which answer with a `PaintShown` — the `List` every target agrees on **in value**, or `Mixed` (§15
+D980: the item ids differ between layers given the same fill separately, so agreement ignores them).
+Adding from an empty panel gives every target that one fill. Writes for a shared list go through
+`build::retarget_fills_all` / `retarget_strokes_all` (`inspector::write_fill_list`, `write_strokes`),
+which give every target the edited values under **its own** item ids — the anchor's mapped through by
+position, an added row minted per target — so what the panel shows is true of all of them and no
+layer takes another's ids (§5.3d's three write shapes). Both are hidden outright when nothing in scope can take paint
 (`build::any_paint_in`) — one question for both since a frame stopped answering it differently from
 the stroke side, which is what `any_strokeable_in` was for (§15 D400). Rows ride
 `PaintSlot::Selection(PaintTarget, usize)` — the index names one row of the shared list — node-less

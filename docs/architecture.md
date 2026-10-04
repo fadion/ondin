@@ -1839,13 +1839,17 @@ its anchor, down the copy chain, each node linked one level up, against a child 
 parent as inserts land so two children gained at once keep their order; a lost child takes a
 counterpart only where it is `untouched` — every field but the locks equal, the same linked children in
 the same order, recursively, no local additions — and a deleted counterpart is a lost child for its own
-copies; a move within a main and a reorder follow as above. ⚠️ **Known, not ruled**: a move into a
-parent **created in the same transaction** reads as a loss and a gain — an untouched counterpart
-replaced by a fresh copy, a changed one kept *and* a fresh copy beside it — and that is *Group
-selection* inside a main. ⚠️ **Read, not run** (§15 D979's amendment): ungrouping inside a main looks
-refused whenever an instance's copy of the group is untouched — the pass deletes that copy, subtree and
-all, then reparents its children's counterparts, which the delete removed; and a move whose new parent
-has no counterpart leaves the counterpart linked where it was, where the rule above reads a removal.
+copies; a move within a main and a reorder follow as above. **Its ops go out inserts → moves → deletes →
+reorders**, delete decisions made after the moves, `untouched` ignoring the children the pass carries
+out; a parent the edit deleted counts as changed, so the children lifted out of it are moves — which is
+what makes *Ungroup* inside a main work. **A move into a parent the same edit made** — *Group
+selection* — is judged on the final tree: the new parent's copy is pruned to what the edit made
+(`only_new`) and each existing counterpart **moves** into it, carried down the copy chain, so an
+instance's own changes survive grouping and ungrouping, still linked. **A move whose new parent has no
+counterpart** is a removal there — delete if untouched, else cut. ⚠️ All three were wrong in the first
+build (`6ac7d0d`): Group selection re-copied the counterparts and doubled any the instance had changed,
+Ungroup was refused, and the missing-parent case left the link standing — fixed in `e38603d` (§15
+D979's amendment), the Ungroup case measured failing first.
 
 A **reset** family belongs to the design: reset a field; reset structure — re-insert the missing
 counterparts at their anchors, local additions left alone; and reset all — the fields, the missing
@@ -2055,10 +2059,23 @@ D979's amendment) — the propagation pass for **fields**: the compare rule, lis
 chains, user operations winning, and the exact-equality risk measured for the pinned-child path, above.
 ⚠️ The property-based test this step was to carry was not among its first tests, and the fields
 merge and the nested placement skip fell short — all three fixed in `6ac7d0d`; (4) ✅ **built
-2026-10-04** (`6ac7d0d`) — propagation for **structure**: insert at an anchor, reorder, move, delete
-or keep, with a known consequence for a move into a new parent and two things read and not run, above;
-(5) **next** — the reset family, and the inspector showing overridden fields; (6) the live preview of
-main-component edits; (7) then variants and properties.
+2026-10-04** (`6ac7d0d`, then `e38603d`) — propagation for **structure**: insert at an anchor, reorder,
+move (into a parent the same edit made, too), delete or keep; (5) **next** — the reset family (reset a
+field, reset structure, reset all; *Reset fields N*, *Restore removed children N*, *Reset order*, each
+counted and disabled rather than hidden at zero, and none deleting a local addition) and the
+inspector's override look (D981's 4px dot and bright label, ↺ on hover, the list items' trailing slot
+and ghost rows, the card headers' counts); (6) **next after it** — the live preview of main-component
+edits, which today reach the copies only on release; (7) then variants and properties.
+
+**Handoff, 2026-10-04 (session 47's close)** — what is built, next and owed, in one place. **Built**:
+steps 1–4 above, `Ctrl+Alt+K`/`Ctrl+Alt+B`, five menu rows filed provisionally, D981's two toasts.
+**Next**: step 5, then step 6. **Owed, outside the numbered steps**: D981's chrome — the canvas labels,
+chips, glyphs and markers (a group main's label included; a group *instance*'s label is unruled), the
+layers panel's dot and **+**, the component card, `Enter` into an instance (`shortcuts.md` §12 ➕) and
+an instance's group-style picking (§15 D981 (b)); the **filled hexagon**, which has no glyph in the
+bundled Phosphor Regular (§15 D10's *"at two, ship the font"*); the menu rows' final place
+(`context-menus.md` §7) and the text menus' counts, which no test pins; the flex instance's
+exact-equality path, unmeasured; and a verb that un-makes a component, which would owe a detach.
 
 ### 5.4 Text node
 

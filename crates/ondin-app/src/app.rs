@@ -900,6 +900,11 @@ pub struct OndinApp {
     /// that reset it — what a card header's dot, count and *Reset effects* read
     /// (§15 D981). Gathered at the top of `inspector_ui`; empty outside instances.
     pub(crate) card_overrides: Vec<(&'static str, usize, Vec<Operation>)>,
+    /// This frame's field resets of each selected linked layer, by layer — the
+    /// `reset` operations of its `reset::overrides`, which a field's own mark reads
+    /// its source's value out of (`OndinApp::sub_mark`, §15 D981). Gathered beside
+    /// `card_overrides`, one entry per selected layer, an unlinked layer's empty.
+    pub(crate) field_overrides: Vec<(NodeId, Vec<Operation>)>,
     /// Rects whose Appearance panel is showing the four per-corner radius
     /// fields. Purely a disclosure: the model always holds four radii, and the
     /// single field above edits all of them, so nothing here changes what a
@@ -2185,6 +2190,7 @@ impl OndinApp {
             // `u64::MAX` is no revision a session has, so the first read fills it.
             drift_cache: (u64::MAX, Default::default()),
             card_overrides: Vec::new(),
+            field_overrides: Vec::new(),
             per_corner_radius: HashSet::new(),
             open_menu: TopMenu::None,
             context_menu: None,
@@ -4406,7 +4412,8 @@ impl OndinApp {
                 .info("Nothing here differs from the main component");
             return None;
         }
-        Some(Transaction(ops))
+        // A reset is not a resize (`OndinApp::commit_reset`'s first point).
+        Some(self.items_stated(Transaction(ops)))
     }
 
     /// Select a freshly made group, and leave it **shut** in the layers tree.

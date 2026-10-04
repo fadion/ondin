@@ -526,7 +526,14 @@ impl OndinApp {
         let at = flow
             .and_then(|f| flows.iter().position(|x| *x == f))
             .unwrap_or(flows.len());
-        if let Some(i) = ui::segmented_tipped(
+        // An instance's overridden grid fields (§15 D981), each its own mark.
+        let flow_mark = self.grid_mark(
+            subjects,
+            |g| g.auto_flow,
+            |g, v| g.auto_flow = v,
+            move |v| ["Row", "Column"][usize::from(*v == GridAutoFlow::Column)].to_owned(),
+        );
+        let (pick, reset) = ui::segmented_marked(
             ui,
             full,
             ui::SEGMENT_CELL_H,
@@ -534,11 +541,14 @@ impl OndinApp {
             at,
             |_| true,
             |i| FLOW_TIPS[i],
+            flow_mark.as_ref().map(OverrideMark::field),
             |p, i, r, on| match flow {
                 None if i == 0 => ui::segment_mixed(p, r),
                 _ => ui::segment_label(p, r, ["Row", "Column"][i], on),
             },
-        ) {
+        );
+        self.reset_marked(reset, &flow_mark);
+        if let Some(i) = pick {
             let tx = self.grid_tx(subjects, |g| g.auto_flow = flows[i]);
             self.commit_edit(tx);
         }
@@ -549,7 +559,13 @@ impl OndinApp {
 
         // --- the alignments ---------------------------------------------------------
         let content = |c: AlignContent| Glyph::Content(c);
-        if let Some(Some(c)) = glyph_combo(
+        let mark = self.grid_mark(
+            subjects,
+            |g| g.justify_content,
+            |g, v| g.justify_content = v,
+            |v| grid_content_name(*v).to_owned(),
+        );
+        let (pick, reset) = glyph_combo(
             ui,
             "grid-justify-content",
             "Justify content",
@@ -562,11 +578,20 @@ impl OndinApp {
             None,
             true,
             None,
-        ) {
+            mark.as_ref(),
+        );
+        self.reset_marked(reset, &mark);
+        if let Some(Some(c)) = pick {
             let tx = self.grid_tx(subjects, |g| g.justify_content = c);
             self.commit_edit(tx);
         }
-        if let Some(Some(a)) = glyph_combo(
+        let mark = self.grid_mark(
+            subjects,
+            |g| g.justify_items,
+            |g, v| g.justify_items = v,
+            |v| items_name(*v).to_owned(),
+        );
+        let (pick, reset) = glyph_combo(
             ui,
             "grid-justify-items",
             "Justify items",
@@ -579,11 +604,20 @@ impl OndinApp {
             None,
             true,
             None,
-        ) {
+            mark.as_ref(),
+        );
+        self.reset_marked(reset, &mark);
+        if let Some(Some(a)) = pick {
             let tx = self.grid_tx(subjects, |g| g.justify_items = a);
             self.commit_edit(tx);
         }
-        if let Some(Some(a)) = glyph_combo(
+        let mark = self.grid_mark(
+            subjects,
+            |g| g.align_items,
+            |g, v| g.align_items = v,
+            |v| align_items_name(*v).to_owned(),
+        );
+        let (pick, reset) = glyph_combo(
             ui,
             "grid-align-items",
             "Align items",
@@ -596,11 +630,20 @@ impl OndinApp {
             None,
             true,
             None,
-        ) {
+            mark.as_ref(),
+        );
+        self.reset_marked(reset, &mark);
+        if let Some(Some(a)) = pick {
             let tx = self.grid_tx(subjects, |g| g.align_items = a);
             self.commit_edit(tx);
         }
-        if let Some(Some(c)) = glyph_combo(
+        let mark = self.grid_mark(
+            subjects,
+            |g| g.align_content,
+            |g, v| g.align_content = v,
+            |v| grid_content_name(*v).to_owned(),
+        );
+        let (pick, reset) = glyph_combo(
             ui,
             "grid-align-content",
             "Align content",
@@ -613,7 +656,10 @@ impl OndinApp {
             None,
             true,
             None,
-        ) {
+            mark.as_ref(),
+        );
+        self.reset_marked(reset, &mark);
+        if let Some(Some(c)) = pick {
             let tx = self.grid_tx(subjects, |g| g.align_content = c);
             self.commit_edit(tx);
         }
@@ -646,18 +692,30 @@ impl OndinApp {
         let list = get(&grids[0]);
         let agreed = grids.iter().all(|g| get(g) == list);
         let side = ui::CONTROL_H;
+        // An instance's overridden track list (§15 D981), whole — the tracks carry
+        // no ids to be compared one by one — on the head's label.
+        let mark = self.grid_mark(
+            subjects,
+            get,
+            |g, l| with_list(g, rows, &l),
+            |l| tracks_css(l),
+        );
 
         // --- the head ----------------------------------------------------------
         ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new(if rows {
+            let hit = super::super::component::label_mark(
+                ui,
+                None,
+                if rows {
                     "Grid template rows"
                 } else {
                     "Grid template columns"
-                })
-                .size(11.0)
-                .color(theme::text::DIM),
+                },
+                11.0,
+                theme::text::DIM,
+                mark.as_ref(),
             );
+            self.reset_marked(hit, &mark);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let add = ui::icon_button(ui, icon::PLUS, 20.0, 13.0, false, true).on_hover_text(
                     if rows {
@@ -1021,17 +1079,32 @@ impl OndinApp {
         const LABEL_W: f32 = 74.0;
         for (label, rows) in [("Grid column", false), ("Grid row", true)] {
             let lines = |i: &LayoutItem| if rows { i.grid_row } else { i.grid_column };
+            // An instance's overridden lines (§15 D981), on the row's label: both
+            // ends are one property, `grid-column` or `grid-row`.
+            let mark = self.item_mark(
+                subjects,
+                lines,
+                |i, v| {
+                    if rows {
+                        i.grid_row = v;
+                    } else {
+                        i.grid_column = v;
+                    }
+                },
+                |v| format!("{} / {}", placement_css(v.start), placement_css(v.end)),
+            );
             let mut refused = None;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = gap;
-                ui.add_sized(
-                    egui::vec2(LABEL_W, side),
-                    egui::Label::new(
-                        egui::RichText::new(label)
-                            .size(10.5)
-                            .color(theme::text::FAINT),
-                    ),
+                let hit = super::super::component::label_mark(
+                    ui,
+                    Some(egui::vec2(LABEL_W, side)),
+                    label,
+                    10.5,
+                    theme::text::FAINT,
+                    mark.as_ref(),
                 );
+                self.reset_marked(hit, &mark);
                 let half = egui::vec2((full - LABEL_W - gap * 2.0) / 2.0, side);
                 for is_start in [true, false] {
                     let end = |l: GridLines| if is_start { l.start } else { l.end };
@@ -1102,7 +1175,23 @@ impl OndinApp {
             // `T` is the row's value with `normal` in it, so the face can read
             // *Auto · Normal*; an item's own value is never `normal`.
             let shown = shared(items, |i| own(i).map(Some));
-            if let Some(pick) = glyph_combo(
+            let mark = self.item_mark(
+                subjects,
+                own,
+                |i, v| {
+                    if across {
+                        i.justify_self = v;
+                    } else {
+                        i.align_self = v;
+                    }
+                },
+                move |v| match v {
+                    None => "Auto".to_owned(),
+                    Some(_) if across => items_name(*v).to_owned(),
+                    Some(_) => align_items_name(*v).to_owned(),
+                },
+            );
+            let (pick, reset) = glyph_combo(
                 ui,
                 salt,
                 label,
@@ -1121,7 +1210,10 @@ impl OndinApp {
                 Some(inherited),
                 true,
                 None,
-            ) {
+                mark.as_ref(),
+            );
+            self.reset_marked(reset, &mark);
+            if let Some(pick) = pick {
                 let to = pick.flatten();
                 let tx = self.item_tx(subjects, |i| {
                     if across {

@@ -46,6 +46,9 @@ const CELL: f32 = 28.0;
 /// settings popover matches across, exactly as the type popup matches the card it
 /// hangs from (`typography::COL_GAP`).
 const PITCH: f32 = 7.0;
+/// An instance's row's trailing slot (§15 D981, 4D — *"always reserved, 14px"*),
+/// `component::item_slot`'s width.
+const SLOT_W: f32 = 14.0;
 /// Between a row and the size line under it.
 ///
 /// **3, which is tighter than anything else in the card**, and that is the point:
@@ -156,6 +159,8 @@ fn section<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui) ->
 struct RowOut {
     edited: Option<ExportSpec>,
     remove: bool,
+    /// An instance's overridden export asked for its main's back (§15 D981).
+    reset: bool,
 }
 
 /// Which of the two free-text parts of a filename a field is editing.
@@ -418,7 +423,16 @@ impl OndinApp {
         // The `+` in the header opens it, which is why the header keeps its action
         // while collapsed.
         let fresh = self.export_subject_changed();
-        self.sync_paint_collapse("Export", shared.as_ref().is_some_and(Vec::is_empty), fresh);
+        // An instance's ghost rows are something to show (§15 D981).
+        let ghosts = match subjects.as_slice() {
+            [one] => self.has_ghosts(Some(*one), |n| n.exports()),
+            _ => false,
+        };
+        self.sync_paint_collapse(
+            "Export",
+            shared.as_ref().is_some_and(Vec::is_empty) && !ghosts,
+            fresh,
+        );
         // **Three tooltips, because the `+` does two different things** — and the
         // one it does over a disagreeing selection is the destructive one, so it
         // has to say so before the click rather than in the card afterwards
@@ -440,7 +454,15 @@ impl OndinApp {
                 app.export_buttons(ui, &subjects);
                 return;
             };
-            if specs.is_empty() {
+            // One subject's box sizes every row; over a multi-selection there is
+            // no single answer, so the size cell says so rather than picking a
+            // member's arbitrarily (`export_row`).
+            let sizing = (subjects.len() == 1).then(|| subjects[0]);
+            // One instance's list read against its source's (§15 D981): each row's
+            // trailing slot, and the ghost rows of the exports it removed — which
+            // an instance that removed them all still has.
+            let source = sizing.and_then(|id| app.source_list(id, |n| n.exports()));
+            if specs.is_empty() && source.as_ref().is_none_or(Vec::is_empty) {
                 ui.label(
                     egui::RichText::new("No exports")
                         .size(11.0)
@@ -450,10 +472,10 @@ impl OndinApp {
             }
             let mut next = specs.clone();
             let (mut removed, mut changed) = (None, false);
-            // One subject's box sizes every row; over a multi-selection there is
-            // no single answer, so the size cell says so rather than picking a
-            // member's arbitrarily (`export_row`).
-            let sizing = (subjects.len() == 1).then(|| subjects[0]);
+            let states = source
+                .as_ref()
+                .map(|s| ondin_core::reset::item_states(s, &specs));
+            let mut reset = None;
             // **The rows are their own zero-spacing region**, because the gap
             // between two exports is *smaller* than the card's own row gap and a
             // scope cannot subtract: the card places its children 9 apart, so 6 can
@@ -463,7 +485,8 @@ impl OndinApp {
             ui.scope(|ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 for (i, spec) in specs.iter().enumerate() {
-                    let out = app.export_row(ui, i, spec, sizing, i + 1 == specs.len());
+                    let item = states.as_ref().map(|s| s[i]);
+                    let out = app.export_row(ui, i, spec, sizing, i + 1 == specs.len(), item);
                     if let Some(edited) = out.edited {
                         next[i].value = edited;
                         changed = true;
@@ -471,8 +494,34 @@ impl OndinApp {
                     if out.remove {
                         removed = Some(i);
                     }
+                    if out.reset {
+                        reset = Some(spec.id);
+                    }
+                }
+                // The main's exports this instance removed, as ghost rows.
+                for gone in source
+                    .as_deref()
+                    .map(|s| ondin_core::reset::removed_items(s, &specs))
+                    .unwrap_or_default()
+                {
+                    let label = format!("{} {}", gone.scale.label(), gone.format.label());
+                    if super::component::ghost_row(ui, &label, ui.available_width()) {
+                        reset = Some(gone.id);
+                    }
                 }
             });
+            // **Written whole, not retargeted**: `item::retarget` mints an id for an
+            // item the anchor does not hold, and a restored export is the main's by
+            // its id or it is a local addition that looks like one (the Effects
+            // card's restore, which went the same way first).
+            // The rows' own edits stand down that frame, so nothing writes twice.
+            if let (Some(item), Some(src), Some(id)) = (reset, source.as_deref(), sizing) {
+                app.commit_edit(Transaction(vec![Operation::SetExports {
+                    id,
+                    exports: ondin_core::reset::reset_item(src, &specs, item),
+                }]));
+                (removed, changed) = (None, false);
+            }
             if let Some(i) = removed {
                 next.remove(i);
                 // The open block and the buffer are keyed by index, so both are
@@ -778,7 +827,9 @@ impl OndinApp {
     }
 
     /// One export: its scale, its format, the size it will come out at, and the
-    /// two buttons.
+    /// two buttons — and, on an instance's list, the item's reserved trailing slot
+    /// before the ✕ (`item`, §15 D981): nothing while it follows its main, the dot
+    /// when it differs, `+` when it is the instance's own.
     fn export_row(
         &mut self,
         ui: &mut egui::Ui,
@@ -786,8 +837,20 @@ impl OndinApp {
         spec: &ExportSpec,
         sizing: Option<NodeId>,
         last: bool,
+        item: Option<ondin_core::reset::ItemState>,
     ) -> RowOut {
         let mut out = RowOut::default();
+        // The slot's room, taken from the format cell — which takes what is left.
+        let slot = match item {
+            Some(_) => SLOT_W + PITCH,
+            None => 0.0,
+        };
+        // The whole row under the pointer is what turns the dot into ↺, asked
+        // before it is laid out (`component::item_slot`'s caveat).
+        let hot = ui.rect_contains_pointer(egui::Rect::from_min_size(
+            ui.cursor().min,
+            egui::vec2(ui.available_width(), CELL),
+        ));
         let open = self.export_row_open == Some(index);
         let mut head = None;
         // **The row and its size line are one unit, and one unit sits further from
@@ -867,7 +930,7 @@ impl OndinApp {
                     // two because it carries a leading glyph as well as its word, and
                     // because a scale reads as a number where a format reads as a name.
                     let mut format = spec.format;
-                    let format_w = ui.available_width() - CELL * 2.0 - PITCH * 2.0;
+                    let format_w = ui.available_width() - CELL * 2.0 - PITCH * 2.0 - slot;
                     egui::ComboBox::from_id_salt(("export-format", index))
                         .icon(ui::combo_chevron)
                         .width(format_w.max(0.0))
@@ -911,6 +974,9 @@ impl OndinApp {
                     self.export_menu = false;
                 }
                 head = Some(more);
+                if let Some(state) = item {
+                    out.reset = super::component::item_slot(ui, state, hot);
+                }
                 // **An ✕, not a minus.** The design changed it, and the two glyphs are
                 // not interchangeable here: `MINUS` is the *off* mark in this app's
                 // switches (`ui::toggle_row`, the decoration track), so a row ending in
@@ -3029,7 +3095,7 @@ mod tests {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 h = ui
                     .scope(|ui| {
-                        app.export_row(ui, 0, &s, sizing, last);
+                        app.export_row(ui, 0, &s, sizing, last, None);
                     })
                     .response
                     .rect

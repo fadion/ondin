@@ -28,7 +28,33 @@ use crate::ui::{self, FieldButton};
 use eframe::egui;
 use ondin_core::component;
 use ondin_core::reset::{Drift, Kind};
-use ondin_core::{NodeId, Operation};
+use ondin_core::{NodeId, Operation, Transaction};
+
+/// One overridden field's mark (§15 D981): its tooltip, *Reset to main · 168*,
+/// and the transaction that writes the main's value back into that field alone.
+pub(super) struct OverrideMark {
+    pub(super) tip: String,
+    pub(super) tx: Transaction,
+}
+
+impl OverrideMark {
+    pub(super) fn field(&self) -> ui::FieldMark<'_> {
+        ui::FieldMark { tip: &self.tip }
+    }
+
+    /// One mark for a field two stored values stand behind — a laid-out W, which
+    /// is the size and the item's `width` — resetting both, and naming the first's
+    /// value where both differ.
+    pub(super) fn and(a: Option<Self>, b: Option<Self>) -> Option<Self> {
+        match (a, b) {
+            (Some(mut a), Some(b)) => {
+                a.tx.0.extend(b.tx.0);
+                Some(a)
+            }
+            (a, b) => a.or(b),
+        }
+    }
+}
 
 /// The card's faces, one per kind of selection D981 draws.
 enum Face {
@@ -93,8 +119,11 @@ impl OndinApp {
     pub(super) fn gather_card_overrides(&mut self) {
         let doc = &self.session.doc;
         let mut cards: Vec<(&'static str, usize, Vec<Operation>)> = Vec::new();
+        let mut fields = Vec::new();
         for id in self.session.selection.ids() {
-            for o in ondin_core::reset::overrides(doc, *id) {
+            let overrides = ondin_core::reset::overrides(doc, *id);
+            fields.push((*id, overrides.iter().map(|o| o.reset.clone()).collect()));
+            for o in overrides {
                 let Some(title) = card_of(&o.reset) else {
                     continue;
                 };
@@ -147,6 +176,158 @@ impl OndinApp {
             }
         }
         self.card_overrides = cards;
+        self.field_overrides = fields;
+    }
+
+    /// An overridden field put back (§15 D981): `mark`'s reset, committed when its
+    /// ↺ was clicked (`hit`), through [`OndinApp::commit_reset`].
+    pub(super) fn reset_marked(&mut self, hit: bool, mark: &Option<OverrideMark>) {
+        if let (true, Some(m)) = (hit, mark) {
+            self.commit_reset(m.tx.clone());
+        }
+    }
+
+    /// `tx`, a reset, with the item of every layer it resizes stated beside the
+    /// size — the reset's own where it resets the item, else the layer's unchanged
+    /// — so the commit door's `build::flex_holds` does not take the reset for the
+    /// hand's resize ([`OndinApp::commit_reset`]'s first point). The context menu's
+    /// reset (`OndinApp::reset_tx`) takes it too.
+    pub(crate) fn items_stated(&self, mut tx: Transaction) -> Transaction {
+        let doc = &self.session.doc;
+        let mut stated: Vec<Operation> = Vec::new();
+        for op in &tx.0 {
+            let Operation::SetGeometry { id, geometry } = op else {
+                continue;
+            };
+            let named =
+                |o: &Operation| matches!(o, Operation::SetLayoutItem { id: i, .. } if i == id);
+            if !geometry.resizes() || tx.0.iter().any(named) || stated.iter().any(named) {
+                continue;
+            }
+            if let Some(n) = doc.get(*id) {
+                stated.push(Operation::SetLayoutItem {
+                    id: *id,
+                    item: *n.item(),
+                });
+            }
+        }
+        tx.0.extend(stated);
+        tx
+    }
+
+    /// Commit an instance's reset from the inspector (§15 D981) — a field's ↺, a
+    /// card header's chip, the Component card's resets. Through `commit_edit`, as
+    /// every inspector edit that changes ink is, and two things more. (The context
+    /// menu's commits through `reset_selection`, as the menu's verbs do: it gets the
+    /// first through `reset_tx`, and not the second — a live text session owns the
+    /// pointer, so that menu does not open over one.)
+    ///
+    /// - **A reset is not a resize.** `build::flex_holds` reads a size written with
+    ///   no item beside it as the hand's resize and holds it — growth to 0, a
+    ///   percentage or `fit-content` back to px — so a W reset on an instance root
+    ///   growing in a flex row stopped its growth, its placement being its own
+    ///   (§5.3d), and on a nested copy made an item override that was not there.
+    ///   Each layer the reset resizes has its item stated in the same transaction:
+    ///   the reset's own where it resets the item, else the layer's unchanged.
+    ///   `6210953`'s insets, for the other door's other rewrite.
+    /// - **A live text session on a layer the reset restyles adopts it**
+    ///   (`text_session_restyled_after`), as every other Type card write does —
+    ///   or the editor went on laying its text out in the style the reset took
+    ///   away. **Not on a content reset** (`SetText`): the editor holds content a
+    ///   commit ahead of the document's, and spans keyed to the reset's string are
+    ///   not keyed to its.
+    ///
+    /// Both found by `arch-scribe` reading the batch; the restyle is untested.
+    pub(crate) fn commit_reset(&mut self, tx: Transaction) {
+        let tx = self.items_stated(tx);
+        let editing = self.text.as_ref().map(|s| s.id);
+        let restyles = editing.is_some_and(|e| {
+            tx.0.iter().any(|op| {
+                op.overwrites() == Some(e)
+                    && matches!(
+                        op,
+                        Operation::SetTextStyle { .. }
+                            | Operation::SetParagraphStyle { .. }
+                            | Operation::SetBlockStyle { .. }
+                            | Operation::SetGeometry { .. }
+                    )
+            })
+        });
+        self.commit_edit(tx.clone());
+        if restyles {
+            self.text_session_restyled_after(&tx);
+        }
+    }
+
+    /// A **sub-field's** override mark over `subjects` (§15 D981): one number or
+    /// choice inside a struct payload — a layout item's grow, a container's gap, a
+    /// text style's size, one inset — which `reset::overrides` compares and resets
+    /// only as a whole value.
+    ///
+    /// `theirs` reads the source's whole value out of one of this frame's field
+    /// resets ([`OndinApp::field_overrides`]), so a field the comparison skips — an
+    /// instance root's own placement, a kind its source does not share — is never
+    /// marked, by the same rule that never counts it. `mine` is the copy's whole
+    /// value, `get` the sub-field, `put` writes a sub-field into a whole value,
+    /// `write` makes the operation and `say` the tooltip's value.
+    ///
+    /// Over several subjects the mark shows if any of them differs, and its reset
+    /// writes each one that does — D981's *"the dot shows, and a reset resets every
+    /// one of them"*. The tooltip names the first one's main value.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn sub_mark<T: Clone + PartialEq, V: PartialEq + Clone>(
+        &self,
+        subjects: &[NodeId],
+        theirs: impl Fn(&Operation) -> Option<T>,
+        mine: impl Fn(&ondin_core::Node) -> Option<T>,
+        get: impl Fn(&T) -> V,
+        put: impl Fn(&mut T, V),
+        write: impl Fn(NodeId, T) -> Operation,
+        say: impl Fn(&V) -> String,
+    ) -> Option<OverrideMark> {
+        let mut ops = Vec::new();
+        let mut tip = None;
+        for id in subjects {
+            // A card's subject outside the selection — the Mask card's masks inside
+            // a selected group — is compared here rather than in the frame's cache.
+            let computed: Vec<Operation>;
+            let resets = match self.field_overrides.iter().find(|(n, _)| n == id) {
+                Some((_, r)) => r.as_slice(),
+                None => {
+                    computed = ondin_core::reset::overrides(&self.session.doc, *id)
+                        .into_iter()
+                        .map(|o| o.reset)
+                        .collect();
+                    computed.as_slice()
+                }
+            };
+            let (Some(src), Some(mut cur)) = (
+                resets.iter().find_map(&theirs),
+                self.session.doc.get(*id).and_then(&mine),
+            ) else {
+                continue;
+            };
+            let want = get(&src);
+            if get(&cur) == want {
+                continue;
+            }
+            // A reset that would write nothing marks nothing: a sub-field the
+            // source's value has no place for — a flex field where the main is a
+            // grid — differs, and `put` has nowhere to take it from. The layout's
+            // own mark is the one that says so.
+            let before = cur.clone();
+            let shown = say(&want);
+            put(&mut cur, want);
+            if cur == before {
+                continue;
+            }
+            tip.get_or_insert_with(|| format!("Reset to main · {shown}"));
+            ops.push(write(*id, cur));
+        }
+        Some(OverrideMark {
+            tip: tip?,
+            tx: Transaction(ops),
+        })
     }
 
     /// The overrides `title`'s header shows, if it has any.
@@ -287,18 +468,37 @@ impl OndinApp {
                 self.reveal_selection();
             }
             Some(Act::GoToSource) => self.go_to_main(),
-            // Through `commit_edit`, as every inspector edit that changes ink is
-            // (`OndinApp::reset_tx`). *Detach* below changes no pixel and commits
-            // as its verb does — *Group*'s case in `commit_edit`'s doc.
+            // Through `commit_reset`, which is `commit_edit` as every inspector edit
+            // that changes ink is (`OndinApp::reset_tx`), restyling a live text
+            // session too. *Detach* below changes no pixel and commits as its verb
+            // does — *Group*'s case in `commit_edit`'s doc.
             Some(Act::Reset(kind)) => {
                 if let Some(tx) = self.reset_tx(kind) {
-                    self.commit_edit(tx);
+                    self.commit_reset(tx);
                 }
             }
             Some(Act::Detach) => self.detach_instances(),
             Some(Act::SelectAllInstances) => self.select_all_instances(),
             Some(Act::DuplicateAsComponent) => self.duplicate_as_component(),
         }
+    }
+
+    /// Whether the instance layer `id` removed any of its source's items from the
+    /// list `read` takes — the ghost rows (§15 D981, 4D) that keep a list card with
+    /// no item of its own from reading, and closing, as empty. `false` for `None`
+    /// and outside an instance.
+    pub(super) fn has_ghosts<T: Clone>(
+        &self,
+        id: Option<NodeId>,
+        read: impl Fn(&ondin_core::Node) -> &[ondin_core::Keyed<T>],
+    ) -> bool {
+        let doc = &self.session.doc;
+        let Some(cur) = id.and_then(|id| doc.get(id)) else {
+            return false;
+        };
+        ondin_core::reset::source_of(doc, cur.id())
+            .and_then(|s| doc.get(s))
+            .is_some_and(|src| !ondin_core::reset::removed_items(read(src), read(cur)).is_empty())
     }
 
     /// The list `read` takes from the node `id` is compared with — its source's
@@ -475,6 +675,93 @@ fn card_of(op: &Operation) -> Option<&'static str> {
         | O::SetGuideScope { .. }
         | O::AddImage { .. }
         | O::RemoveImage { .. } => None,
+    }
+}
+
+/// An overridden dropdown's reset (§15 D981), as the open list's first row —
+/// ↺ *Reset to main · Alpha*, then a rule. The mockup's ↺ takes the label's slot,
+/// and a dropdown's face is one press target that opens the list, with no label
+/// slot of its own to give, so the reset is the first thing the press shows
+/// instead. Answers whether it was clicked.
+pub(super) fn menu_reset_row(ui: &mut egui::Ui, mark: &OverrideMark) -> bool {
+    let hit = ui
+        .selectable_label(
+            false,
+            ui::glyph_and_text(icon::ARROW_COUNTER_CLOCKWISE, &mark.tip),
+        )
+        .clicked();
+    super::inspector::popup_rule(ui);
+    hit
+}
+
+/// A row's label carrying an override mark (§15 D981, 4C — *"row-labelled
+/// controls carry the dot after the label"*): at full brightness with the dot
+/// after it, and with the pointer on the label ↺ in the dot's place, the mark's
+/// tooltip, and a click that is the reset. Unmarked, the label as it was, in
+/// `ink`. Answers whether the reset was clicked.
+///
+/// `size` is the label's slot, its text centred in it as `add_sized` centred the
+/// plain label this replaces; `None` is the text's own width.
+pub(super) fn label_mark(
+    ui: &mut egui::Ui,
+    size: Option<egui::Vec2>,
+    text: &str,
+    pt: f32,
+    ink: egui::Color32,
+    mark: Option<&OverrideMark>,
+) -> bool {
+    let color = match mark {
+        Some(_) => theme::text::STRONG,
+        None => ink,
+    };
+    let galley =
+        ui.painter()
+            .layout_no_wrap(text.to_owned(), egui::FontId::proportional(pt), color);
+    let w = galley.size().x;
+    // The dot's room beside the text, so a marked label's width does not move
+    // what follows it.
+    let want = size.unwrap_or(galley.size() + egui::vec2(8.0, 0.0));
+    let sense = match mark {
+        Some(_) => egui::Sense::click(),
+        None => egui::Sense::hover(),
+    };
+    let (rect, resp) = ui.allocate_exact_size(want, sense);
+    let left = match size {
+        Some(_) => rect.center().x - w / 2.0,
+        None => rect.left(),
+    };
+    let at = egui::pos2(left, rect.center().y - galley.size().y / 2.0);
+    ui.painter().galley(at, galley, color);
+    let Some(m) = mark else {
+        return false;
+    };
+    if resp.hovered() {
+        ui.painter().text(
+            egui::pos2(at.x + w + 6.0, rect.center().y),
+            egui::Align2::CENTER_CENTER,
+            icon::ARROW_COUNTER_CLOCKWISE,
+            theme::icon_font(11.0),
+            theme::text::STRONG,
+        );
+    } else {
+        ui::override_dot(ui.painter(), at + egui::vec2(w + 1.5, 3.0));
+    }
+    resp.on_hover_text(&m.tip).clicked()
+}
+
+/// An overridden dropdown's dot, where it has no label to sit after: beside its
+/// chevron, at the height a field's dot sits beside its label (§15 D981).
+pub(super) fn combo_dot(p: &egui::Painter, face: egui::Rect) {
+    ui::override_dot(p, egui::pos2(face.right() - 26.0, face.center().y - 4.0));
+}
+
+/// A number as a mark's tooltip names it — two decimals at most, trailing zeros
+/// dropped: *Reset to main · 168*.
+pub(super) fn mark_num(v: f64) -> String {
+    let s = format!("{v:.2}");
+    match s.trim_end_matches('0').trim_end_matches('.') {
+        "-0" => "0".to_owned(),
+        s => s.to_owned(),
     }
 }
 
@@ -1129,6 +1416,147 @@ mod tests {
             doc.get(f.ir).unwrap().transform(),
             doc.get(main_rect).unwrap().transform(),
             "the main's x is back"
+        );
+    }
+
+    /// **The Appearance card's marks** (§15 D981): the instance's rect has its
+    /// opacity and one corner's radius overridden. Opacity's drop glyph is bright
+    /// and the radius field marked — the whole radius differs — while each corner
+    /// is marked alone: the top left and no other, its reset writing that corner
+    /// and leaving the other three as the copy holds them. A click on opacity's
+    /// glyph puts the main's 100% back. Flip: dropping `sub_mark`'s equality skip
+    /// marks every corner and fails *"the top right follows"*.
+    #[test]
+    fn appearance_marks_each_field_and_each_corner() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let mut radii = ondin_core::kurbo::RoundedRectRadii::from_single_radius(0.0);
+        radii.top_left = 4.0;
+        assert!(f.app.session.commit(Transaction(vec![
+            Operation::SetOpacity {
+                id: f.ir,
+                opacity: 0.5,
+            },
+            Operation::SetGeometry {
+                id: f.ir,
+                geometry: ondin_core::GeometryPatch::CornerRadii(radii),
+            },
+        ])));
+        f.app.session.selection.set_one(f.ir);
+        f.app.gather_card_overrides();
+        let marks = f.app.appearance_marks(f.ir);
+        assert!(marks.opacity.is_some() && marks.radius.is_some());
+        assert!(marks.corners[0].is_some(), "the top left is overridden");
+        assert!(marks.corners[1].is_none(), "the top right follows");
+        assert_eq!(
+            marks.corners[0].as_ref().unwrap().tx,
+            Transaction(vec![Operation::SetGeometry {
+                id: f.ir,
+                geometry: ondin_core::GeometryPatch::CornerRadii(Default::default()),
+            }]),
+            "the corner's reset writes that corner alone"
+        );
+        let mut out = frame(&mut f.app, &ctx, Vec::new());
+        for _ in 0..3 {
+            out = frame(&mut f.app, &ctx, Vec::new());
+        }
+        let painted = inks(&out);
+        let (drop_at, drop_ink) = painted
+            .iter()
+            .find(|(t, ..)| t == icon::DROP_HALF)
+            .map(|(_, r, c)| (*r, *c))
+            .expect("the opacity field");
+        assert_eq!(drop_ink, theme::text::STRONG, "opacity is overridden");
+        let at = drop_at.center();
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(&mut f.app, &ctx, vec![egui::Event::PointerMoved(at)]);
+        frame(&mut f.app, &ctx, vec![press(true)]);
+        frame(&mut f.app, &ctx, vec![press(false)]);
+        assert_eq!(f.app.session.doc.get(f.ir).unwrap().opacity(), 1.0);
+    }
+
+    /// **An instance that removed every item still shows its ghost rows** (§15
+    /// D981, 4D). The main's rect has a fill and an export; the instance removes
+    /// both, leaving each list empty. Both cards stay open and each draws its
+    /// ghost row — *Restore* twice — and each *Restore* puts the main's item back
+    /// by its id. Flips, both run: `has_ghosts` answering `false` collapses both
+    /// cards as empty and fails *"two ghost rows"* with none; the Fill card's
+    /// empty-list check put back to `fills.is_empty()` alone draws *No fill* in
+    /// the open card and fails the same assertion with one, the export's.
+    #[test]
+    fn an_emptied_list_still_draws_its_ghost_rows() {
+        use ondin_core::{ExportSpec, Fill, keyed_by_position};
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let r = f.app.session.doc.get(f.m).unwrap().children()[0];
+        let fills = keyed_by_position([Fill {
+            brush: ondin_core::Brush::Solid(ondin_core::peniko::Color::from_rgb8(10, 2, 30)),
+            visible: true,
+        }]);
+        let exports = keyed_by_position([ExportSpec::new(
+            ondin_core::ExportFormat::Png,
+            ondin_core::ExportScale::Times(2.0),
+        )]);
+        assert!(f.app.session.commit(Transaction(vec![
+            Operation::SetFills {
+                id: r,
+                fills: fills.clone(),
+            },
+            Operation::SetExports {
+                id: r,
+                exports: exports.clone(),
+            },
+        ])));
+        assert!(f.app.session.commit(Transaction(vec![
+            Operation::SetFills {
+                id: f.ir,
+                fills: Vec::new(),
+            },
+            Operation::SetExports {
+                id: f.ir,
+                exports: Vec::new(),
+            },
+        ])));
+        f.app.session.selection.set_one(f.ir);
+        let restores = |app: &mut OndinApp| {
+            let mut out = frame(app, &ctx, Vec::new());
+            for _ in 0..3 {
+                out = frame(app, &ctx, Vec::new());
+            }
+            texts(&out)
+                .into_iter()
+                .filter(|(t, _)| t == "Restore")
+                .map(|(_, r)| r.center())
+                .collect::<Vec<_>>()
+        };
+        let found = restores(&mut f.app);
+        assert_eq!(found.len(), 2, "two ghost rows");
+        let click = |app: &mut OndinApp, at: egui::Pos2| {
+            let press = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            };
+            frame(app, &ctx, vec![egui::Event::PointerMoved(at)]);
+            frame(app, &ctx, vec![press(true)]);
+            frame(app, &ctx, vec![press(false)]);
+        };
+        click(&mut f.app, found[0]);
+        let found = restores(&mut f.app);
+        assert_eq!(found.len(), 1, "one restored, one left");
+        click(&mut f.app, found[0]);
+        let node = f.app.session.doc.get(f.ir).unwrap();
+        assert_eq!(node.paint().fills, fills, "the fill back by its id");
+        assert_eq!(
+            node.exports(),
+            exports.as_slice(),
+            "the export back by its id"
         );
     }
 

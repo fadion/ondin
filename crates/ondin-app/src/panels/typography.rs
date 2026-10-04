@@ -73,6 +73,7 @@
 //! Paragraph tab that edit them say so on hover, because a control that quietly
 //! ignores the selection reads as broken rather than as limited.
 
+use super::component::{OverrideMark, mark_num};
 use super::paint::{CharSlot, CharWrite, DecorationSide};
 use super::{ClickAway, dismissed_by_click};
 use crate::app::{OndinApp, TypeTab};
@@ -698,7 +699,137 @@ fn family_actually_changed(chosen: Option<String>, current: &str, mixed: bool) -
     chosen.filter(|f| mixed || f != current)
 }
 
+/// The Type card's override marks — `OndinApp::type_marks`.
+#[derive(Default)]
+struct TypeMarks {
+    family: Option<OverrideMark>,
+    variant: Option<OverrideMark>,
+    size: Option<OverrideMark>,
+    line_height: Option<OverrideMark>,
+    letter_spacing: Option<OverrideMark>,
+    align: Option<OverrideMark>,
+    valign: Option<OverrideMark>,
+}
+
+/// A `Length` as a mark's tooltip names it: *120%*, *4*.
+fn length_words(l: &Length) -> String {
+    match *l {
+        Length::Em(m) => format!("{}%", mark_num(m * 100.0)),
+        Length::Px(v) => mark_num(v),
+    }
+}
+
 impl OndinApp {
+    /// One text style field's override mark on text `id` (§15 D981): compared on
+    /// the node's own style, the one `reset::overrides` compares — not a run's,
+    /// which is the content's unit and *Reset* on the layer.
+    fn style_mark<V: PartialEq + Clone>(
+        &self,
+        id: NodeId,
+        get: impl Fn(&TextStyle) -> V,
+        put: impl Fn(&mut TextStyle, V),
+        say: impl Fn(&V) -> String,
+    ) -> Option<OverrideMark> {
+        self.sub_mark(
+            &[id],
+            |op| match op {
+                Operation::SetTextStyle { style, .. } => Some(style.clone()),
+                _ => None,
+            },
+            |n| match n.kind() {
+                ondin_core::NodeKind::Text { style, .. } => Some((**style).clone()),
+                _ => None,
+            },
+            get,
+            put,
+            |id, style| Operation::SetTextStyle {
+                id,
+                style,
+                spans: None,
+            },
+            say,
+        )
+    }
+
+    /// The Type card's override marks for text `id` (§15 D981): the five style
+    /// fields, the paragraph's alignment and the box's vertical alignment.
+    fn type_marks(&self, id: NodeId) -> TypeMarks {
+        TypeMarks {
+            family: self.style_mark(
+                id,
+                |s| s.font_family.clone(),
+                |s, v| s.font_family = v,
+                |v| v.clone(),
+            ),
+            // The face: weight, italic and the axes a variant sets, as one.
+            variant: self.style_mark(
+                id,
+                |s| (s.weight, s.italic, s.variations.clone()),
+                |s, (w, i, v)| {
+                    s.weight = w;
+                    s.italic = i;
+                    s.variations = v;
+                },
+                |(w, i, _)| match i {
+                    true => format!("{w} italic"),
+                    false => w.to_string(),
+                },
+            ),
+            size: self.style_mark(
+                id,
+                |s| s.font_size,
+                |s, v| s.font_size = v,
+                |v| mark_num(*v),
+            ),
+            line_height: self.style_mark(
+                id,
+                |s| s.line_height,
+                |s, v| s.line_height = v,
+                |v| v.as_ref().map_or_else(|| "auto".to_owned(), length_words),
+            ),
+            letter_spacing: self.style_mark(
+                id,
+                |s| s.letter_spacing,
+                |s, v| s.letter_spacing = v,
+                length_words,
+            ),
+            align: self.sub_mark(
+                &[id],
+                |op| match op {
+                    Operation::SetParagraphStyle { paragraph, .. } => Some(paragraph.clone()),
+                    _ => None,
+                },
+                |n| match n.kind() {
+                    ondin_core::NodeKind::Text { paragraph, .. } => Some(paragraph.clone()),
+                    _ => None,
+                },
+                |p| p.align,
+                |p, v| p.align = v,
+                |id, paragraph| Operation::SetParagraphStyle {
+                    id,
+                    paragraph,
+                    spans: None,
+                },
+                |v| format!("{v:?}"),
+            ),
+            valign: self.sub_mark(
+                &[id],
+                |op| match op {
+                    Operation::SetBlockStyle { block, .. } => Some(*block),
+                    _ => None,
+                },
+                |n| match n.kind() {
+                    ondin_core::NodeKind::Text { block, .. } => Some(*block),
+                    _ => None,
+                },
+                |b| b.vertical_align,
+                |b, v| b.vertical_align = v,
+                |id, block| Operation::SetBlockStyle { id, block },
+                |v| format!("{v:?}"),
+            ),
+        }
+    }
+
     /// The Type panel: family, variant and size, the two `Length` fields, and the
     /// alignment row with the popup's button on the end.
     pub(crate) fn inspector_type(&mut self, ui: &mut egui::Ui, subject: TypeSubject) {
@@ -709,20 +840,22 @@ impl OndinApp {
         // the panel closure as a plain local, since `panel` hands the closure
         // `&mut Self` and nothing else.
         let mut menu_button: Option<egui::Rect> = None;
+        let marks = self.type_marks(subject.id);
         self.panel(ui, "Type", None, |app, ui| {
-            app.type_family_row(ui, &subject);
+            app.type_family_row(ui, &subject, marks.family.as_ref());
             let half = egui::vec2((ui.available_width() - GAP) / 2.0, ROW_H);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = GAP;
-                app.type_variant_field(ui, &subject, half);
-                app.type_size_field(ui, &subject, half);
+                app.type_variant_field(ui, &subject, half, marks.variant.as_ref());
+                let (_, hit) = app.type_size_field(ui, &subject, half, marks.size.as_ref());
+                app.reset_marked(hit, &marks.size);
             });
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = GAP;
-                app.type_line_height_field(ui, &subject, half);
-                app.type_letter_spacing_field(ui, &subject, half);
+                app.type_line_height_field(ui, &subject, half, marks.line_height.as_ref());
+                app.type_letter_spacing_field(ui, &subject, half, marks.letter_spacing.as_ref());
             });
-            menu_button = app.type_alignment_row(ui, &subject);
+            menu_button = app.type_alignment_row(ui, &subject, [&marks.align, &marks.valign]);
         });
         self.type_menu_popup(ui, &subject, menu_button);
     }
@@ -743,7 +876,12 @@ impl OndinApp {
     /// - **Drawing a row asks for that family's regular face**, so scrolling the
     ///   list warms exactly the files picking a family needs. The row is where the
     ///   prefetch comes from; the preview is what makes it worth doing anyway.
-    fn type_family_row(&mut self, ui: &mut egui::Ui, subject: &TypeSubject) {
+    fn type_family_row(
+        &mut self,
+        ui: &mut egui::Ui,
+        subject: &TypeSubject,
+        mark: Option<&OverrideMark>,
+    ) {
         let shown = attr!(subject, Family, Family);
         let mixed = subject.mixed(CharAttrKind::Family);
         let current = shown.clone();
@@ -776,6 +914,7 @@ impl OndinApp {
             _ => ui::glyph_and_text(icon::TEXT_AA, &label),
         };
         let mut chosen: Option<String> = None;
+        let mut reset = false;
         let width = ui.available_width();
         // **A combo paints exactly `interact_size.y`, so the row states it** — and
         // in a `scope`, or the height would leak into the fields below. Left to the
@@ -810,6 +949,14 @@ impl OndinApp {
                     // theme's 6px item spacing was set for stacked panel rows, and
                     // here it separates a field from a list that belongs to it.
                     ui.spacing_mut().item_spacing.y = 3.0;
+                    // An instance's overridden family (§15 D981), first. This list
+                    // closes only by hand (`close_behavior` above).
+                    if let Some(m) = mark
+                        && super::component::menu_reset_row(ui, m)
+                    {
+                        reset = true;
+                        ui.close();
+                    }
                     ui.add(
                         egui::TextEdit::singleline(&mut self.font_filter)
                             .margin(egui::Margin::symmetric(FILTER_PAD_X, FILTER_PAD_Y))
@@ -834,6 +981,9 @@ impl OndinApp {
                     );
                 })
                 .response;
+            if mark.is_some() {
+                super::component::combo_dot(ui.painter(), combo.rect);
+            }
             // **The sentence hangs off the combo's own head response**, which is the
             // one place it fires: a tooltip on the wrapping `ui.scope` is silently
             // dead, the scope's response being a placeholder over the rect rather
@@ -847,6 +997,10 @@ impl OndinApp {
                 );
             }
         });
+        if reset && let Some(m) = mark {
+            self.commit_reset(m.tx.clone());
+            return;
+        }
         if let Some(family) = family_actually_changed(chosen, &current, mixed) {
             self.fonts.ensure_loaded(&family);
             // **The axis and feature settings go with the family.** They are named
@@ -932,7 +1086,13 @@ impl OndinApp {
     /// variant** — the same shape as the stroke panel's `DashStyle::Custom`, and
     /// classified from the values rather than stored beside them, so a hand-tuned
     /// axis cannot leave the field claiming "Bold".
-    fn type_variant_field(&mut self, ui: &mut egui::Ui, subject: &TypeSubject, size: egui::Vec2) {
+    fn type_variant_field(
+        &mut self,
+        ui: &mut egui::Ui,
+        subject: &TypeSubject,
+        size: egui::Vec2,
+        mark: Option<&OverrideMark>,
+    ) {
         let family = attr!(subject, Family, Family);
         let variants = text::family_variants(&family);
         let weight = attr!(subject, Weight, Weight);
@@ -957,19 +1117,24 @@ impl OndinApp {
             return;
         }
         let mut pick: Option<usize> = None;
+        let mut reset = false;
         ui.scope(|ui| {
             // The combo paints its border *inside* its rect, so its height is `size.y`
             // whole — subtracting the hairline (right for content inside a `field_row`)
             // left it 2px short of the fields beside it (§15 D85).
             ui.spacing_mut().interact_size.y = size.y;
             ui.spacing_mut().button_padding.y = 0.0;
-            egui::ComboBox::from_id_salt("font-variant")
+            let face = egui::ComboBox::from_id_salt("font-variant")
                 .icon(ui::combo_chevron)
                 .width(size.x)
                 .selected_text(ui::glyph_and_text(icon::TEXT_BOLD, &label))
                 .show_ui(ui, |ui| {
                     ui::menu_rows(ui);
                     ui.spacing_mut().button_padding.y = 2.0;
+                    // An instance's overridden face (§15 D981), first.
+                    if let Some(m) = mark {
+                        reset = super::component::menu_reset_row(ui, m);
+                    }
                     for (i, v) in variants.iter().enumerate() {
                         if ui.selectable_label(current == Some(i), &v.name).clicked() {
                             pick = Some(i);
@@ -981,8 +1146,16 @@ impl OndinApp {
                     if current.is_none() {
                         ui.add_enabled(false, egui::Button::new("Custom"));
                     }
-                });
+                })
+                .response;
+            if mark.is_some() {
+                super::component::combo_dot(ui.painter(), face.rect);
+            }
         });
+        if reset && let Some(m) = mark {
+            self.commit_reset(m.tx.clone());
+            return;
+        }
         if let Some(i) = pick {
             let v = &variants[i];
             let mut merged = coords.clone();
@@ -1049,17 +1222,22 @@ impl OndinApp {
     /// and for the same reason: the widget's rect is not predictable from
     /// outside, so a test that wants to click into it has to draw it once to
     /// find where it is. Nothing in production reads the value.
+    ///
+    /// `mark` is an instance's override mark (§15 D981); the second return value
+    /// is whether its ↺ was clicked.
     fn type_size_field(
         &mut self,
         ui: &mut egui::Ui,
         subject: &TypeSubject,
         size: egui::Vec2,
-    ) -> egui::Response {
+        mark: Option<&OverrideMark>,
+    ) -> (egui::Response, bool) {
         let mut value = subject.font_size();
-        let resp = value_field(
+        let (resp, hit) = ui::value_field_marked(
             ui,
             size,
             Prefix::Icon(icon::TEXT_T),
+            mark.map(OverrideMark::field),
             &mut value,
             Scrub::whole(0.5).range(MIN_FONT_SIZE..=MAX_FONT_SIZE),
             |d| {
@@ -1068,7 +1246,7 @@ impl OndinApp {
             },
         );
         self.char_valve(&resp, subject, CharAttr::Size(value));
-        resp
+        (resp, hit)
     }
 
     /// Line height: `Auto`, a percentage of the font size, or absolute px.
@@ -1083,6 +1261,7 @@ impl OndinApp {
         ui: &mut egui::Ui,
         subject: &TypeSubject,
         size: egui::Vec2,
+        mark: Option<&OverrideMark>,
     ) {
         let current = match subject.shown(CharAttrKind::LineHeight) {
             CharAttr::LineHeight(v) => v,
@@ -1132,11 +1311,12 @@ impl OndinApp {
                 expr::Unit::Px,
             ),
         };
-        let (resp, unit_clicked) = value_field_suffixed(
+        let (resp, unit, hit) = ui::value_field_unit_marked(
             ui,
             size,
             Prefix::Icon(icon::ARROWS_VERTICAL),
             suffix,
+            mark.map(OverrideMark::field),
             &mut shown,
             scrub,
             // Its own parser, for [`length_field`]'s reason: px and % on one
@@ -1155,6 +1335,12 @@ impl OndinApp {
                 d
             },
         );
+        // An instance's overridden line height, put back (§15 D981) — and the valve
+        // below still told, with the number unmoved, since it owns the latch.
+        if hit && let Some(m) = mark {
+            self.commit_reset(m.tx.clone());
+        }
+        let unit_clicked = unit.is_some_and(|u| u.clicked());
         if unit_clicked {
             self.apply_char_attrs(
                 subject,
@@ -1183,8 +1369,9 @@ impl OndinApp {
         ui: &mut egui::Ui,
         subject: &TypeSubject,
         size: egui::Vec2,
+        mark: Option<&OverrideMark>,
     ) {
-        self.length_char_field(
+        self.length_char_field_marked(
             ui,
             subject,
             size,
@@ -1192,6 +1379,7 @@ impl OndinApp {
             Prefix::Icon(icon::TEXT_AA),
             Bounds::TRACKING,
             "Letter spacing",
+            mark,
         );
     }
 
@@ -1208,7 +1396,9 @@ impl OndinApp {
         &mut self,
         ui: &mut egui::Ui,
         subject: &TypeSubject,
+        marks: [&Option<OverrideMark>; 2],
     ) -> Option<egui::Rect> {
+        let [align_mark, valign_mark] = marks;
         // **The row is on the *column* grid of the fields above it, not on its own
         // module.** Two passes got this wrong in opposite directions. First the
         // horizontal set took the row's remainder while the vertical set was pinned
@@ -1235,16 +1425,23 @@ impl OndinApp {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
             let align = subject.paragraph.align;
-            if let Some(i) = segmented(
+            // An instance's overridden alignments (§15 D981), on their lit cells.
+            let (pick, reset) = ui::segmented_marked(
                 ui,
                 horizontal_w,
                 SEG_CELL_H,
                 4,
                 align.cell(),
+                |_| true,
+                |_| "",
+                align_mark.as_ref().map(OverrideMark::field),
                 |p, i, rect, on| {
                     segment_glyph(p, rect, ALIGN_GLYPHS[i], on);
                 },
-            ) && TextAlign::OFFERED[i] != align
+            );
+            self.reset_marked(reset, align_mark);
+            if let Some(i) = pick
+                && TextAlign::OFFERED[i] != align
             {
                 let mut next = subject.paragraph.clone();
                 next.align = TextAlign::OFFERED[i];
@@ -1264,10 +1461,21 @@ impl OndinApp {
                 if !enabled {
                     ui.disable();
                 }
-                if let Some(i) =
-                    segmented(ui, vertical_w, SEG_CELL_H, 3, current, |p, i, rect, on| {
+                let (pick, reset) = ui::segmented_marked(
+                    ui,
+                    vertical_w,
+                    SEG_CELL_H,
+                    3,
+                    current,
+                    |_| true,
+                    |_| "",
+                    valign_mark.as_ref().map(OverrideMark::field),
+                    |p, i, rect, on| {
                         segment_glyph(p, rect, VALIGN_GLYPHS[i], on);
-                    })
+                    },
+                );
+                self.reset_marked(reset, valign_mark);
+                if let Some(i) = pick
                     && VerticalAlign::ALL[i] != valign
                 {
                     let next = BlockStyle {
@@ -3241,6 +3449,22 @@ impl OndinApp {
         bounds: Bounds,
         tooltip: &str,
     ) {
+        self.length_char_field_marked(ui, subject, size, kind, prefix, bounds, tooltip, None);
+    }
+
+    /// [`Self::length_char_field`] with an instance's override mark (§15 D981).
+    #[allow(clippy::too_many_arguments)]
+    fn length_char_field_marked(
+        &mut self,
+        ui: &mut egui::Ui,
+        subject: &TypeSubject,
+        size: egui::Vec2,
+        kind: CharAttrKind,
+        prefix: Prefix,
+        bounds: Bounds,
+        tooltip: &str,
+        mark: Option<&OverrideMark>,
+    ) {
         let pct_range = bounds.pct.clone();
         let current = match subject.shown(kind) {
             CharAttr::LetterSpacing(l) | CharAttr::WordSpacing(l) | CharAttr::BaselineShift(l) => l,
@@ -3260,7 +3484,7 @@ impl OndinApp {
                 expr::Unit::Px,
             ),
         };
-        let (resp, unit_clicked) = value_field_suffixed(
+        let (resp, unit, hit) = ui::value_field_unit_marked(
             ui,
             size,
             prefix,
@@ -3269,6 +3493,7 @@ impl OndinApp {
                 clickable: true,
                 tooltip: "Click to switch unit",
             }),
+            mark.map(OverrideMark::field),
             &mut shown,
             scrub,
             // Its own parser, for [`length_field`]'s reason: two units on one
@@ -3288,8 +3513,17 @@ impl OndinApp {
         // shift, sit **side by side in one row** behind two icons a reader has to
         // already know. The chip had its own text the whole time, which is the
         // shape `[S6.2-L3-09]`'s third divergence was about from the other side.
-        let resp = resp.on_hover_text(tooltip);
-        if unit_clicked {
+        // A marked field's tip names the main's value instead; two would stack.
+        let resp = match mark {
+            None => resp.on_hover_text(tooltip),
+            Some(m) => {
+                if hit {
+                    self.commit_reset(m.tx.clone());
+                }
+                resp
+            }
+        };
+        if unit.is_some_and(|u| u.clicked()) {
             let next = current.in_unit(current.unit().other(), font_size);
             self.apply_char_attrs(subject, vec![length_attr(kind, next)]);
             return;
@@ -9029,7 +9263,8 @@ mod char_valve_tests {
             |ui| {
                 ui.set_width(240.0);
                 out = app
-                    .type_size_field(ui, &subject, egui::vec2(120.0, 28.0))
+                    .type_size_field(ui, &subject, egui::vec2(120.0, 28.0), None)
+                    .0
                     .rect;
             },
         );
@@ -9255,6 +9490,96 @@ mod skip_ink_tests {
         (ctx, app, id)
     }
 
+    /// **The Type card's override marks** (§15 D981). The text is put in a group
+    /// made a main and an instance of it placed; the copy's size and its paragraph
+    /// alignment are overridden. Size and alignment are marked and family, line
+    /// height and the vertical alignment are not, and the size's reset writes the
+    /// main's 20 into the copy's own style and changes nothing else in it. Flip:
+    /// `style_mark` comparing the whole style marks the family over the size and
+    /// fails *"the family follows"*.
+    #[test]
+    fn the_type_card_marks_an_instances_own_fields_and_no_others() {
+        let (_ctx, mut app, text) = app_with(CharAttr::Size(20.0));
+        let group = app.session.ids.mint();
+        let root = app.session.doc.root();
+        assert!(app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: group,
+                parent: root,
+                index: 0,
+                kind: ondin_core::NodeKind::Group,
+                transform: None,
+                name: Some("Label".into()),
+            },
+            Operation::Reparent {
+                id: text,
+                new_parent: group,
+                index: 0,
+            },
+            Operation::SetComponent {
+                id: group,
+                component: true,
+            },
+        ])));
+        let inst = {
+            let doc = &app.session.doc;
+            let (tx, made) = ondin_core::insert_subtrees(
+                doc,
+                &mut app.session.ids,
+                &[ondin_core::Placement {
+                    nodes: doc.capture_subtree(group).unwrap(),
+                    parent: root,
+                    index: None,
+                }],
+                Default::default(),
+            );
+            assert!(app.session.commit(tx));
+            made[0]
+        };
+        let copy = app.session.doc.get(inst).unwrap().children()[0];
+        let (style, paragraph) = match app.session.doc.get(copy).unwrap().kind() {
+            ondin_core::NodeKind::Text {
+                style, paragraph, ..
+            } => ((**style).clone(), paragraph.clone()),
+            _ => unreachable!("a text"),
+        };
+        assert!(app.session.commit(Transaction(vec![
+            Operation::SetTextStyle {
+                id: copy,
+                style: TextStyle {
+                    font_size: 30.0,
+                    ..style.clone()
+                },
+                spans: None,
+            },
+            Operation::SetParagraphStyle {
+                id: copy,
+                paragraph: ParagraphStyle {
+                    align: TextAlign::Center,
+                    ..paragraph
+                },
+                spans: None,
+            },
+        ])));
+        app.session.selection.set_one(copy);
+        app.gather_card_overrides();
+        let marks = app.type_marks(copy);
+        assert!(marks.family.is_none(), "the family follows");
+        assert!(marks.line_height.is_none() && marks.valign.is_none());
+        assert!(marks.align.is_some(), "the alignment is overridden");
+        let size = marks.size.expect("the size is overridden");
+        assert_eq!(size.tip, "Reset to main · 20");
+        assert_eq!(
+            size.tx,
+            Transaction(vec![Operation::SetTextStyle {
+                id: copy,
+                style,
+                spans: None,
+            }]),
+            "the main's size into the copy's own style, nothing else moved"
+        );
+    }
+
     /// One frame of the decoration section alone, with `events` delivered to it.
     fn frame(
         ctx: &egui::Context,
@@ -9388,7 +9713,7 @@ mod skip_ink_tests {
                 };
                 let _ = ctx.run_ui(input, |ui| {
                     ui.set_width(MENU_INNER);
-                    app.type_letter_spacing_field(ui, &subject, egui::vec2(120.0, 28.0));
+                    app.type_letter_spacing_field(ui, &subject, egui::vec2(120.0, 28.0), None);
                 });
             }
 

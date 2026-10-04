@@ -37,6 +37,7 @@
 //! inert** (§15 D882), because its container places it and a typed position would
 //! be dropped at the commit door (`build::keep_flex_sizes`, §15 D877's amendment).
 
+use super::component::OverrideMark;
 use crate::app::OndinApp;
 use crate::theme::{self, color, icon};
 use crate::ui::{self, Prefix, Scrub, Suffix};
@@ -659,6 +660,48 @@ fn plain_mode(d: Dimension) -> SizeMode {
     }
 }
 
+/// A segmented cell's tooltip up to its dash — *Row reverse* out of *Row reverse —
+/// items run right to left* — as an override mark names the value (§15 D981).
+fn tip_word(tips: &[&'static str], i: Option<usize>) -> String {
+    i.and_then(|i| tips.get(i))
+        .and_then(|t| t.split(" —").next())
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// A layout compared by its **mode** alone — none, flex or grid — for the
+/// `display` cells' override mark (§15 D981): a copy whose gap differs is still a
+/// flex like its main, and that difference is the gap field's mark, not this one.
+/// Its reset writes the main's whole layout, as the mode it names comes with it.
+#[derive(Clone)]
+struct ByMode(Option<Display>);
+
+impl PartialEq for ByMode {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.as_ref().map(std::mem::discriminant) == other.0.as_ref().map(std::mem::discriminant)
+    }
+}
+
+/// The source's layout item out of a field reset — what an Item card field's
+/// override mark compares against (`OndinApp::sub_mark`, §15 D981).
+pub(crate) fn item_of(op: &Operation) -> Option<LayoutItem> {
+    match op {
+        Operation::SetLayoutItem { item, .. } => Some(*item),
+        _ => None,
+    }
+}
+
+/// A stored size as an override mark's tooltip names it (§15 D981): the number
+/// in its unit, or the keyword — *Reset to main · 50%*, *· fit content*.
+pub(crate) fn dimension_words(d: &Dimension) -> String {
+    match *d {
+        Dimension::Px(v) => super::component::mark_num(v),
+        Dimension::Percent(v) => format!("{}%", super::component::mark_num(v)),
+        Dimension::Auto => SizeMode::Auto.word().to_owned(),
+        Dimension::FitContent => SizeMode::FitContent.word().to_owned(),
+    }
+}
+
 /// What a [`size_field`] did this frame.
 pub(crate) struct SizeEdit {
     /// The number's own response, for the valve.
@@ -670,6 +713,8 @@ pub(crate) struct SizeEdit {
     /// through the frame the field lets go ([`edited`], §15 D885) — so the valve's
     /// committing frame has it too.
     pub typed: Option<f64>,
+    /// The override mark's ↺ was clicked (§15 D981).
+    pub reset: bool,
 }
 
 /// A value field whose unit is a **menu of sizing modes** (§15 D879).
@@ -692,6 +737,10 @@ pub(crate) struct SizeEdit {
 ///   "Mixed" ([`mixed_if`], §15 D892).
 ///
 /// Typing or dragging writes the number in px, or in % while the mode is %.
+///
+/// `mark` is an instance's override mark on the field (§15 D981), its ↺ answered
+/// as [`SizeEdit::reset`].
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn size_field(
     ui: &mut egui::Ui,
     size: egui::Vec2,
@@ -700,6 +749,7 @@ pub(crate) fn size_field(
     number: Option<f64>,
     under: f64,
     modes: &[SizeMode],
+    mark: Option<ui::FieldMark<'_>>,
 ) -> SizeEdit {
     let mut v = number.unwrap_or(under);
     let start = v;
@@ -709,7 +759,7 @@ pub(crate) fn size_field(
         (None, Some(m @ (SizeMode::Auto | SizeMode::FitContent))) => Some(m.word()),
         _ => None,
     };
-    let (resp, unit) = ui::value_field_unit(
+    let (resp, unit, reset) = ui::value_field_unit_marked(
         ui,
         size,
         prefix,
@@ -722,6 +772,7 @@ pub(crate) fn size_field(
             clickable: modes.len() > 1,
             tooltip: "How this size is set",
         }),
+        mark,
         &mut v,
         if percent {
             Scrub::fine(0.25, 1)
@@ -771,6 +822,7 @@ pub(crate) fn size_field(
         resp,
         picked,
         typed,
+        reset,
     }
 }
 
@@ -789,6 +841,10 @@ pub(crate) fn size_field(
 /// D923), so the list always lights what the face names — grid's menus leave
 /// `baseline` out (§15 D919) and a grid can still hold it, from flex or a file,
 /// and the face read *Baseline* over a list with nothing lit.
+///
+/// `mark` is an instance's override mark (§15 D981): the label at full brightness
+/// with the dot after it, and the open list led by its reset
+/// (`component::menu_reset_row`) — answered as the second return value.
 #[allow(clippy::too_many_arguments)]
 fn glyph_combo<T: Copy + PartialEq>(
     ui: &mut egui::Ui,
@@ -803,8 +859,10 @@ fn glyph_combo<T: Copy + PartialEq>(
     auto: Option<T>,
     enabled: bool,
     hint: Option<&str>,
-) -> Option<Option<T>> {
+    mark: Option<&OverrideMark>,
+) -> (Option<Option<T>>, bool) {
     let mut picked = None;
+    let mut reset = false;
     ui.scope(|ui| {
         ui.spacing_mut().interact_size.y = ui::CONTROL_H;
         ui.spacing_mut().button_padding.y = 0.0;
@@ -838,7 +896,13 @@ fn glyph_combo<T: Copy + PartialEq>(
         job.append(
             label,
             0.0,
-            egui::TextFormat::simple(label_font, theme::text::FAINT),
+            egui::TextFormat::simple(
+                label_font,
+                match mark {
+                    Some(_) => theme::text::STRONG,
+                    None => theme::text::FAINT,
+                },
+            ),
         );
         job.append(
             &face_text,
@@ -854,6 +918,9 @@ fn glyph_combo<T: Copy + PartialEq>(
                 .show_ui(ui, |ui| {
                     ui::menu_rows(ui);
                     ui.spacing_mut().button_padding.y = 2.0;
+                    if let Some(m) = mark {
+                        reset = super::component::menu_reset_row(ui, m);
+                    }
                     let row_pad = ui.spacing().button_padding.x;
                     let held = match shown {
                         Some(Some(v)) if !options.contains(&v) => Some(Some(v)),
@@ -895,6 +962,13 @@ fn glyph_combo<T: Copy + PartialEq>(
                 .response
         });
         let face = inner.inner.rect;
+        if mark.is_some() {
+            // After the label, at the height a field's dot sits (`ui::value_field_marked`).
+            ui::override_dot(
+                ui.painter(),
+                egui::pos2(face.left() + pad + label_w + 3.5, face.center().y - 4.0),
+            );
+        }
         if let Some(g) = face_glyph {
             paint_glyph(
                 ui.painter(),
@@ -918,7 +992,7 @@ fn glyph_combo<T: Copy + PartialEq>(
             );
         }
     });
-    picked
+    (picked, reset)
 }
 
 /// A `display` cell: its picture and its word, centred together.
@@ -1045,13 +1119,33 @@ impl OndinApp {
                 _ => None,
             })
             .collect();
+        // The `display` cells' mark, by mode alone ([`ByMode`], §15 D981).
+        let mode_mark = self.sub_mark(
+            &subjects,
+            |op| match op {
+                Operation::SetDisplay { display, .. } => Some(display.clone()),
+                _ => None,
+            },
+            |n| Some(n.display().cloned()),
+            |d| ByMode(d.clone()),
+            |d, v| *d = v.0,
+            |id, display| Operation::SetDisplay { id, display },
+            |v| {
+                match &v.0 {
+                    None => "None",
+                    Some(Display::Flex(_)) => "Flex",
+                    Some(Display::Grid(_)) => "Grid",
+                }
+                .to_owned()
+            },
+        );
         self.panel(ui, "Container", None, |app, ui| {
             let full = ui.available_width();
             // Nothing raised while the selection disagrees — `segmented`'s mixed
             // reading, an index past the last cell — and the first cell's picture
             // traded for `ui::segment_mixed`'s dash, the Type panel's convention
             // and one of D130's two dashes; blank read as a bug (§15 D892).
-            if let Some(i) = ui::segmented_tipped(
+            let (pick, reset) = ui::segmented_marked(
                 ui,
                 full,
                 ui::SEGMENT_CELL_H,
@@ -1059,6 +1153,7 @@ impl OndinApp {
                 mode.unwrap_or(3),
                 |_| true,
                 |i| DISPLAY_TIPS[i],
+                mode_mark.as_ref().map(OverrideMark::field),
                 |p, i, r, on| {
                     if mode.is_none() && i == 0 {
                         ui::segment_mixed(p, r);
@@ -1066,7 +1161,9 @@ impl OndinApp {
                         display_cell(p, i, r, on);
                     }
                 },
-            ) {
+            );
+            app.reset_marked(reset, &mode_mark);
+            if let Some(i) = pick {
                 app.set_display(&subjects, i);
             }
             let laid: Vec<Display> = displays.iter().flatten().cloned().collect();
@@ -1213,6 +1310,37 @@ impl OndinApp {
         // subject's when the selection disagrees.
         let orient = |g: Glyph| Orient::of(g, &first);
         let wraps = wrap != Some(FlexWrap::NoWrap);
+        // An instance's overridden flex fields (§15 D981), each its own mark.
+        let direction_mark = self.flex_mark(
+            subjects,
+            |f| f.direction,
+            |f, v| f.direction = v,
+            |v| tip_word(&DIRECTION_TIPS, DIRECTIONS.iter().position(|d| d == v)),
+        );
+        let wrap_mark = self.flex_mark(
+            subjects,
+            |f| f.wrap,
+            |f, v| f.wrap = v,
+            |v| tip_word(&WRAP_TIPS, WRAPS.iter().position(|w| w == v)),
+        );
+        let justify_mark = self.flex_mark(
+            subjects,
+            |f| f.justify_content,
+            |f, v| f.justify_content = v,
+            |v| justify_name(*v).to_owned(),
+        );
+        let align_mark = self.flex_mark(
+            subjects,
+            |f| f.align_items,
+            |f, v| f.align_items = v,
+            |v| align_name(*v).to_owned(),
+        );
+        let content_mark = self.flex_mark(
+            subjects,
+            |f| f.align_content,
+            |f, v| f.align_content = v,
+            |v| content_name(*v).to_owned(),
+        );
 
         // --- direction and wrap ---------------------------------------------
         ui.horizontal(|ui| {
@@ -1227,7 +1355,7 @@ impl OndinApp {
             let at = direction
                 .and_then(|d| DIRECTIONS.iter().position(|x| *x == d))
                 .unwrap_or(DIRECTIONS.len());
-            if let Some(i) = ui::segmented_tipped(
+            let (pick, reset) = ui::segmented_marked(
                 ui,
                 cell * 4.0,
                 ui::SEGMENT_CELL_H,
@@ -1235,11 +1363,14 @@ impl OndinApp {
                 at,
                 |_| true,
                 |i| DIRECTION_TIPS[i],
+                direction_mark.as_ref().map(OverrideMark::field),
                 |p, i, r, on| match direction {
                     None if i == 0 => ui::segment_mixed(p, r),
                     _ => ui::segment_glyph(p, r, arrows[i], on),
                 },
-            ) {
+            );
+            self.reset_marked(reset, &direction_mark);
+            if let Some(i) = pick {
                 let tx = self.flex_tx(subjects, |f| f.direction = DIRECTIONS[i]);
                 self.commit_edit(tx);
             }
@@ -1251,7 +1382,7 @@ impl OndinApp {
             let at = wrap
                 .and_then(|w| WRAPS.iter().position(|x| *x == w))
                 .unwrap_or(WRAPS.len());
-            if let Some(i) = ui::segmented_tipped(
+            let (pick, reset) = ui::segmented_marked(
                 ui,
                 cell * 3.0,
                 ui::SEGMENT_CELL_H,
@@ -1259,18 +1390,21 @@ impl OndinApp {
                 at,
                 |_| true,
                 |i| WRAP_TIPS[i],
+                wrap_mark.as_ref().map(OverrideMark::field),
                 |p, i, r, on| match wrap {
                     None if i == 0 => ui::segment_mixed(p, r),
                     _ => ui::segment_glyph(p, r, turns[i], on),
                 },
-            ) {
+            );
+            self.reset_marked(reset, &wrap_mark);
+            if let Some(i) = pick {
                 let tx = self.flex_tx(subjects, |f| f.wrap = WRAPS[i]);
                 self.commit_edit(tx);
             }
         });
 
         // --- the alignments -------------------------------------------------
-        if let Some(Some(j)) = glyph_combo(
+        let (pick, reset) = glyph_combo(
             ui,
             "flex-justify",
             "Justify content",
@@ -1283,11 +1417,14 @@ impl OndinApp {
             None,
             true,
             None,
-        ) {
+            justify_mark.as_ref(),
+        );
+        self.reset_marked(reset, &justify_mark);
+        if let Some(Some(j)) = pick {
             let tx = self.flex_tx(subjects, |f| f.justify_content = j);
             self.commit_edit(tx);
         }
-        if let Some(Some(a)) = glyph_combo(
+        let (pick, reset) = glyph_combo(
             ui,
             "flex-align-items",
             "Align items",
@@ -1300,13 +1437,16 @@ impl OndinApp {
             None,
             true,
             None,
-        ) {
+            align_mark.as_ref(),
+        );
+        self.reset_marked(reset, &align_mark);
+        if let Some(Some(a)) = pick {
             let tx = self.flex_tx(subjects, |f| f.align_items = a);
             self.commit_edit(tx);
         }
         // **Dimmed in place rather than removed** while nothing wraps — the
         // mockup's note: toggling wrap must not shift the card under the pointer.
-        if let Some(Some(c)) = glyph_combo(
+        let (pick, reset) = glyph_combo(
             ui,
             "flex-align-content",
             "Align content",
@@ -1319,7 +1459,10 @@ impl OndinApp {
             None,
             wraps,
             (!wraps).then_some("Needs wrap"),
-        ) {
+            content_mark.as_ref(),
+        );
+        self.reset_marked(reset, &content_mark);
+        if let Some(Some(c)) = pick {
             let tx = self.flex_tx(subjects, |f| f.align_content = c);
             self.commit_edit(tx);
         }
@@ -1369,10 +1512,20 @@ impl OndinApp {
                 };
                 let shown = shared(laid, get);
                 let live = is_first || second_live;
+                // An instance's overridden gap (§15 D981).
+                let mark = self.display_mark(
+                    subjects,
+                    |d| Some(get(d)),
+                    |d, v| {
+                        let (c, r) = d.gaps_mut();
+                        *(if is_column_gap { c } else { r }) = v;
+                    },
+                    |v| super::component::mark_num(*v),
+                );
                 ui::disable_unless(ui, live, |ui| {
                     let mut v = shown.unwrap_or_else(|| get(first));
                     let start = v;
-                    let (resp, _) = ui::value_field_suffixed(
+                    let (resp, _, hit) = ui::value_field_unit_marked(
                         ui,
                         half,
                         Prefix::Icon(glyph),
@@ -1381,10 +1534,12 @@ impl OndinApp {
                             clickable: false,
                             tooltip: "",
                         }),
+                        mark.as_ref().map(OverrideMark::field),
                         &mut v,
                         Scrub::whole(0.5).range(0.0..=f64::MAX),
                         |d| mixed_if(d.custom_formatter(ui::number(2)), shown.is_none()),
                     );
+                    self.reset_marked(hit, &mark);
                     let tx = if !edited(&resp, v != start) {
                         Transaction(Vec::new())
                     } else {
@@ -1445,15 +1600,36 @@ impl OndinApp {
                 .flatten();
                 let mut v = shown.unwrap_or(first_or_zero(&paddings, sides[0]));
                 let start = v;
-                let resp = ui::value_field(
+                // An instance's overridden padding on either of the pair's sides
+                // (§15 D981); the reset puts back both.
+                let mark = self.display_mark(
+                    subjects,
+                    |d| Some(sides.map(|s| d.padding()[s])),
+                    |d, v| {
+                        for (s, x) in sides.into_iter().zip(v) {
+                            d.padding_mut()[s] = x;
+                        }
+                    },
+                    |v| match v {
+                        [a, b] if a == b => super::component::mark_num(*a),
+                        [a, b] => format!(
+                            "{} · {}",
+                            super::component::mark_num(*a),
+                            super::component::mark_num(*b)
+                        ),
+                    },
+                );
+                let (resp, hit) = ui::value_field_marked(
                     ui,
                     pair,
                     Prefix::Icon(glyph),
+                    mark.as_ref().map(OverrideMark::field),
                     &mut v,
                     Scrub::whole(0.5).range(0.0..=f64::MAX),
                     |d| mixed_if(d.custom_formatter(ui::number(2)), shown.is_none()),
-                )
-                .on_hover_text(word);
+                );
+                let resp = super::inspector::tip_unless_marked(resp, &mark, word);
+                self.reset_marked(hit, &mark);
                 let tx = if !edited(&resp, v != start) {
                     Transaction(Vec::new())
                 } else {
@@ -1495,14 +1671,22 @@ impl OndinApp {
                     let shown = shared(&paddings, |p| p[s]);
                     let mut v = shown.unwrap_or(first_or_zero(&paddings, s));
                     let start = v;
-                    let resp = ui::value_field(
+                    let mark = self.display_mark(
+                        subjects,
+                        |d| Some(d.padding()[s]),
+                        |d, v| d.padding_mut()[s] = v,
+                        |v| super::component::mark_num(*v),
+                    );
+                    let (resp, hit) = ui::value_field_marked(
                         ui,
                         half,
                         Prefix::Text(letter),
+                        mark.as_ref().map(OverrideMark::field),
                         &mut v,
                         Scrub::whole(0.5).range(0.0..=f64::MAX),
                         |d| mixed_if(d.custom_formatter(ui::number(2)), shown.is_none()),
                     );
+                    self.reset_marked(hit, &mark);
                     let tx = if !edited(&resp, v != start) {
                         Transaction(Vec::new())
                     } else {
@@ -1665,6 +1849,101 @@ impl OndinApp {
                 .collect(),
         };
         self.commit_edit(Transaction(ops));
+    }
+
+    /// An Item card field's override mark over `subjects` (§15 D981) — one property
+    /// of the layout item, which the comparison resets only whole.
+    fn item_mark<V: PartialEq + Clone>(
+        &self,
+        subjects: &[NodeId],
+        get: impl Fn(&LayoutItem) -> V,
+        put: impl Fn(&mut LayoutItem, V),
+        say: impl Fn(&V) -> String,
+    ) -> Option<OverrideMark> {
+        self.sub_mark(
+            subjects,
+            item_of,
+            |n| Some(*n.item()),
+            get,
+            put,
+            |id, item| Operation::SetLayoutItem { id, item },
+            say,
+        )
+    }
+
+    /// A Container card field's override mark over `subjects` (§15 D981): `get`
+    /// reads the field out of a layout, `None` where that layout has no such field —
+    /// a flex field where the main is a grid — which marks nothing, the `display`
+    /// cells' own mark saying so instead ([`ByMode`]).
+    fn display_mark<V: PartialEq + Clone>(
+        &self,
+        subjects: &[NodeId],
+        get: impl Fn(&Display) -> Option<V>,
+        put: impl Fn(&mut Display, V),
+        say: impl Fn(&V) -> String,
+    ) -> Option<OverrideMark> {
+        self.sub_mark(
+            subjects,
+            |op| match op {
+                Operation::SetDisplay { display, .. } => Some(display.clone()),
+                _ => None,
+            },
+            |n| Some(n.display().cloned()),
+            |d| d.as_ref().and_then(&get),
+            |d, v| {
+                if let (Some(d), Some(v)) = (d.as_mut(), v) {
+                    put(d, v);
+                }
+            },
+            |id, display| Operation::SetDisplay { id, display },
+            |v| v.as_ref().map(&say).unwrap_or_default(),
+        )
+    }
+
+    /// [`Self::display_mark`] for one field of a flex layout.
+    fn flex_mark<V: PartialEq + Clone>(
+        &self,
+        subjects: &[NodeId],
+        get: impl Fn(&Flex) -> V,
+        put: impl Fn(&mut Flex, V),
+        say: impl Fn(&V) -> String,
+    ) -> Option<OverrideMark> {
+        self.display_mark(
+            subjects,
+            |d| match d {
+                Display::Flex(f) => Some(get(f)),
+                Display::Grid(_) => None,
+            },
+            |d, v| {
+                if let Display::Flex(f) = d {
+                    put(f, v);
+                }
+            },
+            say,
+        )
+    }
+
+    /// [`Self::display_mark`] for one field of a grid layout.
+    fn grid_mark<V: PartialEq + Clone>(
+        &self,
+        subjects: &[NodeId],
+        get: impl Fn(&Grid) -> V,
+        put: impl Fn(&mut Grid, V),
+        say: impl Fn(&V) -> String,
+    ) -> Option<OverrideMark> {
+        self.display_mark(
+            subjects,
+            |d| match d {
+                Display::Grid(g) => Some(get(g)),
+                Display::Flex(_) => None,
+            },
+            |d, v| {
+                if let Display::Grid(g) = d {
+                    put(g, v);
+                }
+            },
+            say,
+        )
     }
 
     /// Every flowing subject's item properties with `f` applied, as the ops that
@@ -1895,14 +2174,29 @@ impl OndinApp {
                 let mut v = shown.unwrap_or_else(|| get(&first));
                 let start = v;
                 let at = egui::Rect::from_min_size(ui.cursor().min, half);
-                let resp = ui::value_field(
+                // An instance's overridden grow or shrink (§15 D981).
+                let mark = self.item_mark(
+                    subjects,
+                    get,
+                    |i, v| {
+                        if is_grow {
+                            i.grow = v;
+                        } else {
+                            i.shrink = v;
+                        }
+                    },
+                    |v| super::component::mark_num(*v),
+                );
+                let (resp, hit) = ui::value_field_marked(
                     ui,
                     half,
                     Prefix::Label(label),
+                    mark.as_ref().map(OverrideMark::field),
                     &mut v,
                     Scrub::fine(0.05, 1).range(0.0..=f64::MAX),
                     |d| mixed_if(d.custom_formatter(ui::number(2)), shown.is_none()),
                 );
+                self.reset_marked(hit, &mark);
                 accent(ui, at, flipped);
                 let tx = if !edited(&resp, v != start) {
                     Transaction(Vec::new())
@@ -1937,7 +2231,13 @@ impl OndinApp {
 
         // --- align-self -------------------------------------------------------
         let at = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(full, ui::CONTROL_H));
-        if let Some(pick) = glyph_combo(
+        let mark = self.item_mark(
+            subjects,
+            |i| i.align_self,
+            |i, v| i.align_self = v,
+            |v| v.map_or("Auto", align_name).to_owned(),
+        );
+        let (pick, reset) = glyph_combo(
             ui,
             "flex-align-self",
             "Align self",
@@ -1950,7 +2250,10 @@ impl OndinApp {
             Some(parent_flex.align_items),
             true,
             None,
-        ) {
+            mark.as_ref(),
+        );
+        self.reset_marked(reset, &mark);
+        if let Some(pick) = pick {
             let tx = self.item_tx(subjects, |i| i.align_self = pick);
             self.commit_edit(tx);
         }
@@ -2094,6 +2397,15 @@ impl OndinApp {
             Some(Dimension::Px(v) | Dimension::Percent(v)) => Some(v),
             _ => None,
         };
+        let mark = self.sub_mark(
+            subjects,
+            item_of,
+            |n| Some(*n.item()),
+            &get,
+            put,
+            |id, item| Operation::SetLayoutItem { id, item },
+            dimension_words,
+        );
         let edit = size_field(
             ui,
             egui::vec2(width, ui::CONTROL_H),
@@ -2103,7 +2415,10 @@ impl OndinApp {
             // Under a keyword, the size drawn, so a scrub starts from it.
             drawn.unwrap_or(0.0),
             modes,
+            mark.as_ref().map(OverrideMark::field),
         );
+        // An instance's overridden length, put back (§15 D981).
+        self.reset_marked(edit.reset, &mark);
         if let Some(m) = edit.picked {
             // **Each subject's own value, converted in its own container** (§15
             // D943, the release review's `[X6.2-L1-03]`) — the first subject's
@@ -2391,6 +2706,218 @@ mod tests {
         f(&mut item);
         app.session
             .commit(Transaction(vec![Operation::SetLayoutItem { id, item }]));
+    }
+
+    /// **A reset is not a resize** (`OndinApp::commit_reset`, §15 D981). An instance
+    /// of a 50-wide main sits in the scene's flex row, growing (`flex-grow: 1`), its
+    /// own width overridden to 80 — so it is drawn wider than it is stored. Its W
+    /// reset writes the main's 50, and the instance goes on growing: the growth is
+    /// its placement, its own (§5.3d). Flip, run: `OndinApp::items_stated` handing
+    /// the transaction back without the stated items lets the commit door's
+    /// `build::flex_holds` read the reset as the hand's resize and fails *"still
+    /// grows"*, grow 0. Found by `arch-scribe` reading the batch.
+    #[test]
+    fn a_size_reset_leaves_a_growing_instance_growing() {
+        let mut s = scene();
+        let root = s.app.session.doc.root();
+        let main = s.app.session.ids.mint();
+        assert!(s.app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: main,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(50.0, 30.0),
+                },
+                transform: Some(Affine::translate((1000.0, 0.0))),
+                name: None,
+            },
+            Operation::SetComponent {
+                id: main,
+                component: true,
+            },
+        ])));
+        let inst = {
+            let doc = &s.app.session.doc;
+            let (tx, made) = ondin_core::insert_subtrees(
+                doc,
+                &mut s.app.session.ids,
+                &[ondin_core::Placement {
+                    nodes: doc.capture_subtree(main).unwrap(),
+                    parent: s.frame,
+                    index: Some(2),
+                }],
+                Default::default(),
+            );
+            assert!(s.app.session.commit(tx));
+            made[0]
+        };
+        // One transaction, the item beside the size — or the door holds this
+        // resize too, which is the mechanism under test.
+        let mut item = *s.app.session.doc.get(inst).unwrap().item();
+        item.grow = 1.0;
+        assert!(s.app.session.commit(Transaction(vec![
+            Operation::SetGeometry {
+                id: inst,
+                geometry: GeometryPatch::Size(Size::new(80.0, 30.0)),
+            },
+            Operation::SetLayoutItem { id: inst, item },
+        ])));
+        let grown = drawn(&s.app, inst).width();
+        assert!(
+            grown > 80.0,
+            "the fixture: drawn wider than stored, {grown}"
+        );
+        s.app.commit_reset(Transaction(vec![Operation::SetGeometry {
+            id: inst,
+            geometry: GeometryPatch::Size(Size::new(50.0, 30.0)),
+        }]));
+        let node = s.app.session.doc.get(inst).unwrap();
+        assert_eq!(node.item().grow, 1.0, "still grows");
+        assert!(matches!(
+            node.kind(),
+            NodeKind::Artboard { size } if size.width == 50.0
+        ));
+    }
+
+    /// **The Container and Item cards' override marks** (§15 D981). The scene's
+    /// frame is made a main and an instance of it placed; the instance's column
+    /// gap and its first item's grow are overridden. The gap's mark resets the gap
+    /// alone, back to the main's 10; direction, padding and the `display` cells are
+    /// unmarked — the instance is a flex like its main, so the mode mark, which
+    /// compares by mode (`ByMode`), stays quiet. Grow is marked and shrink is not.
+    /// With the instance's layout taken away, the mode is marked and the gap is
+    /// not: a copy with no layout has no gap to reset (`sub_mark`'s write-nothing
+    /// skip). Flip: comparing `ByMode` by the whole layout marks the mode over the
+    /// gap and fails *"the mode follows"*.
+    #[test]
+    fn an_instance_marks_its_own_layout_fields_and_no_others() {
+        let mut s = scene();
+        assert!(
+            s.app
+                .session
+                .commit(Transaction(vec![Operation::SetComponent {
+                    id: s.frame,
+                    component: true,
+                }]))
+        );
+        let inst = {
+            let doc = &s.app.session.doc;
+            let (tx, made) = ondin_core::insert_subtrees(
+                doc,
+                &mut s.app.session.ids,
+                &[ondin_core::Placement {
+                    nodes: doc.capture_subtree(s.frame).unwrap(),
+                    parent: doc.root(),
+                    index: None,
+                }],
+                Default::default(),
+            );
+            assert!(s.app.session.commit(tx));
+            made[0]
+        };
+        let ia = s.app.session.doc.get(inst).unwrap().children()[0];
+        let mut wide = s
+            .app
+            .session
+            .doc
+            .get(inst)
+            .unwrap()
+            .display()
+            .cloned()
+            .unwrap();
+        *wide.gaps_mut().0 = 24.0;
+        assert!(
+            s.app
+                .session
+                .commit(Transaction(vec![Operation::SetDisplay {
+                    id: inst,
+                    display: Some(wide.clone()),
+                }]))
+        );
+        set_item(&mut s.app, ia, |i| i.grow = 1.0);
+        s.app.session.selection.set(vec![inst, ia]);
+        s.app.gather_card_overrides();
+
+        let gap = s
+            .app
+            .display_mark(
+                &[inst],
+                |d| Some(d.gaps().0),
+                |d, v| *d.gaps_mut().0 = v,
+                |v| super::super::component::mark_num(*v),
+            )
+            .expect("the gap is overridden");
+        assert_eq!(gap.tip, "Reset to main · 10");
+        let mut back = wide.clone();
+        *back.gaps_mut().0 = 10.0;
+        assert_eq!(
+            gap.tx,
+            Transaction(vec![Operation::SetDisplay {
+                id: inst,
+                display: Some(back),
+            }])
+        );
+        assert!(
+            s.app
+                .flex_mark(
+                    &[inst],
+                    |f| f.direction,
+                    |f, v| f.direction = v,
+                    |_| String::new()
+                )
+                .is_none(),
+            "the direction follows"
+        );
+        let mode = |app: &OndinApp| {
+            app.sub_mark(
+                &[inst],
+                |op| match op {
+                    Operation::SetDisplay { display, .. } => Some(display.clone()),
+                    _ => None,
+                },
+                |n| Some(n.display().cloned()),
+                |d| ByMode(d.clone()),
+                |d, v| *d = v.0,
+                |id, display| Operation::SetDisplay { id, display },
+                |_| String::new(),
+            )
+        };
+        assert!(mode(&s.app).is_none(), "the mode follows");
+        assert!(
+            s.app
+                .item_mark(&[ia], |i| i.grow, |i, v| i.grow = v, |_| String::new())
+                .is_some(),
+            "grow is overridden"
+        );
+        assert!(
+            s.app
+                .item_mark(&[ia], |i| i.shrink, |i, v| i.shrink = v, |_| String::new())
+                .is_none(),
+            "shrink follows"
+        );
+
+        assert!(
+            s.app
+                .session
+                .commit(Transaction(vec![Operation::SetDisplay {
+                    id: inst,
+                    display: None,
+                }]))
+        );
+        s.app.gather_card_overrides();
+        assert!(mode(&s.app).is_some(), "the mode is overridden");
+        assert!(
+            s.app
+                .display_mark(
+                    &[inst],
+                    |d| Some(d.gaps().0),
+                    |d, v| *d.gaps_mut().0 = v,
+                    |_| String::new(),
+                )
+                .is_none(),
+            "no layout, no gap to reset"
+        );
     }
 
     /// **The sizing menu offers only the modes that mean something different for

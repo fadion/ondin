@@ -17,6 +17,7 @@
 //! backdrop pane behind it. Collapse state is keyed by panel title and survives
 //! changing the selection, so a designer who never wants to see Effects only has
 //! to close it once.
+use super::component::OverrideMark as Mark;
 use super::layout::SizeMode;
 use super::paint::{self, PaintDrag, PaintKind, PaintList, PaintSlot};
 use super::picker::Picker;
@@ -217,19 +218,6 @@ impl ImageCard {
     }
 }
 
-/// One overridden field's mark (§15 D981): its tooltip, *Reset to main · 168*,
-/// and the transaction that writes the main's value back into that field alone.
-struct Mark {
-    tip: String,
-    tx: Transaction,
-}
-
-impl Mark {
-    fn field(&self) -> ui::FieldMark<'_> {
-        ui::FieldMark { tip: &self.tip }
-    }
-}
-
 /// The Transform card's marks — `OndinApp::transform_marks`.
 #[derive(Default)]
 struct TransformMarks {
@@ -238,6 +226,31 @@ struct TransformMarks {
     r: Option<Mark>,
     w: Option<Mark>,
     h: Option<Mark>,
+}
+
+/// `resp` with the field's own hover text, unless an override mark gives it one —
+/// the mark's names the main's value, and two tooltips over one field would stack.
+pub(super) fn tip_unless_marked(
+    resp: egui::Response,
+    mark: &Option<Mark>,
+    tip: &str,
+) -> egui::Response {
+    match mark {
+        None => resp.on_hover_text(tip),
+        Some(_) => resp,
+    }
+}
+
+/// The Appearance card's marks — `OndinApp::appearance_marks`. `corners` is in
+/// [`Corner`]'s order.
+#[derive(Default)]
+pub(super) struct AppearanceMarks {
+    pub(super) opacity: Option<Mark>,
+    pub(super) radius: Option<Mark>,
+    pub(super) corners: [Option<Mark>; 4],
+    pub(super) count: Option<Mark>,
+    pub(super) ratio: Option<Mark>,
+    pub(super) clip: Option<Mark>,
 }
 
 /// A signed integer for an adjustment field: `+12`, `-8`, `0`.
@@ -291,6 +304,13 @@ enum Corner {
     BottomRight,
 }
 impl Corner {
+    const ALL: [Corner; 4] = [
+        Corner::TopLeft,
+        Corner::TopRight,
+        Corner::BottomLeft,
+        Corner::BottomRight,
+    ];
+
     fn get(self, r: &RoundedRectRadii) -> f64 {
         match self {
             Corner::TopLeft => r.top_left,
@@ -881,6 +901,13 @@ impl PaintScope {
         match self {
             PaintScope::Node(id) => id,
             PaintScope::Selection => app.session.doc.root(),
+        }
+    }
+    /// The one node the scope is, or `None` for a selection.
+    fn node(self) -> Option<NodeId> {
+        match self {
+            PaintScope::Node(id) => Some(id),
+            PaintScope::Selection => None,
         }
     }
     fn slot(self, list: PaintList, index: usize) -> PaintSlot {
@@ -2592,8 +2619,23 @@ impl OndinApp {
             .first()
             .map(|(_, m)| *m)
             .filter(|m| modes.iter().all(|(_, other)| other == m));
+        // An instance's overridden mode (§15 D981) — the masks inside a selected
+        // group are the card's subjects, so the mark reads them, not the selection.
+        let mark = self.sub_mark(
+            &targets,
+            |op| match op {
+                Operation::SetMaskMode { mode, .. } => Some(*mode),
+                _ => None,
+            },
+            |n| Some(n.mask_mode()),
+            |m| *m,
+            |c, m| *c = m,
+            |id, mode| Operation::SetMaskMode { id, mode },
+            |m| m.label().to_owned(),
+        );
 
         let mut pick = None;
+        let mut reset = false;
         self.panel(ui, "Mask", None, |_app, ui| {
             ui.spacing_mut().interact_size.y = 28.0;
             ui.spacing_mut().button_padding.y = 0.0;
@@ -2601,7 +2643,7 @@ impl OndinApp {
                 Some(m) => m.label(),
                 None => "Mixed",
             };
-            egui::ComboBox::from_id_salt("mask-mode")
+            let face = egui::ComboBox::from_id_salt("mask-mode")
                 .icon(ui::combo_chevron)
                 // The full width, as the stroke-sides combo takes it, and for the
                 // reason written there: a combo strokes inside its own rect.
@@ -2610,6 +2652,9 @@ impl OndinApp {
                 .show_ui(ui, |ui| {
                     ui::menu_rows(ui);
                     ui.spacing_mut().button_padding.y = 2.0;
+                    if let Some(m) = &mark {
+                        reset = super::component::menu_reset_row(ui, m);
+                    }
                     // **"Mixed" is not among them**, on the rule the stroke
                     // alignment combo states: it is a report, not a value, and
                     // nothing is lit while the two runs disagree.
@@ -2622,8 +2667,13 @@ impl OndinApp {
                             pick = Some(option);
                         }
                     }
-                });
+                })
+                .response;
+            if mark.is_some() {
+                super::component::combo_dot(ui.painter(), face.rect);
+            }
         });
+        self.reset_marked(reset, &mark);
         if let Some(mode) = pick {
             // Every target, and only the ones that would change — so picking the
             // mode two runs already share is not an undo step, and picking one out
@@ -3265,6 +3315,20 @@ impl OndinApp {
         let opacity = self.shared_opacity_shown();
         let radius = self.shared_radius_shown();
         let has_rect = ondin_core::any_rect_in(&self.session.doc, &ids);
+        // Several instances' overridden opacity (§15 D981, 4G): the dot if any one
+        // overrides it — beside *Mixed* where they disagree — and the reset for all.
+        let opacity_mark = self.sub_mark(
+            &ids,
+            |op| match op {
+                Operation::SetOpacity { opacity, .. } => Some(*opacity),
+                _ => None,
+            },
+            |n| Some(n.opacity()),
+            |v| *v,
+            |c, v| *c = v,
+            |id, opacity| Operation::SetOpacity { id, opacity },
+            |v| format!("{}%", super::component::mark_num(f64::from(*v) * 100.0)),
+        );
         self.panel(ui, "Appearance", None, |app, ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
@@ -3284,10 +3348,11 @@ impl OndinApp {
                     / fields;
                 let mixed = opacity.is_none();
                 let mut pct = f64::from(opacity.unwrap_or(1.0)) * 100.0;
-                let ro = value_field(
+                let (ro, hit) = ui::value_field_marked(
                     ui,
                     egui::vec2(fw, 28.0),
                     Prefix::Icon(icon::DROP_HALF),
+                    opacity_mark.as_ref().map(Mark::field),
                     &mut pct,
                     Scrub::whole(0.5).range(0.0..=100.0),
                     |d| {
@@ -3308,6 +3373,7 @@ impl OndinApp {
                         })
                     },
                 );
+                app.reset_marked(hit, &opacity_mark);
                 if interacting(&ro) {
                     let tx = ondin_core::set_opacity_all(
                         &app.session.doc,
@@ -4543,10 +4609,7 @@ impl OndinApp {
         ) else {
             return TransformMarks::default();
         };
-        let num = |v: f64| {
-            let s = format!("{v:.2}");
-            s.trim_end_matches('0').trim_end_matches('.').to_string()
-        };
+        let num = super::component::mark_num;
         let mut marks = TransformMarks::default();
         let cur = copy.transform().as_coeffs();
         let theirs = src.transform().as_coeffs();
@@ -4681,6 +4744,28 @@ impl OndinApp {
                 });
             }
         }
+        // **And the item's `width` and `height`**, which a laid-out W and H also
+        // stand for (`layout::size_field`): a copy set to `fit-content` or a
+        // percentage where its main is px differs there and nowhere else. An
+        // instance root's item is its own placement, which `sub_mark` never marks.
+        for (horizontal, slot) in [(true, &mut marks.w), (false, &mut marks.h)] {
+            let item = self.sub_mark(
+                &[id],
+                super::layout::item_of,
+                |n| Some(*n.item()),
+                move |i| if horizontal { i.width } else { i.height },
+                move |i, d| {
+                    if horizontal {
+                        i.width = d;
+                    } else {
+                        i.height = d;
+                    }
+                },
+                |id, item| Operation::SetLayoutItem { id, item },
+                super::layout::dimension_words,
+            );
+            *slot = Mark::and(slot.take(), item);
+        }
         marks
     }
 
@@ -4812,7 +4897,7 @@ impl OndinApp {
                 );
                 // An instance's overridden X, put back (§15 D981).
                 if let (true, Some(m)) = (reset_x, &marks.x) {
-                    app.commit_edit(m.tx.clone());
+                    app.commit_reset(m.tx.clone());
                 }
                 // **A world-space nudge, rather than a rebuilt transform.** The old form
                 // composed the typed number with the stripped basis, which only lands the
@@ -4840,7 +4925,7 @@ impl OndinApp {
                     |d| d.custom_formatter(ui::number(2)),
                 );
                 if let (true, Some(m)) = (reset_y, &marks.y) {
-                    app.commit_edit(m.tx.clone());
+                    app.commit_reset(m.tx.clone());
                 }
                 let ty = app.place_at(
                     id,
@@ -4992,6 +5077,7 @@ impl OndinApp {
                         let mut v = drawn;
                         let (resp, typed) = match (&size_menu, mode) {
                             (Some(m), Some((mode, pct))) => {
+                                let mark = if horizontal { &marks.w } else { &marks.h };
                                 let e = super::layout::size_field(
                                     ui,
                                     slot,
@@ -5002,7 +5088,10 @@ impl OndinApp {
                                     Some(pct.unwrap_or(drawn)),
                                     drawn,
                                     &m.modes,
+                                    mark.as_ref().map(Mark::field),
                                 );
+                                // An instance's overridden size, put back (§15 D981).
+                                app.reset_marked(e.reset, mark);
                                 if let Some(p) = e.picked {
                                     picks.push((horizontal, p));
                                 }
@@ -5023,7 +5112,7 @@ impl OndinApp {
                                     |d| d.custom_formatter(ui::number(2)),
                                 );
                                 if let (true, Some(m)) = (reset, mark) {
-                                    app.commit_edit(m.tx.clone());
+                                    app.commit_reset(m.tx.clone());
                                 }
                                 // `size_field`'s latch (§15 D885): whether a number
                                 // moved at any point of this edit, held to its
@@ -5259,7 +5348,7 @@ impl OndinApp {
                     Some(_) => ra,
                 };
                 if let (true, Some(m)) = (reset_r, &marks.r) {
-                    app.commit_edit(m.tx.clone());
+                    app.commit_reset(m.tx.clone());
                 }
                 // **The delta, not the value — measured from the gesture's own
                 // reference and *composed* onto the matrix rather than written into a
@@ -5343,6 +5432,121 @@ impl OndinApp {
         let tx = tools::rotate_node(doc, res, id, pivot, angle);
         self.commit_edit(tx);
     }
+    /// The Appearance card's override marks for `id` (§15 D981): opacity, the
+    /// radius — the single field over all four corners, and each corner's own —
+    /// the vertex count and ratio, and *Clip content*.
+    pub(super) fn appearance_marks(&self, id: NodeId) -> AppearanceMarks {
+        use super::component::mark_num;
+        let s = &[id];
+        let radii_of = |op: &Operation| match op {
+            Operation::SetGeometry {
+                geometry: GeometryPatch::CornerRadii(r),
+                ..
+            } => Some(*r),
+            _ => None,
+        };
+        let my_radii = |n: &ondin_core::Node| match n.kind() {
+            NodeKind::Rect { corner_radii, .. } => Some(*corner_radii),
+            _ => None,
+        };
+        let write_radii = |id, r| Operation::SetGeometry {
+            id,
+            geometry: GeometryPatch::CornerRadii(r),
+        };
+        let patch = |want: fn(&GeometryPatch) -> Option<f64>| {
+            move |op: &Operation| match op {
+                Operation::SetGeometry { geometry, .. } => want(geometry),
+                _ => None,
+            }
+        };
+        let sides = patch(|g| match g {
+            GeometryPatch::Sides(n) => Some(f64::from(*n)),
+            _ => None,
+        });
+        let ratio = patch(|g| match g {
+            GeometryPatch::InnerRatio(r) => Some(*r),
+            _ => None,
+        });
+        let my_sides = |n: &ondin_core::Node| match n.kind() {
+            NodeKind::Polygon { sides, .. } => Some(f64::from(*sides)),
+            NodeKind::Star { points, .. } => Some(f64::from(*points)),
+            _ => None,
+        };
+        let my_ratio = |n: &ondin_core::Node| match n.kind() {
+            NodeKind::Star { inner_ratio, .. } => Some(*inner_ratio),
+            _ => None,
+        };
+        AppearanceMarks {
+            opacity: self.sub_mark(
+                s,
+                |op| match op {
+                    Operation::SetOpacity { opacity, .. } => Some(*opacity),
+                    _ => None,
+                },
+                |n| Some(n.opacity()),
+                |v| *v,
+                |c, v| *c = v,
+                |id, opacity| Operation::SetOpacity { id, opacity },
+                |v| format!("{}%", mark_num(f64::from(*v) * 100.0)),
+            ),
+            radius: self.sub_mark(
+                s,
+                radii_of,
+                my_radii,
+                |r| *r,
+                |c, v| *c = v,
+                write_radii,
+                |r| uniform(*r).map_or_else(|| "per corner".to_owned(), mark_num),
+            ),
+            corners: Corner::ALL.map(|c| {
+                self.sub_mark(
+                    s,
+                    radii_of,
+                    my_radii,
+                    |r| c.get(r),
+                    |r, v| c.set(r, v),
+                    write_radii,
+                    |v| mark_num(*v),
+                )
+            }),
+            count: self.sub_mark(
+                s,
+                sides,
+                my_sides,
+                |v| *v,
+                |c, v| *c = v,
+                |id, n| Operation::SetGeometry {
+                    id,
+                    geometry: GeometryPatch::Sides(n as u32),
+                },
+                |v| mark_num(*v),
+            ),
+            ratio: self.sub_mark(
+                s,
+                ratio,
+                my_ratio,
+                |v| *v,
+                |c, v| *c = v,
+                |id, r| Operation::SetGeometry {
+                    id,
+                    geometry: GeometryPatch::InnerRatio(r),
+                },
+                |v| format!("{}%", mark_num(*v * 100.0)),
+            ),
+            clip: self.sub_mark(
+                s,
+                |op| match op {
+                    Operation::SetClip { clip, .. } => Some(*clip),
+                    _ => None,
+                },
+                |n| Some(n.clip()),
+                |v| *v,
+                |c, v| *c = v,
+                |id, clip| Operation::SetClip { id, clip },
+                |v| if *v { "on" } else { "off" }.to_owned(),
+            ),
+        }
+    }
     /// Opacity, corner radius, and the vertex counts — the design's Appearance
     /// panel.
     ///
@@ -5363,6 +5567,7 @@ impl OndinApp {
         vertices0: Option<Vertices>,
         clip0: Option<bool>,
     ) {
+        let marks = self.appearance_marks(id);
         self.panel(ui, "Appearance", None, |app, ui| {
             let per_corner = app.per_corner_radius.contains(&id);
             ui.horizontal(|ui| {
@@ -5378,14 +5583,17 @@ impl OndinApp {
                 let fw = (ui.available_width() - button_space - ui::CARD_COL_GAP * (fields - 1.0))
                     / fields;
                 let mut pct = opacity0 * 100.0;
-                let ro = value_field(
+                let (ro, _, hit) = ui::value_field_unit_marked(
                     ui,
                     egui::vec2(fw, 28.0),
                     Prefix::Icon(icon::DROP_HALF),
+                    None,
+                    marks.opacity.as_ref().map(Mark::field),
                     &mut pct,
                     Scrub::whole(0.5).range(0.0..=100.0),
                     |d| d.suffix("%").max_decimals(0),
                 );
+                app.reset_marked(hit, &marks.opacity);
                 app.edit_valve(
                     &ro,
                     Transaction(vec![Operation::SetOpacity {
@@ -5400,14 +5608,16 @@ impl OndinApp {
                 let shared = uniform(corners);
                 let mut r = shared.unwrap_or_else(|| largest(corners));
                 let seed = r;
-                let rr = value_field(
+                let (rr, hit) = ui::value_field_marked(
                     ui,
                     egui::vec2(fw, 28.0),
                     Prefix::Icon(icon::CORNERS_OUT),
+                    marks.radius.as_ref().map(Mark::field),
                     &mut r,
                     Scrub::whole(0.5).range(0.0..=f64::MAX),
                     |d| d.custom_formatter(ui::number(2)),
                 );
+                app.reset_marked(hit, &marks.radius);
                 // ⚠️ **A field seeded from one member of a disagreeing set may not
                 // write until it has been moved** (§15 D534). `[S14.3-L1-01]`: a
                 // rect whose corners are `(10, 0, 0, 0)` shows `largest` — 10 — and
@@ -5465,7 +5675,7 @@ impl OndinApp {
             // is pulled in. Their own row: on a star that is two fields, and
             // crowding either behind opacity would leave them at half width.
             if let Some(vertices) = vertices0 {
-                app.vertex_fields(ui, id, vertices);
+                app.vertex_fields(ui, id, vertices, &marks);
             }
             // A frame's "clip content". On by default, which is what makes a
             // frame a page rather than a suggestion; off turns it into a plain
@@ -5480,9 +5690,14 @@ impl OndinApp {
             // of 28pt fields. The switch also reads its state from two things at
             // once (the knob's travel and the track's colour) where a tick reads
             // from one.
+            // An overridden clip is reset by the toggle itself (`ui::switch_row_marked`),
+            // so its tooltip names the main's value instead.
             if let Some(clip) = clip0
-                && ui::switch_row(ui, "Clip content", clip, BOOL_ROW_H)
-                    .on_hover_text("Hide anything that falls outside this frame")
+                && ui::switch_row_marked(ui, "Clip content", clip, BOOL_ROW_H, marks.clip.is_some())
+                    .on_hover_text(match &marks.clip {
+                        Some(m) => m.tip.as_str(),
+                        None => "Hide anything that falls outside this frame",
+                    })
                     .clicked()
             {
                 app.commit_edit(Transaction(vec![Operation::SetClip { id, clip: !clip }]));
@@ -5513,15 +5728,18 @@ impl OndinApp {
                     ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
                     for (glyph, corner, tip) in pair {
                         let mut v = corner.get(&corners);
-                        let resp = value_field(
+                        let mark = &marks.corners[corner as usize];
+                        let (resp, hit) = ui::value_field_marked(
                             ui,
                             egui::vec2(fw, 28.0),
                             Prefix::Icon(glyph),
+                            mark.as_ref().map(Mark::field),
                             &mut v,
                             Scrub::whole(0.5).range(0.0..=f64::MAX),
                             |d| d.custom_formatter(ui::number(2)),
-                        )
-                        .on_hover_text(tip);
+                        );
+                        let resp = tip_unless_marked(resp, mark, tip);
+                        app.reset_marked(hit, mark);
                         let mut next = corners;
                         corner.set(&mut next, v.max(0.0));
                         app.edit_valve(
@@ -5544,7 +5762,13 @@ impl OndinApp {
     /// fraction the outline builder wants. It cannot reach 0: a star with no
     /// interior is a set of hairlines no fill can show, so
     /// `geometry::MIN_INNER_RATIO` is the floor here as well as there.
-    fn vertex_fields(&mut self, ui: &mut egui::Ui, id: NodeId, vertices: Vertices) {
+    fn vertex_fields(
+        &mut self,
+        ui: &mut egui::Ui,
+        id: NodeId,
+        vertices: Vertices,
+        marks: &AppearanceMarks,
+    ) {
         use ondin_core::geometry::{MAX_SIDES, MIN_INNER_RATIO, MIN_SIDES};
         // Half width either way. A star needs two fields side by side, and a
         // polygon's lone count does not deserve the whole row — a two-digit
@@ -5557,15 +5781,17 @@ impl OndinApp {
                 Vertices::Star { points, .. } => (icon::ASTERISK, points, "Points"),
             };
             let mut n = f64::from(count);
-            let rn = value_field(
+            let (rn, hit) = ui::value_field_marked(
                 ui,
                 egui::vec2(fw, 28.0),
                 Prefix::Icon(glyph),
+                marks.count.as_ref().map(Mark::field),
                 &mut n,
                 Scrub::whole(0.08).range(f64::from(MIN_SIDES)..=f64::from(MAX_SIDES)),
                 |d| d.max_decimals(0),
-            )
-            .on_hover_text(tip);
+            );
+            let rn = tip_unless_marked(rn, &marks.count, tip);
+            self.reset_marked(hit, &marks.count);
             self.edit_valve(
                 &rn,
                 Transaction(vec![Operation::SetGeometry {
@@ -5588,15 +5814,17 @@ impl OndinApp {
             // briefly applied here too and put this field straight back into the
             // state this comment records as already fixed once.
             let mut pct = inner_ratio * 100.0;
-            let rr = value_field(
+            let (rr, hit) = ui::value_field_marked(
                 ui,
                 egui::vec2(fw, 28.0),
                 Prefix::Icon(icon::ANGLE),
+                marks.ratio.as_ref().map(Mark::field),
                 &mut pct,
                 Scrub::fine(0.25, 1).range(MIN_INNER_RATIO * 100.0..=100.0),
                 |d| d.suffix("%").max_decimals(1),
-            )
-            .on_hover_text("How far the inner points are pulled in");
+            );
+            let rr = tip_unless_marked(rr, &marks.ratio, "How far the inner points are pulled in");
+            self.reset_marked(hit, &marks.ratio);
             self.edit_valve(
                 &rr,
                 Transaction(vec![Operation::SetGeometry {
@@ -5678,7 +5906,9 @@ impl OndinApp {
         fresh: bool,
     ) {
         let fills = shown.list();
-        self.sync_paint_collapse("Fill", shown.unpainted(), fresh);
+        // An instance's ghost rows are something to show (§15 D981).
+        let ghosts = self.has_ghosts(scope.node(), |n| &n.paint().fills);
+        self.sync_paint_collapse("Fill", shown.unpainted() && !ghosts, fresh);
         // **The `+` stays and goes inert over a disagreement**, rather than going
         // away. There is no list for a row to be added to, and the only two things
         // it could mean are both wrong: appending to each target's own list changes
@@ -5698,7 +5928,15 @@ impl OndinApp {
                 app.mixed_paint_row(ui, PaintList::Fill);
                 return;
             }
-            if fills.is_empty() {
+            // An instance's list read against its source's (§15 D981): each row's
+            // trailing slot, and the ghost rows of the items it removed — which an
+            // instance that removed every one still has, so the source is asked
+            // before the empty list is.
+            let source = match scope {
+                PaintScope::Node(id) => app.source_list(id, |n| &n.paint().fills),
+                PaintScope::Selection => None,
+            };
+            if fills.is_empty() && source.as_ref().is_none_or(Vec::is_empty) {
                 ui.label(
                     egui::RichText::new("No fill")
                         .size(11.0)
@@ -5707,12 +5945,6 @@ impl OndinApp {
                 return;
             }
             let anchor = scope.anchor(app);
-            // An instance's list read against its source's (§15 D981): each row's
-            // trailing slot, and the ghost rows of the items it removed.
-            let source = match scope {
-                PaintScope::Node(id) => app.source_list(id, |n| &n.paint().fills),
-                PaintScope::Selection => None,
-            };
             let states = source
                 .as_ref()
                 .map(|s| ondin_core::reset::item_states(s, fills));
@@ -5821,7 +6053,8 @@ impl OndinApp {
         fresh: bool,
     ) {
         let strokes = shown.list();
-        self.sync_paint_collapse("Stroke", shown.unpainted(), fresh);
+        let ghosts = self.has_ghosts(scope.node(), |n| &n.paint().strokes);
+        self.sync_paint_collapse("Stroke", shown.unpainted() && !ghosts, fresh);
         // Inert rather than absent while they disagree — see `inspector_fill`.
         let action = Some(if shown.is_mixed() {
             ui::HeadAction::inert(
@@ -5845,7 +6078,12 @@ impl OndinApp {
                 );
                 return;
             }
-            if strokes.is_empty() {
+            // `inspector_fill`'s reading of an instance's list, for strokes.
+            let source = match scope {
+                PaintScope::Node(id) => app.source_list(id, |n| &n.paint().strokes),
+                PaintScope::Selection => None,
+            };
+            if strokes.is_empty() && source.as_ref().is_none_or(Vec::is_empty) {
                 ui.label(
                     egui::RichText::new("No stroke")
                         .size(11.0)
@@ -5854,11 +6092,6 @@ impl OndinApp {
                 return;
             }
             let anchor = scope.anchor(app);
-            // `inspector_fill`'s reading of an instance's list, for strokes.
-            let source = match scope {
-                PaintScope::Node(id) => app.source_list(id, |n| &n.paint().strokes),
-                PaintScope::Selection => None,
-            };
             let states = source
                 .as_ref()
                 .map(|s| ondin_core::reset::item_states(s, strokes));
@@ -7588,9 +7821,14 @@ impl OndinApp {
         // That is what the sentence in the card is for, and a message nobody can
         // see explains nothing.
         let fresh = self.grids_subject_changed();
+        // An instance's ghost rows are something to show (§15 D981).
+        let ghosts = match subjects.as_slice() {
+            [one] => self.has_ghosts(Some(*one), |n| n.grids()),
+            _ => false,
+        };
         self.sync_paint_collapse(
             "Layout grid",
-            shared.as_ref().is_some_and(Vec::is_empty),
+            shared.as_ref().is_some_and(Vec::is_empty) && !ghosts,
             fresh,
         );
         let mixed = shared.is_none();
@@ -7620,7 +7858,14 @@ impl OndinApp {
                 );
                 return;
             };
-            if grids.is_empty() {
+            // One instance's list read against its source's (§15 D981): each grid's
+            // trailing slot, and the ghost rows of the grids it removed — which an
+            // instance that removed them all still has.
+            let source = match subjects.as_slice() {
+                [one] => app.source_list(*one, |n| n.grids()),
+                _ => None,
+            };
+            if grids.is_empty() && source.as_ref().is_none_or(Vec::is_empty) {
                 ui.label(
                     egui::RichText::new("No layout grid")
                         .size(11.0)
@@ -7628,8 +7873,16 @@ impl OndinApp {
                 );
                 return;
             }
+            let states = source
+                .as_ref()
+                .map(|s| ondin_core::reset::item_states(s, &grids));
+            let mut reset = None;
             for (index, grid) in grids.iter().enumerate() {
-                let out = app.grid_rows(ui, &subjects, index, grid.value);
+                let item = states.as_ref().map(|s| s[index]);
+                let out = app.grid_rows(ui, &subjects, index, grid.value, item);
+                if out.reset {
+                    reset = Some(grid.id);
+                }
                 if out.remove {
                     let mut list = grids.clone();
                     list.remove(index);
@@ -7646,6 +7899,28 @@ impl OndinApp {
                 if index + 1 < grids.len() {
                     ui.add_space(GRID_ROW_GAP);
                 }
+            }
+            for gone in source
+                .as_deref()
+                .map(|s| ondin_core::reset::removed_items(s, &grids))
+                .unwrap_or_default()
+            {
+                ui.add_space(GRID_ROW_GAP);
+                let label = format!("{} · {}", grid_axis_word(gone.axis), gone.count);
+                if super::component::ghost_row(ui, &label, ui.available_width()) {
+                    reset = Some(gone.id);
+                }
+            }
+            // Written whole, not through `retarget_grids` — which mints an id for
+            // an item the anchor does not hold, and a restored grid is the main's
+            // by its id (the export card's restore says the same).
+            if let (Some(item), Some(src), [id]) = (reset, source.as_deref(), subjects.as_slice()) {
+                app.commit_edit(Transaction(vec![Operation::SetLayoutGrids {
+                    id: *id,
+                    grids: ondin_core::reset::reset_item(src, &grids, item),
+                }]));
+                // The rows' own edits stand down that frame, so nothing writes twice.
+                next = None;
             }
         });
         if let Some(grids) = next {
@@ -8070,7 +8345,33 @@ impl OndinApp {
         // scrub starts from where the edge is rather than from zero. It showed the
         // distance beside an `auto` unit until then (§15 D874).
         let unpinned = set.is_none() && !held;
-        let (resp, flip) = ui::value_field_suffixed(
+        // An instance's overridden inset on this edge (§15 D981). A layer's insets
+        // are its placement, so an instance root's are its own and never marked.
+        let mark = self.sub_mark(
+            subjects,
+            |op| match op {
+                Operation::SetInsets { insets, .. } => Some(*insets),
+                _ => None,
+            },
+            |n| Some(*n.insets()),
+            move |i| inset_of(i, edge),
+            move |i, v| {
+                use ondin_core::container::Edge as Pin;
+                *match edge {
+                    Pin::Top => &mut i.top,
+                    Pin::Right => &mut i.right,
+                    Pin::Bottom => &mut i.bottom,
+                    Pin::Left => &mut i.left,
+                } = v;
+            },
+            |id, insets| Operation::SetInsets { id, insets },
+            |v| match v {
+                Some(LengthPct::Px(x)) => super::component::mark_num(*x),
+                Some(LengthPct::Percent(x)) => format!("{}%", super::component::mark_num(*x)),
+                None => "auto".to_owned(),
+            },
+        );
+        let (resp, unit_resp, hit) = ui::value_field_unit_marked(
             ui,
             size,
             ui::Prefix::Text(inset_label(edge)),
@@ -8079,6 +8380,7 @@ impl OndinApp {
                 clickable: true,
                 tooltip,
             }),
+            mark.as_ref().map(Mark::field),
             &mut v,
             if percent {
                 ui::Scrub::fine(0.25, 1)
@@ -8093,12 +8395,20 @@ impl OndinApp {
                 }
             },
         );
+        let flip = unit_resp.is_some_and(|u| u.clicked());
+        // A marked field's tip names the main's inset instead; two would stack.
         let resp = if unpinned {
-            resp.on_hover_text("Not pinned — type a value, drag, or click the diagram to pin")
+            tip_unless_marked(
+                resp,
+                &mark,
+                "Not pinned — type a value, drag, or click the diagram to pin",
+            )
         } else if set.is_none() {
             // Held by default: the distance, and no accent edge — nothing is
             // authored, and the accent is what says a pin was set.
-            resp.on_hover_text(
+            tip_unless_marked(
+                resp,
+                &mark,
                 "Held at this distance by default — nothing is pinned on this axis. \
                  Type or drag to pin it",
             )
@@ -8116,6 +8426,13 @@ impl OndinApp {
             );
             resp
         };
+        // An instance's overridden inset, put back (§15 D981) — and the valve told
+        // nothing moved, since it owns the engagement latch.
+        if hit && let Some(m) = &mark {
+            self.commit_reset(m.tx.clone());
+            self.edit_valve(&resp, Transaction::default());
+            return;
+        }
         if flip && let Some(was) = set {
             let ops = self.inset_flip_ops(subjects, edge, matches!(was, LengthPct::Px(_)));
             self.commit_edit(Transaction(ops));
@@ -8399,6 +8716,7 @@ impl OndinApp {
         subjects: &[NodeId],
         index: usize,
         committed: LayoutGrid,
+        item: Option<ondin_core::reset::ItemState>,
     ) -> GridRowOut {
         let mut out = GridRowOut::default();
         // **The first subject in document order, and the panel is only drawn where
@@ -8426,11 +8744,22 @@ impl OndinApp {
         let half = egui::vec2((full - gap) / 2.0, GRID_CELL);
         let track = GRID_CELL - 4.0;
 
+        // The whole head row under the pointer turns an overridden grid's dot into
+        // ↺ (`component::item_slot`'s caveat), asked before it is laid out.
+        let hot = ui.rect_contains_pointer(egui::Rect::from_min_size(
+            ui.cursor().min,
+            egui::vec2(full, GRID_CELL),
+        ));
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
             // The axis, as the two glyphs the dashboard's own view switch uses for
-            // the same distinction.
-            let axis_w = full - 2.0 * (GRID_CELL + gap);
+            // the same distinction — narrowed by an instance's trailing slot (§15
+            // D981, 4D), reserved before the ✕ as the other lists reserve it.
+            let slot = match item {
+                Some(_) => 14.0 + gap,
+                None => 0.0,
+            };
+            let axis_w = full - 2.0 * (GRID_CELL + gap) - slot;
             let current = GridAxis::ALL
                 .iter()
                 .position(|a| *a == grid.axis)
@@ -8476,6 +8805,9 @@ impl OndinApp {
             {
                 grid.visible = !grid.visible;
                 out.set = Some(grid);
+            }
+            if let Some(state) = item {
+                out.reset = super::component::item_slot(ui, state, hot);
             }
             if ui::field_button(ui, icon::X, GRID_CELL, 13.0, ui::FieldButton::Off)
                 .on_hover_text("Remove this grid")
@@ -10337,7 +10669,12 @@ impl OndinApp {
         // the card is where it is said. Its own edge rather than
         // `paint_subject_changed`, which the paint panels have already consumed.
         let fresh = self.effects_subject_changed();
-        self.sync_paint_collapse("Effects", !mixed && effects.is_empty(), fresh);
+        // An instance's ghost rows are something to show (§15 D981).
+        let ghosts = match subjects {
+            [one] => self.has_ghosts(Some(*one), |n| n.effects()),
+            _ => false,
+        };
+        self.sync_paint_collapse("Effects", !mixed && effects.is_empty() && !ghosts, fresh);
         let mut out = EffectRowOut::default();
         let mut acted: Option<usize> = None;
         // An instance's stack read against its source's (§15 D981) — one layer
@@ -10366,7 +10703,8 @@ impl OndinApp {
                 );
                 return;
             }
-            if effects.is_empty() {
+            // An instance that removed every effect still has its ghost rows.
+            if effects.is_empty() && source.as_ref().is_none_or(Vec::is_empty) {
                 ui.label(
                     egui::RichText::new("No effects")
                         .size(11.0)
@@ -12315,7 +12653,7 @@ impl OndinApp {
             }
         }
         if clicks.reset {
-            self.commit_edit(Transaction(resets));
+            self.commit_reset(Transaction(resets));
         }
         clicks.acted
     }
@@ -13271,6 +13609,8 @@ struct GridRowOut {
     /// The grid as it should be committed, or `None` for "nothing settled".
     set: Option<LayoutGrid>,
     remove: bool,
+    /// An instance's overridden grid asked for its main's back (§15 D981).
+    reset: bool,
 }
 
 /// The inputs [`grid_step`] decides from.
@@ -13354,6 +13694,14 @@ fn align_glyph(align: GridAlign, axis: GridAxis) -> &'static str {
         (GridAlign::Center, GridAxis::Rows) => icon::ALIGN_CENTER_VERTICAL,
         (GridAlign::End, GridAxis::Columns) => icon::ALIGN_RIGHT,
         (GridAlign::End, GridAxis::Rows) => icon::ALIGN_BOTTOM,
+    }
+}
+
+/// A layout grid's axis in words, for its ghost row (§15 D981): *Columns · 12*.
+fn grid_axis_word(axis: GridAxis) -> &'static str {
+    match axis {
+        GridAxis::Columns => "Columns",
+        GridAxis::Rows => "Rows",
     }
 }
 

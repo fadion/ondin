@@ -2038,8 +2038,26 @@ pub fn value_field_unit<N: egui::emath::Numeric>(
     scrub: Scrub,
     build: impl FnOnce(egui::DragValue<'_>) -> egui::DragValue<'_>,
 ) -> (egui::Response, Option<egui::Response>) {
+    let (resp, unit, _) =
+        value_field_unit_marked(ui, size, prefix, suffix, None, value, scrub, build);
+    (resp, unit)
+}
+
+/// [`value_field_unit`] with an override mark ([`FieldMark`]), or without one when
+/// `mark` is `None`; the third return value is whether the mark's ↺ was clicked.
+#[allow(clippy::too_many_arguments)]
+pub fn value_field_unit_marked<N: egui::emath::Numeric>(
+    ui: &mut egui::Ui,
+    size: egui::Vec2,
+    prefix: Prefix,
+    suffix: Option<Suffix<'_>>,
+    mark: Option<FieldMark<'_>>,
+    value: &mut N,
+    scrub: Scrub,
+    build: impl FnOnce(egui::DragValue<'_>) -> egui::DragValue<'_>,
+) -> (egui::Response, Option<egui::Response>, bool) {
     let mut v = value.to_f64();
-    let out = value_field_f64(ui, size, prefix, suffix, None, None, &mut v, scrub, build);
+    let out = value_field_f64_marked(ui, size, prefix, suffix, None, mark, &mut v, scrub, build);
     // Written back only on a real change, so a field whose type cannot hold its own
     // displayed value exactly — an `f32` opacity — is not rewritten every frame with
     // the round trip's error.
@@ -3824,6 +3842,31 @@ pub fn segmented_tipped(
     tip: impl Fn(usize) -> &'static str,
     paint: impl Fn(&egui::Painter, usize, egui::Rect, bool),
 ) -> Option<usize> {
+    segmented_marked(ui, width, cell_h, n, selected, enabled, tip, None, paint).0
+}
+
+/// [`segmented_tipped`] with an override mark ([`FieldMark`], §15 D981); the
+/// second return value is whether the mark's reset was clicked.
+///
+/// **The mark sits on the lit cell**, because a segmented control has no label of
+/// its own to brighten: the dot at the cell's top right at rest, and with the
+/// pointer on the cell its picture traded for ↺ in the same box, the mark's tooltip
+/// in place of the cell's. **A click on the lit cell is the reset** — it picked the
+/// value already held, which did nothing, so the reset takes no click that meant
+/// anything. Over a selection that disagrees no cell is lit: the dot then sits at
+/// the track's top right and the reset is the card header's.
+#[allow(clippy::too_many_arguments)]
+pub fn segmented_marked(
+    ui: &mut egui::Ui,
+    width: f32,
+    cell_h: f32,
+    n: usize,
+    selected: usize,
+    enabled: impl Fn(usize) -> bool,
+    tip: impl Fn(usize) -> &'static str,
+    mark: Option<FieldMark<'_>>,
+    paint: impl Fn(&egui::Painter, usize, egui::Rect, bool),
+) -> (Option<usize>, bool) {
     const PAD: f32 = 2.0;
     const GAP: f32 = 2.0;
     let (track, _) =
@@ -3852,6 +3895,10 @@ pub fn segmented_tipped(
     let inner = track.shrink(PAD + SEGMENT_BORDER);
     let cell_w = (inner.width() - GAP * (n.saturating_sub(1)) as f32) / n.max(1) as f32;
     let mut clicked = None;
+    let mut reset = false;
+    if mark.is_some() && selected >= n {
+        override_dot(ui.painter(), track.right_top() + egui::vec2(-5.0, 5.0));
+    }
     for i in 0..n {
         let rect = egui::Rect::from_min_size(
             egui::pos2(inner.min.x + i as f32 * (cell_w + GAP), inner.min.y),
@@ -3897,7 +3944,21 @@ pub fn segmented_tipped(
             ui.painter()
                 .rect_filled(rect, egui::CornerRadius::same(4), theme::color::text_a(18));
         }
-        paint(ui.painter(), i, rect, on);
+        match mark {
+            Some(m) if on => {
+                if resp.hovered() {
+                    segment_glyph(ui.painter(), rect, icon::ARROW_COUNTER_CLOCKWISE, true);
+                } else {
+                    paint(ui.painter(), i, rect, on);
+                    override_dot(ui.painter(), rect.right_top() + egui::vec2(-4.0, 4.0));
+                }
+                if resp.on_hover_text(m.tip).clicked() {
+                    reset = true;
+                }
+                continue;
+            }
+            _ => paint(ui.painter(), i, rect, on),
+        }
         let words = tip(i);
         let resp = if words.is_empty() {
             resp
@@ -3908,7 +3969,7 @@ pub fn segmented_tipped(
             clicked = Some(i);
         }
     }
-    clicked
+    (clicked, reset)
 }
 
 /// A centred Phosphor glyph for a [`segmented`] cell — the icon twin of
@@ -4173,7 +4234,20 @@ pub fn switch_row_ink(on: bool) -> egui::Color32 {
 /// column of a dozen rows is read as a column, and two tiers of contrast say
 /// which ones are on without the eye having to find each knob.
 pub fn switch_row(ui: &mut egui::Ui, label: &str, on: bool, height: f32) -> egui::Response {
-    switch_row_inner(ui, label, Some(on), height)
+    switch_row_inner(ui, label, Some(on), height, false)
+}
+
+/// A [`switch_row`] whose value an instance overrides (§15 D981): the dot after
+/// the label. **No ↺**: a switch has two values, so the reset *is* the toggle the
+/// row already makes, and the caller's tooltip names the main's value.
+pub fn switch_row_marked(
+    ui: &mut egui::Ui,
+    label: &str,
+    on: bool,
+    height: f32,
+    marked: bool,
+) -> egui::Response {
+    switch_row_inner(ui, label, Some(on), height, marked)
 }
 
 /// A [`switch_row`] over a selection whose runs disagree: the word **"Mixed"**
@@ -4199,7 +4273,7 @@ pub fn switch_row(ui: &mut egui::Ui, label: &str, on: bool, height: f32) -> egui
 /// a mixed range is resolved, and a row that refused the click would leave the
 /// user no way to make the selection agree.
 pub fn switch_row_mixed(ui: &mut egui::Ui, label: &str, height: f32) -> egui::Response {
-    switch_row_inner(ui, label, None, height)
+    switch_row_inner(ui, label, None, height, false)
 }
 
 /// The one implementation behind [`switch_row`] and [`switch_row_mixed`].
@@ -4213,6 +4287,7 @@ fn switch_row_inner(
     label: &str,
     on: Option<bool>,
     height: f32,
+    marked: bool,
 ) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), height),
@@ -4231,7 +4306,7 @@ fn switch_row_inner(
         );
     }
     let inner = rect;
-    ui.painter().text(
+    let words = ui.painter().text(
         egui::pos2(inner.left(), inner.center().y),
         egui::Align2::LEFT_CENTER,
         label,
@@ -4240,6 +4315,9 @@ fn switch_row_inner(
         // range that disagrees is not a range this feature is on for.
         switch_row_ink(on.unwrap_or(false)),
     );
+    if marked {
+        override_dot(ui.painter(), words.right_top() + egui::vec2(4.0, 3.0));
+    }
     match on {
         Some(on) => paint_switch(
             ui.painter(),

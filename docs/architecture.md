@@ -1607,16 +1607,17 @@ first was, it saved only the track list.
 `track_lines` merges an edge with the last one only, the spans being laid in order — it searched every
 edge, quadratic in the track count.
 
-### 5.3d Components and overrides (designed 2026-10-04; build steps 1–4 built, step 5's resets and card built; §15 D978–D981)
+### 5.3d Components and overrides (designed 2026-10-04; build steps 1–5 built; §15 D978–D981)
 
 > **Design ahead of code, part of it** — decided with the maintainer on 2026-10-04 (session 47). **Build
 > steps 1–4 are built** the same day — the list items' ids (§15 D980, `a83adc8`), the component model,
 > its two fields, two operations and post-conditions (§15 D978, `e3df69d`), the verbs — create, detach,
 > delete, copy, and their keys and menu rows (§15 D979, D981, `0ae3cd7`, then `settle_links`) — field
 > propagation (§15 D979 (a), `45730f6`) and structural propagation (§15 D979 (b), `6ac7d0d`) — and the
-> paragraphs on those say so; so is most of step 5 — the reset family in core, its two menu rows, the
-> inspector's component card and part of the override look (`26c8434` to `6210953`, §15 D979's and
-> D981's amendments). The rest of that look, the live preview and most of the chrome are not. It sits
+> paragraphs on those say so; so is step 5 — the reset family in core, its two menu rows, the
+> inspector's component card and the override look on the inspector's cards and lists (`26c8434` to
+> `6210953`, then session 49; §15 D979's and D981's amendments). The live preview and the canvas and
+> layers chrome are not. It sits
 > beside §5.3c
 > because what it changes is the node model. Every other passage of this document still describes `HEAD`; where one states a rule this
 > design will change, it carries a forward pointer here — §4's invariants 4 and 8, §5.11's bump rule
@@ -2124,8 +2125,21 @@ insets on its axis**, or `keep_insets` re-pins it where it lands — except on a
 whose insets are its own placement and which writes its own back unchanged (`6210953`; the first fix
 gave it the main's and unpinned it); and the **trailing slot and ghost
 rows** on Fill, Stroke and Effects, an item reset written verbatim and never through a retargeting
-writer, which mints a fresh id and lands the restored item as a local one. Not yet: the other cards' fields, W and H through a layout's
-`size_field`, and the exports and layout-grid lists. ⚠️ **The filled hexagon has no glyph**:
+writer, which mints a fresh id and lands the restored item as a local one. ✅ **Then the rest of the
+cards and both remaining lists** (session 49, §15 D981's amendment): a **sub-field** — one inset, a
+gap, a grow, a text size — is marked by `OndinApp::sub_mark`, which reads the source's whole value out
+of the frame's field resets (`OndinApp::field_overrides`), so a field `reset::overrides` skips — an
+instance root's own placement, a kind its source does not share — is never marked, and which skips a
+subject whose reset would write nothing; Appearance, Mask, Position, Container (the `display` cells
+compared by mode alone, `ByMode`), Item, Transform's laid-out W and H through `layout::size_field`, and
+Type — **compared on the node's own style, never a run's** — are marked; Export and Layout grid have the
+trailing slot and ghost rows, their restores written whole for the Effects card's reason. 🚨 **A reset
+is not a resize**: every reset states the layout item of each layer it resizes
+(`OndinApp::items_stated`, in `reset_tx` and `commit_reset`), or `keep_flex_sizes` reads it as the
+hand's resize and stops a growing instance growing. A dropdown's
+↺ is the first row of its open list, a segmented control's mark sits on its lit cell, and a switch
+row's dot has no ↺ — the session's, D981 has each. Some fields are left unmarked on purpose, D981
+lists them. ⚠️ **The filled hexagon has no glyph**:
 the bundled icon font is Phosphor Regular alone, and §15 D10, which hand-drew the one Fill-weight
 glyph the app needed, says *"at two, ship the font"* — so the card's main face draws the outline one.
 The canvas labels and markers and the layers marks are not built.
@@ -2150,15 +2164,15 @@ chains, user operations winning, and the exact-equality risk measured for the pi
 ⚠️ The property-based test this step was to carry was not among its first tests, and the fields
 merge and the nested placement skip fell short — all three fixed in `6ac7d0d`; (4) ✅ **built
 2026-10-04** (`6ac7d0d`, then `e38603d`) — propagation for **structure**: insert at an anchor, reorder,
-move (into a parent the same edit made, too), delete or keep; (5) **mostly built** — ✅ the reset
+move (into a parent the same edit made, too), delete or keep; (5) ✅ **built** — the reset
 family in core (reset a field, reset structure, reset all, none deleting a local addition; `26c8434`,
 `7cf242e`, `7b5961e`), the context menu's two rows (`a18b0b5`, `d66044c`), the inspector's component
 card (*Reset all*, *Detach*, the overflow's *Reset fields N*, *Restore removed children N* and *Reset
-order* disabled rather than hidden at zero, the drift summary; `5fcff6b`) and the override look in
-part — the card headers' counts, Transform's field marks, the trailing slot and ghost rows on Fill,
-Stroke and Effects (`d2beb37`, `d39f7c1`, `6033571`, `a345b81`, `c292b50`, `6210953`); **next**, the rest of that
-look: the other cards' fields, `size_field`'s W and H, and the exports and layout-grid lists; (6)
-**next after it** — the
+order* disabled rather than hidden at zero, the drift summary; `5fcff6b`) and the override look — the
+card headers' counts, Transform's field marks, the trailing slot and ghost rows on Fill, Stroke and
+Effects (`d2beb37`, `d39f7c1`, `6033571`, `a345b81`, `c292b50`, `6210953`), then every other card's
+fields, `size_field`'s W and H, and the exports and layout-grid lists (session 49), with the fields
+§15 D981 lists left unmarked on purpose; (6) **next** — the
 live preview of main-component
 edits, which today reach the copies only on release; (7) then variants and properties.
 
@@ -2166,8 +2180,8 @@ edits, which today reach the copies only on release; (7) then variants and prope
 steps 1–4 above, `Ctrl+Alt+K`/`Ctrl+Alt+B`, five menu rows filed provisionally, D981's two toasts;
 then step 5's resets in core, the two *Reset* menu rows, the component card and the override look in
 part (`26c8434`, `7cf242e`, `7b5961e`, `a18b0b5`, `d66044c`, `5fcff6b`, `d2beb37`, `d39f7c1`,
-`6033571`, `a345b81`, `c292b50`, `6210953`). **Next**: the rest of step 5 — the override look on the cards and lists not yet marked —
-then step 6.
+`6033571`, `a345b81`, `c292b50`, `6210953`); then, in session 49, the rest of that look — every other
+card's fields and the exports and layout-grid lists. **Next**: step 6.
 **Owed, outside the numbered steps**: D981's chrome — the canvas labels,
 chips, glyphs and markers (a group main's label included; a group *instance*'s label is unruled), the
 layers panel's dot and **+**, `Enter` into an instance (`shortcuts.md` §12 ➕) and

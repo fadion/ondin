@@ -36,9 +36,10 @@
 //! and the premise it rested on was about the *process* rather than the machine.**
 //! The temp name used to be derived from the target with no unique part, on the
 //! stated grounds that this app never has two writers for one path — true of one
-//! Ondin, and nothing prevents two. Nothing does: there is no lock file, no named
-//! mutex and no single-instance check, and the base folder is documented as
-//! syncable. Two instances with the same document open both autosave every thirty
+//! Ondin, and nothing prevents two. Nothing does: there is no named mutex and no
+//! single-instance check — `instances`' lock file per process counts running
+//! copies for the updater and stops none (§15 D970) — and the base folder is
+//! documented as syncable. Two instances with the same document open both autosave every thirty
 //! seconds and snapshot every ten, through here, onto one temp name; the second
 //! `File::create` truncates the first's temp, and the first's handle then follows
 //! the file *through* the rename and extends it. Staged deterministically that
@@ -48,12 +49,14 @@
 //! per-process counter, which turns that into a lost update: the safe direction,
 //! and the only one this module can reach without an instance lock.
 //!
-//! **Two kinds of file deliberately do not use this.** The *derived caches* —
+//! **Three kinds of file deliberately do not use this.** The *derived caches* —
 //! the cover PNGs and the font data — are regenerated from a document or
 //! re-fetched when they fail to parse, so a torn one costs nothing and is
 //! self-healing, and they are written in bulk where a `sync_all` each would be
 //! felt. The *exports*, CLI and panel alike (`main.rs`, `panels::export`), are an
-//! output the user re-runs rather than a record the app keeps. **The rule is that
+//! output the user re-runs rather than a record the app keeps. And `ondin.log`
+//! (`logging`), an append-only stream with no atomic form worth having, whose
+//! worst crash is a torn last line (§15 D378's amendment). **The rule is that
 //! a file worth an fsync is one nothing else can reconstruct**, and those are the
 //! whole of the un-converted set — which is worth stating as an inventory,
 //! because the next `fs::write` somebody adds should have to argue its way onto
@@ -71,6 +74,14 @@ use std::path::{Path, PathBuf};
 /// Creates the parent directory if it is missing, which every caller wanted
 /// anyway and two of them used to do by hand.
 pub fn write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    // 🚨 **Through a symlink to the file it names** (§15 D975, `[R3-L5-03]`).
+    // A rename replaces the *link*, so a document reached through one became a
+    // plain file beside a target that never saw the save again — on Linux and
+    // macOS, where D956 first shipped this function and links are ordinary.
+    // The temp is then made beside the target, so the rename stays on one
+    // volume. A link whose target cannot be resolved is written as before.
+    let resolved = through_link(path);
+    let path = resolved.as_path();
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -103,6 +114,15 @@ pub fn write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
             let mut file = std::fs::File::create(&temp).map_err(|e| at(e, "create", &temp))?;
             file.write_all(bytes).map_err(|e| at(e, "write", &temp))?;
             file.sync_all().map_err(|e| at(e, "flush", &temp))?;
+            // **The replaced file's permissions, kept** (§15 D975,
+            // `[R3-L5-03]`): the temp is created with the process's default
+            // mode, so every save turned a document the user had restricted to
+            // `0600` into `0644`. Ignored on failure — the bytes are what the
+            // write is for. On Windows `Permissions` is the read-only flag, and
+            // a read-only destination refuses the rename anyway (D967).
+            if let Ok(meta) = std::fs::metadata(path) {
+                let _ = file.set_permissions(meta.permissions());
+            }
         }
         // **The destination, not the temp.** This is the one step whose path the
         // user has heard of, and it is the step reachable today — see
@@ -118,6 +138,17 @@ pub fn write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         let _ = std::fs::remove_file(&temp);
     }
     result
+}
+
+/// The file `path` names: its target if it is a symbolic link that resolves,
+/// and `path` itself otherwise.
+fn through_link(path: &Path) -> PathBuf {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+        }
+        _ => path.to_path_buf(),
+    }
 }
 
 /// Remove every temp file that belongs to `path`, whichever writer left it.
@@ -850,6 +881,54 @@ mod tests {
         );
 
         unlock(&path);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A save keeps the document's mode and its symlink** (§15 D975,
+    /// `[R3-L5-03]`): a `0600` file stays `0600`, and a document reached
+    /// through a link is written at the link's target, the link left a link.
+    ///
+    /// `cfg(unix)`: both are Linux and macOS semantics, so of the local gates
+    /// only a Linux build compiles this; CI does on every push.
+    ///
+    /// **Flip-checked under WSL Ubuntu 24.04** (2026-10-04): the permissions
+    /// copy disabled fails on *"the mode is kept"* with `420` (`0o644`, a
+    /// `022` umask) against `384`; `write` skipping `through_link` fails on
+    /// *"the link is still a link"*.
+    #[cfg(unix)]
+    #[test]
+    fn a_save_keeps_the_documents_mode_and_its_link() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = temp_root("mode-link");
+        let doc = root.join("doc.ondin");
+        std::fs::write(&doc, b"old").unwrap();
+        std::fs::set_permissions(&doc, std::fs::Permissions::from_mode(0o600)).unwrap();
+        write(&doc, b"new").unwrap();
+        let mode = std::fs::metadata(&doc).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "the mode is kept");
+
+        let real = root.join("real").join("doc.ondin");
+        std::fs::create_dir_all(real.parent().unwrap()).unwrap();
+        std::fs::write(&real, b"old").unwrap();
+        let link = root.join("link.ondin");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        write(&link, b"new").unwrap();
+        assert!(
+            std::fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "the link is still a link"
+        );
+        assert_eq!(
+            std::fs::read(&real).unwrap(),
+            b"new",
+            "and its target was saved"
+        );
+        assert!(
+            leftovers(&real).is_empty(),
+            "the temp was beside the target"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -93,7 +93,14 @@ use std::collections::BTreeMap;
 /// `skip_serializing_if`, so every gradient ever saved loads unchanged and re-saves
 /// byte-identical. The two versions are different artefacts and a reader looking
 /// for the document format will find this constant first.
-pub const SNAPSHOT_VERSION: u32 = 10;
+///
+/// **11** — every number a platform's maths library can disagree about is
+/// written at the SVG writer's four places: a path's `geometry.svg` (§15 D968)
+/// and the `local_transform`, `world_transform` and `world_bounds` beside it
+/// (§15 D972). No key moved and no type changed, but **an untouched document's
+/// snapshot changes bytes**, which is 6's reason and 9's — and D968 went in
+/// without the bump on its first pass, the same way 9 did (`[R1-L2-04]`).
+pub const SNAPSHOT_VERSION: u32 = 11;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
@@ -435,14 +442,20 @@ fn node_snapshot(
         // first time container layout placed something. Whether a snapshot should
         // *also* carry what the user set — which an agent editing the file needs —
         // is the MCP work's question, and that work is parked.
-        local_transform: res.used_local_of(node).as_coeffs(),
+        // **At the SVG writer's four places, like the path below** (§15 D972,
+        // `[R1-L2-03]`): a rotation's `sin`/`cos` and a rounded corner's
+        // `acos`/`atan2` differ in the last digit between platforms' maths
+        // libraries, which is what D968 found in `geometry.svg` and these carry
+        // as surely.
+        local_transform: res.used_local_of(node).as_coeffs().map(round4),
         world_transform: res
             .world_transform(id)
             .unwrap_or(Affine::IDENTITY)
-            .as_coeffs(),
+            .as_coeffs()
+            .map(round4),
         world_bounds: res
             .world_bounds(id)
-            .map(|b| [b.min_x(), b.min_y(), b.max_x(), b.max_y()]),
+            .map(|b| [b.min_x(), b.min_y(), b.max_x(), b.max_y()].map(round4)),
         visible: node.visible(),
         locked: node.locked(),
         proportions_locked: node.proportions_locked(),
@@ -524,6 +537,21 @@ fn effect_summary(e: &ondin_core::Effect) -> EffectSummary {
             ..base("Filters")
         },
     }
+}
+
+/// `v` at four decimal places — the SVG writer's precision (`svg::fmt`), kept
+/// as a number so the JSON shape does not change (§15 D972).
+///
+/// A non-finite value is `0`, which is `svg::fmt`'s floor and for its reason:
+/// JSON has no spelling for one, so `serde_json` would write `null` into a
+/// field typed as a number. And `-0` is `0`, since a value that rounds to
+/// nothing but keeps its sign is dust, and would print as `-0.0`.
+fn round4(v: f64) -> f64 {
+    if !v.is_finite() {
+        return 0.0;
+    }
+    let r = (v * 1e4).round() / 1e4;
+    if r == 0.0 { 0.0 } else { r }
 }
 
 fn kind_name(kind: &NodeKind) -> &'static str {

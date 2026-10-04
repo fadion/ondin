@@ -580,3 +580,42 @@ fn a_pivot_is_reported_as_a_point_and_only_when_it_has_been_moved() {
          recorded, not endorsed"
     );
 }
+
+/// **A rotated layer's transforms and bounds are written at four places**
+/// (§15 D972, `[R1-L2-03]`): a 30° rotation's `sin` and `cos` are where a
+/// platform's maths library can differ in the last digit, and the golden is a
+/// byte comparison on three of them.
+///
+/// **Flip-check, run**: `round4` returning `v` unchanged fails on the rect's
+/// `local_transform`, whose `cos 30°` prints as `0.8660254037844387`.
+#[test]
+fn a_rotated_layers_numbers_are_written_at_four_places() {
+    use ondin_core::{Operation, Resolved, Transaction};
+    let mut f = common::fixture();
+    let turned = ondin_core::kurbo::Affine::translate((20.0, 20.0))
+        * ondin_core::kurbo::Affine::rotate(30f64.to_radians());
+    f.doc
+        .apply(&Transaction(vec![Operation::SetTransform {
+            id: f.rect,
+            transform: turned,
+        }]))
+        .expect("rotate the rect");
+    f.res = Resolved::rebuild(&f.doc);
+    let snap = snapshot(&f.doc, &f.res);
+    let rect = snap.nodes.iter().find(|n| n.id == wire(f.rect)).unwrap();
+    assert!(rect.local_transform[1] != 0.0, "the fixture is rotated");
+    let places = |v: f64| {
+        let s = serde_json::to_string(&v).unwrap();
+        s.split_once('.').map_or(0, |(_, frac)| frac.len())
+    };
+    for node in &snap.nodes {
+        let numbers = node
+            .local_transform
+            .iter()
+            .chain(&node.world_transform)
+            .chain(node.world_bounds.iter().flatten());
+        for &v in numbers {
+            assert!(places(v) <= 4, "{} writes {v}", node.id);
+        }
+    }
+}

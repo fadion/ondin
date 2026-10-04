@@ -887,6 +887,14 @@ pub struct OndinApp {
     /// panel is independent (`design/Editor.dc.html`), and the state is keyed by
     /// title rather than by node so it survives changing the selection.
     pub(crate) collapsed_panels: HashSet<&'static str>,
+    /// How far each instance asked about has drifted from its main
+    /// (`reset::drift`), as of the session revision beside it — the Component
+    /// card's counts, read every frame the card is up and recomputed only when the
+    /// document changes (§15 D981 (4)'s cache keyed on the revision).
+    pub(crate) drift_cache: (
+        u64,
+        std::collections::HashMap<NodeId, ondin_core::reset::Drift>,
+    ),
     /// Rects whose Appearance panel is showing the four per-corner radius
     /// fields. Purely a disclosure: the model always holds four radii, and the
     /// single field above edits all of them, so nothing here changes what a
@@ -2169,6 +2177,8 @@ impl OndinApp {
             // answer, on the grounds that the card was a placeholder with nothing
             // in it.
             collapsed_panels: HashSet::from(["Effects", "Preview"]),
+            // `u64::MAX` is no revision a session has, so the first read fills it.
+            drift_cache: (u64::MAX, Default::default()),
             per_corner_radius: HashSet::new(),
             open_menu: TopMenu::None,
             context_menu: None,
@@ -4371,7 +4381,9 @@ impl OndinApp {
         }
         let ops = ondin_core::reset::reset(doc, kind, &scopes, &mut self.session.ids);
         if ops.is_empty() {
-            self.session.info("Nothing differs from the main component");
+            // The card's *Reset all* tooltip's words, so the two say one thing.
+            self.session
+                .info("Nothing here differs from the main component");
             return;
         }
         if let Err(e) = self.session.try_commit(Transaction(ops)) {
@@ -9882,7 +9894,8 @@ mod tests {
     /// fails naming `inspector.rs`. Predicted correctly.
     #[test]
     fn only_the_layers_panel_commits_without_the_committer() {
-        let panels: [(&str, &str); 9] = [
+        let panels: [(&str, &str); 10] = [
+            ("component.rs", include_str!("panels/component.rs")),
             ("dashboard.rs", include_str!("panels/dashboard.rs")),
             ("export.rs", include_str!("panels/export.rs")),
             ("inspector.rs", include_str!("panels/inspector.rs")),

@@ -5,6 +5,7 @@
 //! so their controls reflect an in-progress gesture, and every action they take
 //! goes through `commit`/`edit_valve` — never a direct mutation.
 
+mod component;
 pub(crate) mod dashboard;
 mod export;
 mod inspector;

@@ -601,3 +601,74 @@ fn pasting_an_instance_into_another_document_drops_its_links() {
     other.apply(&tx).expect("plain layers");
     assert_eq!(link_of(&other, created[0]), None);
 }
+
+/// `tx` plus the links its moves cut, as `commit_inner` assembles it.
+fn settled(doc: &Document, ops: Vec<Operation>) -> Transaction {
+    let mut tx = Transaction(ops);
+    let cuts = ondin_core::component::settle_moves(doc, &tx);
+    tx.0.extend(cuts);
+    tx
+}
+
+/// A member dragged out of its instance becomes its own layer: the bare move is
+/// refused (`Membership`), the settled one goes through with the link cut. Flip:
+/// `settle_moves` answering nothing leaves the settled move refused too.
+#[test]
+fn a_member_moved_out_of_its_instance_loses_its_link() {
+    let mut f = fixture();
+    let out = Operation::Reparent {
+        id: f.ia,
+        new_parent: f.root,
+        index: 0,
+    };
+    refused(&mut f.doc, vec![out.clone()]);
+    let tx = settled(&f.doc, vec![out]);
+    f.doc.apply(&tx).expect("the move with its cut");
+    assert_eq!(link_of(&f.doc, f.ia), None);
+    assert_eq!(
+        link_of(&f.doc, f.ib),
+        Some(f.b),
+        "the one left behind still follows"
+    );
+}
+
+/// Regrouping inside its own instance moves nothing out of it: no cut.
+#[test]
+fn a_member_regrouped_inside_its_instance_keeps_its_link() {
+    let mut f = fixture();
+    let g = f.ids.mint();
+    let tx = settled(
+        &f.doc,
+        vec![
+            create(g, f.i, 2, NodeKind::Group),
+            Operation::Reparent {
+                id: f.ia,
+                new_parent: g,
+                index: 0,
+            },
+        ],
+    );
+    assert_eq!(tx.0.len(), 2, "nothing cut");
+    f.doc.apply(&tx).expect("a local group holding a member");
+    assert_eq!(link_of(&f.doc, f.ia), Some(f.a));
+}
+
+/// A nested copy moved out of its outer instance is cut, and its members with it
+/// — they are asked after it, with its link already gone.
+#[test]
+fn a_nested_copy_moved_out_takes_its_members_links_with_it() {
+    let mut f = fixture();
+    let [_, _, _, _, _, cn, cna, cnb] = nested(&mut f);
+    let tx = settled(
+        &f.doc,
+        vec![Operation::Reparent {
+            id: cn,
+            new_parent: f.root,
+            index: 0,
+        }],
+    );
+    f.doc.apply(&tx).expect("the move with its cuts");
+    for id in [cn, cna, cnb] {
+        assert_eq!(link_of(&f.doc, id), None, "{id:?}");
+    }
+}

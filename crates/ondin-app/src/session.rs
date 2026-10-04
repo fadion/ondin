@@ -1129,6 +1129,12 @@ impl EditorSession {
         // And a resized flex item keeps the size it was dragged to (§15 D875), and
         // an in-flow item its stored translation (§15 D877).
         let tx = ondin_core::build::keep_flex_sizes(&self.doc, &self.resolved, tx);
+        // And a linked layer moved out of its instance becomes its own layer
+        // rather than a link `component::check` refuses (§5.3d) — every door that
+        // reparents comes through here, so none of them has to know.
+        let mut tx = tx;
+        let cuts = ondin_core::component::settle_moves(&self.doc, &tx);
+        tx.0.extend(cuts);
         let held = self.growth_held(&tx, &asked);
         // And either can empty a transaction outright — `keep_insets` one pinned
         // layer written back where it already is, `keep_flex_sizes` a translation

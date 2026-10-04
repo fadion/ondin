@@ -397,6 +397,120 @@ pub fn detach(doc: &Document, root: NodeId) -> Option<Transaction> {
     Some(Transaction(ops))
 }
 
+/// The links a transaction's **moves** cut (§5.3d): a linked layer reparented out
+/// of its instance, into another instance of the same main whose counterpart is
+/// already there, or into a nested instance, becomes the copy's own layer rather
+/// than a link [`check`] would refuse. A commit-time pass, `build::keep_insets`'
+/// shape: `EditorSession::commit_inner` runs it over every transaction, so every
+/// door that moves a layer — the layers panel, a canvas drop, the structural
+/// verbs — is covered without each knowing about components.
+///
+/// The transaction's `Reparent`s are simulated over the document's parents, then
+/// every linked node under a moved one is asked, top-down, whether it still
+/// belongs to the instance around it: an instance root above it whose source
+/// contains its source, and no other node of that instance on the same source. A
+/// link straight to a main is placed anywhere, as [`check`] allows. Cutting a
+/// nested copy's root cuts its members too, because the top-down order asks them
+/// after it with its link already gone. Empty in a document with no links, and
+/// for a transaction that moves nothing.
+pub fn settle_moves(doc: &Document, tx: &Transaction) -> Vec<Operation> {
+    let nodes = doc.node_map();
+    let moved: Vec<(NodeId, NodeId)> =
+        tx.0.iter()
+            .filter_map(|op| match op {
+                Operation::Reparent { id, new_parent, .. } => Some((*id, *new_parent)),
+                _ => None,
+            })
+            .collect();
+    if moved.is_empty() || !nodes.values().any(|n| n.link.is_some()) {
+        return Vec::new();
+    }
+    // Parents as the transaction leaves them: its moves, and the nodes it creates
+    // — a group made in the same transaction to hold a moved layer is an ancestor
+    // the document does not have yet, and a chain that stops at it would read as
+    // "outside every instance".
+    let mut parent: FxHashMap<NodeId, NodeId> = FxHashMap::default();
+    for op in &tx.0 {
+        match op {
+            Operation::Reparent { id, new_parent, .. } => {
+                parent.insert(*id, *new_parent);
+            }
+            Operation::CreateNode { id, parent: p, .. } => {
+                parent.insert(*id, *p);
+            }
+            Operation::InsertSubtree {
+                nodes: inserted,
+                parent: p,
+                ..
+            } => {
+                let set: FxHashSet<NodeId> = inserted.iter().map(|n| n.id).collect();
+                for n in inserted {
+                    match n.parent.filter(|q| set.contains(q)) {
+                        Some(q) => parent.insert(n.id, q),
+                        None => parent.insert(n.id, *p),
+                    };
+                }
+            }
+            _ => {}
+        }
+    }
+    let parent_of = |id: NodeId| {
+        parent
+            .get(&id)
+            .copied()
+            .or_else(|| nodes.get(&id).and_then(|n| n.parent))
+    };
+    let depth = |id: NodeId| std::iter::successors(Some(id), |a| parent_of(*a)).count();
+    let inside = |id: NodeId, outer: NodeId| {
+        std::iter::successors(parent_of(id), |a| parent_of(*a)).any(|a| a == outer)
+    };
+    let mut cut: FxHashSet<NodeId> = FxHashSet::default();
+    // Whether `id`'s chain ends at a main, given the links cut so far.
+    let is_root = |id: NodeId, cut: &FxHashSet<NodeId>| {
+        let mut at = id;
+        for _ in 0..=nodes.len() {
+            if cut.contains(&at) {
+                return false;
+            }
+            let Some(src) = nodes.get(&at).and_then(|n| n.link) else {
+                return false;
+            };
+            if nodes.get(&src).is_some_and(|s| s.component) {
+                return true;
+            }
+            at = src;
+        }
+        false
+    };
+    let mut candidates: Vec<NodeId> =
+        crate::build::subtree_nodes(doc, &moved.iter().map(|(id, _)| *id).collect::<Vec<_>>())
+            .into_iter()
+            .filter(|id| nodes.get(id).is_some_and(|n| n.link.is_some()))
+            .collect();
+    candidates.sort_by_key(|id| (depth(*id), *id));
+    let mut ops = Vec::new();
+    for id in candidates {
+        let src = nodes[&id].link.expect("filtered to linked nodes");
+        if nodes.get(&src).is_some_and(|s| s.component) {
+            continue;
+        }
+        let root =
+            std::iter::successors(parent_of(id), |a| parent_of(*a)).find(|a| is_root(*a, &cut));
+        let belongs = root.is_some_and(|r| {
+            let root_src = nodes[&r].link.expect("an instance root is linked");
+            let shared = nodes.values().any(|o| {
+                o.id != id && o.link == Some(src) && !cut.contains(&o.id) && inside(o.id, r)
+            });
+            inside(src, root_src) && !shared
+        });
+        if !belongs {
+            cut.insert(id);
+            ops.push(Operation::SetLink { id, link: None });
+        }
+    }
+    ops
+}
+
 /// How a copy of a **main** lands (§15 D979 (e)): as an instance of it, which is
 /// what copy and paste, duplicate and Alt-drag do, or as a new main — *Duplicate
 /// as component*.

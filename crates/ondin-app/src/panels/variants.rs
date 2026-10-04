@@ -137,7 +137,7 @@ fn note(ui: &mut egui::Ui, glyph: &str, text: &str) -> egui::Response {
 }
 
 /// *2 variants are Large, Hover* — or `None` without a clash.
-pub(super) fn clash_text(doc: &ondin_core::Document, set: NodeId) -> Option<String> {
+pub(crate) fn clash_text(doc: &ondin_core::Document, set: NodeId) -> Option<String> {
     let clashing = variant::clashes(doc, set);
     let first = doc.get(*clashing.first()?)?;
     let same = clashing

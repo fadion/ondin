@@ -1877,8 +1877,25 @@ impl OndinApp {
         // No row can want two of them. A frame cannot be a mask
         // (`NodeKind::can_mask`), and a boolean's operands are consumed by the
         // operation rather than painted, so a mask among them would clip nothing.
+        // A collapsed set carries its variant count where a frame carries its size,
+        // and a layer bound to a component property carries `{}` (§15 D982, the
+        // design's 2A and 2C) — the count is what the folded row hides, and the
+        // binding is the one thing about the layer no other row says.
+        let doc = &self.session.doc;
+        let set_count = (node.set().is_some() && self.collapsed.contains(&id))
+            .then(|| ondin_core::variant::variants(doc, id).len());
+        let bound = ondin_core::variant::owner_above(doc, id)
+            .and_then(|o| doc.get(o))
+            .is_some_and(|o| o.props().iter().any(|p| p.bound.contains(&id)));
         let badge = if node.mask() {
             Some(RowBadge::Icon(icon::CIRCLE_HALF, BADGE_MASK))
+        } else if let Some(n) = set_count {
+            Some(RowBadge::Text(match n {
+                1 => "1 variant".to_string(),
+                n => format!("{n} variants"),
+            }))
+        } else if bound {
+            Some(RowBadge::Icon(icon::BRACKETS_CURLY, BADGE_STACK))
         } else {
             // The frame's **used** size (§15 D868) — the badge reports the frame
             // on the canvas, which is where container layout put it.

@@ -238,6 +238,9 @@ impl Gpu {
 /// choose it if they can see the part they are giving up.
 const GHOST_ALPHA: f32 = 0.3;
 
+/// A component set's tab's padding round its text (§15 D982, the design's 1C).
+const SET_TAB_PAD: egui::Vec2 = egui::vec2(6.0, 3.0);
+
 /// The id the crop ghost wears — see `OndinApp::image_ghost`.
 const GHOST_ID: NodeId = NodeId {
     actor: u64::MAX,
@@ -9648,14 +9651,64 @@ impl OndinApp {
         }
         // The frame's own top-left, so the tag tracks the box the user sees.
         let corner = self.selection_quad(id, rect, ppp)?[0];
-        // `PLACEHOLDER` leaves the ink to `Painter::galley`, which is what lets
-        // the same layout be drawn selected or not.
-        let galley = ui.painter().layout_no_wrap(
-            node.name().to_string(),
-            egui::FontId::proportional(PT),
-            egui::Color32::PLACEHOLDER,
-        );
+        let doc = &self.session.doc;
+        // A component set's tag is a **tab** (§15 D982, the design's 1C): the
+        // four-squares glyph before the name, the variant count while the set is
+        // selected (1D), and what is wrong when two variants clash (1F) — and a
+        // variant in a clash leads with the warning glyph. `PLACEHOLDER` leaves
+        // the ink to `Painter::galley`, which is what lets the same layout be drawn
+        // selected or not; the count and the clash keep their own.
+        let is_set = node.set().is_some();
+        let clashing = ondin_core::variant::set_of(doc, id)
+            .is_some_and(|s| ondin_core::variant::clashes(doc, s).contains(&id));
+        let mut job = egui::text::LayoutJob::default();
+        let glyph = |job: &mut egui::text::LayoutJob, g: &str, ink| {
+            job.append(g, 0.0, egui::TextFormat::simple(theme::icon_font(PT), ink));
+        };
+        let words = |job: &mut egui::text::LayoutJob, t: &str, lead: f32, ink| {
+            job.append(
+                t,
+                lead,
+                egui::TextFormat::simple(egui::FontId::proportional(PT), ink),
+            );
+        };
+        if is_set {
+            glyph(&mut job, icon::SQUARES_FOUR, egui::Color32::PLACEHOLDER);
+            words(&mut job, node.name(), 4.0, egui::Color32::PLACEHOLDER);
+            if let Some(clash) = crate::panels::clash_text(doc, id) {
+                job.append(
+                    icon::WARNING,
+                    8.0,
+                    egui::TextFormat::simple(theme::icon_font(PT), theme::text::STRONG),
+                );
+                words(&mut job, &clash, 3.0, theme::text::STRONG);
+            } else if self.session.selection.contains(id) {
+                let n = ondin_core::variant::variants(doc, id).len();
+                let count = match n {
+                    1 => "1 variant".to_string(),
+                    n => format!("{n} variants"),
+                };
+                words(&mut job, &count, 8.0, theme::text::DIM);
+            }
+        } else {
+            if clashing {
+                glyph(&mut job, icon::WARNING, egui::Color32::PLACEHOLDER);
+            }
+            words(
+                &mut job,
+                node.name(),
+                if clashing { 4.0 } else { 0.0 },
+                egui::Color32::PLACEHOLDER,
+            );
+        }
+        let galley = ui.painter().layout_job(job);
         let size = galley.size();
+        if is_set {
+            // Fused to the frame's top edge: the tab's padded box sits on it.
+            let min = egui::pos2(corner.x, corner.y - size.y - SET_TAB_PAD.y * 2.0);
+            let tab = egui::Rect::from_min_size(min, size + SET_TAB_PAD * 2.0);
+            return Some((tab, galley));
+        }
         let min = egui::pos2(corner.x + INSET_X, corner.y - GAP_Y - size.y);
         Some((egui::Rect::from_min_size(min, size), galley))
     }
@@ -9672,6 +9725,32 @@ impl OndinApp {
             let Some((label, galley)) = self.frame_label(ui, id, rect, ppp) else {
                 continue;
             };
+            let is_set = self.session.doc.get(id).is_some_and(|n| n.set().is_some());
+            if is_set {
+                // A set's tab and its resting hairline (§15 D982, 1C): neutral, and
+                // **no change of hue on selection** — D981's rule for a component's
+                // label, which the set's tab keeps (1D adds the count instead).
+                if let Some(q) = self.selection_quad(id, rect, ppp) {
+                    let stroke = egui::Stroke::new(1.0, theme::color::CARD_BORDER);
+                    for i in 0..4 {
+                        painter.line_segment([q[i], q[(i + 1) % 4]], stroke);
+                    }
+                }
+                painter.rect(
+                    label,
+                    egui::CornerRadius {
+                        nw: 3,
+                        ne: 3,
+                        sw: 0,
+                        se: 0,
+                    },
+                    theme::color::CARD,
+                    egui::Stroke::new(1.0, theme::color::CARD_BORDER),
+                    egui::StrokeKind::Inside,
+                );
+                painter.galley(label.min + SET_TAB_PAD, galley, theme::text::STRONG);
+                continue;
+            }
             let ink = if self.session.selection.contains(id) {
                 color::SELECT
             } else {
@@ -20298,6 +20377,90 @@ mod frame_menu_door_tests {
         app.session.adopt_document(doc, None);
         app.canvas_px = (800, 600);
         (app, frame)
+    }
+
+    /// **A component set's tag is a tab** (§15 D982, the design's 1C, 1D, 1F): it
+    /// sits on the frame's top edge rather than five points above it, it adds the
+    /// variant count while the set is selected, and when two variants clash it
+    /// says so — and each clashing variant's own tag leads with the warning glyph.
+    #[test]
+    fn a_sets_tag_is_a_tab_with_its_count_and_its_clash() {
+        use ondin_core::variant::{VariantProp, VariantSet};
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let (mut app, set) = app_with_an_occupied_frame(&ctx);
+        let [a, b] = [(); 2].map(|_| app.session.ids.mint());
+        let frame = |id, index| Operation::CreateNode {
+            id,
+            parent: set,
+            index,
+            kind: NodeKind::Artboard {
+                size: Size::new(20.0, 20.0),
+            },
+            transform: None,
+            name: None,
+        };
+        let props = VariantSet {
+            props: vec![VariantProp {
+                name: "Size".into(),
+                values: vec!["Small".into(), "Large".into()],
+            }],
+        };
+        let mut ops = vec![frame(a, 1), frame(b, 2)];
+        for id in [a, b] {
+            ops.push(Operation::SetComponent {
+                id,
+                component: true,
+            });
+        }
+        ops.push(Operation::SetVariantSet {
+            id: set,
+            set: Some(props),
+        });
+        ops.push(Operation::SetVariant {
+            id: a,
+            values: vec!["Small".into()],
+        });
+        ops.push(Operation::SetVariant {
+            id: b,
+            values: vec!["Large".into()],
+        });
+        assert!(app.session.commit(Transaction(ops)));
+
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let tag = |app: &OndinApp, id| {
+            let mut out = None;
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(rect),
+                    ..Default::default()
+                },
+                |ui| {
+                    let (r, g) = app.frame_label(ui, id, rect, 1.0).expect("a tag");
+                    let top = app.selection_quad(id, rect, 1.0).expect("a quad")[0].y;
+                    out = Some((r, g.text().to_string(), top));
+                },
+            );
+            out.expect("the closure ran")
+        };
+        let (r, text, top) = tag(&app, set);
+        assert!(
+            (r.bottom() - top).abs() < 0.01,
+            "fused to the edge: {r:?} over {top}"
+        );
+        assert!(!text.contains("variants"), "no count at rest: {text:?}");
+        app.session.selection.set_one(set);
+        assert!(tag(&app, set).1.ends_with("2 variants"));
+
+        // A clash: both Small.
+        assert!(app.session.commit(Transaction(vec![Operation::SetVariant {
+            id: b,
+            values: vec!["Small".into()],
+        }])));
+        assert!(tag(&app, set).1.ends_with("2 variants are Small"));
+        assert!(tag(&app, b).1.starts_with(icon::WARNING));
+        assert!(tag(&app, a).1.starts_with(icon::WARNING));
     }
 
     /// ⚠️ **Flipped** by replacing `pick_at_pointer`'s body with `self

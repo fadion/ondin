@@ -191,8 +191,11 @@ A job that ran and failed in its steps is usually the signing key
 running the **Pages** workflow again from the Actions tab, on `main` — not by
 re-tagging.
 
-Then **check the assets**, which the workflow's conclusion does not prove — two of
-its publish steps tolerate missing files by design:
+Then **check the assets**, which the workflow's conclusion does not prove — one of
+its three publish steps, *Publish the Velopack artifacts*, tolerates missing files
+by design, since every leg names every platform's files. The other two say
+`fail_on_unmatched_files: true`; until §15 D974 the portable-archive step only
+*claimed* to be strict, and the action's default made all three tolerant:
 
 ```bash
 gh release view vX.Y.Z --json assets --jq ".assets[].name"
@@ -208,6 +211,17 @@ Expect, for version `X.Y.Z`:
 
 A missing feed (`releases.<channel>.json`) means installed copies on that platform
 will never see this release — say so loudly.
+
+⚠️ **A leg that has already published its Velopack files cannot simply be
+re-run** (§15 D974, `[X3-L1-04]`). Its *Fetch the previous release* step then
+downloads the release it just published, and `vpk pack` refuses a version equal
+to the channel's latest. The `.deb`/`.rpm` are *built* before that upload, so a
+Linux leg that dies after it has died in *Publish the distribution packages*:
+the packages and Pages are what is missing. Attach the packages by hand with
+`gh release upload` (the leg's build log names them; rebuild from the tag on a
+Linux host if they are gone),
+and run the **Pages** workflow on `main`. Re-running the whole leg is the wrong
+repair, and so is re-tagging.
 
 **Never launch the GUI to check a release** (CLAUDE.md). If it needs an eye,
 ask the user to install it and say what to look for.

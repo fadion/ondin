@@ -60,7 +60,13 @@ jobs:
             target: macos-arm64
             channel: osx-arm64
     steps:
+      # **No credentials left in `.git/config`** (§15 D974, `[X3-L5-03]`): this
+      # job's token can rewrite the update feed every installed copy applies,
+      # and a persisted one is readable by every later step — the build tools
+      # included. The two steps that need it are handed it by name.
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       # The only guard a channel name has. Nothing in the Rust tree names one —
       # `update.rs` leaves Velopack's `UpdateOptions` unset — so `cargo test`
@@ -101,6 +107,14 @@ jobs:
             v="$cargo_v"
             echo "::notice::No tag; packing the workspace version $v as a dry run"
           fi
+          # **Plain X.Y.Z only** (§15 D974, `[X3-L1-05]`): rpm's `Version` refuses
+          # a `-`, so a `v0.5.0-rc.1` passed the check above and died in rpmbuild
+          # after Windows and macOS had already published. Refused here, before
+          # any leg builds; a pre-release channel is a decision to make first.
+          if ! printf '%s\n' "$v" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Version $v is not plain X.Y.Z. The Linux packages cannot carry a pre-release suffix."
+            exit 1
+          fi
           echo "VPK_VERSION=$v" >> "$GITHUB_ENV"
 
       # Bounded and retried (see `ci.yml`): a stalled mirror never fails on its
@@ -133,7 +147,10 @@ jobs:
           version: 0.13.0
       - name: Install cargo-zigbuild (Linux)
         if: runner.os == 'Linux'
-        run: cargo install --locked cargo-zigbuild
+        # Pinned (§15 D974): a new crates.io release would otherwise run in a
+        # job holding a write token at the next tag. The version the v0.4.0
+        # release built with.
+        run: cargo install --locked cargo-zigbuild --version 0.23.4
       - name: Build release binary (Linux, glibc 2.31)
         if: runner.os == 'Linux'
         run: cargo zigbuild --release -p ondin-app --bin ondin --target x86_64-unknown-linux-gnu.2.31
@@ -239,8 +256,13 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
+      # **Pinned to the `velopack` crate's own version** (§15 D974): Velopack
+      # asks for the CLI and the client library to match, and an unpinned
+      # NuGet release would run here holding the token `--token` hands it.
+      # `update::tests` reads this line against `Cargo.lock`, so a client bump
+      # without this one fails a test rather than a release.
       - name: Install the Velopack CLI
-        run: dotnet tool install -g vpk
+        run: dotnet tool install -g vpk --version 1.2.161
 
       # The previous release's feed, so `releases.<channel>.json` keeps its
       # history. Non-fatal — the first release has no predecessor — and bounded:
@@ -335,13 +357,21 @@ jobs:
             "Releases/Ondin-${{ matrix.channel }}.dmg"
           ls -l Releases
 
-      # Strict (no `fail_on_unmatched_files: false`), so a missing Linux or
-      # Windows archive fails the release. macOS builds no archive.
+      # Strict, so a missing Linux or Windows archive fails the release. macOS
+      # builds no archive.
+      #
+      # ⚠️ **Strict by saying so** (§15 D974, `[X3-L3-01]`): this comment read
+      # *"no `fail_on_unmatched_files: false`"*, as if strictness were the
+      # default — and the action's default is `false`, so a missing archive
+      # shipped green. All three publish steps pin the action by commit: it is
+      # the one piece of third-party code here that writes, and a tag can be
+      # moved (`v2` → `v2.6.2`, resolved 2026-10-04).
       - name: Publish the portable archive
         if: github.ref_type == 'tag' && runner.os != 'macOS'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: ondin-${{ github.ref_name }}-${{ matrix.target }}.*
+          fail_on_unmatched_files: true
 
       # Scoped to this version and channel: the fetch above leaves the previous
       # release's .nupkg in `Releases/`, and a bare glob would re-attach it.
@@ -350,7 +380,7 @@ jobs:
       # produces only its own, hence the tolerance.
       - name: Publish the Velopack artifacts
         if: github.ref_type == 'tag'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: |
             Releases/Ondin-${{ matrix.channel }}-Setup.exe
@@ -365,11 +395,13 @@ jobs:
       # (`ondin_0.4.0_amd64.deb`, `ondin-0.4.0-1.x86_64.rpm`).
       - name: Publish the distribution packages
         if: github.ref_type == 'tag' && runner.os == 'Linux'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: |
             dist-packages/*.deb
             dist-packages/*.rpm
+          # Both are built on this leg, so either missing is a broken build.
+          fail_on_unmatched_files: true
 
   # ── The Linux package repositories ──────────────────────────────────────
   # Rebuilds the apt and dnf repositories on GitHub Pages from the release this

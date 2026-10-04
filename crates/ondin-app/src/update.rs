@@ -631,6 +631,38 @@ mod tests {
         );
     }
 
+    /// **The Release workflow packs with the Velopack CLI the client was built
+    /// against** (§15 D974, `[X3-L5-03]`): `vpk` is pinned in `release.yml`,
+    /// and a `velopack` bump in `Cargo.lock` without the pin moving would pack
+    /// with a CLI the client was not built for. Read from both files, so the
+    /// mismatch fails here rather than in a release.
+    ///
+    /// **Flip-check, run**: the workflow's `--version 1.2.161` edited to
+    /// `1.2.160` fails with both versions named.
+    #[test]
+    fn the_release_packs_with_the_clients_own_velopack_version() {
+        let lock = include_str!("../../../Cargo.lock");
+        let client = lock
+            .split("[[package]]")
+            .find(|p| p.contains("\nname = \"velopack\"\n"))
+            .and_then(|p| p.lines().find_map(|l| l.strip_prefix("version = \"")))
+            .and_then(|v| v.strip_suffix('"'))
+            .expect("Cargo.lock has a velopack package");
+        let workflow = include_str!("../../../.github/workflows/release.yml");
+        let pinned = workflow
+            .lines()
+            .find_map(|l| {
+                l.trim()
+                    .strip_prefix("run: dotnet tool install -g vpk --version ")
+            })
+            .expect("release.yml installs vpk at a pinned version");
+        assert_eq!(
+            pinned.trim(),
+            client,
+            "vpk {pinned} packs for velopack {client}"
+        );
+    }
+
     /// The feed's identity and the published opt-out's name: a wrong repository
     /// would check someone else's releases, and a renamed variable silently
     /// breaks everyone who set it.

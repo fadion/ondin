@@ -107,7 +107,7 @@ curl -fsSL https://fadion.github.io/ondin/ondin.sources \
 sudo apt-get update && sudo apt-get install ondin
 ```
 
-Fedora, RHEL and CentOS (on openSUSE, `zypper` in place of `dnf`):
+Fedora, RHEL and CentOS:
 
 ```sh
 sudo curl -fsSL https://fadion.github.io/ondin/ondin.repo \
@@ -115,8 +115,16 @@ sudo curl -fsSL https://fadion.github.io/ondin/ondin.repo \
 sudo dnf install ondin
 ```
 
-The first `dnf install` asks to import the signing key. Check that it matches
-this fingerprint before you accept:
+openSUSE, whose `zypper` reads its own directory rather than
+`/etc/yum.repos.d`:
+
+```sh
+sudo zypper addrepo https://fadion.github.io/ondin/ondin.repo
+sudo zypper install ondin
+```
+
+The first install asks to import the signing key. Check that it matches this
+fingerprint before you accept:
 
 ```
 456BA115B1DA8E1DBF93299454AC6F3C915023EA

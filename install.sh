@@ -448,31 +448,58 @@ count_public_key_packets() {
     printf '%s\n' "$n"
 }
 
-# Refuse a downloaded repository configuration that does not name this site.
+# **The repository configurations are written here, from this script's own
+# constants, and never downloaded** (§15 D974, `[X3-L5-01]`, `[X3-L5-02]`).
 #
-# **The fingerprint check guards the key; nothing would guard the file that
-# decides what the key is used for.** Both configs are fetched from the same
-# origin as the key, and accepting them on one shape grep each means an
-# adversary serving the *genuine* key alongside a config naming their own
-# `URIs:`/`baseurl=` gets "Repository added, signed by the published key"
-# printed at them, and every `apt-get upgrade`/`dnf upgrade` on that machine
-# fetches root-installed packages from their host for the life of the install.
-# deb822 also accepts `Trusted: yes`, which turns apt's signature verification
-# off for the entry entirely, and an *inline* armoured key in `Signed-By:` — so
-# the attacker's key can travel in the file that was never checked rather than
-# the one that was.
+# The fingerprint check guards the key; nothing guards a downloaded file that
+# decides what the key is used for. Both configs used to be fetched from the
+# same origin as the key and accepted if the expected lines were *present* —
+# so an adversary serving the genuine key beside a config with a second stanza
+# or section of their own (`URIs:`/`baseurl=` on their host, `gpgcheck=0`, or
+# an inline armoured key in `Signed-By:`) passed every check, and every
+# `apt-get upgrade`/`dnf upgrade` on that machine fetched root-installed
+# packages from their host for the life of the install. Both files are wholly
+# determined by `SITE` and `KEYRING`, which this script already holds, so there
+# was never anything to learn by downloading them.
 #
-# `SITE` and `KEYRING` are constants this script already holds; this makes the
-# comparison. A rotation of `SITE` has to touch this file anyway (the
-# `pages.yml` guard enforces it), so these cannot drift silently.
-require_expected_line() {
-    local f="$1" want="$2"
-    grep -qx -- "$want" "$f" && return 0
-    err "the downloaded repository configuration does not match this installer."
-    err "  expected a line: ${want}"
-    err "Nothing has been installed. Either the repository moved and this script is"
-    err "out of date, or something between you and ${SITE} replaced it."
-    return 1
+# The apt source is byte-for-byte the one `packaging/repo/build-site.sh`
+# publishes for people adding the repository by hand. The rpm one differs in
+# one line on purpose — see `write_rpm_repo`.
+write_apt_source() {
+    printf '%s\n' \
+        "Types: deb" \
+        "URIs: ${SITE}/deb" \
+        "Suites: stable" \
+        "Components: main" \
+        "Architectures: amd64" \
+        "Signed-By: ${KEYRING}" > "$1"
+}
+
+# Where the rpm route installs the verified key, for `gpgkey=` to name.
+RPM_KEY="/etc/pki/rpm-gpg/RPM-GPG-KEY-ondin"
+
+# The .repo, with **`gpgkey=` naming the key on disk** that this script has
+# checked against `KEY_FINGERPRINT` — not the https URL the published file
+# names. dnf fetches `gpgkey=` itself, both to verify `repomd.xml.asc` and to
+# import a key a package needs, and `dnf install -y` answers its import prompt
+# yes; with a URL on the same untrusted origin, the pinned fingerprint never
+# constrained what dnf trusted (`[X3-L5-02]`).
+#
+# `autorefresh=1` is zypper's: without it `zypper update` never refreshes this
+# repository and never sees a new Ondin (`[X3-L1-02]`). dnf reads the metadata
+# on its own schedule and ignores the key, as it does in every vendor .repo
+# that carries it for openSUSE's sake.
+write_rpm_repo() {
+    printf '%s\n' \
+        "[ondin]" \
+        "name=Ondin" \
+        "baseurl=${SITE}/rpm" \
+        "enabled=1" \
+        "autorefresh=1" \
+        "type=rpm-md" \
+        "gpgcheck=1" \
+        "repo_gpgcheck=1" \
+        "gpgkey=file://${RPM_KEY}" > "$1"
 }
 
 # Match a release asset by file-name pattern. Anonymous GitHub API calls are
@@ -561,28 +588,7 @@ install_deb() {
         exit 1
     fi
 
-    download_to "${SITE}/ondin.sources" "${tmp}/ondin.sources"
-    if ! grep -q '^Types: deb' "${tmp}/ondin.sources"; then
-        err "the downloaded apt source is not a deb822 sources file"
-        rm -rf "$tmp"
-        exit 1
-    fi
-    # …and a shape test is not an identity test here either. The two lines that
-    # decide what this machine will install as root from now on are `URIs:` and
-    # `Signed-By:`; `Trusted: yes` turns apt's signature checking off for the
-    # entry entirely, and an inline armoured key in `Signed-By:` would carry a
-    # key past the fingerprint check that only ever looked at the other file.
-    if ! require_expected_line "${tmp}/ondin.sources" "URIs: ${SITE}/deb" \
-        || ! require_expected_line "${tmp}/ondin.sources" "Signed-By: ${KEYRING}"; then
-        rm -rf "$tmp"
-        exit 1
-    fi
-    if grep -qi '^Trusted:' "${tmp}/ondin.sources"; then
-        err "the downloaded apt source asks apt to trust it without a signature."
-        err "Nothing has been installed."
-        rm -rf "$tmp"
-        exit 1
-    fi
+    write_apt_source "${tmp}/ondin.sources"
 
     info "Installing the repository (this needs root)"
     run_privileged install -m 0644 -D "${tmp}/keyring.gpg" "$KEYRING"
@@ -661,30 +667,16 @@ install_rpm() {
         rm -rf "$tmp"
         exit 1
     fi
-    download_to "${SITE}/ondin.repo" "${tmp}/ondin.repo"
-    if ! grep -q '^\[ondin\]' "${tmp}/ondin.repo"; then
-        err "the downloaded repository definition is not a .repo file"
-        rm -rf "$tmp"
-        exit 1
-    fi
-    # The four lines that decide where root-installed packages come from and
-    # whether anything checks them. `dnf install -y` below imports whatever
-    # `gpgkey=` names with no prompt, so an unchecked `.repo` defeats the key
-    # check entirely rather than merely weakening it.
-    if ! require_expected_line "${tmp}/ondin.repo" "baseurl=${SITE}/rpm" \
-        || ! require_expected_line "${tmp}/ondin.repo" "gpgkey=${SITE}/ondin.asc" \
-        || ! require_expected_line "${tmp}/ondin.repo" "gpgcheck=1" \
-        || ! require_expected_line "${tmp}/ondin.repo" "repo_gpgcheck=1"; then
-        rm -rf "$tmp"
-        exit 1
-    fi
+    write_rpm_repo "${tmp}/ondin.repo"
 
     # Imported into the rpm database up front so the packages verify against a
     # key the machine already holds. Without this, dnf offers to import it
     # mid-install, which is a prompt in the middle of a piped script and a much
-    # worse moment to be deciding whether to trust a key.
+    # worse moment to be deciding whether to trust a key. And installed as a
+    # file, for the `.repo`'s `gpgkey=` to name — the same verified bytes.
     info "Importing the signing key (this needs root)"
-    run_privileged rpm --import "${tmp}/ondin.asc"
+    run_privileged install -m 0644 -D "${tmp}/ondin.asc" "$RPM_KEY"
+    run_privileged rpm --import "$RPM_KEY"
 
     if has dnf; then
         run_privileged install -m 0644 -D "${tmp}/ondin.repo" /etc/yum.repos.d/ondin.repo
@@ -754,8 +746,21 @@ install_appimage() {
     url="$(asset_url '/Ondin-linux-x64\.AppImage')"
     mkdir -p "$bindir" "$desktop_dir" "$icon_dir"
     info "Downloading ${url##*/}"
-    download_to "$url" "$dest"
-    chmod +x "$dest"
+    # **Beside the old one, then renamed over it** (§15 D974, `[X3-L1-06]`): a
+    # re-run that failed mid-download used to leave a truncated file where a
+    # working app had been. An AppImage is an ELF whose bytes 8–10 are
+    # `AI\x02` (type 2), which a cut-off file still has — so the check is the
+    # cheap one against an error page, and the rename is what makes a partial
+    # download harmless.
+    download_to "$url" "${dest}.partial"
+    if [ "$(od -An -tx1 -N4 "${dest}.partial" 2>/dev/null | tr -d ' \n')" != "7f454c46" ] \
+        || [ "$(od -An -tx1 -j8 -N3 "${dest}.partial" 2>/dev/null | tr -d ' \n')" != "414902" ]; then
+        rm -f "${dest}.partial"
+        err "the downloaded file is not an AppImage; the installed one, if any, is untouched"
+        exit 1
+    fi
+    chmod +x "${dest}.partial"
+    mv -f "${dest}.partial" "$dest"
     ok "Installed to ${dest}"
 
     # The AppImage carries a .desktop of its own inside it, but nothing reads
@@ -909,12 +914,12 @@ case "$family" in
         elif has dnf; then
             info "Updates:   with the rest of your system - sudo dnf upgrade."
             info "Uninstall: sudo dnf remove ondin \\"
-            info "           && sudo rm /etc/yum.repos.d/ondin.repo \\"
+            info "           && sudo rm /etc/yum.repos.d/ondin.repo ${RPM_KEY} \\"
             info "           ${rpm_key_removal}"
         else
             info "Updates:   with the rest of your system - sudo zypper update."
             info "Uninstall: sudo zypper remove ondin \\"
-            info "           && sudo rm /etc/zypp/repos.d/ondin.repo \\"
+            info "           && sudo rm /etc/zypp/repos.d/ondin.repo ${RPM_KEY} \\"
             info "           ${rpm_key_removal}"
         fi
         ;;

@@ -134,6 +134,10 @@ DEPENDS="libc6 (>= 2.31)"
 DEPENDS="${DEPENDS}, libxkbcommon0, libxkbcommon-x11-0"
 DEPENDS="${DEPENDS}, libwayland-client0, libwayland-egl1"
 DEPENDS="${DEPENDS}, libx11-6, libx11-xcb1, libxcb1"
+# winit's X11 backend opens these two beside libX11 and refuses to start
+# without either (`XConnection::new`, winit 0.30.13) — read in its source, not
+# measured, and missing from the list Schemaic measured (§15 D974).
+DEPENDS="${DEPENDS}, libxcursor1, libxi6"
 DEPENDS="${DEPENDS}, libvulkan1, libegl1"
 
 INSTALLED_SIZE="$(du -ks --exclude=DEBIAN "$ROOT" | cut -f1)"

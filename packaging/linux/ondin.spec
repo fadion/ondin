@@ -45,6 +45,10 @@ Requires:       libwayland-egl.so.1()(64bit)
 Requires:       libX11.so.6()(64bit)
 Requires:       libX11-xcb.so.1()(64bit)
 Requires:       libxcb.so.1()(64bit)
+# winit's X11 backend opens these two beside libX11 and refuses to start
+# without either (`XConnection::new`, winit 0.30.13; §15 D974).
+Requires:       libXcursor.so.1()(64bit)
+Requires:       libXi.so.6()(64bit)
 Requires:       libvulkan.so.1()(64bit)
 Requires:       libEGL.so.1()(64bit)
 

@@ -68,14 +68,48 @@ echo "[rpm] staged ${#rpms[@]} package(s)"
 # silently overwrite a developer's own macros when this is run locally, and
 # --macros takes the *whole* search path, so naming one file there means
 # knowing where the distribution keeps the rest.
-sign_args=(--define "_gpg_name ${GPG_KEY_ID}")
+gpg_extra="--batch --pinentry-mode loopback"
 if [ -n "${GPG_PASSPHRASE_FILE:-}" ]; then
-    sign_args+=(--define "_gpg_sign_cmd_extra_args --batch --pinentry-mode loopback --passphrase-file ${GPG_PASSPHRASE_FILE}")
-else
-    sign_args+=(--define "_gpg_sign_cmd_extra_args --batch --pinentry-mode loopback")
+    gpg_extra="${gpg_extra} --passphrase-file ${GPG_PASSPHRASE_FILE}"
 fi
 
-rpmsign "${sign_args[@]}" --addsign "${OUTPUT_DIR}"/packages/*.rpm
+# 🚨 **Signed at a fixed time per package, so a package's bytes never change
+# between site builds** (§15 D974, `[X3-L1-01]`). Nothing here is incremental:
+# every Pages run downloads the unsigned release assets and signs them again,
+# and a signature packet carries its creation time — so
+# `packages/ondin-0.4.0-1.x86_64.rpm` had new bytes at the same URL after every
+# release, and a dnf client whose cached index (48 hours by default) still held
+# the old checksum failed its *whole* `dnf upgrade` on the mismatch.
+#
+# The time is the package's own `BUILDTIME`, or the key's creation if that is
+# later — a signature dated before its key is one a strict verifier (rpm's
+# Sequoia backend) refuses. The key is RSA (packaging/repo/README.md), and an
+# RSA PKCS#1 v1.5 signature is deterministic, so the same package, key and time
+# give the same bytes. `!` freezes gpg's clock at that instant rather than
+# starting it there.
+key_created="$(
+    gpg --batch --with-colons --list-keys "$GPG_KEY_ID" \
+        | awk -F: '/^pub:/ { print $6; exit }'
+)"
+case "$key_created" in
+    '' | *[!0-9]*)
+        echo "cannot read the signing key's creation time (got '${key_created}')" >&2
+        exit 1
+        ;;
+esac
+for rpm in "${OUTPUT_DIR}"/packages/*.rpm; do
+    built="$(rpm -qp --qf '%{BUILDTIME}' "$rpm")"
+    case "$built" in
+        '' | *[!0-9]*)
+            echo "$(basename "$rpm") has no readable BUILDTIME (got '${built}')" >&2
+            exit 1
+            ;;
+    esac
+    at=$((built > key_created ? built : key_created))
+    rpmsign --define "_gpg_name ${GPG_KEY_ID}" \
+        --define "_gpg_sign_cmd_extra_args ${gpg_extra} --faked-system-time ${at}!" \
+        --addsign "$rpm"
+done
 
 # Not decoration: --addsign has reported success on some rpm versions when gpg
 # declined, and an unsigned package in a gpgcheck=1 repository fails on the

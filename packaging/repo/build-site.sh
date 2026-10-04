@@ -175,12 +175,19 @@ EOF
 
 # Both checks on: gpgcheck is the signature inside each package, repo_gpgcheck
 # the one over the index. Leaving either off would make a repository that
-# verifies less than the file it replaced.
+# verifies less than the file it replaced. `autorefresh=1` is zypper's, which
+# otherwise never refreshes the repository on `zypper update` (§15 D974).
+#
+# ⚠️ **This file is for adding the repository by hand, and install.sh no longer
+# reads it**: it writes its own from its constants, with `gpgkey=` naming the
+# key it verified on disk rather than this URL (`write_rpm_repo`). Keep the
+# other lines in step with that function.
 cat > "${OUT}/ondin.repo" <<EOF
 [ondin]
 name=Ondin
 baseurl=${BASE_URL}/rpm
 enabled=1
+autorefresh=1
 type=rpm-md
 gpgcheck=1
 repo_gpgcheck=1

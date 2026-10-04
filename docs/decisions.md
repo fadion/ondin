@@ -1354,9 +1354,9 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D976** — **The Release workflow builds under a read-only token and publishes from the one job that can write.** `[X3-L5-03]`'s last bullet, which D974 left open. Top-level `contents: read`; the matrix job is `build`, each leg staging every file it ships by its exact name — a missing one fails the leg, the `.nupkg` scoped to `$VPK_VERSION` because the feed's fetch leaves the previous one in `Releases/` — and uploading them as the artifact `release-<channel>`; `publish`, `needs: build`, on a tag only, `contents: write`, runs the pinned `softprops` action once with `fail_on_unmatched_files: true`; `pages` is `needs: publish`. `vpk download` keeps the token, read-only now, for the authenticated rate limit. **A Release is every platform's assets or none** — a failed macOS leg had left Windows and Linux published — no step tolerates a missing file, and `[X3-L1-04]`'s re-run hazard narrows to a `publish` that died part-way and a leg re-run after it. 🚨 **A compromised build tool can still poison what it builds**; what it loses is any write to the repository. *(Built 2026-10-04, committed as `23c3c10`; **Keep**, the session's, the shape the finding sketched. 🚨 Not run — **ran 2026-10-04**: a dispatch dry run built all three legs and left the fourteen assets under their shipping names, then **v0.4.1** ran it whole — three builds, `publish`, `pages`, all green, fourteen assets, every feed listing 0.4.1 over 0.4.0. D956, D957, D974 amended. **Amended** the same day: both artifact actions pinned by commit at their current majors, the upload `overwrite: true`)*
 - **D977** — **install.sh's single-package rpm route waives the signature check for the downloaded file only.** `[X3-L5-04]`, which D974 left open. `install_rpm_direct`'s dnf branch is `--setopt=localpkg_gpgcheck=0`, was `--nogpgcheck`, which waived the check for every dependency in the transaction; zypper's `--allow-unsigned-rpm` and `rpm -i --nosignature` already scoped to the file and are unchanged. **Set, not dropped**: both dnf generations default it off, but a policy turning it on refuses the file with no flag. Measured in containers on Fedora 40 (dnf 4.22.0), 42 (dnf5 5.2.18.0) and 44 (dnf5 5.4.3.0), identically: an unsigned dependency from a `gpgcheck=1` repository installs under `--nogpgcheck` and is refused under the setopt; end to end, the published v0.4.0 rpm installed through `ONDIN_NO_REPO=1` on all three, under the strict policy too. `README.md`'s release-files table drops the flag. *(Fixed 2026-10-04, committed as `bd6ff4f`; **Keep**, the session's. The zypper and plain-`rpm` branches not run. D974 amended)*
 - **D978** — **An instance is a linked copy written at the commit, not a subtree derived in `Resolved` — which reinterprets D868's shared pipeline as layout's write-back.** Every reader in Ondin is keyed by a stored `NodeId` — every `Resolved` map, `container::lay_out` through `LayoutView`, selection, hit-testing, `scene::build` and the SVG writer, the snapshot, the layers panel, `RenderOverrides` — so a derived child would need path ids or an expanded-document view in all of them and every edit verb re-targeted into *override at path*. Instance subtrees are ordinary `Node`s with their own ids, each linked to the node it was copied from, and a commit-time pass writes main-component changes into them as ops in the same transaction — `keep_insets`' shape in `commit_inner`, which is what components share with layout. No new `Resolved` map. Penpot's model; Figma and Sketch derive. ⚠️ **Costs**: copies are derived data stored in the document, bending §12's fourth property — replay converges, concurrent collaboration would need a resync on merge — and invariant 4's D788 clause gains a second member; file size grows with instances; a main edit fans out into ops on every copy. A link is the cross-node reference D405 declined, its semantics written down after the guide owner's precedent (D491). 🚨 **The model is built** (`e3df69d`): `Node::component`/`link`, `SetComponent`/`SetLink` (chrome ops — `changes_ink`'s false list now thirteen, `absorb`'s no-ops fifteen), and `component::check`'s eight rules as `OpError::BadLink`, run by `apply` over the **whole document** — a link breaks when its target goes — and by the loader; an instance root is a linked node whose chain ends at a main; `remap_subtree` remaps links inside a payload. v5 complete. ⚠️ Every instance root is exempt from membership, looser than §5.3d. Owed by step 2, refused today: a duplicate inside its own instance, a cross-document paste, a main's deletion, a member moved out, and a main's copy being a main. *(Decided 2026-10-04 by the maintainer; **the model built the same day**, `e3df69d`. **Keep** — *revisit if* real-time collaboration is built, the maintainer's verdict: collaboration *"currently a non-goal, but open for the future"*. The model and its post-conditions, the v5 bump, preview and snapshot are the session's design in `architecture.md` §5.3d, open to overturning. D868 and D867 amended, D869 noted; §5.3d written, §1, §5.3c, invariants 4 and 8, §5.11 and §12 amended or pointed; `roadmap.md` step 5 rewritten; `context-menus.md` §7 corrected)*
-- **D979** — **An override is a value that differs from its source, an instance's structure is free, a main's deletion detaches, components are document-local, and a copy of a main is an instance.** (a) Nothing records an override: when a main node's field goes `old` → `new`, each linked node takes `new` iff it still holds `old` — per field inside `TextStyle`, `ParagraphStyle`, `BlockStyle`, `LayoutItem`, `Display`, `Insets` and `GeometryPatch`'s parts, per item by id in the five item lists (D980), and 🚨 a text's `content` as one unit with its spans, which index into it; drift cannot exist, *reset* copies the source back, and setting a copy equal to the main makes it follow again. (b) Structure is free — the maintainer overruled locking it, slots being *"more of a workaround than a real solution"*: local additions, deletions, reorders and reparents inside an instance, with a main's structural edits followed only where the instance still matches, and a main's removed child deleted only where its counterpart's whole subtree still equals its sources with no local additions, else kept unlinked — the session's rule, confirmed by the maintainer the same day (D981). (c) Deleting a main detaches its instances in the same transaction, nested chains relinking one level up. (d) Document-local; a paste into another document drops unresolvable links; shared libraries deferred, not a non-goal. (e) Copy, paste, duplicate and Alt-drag of a main make an instance; *Duplicate as component* makes a new main. *(Decided 2026-10-04 by the maintainer; **not built**. **Keep.** `architecture.md` §5.3d; `roadmap.md` gains the parked shared-libraries entry. Amended the same day: lists per item (D980), overturning the record's first reading of (a), and (e) added; (b)'s keep rule confirmed by the maintainer with the chrome, D981)*
+- **D979** — **An override is a value that differs from its source, an instance's structure is free, a main's deletion detaches, components are document-local, and a copy of a main is an instance.** (a) Nothing records an override: when a main node's field goes `old` → `new`, each linked node takes `new` iff it still holds `old` — per field inside `TextStyle`, `ParagraphStyle`, `BlockStyle`, `LayoutItem`, `Display`, `Insets` and `GeometryPatch`'s parts, per item by id in the five item lists (D980), and 🚨 a text's `content` as one unit with its spans, which index into it; drift cannot exist, *reset* copies the source back, and setting a copy equal to the main makes it follow again. (b) Structure is free — the maintainer overruled locking it, slots being *"more of a workaround than a real solution"*: local additions, deletions, reorders and reparents inside an instance, with a main's structural edits followed only where the instance still matches, and a main's removed child deleted only where its counterpart's whole subtree still equals its sources with no local additions, else kept unlinked — the session's rule, confirmed by the maintainer the same day (D981). (c) Deleting a main detaches its instances in the same transaction, nested chains relinking one level up. (d) Document-local; a paste into another document drops unresolvable links; shared libraries deferred, not a non-goal. (e) Copy, paste, duplicate and Alt-drag of a main make an instance; *Duplicate as component* makes a new main. 🚨 **(c), (d) and (e) built** (`0ae3cd7`): `component::relink_past` — a link into what goes climbs past it or is cut — behind Delete (a main's instances detach, nested ones climb; a main's *child* leaves its counterparts as local layers, an interim until step 4 owes (b)'s delete-or-keep) and Detach (the root and its members cut, nested instances climb); `component::settle_copy` making a main's copy an instance with the main's names, dropping links absent from the document and a member's link without its root; `check` tightened so only a link straight to a main is free. `Ctrl+Alt+K`/`Ctrl+Alt+B` and five provisional menu rows. Then `component::settle_links` in `commit_inner` (`66b48a5`, `f75dcc5`) — climb past deleted nodes, cut what no longer belongs, the untouched node keeping a shared source — so no door that moves, deletes or regroups has to know; and a nested instance copied alone climbs to its own main. Owed: (b)'s delete-or-keep (step 4), the filled hexagon, the rest of the chrome. *(Decided 2026-10-04 by the maintainer; **(c)–(e) built the same day**, `0ae3cd7`. **Keep.** `architecture.md` §5.3d; `roadmap.md` gains the parked shared-libraries entry. Amended the same day: lists per item (D980), overturning the record's first reading of (a), and (e) added; (b)'s keep rule confirmed by the maintainer with the chrome, D981)*
 - **D980** — **The five item lists carry ids, in a wrapper beside each item rather than a field inside it, and an instance's items follow its main's item by item.** The maintainer overturned the record's first reading of D979 (a), a list compared whole: *"Rather do it right first time than do it twice."* `Paint::fills`, `Paint::strokes`, `Node::effects`, `Node::exports` and `Node::grids` become `Vec<Keyed<T>>`, `Keyed<T> { id: ItemId, value: T }`; a template's tracks, gradient stops, path points, `corner_radii` and spans stay single values. 🚨 **Not an `id` inside `Fill`/`Stroke`/`Effect`**: all derive `PartialEq`, and every *same look* comparison — *Mixed*, `changes_nothing`, `overwrites` and run merging, dedupes — would change meaning in silence; ⚠️ five whole-list *Mixed* readings (grids, effects, exports, and fills and strokes through `build::paint_shown`) still compare ids through the wrapper and must compare values. `ItemId` over `NodeId`, minted from `IdSource`, unique within its list, copied verbatim on duplicate — which is the match — and global so local and main additions never collide. The structural rule one level down. `migrate_4_to_5` gives `ItemId { actor: 0, seq: index }`; ⚠️ actor 0 is improbable, not excluded, so `reserve_existing_ids` must sweep item ids. ~330 construction sites, in build step 1. 🚨 **Built**, and the build found that a multi-selection write copied the first layer's whole list, ids included, onto every layer: writes now have three shapes keeping each target's ids — an edit retargeted through the anchor (`item::retarget`, an added row minted per target), a wholesale replacement keyed by position (`item::rekey_by_position` — *Paste properties*, presets), and one row edited in place. No `From<Vec<T>>`, on purpose; `OpError::DuplicateItemId` after the last op and in the loader; v5; no snapshot bump. *(Per item decided 2026-10-04 by the maintainer; shape and migration the session's; **built 2026-10-04**, `a83adc8` — ~290 compiler-reported sites, the caller's count, against the design's ~330 grep estimate. **Keep.** D979 amended; `architecture.md` §5.3d, §5.7a, §9.4, invariants 3 and 8 and §5.11 amended or pointed; `roadmap.md` step 5 amended)*
-- **D981** — **Components' chrome: component-ness is carried by shape and never by the accent, an override is a bright label and a dot, and the kept child reads as local.** From `design/Components.dc.html` — untracked and regenerated, so the body carries the design in words. A main's label has a filled hexagon on a neutral chip, an instance's an outline hexagon and a bare label, a renamed one trailing its main's name in grey; selection is geometry only, and 🚨 component labels never change hue on selection — for components only, ordinary frame labels unchanged (the maintainer's ruling); a click selects the instance, a double-click enters it under a path label, a context tag and a dashed neutral boundary. Layers: neutral icons, a dot for overrides that bubbles to a collapsed ancestor, + for local; 🚨 a kept child shows as + (the maintainer's ruling — no provenance is stored), and D979 (b)'s keep rule is confirmed. The component card per selection state, its resets disabled rather than hidden; an override is a 4px neutral dot and a bright label, ↺ on hover with the main's value in a tooltip; list items' 14px slot and a deleted item's dashed ghost with *Restore*; header counts and resets; Mixed (value) and override (label) coexist. Rows, `Ctrl+Alt+K` *Create component* and `Ctrl+Alt+B` *Detach instance*, and two text-only toasts naming `Ctrl+Z`. Clarifications: no reset deletes a local addition; restores asymmetric on purpose; `AltGr` is the keymap's question; the per-frame lookups want a cache on `revision`. Six conflicts the record noted, all ruled the same day by the maintainer: D130 stands over the mockup's dashed Mixed segments; 🚨 an instance picks like a group whatever its kind, an exception to D22 that leaves ordinary frames alone; `Enter` steps into an instance (D228); toasts stay text-only; a collapsed row's dot means any difference from the main; a group main gets a canvas label. ⚠️ A group *instance*'s label is unruled. *(Accepted 2026-10-04 by the maintainer; **not built**. **Keep.** The six conflicts ruled the same day, amending the entry. D979 amended; `architecture.md` §5.3d; `roadmap.md` step 5; `context-menus.md` §7; `shortcuts.md` §12)*
+- **D981** — **Components' chrome: component-ness is carried by shape and never by the accent, an override is a bright label and a dot, and the kept child reads as local.** From `design/Components.dc.html` — untracked and regenerated, so the body carries the design in words. A main's label has a filled hexagon on a neutral chip, an instance's an outline hexagon and a bare label, a renamed one trailing its main's name in grey; selection is geometry only, and 🚨 component labels never change hue on selection — for components only, ordinary frame labels unchanged (the maintainer's ruling); a click selects the instance, a double-click enters it under a path label, a context tag and a dashed neutral boundary. Layers: neutral icons, a dot for overrides that bubbles to a collapsed ancestor, + for local; 🚨 a kept child shows as + (the maintainer's ruling — no provenance is stored), and D979 (b)'s keep rule is confirmed. The component card per selection state, its resets disabled rather than hidden; an override is a 4px neutral dot and a bright label, ↺ on hover with the main's value in a tooltip; list items' 14px slot and a deleted item's dashed ghost with *Restore*; header counts and resets; Mixed (value) and override (label) coexist. Rows, `Ctrl+Alt+K` *Create component* and `Ctrl+Alt+B` *Detach instance*, and two text-only toasts naming `Ctrl+Z`. Clarifications: no reset deletes a local addition; restores asymmetric on purpose; `AltGr` is the keymap's question; the per-frame lookups want a cache on `revision`. Six conflicts the record noted, all ruled the same day by the maintainer: D130 stands over the mockup's dashed Mixed segments; 🚨 an instance picks like a group whatever its kind, an exception to D22 that leaves ordinary frames alone; `Enter` steps into an instance (D228); toasts stay text-only; a collapsed row's dot means any difference from the main; a group main gets a canvas label. ⚠️ A group *instance*'s label is unruled. 🚨 **Built** (`0ae3cd7`): the two chords, five menu rows by `menu::Role`, filed in Structure provisionally, and the two toasts; the filled hexagon has no glyph in a Phosphor-Regular-only font — D10's *"at two, ship the font"*. *(Accepted 2026-10-04 by the maintainer; **keys, rows and toasts built the same day**, `0ae3cd7`, the rest not. **Keep.** The six conflicts ruled the same day, amending the entry. D979 amended; `architecture.md` §5.3d; `roadmap.md` step 5; `context-menus.md` §7; `shortcuts.md` §12)*
 
 ---
 
@@ -20216,12 +20216,86 @@ the same main — and to a payload holding a main and its instance, whose links 
 ids (`architecture.md` §5.3d).
 
 *(Decided 2026-10-04 by the maintainer, in session 47 — all five rulings theirs, and (b)'s
-delete-or-unlink theirs too since they confirmed it with the chrome (D981); **not built**, and no code cites this number. **Keep.** The
-property-based test of (a) — after a main edit, each counterpart's field equals the new value iff it
-equalled the old — is the build order's step 3, and is the spec this entry hangs on.
-`architecture.md` §5.3d carries all five; `roadmap.md` gains the parked shared-libraries entry.
-**Amended the same day**: (a)'s lists compare per item by id (D980), overturning the record's first
-reading, and (e) added)*
+delete-or-unlink theirs too since they confirmed it with the chrome (D981); **(c), (d) and (e) built the
+same day**, committed as `0ae3cd7`, with `settle_links` and the nested-copy climb in `66b48a5` and
+`f75dcc5` — the amendment below — and (a) and (b)'s propagation not; this read
+*not built, and no code cites this number* until then. **Keep.** The property-based test of (a) —
+after a main edit, each counterpart's field equals the new value iff it equalled the old — is the
+build order's step 3, and is the spec this entry hangs on. `architecture.md` §5.3d carries all five;
+`roadmap.md` gains the parked shared-libraries entry. **Amended the same day**: (a)'s lists compare per
+item by id (D980), overturning the record's first reading, and (e) added)*
+
+🚨 **Amended 2026-10-04: build step 2 is built** (`0ae3cd7`) — the verbs, and with them (c), (d) and
+(e). From the caller's brief and a read of `ondin-core/src/component.rs` from *The verbs*; the commit
+itself not read. **One rule for every way a link's target goes**: `component::relink_past(doc, gone,
+among)` — a link into `gone` climbs to the first source above it that is not in `gone`, or is cut
+when there is none. It is what D978's *"relink one level up"* became in code, and three verbs use it.
+**Delete** — `relink_for_delete`, from `OndinApp::delete_selection` — detaches a deleted main's
+instances, a nested instance among them climbing to its own main, which is (c). 🚨 **And a deleted
+main *child* leaves each counterpart as the instance's own layer — an interim, not (b)**: nothing is
+deleted with the main's child until build step 4 can tell an untouched counterpart from a changed one,
+so today every counterpart is kept and cut loose, changed or not. **Step 4 owes (b)'s delete-or-keep.**
+**Detach** — `component::detach` — **cuts** the root and its own members, and lets a nested instance
+inside climb past this instance's main to its own. A first draft climbed the members too, which `apply`
+refused as `Membership` — a member climbing past its instance root lands with no instance root above
+it — and a test pins the cut, flip run. **Copies** — `component::settle_copy`, called from
+`build::insert_subtrees_as` (`insert_subtrees` is `MainCopy::Instance`): a copy of a main in this
+document becomes an instance of it, each node linked to its original and keeping the main's names, copy
+numbering skipped (§5.3d, D981) — that is (e); a link `remap_subtree` pointed inside the copy stays; a
+link to a node outside the document is dropped — (d)'s cross-document paste; an instance root's link
+stays; and **a member's link stays only if its instance root came along**, otherwise the member becomes
+local — which is how a child duplicated inside its own instance stops claiming its original's source.
+`MainCopy::NewMain` is *Duplicate as component*. **`component::check` was tightened with it**: only a
+link **straight to a main** is placed freely, and a nested copy's root is held to membership and
+uniqueness like a member — closing the looseness D978's amendment noted, with a test and a flip.
+
+**The app**: `Ctrl+Alt+K` → `Action::CreateComponent` and `Ctrl+Alt+B` → `Action::DetachInstance`,
+with a test that `Ctrl+Shift+K` still places an image (`shortcuts.md` §12); five `menu::Item`s shown by
+`menu::Role` and filed in `Group::Structure` after *Frame selection* **provisionally**
+(`context-menus.md` §7, §3 — a primitive's menu 24 rows, a boolean's 30, the pinned test renamed
+`a_primitives_menu_is_twenty_four_rows_in_canonical_group_order`); `OndinApp::create_component`,
+`detach_instances`, `go_to_main`, `select_all_instances`, `duplicate_as_component` and
+`component_role`; and D981's two text-only toasts. **Tests**: `ondin-core/tests/components.rs` at 21,
+`app::component_verb_tests` three, and the chord test; flips bit, per the brief, for cut-instead-of-climb,
+members-climb, the instance arm, keeping a lone member's link, and Delete with no relink. Gates as
+reported: all green, debug and release.
+
+**Owed when this was written, and what closed it.** (1) ~~**Moving a linked layer out of its
+instance**, by drag or reparent, was refused as `Membership`~~ — (3) ~~**`delete_selection` was the
+only door that relinked**: `build::ungroup`, `flatten`/`outline`'s helper and `text_on_new_path` deleted
+without it, so ungrouping a main group or flattening inside a main was refused by `BadLink`~~ (found by
+the record reading the code) — both closed the same day by **`component::settle_links`** (`66b48a5`, as
+`settle_moves`; generalised and renamed in `f75dcc5`), below. (4) ~~**A nested instance copied on its
+own** kept its link to the nested copy inside the main, and the tightened `check` refused it either
+way~~ (found by the record reading the code, not run) — closed in `f75dcc5`: `settle_copy` now climbs
+it one level up, `detach`'s rule, so it lands as a plain instance of its own main. **Still owed**: (2)
+(b)'s delete-or-keep for a main's child, at step 4; D981's filled hexagon (D10's *"at two, ship the
+font"*); and the rest of D981's chrome.
+
+🚨 **`component::settle_links(doc, tx)` — so that no door that moves, deletes or regroups layers has to
+know about components** (`66b48a5`, `f75dcc5`; from the caller's brief and a read of `component.rs`). A
+commit-time pass in `EditorSession::commit_inner`, after `keep_flex_sizes` — `keep_insets`' shape. It
+applies the transaction to a scratch copy through `Document::apply_unchecked` (crate-private, no
+post-conditions), then on the tree that leaves: links into deleted nodes **climb past them**
+(`relink_past`'s rule), so an ungrouped main is a deleted main and its instances detach; top-down,
+every linked node not linked straight to a main must have an instance root above it whose source
+contains its own, **else it is cut** — a layer dragged out of its instance, the members of a group
+instance an ungroup dissolved; and where two nodes of one instance share a source, **the one the
+transaction did not touch keeps it** (touched: moved subtrees, created and inserted nodes) — a member
+moved into a sibling instance is cut and the counterpart already there keeps its link. It iterates to a
+fixed point, so a cut nested root cuts its members, and does nothing without a structural op
+(`Reparent`, `DeleteNode`, `InsertSubtree`, `CreateNode`) or without a link in the document.
+`delete_selection` still relinks for itself, which is what its toast's detach count reads; the pass
+then finds those links settled. ⚠️ **`66b48a5`'s first version simulated only the `Reparent`s**, so a
+layer regrouped inside its own instance — into a group the same transaction created — read as outside
+every instance and was cut; a test pins it, and `f75dcc5` replaced the simulation with the scratch
+apply. **Tests**: `components.rs` at 27, each new one flip-checked per the brief — a regrouped member
+kept, a nested copy moved out cut with its members, a nested copy duplicated alone, a main ungrouped by
+raw ops, a member moved into a sibling instance. ⚠️ **Not a structural op, and so not settled**:
+`SetComponent { component: false }` on a main with instances leaves chains that end at no main, and
+`apply` refuses it (`LinkRule::LinkCycle`/`Membership`) — no verb un-makes a component today, so it is
+unreachable; one that does owes a detach, as a delete does.
+
 
 **D980 — The five item lists carry ids, in a wrapper beside each item rather than a field inside it,
 and an instance's items follow its main's item by item. *Decided 2026-10-04 by the maintainer — per
@@ -20459,8 +20533,9 @@ D22's unclickable frame is picked, and under (b) an instance is picked anywhere,
 needs no label to be selectable.
 
 **D884 holds**: every label is sentence case — *Main component*, *Duplicate as component*, *Restore
-removed children*, *Go to main component*. *(Accepted 2026-10-04 by the maintainer, in session 47; **not
-built**, and no code cites this number. **Keep.** Two rulings in it are the maintainer's own — the kept
+removed children*, *Go to main component*. *(Accepted 2026-10-04 by the maintainer, in session 47; **the
+two chords, five menu rows and two toasts built the same day** (`0ae3cd7`, the amendment below), the
+rest not; this read *not built, and no code cites this number* until then. **Keep.** Two rulings in it are the maintainer's own — the kept
 child reading as local, and component labels never changing hue, for components only — with their
 confirmation of D979 (b)'s keep rule; the four clarifications are the session's, accepted with it.
 D979 amended in body and index; `architecture.md` §5.3d's chrome summary and its delete-or-unlink
@@ -20469,6 +20544,23 @@ attribution; `roadmap.md` step 5's open line; `context-menus.md` §7; `shortcuts
 an instance picks like a group as an exception to D22, `Enter` steps in, toasts text-only, a collapsed
 dot for any difference, a label for a group main — with a group instance's label left unruled;
 `shortcuts.md` §12 gains the `Enter` row)*
+
+🚨 **Amended 2026-10-04: the keys, the menu rows and the toasts are built** (`0ae3cd7`, with D979's
+verbs). `Ctrl+Alt+K` → `Action::CreateComponent`, `Ctrl+Alt+B` → `Action::DetachInstance`, a test
+asserting `Ctrl+Shift+K` still places an image. Five `menu::Item`s — *Create component*, *Duplicate as
+component*, *Select all instances*, *Go to main component*, *Detach instance* — shown by `menu::Role`:
+`Plain` and `Local` get *Create component*, `Main` *Duplicate as component* and *Select all instances*,
+`Instance` *Go to main component* and *Detach instance*, `Member` *Go to main component*. ⚠️ **They are
+filed in `Group::Structure` after *Frame selection* provisionally** — `context-menus.md` §7 places a row
+when the feature is built, and this placement is the build's, not a ruling; a primitive's menu is 24
+rows and a boolean's 30 (that file's §3). The two *Reset* rows wait on build step 5. The two toasts are
+the text-only strings (d) above settled. Icons: `theme::icon::{HEXAGON, LINK_BREAK, ARROW_SQUARE_OUT,
+SELECTION_ALL}`. ⚠️ **The bundled font is Phosphor Regular alone**, so the *filled* hexagon this entry
+gives a main's label and layers row has no glyph in the app (D10 drew the one Fill-weight glyph the app
+needed by hand, and set *"at two, ship the font"* as its trigger) — owed by the layers-panel and canvas
+chrome. **Not built**: the canvas labels and markers, the layers panel's marks, the component card, the
+override look and `Enter` into an instance (`shortcuts.md` §12 keeps it ➕) — each with the build step
+that reaches it.
 
 **D870 — A frame may sit inside any group, and `paint_targets` already stops at one. *Decided
 2026-09-23 by the maintainer; built and tested 2026-09-24 (D876), committed 2026-09-24 (session 34).*** `build::can_parent` lets a frame hang off the root or
@@ -57520,7 +57612,8 @@ grouped — the same pair of reasons *Group selection* is absent for) and inside
 **The row moved the counts, and that is worth stating because `context-menus.md` §3 hand-counts them.**
 A primitive's canvas menu went **22 → 23**, a boolean's **28 → 29**, the Structure group **6 → 7**;
 the pinned test was renamed with it, to `a_primitives_menu_is_twenty_three_rows_in_canonical_group_order`
-— `..._twenty_four_...` since *Copy as PNG* (D259), which is also what took text's 27 to 28. §3's *tail*
+— `..._twenty_four_...` since *Copy as PNG* (D259), which is also what took text's 27 to 28 (and
+`..._twenty_four_...` once more since 2026-10-04, *Create component* — D979's amendment). §3's *tail*
 of 19 is untouched, Structure not being part of it. ⚠️ **This is the first row to lengthen those menus
 by a decision rather than by an implementation**, so §3's "nothing outstanding can lengthen these
 menus" has been amended rather than left: it was a true statement about the open ledger and was never a

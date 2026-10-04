@@ -1607,13 +1607,14 @@ first was, it saved only the track list.
 `track_lines` merges an edge with the last one only, the spans being laid in order — it searched every
 edge, quadratic in the track count.
 
-### 5.3d Components and overrides (designed 2026-10-04; build step 1 built; §15 D978–D981)
+### 5.3d Components and overrides (designed 2026-10-04; build steps 1–2 built; §15 D978–D981)
 
 > **Design ahead of code, most of it** — decided with the maintainer on 2026-10-04 (session 47). **Build
-> step 1 is built** the same day — the list items' ids (§15 D980, `a83adc8`) and the component model,
-> its two fields, two operations and post-conditions (§15 D978, `e3df69d`) — and the paragraphs on those
-> say so; propagation, the verbs and the chrome are not. It sits beside §5.3c because what it changes is the node
-> model. Every other passage of this document still describes `HEAD`; where one states a rule this
+> steps 1 and 2 are built** the same day — the list items' ids (§15 D980, `a83adc8`), the component
+> model, its two fields, two operations and post-conditions (§15 D978, `e3df69d`), and the verbs —
+> create, detach, delete, copy, and their keys and menu rows (§15 D979, D981, `0ae3cd7`) — and the
+> paragraphs on those say so; propagation and most of the chrome are not. It sits beside §5.3c because
+> what it changes is the node model. Every other passage of this document still describes `HEAD`; where one states a rule this
 > design will change, it carries a forward pointer here — §4's invariants 4 and 8, §5.11's bump rule
 > and §12's fourth property. **When a step below lands, this section is rewritten in the present
 > tense and the pointers go.** The maintainer's rulings are §15 D978 (linked copies), D979
@@ -1816,6 +1817,30 @@ same transaction: each instance becomes a plain copy that keeps its current look
 the main and the links. Nested chains relink one level up, above, so a nested instance survives its
 outer main's deletion as an instance of its own main.
 
+✅ **The verbs are built** (build step 2, `0ae3cd7`, §15 D979's amendment), on **one rule for every
+way a link's target goes**: `component::relink_past(doc, gone, among)` — a link into `gone` climbs to
+the first source above it not in `gone`, or is cut. **Delete** (`relink_for_delete`, from
+`OndinApp::delete_selection`) detaches a deleted main's instances, a nested one climbing to its own
+main. ⚠️ **A deleted main *child* leaves every counterpart as the instance's own layer, changed or not —
+an interim**: *the main loses a child*'s delete-or-keep above needs build step 4 to tell an untouched
+counterpart from a changed one. **Detach** (`component::detach`) **cuts** the root and its own members
+— climbing a member would leave it with no instance root above it, which `Membership` refuses — and
+lets a nested instance inside climb past this instance's main to its own. 🚨 **And no door that
+moves, deletes or regroups layers has to know about components**: `component::settle_links`, a
+commit-time pass in `EditorSession::commit_inner` after `keep_flex_sizes` (`keep_insets`' shape;
+`66b48a5`, `f75dcc5`, §15 D979's amendment), applies the transaction to a scratch copy through
+`Document::apply_unchecked` and settles the tree it leaves — links into deleted nodes climb past them,
+so an ungrouped main is a deleted main; top-down, a linked node not linked straight to a main with no
+instance root above it whose source contains its own is **cut**, so a layer dragged out of its
+instance, or the members of a group instance an ungroup dissolved, become plain layers; and where two
+nodes of one instance share a source, **the one the transaction did not touch keeps it**. It iterates
+to a fixed point, so a cut nested root cuts its members, and costs nothing without a structural op or
+without a link. `delete_selection` still relinks for itself — its toast counts the detaches — and
+`build::ungroup`, *Flatten*, *Outline* and text-on-a-new-path, which delete nodes without knowing,
+are settled by the pass. ⚠️ **A scratch apply, not a simulation of the `Reparent`s**: the first cut
+simulated only those, and a layer regrouped inside its own instance, into a group the same transaction
+created, read as outside every instance and was cut.
+
 **Components are document-local** in the first version (§15 D979's ruling (d), the maintainer's). There
 are no cross-document libraries, and a document stays self-contained as it does with embedded images.
 Pasting into another document drops every link whose source is not in the target document. **Shared
@@ -1828,17 +1853,29 @@ session's): duplicating, pasting or Alt-dragging one keeps its links. A payload 
 instance of it has the instance's links remapped with the ids, so the pasted instance links to the
 pasted main. **Creating an instance copies the main's names verbatim** (the session's): §5.7b's
 duplicate numbering does not apply, or every renumbered name would start life as an override.
+✅ **Built** (`0ae3cd7`) as `component::settle_copy`, run by `build::insert_subtrees_as` on each copy
+`remap_subtree` makes — `insert_subtrees` is `MainCopy::Instance`, *Duplicate as component*
+`MainCopy::NewMain`: a copy of a main in this document becomes an instance, each node linked to its
+original, names kept; a link `remap_subtree` pointed inside the copy stays; a link to a node outside the
+document is dropped (§15 D979 (d)); an instance root's link stays; and **a member's link stays only if
+its instance root came along**, otherwise it becomes local — so a child duplicated inside its own
+instance is local rather than refused. **A nested instance copied on its own** — its root linked to a
+nested copy inside some main, no outer instance coming with it — **climbs one level up**, `detach`'s
+rule: its root and members relink past that nested copy to the nested main's own nodes, and it lands as
+a plain instance of that main (`f75dcc5`). A layer *moved* out of its instance is cut by
+`settle_links`, above.
 
 **`apply`'s post-conditions** (the session's; §15 D491's shape — after the last op, before
 `*self = working`, so a transaction may pass *through* a state that breaks one). ✅ **Built** —
 `component::check`, refused as `OpError::BadLink(NodeId, LinkRule)`, `LinkRule` naming which of eight
 rules broke: **`Dangling`**, a link to a node not in the document or to itself; **`ComponentKind`**,
 `component` on a kind that is not a frame or a group; **`ComponentLinked`**, a node both a main and
-linked; **`NestedMain`**, a main beneath a main or a linked node; **`Membership`**, a linked node that
-is not an instance root with no instance root above it, or with its source not **strictly inside** its
-nearest ancestor instance root's source; **`SharedSource`**, two such members of one instance root
-linked to one source — instance roots themselves exempt, so two local instances of another main inside
-one instance are legal; **`LinkCycle`**, a chain of links that never reaches a main; and
+linked; **`NestedMain`**, a main beneath a main or a linked node; **`Membership`**, a linked node —
+**any but one linked straight to a main** — with no instance root above it, or with its source not
+**strictly inside** its nearest ancestor instance root's source; **`SharedSource`**, two such nodes of
+one instance root linked to one source — a node linked straight to a main exempt, so two local instances
+of another main inside one instance are legal, while a nested copy's root is held to both rules like a
+member (tightened with build step 2, §15 D979's amendment); **`LinkCycle`**, a chain of links that never reaches a main; and
 **`ComponentCycle`**, a main containing at some depth an instance whose chain ends at itself, found by
 a depth-first search over a graph from each main to the mains of the instance roots inside it. 🚨 **It
 runs over the whole document, not over `dirty`**: a link breaks when its *target* goes, and a delete
@@ -1847,10 +1884,9 @@ one scan. The item-id rule (§15 D980) is the other check at the same place, ove
 node an op wrote can have gained a duplicate. **The loader runs `component::check` too**, at the end of
 `schema::verify_integrity` once the tree is known to be a tree, and refuses a file that fails it, as it
 refuses a guide's dangling owner (§5.11). It does not compare values: under the compare rule there is
-nothing to drift. ⚠️ **As built, every instance root is exempt from membership**, where this paragraph
-read *"unless its source is a component root"*: a nested instance's copy (a node linked to a nested
-copy inside a main) is an instance root and is not held to sit inside its outer instance — noted by the
-record, not ruled (§15 D978's amendment).
+nothing to drift. *(Step 1 exempted every instance root from membership, looser than this paragraph's
+*"unless its source is a component root"*; step 2 tightened it to match — §15 D978's and D979's
+amendments.)*
 
 **The save format is v5** (the session's), on two counts. **The item-id half is built** (§15 D980,
 `a83adc8`): `CURRENT_SCHEMA_VERSION` is 5, and it is §5.11's own case — a v4 list item has no id, so
@@ -1945,7 +1981,12 @@ component*, *Select all instances*, *Go to main component*, *Reset all*, and *Re
 — 3 layers wrapped in a frame · Ctrl+Z to undo*. The per-frame *source → instances* lookups the dot,
 the count and the hairlines need want a cache keyed on `EditorSession::revision`, not the per-commit
 scan above. The six places the mockup met an older rule were all ruled by the maintainer on
-2026-10-04, as above; D981 has each.
+2026-10-04, as above; D981 has each. ✅ **Built with step 2** (`0ae3cd7`): the two chords, five of the
+rows — filed in Structure after *Frame selection* **provisionally**, `context-menus.md` §7 still to
+place them — and the two toasts; the *Reset* rows wait on step 5. ⚠️ **The filled hexagon has no glyph**:
+the bundled icon font is Phosphor Regular alone, and §15 D10, which hand-drew the one Fill-weight
+glyph the app needed, says *"at two, ship the font"*. The canvas labels and markers, the layers marks,
+the card and the override look are not built.
 
 **Variants, component properties, instance swap, and pushing an instance's changes to its main come
 later.** So does real-time collaboration, the one place §15 D978's cost (a) arrives: a non-goal for
@@ -1957,12 +1998,12 @@ if it is built.
 construction sites from grep counts and the build measured at about 290 sites the compiler reported,
 across 40 test files plus production (the caller's figure); then the model — `component`, `link`,
 `SetComponent` and `SetLink`, the post-conditions and the loader's check (`e3df69d`, §15 D978's
-amendment); (2) **next** — create a component, create an instance, detach, and a main's deletion
-detaching, owing what step 1 left refused rather than handled (§15 D978's amendment): a child
-duplicated or pasted inside its own instance has to lose its link, a cross-document paste has to drop
-the links it cannot resolve, the Delete verb has to detach a main's instances, relinking nested chains
-one level up, a member moved or pasted out of its instance has to lose its link, and a copy of a main
-has to make an instance rather than the second main `remap_subtree` makes today; (3) the propagation pass for **fields** — the compare rule, list items by id, nested chains,
+amendment); (2) ✅ **built 2026-10-04** (`0ae3cd7`, §15 D979's and D981's amendments) — create a
+component, create an instance, detach, a main's deletion detaching, copies settled, the two chords and
+five menu rows — then `settle_links` and the nested-copy climb (`66b48a5`, `f75dcc5`), closing a
+layer moved out of its instance, the other delete doors and a nested instance copied alone; leaving
+the delete-or-keep for a main's child, which is step 4's; (3) **next** — the propagation pass for **fields** — the compare
+rule, list items by id, nested chains,
 user operations winning — with a property-based test of its specification: after a main edit, each
 counterpart's field equals the new value if and only if it equalled the old; and the exact-equality
 risk measured here, above; (4) propagation for **structure** — insert at

@@ -366,9 +366,13 @@ a reader comparing today's numbers against 2026-08-21's finds every one of them 
 Export group entirely rewritten underneath. What moved is the *labels*, which is why the primitive
 test spells them out rather than only counting them — either move alone would have failed it, and
 together they do not touch the count at all.
+**And a fifth, on 2026-10-04: *Create component*** (§15 D979's amendment, D981), filed in Structure
+after *Frame selection* — **provisionally**, by the build and not by this file (§7) — took both ends
+to **24 and 30** and a primitive's Structure group from 7 to 8. The tail is untouched.
 **Both totals are the menu as actually
 built, and both ends are pinned by name** —
-`a_primitives_menu_is_twenty_three_rows_in_canonical_group_order` and
+`a_primitives_menu_is_twenty_four_rows_in_canonical_group_order` (named `…twenty_three…` until
+2026-10-04, renamed with the count) and
 `a_booleans_menu_is_the_long_end_of_the_range`. The long end is the one nothing was counting, and it
 is the end the ceiling below rests on, so a range with only the short end measured was half a claim.
 They read 16 and 24 until 2026-08-20 and were wrong twice over: this paragraph counted the Properties
@@ -378,14 +382,17 @@ pair that closed the first half; §15 D259's *Copy as SVG* is what took both end
 the Export group in the code for the first time, and §15 D264's *Export as…* took them up by one again
 the same day and has since taken that one back down.
 
-**Text is 27 rows, and the range still holds** — head 4 · Clipboard 5 · Properties 2 · Structure 4 ·
-Order 4 · Transform 2 · State 3 · Navigate 1 · Export 2, counted once with a throwaway probe on
+**Text is 28 rows, and the range still holds** — head 4 · Clipboard 5 · Properties 2 · Structure 5 ·
+Order 4 · Transform 2 · State 3 · Navigate 1 · Export 2. ⚠️ **It was 27 until 2026-10-04**, when
+*Create component* (`menu::Role::Plain`) joined Structure on a text layer as on every plain layer — a
+**fourth** move applied by reading, counted from the rule in the code and not from a built menu. The 27
+was counted once with a throwaway probe on
 2026-08-20 when §5.6's last two rows landed (§15 D260, D261) and **not pinned by a test name**, unlike
 the two ends. ⚠️ It was 26 then, and the one extra row is *Use as mask*, **read rather than
 re-measured**: it is pushed for any selection with no frame in it and not inside a boolean, which a
 text layer satisfies. *Copy as PNG* and *Export as…* both moved it on 2026-08-22 and in opposite
 directions, being §4's invariant tail, which every layer menu gets whole — so this number cancelled
-exactly as the two ends did. Re-probe it if it is ever load-bearing: three row moves have now been
+exactly as the two ends did. Re-probe it if it is ever load-bearing: four row moves have now been
 applied to this number by reading rather than by measuring, where the two ends have a test each. It is stated because the sentence above reads as though the primitive and the boolean
 bracket a spread of *kinds*, and they no longer do in the way they did: text used to be the obviously
 short kind and now sits two rows off the long end. The endpoints do not move — the three sizing rows
@@ -582,8 +589,8 @@ sits among rather than here.
 
 ### 5.5 Primitive shapes (Rect · Ellipse · Polygon · Star · Line)
 
-**No head at all.** These are the baseline menu — groups 2–9 and nothing else, 23 rows in v1 and the
-shortest menu in the app. Corner radius, side count and star ratio are numeric fields and belong to
+**No head at all.** These are the baseline menu — groups 2–9 and nothing else, 24 rows since
+2026-10-04 (23 until *Create component*, below) and the shortest menu in the app. Corner radius, side count and star ratio are numeric fields and belong to
 the inspector; a menu is the wrong instrument for a number.
 
 The one candidate was *Outline shape* (§4) — where a rect stops having W/H fields and
@@ -613,9 +620,14 @@ a row leaving, and the first time this number has gone *down*. **The two moves c
 coincidence**, worth naming because 23 is what this section said the day before as well: the menu is
 the same length and its ninth group has been completely rewritten, from one file row and two
 clipboard rows to two clipboard rows and nothing else.
-`a_primitives_menu_is_twenty_three_rows_in_canonical_group_order` is the count, and it is the
+`a_primitives_menu_is_twenty_three_rows_in_canonical_group_order` was the count, and it is the
 **labels** the test spells out that tell the two days apart — the number alone cannot, which is the
 whole argument for asserting a sequence rather than a length.
+
+**And 24 again on 2026-10-04**, *Create component* in Structure after *Frame selection* (§15 D979's
+amendment, D981) — filed there provisionally by the build, its place §7's to decide. The test is
+`a_primitives_menu_is_twenty_four_rows_in_canonical_group_order` now, renamed with the count — a name
+this menu has carried once before, between *Copy as PNG* and *Export as…*'s removal.
 
 ### 5.6 Text
 
@@ -632,10 +644,13 @@ text layer and are specified in §4's Structure table with it**: *Flip to other 
 path* (§15 D405, D406, D409), which the code files under Structure for *Convert to path*'s reason and
 which appear only on a layer already on a rail. They arrived on 2026-09-01, after this section was
 written, and `Item::DetachTextPath` and `Item::FlipTextPath` cite **§5.6** in their doc comments — so
-this is where a reader is sent and §4 is where they are described. A text menu is therefore **27
-rows** — head 4 · Clipboard 5 · Properties 2 · Structure 4 · Order 4 · Transform 2 · State 3 · Navigate
+this is where a reader is sent and §4 is where they are described. A text menu is therefore **28
+rows** — head 4 · Clipboard 5 · Properties 2 · Structure 5 · Order 4 · Transform 2 · State 3 · Navigate
 1 · Export 2 — which sits inside §3's range without moving either end of it, and a **railed** text
-layer's is **29**, Structure being 6 there. It read 26 with Structure
+layer's is **30**, Structure being 7 there. ⚠️ **27 and 29 until 2026-10-04**, when *Create component*
+(`menu::Role::Plain`, §15 D979's amendment) joined Structure on text layers too — counted from the rule
+in the code, not from a built menu, and **no test pins either number**, so nothing failed when they
+moved. It read 26 with Structure
 3 until 2026-08-22, and the term that moved is one this section does not own: *Use as mask* in
 Structure (§15 D286). **Export moved twice that day and came back to where it started** — *Copy as
 PNG* added (§15 D259's other half) and *Export as…* removed (§15 D264), both in §4's tail, which every
@@ -869,13 +884,18 @@ Recorded so they are not re-argued, the way `shortcuts.md`'s *Deliberately unbou
   argued from a *mechanism* expires when the mechanism does.
 - **Blend modes, effects, components, auto layout.** Blend modes are deferred in
   `architecture.md` §1, and a menu row is not the place a deferred feature first appears. Components
-  left that list on 2026-10-04 and are designed and not built (§5.3d, §15 D978–D981). Their rows
-  were accepted with the chrome (§15 D981) — *Create component* on an ordinary layer; *Duplicate as
-  component* and *Select all instances* on a main; *Go to main component*, *Reset all* and *Detach
-  instance* on an instance; *Go to main component* and a *Reset* named for the child on a child inside
-  one — and **they are not placed in §5's heads or scored in §9 yet**: where each sits in its head, the
-  invariant tail (§4) and the cost score are this file's rules to apply when components are built,
-  not a mockup's. ⚠️ **The
+  left that list on 2026-10-04 and are designed (§5.3d, §15 D978–D981). Their rows were accepted
+  with the chrome (§15 D981) — *Create component* on an ordinary layer; *Duplicate as component* and
+  *Select all instances* on a main; *Go to main component*, *Reset all* and *Detach instance* on an
+  instance; *Go to main component* and a *Reset* named for the child on a child inside one. **Five
+  are built since 2026-10-04** (§15 D979's amendment): `menu::Item::{CreateComponent,
+  DuplicateAsComponent, SelectAllInstances, GoToMain, DetachInstance}`, shown by a `menu::Role` —
+  `Plain` or `Local` gets *Create component*, `Main` *Duplicate as component* and *Select all
+  instances*, `Instance` *Go to main component* and *Detach instance*, `Member` *Go to main
+  component*; the two *Reset* rows wait on build step 5. ⚠️ **They are filed in `Group::Structure`
+  after *Frame selection* provisionally** — the build's choice, not a ruling and not this file's yet:
+  where each belongs in §5's heads or §4's tail, and its §9 score, are still this file's to decide.
+  *Create component* took a primitive's menu to 24 and a boolean's to 30 (§3). ⚠️ **The
   other two are not deferred and are still not rows**: effects were built on 2026-08-24 and are
   authored in the inspector's Effects card (§5.3a), and auto layout left §1's list on 2026-09-23 and
   is designed (§5.3c, §15 D867) — its absolute insets built on 2026-09-24 and authored in the
@@ -1603,15 +1623,15 @@ names the plausible wrong implementation it is aimed at.
   and §3's whole claim is about *order*. ⚠️ **And assert the *sequence*, not that it is sorted.**
   `build` buckets rows by their registry group, so "the groups come out in order" became true by
   construction and a test of it would pass against every possible assignment of rows *to* groups.
-  What can still be wrong is the assignment, so the assertion is the primitive menu's 23 labels
+  What can still be wrong is the assignment, so the assertion is the primitive menu's 24 labels
   spelled out — which is what would have caught the View switches sitting in `Group::State` and
   pushing *Zoom to fit* below them. (A small history worth keeping, because it is the drift rule
   working: this file said 17, was corrected to **16** on 2026-08-19 against the code, went back to
   **17** the same day when *Outline shape* landed and made the file right again — §15 D230 — and to
   **18** on 2026-08-20 with *Frame selection*, §15 D249. It then sat at 18 here while the code went
   to 20, 21, 22, 23, 24 and back to 23, which is six rows of drift in a bullet whose whole subject is
-  drift. The number was never the thing to trust;
-  `a_primitives_menu_is_twenty_three_rows_in_canonical_group_order` is, and it is renamed with the
+  drift — and to 24 again on 2026-10-04 with *Create component*. The number was never the thing to
+  trust; `a_primitives_menu_is_twenty_four_rows_in_canonical_group_order` is, and it is renamed with the
   count precisely so a stale one cannot sit in a green suite — as this sentence's did, the test having
   been renamed every time and this copy of it not.)
 - **The keyboard walk visits only the rows a press could run, and `↑` from nothing is the last one**

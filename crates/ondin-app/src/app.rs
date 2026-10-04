@@ -895,6 +895,11 @@ pub struct OndinApp {
         u64,
         std::collections::HashMap<NodeId, ondin_core::reset::Drift>,
     ),
+    /// This frame's overrides of the selected instance layers, by the inspector
+    /// card that shows them: the card's title, its unit count and the operations
+    /// that reset it — what a card header's dot, count and *Reset effects* read
+    /// (§15 D981). Gathered at the top of `inspector_ui`; empty outside instances.
+    pub(crate) card_overrides: Vec<(&'static str, usize, Vec<Operation>)>,
     /// Rects whose Appearance panel is showing the four per-corner radius
     /// fields. Purely a disclosure: the model always holds four radii, and the
     /// single field above edits all of them, so nothing here changes what a
@@ -2179,6 +2184,7 @@ impl OndinApp {
             collapsed_panels: HashSet::from(["Effects", "Preview"]),
             // `u64::MAX` is no revision a session has, so the first read fills it.
             drift_cache: (u64::MAX, Default::default()),
+            card_overrides: Vec::new(),
             per_corner_radius: HashSet::new(),
             open_menu: TopMenu::None,
             context_menu: None,
@@ -4370,6 +4376,20 @@ impl OndinApp {
     /// transaction, so one `Ctrl+Z`. No toast: the dots going out is the answer,
     /// D981's rule for its other verbs.
     pub(crate) fn reset_selection(&mut self, kind: ondin_core::reset::Kind) {
+        if let Some(tx) = self.reset_tx(kind)
+            && let Err(e) = self.session.try_commit(tx)
+        {
+            self.session.fail(format!("Cannot reset: {e}"));
+        }
+    }
+
+    /// The transaction [`Self::reset_selection`] commits, or `None` — having said
+    /// why — when there is nothing to reset. Split out so the inspector's
+    /// Component card can commit it through [`Self::commit_edit`]: a reset changes
+    /// what is drawn, so from the panel it arms the chrome hide as every other
+    /// inspector edit does, where the context menu's row commits as the menu's
+    /// other verbs do.
+    pub(crate) fn reset_tx(&mut self, kind: ondin_core::reset::Kind) -> Option<Transaction> {
         let doc = &self.session.doc;
         let scopes: Vec<NodeId> = build::outermost(doc, self.session.selection.ids())
             .into_iter()
@@ -4377,18 +4397,16 @@ impl OndinApp {
             .collect();
         if scopes.is_empty() {
             self.session.info("Select an instance to reset");
-            return;
+            return None;
         }
         let ops = ondin_core::reset::reset(doc, kind, &scopes, &mut self.session.ids);
         if ops.is_empty() {
             // The card's *Reset all* tooltip's words, so the two say one thing.
             self.session
                 .info("Nothing here differs from the main component");
-            return;
+            return None;
         }
-        if let Err(e) = self.session.try_commit(Transaction(ops)) {
-            self.session.fail(format!("Cannot reset: {e}"));
-        }
+        Some(Transaction(ops))
     }
 
     /// Select a freshly made group, and leave it **shut** in the layers tree.

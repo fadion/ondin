@@ -769,6 +769,16 @@ pub struct HeadClicks {
     pub toggled: bool,
     /// The optional right-hand action icon (`+` on Fill and Stroke).
     pub acted: bool,
+    /// The card-level reset a header with overrides offers on hover (§15 D981).
+    pub reset: bool,
+}
+
+/// A card's overrides, for its header (§15 D981): a dot and `count` at rest, and on
+/// hover the count turned into a card-level reset named `reset` — *Reset effects*.
+#[derive(Clone, Copy)]
+pub struct HeadOverrides<'a> {
+    pub count: usize,
+    pub reset: &'a str,
 }
 
 /// The control on the right of a [`section_head`], if it has one.
@@ -866,7 +876,35 @@ pub fn section_head_badged(
     badge: Option<&str>,
     sense: bool,
 ) -> HeadClicks {
+    section_head_full(ui, label, open, action, badge, None, sense)
+}
+
+/// The chip a header's reset takes on hover: its height, and its padding either
+/// side of the glyph-and-word.
+const HEAD_RESET_H: f32 = 18.0;
+const HEAD_RESET_PAD: f32 = 6.0;
+
+/// [`section_head_badged`] with the card's **overrides** (§15 D981): after the
+/// label, a 4-pt neutral dot and the count; with the pointer over the header, the
+/// count becomes a chip — *↺ Reset effects* — whose click is [`HeadClicks::reset`].
+///
+/// **The chip's slot is reserved at rest**, sized to the chip, so hovering changes
+/// what is drawn and nothing about where anything is — the mockup's *nothing
+/// moves*. Its click is registered **after** the header's own toggle target, which
+/// covers it, so the later and smaller target takes the press and a reset does
+/// not also fold the card.
+pub fn section_head_full(
+    ui: &mut egui::Ui,
+    label: &str,
+    open: bool,
+    action: Option<HeadAction>,
+    badge: Option<&str>,
+    overrides: Option<HeadOverrides<'_>>,
+    sense: bool,
+) -> HeadClicks {
     let mut clicks = HeadClicks::default();
+    let overrides = overrides.filter(|o| o.count > 0);
+    let mut chip: Option<egui::Rect> = None;
     let row = ui
         .horizontal(|ui| {
             // Scoped, so the 6px pitch applies between the caret and the label
@@ -883,6 +921,24 @@ pub fn section_head_badged(
                     theme::text::FAINT,
                 ));
                 ui.label(eyebrow(label));
+                if let Some(o) = overrides {
+                    let w = ui
+                        .painter()
+                        .layout_no_wrap(
+                            o.reset.to_owned(),
+                            egui::FontId::proportional(11.0),
+                            theme::text::MUTED,
+                        )
+                        .size()
+                        .x
+                        + 12.0
+                        + 4.0
+                        + HEAD_RESET_PAD * 2.0;
+                    chip = Some(
+                        ui.allocate_exact_size(egui::vec2(w, HEAD_RESET_H), egui::Sense::hover())
+                            .0,
+                    );
+                }
             });
 
             if action.is_some() || badge.is_some() {
@@ -937,7 +993,66 @@ pub fn section_head_badged(
         );
         clicks.toggled = head.clicked();
     }
+    if let (Some(o), Some(slot)) = (overrides, chip) {
+        let mut over = row.rect;
+        over.max.x = over.max.x.max(ui.max_rect().right());
+        let hovered = ui.rect_contains_pointer(over);
+        let p = ui.painter();
+        if hovered {
+            let target = ui
+                .interact(
+                    slot,
+                    ui.id().with(("section-reset", label)),
+                    egui::Sense::click(),
+                )
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            // `button_face`'s grounds, so the chip is the same material as a button.
+            let ground = if target.hovered() {
+                color::HOVER
+            } else {
+                color::FIELD
+            };
+            p.rect_filled(slot, 4.0, ground);
+            let mid = slot.center().y;
+            p.text(
+                egui::pos2(slot.left() + HEAD_RESET_PAD + 6.0, mid),
+                egui::Align2::CENTER_CENTER,
+                icon::ARROW_COUNTER_CLOCKWISE,
+                theme::icon_font(12.0),
+                theme::text::MUTED,
+            );
+            p.text(
+                egui::pos2(slot.left() + HEAD_RESET_PAD + 16.0, mid),
+                egui::Align2::LEFT_CENTER,
+                o.reset,
+                egui::FontId::proportional(11.0),
+                theme::text::STRONG,
+            );
+            if target.clicked() {
+                clicks.reset = true;
+                // The header's toggle sits under the chip; the reset is the press.
+                clicks.toggled = false;
+            }
+        } else {
+            override_dot(p, egui::pos2(slot.left() + 2.0, slot.center().y));
+            p.text(
+                egui::pos2(slot.left() + 8.0, slot.center().y),
+                egui::Align2::LEFT_CENTER,
+                o.count.to_string(),
+                egui::FontId::proportional(10.0),
+                theme::text::MUTED,
+            );
+        }
+    }
     clicks
+}
+
+/// D981's override mark: a **4-pt neutral dot** centred at `at` — on a card
+/// header, beside an overridden field's label, and in a list item's trailing slot.
+/// Neutral because the accent means *selected* (D981: component-ness is shape,
+/// never hue).
+pub fn override_dot(p: &egui::Painter, at: egui::Pos2) {
+    p.circle_filled(at, 2.0, theme::text::MUTED);
 }
 
 /// A [`section_head_badged`] badge: an 18-pt accent chip, the mockup's — accent

@@ -26,9 +26,9 @@ use crate::app::OndinApp;
 use crate::theme::{self, icon};
 use crate::ui::{self, FieldButton};
 use eframe::egui;
-use ondin_core::NodeId;
 use ondin_core::component;
 use ondin_core::reset::{Drift, Kind};
+use ondin_core::{NodeId, Operation};
 
 /// The card's faces, one per kind of selection D981 draws.
 enum Face {
@@ -84,6 +84,38 @@ impl OndinApp {
             .1
             .entry(scope)
             .or_insert_with(|| ondin_core::reset::drift(doc, scope))
+    }
+
+    /// Gather [`OndinApp::card_overrides`] for this frame: every selected linked
+    /// layer's overrides (`reset::overrides`), grouped by the card that shows them.
+    /// Over several instances a card counts and resets every one of them — D981's
+    /// *"the dot shows, and a reset resets every one of them"*.
+    pub(super) fn gather_card_overrides(&mut self) {
+        let doc = &self.session.doc;
+        let mut cards: Vec<(&'static str, usize, Vec<Operation>)> = Vec::new();
+        for id in self.session.selection.ids() {
+            for o in ondin_core::reset::overrides(doc, *id) {
+                let Some(title) = card_of(&o.reset) else {
+                    continue;
+                };
+                match cards.iter_mut().find(|(t, ..)| *t == title) {
+                    Some((_, n, ops)) => {
+                        *n += o.units;
+                        ops.push(o.reset);
+                    }
+                    None => cards.push((title, o.units, vec![o.reset])),
+                }
+            }
+        }
+        self.card_overrides = cards;
+    }
+
+    /// The overrides `title`'s header shows, if it has any.
+    pub(super) fn card_override(&self, title: &str) -> Option<(usize, &[Operation])> {
+        self.card_overrides
+            .iter()
+            .find(|(t, ..)| *t == title)
+            .map(|(_, n, ops)| (*n, ops.as_slice()))
     }
 
     /// The card's face for the selection, or `None` where it draws nothing.
@@ -216,11 +248,82 @@ impl OndinApp {
                 self.reveal_selection();
             }
             Some(Act::GoToSource) => self.go_to_main(),
-            Some(Act::Reset(kind)) => self.reset_selection(kind),
+            // Through `commit_edit`, as every inspector edit that changes ink is
+            // (`OndinApp::reset_tx`). *Detach* below changes no pixel and commits
+            // as its verb does — *Group*'s case in `commit_edit`'s doc.
+            Some(Act::Reset(kind)) => {
+                if let Some(tx) = self.reset_tx(kind) {
+                    self.commit_edit(tx);
+                }
+            }
             Some(Act::Detach) => self.detach_instances(),
             Some(Act::SelectAllInstances) => self.select_all_instances(),
             Some(Act::DuplicateAsComponent) => self.duplicate_as_component(),
         }
+    }
+}
+
+/// The inspector card that shows the field `op` writes — its title, as `panel`
+/// takes it — or `None` for a field no card header owns: the name and visibility
+/// (the identity card), a path's or a boolean's shape, the text's content and its
+/// rail, the mask flag and the fill rule (identity-row toggles).
+///
+/// Wildcard-free on the operation, so a new field operation is placed here by
+/// whoever adds it.
+fn card_of(op: &Operation) -> Option<&'static str> {
+    use Operation as O;
+    use ondin_core::GeometryPatch as G;
+    match op {
+        O::SetTransform { .. } | O::SetPivot { .. } => Some("Transform"),
+        O::SetGeometry { geometry, .. } => match geometry {
+            G::Size(_) | G::LineEnd(_) => Some("Transform"),
+            G::CornerRadius(_) | G::CornerRadii(_) | G::Sides(_) | G::InnerRatio(_) => {
+                Some("Appearance")
+            }
+            G::TextSizing(_) => Some("Type"),
+            G::Path { .. }
+            | G::TextPath(_)
+            | G::TextPathFlip(_)
+            | G::TextPathOffset(_)
+            | G::BoolOp(_) => None,
+        },
+        O::SetOpacity { .. } | O::SetClip { .. } => Some("Appearance"),
+        O::SetMaskMode { .. } => Some("Mask"),
+        O::SetFills { .. } => Some("Fill"),
+        O::SetStrokes { .. } => Some("Stroke"),
+        O::SetEffects { .. } => Some("Effects"),
+        O::SetExports { .. } => Some("Export"),
+        O::SetLayoutGrids { .. } => Some("Layout grid"),
+        O::SetInsets { .. } => Some("Position"),
+        O::SetLayoutItem { .. } => Some("Item"),
+        O::SetDisplay { .. } => Some("Container"),
+        O::SetTextStyle { .. } | O::SetParagraphStyle { .. } | O::SetBlockStyle { .. } => {
+            Some("Type")
+        }
+        O::SetName { .. }
+        | O::SetVisible { .. }
+        | O::SetMask { .. }
+        | O::SetFillRule { .. }
+        | O::SetText { .. }
+        | O::SetTextSpans { .. }
+        | O::SetParagraphSpans { .. }
+        | O::SetLocked { .. }
+        | O::SetProportionsLocked { .. }
+        | O::SetComponent { .. }
+        | O::SetLink { .. }
+        | O::CreateNode { .. }
+        | O::DeleteNode { .. }
+        | O::InsertSubtree { .. }
+        | O::Reparent { .. }
+        | O::Reorder { .. }
+        | O::SetCanvasBackground { .. }
+        | O::AddGuide { .. }
+        | O::RemoveGuide { .. }
+        | O::SetGuidePosition { .. }
+        | O::SetGuideColor { .. }
+        | O::SetGuideScope { .. }
+        | O::AddImage { .. }
+        | O::RemoveImage { .. } => None,
     }
 }
 
@@ -798,6 +901,63 @@ mod tests {
         assert!(
             !texts(&out).iter().any(|(t, _)| t.contains("override")),
             "the summary is gone at zero"
+        );
+    }
+
+    /// **A card header counts its overrides and resets them** (§15 D981, 4E). The
+    /// instance's rect has its opacity overridden: the Appearance header shows `1`
+    /// at rest; with the pointer on the header the count becomes *Reset
+    /// appearance*, and a click there puts the main's opacity back — and leaves the
+    /// card open, the header's own toggle lying under the chip. Flip: `card_of`
+    /// mapping opacity nowhere fails *"the count after the label"* (the header has
+    /// none, and the next text is the field's `50`). ⚠️ Dropping
+    /// `section_head_full`'s `clicks.toggled = false` stays **green**: egui gives
+    /// the press to the topmost target only, the chip registered after the header,
+    /// so that line is a belt and the registration order is what holds it.
+    #[test]
+    fn a_card_header_counts_and_resets_its_overrides() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![Operation::SetOpacity {
+                    id: f.ir,
+                    opacity: 0.5,
+                }]))
+        );
+        f.app.session.selection.set_one(f.ir);
+        let mut out = frame(&mut f.app, &ctx, Vec::new());
+        for _ in 0..3 {
+            out = frame(&mut f.app, &ctx, Vec::new());
+        }
+        let painted = texts(&out);
+        let head = painted
+            .iter()
+            .position(|(t, _)| t == "APPEARANCE")
+            .unwrap_or_else(|| panic!("no Appearance header in {painted:?}"));
+        assert_eq!(painted[head + 1].0, "1", "the count after the label");
+        let on_head = painted[head].1.center();
+        frame(&mut f.app, &ctx, vec![egui::Event::PointerMoved(on_head)]);
+        let out = frame(&mut f.app, &ctx, Vec::new());
+        let at = texts(&out)
+            .into_iter()
+            .find(|(t, _)| t == "Reset appearance")
+            .map(|(_, r)| r.center())
+            .expect("the hovered header offers the reset");
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(&mut f.app, &ctx, vec![egui::Event::PointerMoved(at)]);
+        frame(&mut f.app, &ctx, vec![press(true)]);
+        frame(&mut f.app, &ctx, vec![press(false)]);
+        assert_eq!(f.app.session.doc.get(f.ir).unwrap().opacity(), 1.0);
+        assert!(
+            !f.app.collapsed_panels.contains("Appearance"),
+            "still open: the reset is the press, not the toggle"
         );
     }
 }

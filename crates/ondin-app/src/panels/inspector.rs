@@ -1062,6 +1062,9 @@ impl OndinApp {
         // and it would ambush whoever selected that layer next.
         self.pending_picker
             .take_if(|(id, _)| !self.session.selection.contains(*id));
+        // What each card header counts and resets, for an instance's layers
+        // (§15 D981) — before any card is drawn, and emptied for everything else.
+        self.gather_card_overrides();
         // Guides are never selected alongside layers (`Selection`), so they are
         // asked about first and answer the whole inspector when there are any.
         let guides = self.selected_guides();
@@ -11911,10 +11914,22 @@ impl OndinApp {
         // collide on one id — which egui reports by flashing a red rectangle
         // round the offender for a frame (`Context::check_for_id_clash`). It
         // looked like the Appearance header briefly growing a border.
+        // The card's overrides (§15 D981) — its header's dot and count, and the
+        // card-level reset — looked up by title, so no card has to pass them.
+        let (count, resets) = self
+            .card_override(title)
+            .map(|(n, ops)| (n, ops.to_vec()))
+            .unwrap_or_default();
+        let reset_label = format!("Reset {}", title.to_lowercase());
+        let overrides = (count > 0).then_some(ui::HeadOverrides {
+            count,
+            reset: &reset_label,
+        });
         let (mut clicks, card_rect) = ui
             .push_id(title, |ui| {
                 ui::card_at(ui, |ui| {
-                    let clicks = ui::section_head_badged(ui, title, open, action, badge, open);
+                    let clicks =
+                        ui::section_head_full(ui, title, open, action, badge, overrides, open);
                     if open {
                         body(self, ui);
                     }
@@ -11945,6 +11960,9 @@ impl OndinApp {
             } else {
                 self.collapsed_panels.remove(title);
             }
+        }
+        if clicks.reset {
+            self.commit_edit(Transaction(resets));
         }
         clicks.acted
     }

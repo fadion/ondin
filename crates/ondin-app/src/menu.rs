@@ -1376,7 +1376,8 @@ pub struct Context<'a> {
     pub mask_refused: Option<&'static str>,
     /// What a single selected layer is to the components machinery (§15 D978),
     /// which decides D981's rows: *Create component* on an ordinary layer, the
-    /// main's two rows, the instance's three, the child's two.
+    /// main's two rows, the instance's two or three, the child's one or two — the
+    /// reset among them only where something differs ([`Self::drifted`]).
     pub role: Role,
     /// Whether a reset of that one layer would change anything
     /// (`reset::Drift::any`) — what offers *Reset all* and *Reset Label*, omitted
@@ -1757,11 +1758,12 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
     );
     // D981's rows, by what the layer is to the components machinery (§15 D981):
     // *Create component* on anything that is not already part of one, the main's
-    // two, the instance's three, a linked child's two. **A reset is omitted when
-    // nothing differs**, by §3's one exception — a row whose only purpose is to undo
-    // a non-default state, *Reset origin*'s rule — since a fresh instance has no
-    // drift and a row dim on most opens reads as broken. D981's disabled-not-hidden
-    // is the *card's* counted rows, where the count is the point.
+    // two, the instance's two or three, a linked child's one or two. **A reset is
+    // omitted when nothing differs**, by §3's one exception — a row whose only
+    // purpose is to undo a non-default state, *Reset origin*'s rule — since a
+    // fresh instance has no drift and a row dim on most opens reads as broken.
+    // D981's disabled-not-hidden is the *card's* counted rows, where the count is
+    // the point.
     match cx.role {
         Role::Plain | Role::Local => {
             rows.push(Row::new(Item::CreateComponent).dim_if(locked, why));
@@ -2698,11 +2700,16 @@ impl OndinApp {
             can_frame: build::can_frame(&self.session.doc, self.session.selection.ids()),
             mask_refused: self.mask_refusal(),
             role: self.component_role(),
-            drifted: self
-                .session
-                .selection
-                .single()
-                .is_some_and(|id| ondin_core::reset::drift(&self.session.doc, id).any()),
+            // From the Component card's cache when it is current — the card fills it
+            // for the selected instance every frame — and computed only on a miss
+            // (`OndinApp::drift_of` wants `&mut`, and this is `&self`).
+            drifted: self.session.selection.single().is_some_and(|id| {
+                (self.drift_cache.0 == self.session.revision())
+                    .then(|| self.drift_cache.1.get(&id).copied())
+                    .flatten()
+                    .unwrap_or_else(|| ondin_core::reset::drift(&self.session.doc, id))
+                    .any()
+            }),
             layer_name: self
                 .session
                 .selection

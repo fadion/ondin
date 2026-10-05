@@ -85,7 +85,8 @@
   D979) — as linked copies kept in step at the commit, not on layout's derive-from-specified pipeline
   as this bullet said: the maintainer ruled instances stored, every reader here being keyed by a stored
   id. **Variants and component properties left it on 2026-10-05** (§5.3d, §15 D982), their core
-  and inspector built; **instance swap and shared libraries stay on it.**
+  and inspector built; **instance swap left it the same day as a ruling, unbuilt** (§15 D983);
+  **shared libraries stay on it.**
   ~~Auto-layout/constraints~~ **left this list on 2026-09-23 and are
   designed**: CSS flexbox, CSS grid and absolute insets (§5.3c, §15 D867, D871) — insets on frames
   built 2026-09-24, inspector card included (§15 D874); flex built the same day — its model, engine
@@ -1614,7 +1615,7 @@ first was, it saved only the track list.
 `track_lines` merges an edge with the last one only, the spans being laid in order — it searched every
 edge, quadratic in the track count.
 
-### 5.3d Components and overrides (designed 2026-10-04; steps 1–6 and most of 7 built; §15 D978–D982)
+### 5.3d Components and overrides (designed 2026-10-04; steps 1–6 and most of 7 built; §15 D978–D983)
 
 > **Design ahead of code, part of it** — decided with the maintainer on 2026-10-04 (session 47). **Build
 > steps 1–4 are built** the same day — the list items' ids (§15 D980, `a83adc8`), the component model,
@@ -1636,7 +1637,7 @@ edge, quadratic in the track count.
 > (overrides, free structure, a main's deletion, document-local, what a copy of a main makes) and
 > D980 (list items compared one by one, by id), and the chrome is D981, accepted from a mockup; D982 is
 > variants and properties, a second mockup accepted with its three contradictions of D979 ruled for
-> D979.
+> D979; and D983 is instance swap and a nested copy's switch, ruled and not built.
 > Everything else here — the model fields, where a link
 > points, the post-conditions, the item ids' shape, the save-format bump, the preview — is the
 > session's design under those rulings, open to overturning, and each paragraph says which it is.
@@ -2254,10 +2255,18 @@ is a view over fields**: a boolean is its bound layers' visibility, a text prope
 nothing stores its value on an instance, its default is the main's own bound field, an overridden
 property is a bound field differing from its source, and resetting one is resetting that field — so a
 switch carries properties with every other override, and undo, the preview and propagation need nothing
-new. 🚨 **Open, for the maintainer**: only an instance linked straight to a main can switch
-(`propagate::linked_to_main`); a nested copy inside an outer instance cannot, and **instance swap**
-cannot be built, because the link model has no place for *"the counterpart of N in the outer main, but
-an instance of main B"* — §15 D982 has why, and the session's unbuilt sketch.
+new. Only an instance linked straight to a main can switch (`propagate::linked_to_main`); a nested
+copy inside an outer instance cannot yet, and **instance swap** is not built, because the link model
+has no place for *"the counterpart of N in the outer main, but an instance of main B"* — §15 D982 has
+why. **Ruled 2026-10-05, not built** (§15 D983, the maintainer's): a `swap` field beside `link`, `link`
+keeping the slot's identity; a swap **is an override**; the slot keeps the root's **placement** —
+position, insets, layout item, size, rotation — and its **visibility**, its own or the slot's, and
+**everything else comes from the target**, the root's own fill, stroke, effects, corner radius, clip,
+`display` and kind included — so `source_of` cannot simply follow `swap`, and `linked_to_main` must
+keep reading `link`; overrides carry as the switch carries them; a root linked straight to a main
+swaps by relinking `link`, so `swap` is only a nested copy's; the fields join v5 unbumped; the mains offered are those whose name starts with a **filter** stored on
+the slot in the main, case-insensitive, with a search box on top — *Preferred mains* is not built; and a
+nested copy's switch is a swap restricted to its set's mains. D983 lists what it leaves to the build.
 
 ✅ **The app half, in the inspector and the context menu** (`a313b2c`; `panels/variants.rs`,
 `panels/component.rs`; §15 D982's amendment). **A set** gets its own card, *Variants*, in the Component
@@ -2304,8 +2313,8 @@ slot, then the set count, then `{}`, then a frame's size or a subtract base. **N
 the set's bottom edge — the canvas has no hit route for a control of its own, and *Add variant* is on
 the card and the menu — and a variant's row named by its values with the filled hexagon (§15 D10).
 
-**Instance swap, a nested copy's switch, exposing nested properties, and pushing an instance's changes
-to its main come later.** So does real-time collaboration, the one place §15 D978's cost (a) arrives: a non-goal for
+**Instance swap and a nested copy's switch are ruled and unbuilt** (§15 D983, above); **exposing
+nested properties, and pushing an instance's changes to its main, come later.** So does real-time collaboration, the one place §15 D978's cost (a) arrives: a non-goal for
 now and open for the future, in the maintainer's words, and D978's verdict is to revisit linked copies
 if it is built.
 
@@ -2348,7 +2357,8 @@ part (`26c8434`, `7cf242e`, `7b5961e`, `a18b0b5`, `d66044c`, `5fcff6b`, `d2beb37
 card's fields and the exports and layout-grid lists; then step 6, the live preview; then, on
 2026-10-05, step 7's core (`3fa5276`, §15 D982) and its app half in the inspector and the menu
 (`a313b2c`), and a set's tab and two layers marks (`0ff8f16`). **Next**: step 7's `+` edge control
-and value-named variant rows, beside D981's chrome below; its open question — a nested copy's switch and instance swap — is the maintainer's. Step 6's three defects — a main's pivot preview naming a copy, pinned
+and value-named variant rows, beside D981's chrome below; its open question — a nested copy's switch and instance swap — ~~is the maintainer's~~ was ruled on
+2026-10-05 (§15 D983) and is unbuilt. Step 6's three defects — a main's pivot preview naming a copy, pinned
 copies and roots previewed off their release, an in-flow move dragging the copies — are fixed (§15
 D979's amendment), and so is a fourth read in the fix, a pinned copy with its own value for every
 inset a main's move changes; step 6 owes nothing known.

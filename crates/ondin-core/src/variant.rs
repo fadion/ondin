@@ -976,9 +976,11 @@ pub fn switch_target(doc: &Document, main: NodeId, prop: usize, value: &str) -> 
 
 /// Whether the instance rooted at `root` can switch variants here: it must be
 /// linked **straight to** a main — an instance placed by itself, or a nested
-/// instance inside a main. A nested copy inside an outer instance cannot yet
-/// (§15 D982's open question: the link model has no place for "the counterpart
-/// of this node, but an instance of that main").
+/// instance inside a main. A nested copy inside an outer instance cannot yet:
+/// the link model has no place for "the counterpart of this node, but an
+/// instance of that main" (§15 D982). §15 D983 rules the answer, unbuilt — a
+/// `swap` field beside `link`, of which a nested copy's switch is the case
+/// restricted to its set's mains — and this limit goes when that is built.
 pub fn can_switch(doc: &Document, root: NodeId) -> bool {
     crate::propagate::linked_to_main(doc, root)
 }

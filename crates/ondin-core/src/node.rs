@@ -190,6 +190,14 @@ pub struct Node {
     /// way that one is: after the last op of every transaction
     /// (`crate::component::check`).
     pub(crate) link: Option<NodeId>,
+    /// The main whose **contents** this nested copy shows instead of its link's —
+    /// an **instance swap** (§15 D983). Only on a copy inside an outer instance
+    /// (linked to a nested instance, never straight to a main), and `None`
+    /// everywhere else: [`Self::link`] keeps the slot's identity, so the copy
+    /// still takes its placement, size and visibility from the slot, and
+    /// everything else — its own fields and its children — from this main
+    /// (`crate::swap`).
+    pub(crate) swap: Option<NodeId>,
     /// This frame's **variant properties**, when it is a component set (§5.3d
     /// step 7, §15 D982) — every main directly inside it is a variant. `None` on
     /// every other layer. A set is a frame and never a main itself.
@@ -216,12 +224,19 @@ impl Node {
     pub fn link(&self) -> Option<NodeId> {
         self.link
     }
+    /// The main this nested copy's contents are swapped to, if any (§15 D983).
+    pub fn swap(&self) -> Option<NodeId> {
+        self.swap
+    }
     /// Make this freshly remapped node a **linked copy** of `source`: linked to
     /// it, and none of what makes a main a main — the flag, a variant's values, a
     /// component's properties (§15 D978, D982). Every door that makes an instance
     /// node goes through here, so a new main-only field is cleared in one place.
+    /// A swap is cleared too: a copy of a swapped node shows what it shows by
+    /// following it, one link up (§15 D983).
     pub(crate) fn make_copy_of(&mut self, source: NodeId) {
         self.link = Some(source);
+        self.swap = None;
         self.component = false;
         self.set = None;
         self.variant.clear();

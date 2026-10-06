@@ -285,6 +285,7 @@ fn the_variant_rules_are_held_after_the_last_op() {
                 name: "Show".into(),
                 kind: PropKind::Boolean,
                 bound,
+                filter: String::new(),
             },
         )]
     };

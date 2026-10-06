@@ -278,6 +278,15 @@ pub enum Operation {
         id: NodeId,
         link: Option<NodeId>,
     },
+    /// Swap a nested copy's contents to another main, or back to its slot's
+    /// (§15 D983). The field alone: the commit expands it into the copy's
+    /// rewritten children (`crate::swap::settle`), so every door that writes one —
+    /// the picker, a reset, a variant switch — gets the same rewrite. Checked
+    /// after the last op, as [`Self::SetLink`] is.
+    SetSwap {
+        id: NodeId,
+        swap: Option<NodeId>,
+    },
     /// Make a frame a component set with these variant properties, or stop it
     /// being one (§15 D982). Checked after the last op, as [`Self::SetComponent`]
     /// is (`crate::variant::check`).
@@ -423,6 +432,7 @@ impl Operation {
             | Operation::SetLayoutItem { id, .. }
             | Operation::SetComponent { id, .. }
             | Operation::SetLink { id, .. }
+            | Operation::SetSwap { id, .. }
             | Operation::SetVariantSet { id, .. }
             | Operation::SetVariant { id, .. }
             | Operation::SetProperties { id, .. } => Some(*id),
@@ -479,6 +489,7 @@ impl Operation {
             | Operation::SetLayoutItem { id, .. }
             | Operation::SetComponent { id, .. }
             | Operation::SetLink { id, .. }
+            | Operation::SetSwap { id, .. }
             | Operation::SetVariantSet { id, .. }
             | Operation::SetVariant { id, .. }
             | Operation::SetProperties { id, .. } => id,
@@ -563,8 +574,8 @@ impl Operation {
     /// panel and a tag over a frame, and a guide is a line over the artwork rather
     /// than part of it.
     ///
-    /// **The thirteen operations of `RenderOverrides::absorb`'s chrome no-op arm**
-    /// (its no-ops are fifteen: the image pair is the other arm, a no-op there
+    /// **The seventeen operations of `RenderOverrides::absorb`'s chrome no-op arm**
+    /// (its no-ops are nineteen: the image pair is the other arm, a no-op there
     /// without being invisible — §15 D659), and deliberately the same list: "the renderer has nothing to do with this" and
     /// "this changes nothing drawn" are one fact asked by two callers. They are not
     /// one function because `absorb` also has to separate the *patchable* ops from
@@ -600,6 +611,9 @@ impl Operation {
             // exactly like the nodes it holds.
             | Operation::SetComponent { .. }
             | Operation::SetLink { .. }
+            // A swap is the same: what a swapped copy draws changes through the
+            // children and fields its commit rewrites (§15 D983).
+            | Operation::SetSwap { .. }
             // A set's properties, a variant's values and a component's
             // properties are what the components machinery reads, never what is
             // drawn: the derived name and a bound field change through their own
@@ -870,6 +884,7 @@ impl Operation {
                 node(id).is_some_and(|n| n.component() == *component)
             }
             Operation::SetLink { id, link } => node(id).is_some_and(|n| n.link() == *link),
+            Operation::SetSwap { id, swap } => node(id).is_some_and(|n| n.swap() == *swap),
             Operation::SetVariantSet { id, set } => {
                 node(id).is_some_and(|n| n.set() == set.as_ref())
             }
@@ -1278,7 +1293,7 @@ mod changes_ink_tests {
     use super::*;
     use crate::id::IdSource;
 
-    /// **Exactly thirteen operations change nothing drawn**, and the set is what the
+    /// **Exactly seventeen operations change nothing drawn**, and the set is what the
     /// inspector's chrome hide turns on (§15 D128): an edit with no visible result
     /// has nothing to get the selection box out of the way *for*, and an edit whose
     /// only result *is* chrome would have that result taken away by hiding it.
@@ -1286,9 +1301,9 @@ mod changes_ink_tests {
     /// Pinned as a list rather than left to `changes_ink`'s own `match`, because the
     /// `match` is wildcard-free — so a new operation stops the build there and the
     /// author has to choose an arm, but nothing stops them choosing the *wrong* one.
-    /// This is where the choice is checked against what the thirteen have in common.
+    /// This is where the choice is checked against what the seventeen have in common.
     ///
-    /// They are the thirteen of `RenderOverrides::absorb`'s chrome no-op arm; its
+    /// They are the seventeen of `RenderOverrides::absorb`'s chrome no-op arm; its
     /// image arm is two more, which change ink (§15 D659). If the chrome arm and
     /// this list ever disagree, one of them is wrong.
     ///
@@ -1312,7 +1327,8 @@ mod changes_ink_tests {
     /// **Thirteen with `SetComponent` and `SetLink`** (§15 D978), 2026-10-04 — prose
     /// and fixture recounted together, the fixture's assertion moved first.
     /// **Sixteen with `SetVariantSet`, `SetVariant` and `SetProperties`** (§15
-    /// D982), 2026-10-05, the same way.
+    /// D982), 2026-10-05, the same way. **Seventeen with `SetSwap`** (§15 D983),
+    /// 2026-10-06, the fixture's assertion moved first again.
     #[test]
     fn only_the_chrome_operations_change_no_ink() {
         let mut ids = IdSource::new(1);
@@ -1336,6 +1352,7 @@ mod changes_ink_tests {
                 component: true,
             },
             Operation::SetLink { id, link: None },
+            Operation::SetSwap { id, swap: None },
             Operation::SetVariantSet { id, set: None },
             Operation::SetVariant { id, values: vec![] },
             Operation::SetProperties { id, props: vec![] },
@@ -1367,7 +1384,11 @@ mod changes_ink_tests {
         // makes the count in this test's doc comment checkable by anything but a
         // reader — and that comment has been wrong once, by exactly this
         // mechanism.
-        assert_eq!(invisible.len(), 16, "the chrome list is sixteen operations");
+        assert_eq!(
+            invisible.len(),
+            17,
+            "the chrome list is seventeen operations"
+        );
         for op in &invisible {
             assert!(
                 !op.changes_ink(),

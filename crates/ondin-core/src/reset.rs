@@ -69,6 +69,10 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
         item,
         component: _,
         link: _,
+        // A swap is an override (§15 D983), but not a field one: resetting it
+        // rewrites the copy's children, which `overrides` writes as a `SetSwap`
+        // and `crate::swap::settle` expands at the commit.
+        swap: _,
         // A main's or a set's own, read by an instance through its link (§15 D982).
         set: _,
         variant: _,
@@ -217,10 +221,12 @@ pub struct Override {
     pub units: usize,
 }
 
-/// The node `id` is compared with: its link, when it sits in an instance. `None`
-/// for anything unlinked — a main, an ordinary layer, a local addition.
+/// The node `id` is compared with: its link, when it sits in an instance — its
+/// **swap** when it is swapped (§15 D983), for its children and every field but
+/// the slot's, which [`overrides`] compares with the link. `None` for anything
+/// unlinked — a main, an ordinary layer, a local addition.
 pub fn source_of(doc: &Document, id: NodeId) -> Option<NodeId> {
-    doc.get(id)?.link.filter(|l| doc.get(*l).is_some())
+    crate::swap::content_source(doc, id).filter(|l| doc.get(*l).is_some())
 }
 
 /// Whether `id`'s **placement is its own** — an instance linked straight to a
@@ -236,18 +242,43 @@ pub fn placement_is_own(doc: &Document, id: NodeId) -> bool {
 ///
 /// A copy whose kind is not its source's — a variant no edit can cross — compares
 /// only the fields every node has.
+///
+/// **A swapped copy** (§15 D983) compares its slot's fields — placement, size,
+/// visibility — with its link and the rest with its swap, and the **swap itself
+/// is an override** (the maintainer's ruling (2)): one unit, reset by clearing it,
+/// which the commit expands back into the slot's own contents (`swap::settle`).
 pub fn overrides(doc: &Document, id: NodeId) -> Vec<Override> {
     let (Some(copy), Some(src)) = (doc.get(id), source_of(doc, id).and_then(|s| doc.get(s))) else {
         return Vec::new();
     };
     let own_place = placement_is_own(doc, id);
+    let slot = copy.swap.and(copy.link).and_then(|l| doc.get(l));
     let same_kind = std::mem::discriminant(&copy.kind) == std::mem::discriminant(&src.kind);
     let mine: FxHashMap<_, Operation> = state_ops(copy)
         .into_iter()
         .filter_map(|op| Some((field_key(&op)?, op)))
         .collect();
     let mut out = Vec::new();
-    for theirs in state_ops(src) {
+    if copy.swap.is_some() {
+        out.push(Override {
+            reset: Operation::SetSwap { id, swap: None },
+            units: 1,
+        });
+    }
+    // The slot's fields from the slot, everything else from the swap.
+    let theirs_all: Vec<Operation> = match slot {
+        Some(slot) => state_ops(slot)
+            .into_iter()
+            .filter(crate::swap::is_slot_field)
+            .chain(
+                state_ops(src)
+                    .into_iter()
+                    .filter(|op| !crate::swap::is_slot_field(op)),
+            )
+            .collect(),
+        None => state_ops(src),
+    };
+    for theirs in theirs_all {
         if own_place && crate::propagate::is_placement(&theirs) {
             continue;
         }
@@ -482,22 +513,38 @@ fn reset_items<T: Clone>(src: &[Keyed<T>], cur: &[Keyed<T>]) -> Vec<Keyed<T>> {
 /// instance's source — the instance's own copies, a nested instance's included,
 /// and not a local instance of some other main placed inside it, which is a local
 /// addition. Empty outside every instance. Preorder.
+///
+/// **A swapped copy in scope brings its own members** (§15 D983): they link into
+/// its swap's main, not into the instance's source, and resetting the instance
+/// resets them too — the swap with them.
 pub fn scope_nodes(doc: &Document, scope: NodeId) -> Vec<NodeId> {
-    let Some(src) = crate::component::instance_root(doc, scope).and_then(|r| source_of(doc, r))
-    else {
+    let Some(root) = crate::component::instance_root(doc, scope) else {
         return Vec::new();
     };
-    let within: FxHashSet<NodeId> = crate::build::subtree_nodes(doc, &[src])
+    // The scope's own source, and the slot's for a swapped scope, so the root
+    // itself — linked to its slot — is in it.
+    let mut sources: Vec<NodeId> = source_of(doc, root).into_iter().collect();
+    sources.extend(
+        doc.get(root)
+            .filter(|r| r.swap.is_some())
+            .and_then(|r| r.link),
+    );
+    let mut within: FxHashSet<NodeId> = crate::build::subtree_nodes(doc, &sources)
         .into_iter()
         .collect();
-    crate::build::subtree_nodes(doc, &[scope])
-        .into_iter()
-        .filter(|id| {
-            doc.get(*id)
-                .and_then(|n| n.link)
-                .is_some_and(|l| within.contains(&l))
-        })
-        .collect()
+    let mut out = Vec::new();
+    for id in crate::build::subtree_nodes(doc, &[scope]) {
+        let Some(n) = doc.get(id) else { continue };
+        if !n.link.is_some_and(|l| within.contains(&l)) {
+            continue;
+        }
+        out.push(id);
+        // Preorder, so a swapped copy's members come after it.
+        if let Some(s) = n.swap {
+            within.extend(crate::build::subtree_nodes(doc, &[s]));
+        }
+    }
+    out
 }
 
 /// How far the instance at `scope` has drifted from its main — the counts §15

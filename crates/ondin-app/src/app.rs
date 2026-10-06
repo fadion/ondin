@@ -4479,32 +4479,44 @@ impl OndinApp {
     /// The component property the one selected linked layer drives whose field
     /// differs from the main's — what *Reset Label text* resets (§15 D982).
     pub(crate) fn overridden_property_of_selection(&self) -> Option<ondin_core::variant::Property> {
+        self.overridden_property_and_root().map(|(p, _)| p)
+    }
+
+    /// [`Self::overridden_property_of_selection`] with the instance whose property
+    /// it is. **Climbing out**: the selected layer's own instance first, then each
+    /// instance around it — a swap property's counterpart is a nested copy, itself
+    /// an instance root, so its property is its *outer* instance's (§15 D983;
+    /// `arch-scribe` read the first build answering the copy's own main's).
+    fn overridden_property_and_root(&self) -> Option<(ondin_core::variant::Property, NodeId)> {
         let doc = &self.session.doc;
         let id = self.session.selection.single()?;
-        let root = ondin_core::component::instance_root(doc, id)?;
-        ondin_core::variant::instance_properties(doc, root)
-            .into_iter()
-            .map(|p| p.value)
-            .find(|p| {
-                ondin_core::variant::counterparts(doc, root, p).contains(&id)
-                    && ondin_core::variant::property_state(doc, root, p).is_some_and(|(_, o)| o)
-            })
+        let mut root = ondin_core::component::instance_root(doc, id);
+        while let Some(r) = root {
+            let found = ondin_core::variant::instance_properties(doc, r)
+                .into_iter()
+                .map(|p| p.value)
+                .find(|p| {
+                    ondin_core::variant::counterparts(doc, r, p).contains(&id)
+                        && ondin_core::variant::property_state(doc, r, p).is_some_and(|(_, o)| o)
+                });
+            if let Some(p) = found {
+                return Some((p, r));
+            }
+            root = doc
+                .get(r)
+                .and_then(|n| n.parent())
+                .and_then(|p| ondin_core::component::instance_root(doc, p));
+        }
+        None
     }
 
     /// *Reset Label text* — named for the property (§15 D982) — from the context menu: that property back to
     /// the main's value on the instance the selected layer sits in.
     pub(crate) fn reset_selected_property(&mut self) {
-        let doc = &self.session.doc;
-        let (Some(p), Some(root)) = (
-            self.overridden_property_of_selection(),
-            self.session
-                .selection
-                .single()
-                .and_then(|id| ondin_core::component::instance_root(doc, id)),
-        ) else {
+        let Some((p, root)) = self.overridden_property_and_root() else {
             return;
         };
-        let ops = ondin_core::variant::reset_property(doc, &[root], &p);
+        let ops = ondin_core::variant::reset_property(&self.session.doc, &[root], &p);
         self.session.commit(Transaction(ops));
     }
 
@@ -19791,6 +19803,183 @@ mod component_verb_tests {
             kids.as_slice(),
             "with its layers"
         );
+    }
+
+    /// **The session's commit makes a swap's rewrite** (§15 D983): a `SetSwap`
+    /// alone, committed, comes back with the nested copy's layer relinked to the
+    /// swapped-to main's — `EditorSession::commit_inner` runs `swap::settle` — and
+    /// one undo takes the swap and its rewrite back together. The core tests
+    /// rebuild the commit's passes by hand; this is the one that says the session
+    /// runs them. Flip: dropping `swap::settle` from `commit_inner` fails at
+    /// `relinked` — `component::check` refuses the unexpanded swap, the session
+    /// reports it and commits nothing, and the copy is still the slot's.
+    #[test]
+    fn a_committed_swap_is_rewritten_and_undone_whole() {
+        let ctx = egui::Context::default();
+        let SwapFixture {
+            mut app,
+            heart,
+            hshape,
+            n,
+            r,
+            shape,
+            ..
+        } = swap_fixture(&ctx);
+        let tx = ondin_core::swap::swap(&app.session.doc, r, heart).expect("a swap");
+        app.session.commit(tx);
+        let relinked = app.session.doc.get(shape).unwrap().link();
+        assert_eq!(relinked, Some(hshape), "the commit rewrote the copy");
+        assert!(app.session.undo());
+        assert_eq!(app.session.doc.get(r).unwrap().swap(), None);
+        assert_eq!(
+            app.session.doc.get(shape).unwrap().link(),
+            app.session.doc.get(n).unwrap().children().first().copied(),
+            "one undo took both back"
+        );
+    }
+
+    /// **The menu's *Reset <property>* reaches a swap property** (§15 D983):
+    /// selecting the swapped copy — itself an instance root — finds the property
+    /// on the instance *around* it, whose property it is, and resetting it clears
+    /// the swap. `arch-scribe` read the first build asking the copy's own main.
+    ///
+    /// Flip: `overridden_property_and_root` asking only the selected layer's own
+    /// instance answers `None`.
+    #[test]
+    fn the_menu_resets_a_swap_property_from_the_swapped_copy() {
+        let ctx = egui::Context::default();
+        let SwapFixture {
+            mut app,
+            heart,
+            button,
+            n,
+            b1,
+            r,
+            ..
+        } = swap_fixture(&ctx);
+        let (tx, _) = ondin_core::variant::define(
+            &app.session.doc,
+            &mut app.session.ids,
+            button,
+            "Icon",
+            ondin_core::variant::PropKind::Swap,
+            vec![n],
+        )
+        .expect("a swap property");
+        assert!(app.session.commit(tx));
+        let p = ondin_core::variant::instance_properties(&app.session.doc, b1)[0]
+            .value
+            .clone();
+        let ops = ondin_core::variant::set_property(
+            &app.session.doc,
+            &[b1],
+            &p,
+            &ondin_core::variant::PropValue::Swap(heart),
+        );
+        assert!(app.session.commit(Transaction(ops)));
+        assert_eq!(app.session.doc.get(r).unwrap().swap(), Some(heart));
+        app.session.selection.set_one(r);
+        assert_eq!(
+            app.overridden_property_of_selection().map(|p| p.name),
+            Some("Icon".to_string())
+        );
+        app.reset_selected_property();
+        assert_eq!(app.session.doc.get(r).unwrap().swap(), None);
+    }
+
+    /// Two icon mains, `Star` and `Heart`, each holding a `Shape`; a `Button` main
+    /// holding a nested instance `n` of Star; and `b1`, an instance of Button,
+    /// whose copy of `n` is `r` and of Star's `Shape` is `shape` — the nested copy a
+    /// swap is made on.
+    struct SwapFixture {
+        app: OndinApp,
+        heart: NodeId,
+        hshape: NodeId,
+        button: NodeId,
+        n: NodeId,
+        b1: NodeId,
+        r: NodeId,
+        shape: NodeId,
+    }
+
+    fn swap_fixture(ctx: &egui::Context) -> SwapFixture {
+        use ondin_core::Placement;
+        let mut app = OndinApp::headless(ctx);
+        let mut ids = IdSource::new(0x7CA);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let [star, sshape, heart, hshape, button] = [(); 5].map(|_| ids.mint());
+        let frame = |w: f64| NodeKind::Artboard {
+            size: Size::new(w, w),
+        };
+        let rect = || NodeKind::Rect {
+            size: Size::new(4.0, 4.0),
+            corner_radii: Default::default(),
+        };
+        let create = |id, parent, kind, name: &str| Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind,
+            transform: None,
+            name: Some(name.into()),
+        };
+        doc.apply(&Transaction(vec![
+            create(star, root, frame(24.0), "Star"),
+            create(sshape, star, rect(), "Shape"),
+            create(heart, root, frame(24.0), "Heart"),
+            create(hshape, heart, rect(), "Shape"),
+            create(button, root, frame(80.0), "Button"),
+            Operation::SetComponent {
+                id: star,
+                component: true,
+            },
+            Operation::SetComponent {
+                id: heart,
+                component: true,
+            },
+        ]))
+        .expect("two icons and a button frame");
+        let place = |doc: &Document, ids: &mut IdSource, main, parent| {
+            let (tx, made) = ondin_core::insert_subtrees(
+                doc,
+                ids,
+                &[Placement {
+                    nodes: doc.capture_subtree(main).unwrap(),
+                    parent,
+                    index: None,
+                }],
+                Default::default(),
+            );
+            (tx, made[0])
+        };
+        let (tx, n) = place(&doc, &mut ids, star, button);
+        doc.apply(&tx).expect("a Star in the button");
+        doc.apply(&Transaction(vec![Operation::SetComponent {
+            id: button,
+            component: true,
+        }]))
+        .expect("the button a main");
+        let (tx, b1) = place(&doc, &mut ids, button, root);
+        doc.apply(&tx).expect("an instance of the button");
+        let r = doc.get(b1).unwrap().children()[0];
+        let shape = doc.get(r).unwrap().children()[0];
+        assert_eq!(
+            doc.get(r).unwrap().link(),
+            Some(n),
+            "the fixture: b1's nested copy"
+        );
+        app.session.adopt_document(doc, None);
+        SwapFixture {
+            app,
+            heart,
+            hshape,
+            button,
+            n,
+            b1,
+            r,
+            shape,
+        }
     }
 
     /// *Detach instance* cuts the instance and every node it links.

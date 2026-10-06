@@ -237,6 +237,11 @@ pub(crate) struct NodeDto {
     /// nothing is refused, not dropped (`crate::component::check`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link: Option<String>,
+    /// The main a nested copy's contents are swapped to, as a wire id (§15 D983),
+    /// absent on every layer not swapped. Part of v5 unbumped, as `set` is — no
+    /// release has written v5. Checked on load with the links.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub swap: Option<String>,
     /// A component set's variant properties (§15 D982), absent on every other
     /// layer. Part of v5 — no release went out between v5's components and these
     /// (`v0.4.1` predates both), so no released v5 reader would drop them.
@@ -333,6 +338,7 @@ impl NodeDto {
             item: *n.item(),
             component: n.component(),
             link: n.link().map(NodeId::to_wire),
+            swap: n.swap().map(NodeId::to_wire),
             set: n.set().cloned(),
             variant: n.variant().to_vec(),
             props: n.props().to_vec(),
@@ -351,6 +357,7 @@ impl NodeDto {
         let id = parse_id(&self.id)?;
         let parent = self.parent.as_deref().map(parse_id).transpose()?;
         let link = self.link.as_deref().map(parse_id).transpose()?;
+        let swap = self.swap.as_deref().map(parse_id).transpose()?;
         let children = self
             .children
             .iter()
@@ -425,6 +432,7 @@ impl NodeDto {
             item: self.item,
             component: self.component,
             link,
+            swap,
             set: self.set,
             variant: self.variant,
             props: self.props,

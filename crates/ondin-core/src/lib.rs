@@ -44,6 +44,7 @@ pub mod query;
 pub mod reset;
 pub mod resolve;
 pub mod svg_in;
+pub mod swap;
 pub mod text;
 pub mod typography;
 pub mod variant;

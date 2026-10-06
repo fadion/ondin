@@ -1558,6 +1558,7 @@ mod tests {
             item: Default::default(),
             component: false,
             link: None,
+            swap: None,
             set: None,
             variant: Vec::new(),
             props: Vec::new(),

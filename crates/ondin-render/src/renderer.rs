@@ -1505,6 +1505,8 @@ impl RenderOverrides {
             // same): the instance looks exactly like the nodes it holds.
             | Operation::SetComponent { .. }
             | Operation::SetLink { .. }
+            // Nor does a swap: the children its commit rewrites do (§15 D983).
+            | Operation::SetSwap { .. }
             // Nor do a set's properties, a variant's values or a component's
             // properties (§15 D982).
             | Operation::SetVariantSet { .. }
@@ -1543,8 +1545,9 @@ impl RenderOverrides {
             // `overrides.rs · every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink`
             // is the sibling of `op.rs`'s eleven-item fixture. (Both counts are
             // two higher since `SetComponent` and `SetLink` joined the chrome arm,
-            // §15 D978, and three higher again with the variant ops, §15 D982:
-            // eighteen no-ops here, sixteen of them `changes_ink`'s.)
+            // §15 D978, three higher again with the variant ops, §15 D982, and one
+            // higher with `SetSwap`, §15 D983: nineteen no-ops here, seventeen of
+            // them `changes_ink`'s.)
             Operation::AddImage { .. } | Operation::RemoveImage { .. } => {}
             // **Structural in the sense that matters here**: a mask changes which
             // *other* nodes the walk clips, and an override is a patch on one

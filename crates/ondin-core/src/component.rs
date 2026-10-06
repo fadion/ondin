@@ -41,6 +41,9 @@ pub enum LinkRule {
     LinkCycle,
     /// A main component contains, at some depth, an instance of itself.
     ComponentCycle,
+    /// A swap on a node that is not a nested copy inside an outer instance, or
+    /// naming something that is not a main of the node's own kind (§15 D983).
+    Swap,
     /// A variant or component-property rule (§15 D982).
     Variant(crate::variant::VariantRule),
 }
@@ -56,6 +59,7 @@ impl std::fmt::Display for LinkRule {
             Self::SharedSource => "shares its source with another node of the same instance",
             Self::LinkCycle => "is on a chain of links that never reaches a main component",
             Self::ComponentCycle => "is a main component that contains an instance of itself",
+            Self::Swap => "is swapped to something it cannot show",
             Self::Variant(rule) => return rule.fmt(f),
         })
     }
@@ -80,10 +84,17 @@ impl std::fmt::Display for LinkRule {
 ///   root's source; within one instance, no two such nodes share a source. A
 ///   nested copy's root is held to this like a member — only a link to a main
 ///   itself (an instance, or a local instance inside another) is placed freely;
-/// - no main contains, at any depth, an instance whose chain ends at itself.
+///   a **swapped** root's source, for its members, is its swap (§15 D983);
+/// - a swap sits only on a nested copy inside an outer instance (`swap::can_swap`)
+///   and names a main of the copy's own kind;
+/// - no main contains, at any depth, an instance of a main it shows — through
+///   its chain, or through a swap on it.
 pub fn check(nodes: &FxHashMap<NodeId, Node>) -> Result<(), (NodeId, LinkRule)> {
     crate::variant::check(nodes).map_err(|(id, rule)| (id, LinkRule::Variant(rule)))?;
     if !nodes.values().any(|n| n.component || n.link.is_some()) {
+        if let Some(n) = nodes.values().find(|n| n.swap.is_some()) {
+            return Err((n.id, LinkRule::Swap));
+        }
         return Ok(());
     }
     let parent = |id: NodeId| nodes.get(&id).and_then(|n| n.parent);
@@ -111,6 +122,20 @@ pub fn check(nodes: &FxHashMap<NodeId, Node>) -> Result<(), (NodeId, LinkRule)> 
             && (src == n.id || !nodes.contains_key(&src))
         {
             return Err((n.id, LinkRule::Dangling));
+        }
+        if let Some(s) = n.swap {
+            let Some(target) = nodes.get(&s) else {
+                return Err((n.id, LinkRule::Dangling));
+            };
+            let nested_copy = !n.component
+                && n.link
+                    .and_then(|l| nodes.get(&l))
+                    .is_some_and(|l| !l.component)
+                && is_instance_root(nodes, n);
+            let same_kind = std::mem::discriminant(&n.kind) == std::mem::discriminant(&target.kind);
+            if !target.component || !nested_copy || !same_kind {
+                return Err((n.id, LinkRule::Swap));
+            }
         }
     }
 
@@ -151,7 +176,8 @@ pub fn check(nodes: &FxHashMap<NodeId, Node>) -> Result<(), (NodeId, LinkRule)> 
             .filter_map(|a| nodes.get(&a))
             .find(|a| is_root(a))
             .ok_or((n.id, LinkRule::Membership))?;
-        let root_src = root.link.expect("an instance root is linked");
+        // A swapped root's members are copies of its swap's nodes (§15 D983).
+        let root_src = root.swap.or(root.link).expect("an instance root is linked");
         if !inside(src, root_src) {
             return Err((n.id, LinkRule::Membership));
         }
@@ -163,16 +189,10 @@ pub fn check(nodes: &FxHashMap<NodeId, Node>) -> Result<(), (NodeId, LinkRule)> 
     // Component → the mains of the instances inside it; a cycle there is an
     // instance of a main inside itself, at some depth, which could never be
     // expanded.
-    let mut uses: FxHashMap<NodeId, Vec<NodeId>> = FxHashMap::default();
     for n in nodes.values().filter(|n| is_root(n)) {
-        let main = main_of(n.id)?;
-        if let Some(outer) = std::iter::once(n.id)
-            .chain(ancestors(n.id))
-            .find(|a| nodes.get(a).is_some_and(|a| a.component))
-        {
-            uses.entry(outer).or_default().push(main);
-        }
+        main_of(n.id)?;
     }
+    let uses = uses(nodes);
     let mut done: FxHashSet<NodeId> = FxHashSet::default();
     for &start in uses.keys() {
         let mut path: Vec<NodeId> = Vec::new();
@@ -183,10 +203,30 @@ pub fn check(nodes: &FxHashMap<NodeId, Node>) -> Result<(), (NodeId, LinkRule)> 
     Ok(())
 }
 
+/// Each main → the mains **shown** by the instances inside it, at any depth below
+/// it and itself excluded (`swap::shown_main`: a swap counts, the chain it
+/// replaces does not) — the graph a component cycle is a cycle in.
+pub(crate) fn uses(nodes: &FxHashMap<NodeId, Node>) -> FxHashMap<NodeId, Vec<NodeId>> {
+    let parent = |id: NodeId| nodes.get(&id).and_then(|n| n.parent);
+    let mut uses: FxHashMap<NodeId, Vec<NodeId>> = FxHashMap::default();
+    for n in nodes.values().filter(|n| is_instance_root(nodes, n)) {
+        let Some(main) = crate::swap::shown_main(nodes, n.id) else {
+            continue;
+        };
+        if let Some(outer) = std::iter::successors(Some(n.id), |a| parent(*a))
+            .find(|a| nodes.get(a).is_some_and(|a| a.component))
+        {
+            uses.entry(outer).or_default().push(main);
+        }
+    }
+    uses
+}
+
 /// Whether `n` is an instance root: linked to a main, or to an instance root —
 /// equivalently, its chain of links ends at a main. A member's chain ends at an
 /// unlinked node inside a main instead, which is how the two are told apart.
-fn is_instance_root(nodes: &FxHashMap<NodeId, Node>, n: &Node) -> bool {
+/// A swap does not change the answer: the link still names the slot (§15 D983).
+pub(crate) fn is_instance_root(nodes: &FxHashMap<NodeId, Node>, n: &Node) -> bool {
     let mut at = n;
     for _ in 0..=nodes.len() {
         let Some(src) = at.link.and_then(|s| nodes.get(&s)) else {
@@ -276,17 +316,12 @@ pub fn instances_of(doc: &Document, main: NodeId) -> Vec<NodeId> {
     out
 }
 
-/// The main an instance root's chain of links ends at.
+/// The main an instance root **shows**: its chain of links' end, or the swap
+/// that takes the chain's place where one sits on it (§15 D983,
+/// `swap::shown_main`) — what *Instance of*, *Select all instances*, *Go to main*
+/// and the properties an instance offers all mean by its main.
 pub fn main_of(doc: &Document, root: NodeId) -> Option<NodeId> {
-    let nodes = doc.node_map();
-    let mut at = nodes.get(&root)?;
-    for _ in 0..=nodes.len() {
-        if at.component {
-            return Some(at.id);
-        }
-        at = nodes.get(&at.link?)?;
-    }
-    None
+    crate::swap::shown_main(doc.node_map(), root)
 }
 
 /// Links into `gone` **climb past it**: every node `among` admits whose link
@@ -304,18 +339,33 @@ pub fn main_of(doc: &Document, root: NodeId) -> Option<NodeId> {
 ///   edit to the main — until build step 4 can tell an untouched counterpart from
 ///   a changed one, which is when the untouched ones start being deleted with it;
 /// - **detaching** ([`detach`]) is the same climb, past the instance's own main.
+///
+/// **A swapped copy lands by `swap::landed`** (§15 D983): one whose climb ends at a
+/// main, or at nothing, becomes an instance of the main it shows. And a swap
+/// naming a main in `gone` is cleared.
 pub fn relink_past(
     doc: &Document,
     gone: &FxHashSet<NodeId>,
     among: impl Fn(NodeId) -> bool,
 ) -> Vec<Operation> {
     let nodes = doc.node_map();
-    let mut ops = Vec::new();
+    let mut by_node: Vec<(NodeId, Vec<Operation>)> = Vec::new();
     for n in nodes.values() {
-        let Some(link) = n.link else { continue };
-        if !gone.contains(&link) || !among(n.id) {
+        if !among(n.id) {
             continue;
         }
+        let Some(link) = n.link.filter(|l| gone.contains(l)) else {
+            if n.swap.is_some_and(|s| gone.contains(&s)) {
+                by_node.push((
+                    n.id,
+                    vec![Operation::SetSwap {
+                        id: n.id,
+                        swap: None,
+                    }],
+                ));
+            }
+            continue;
+        };
         let mut to = Some(link);
         for _ in 0..=nodes.len() {
             match to {
@@ -323,14 +373,23 @@ pub fn relink_past(
                 _ => break,
             }
         }
-        ops.push(Operation::SetLink { id: n.id, link: to });
+        let mut ops = if n.swap.is_some_and(|s| gone.contains(&s)) {
+            vec![
+                Operation::SetLink { id: n.id, link: to },
+                Operation::SetSwap {
+                    id: n.id,
+                    swap: None,
+                },
+            ]
+        } else {
+            crate::swap::land_ops(doc, n, to)
+        };
+        ops.dedup();
+        by_node.push((n.id, ops));
     }
     // Deterministic order, so the same edit produces the same transaction.
-    ops.sort_by_key(|op| match op {
-        Operation::SetLink { id, .. } => *id,
-        _ => unreachable!(),
-    });
-    ops
+    by_node.sort_by_key(|(id, _)| *id);
+    by_node.into_iter().flat_map(|(_, ops)| ops).collect()
 }
 
 /// The ops that keep every link valid when the subtrees under `deleted` go — the
@@ -351,13 +410,18 @@ pub fn relink_for_delete(doc: &Document, deleted: &[NodeId]) -> Vec<Operation> {
 /// to the nested main's own nodes ([`relink_past`]), so it stays an instance of
 /// that main. Links to anything else — a local instance of some other main —
 /// are left alone. `None` when `root` is not an instance root.
+///
+/// A **swapped** root (§15 D983) is detached from what it shows: its members are
+/// copies of its swap's nodes, so those are the links cut, and its own link and
+/// swap both go. A swapped copy nested inside it lands by `swap::landed` — an
+/// instance of what it shows.
 pub fn detach(doc: &Document, root: NodeId) -> Option<Transaction> {
     let nodes = doc.node_map();
     let r = nodes.get(&root)?;
     if !is_instance_root(nodes, r) {
         return None;
     }
-    let src = r.link?;
+    let src = r.swap.or(r.link)?;
     let past: FxHashSet<NodeId> = crate::build::subtree_nodes(doc, &[src])
         .into_iter()
         .collect();
@@ -373,9 +437,22 @@ pub fn detach(doc: &Document, root: NodeId) -> Option<Transaction> {
         }
         None
     };
-    let mut ops = Vec::new();
+    let mut ops = vec![Operation::SetLink {
+        id: root,
+        link: None,
+    }];
+    if r.swap.is_some() {
+        ops.push(Operation::SetSwap {
+            id: root,
+            swap: None,
+        });
+    }
     for id in crate::build::subtree_nodes(doc, &[root]) {
-        let Some(link) = nodes.get(&id).and_then(|n| n.link) else {
+        if id == root {
+            continue;
+        }
+        let Some(n) = nodes.get(&id) else { continue };
+        let Some(link) = n.link else {
             continue;
         };
         if !past.contains(&link) {
@@ -397,7 +474,7 @@ pub fn detach(doc: &Document, root: NodeId) -> Option<Transaction> {
             }
             to
         };
-        ops.push(Operation::SetLink { id, link: to });
+        ops.extend(crate::swap::land_ops(doc, n, to));
     }
     Some(Transaction(ops))
 }
@@ -421,6 +498,14 @@ pub fn detach(doc: &Document, root: NodeId) -> Option<Transaction> {
 ///
 /// A link straight to a main is placed anywhere, as [`check`] allows. Empty for
 /// a document with no links or a transaction with no structural op.
+///
+/// **And the swaps it leaves** (§15 D983, `swap::tidy`): a climb lands a swapped
+/// copy by `swap::landed`, and once the links are settled a swap that no longer
+/// stands — its main gone, its node no longer linked, or linked straight to a
+/// main — is cleared or turned into the link it stands for. Asked before the
+/// membership below, which reads a swapped root's members against its swap. A
+/// transaction that only writes links or swaps — a detach, a reset — asks this
+/// too where the document holds a swap.
 pub fn settle_links(doc: &Document, tx: &Transaction) -> Vec<Operation> {
     let before = doc.node_map();
     let structural = tx.0.iter().any(|op| {
@@ -432,7 +517,13 @@ pub fn settle_links(doc: &Document, tx: &Transaction) -> Vec<Operation> {
                 | Operation::CreateNode { .. }
         )
     });
-    if !structural || !before.values().any(|n| n.link.is_some()) {
+    let relinks = tx.0.iter().any(|op| {
+        matches!(
+            op,
+            Operation::SetLink { .. } | Operation::SetSwap { .. } | Operation::SetComponent { .. }
+        )
+    }) && before.values().any(|n| n.swap.is_some());
+    if !(structural || relinks) || !before.values().any(|n| n.link.is_some()) {
         return Vec::new();
     }
     let mut scratch = doc.clone();
@@ -448,7 +539,7 @@ pub fn settle_links(doc: &Document, tx: &Transaction) -> Vec<Operation> {
         .copied()
         .collect();
     if !gone.is_empty() {
-        let mut climbs: Vec<Operation> = scratch
+        let mut climbs: Vec<(NodeId, Vec<Operation>)> = scratch
             .node_map()
             .values()
             .filter_map(|n| {
@@ -460,10 +551,11 @@ pub fn settle_links(doc: &Document, tx: &Transaction) -> Vec<Operation> {
                         _ => break,
                     }
                 }
-                Some(Operation::SetLink { id: n.id, link: to })
+                Some((n.id, crate::swap::land_ops(&scratch, n, to)))
             })
             .collect();
-        climbs.sort_by_key(set_link_id);
+        climbs.sort_by_key(|(id, _)| *id);
+        let climbs: Vec<Operation> = climbs.into_iter().flat_map(|(_, o)| o).collect();
         if scratch
             .apply_unchecked(&Transaction(climbs.clone()))
             .is_err()
@@ -471,6 +563,17 @@ pub fn settle_links(doc: &Document, tx: &Transaction) -> Vec<Operation> {
             return Vec::new();
         }
         ops.extend(climbs);
+    }
+    // The swaps that no longer stand, settled before membership reads them.
+    let tidied = crate::swap::tidy(&scratch);
+    if !tidied.is_empty() {
+        if scratch
+            .apply_unchecked(&Transaction(tidied.clone()))
+            .is_err()
+        {
+            return ops;
+        }
+        ops.extend(tidied);
     }
 
     // Membership on the tree the transaction leaves.
@@ -534,8 +637,10 @@ pub fn settle_links(doc: &Document, tx: &Transaction) -> Vec<Operation> {
             let src = nodes[&id].link.expect("filtered to linked nodes");
             let root =
                 std::iter::successors(parent_of(id), |a| parent_of(*a)).find(|a| is_root(*a, &cut));
+            // A swapped root's members are copies of its swap's nodes (§15 D983).
+            let root_src = |r: NodeId| nodes[&r].swap.or(nodes[&r].link).expect("a root is linked");
             match root {
-                Some(r) if inside(src, nodes[&r].link.expect("a root is linked")) => {
+                Some(r) if inside(src, root_src(r)) => {
                     claims.entry((r, src)).or_default().push(id);
                 }
                 _ => {
@@ -555,20 +660,17 @@ pub fn settle_links(doc: &Document, tx: &Transaction) -> Vec<Operation> {
             break;
         }
     }
-    let mut cuts: Vec<Operation> = cut
-        .into_iter()
-        .map(|id| Operation::SetLink { id, link: None })
-        .collect();
-    cuts.sort_by_key(set_link_id);
-    ops.extend(cuts);
-    ops
-}
-
-fn set_link_id(op: &Operation) -> NodeId {
-    match op {
-        Operation::SetLink { id, .. } => *id,
-        _ => unreachable!("only SetLinks are sorted here"),
+    let mut cut: Vec<NodeId> = cut.into_iter().collect();
+    cut.sort();
+    for id in cut {
+        ops.push(Operation::SetLink { id, link: None });
+        // A swapped copy cut loose is plain layers, as an unswapped one is: its
+        // members are cut with it (§15 D983).
+        if nodes.get(&id).is_some_and(|n| n.swap.is_some()) {
+            ops.push(Operation::SetSwap { id, swap: None });
+        }
     }
+    ops
 }
 
 /// How a copy of a **main** lands (§15 D979 (e)): as an instance of it, which is
@@ -660,7 +762,9 @@ pub(crate) fn settle_copy(
                     _ => break,
                 }
             }
-            c.link = to;
+            // A swapped copy landing alone is an instance of what it shows
+            // (§15 D983, `swap::landed`); its members already link there.
+            (c.link, c.swap) = crate::swap::landed(doc, c, to);
         }
     }
     false

@@ -25,7 +25,7 @@ use crate::theme::{self, icon};
 use crate::ui::{self, FieldButton};
 use eframe::egui;
 use ondin_core::variant::{self, PropKind, PropValue, Property};
-use ondin_core::{Keyed, NodeId, Transaction, component};
+use ondin_core::{Keyed, NodeId, Transaction, component, swap};
 
 /// A row's label column, the width the Component card's dropdowns sit after.
 const LABEL_W: f32 = 76.0;
@@ -101,6 +101,74 @@ fn dropdown(
             .response;
         if let Some(why) = enabled {
             resp.on_disabled_hover_text(why);
+        }
+    });
+    pick
+}
+
+/// The **swap picker** (§15 D983): a dropdown of the mains `options` answers for
+/// the search typed at its top, showing `shown`, answering the main picked. The
+/// search lives in egui's memory under the dropdown's id while it is open and is
+/// cleared when it closes, so every opening starts from the whole filtered list.
+fn swap_picker(
+    ui: &mut egui::Ui,
+    salt: impl std::hash::Hash + std::fmt::Debug + Copy,
+    width: f32,
+    shown: &str,
+    current: Option<NodeId>,
+    options: impl Fn(&str) -> Vec<(NodeId, String)>,
+    enabled: Option<&str>,
+) -> Option<NodeId> {
+    let mut pick = None;
+    let search_id = egui::Id::new(("swap-search", salt));
+    ui::disable_unless(ui, enabled.is_none(), |ui| {
+        let resp = egui::ComboBox::from_id_salt(salt)
+            .icon(ui::combo_chevron)
+            .width(width)
+            // A popup you click into, the font family's case (`typography.rs`):
+            // `CloseOnClick` would dismiss it on the click into the search field,
+            // so a pick closes it by hand below.
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .selected_text(egui::RichText::new(shown).size(12.0))
+            .show_ui(ui, |ui| {
+                ui::menu_rows(ui);
+                ui.spacing_mut().item_spacing.y = 3.0;
+                let mut search = ui
+                    .data(|d| d.get_temp::<String>(search_id))
+                    .unwrap_or_default();
+                ui.add(
+                    egui::TextEdit::singleline(&mut search)
+                        .desired_width(width.max(160.0))
+                        .hint_text("Search…"),
+                );
+                ui.data_mut(|d| d.insert_temp(search_id, search.clone()));
+                let found = options(&search);
+                if found.is_empty() {
+                    ui.label(
+                        egui::RichText::new("No main matches")
+                            .size(12.0)
+                            .color(theme::text::DIM),
+                    );
+                }
+                egui::ScrollArea::vertical()
+                    .max_height(240.0)
+                    .show(ui, |ui| {
+                        for (id, name) in found {
+                            if ui
+                                .add(egui::Button::selectable(current == Some(id), name))
+                                .clicked()
+                            {
+                                pick = Some(id);
+                                ui.close();
+                            }
+                        }
+                    });
+            });
+        if resp.inner.is_none() {
+            ui.data_mut(|d| d.remove::<String>(search_id));
+        }
+        if let Some(why) = enabled {
+            resp.response.on_disabled_hover_text(why);
         }
     });
     pick
@@ -480,6 +548,59 @@ impl OndinApp {
             return;
         };
         let mut out: Option<Transaction> = None;
+        let name_of = |id: NodeId| {
+            doc.get(id)
+                .map(|n| n.name().to_string())
+                .unwrap_or_default()
+        };
+        // **Swap**, on a nested copy inside an outer instance (§15 D983) — every
+        // main of its kind, the session's: a swap property narrows this list for
+        // an instance's users, and this row is the nested copy's own, with no
+        // property to filter it. A swap is an override, marked and reset as one.
+        if roots.iter().all(|r| swap::can_swap(doc, *r)) {
+            let shows: Vec<Option<NodeId>> =
+                roots.iter().map(|r| component::main_of(doc, *r)).collect();
+            let mixed = shows.iter().any(|m| *m != shows[0]);
+            let shown = match (mixed, shows[0]) {
+                (true, _) => "Mixed".to_string(),
+                (false, Some(m)) => name_of(m),
+                (false, None) => String::new(),
+            };
+            let resets: Vec<ondin_core::Operation> = roots
+                .iter()
+                .filter(|r| doc.get(**r).is_some_and(|n| n.swap().is_some()))
+                .map(|r| ondin_core::Operation::SetSwap { id: *r, swap: None })
+                .collect();
+            let slot = swap::slot_main(doc, first).map(name_of).unwrap_or_default();
+            let mark = (!resets.is_empty()).then(|| super::component::OverrideMark {
+                tip: format!("Reset to main · {slot}"),
+                tx: Transaction(resets),
+            });
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                if row_label(ui, "Swap", mark.as_ref()) {
+                    out = mark.as_ref().map(|m| m.tx.clone());
+                }
+                let w = ui.available_width() - 8.0;
+                let current = (!mixed).then_some(shows[0]).flatten();
+                let options = |search: &str| {
+                    swap::options(doc, first, "", search)
+                        .into_iter()
+                        .map(|m| (m, name_of(m)))
+                        .collect()
+                };
+                if let Some(m) =
+                    swap_picker(ui, ("swap-pick", first), w, &shown, current, options, None)
+                {
+                    let ops: Vec<ondin_core::Operation> = roots
+                        .iter()
+                        .filter_map(|r| swap::swap(doc, *r, m))
+                        .flat_map(|tx| tx.0)
+                        .collect();
+                    out = Some(Transaction(ops));
+                }
+            });
+        }
         let switchable = roots.iter().all(|r| variant::can_switch(doc, *r));
         if let Some(set) = variant::set_of(doc, main)
             && let Some(vs) = doc.get(set).and_then(|s| s.set()).cloned()
@@ -535,9 +656,8 @@ impl OndinApp {
                     ui.spacing_mut().item_spacing.x = 0.0;
                     row_label(ui, &p.name, None);
                     let w = ui.available_width() - 8.0;
-                    let refuse = (!switchable).then_some(
-                        "A nested instance switches in its main — not yet inside another instance",
-                    );
+                    let refuse =
+                        (!switchable).then_some("Only an instance or a nested copy switches");
                     if let Some(i) = dropdown(
                         ui,
                         ("variant-pick", first, pi),
@@ -583,7 +703,7 @@ impl OndinApp {
             let reset = variant::reset_property(doc, roots, p);
             let default = main_default(doc, main, p);
             let mark = overridden.then(|| super::component::OverrideMark {
-                tip: format!("Reset to main · {}", say(&default)),
+                tip: format!("Reset to main · {}", say(doc, &default)),
                 tx: Transaction(reset.clone()),
             });
             match p.kind {
@@ -633,6 +753,43 @@ impl OndinApp {
                         }
                     });
                 }
+                // An instance swap (§15 D983): the mains the property's filter
+                // offers, searched; a pick swaps each instance's copy.
+                PropKind::Swap => {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        if row_label(ui, &p.name, mark.as_ref()) {
+                            out = Some(Transaction(reset.clone()));
+                        }
+                        let shown = match (&value, mixed) {
+                            (_, true) => "Mixed".to_string(),
+                            (PropValue::Swap(m), false) => name_of(*m),
+                            _ => String::new(),
+                        };
+                        let current = match (&value, mixed) {
+                            (PropValue::Swap(m), false) => Some(*m),
+                            _ => None,
+                        };
+                        let copy = variant::counterparts(doc, first, p).first().copied();
+                        let w = ui.available_width() - 8.0;
+                        let options = |search: &str| {
+                            copy.map(|c| swap::options(doc, c, &p.filter, search))
+                                .unwrap_or_default()
+                                .into_iter()
+                                .map(|m| (m, name_of(m)))
+                                .collect()
+                        };
+                        let salt = ("prop-swap", first, p.id);
+                        if let Some(m) = swap_picker(ui, salt, w, &shown, current, options, None) {
+                            out = Some(Transaction(variant::set_property(
+                                doc,
+                                roots,
+                                p,
+                                &PropValue::Swap(m),
+                            )));
+                        }
+                    });
+                }
             }
         }
         if let Some(tx) = out.filter(|t| !t.0.is_empty()) {
@@ -669,7 +826,7 @@ impl OndinApp {
             if props.is_empty() {
                 ui.label(
                     egui::RichText::new(
-                        "Bind a layer's visibility or text to a property from that layer's Component line",
+                        "Bind a layer's visibility or text, or a nested instance's main, to a property from that layer's Component line",
                     )
                     .size(11.5)
                     .color(theme::text::DIM),
@@ -690,6 +847,8 @@ impl OndinApp {
                         .on_hover_text(match kind {
                             PropKind::Boolean => "A property that shows and hides the layers bound to it",
                             PropKind::Text => "A property that sets the text of the layers bound to it",
+                            // Made from a nested instance's binding line, never here.
+                            PropKind::Swap => "A property that swaps the nested instances bound to it",
                         })
                         .clicked()
                     {
@@ -728,19 +887,31 @@ impl OndinApp {
         };
         let Some(n) = doc.get(node) else { return };
         let is_text = matches!(n.kind(), ondin_core::NodeKind::Text { .. });
+        // A nested instance inside the main: its main can be a swap property
+        // (§15 D983), with the filter suggested from the main it shows.
+        let shows = n
+            .link()
+            .filter(|l| doc.get(*l).is_some_and(|l| l.component()));
         let layer = n.name().to_string();
+        let filter = shows
+            .and_then(|m| doc.get(m))
+            .map(|m| swap::suggested_filter(m.name()))
+            .unwrap_or_default();
         let props = doc
             .get(owner)
             .map(|o| o.props().to_vec())
             .unwrap_or_default();
         let mut out: Option<Transaction> = None;
-        let kinds: &[(PropKind, &str)] = if is_text {
-            &[
+        let kinds: &[(PropKind, &str)] = match (is_text, shows.is_some()) {
+            (true, _) => &[
                 (PropKind::Boolean, "Visibility"),
                 (PropKind::Text, "Content"),
-            ]
-        } else {
-            &[(PropKind::Boolean, "Visibility")]
+            ],
+            (false, true) => &[
+                (PropKind::Boolean, "Visibility"),
+                (PropKind::Swap, "Instance"),
+            ],
+            (false, false) => &[(PropKind::Boolean, "Visibility")],
         };
         ui::card_at(ui, |ui| {
             ui.horizontal(|ui| {
@@ -812,6 +983,7 @@ impl OndinApp {
                             &match kind {
                                 PropKind::Boolean => format!("Show {layer}"),
                                 PropKind::Text => format!("{layer} text"),
+                                PropKind::Swap => layer.clone(),
                             },
                         );
                         let item = self.session.ids.mint_item();
@@ -821,6 +993,10 @@ impl OndinApp {
                                 name,
                                 kind: *kind,
                                 bound: vec![node],
+                                filter: match kind {
+                                    PropKind::Swap => filter.clone(),
+                                    PropKind::Boolean | PropKind::Text => String::new(),
+                                },
                             },
                         ));
                         ops = vec![ondin_core::Operation::SetProperties {
@@ -853,6 +1029,7 @@ fn property_row(
         let glyph = match p.kind {
             PropKind::Boolean => icon::EYE,
             PropKind::Text => icon::TEXT_T,
+            PropKind::Swap => icon::SWAP,
         };
         ui.label(
             egui::RichText::new(glyph)
@@ -897,6 +1074,7 @@ fn property_row(
                 match p.kind {
                     PropKind::Boolean => "visibility",
                     PropKind::Text => "content",
+                    PropKind::Swap => "instance",
                 }
             )
         })
@@ -905,21 +1083,73 @@ fn property_row(
         .bound
         .first()
         .and_then(|b| variant::field_value(doc, *b, p.kind));
-    let default = say(&default);
+    let default = say(doc, &default);
     let line = match bound.as_slice() {
         [] => "Not bound to any layer".to_string(),
         [one] => format!("{default} · {one}"),
         [one, rest @ ..] => format!("{default} · {one} and {} more", rest.len()),
     };
     ui.label(egui::RichText::new(line).size(11.0).color(theme::text::DIM));
+    // A swap property's filter (§15 D983 (5)): the prefix of a main's name the
+    // picker offers, every main when empty. Edited here, on the main.
+    if p.kind == PropKind::Swap {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            row_label(ui, "Filter", None);
+            let w = ui.available_width() - 8.0;
+            let id = ui.id().with(("prop-filter", owner, p.id));
+            if let Some(f) = filter_field(ui, id, &p.filter, egui::vec2(w, ui::CONTROL_H)) {
+                *out = variant::edit_property(doc, owner, p.id, |q| {
+                    Some(Property {
+                        filter: f.clone(),
+                        ..q.clone()
+                    })
+                });
+            }
+        });
+    }
 }
 
-/// A property's value as a row or a tooltip says it.
-fn say(v: &Option<PropValue>) -> String {
+/// [`name_field`] for a swap property's filter, which may be cleared — an empty
+/// filter offers every main — and is hinted with what it does when it is.
+fn filter_field(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    current: &str,
+    size: egui::Vec2,
+) -> Option<String> {
+    let mut buf = ui
+        .data(|d| d.get_temp::<String>(id))
+        .unwrap_or_else(|| current.to_string());
+    let resp = ui
+        .push_id(id, |ui| {
+            ui::text_field(ui, size, &mut buf, "Every main", 12.0)
+        })
+        .inner
+        .on_hover_text("The picker offers the mains whose name starts with this");
+    let focused = resp.has_focus();
+    ui.data_mut(|d| {
+        if focused {
+            d.insert_temp(id, buf.clone());
+        } else {
+            d.remove::<String>(id);
+        }
+    });
+    let done =
+        ui::defocus_commits(&resp) || (focused && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+    (done && buf.trim() != current).then(|| buf.trim().to_string())
+}
+
+/// A property's value as a row or a tooltip says it — a swap's by its main's name.
+fn say(doc: &ondin_core::Document, v: &Option<PropValue>) -> String {
     match v {
         Some(PropValue::Boolean(true)) => "On".into(),
         Some(PropValue::Boolean(false)) => "Off".into(),
         Some(PropValue::Text(t)) => t.clone(),
+        Some(PropValue::Swap(m)) => doc
+            .get(*m)
+            .map(|n| n.name().to_string())
+            .unwrap_or_default(),
         None => String::new(),
     }
 }

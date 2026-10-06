@@ -110,6 +110,7 @@ impl Document {
             item: Default::default(),
             component: false,
             link: None,
+            swap: None,
             set: None,
             variant: Vec::new(),
             props: Vec::new(),
@@ -577,6 +578,12 @@ impl Document {
                 dirty.0.insert(*id);
                 Ok(Operation::SetLink { id: *id, link: old })
             }
+            Operation::SetSwap { id, swap } => {
+                let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
+                let old = std::mem::replace(&mut node.swap, *swap);
+                dirty.0.insert(*id);
+                Ok(Operation::SetSwap { id: *id, swap: old })
+            }
             Operation::SetVariantSet { id, set } => {
                 let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
                 let old = std::mem::replace(&mut node.set, set.clone());
@@ -712,6 +719,7 @@ impl Document {
             item: Default::default(),
             component: false,
             link: None,
+            swap: None,
             set: None,
             variant: Vec::new(),
             props: Vec::new(),
@@ -2105,6 +2113,9 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
             // function's.
             component: n.component,
             link: n.link.map(|l| map.get(&l).copied().unwrap_or(l)),
+            // A swap names a main, which a copy keeps naming, remapped only when
+            // the main came along — the link's rule (§15 D983).
+            swap: n.swap.map(|s| map.get(&s).copied().unwrap_or(s)),
             // A copied set is a set and a copied variant keeps its values (§15
             // D982); a property's bound layers are remapped with the ids, so a copy
             // of a main drives its own layers — one bound outside the template is
@@ -2341,6 +2352,7 @@ mod tests {
             item: Default::default(),
             component: false,
             link: None,
+            swap: None,
             set: None,
             variant: Vec::new(),
             props: Vec::new(),

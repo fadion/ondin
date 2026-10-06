@@ -52,6 +52,9 @@ pub enum PropKind {
     Boolean,
     /// Their text content (text layers only).
     Text,
+    /// The main they show — an **instance swap** (§15 D983), bound to nested
+    /// instances inside the main; on an instance, the copies of those swap.
+    Swap,
 }
 
 /// A component property: a name, a kind, and the layers inside the owner it is
@@ -63,6 +66,12 @@ pub struct Property {
     pub kind: PropKind,
     #[serde(default, skip_serializing_if = "Vec::is_empty", with = "wire_ids")]
     pub bound: Vec<NodeId>,
+    /// A swap property's **filter** (§15 D983 (5)): the picker offers the mains
+    /// whose name starts with it, compared without case, every main when it is
+    /// empty. It scopes what is offered, never what is valid — a swap made before
+    /// the filter changed stands. Empty, and unwritten, on the other kinds.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub filter: String,
 }
 
 /// Node ids in a saved property, written as wire strings like every other id in
@@ -279,7 +288,7 @@ pub(crate) fn check(nodes: &FxHashMap<NodeId, Node>) -> Result<(), (NodeId, Vari
             for p in n.props.iter() {
                 for b in &p.bound {
                     let ok = nodes.get(b).is_some_and(|bn| {
-                        binding_fits(nodes, n.id, bn) && (p.kind != PropKind::Text || is_text(bn))
+                        binding_fits(nodes, n.id, bn) && kind_fits(nodes, p.kind, bn)
                     });
                     if !ok || !fields.insert((*b, p.kind)) {
                         return Err((n.id, VariantRule::Binding));
@@ -303,6 +312,20 @@ fn names_ok<'a>(names: impl Iterator<Item = &'a str>) -> bool {
 
 fn is_text(n: &Node) -> bool {
     matches!(n.kind, NodeKind::Text { .. })
+}
+
+/// Whether a property of `kind` can drive `bound`: a text property only a text
+/// layer; a swap only a **nested instance** inside the main — a layer linked
+/// straight to a main, whose copies in an instance are what swap (§15 D983).
+fn kind_fits(nodes: &FxHashMap<NodeId, Node>, kind: PropKind, bound: &Node) -> bool {
+    match kind {
+        PropKind::Boolean => true,
+        PropKind::Text => is_text(bound),
+        PropKind::Swap => bound
+            .link
+            .and_then(|l| nodes.get(&l))
+            .is_some_and(|l| l.component),
+    }
 }
 
 /// Whether `bound` may carry a property of `owner`: strictly inside the owner's
@@ -497,9 +520,10 @@ pub fn settle(doc: &Document, tx: &Transaction) -> Vec<Operation> {
             let mut p = p.clone();
             let kind = p.kind;
             p.bound.retain(|b| {
-                nodes.get(b).is_some_and(|bn| {
-                    binding_fits(nodes, id, bn) && (kind != PropKind::Text || is_text(bn))
-                }) && fields.insert((*b, kind))
+                nodes
+                    .get(b)
+                    .is_some_and(|bn| binding_fits(nodes, id, bn) && kind_fits(nodes, kind, bn))
+                    && fields.insert((*b, kind))
             });
             // A merge can bring a name in twice, or onto a variant property's.
             let mut name = p.name.clone();
@@ -974,15 +998,25 @@ pub fn switch_target(doc: &Document, main: NodeId, prop: usize, value: &str) -> 
     find_variant(doc, set, &values)
 }
 
-/// Whether the instance rooted at `root` can switch variants here: it must be
-/// linked **straight to** a main — an instance placed by itself, or a nested
-/// instance inside a main. A nested copy inside an outer instance cannot yet:
-/// the link model has no place for "the counterpart of this node, but an
-/// instance of that main" (§15 D982). §15 D983 rules the answer, unbuilt — a
-/// `swap` field beside `link`, of which a nested copy's switch is the case
-/// restricted to its set's mains — and this limit goes when that is built.
+/// Whether the instance rooted at `root` can switch variants here: an instance
+/// linked **straight to** a main — placed by itself, or nested inside a main —
+/// which switches by relinking; or a **nested copy inside an outer instance**,
+/// which switches by swapping (§15 D983 (6): the link model had no place for "the
+/// counterpart of this node, but an instance of that main" until the `swap`
+/// field beside `link`, of which this switch is the case restricted to one set).
 pub fn can_switch(doc: &Document, root: NodeId) -> bool {
-    crate::propagate::linked_to_main(doc, root)
+    crate::propagate::linked_to_main(doc, root) || crate::swap::can_swap(doc, root)
+}
+
+/// What [`rewrite`] does with the root.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Rewrite {
+    /// The variant switch of a root linked straight to a main: the root is
+    /// relinked to the new main, its placement kept.
+    Relink,
+    /// A swap (§15 D983): the root keeps its link — its slot — and everything the
+    /// slot gives it, placement, size and visibility (`swap::is_slot_field`).
+    Swap,
 }
 
 /// **Switch** the instance rooted at `root` to the main `to` (§15 D982) — the
@@ -1003,14 +1037,39 @@ pub fn can_switch(doc: &Document, root: NodeId) -> bool {
 /// - the order follows where the instance still had the old main's.
 ///
 /// The root's placement is its own, as always. `None` unless [`can_switch`].
+///
+/// **A nested copy inside an outer instance switches by swapping** (§15 D983
+/// (6)): the transaction is its `SetSwap` alone, and the commit makes the same
+/// rewrite this function makes for a root linked straight to a main
+/// (`swap::settle`) — so the two differ in what keeps the slot, never in how the
+/// layers are matched.
 pub fn switch(doc: &Document, root: NodeId, to: NodeId, ids: &mut IdSource) -> Option<Transaction> {
     if !can_switch(doc, root) {
         return None;
+    }
+    if !crate::propagate::linked_to_main(doc, root) {
+        return crate::swap::swap(doc, root, to);
     }
     let from = doc.get(root)?.link?;
     if from == to || !doc.get(to)?.component {
         return None;
     }
+    rewrite(doc, root, from, to, ids, Rewrite::Relink).map(Transaction)
+}
+
+/// The in-place rewrite of the instance rooted at `root` from showing `from` to
+/// showing `to` — [`switch`]'s whole body, and `swap::settle`'s. `from` and `to`
+/// are the sources the root's contents were and will be copies of: a variant and
+/// its sibling for a switch; for a swap, any two of the slot's counterpart and
+/// the mains it is swapped between. What happens to the root itself is `mode`'s.
+pub(crate) fn rewrite(
+    doc: &Document,
+    root: NodeId,
+    from: NodeId,
+    to: NodeId,
+    ids: &mut IdSource,
+    mode: Rewrite,
+) -> Option<Vec<Operation>> {
     let paths_old = paths(doc, from);
     let paths_new = paths(doc, to);
     let by_path_new: FxHashMap<&Vec<(String, usize)>, NodeId> =
@@ -1036,8 +1095,14 @@ pub fn switch(doc: &Document, root: NodeId, to: NodeId, ids: &mut IdSource) -> O
     let old_sources: FxHashSet<NodeId> = crate::build::subtree_nodes(doc, &[from])
         .into_iter()
         .collect();
+    // The root is `from`'s counterpart by definition: a swapped root's link names
+    // its slot, which is not `from` when it is swapped away from another main.
     let mut cp: FxHashMap<NodeId, NodeId> = FxHashMap::default();
+    cp.insert(from, root);
     for id in crate::build::subtree_nodes(doc, &[root]) {
+        if id == root {
+            continue;
+        }
         if let Some(l) = doc.get(id).and_then(|n| n.link)
             && old_sources.contains(&l)
         {
@@ -1054,11 +1119,18 @@ pub fn switch(doc: &Document, root: NodeId, to: NodeId, ids: &mut IdSource) -> O
     for (s_old, c) in &sorted {
         match matched.get(s_old) {
             Some(s_new) => {
-                fields.push(Operation::SetLink {
-                    id: *c,
-                    link: Some(*s_new),
-                });
-                fields.extend(carry(doc, *c, *s_old, *s_new, *c == root));
+                if *c != root || mode == Rewrite::Relink {
+                    fields.push(Operation::SetLink {
+                        id: *c,
+                        link: Some(*s_new),
+                    });
+                }
+                let keep = match (*c == root, mode) {
+                    (false, _) => Keep::Nothing,
+                    (true, Rewrite::Relink) => Keep::Placement,
+                    (true, Rewrite::Swap) => Keep::Slot,
+                };
+                fields.extend(carry(doc, *c, *s_old, *s_new, keep));
             }
             None => {
                 // Only the topmost unmatched counterpart decides; below it, the
@@ -1141,7 +1213,12 @@ pub fn switch(doc: &Document, root: NodeId, to: NodeId, ids: &mut IdSource) -> O
             .copied()
             .filter(|k| !deleted.contains(k))
             .collect();
-        let s_old = doc.get(c).and_then(|n| n.link).unwrap_or(from);
+        // The root's old source is `from`, whatever its link says (a swap).
+        let s_old = if c == root {
+            from
+        } else {
+            doc.get(c).and_then(|n| n.link).unwrap_or(from)
+        };
         let s_old_kids = doc
             .get(s_old)
             .map(|n| n.children.clone())
@@ -1215,7 +1292,7 @@ pub fn switch(doc: &Document, root: NodeId, to: NodeId, ids: &mut IdSource) -> O
             );
         }
     }
-    Some(Transaction(ops))
+    Some(ops)
 }
 
 /// Each layer below `main` with its **name path** — the names from just below
@@ -1239,11 +1316,21 @@ fn paths(doc: &Document, main: NodeId) -> Vec<(NodeId, Vec<(String, usize)>)> {
     out
 }
 
+/// What [`carry`] leaves alone on the node it rewrites.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Keep {
+    Nothing,
+    /// A switched root's placement, its own as an instance root's always is.
+    Placement,
+    /// A swapped root's slot fields (`swap::is_slot_field`, §15 D983 (3)).
+    Slot,
+}
+
 /// The field edits a switch makes to the counterpart `c`: every field of `s_new`
 /// where `c` still held `s_old`'s value — `propagate::follow`, the propagation
-/// pass's rule, applied as though `s_old` had become `s_new`. The root's
-/// placement is skipped, as an instance root's always is.
-fn carry(doc: &Document, c: NodeId, s_old: NodeId, s_new: NodeId, is_root: bool) -> Vec<Operation> {
+/// pass's rule, applied as though `s_old` had become `s_new` — but what `keep`
+/// keeps.
+fn carry(doc: &Document, c: NodeId, s_old: NodeId, s_new: NodeId, keep: Keep) -> Vec<Operation> {
     use crate::reset::{field_key, state_ops};
     let (Some(cn), Some(on), Some(nn)) = (doc.get(c), doc.get(s_old), doc.get(s_new)) else {
         return Vec::new();
@@ -1258,7 +1345,12 @@ fn carry(doc: &Document, c: NodeId, s_old: NodeId, s_new: NodeId, is_root: bool)
         .collect();
     let mut out = Vec::new();
     for new in state_ops(nn) {
-        if is_root && crate::propagate::is_placement(&new) {
+        let kept = match keep {
+            Keep::Nothing => false,
+            Keep::Placement => crate::propagate::is_placement(&new),
+            Keep::Slot => crate::swap::is_slot_field(&new),
+        };
+        if kept {
             continue;
         }
         let Some(key) = field_key(&new) else { continue };
@@ -1322,6 +1414,8 @@ fn rekey_lists(new: &Operation, old: &Operation, cur: &Operation) -> (Operation,
 pub enum PropValue {
     Boolean(bool),
     Text(String),
+    /// The main a swap property's copy shows (§15 D983).
+    Swap(NodeId),
 }
 
 /// The properties an instance rooted at `root` offers — its main's owner's (the
@@ -1370,6 +1464,7 @@ pub fn field_value(doc: &Document, id: NodeId, kind: PropKind) -> Option<PropVal
             NodeKind::Text { content, .. } => Some(PropValue::Text(content.clone())),
             _ => None,
         },
+        PropKind::Swap => crate::component::main_of(doc, id).map(PropValue::Swap),
     }
 }
 
@@ -1398,6 +1493,12 @@ pub fn set_property(
     for r in roots {
         for c in counterparts(doc, *r, p) {
             match value {
+                // The swap verb's own rule: the slot's main clears the swap.
+                PropValue::Swap(main) => {
+                    if let Some(tx) = crate::swap::swap(doc, c, *main) {
+                        ops.extend(tx.0);
+                    }
+                }
                 PropValue::Boolean(v) => {
                     if doc.get(c).is_some_and(|n| n.visible != *v) {
                         ops.push(Operation::SetVisible { id: c, visible: *v });
@@ -1446,6 +1547,7 @@ fn property_reset_ops(doc: &Document, c: NodeId, kind: PropKind) -> Vec<Operatio
         .filter(|op| match kind {
             PropKind::Boolean => matches!(op, Operation::SetVisible { .. }),
             PropKind::Text => matches!(op, Operation::SetText { .. }),
+            PropKind::Swap => matches!(op, Operation::SetSwap { .. }),
         })
         .collect()
 }
@@ -1476,6 +1578,10 @@ pub fn property_fields(doc: &Document, root: NodeId) -> FxHashSet<(NodeId, PropK
 
 /// Add a property to `owner` — a main or a set — bound to `bound`. `None` for a
 /// name that is empty or taken.
+///
+/// A **swap** property's filter starts as the suggestion §15 D983 (5) makes —
+/// the name of the main its first bound layer shows, less its last segment
+/// (`swap::suggested_filter`) — for the user to edit.
 pub fn define(
     doc: &Document,
     ids: &mut IdSource,
@@ -1490,9 +1596,26 @@ pub fn define(
     if o.props.iter().any(|p| p.name == name) || reserved.into_iter().any(|r| *r == name) {
         return None;
     }
+    let filter = match kind {
+        PropKind::Swap => bound
+            .first()
+            .and_then(|b| crate::component::main_of(doc, *b))
+            .and_then(|m| doc.get(m))
+            .map(|m| crate::swap::suggested_filter(&m.name))
+            .unwrap_or_default(),
+        PropKind::Boolean | PropKind::Text => String::new(),
+    };
     let item = ids.mint_item();
     let mut props = o.props.clone();
-    props.push(Keyed::new(item, Property { name, kind, bound }));
+    props.push(Keyed::new(
+        item,
+        Property {
+            name,
+            kind,
+            bound,
+            filter,
+        },
+    ));
     Some((
         Transaction(vec![Operation::SetProperties { id: owner, props }]),
         item,
@@ -1580,9 +1703,14 @@ mod tests {
                 actor: 0xab,
                 seq: 7,
             }],
+            filter: String::new(),
         };
         let json = serde_json::to_string(&p).unwrap();
         assert!(json.contains("\"ab:7\""), "{json}");
+        assert!(
+            !json.contains("filter"),
+            "an empty filter is not written: {json}"
+        );
         assert_eq!(serde_json::from_str::<Property>(&json).unwrap(), p);
     }
 }

@@ -1217,16 +1217,26 @@ impl EditorSession {
         // And a resized flex item keeps the size it was dragged to (§15 D875), and
         // an in-flow item its stored translation (§15 D877).
         let tx = ondin_core::build::keep_flex_sizes(&self.doc, &self.resolved, tx);
-        // And the links a structural edit owes (§5.3d): a link into a deleted node
-        // climbs past it, a linked layer moved out of its instance becomes its own
-        // — every door that moves, deletes or regroups comes through here, so none
-        // of them has to know `component::check` exists.
         let mut tx = tx;
+        // A swap's rewrite (§15 D983): a nested copy swapped to another main, or
+        // back, has its children and fields rewritten in place here — the one
+        // place they are — so the picker, a reset and a nested variant switch
+        // need write only the `SetSwap`. First, so what it brings in and takes
+        // away reaches the copy's own copies through the structural pass below.
+        let swaps = ondin_core::swap::settle(&self.doc, &tx, &mut self.ids);
+        tx.0.extend(swaps);
         // A main's children gained, lost, moved or reordered reach its instances
         // (§5.3d build step 4) — before the settling below, which tidies any link
         // these leave behind.
         let structure = ondin_core::propagate::propagate_structure(&self.doc, &tx, &mut self.ids);
         tx.0.extend(structure);
+        // And the links a structural edit owes (§5.3d): a link into a deleted node
+        // climbs past it, a linked layer moved out of its instance becomes its own,
+        // and a swap that no longer stands is settled (§15 D983) — every door that
+        // moves, deletes or regroups comes through here, so none of them has to
+        // know `component::check` exists. (This sentence sat above the structural
+        // pass until 2026-10-06, two blocks from the line it describes — §15
+        // D790's shape, `arch-scribe`'s find.)
         let cuts = ondin_core::component::settle_links(&self.doc, &tx);
         tx.0.extend(cuts);
         // And what the variant rules owe (§15 D982): a main moved into a set takes

@@ -81,6 +81,9 @@ fn mode(op: &Operation) -> Mode {
         | Operation::SetProportionsLocked { .. }
         | Operation::SetComponent { .. }
         | Operation::SetLink { .. }
+        // A copy of a swapped node follows what the swap rewrote, one link up,
+        // never the swap itself (§15 D983).
+        | Operation::SetSwap { .. }
         // A set, a variant's values and a component's properties belong to the
         // main or set they are on; an instance reads them through its link.
         | Operation::SetVariantSet { .. }
@@ -135,10 +138,57 @@ fn writes_spans(op: &Operation) -> bool {
 pub fn touches_copied(doc: &Document, tx: &Transaction) -> bool {
     let written: FxHashSet<NodeId> = tx.0.iter().filter_map(Operation::overwrites).collect();
     !written.is_empty()
-        && doc
-            .node_map()
-            .values()
-            .any(|n| n.link.is_some_and(|l| written.contains(&l)))
+        && doc.node_map().values().any(|n| {
+            n.link.is_some_and(|l| written.contains(&l))
+                || n.swap.is_some_and(|s| written.contains(&s))
+        })
+}
+
+/// What of its source's edits a copy takes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Takes {
+    /// Everything — but an instance root's placement, which is its own.
+    All,
+    /// Only the slot's fields: a swapped copy from its link (§15 D983).
+    Slot,
+    /// All but the slot's fields: a swapped copy from its swap.
+    Content,
+}
+
+/// Every source → the copies that follow it, and what of it each takes. A copy
+/// follows its link; a **swapped** copy follows its link for the slot's fields
+/// and its swap for the rest (§15 D983, `swap::is_slot_field`). Each list sorted.
+fn followers(doc: &Document) -> FxHashMap<NodeId, Vec<(NodeId, Takes)>> {
+    let mut out: FxHashMap<NodeId, Vec<(NodeId, Takes)>> = FxHashMap::default();
+    for n in doc.node_map().values() {
+        match (n.link, n.swap) {
+            (Some(l), Some(s)) => {
+                out.entry(l).or_default().push((n.id, Takes::Slot));
+                out.entry(s).or_default().push((n.id, Takes::Content));
+            }
+            (Some(l), None) => out.entry(l).or_default().push((n.id, Takes::All)),
+            _ => {}
+        }
+    }
+    for list in out.values_mut() {
+        list.sort_by_key(|(id, _)| *id);
+    }
+    out
+}
+
+/// Every source → the copies whose **children** are copies of its children: a
+/// copy of its link's, a swapped copy of its swap's (§15 D983). Each list sorted.
+fn structural_copies(doc: &Document) -> FxHashMap<NodeId, Vec<NodeId>> {
+    let mut out: FxHashMap<NodeId, Vec<NodeId>> = FxHashMap::default();
+    for n in doc.node_map().values() {
+        if let Some(src) = n.swap.or(n.link) {
+            out.entry(src).or_default().push(n.id);
+        }
+    }
+    for list in out.values_mut() {
+        list.sort();
+    }
+    out
 }
 
 /// The operations `tx`'s edits to mains owe their instances: for every copy, at
@@ -153,18 +203,9 @@ pub fn touches_copied(doc: &Document, tx: &Transaction) -> bool {
 /// - Where one transaction edits the same field of a node twice, the last edit is
 ///   the one carried, compared against the value before the transaction.
 pub fn propagate(doc: &Document, tx: &Transaction) -> Vec<Operation> {
-    let nodes = doc.node_map();
-    let mut copies: FxHashMap<NodeId, Vec<NodeId>> = FxHashMap::default();
-    for n in nodes.values() {
-        if let Some(src) = n.link {
-            copies.entry(src).or_default().push(n.id);
-        }
-    }
+    let copies = followers(doc);
     if copies.is_empty() {
         return Vec::new();
-    }
-    for list in copies.values_mut() {
-        list.sort();
     }
     let user: FxHashSet<_> = tx.0.iter().filter_map(Operation::shape_key).collect();
     // The last edit of each (node, field), in the order those last edits came.
@@ -200,14 +241,19 @@ pub fn propagate(doc: &Document, tx: &Transaction) -> Vec<Operation> {
         };
         let mut queue = vec![(n, op.clone(), old)];
         while let Some((src, new, old)) = queue.pop() {
-            for &m in copies.get(&src).into_iter().flatten() {
+            for &(m, takes) in copies.get(&src).into_iter().flatten() {
                 let Some(probe) = new.retargeted(m) else {
                     continue;
                 };
                 if probe.shape_key().is_some_and(|k| user.contains(&k)) {
                     continue;
                 }
-                if is_placement(op) && linked_to_main(doc, m) {
+                let skip = match takes {
+                    Takes::All => is_placement(op) && linked_to_main(doc, m),
+                    Takes::Slot => !crate::swap::is_slot_field(op),
+                    Takes::Content => crate::swap::is_slot_field(op),
+                };
+                if skip {
                     continue;
                 }
                 if writes_spans(op) && !same_content(doc, src, m) {
@@ -262,17 +308,10 @@ pub fn propagate_structure(
     ids: &mut crate::id::IdSource,
 ) -> Vec<Operation> {
     let before = doc.node_map();
-    let mut copies: FxHashMap<NodeId, Vec<NodeId>> = FxHashMap::default();
-    for n in before.values() {
-        if let Some(src) = n.link {
-            copies.entry(src).or_default().push(n.id);
-        }
-    }
+    // A swapped copy's children are its swap's, never its slot's (§15 D983).
+    let copies = structural_copies(doc);
     if copies.is_empty() {
         return Vec::new();
-    }
-    for list in copies.values_mut() {
-        list.sort();
     }
     let structural = tx.0.iter().any(|op| {
         matches!(
@@ -639,9 +678,10 @@ fn main_of_node(doc: &Document, id: NodeId) -> Option<NodeId> {
 }
 
 /// The node of the instance rooted at `root` that is linked to `src` — `root`
-/// itself when `src` is its source.
+/// itself when `src` is its source, a swapped root's being its swap (§15 D983).
 pub(crate) fn counterpart(doc: &Document, root: NodeId, src: NodeId) -> Option<NodeId> {
-    if doc.get(root)?.link == Some(src) {
+    let r = doc.get(root)?;
+    if r.swap.or(r.link) == Some(src) {
         return Some(root);
     }
     crate::build::subtree_nodes(doc, &[root])
@@ -719,6 +759,8 @@ pub(crate) fn untouched(
         && c.insets == s.insets
         && c.display == s.display
         && c.item == s.item
+        // A swap is an override (§15 D983): a swapped copy is never untouched.
+        && c.swap.is_none()
         && c_kids.len() == s_kids.len();
     same && c_kids
         .iter()

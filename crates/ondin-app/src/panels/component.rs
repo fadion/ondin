@@ -128,6 +128,7 @@ pub(crate) fn prop_drift(doc: &ondin_core::Document, root: NodeId) -> PropDrift 
                 .any(|o| match kind {
                     PropKind::Boolean => matches!(o.reset, Operation::SetVisible { .. }),
                     PropKind::Text => matches!(o.reset, Operation::SetText { .. }),
+                    PropKind::Swap => matches!(o.reset, Operation::SetSwap { .. }),
                 })
         })
         .count();
@@ -630,20 +631,27 @@ impl OndinApp {
             Some(Act::Reset(Kind::Fields)) => {
                 if let Some(tx) = self.reset_tx(Kind::Fields) {
                     let doc = &self.session.doc;
-                    let bound: std::collections::HashSet<(NodeId, bool)> = self
+                    use ondin_core::variant::PropKind;
+                    let bound: std::collections::HashSet<(NodeId, PropKind)> = self
                         .session
                         .selection
                         .ids()
                         .iter()
                         .filter_map(|id| component::instance_root(doc, *id))
                         .flat_map(|r| ondin_core::variant::property_fields(doc, r))
-                        .map(|(c, k)| (c, k == ondin_core::variant::PropKind::Boolean))
                         .collect();
                     let kept: Vec<Operation> =
                         tx.0.into_iter()
                             .filter(|op| match op {
-                                Operation::SetVisible { id, .. } => !bound.contains(&(*id, true)),
-                                Operation::SetText { id, .. } => !bound.contains(&(*id, false)),
+                                Operation::SetVisible { id, .. } => {
+                                    !bound.contains(&(*id, PropKind::Boolean))
+                                }
+                                Operation::SetText { id, .. } => {
+                                    !bound.contains(&(*id, PropKind::Text))
+                                }
+                                Operation::SetSwap { id, .. } => {
+                                    !bound.contains(&(*id, PropKind::Swap))
+                                }
                                 _ => true,
                             })
                             .collect();
@@ -852,6 +860,7 @@ fn card_of(op: &Operation) -> Option<&'static str> {
         | O::SetProportionsLocked { .. }
         | O::SetComponent { .. }
         | O::SetLink { .. }
+        | O::SetSwap { .. }
         | O::SetVariantSet { .. }
         | O::SetVariant { .. }
         | O::SetProperties { .. }
@@ -2379,6 +2388,7 @@ mod tests {
                         name: "Label text".into(),
                         kind: PropKind::Text,
                         bound: vec![label, llabel],
+                        filter: String::new(),
                     },
                 )],
             },

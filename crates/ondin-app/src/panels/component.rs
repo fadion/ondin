@@ -1016,9 +1016,10 @@ fn plural(n: usize, what: &str) -> String {
     }
 }
 
-/// The two-line face of an instance card: the outline hexagon, a small caption
-/// over the main's name as a link (or over a plain `title`), and the grey drift
-/// summary on the right.
+/// The two-line face of an instance card — or a variant's, with `main` — the
+/// hexagon (outline for an instance, filled for a `main`, `paint_hexagon`), a
+/// small caption over the main's name as a link (or over a plain `title`), and
+/// the grey drift summary on the right.
 fn heading(
     ui: &mut egui::Ui,
     main: bool,

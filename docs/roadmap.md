@@ -42,7 +42,7 @@ which is this file's own §9.5 lesson: **check the section before believing the 
 | *Now · Files, library and storage* | **Nothing open as of 2026-09-23** — the cover cache's lifecycle, opened that day while closing §15 D862, closed the same day: `Covers::pass` drains once a dashboard pass and the project mosaic asks only on screen (§15 D863), and textures past a cap of 128 go least recently asked-for first (§15 D864). *The text below is the row as it stood that morning.* **One item as of 2026-09-23**: the cover cache's lifecycle — no texture is ever evicted, `drain` runs only when a card asks, and the project mosaic is ungated. Found while closing §15 D862; no behaviour is wrong, it is memory and wasted repaints. *The text below is the row as it stood before.* **Nothing open as of 2026-09-19** — the last two closed that day: the cover render moved onto **a worker of its own** rather than onto `Writer`'s FIFO queue, `FRAME_BUDGET` deleted with what it bounded (§15 D820), and **rollback was refused outright** and is a §0 non-goal, the retry being the recovery (§15 D814). 🚨 **The threading then flaked a *dashboard* test 2 runs in 20**, found by running the filter twenty times after six clean runs had said nothing. *The text below is the row as it stood that morning.* **Two**, as of 2026-09-19: a dashboard cover rendered synchronously on the UI thread, which needs a thread, and **rollback** after a partly-failed migration, which needs a ruling. **Three left this row that day.** The non-Unicode filename was **reproduced** — a lone UTF-16 surrogate, which NTFS accepts and `to_str` refuses — and the migration now carries such a file by its `OsStr` name (§15 D809); the per-machine index has an injection point, and it is a `cfg!` rather than any of the four answers the bullet proposed (§15 D807); and the partly-failed migration got its list in the modal and a *Try again* button, leaving only the third of its three asks (§15 D810). ⚠️ **This row said *"Three, all from the codebase review"* while the section held four**, the migration bullet never having been named in it — so it was short by one from the day it was written and the arithmetic in it was never a count of anything. ⚠️ **This row did not exist until 2026-09-09** and the section had held open work since 2026-09-06; the *"nothing open"* line below was the half that got corrected first, and a missing row is the same failure with nothing to contradict. |
 | *Now · Text alignment* | **Nothing open as of 2026-09-22.** Side bearings / optical margin alignment moved to *Later · Parked decisions*, undecided — it had been filed `Later:` inside a `Now` section since the section was written, which is the prefix table broken from the inside — **and was built hours later the same day** (§15 D830): both edges, `ParagraphStyle::optical_margins`, off by default, one adjustment to the line's geometry that no arm of reads `align`. ⚠️ **The bullet's own example was backwards the whole time it stood** — it blamed `H` for having *almost no* left bearing, and `H` has the largest of the capitals measured. ⚠️ *This row said "Side bearings / optical margin alignment, marked **Later**" and was perfectly accurate for weeks — it described the bullet exactly, including the contradiction, and that is why nobody acted on it.* What is left in the section is one standing rule: don't use ink bounds for alignment — **which D830 does not break, and which now says it is about the *datum***. |
 | *Now · Distribution* | **Nothing open as of 2026-10-04** — both items closed the day they opened: the release job split so its build steps hold no write token (§15 D976), and the single-package rpm route's waiver narrowed to the file (§15 D977). *The text below is the row as it stood before.* **Two open as of 2026-10-04**, both left by §15 D974's hardening of the release review's findings: the release job is not yet split so that the build steps hold no write token (`[X3-L5-03]`'s last bullet), and the single-package rpm route's `dnf install --nogpgcheck` still waives checking for the whole transaction (`[X3-L5-04]`). And it has run: CI was green on all three legs at `e1f1842`, and v0.4.0's Release workflow built and published every platform; the tag's Pages publish was refused by the `github-pages` environment's `main`-only rule and published from `main`, and the environment admits `v*` tags since `430ed7e`. *The text below is the row as it stood before.* **Nothing open as of 2026-10-03.** Its one item, the package repositories' signing key, opened and closed that day (§15 D957): the maintainer generated the key, set `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE` and turned Pages on, and the fingerprint is in `install.sh` and `README.md`. ⚠️ **Nothing has run** — the first tagged Release is the first time `pages.yml` builds the site, and the first check that the secret's key is the one the fingerprint names. That is the release skill's to do, not an item. |
-| *Next · Container layout* | **Opened 2026-09-23 and designed** (§15 D867–D873): five steps — used geometry behind an identity pass, absolute insets, flex, grid, then components — plus the decisions still open. **Steps 1 and 2 are built** (2026-09-24, §15 D868, D874) — step 2 with its inspector card, so pinning shipped; **step 3, flex, is built** the same day (§15 D875–D877), its inspector cards last (§15 D878–D883), and frames under groups with it (§15 D876) — and the maintainer's first look at the cards came back with seven findings, answered in session 36 (2026-09-26, §15 D884–D889), and the Position card then laid out as the mockup and refined (2026-09-27, §15 D890–D891). **Step 3 committed 2026-09-27**, and the maintainer's six rulings on what flex had left the same day (§15 D892–D897); flex owes nothing since 2026-09-28, the section's *owed* paragraph of tests having landed and been struck (§15 D901's amendment) — its *open* decisions, all grid's, answered before grid's code (§15 D913); **step 4's model and engine built 2026-09-27** (§15 D914), the question it left for the maintainer ruled the same day (§15 D915), and its preview and gestures built (§15 D916), several grid items dragged together moving as a block since (§15 D918), and its cards built (§15 D920), what the sub-steps before them left closed first (§15 D919), and its canvas track lines built 2026-09-28 (§15 D921). The only `Next` section in the file, and not a `Now`, because what is left in it is step 5 — **designed 2026-10-04, its build steps 1–4 (item ids, the component model, the verbs, field and structural propagation) built the same day, step 5's resets, their two menu rows, the component card and the override look on the inspector's cards and lists built, step 6 (live preview) built, the four defects read in it fixed, step 7 (variants and properties) built on 2026-10-05 but for the set's `+` edge control and value-named variant rows, the mockup accepted with D979's rulings held over it, instance swap and a nested copy's switch ruled the same day and unbuilt, and most of D981's chrome unbuilt** (§15 D978–D983; `architecture.md` §5.3d), its seven-part order of work in the section: the maintainer's first look at step 4, the last item on its handoff list since 2026-09-29, came back on 2026-10-02 with two findings, both fixed (§15 D926, D927), the owed tests and what was named and left alone having closed on 2026-09-29 (§15 D921's second amendment, D923–D925). |
+| *Next · Container layout* | **Opened 2026-09-23 and designed** (§15 D867–D873): five steps — used geometry behind an identity pass, absolute insets, flex, grid, then components — plus the decisions still open. **Steps 1 and 2 are built** (2026-09-24, §15 D868, D874) — step 2 with its inspector card, so pinning shipped; **step 3, flex, is built** the same day (§15 D875–D877), its inspector cards last (§15 D878–D883), and frames under groups with it (§15 D876) — and the maintainer's first look at the cards came back with seven findings, answered in session 36 (2026-09-26, §15 D884–D889), and the Position card then laid out as the mockup and refined (2026-09-27, §15 D890–D891). **Step 3 committed 2026-09-27**, and the maintainer's six rulings on what flex had left the same day (§15 D892–D897); flex owes nothing since 2026-09-28, the section's *owed* paragraph of tests having landed and been struck (§15 D901's amendment) — its *open* decisions, all grid's, answered before grid's code (§15 D913); **step 4's model and engine built 2026-09-27** (§15 D914), the question it left for the maintainer ruled the same day (§15 D915), and its preview and gestures built (§15 D916), several grid items dragged together moving as a block since (§15 D918), and its cards built (§15 D920), what the sub-steps before them left closed first (§15 D919), and its canvas track lines built 2026-09-28 (§15 D921). The only `Next` section in the file, and not a `Now`, because what is left in it is step 5 — **designed 2026-10-04, its build steps 1–4 (item ids, the component model, the verbs, field and structural propagation) built the same day, step 5's resets, their two menu rows, the component card and the override look on the inspector's cards and lists built, step 6 (live preview) built, the four defects read in it fixed, step 7 (variants and properties) built on 2026-10-05, the mockup accepted with D979's rulings held over it, instance swap and a nested copy's switch ruled the same day and built on 2026-10-06, and the set's `+`, the variant rows and D981's canvas and layers chrome built the same day, the three defects read in them fixed with it** (§15 D978–D985; `architecture.md` §5.3d), its seven-part order of work in the section: the maintainer's first look at step 4, the last item on its handoff list since 2026-09-29, came back on 2026-10-02 with two findings, both fixed (§15 D926, D927), the owed tests and what was named and left alone having closed on 2026-09-29 (§15 D921's second amendment, D923–D925). |
 | *Later* | The command palette and cheatsheet; the parked decisions; post-v1 (MCP, Command Mode, multiplayer). |
 
 **Sections with nothing open**: *Doc drift*, *Now · Images*, *Now · Inspector*, *Now · Keyboard*,
@@ -1554,8 +1554,8 @@ are chrome.
       amendment and **D925** are the record.
    4. ~~**Named and left alone**~~ — the held `baseline`'s face, §15 **D923**; the two `MAX_TRACKS`,
       §15 **D924**; the grid item's receipt, §15 **D922**.
-5. **Components and overrides.** **Designed 2026-10-04; items 1–6 built by session 49, and most of
-   item 7 on 2026-10-05** —
+5. **Components and overrides.** **Designed 2026-10-04; items 1–6 built by session 49, most of
+   item 7 on 2026-10-05, and its instance swap and the canvas and layers chrome on 2026-10-06** —
    `architecture.md` §5.3d is the design and §15 **D978** (instances as linked copies kept in step at
    the commit), **D979**
    (overrides found by comparing values, free structure, a main's deletion detaching, document-local,
@@ -1574,9 +1574,9 @@ are chrome.
       own instance, the cross-document paste, a main's deletion, and a main's copy being an instance.
       The three it left — a layer moved out of its instance, the other delete doors, a nested
       instance copied alone — closed the same day by `component::settle_links` and `settle_copy`'s
-      climb (`66b48a5`, `f75dcc5`; §15 D979's amendment). **Still owed after it**: the **filled
-      hexagon** D981 gives a main has no glyph in the bundled Phosphor Regular — §15 D10's *"at two,
-      ship the font"* — owed by the layers-panel and canvas chrome.
+      climb (`66b48a5`, `f75dcc5`; §15 D979's amendment). ~~**Still owed after it**: the **filled
+      hexagon**~~ — drawn 2026-10-06 (§15 **D985**, against D10's *"at two, ship the font"*), on the
+      canvas, in the layers panel and on the Component card's main and variant faces.
    3. ~~The propagation pass for **fields** — the compare rule, list items by id, nested chains, user
       operations winning~~ — **built 2026-10-04** (`45730f6`; §15 D979's and D980's amendments), the
       exact-equality risk measured for the pinned-child path. The three things the record found left
@@ -1593,12 +1593,12 @@ are chrome.
       (`a18b0b5`, omitted at zero since `d66044c`), the card (`5fcff6b`), the override look in part
       (`d2beb37`, `d39f7c1`, `6033571`, `a345b81`, `c292b50`, `6210953`) and the rest of it in session
       49; §15 D979's and D981's amendments. The two defects the record found in that last batch
-      were fixed with it (D981's amendment). **Still owed from it**: a test for the Type resets'
-      live-session restyle, which has none. And the fields D981 (e) of that amendment leaves
-      unmarked for now — Position's centre buttons, the
+      were fixed with it (D981's amendment). ~~**Still owed from it**: a test for the Type resets'
+      live-session restyle~~ — written 2026-10-06 (D981's last amendment). The fields D981 (e) of
+      that amendment leaves unmarked for now — Position's centre buttons, the
       Type popup, the multi-selection Transform card and radius, a variantless family's bold and
       italic toggles, per-track fields, the identity card — are unmarked by the session's choice, not
-      by a ruling. The layers panel's marks are D981's chrome, below.
+      by a ruling. ~~The layers panel's marks are D981's chrome, below.~~ Built 2026-10-06 (§15 **D985**).
    6. ~~The live preview of main-component edits~~ — **built 2026-10-04** (session 49; §15 D979's
       amendment): the field pass over the preview's transaction, after the flex holds; structure still
       follows on release. The three defects the record read in its first cut — a main's pivot preview
@@ -1613,23 +1613,21 @@ are chrome.
       **built 2026-10-05** (`a313b2c`; D982's amendment, which has the four places it departs from the
       mockup, each the session's and open to overturning); ~~*Reset properties* omitted at zero~~
       fixed in `adc5f66`. ~~The canvas set tab, its clash warning, the layers panel's folded-set count
-      and the `{}` marks~~ — **built 2026-10-05** (`0ff8f16`; D982's second amendment). **Still owed
-      from it**: the `+` on the set's bottom edge, which needs a hit route of its own on the canvas
-      (*Add variant* is on the card and the menu meanwhile), and value-named variant rows in the layers
-      panel with the filled hexagon (no glyph, D10) — with D981's chrome below. **Instance swap, and
-      a nested copy's switch inside an outer instance** — ~~open, the maintainer's~~ **ruled
-      2026-10-05** (§15 **D983**, in two rounds: a `swap` field beside `link` on a nested copy only, a
-      straight-linked root swapping by relinking; an override taking everything from its target but
-      the slot's placement and visibility; overrides carried; v5 unbumped; a prefix filter on the slot
-      in place of *Preferred mains*; the nested switch a swap within its set) and **not built**; D983
-      lists what the build has to settle, among them how `component::check`'s `Membership` and
-      `ComponentCycle` read `swap`, `reset::state_ops`, and the nested variant dropdown's dot. Exposing
-      nested properties is later, by the mockup.
+      and the `{}` marks~~ — **built 2026-10-05** (`0ff8f16`; D982's second amendment). ~~The `+` on
+      the set's bottom edge, and value-named variant rows in the layers panel with the filled
+      hexagon~~ — **built 2026-10-06** (§15 **D985**), the rows by reading: a variant's derived name is
+      its values. ~~Instance swap, and
+      a nested copy's switch inside an outer instance~~ — ruled 2026-10-05 and **built 2026-10-06**
+      (§15 **D983** and its amendment, which has the build's seven decisions). Exposing nested
+      properties is later, by the mockup.
 
    **Owed outside the numbered steps** (`architecture.md` §5.3d's handoff paragraph has the list):
-   D981's chrome — the canvas labels, chips, glyphs and markers, the layers panel's marks, `Enter`
+   ~~D981's chrome — the canvas labels, chips, glyphs and markers, the layers panel's marks, `Enter`
    into an instance and an instance's group-style picking; the filled hexagon's
-   missing glyph (§15 D10); the menu rows' final place in `context-menus.md`; the flex instance's
+   missing glyph (§15 D10)~~ — built 2026-10-06 (§15 **D985**), the three defects the record read in
+   it fixed the same day (`f3ac348`); a test driving a
+   real click or `Enter` through `normal_mode_input`, which none of D985's does; the menu rows' final
+   place in `context-menus.md`; the flex instance's
    exact-equality path, measured for a held resize at step 6 and unmeasured for the kept flow
    translations.
 
@@ -1638,8 +1636,8 @@ are chrome.
    there**; on a flex instance, `keep_flex_sizes`' held size measured for one resize at step 6, the
    flow translations unmeasured. The
    chrome is accepted (§15 **D981**): its keys, all seven menu rows, the toasts, the component card and
-   the override look on the inspector's cards and lists are built, the rest is in the *owed* paragraph
-   above and in step 5.
+   the override look on the inspector's cards and lists are built, and the canvas and layers chrome
+   since 2026-10-06 (§15 **D985**); what is left of it is in the *owed* paragraph above.
 
 ## Later · Command palette (`Ctrl+K`, with `Ctrl+/` as an alias — `shortcuts.md` §8)
 

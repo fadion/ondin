@@ -3,8 +3,8 @@
 **Status: agreed 2026-08-03; §1–§6, §9 and §10's cheap rows built 2026-08-18, §7 and §8's export
 rows 2026-08-20, §8a — the library's own keys — 2026-08-28, and `Ctrl+N`/`Ctrl+W`/`F2`/`Ctrl+D` the
 same day.** **Three** rows in §8 and two in §10 are
-what is left — plus §12's `Enter` row, agreed on 2026-10-04 with components and waiting on entering
-an instance (its two chords were bound the same day); the count is kept here rather than only in the ledger because this is the line a
+what is left — ~~plus §12's `Enter` row, agreed on 2026-10-04 with components and waiting on entering
+an instance~~ (§12's `Enter` row built 2026-10-06, §15 D985; its two chords were bound on 2026-10-04); the count is kept here rather than only in the ledger because this is the line a
 reader checks first. ⚠️ **It was five until 2026-08-28**, when `Ctrl+N` and `Ctrl+W` — the two that
 had been waiting on a dashboard that arrived two days earlier — were bound (§15 D383); the three
 left all wait on the command registry, which is one blocker rather than three. ⚠️ **§8a did not
@@ -729,7 +729,7 @@ and the cheatsheet can be rendered from one source.
 | `Shift`+arrows | nudge (10 by default) | ✅ *Settings › Nudge › Shift*, `input::NudgeStep::large`. Not constrained to be larger than the plain step: someone who wants the modifier to mean *finer* is not making a mistake |
 | `Ctrl`+arrows | resize the selection — `→` wider, `←` narrower, `↓` taller, `↑` shorter | ✅ new 2026-08-25 with §15 D346, and **undesigned territory** — this file reserved no `Ctrl`/`Cmd`+arrow row at all, and the only convention behind it is the request's own *"Figma does something similar"*. The distance is the **nudge** step, the same `NudgeStep` the bare arrows read, so `Shift` gives 10 and a retuned nudge retunes this too. Held by the **top-left corner**, which is what makes `↓` taller and `↑` shorter, and what lets the two verbs share **one** table of signed pairs in `normal_mode`. `Ctrl+Alt`+arrow is deliberately left unclaimed, the binding being gated on `cmd_only` |
 | `Tab` / `Shift+Tab` | step the point selection along the path | ✅ node tool only — and see §10, where the same key nests a list in TextInsert |
-| `Enter` | step **into** the selection, or back out | ✅ all five kinds, 2026-08-19 (§15 D228) — text, picture, path, group, boolean, in `double_click_pick`'s order so the key and the double-click cannot disagree. On text with no pointer to place a caret from it **selects the whole string**; a group is a *depth* rather than a mode, so `Escape` is the way back out of that one |
+| `Enter` | step **into** the selection, or back out | ✅ all five kinds, 2026-08-19 (§15 D228) — text, picture, path, group, boolean, in `double_click_pick`'s order so the key and the double-click cannot disagree — and an instance, ahead of all five, since 2026-10-06 (§12, §15 D985). On text with no pointer to place a caret from it **selects the whole string**; a group is a *depth* rather than a mode, so `Escape` is the way back out of that one |
 | `Escape` | unwind one rung | ✅ |
 
 **The Escape ladder is part of the keymap and belongs in the cheatsheet.** Read off
@@ -805,17 +805,17 @@ chord that ends in either key is added. Note also that on Windows `Shift+Delete`
 intercepted as `Event::Cut` by `egui_winit` and never arrives as a key — cut rather than
 delete, which is arguably correct and is certainly not what the binding says.
 
-## 12. Components — agreed 2026-10-04, two of three bound
+## 12. Components — agreed 2026-10-04, all three built
 
 Agreed with the components chrome (`decisions.md` §15 D981; `architecture.md` §5.3d). The two chords
-were bound the same day (§15 D979's amendment); `Enter` waits on entering an instance, not on the
-command registry, so it is outside §8's blocker.
+were bound the same day (§15 D979's amendment); `Enter` ~~waits on entering an instance~~ enters one
+since 2026-10-06 (§15 D985), never having waited on the command registry or §8's blocker.
 
 | Key | Action | |
 |---|---|---|
 | `Ctrl+Alt+K` | ✅ create component | Figma's. `Action::CreateComponent`, bound 2026-10-04. Free in this keymap — a test asserts `Ctrl+Shift+K` still places an image; the dashboard's `Ctrl+Alt+K` is deliberately inert (*Deliberately unbound*, below), and the editor's `K` alone is the Scale tool |
 | `Ctrl+Alt+B` | ✅ detach instance | Figma's. `Action::DetachInstance`, bound 2026-10-04 |
-| `Enter` | ➕ step **into** an instance | Not a new chord — §11's `Enter` gains instances as a target, ruled 2026-10-04 (§15 D981): a group instance is a group `Enter` already enters, a frame instance one it does not reach today. It enters as the double-click does, by §15 D228's rule that the two agree; §11's row stays as built until this is |
+| `Enter` | ✅ step **into** an instance | Not a new chord — §11's `Enter` gains instances as a target, ruled 2026-10-04 (§15 D981), **built 2026-10-06** (§15 D985): `enter_action` enters an instance root with children **first**, ahead of its text, picture and path arms — a group instance was a group `Enter` already entered, a frame instance one it did not reach — selecting its topmost layer, as the double-click's group step comes first (§15 D228) — and a double-click on an instance's own background enters it too since `f3ac348`, where the first build cropped a picture-filled one (D985) |
 
 ⚠️ **`Ctrl+Alt` is `AltGr` on many European layouts**, which §10 already meets from the other side (an
 `AltGr` character arriving as a chord). The mockup offered a `Ctrl+Shift` fallback for these two and it
@@ -897,8 +897,8 @@ dropdowns render their rows *from*: they were keyed by the row's own string
 for as long as nobody typed a different string, and the chords are a second caller that never
 sees the row at all. One enum, two callers, one `label()`.
 
-**Still to build**: `New`, `Close`, `Export`, `Palette`, `Cheatsheet`; and §12's `Enter` into an
-instance. ~~§12's two chords~~ — **bound 2026-10-04**, `Action::CreateComponent` and
+**Still to build**: `New`, `Close`, `Export`, `Palette`, `Cheatsheet`. ~~And §12's `Enter` into an
+instance~~ — built 2026-10-06 (§15 D985). ~~§12's two chords~~ — **bound 2026-10-04**, `Action::CreateComponent` and
 `Action::DetachInstance` (§15 D979's amendment). ~~`PasteInPlace`,
 `CopyProperties`, `PasteProperties` (§7, deferred whole)~~ — **all three built 2026-08-20**
 (§15 D248, D257); this line outlived them by two days, and §7's own heading said so while this

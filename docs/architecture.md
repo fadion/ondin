@@ -85,7 +85,8 @@
   D979) — as linked copies kept in step at the commit, not on layout's derive-from-specified pipeline
   as this bullet said: the maintainer ruled instances stored, every reader here being keyed by a stored
   id. **Variants and component properties left it on 2026-10-05** (§5.3d, §15 D982), their core
-  and inspector built; **instance swap left it the same day as a ruling, unbuilt** (§15 D983);
+  and inspector built; **instance swap left it the same day as a ruling, and was built on
+  2026-10-06** (§15 D983);
   **shared libraries stay on it.**
   ~~Auto-layout/constraints~~ **left this list on 2026-09-23 and are
   designed**: CSS flexbox, CSS grid and absolute insets (§5.3c, §15 D867, D871) — insets on frames
@@ -630,6 +631,8 @@ pub struct Node {
     component: bool,           // a MAIN component — frames and groups only; skipped when false —
                                // §5.3d, §15 D978
     link: Option<NodeId>,      // the node this one was copied from, ONE level up; skipped when None
+    swap: Option<NodeId>,      // the main a NESTED COPY shows instead of its link's — an instance
+                               // swap, §5.3d, §15 D983; the link keeps the slot; skipped when None
     set: Option<VariantSet>,   // a COMPONENT SET's variant properties — a frame, never a main; the
                                // three fields from here are §5.3d step 7, §15 D982, each skipped
                                // when empty
@@ -1066,12 +1069,14 @@ pub fn next_grid_color(existing: &[LayoutGrid]) -> Color;    // the first of GRI
   answers **false** to `changes_ink` beside the guide operations, for the reason that list already
   gives — *a guide is a line over the artwork rather than part of it* — and `RenderOverrides::absorb`
   treats it as a no-op. ⚠️ **Those two lists are *not* the same, which this bullet asserted
-  until 2026-09-09** (§15 D659): `changes_ink`'s **sixteen** are a **subset** of `absorb`'s
-  **eighteen** no-ops, the two extras being `AddImage`/`RemoveImage`, which are absorbed for want of an
+  until 2026-09-09** (§15 D659): `changes_ink`'s **seventeen** are a **subset** of `absorb`'s
+  **nineteen** no-ops, the two extras being `AddImage`/`RemoveImage`, which are absorbed for want of an
   image table to patch rather than for being invisible (§6.2). (Eleven and thirteen until 2026-10-04,
-  when `SetComponent` and `SetLink` joined both lists — §15 D978 — and thirteen and fifteen until
-  2026-10-05, when `SetVariantSet`, `SetVariant` and `SetProperties` did — §15 D982.) The test that pins
-  the sixteen asserts its own length, and `overrides.rs` has the sibling that pins the eighteen.
+  when `SetComponent` and `SetLink` joined both lists — §15 D978 — thirteen and fifteen until
+  2026-10-05, when `SetVariantSet`, `SetVariant` and `SetProperties` did — §15 D982 — and sixteen and
+  eighteen until 2026-10-06, when `SetSwap` did — §15 D983.) The test that pins the seventeen asserts
+  its own length, and `overrides.rs` has the sibling that pins the nineteen — which `SetSwap`'s first
+  build left at eighteen, fixed the same day (§15 D983's amendment).
 - **A field on the node, offered on a frame.** `Node::grids` sits beside `exports`: empty on every
   layer until somebody adds one, skipped by the save format, ignored by every walk. That is `clip`'s
   arrangement — a property of the layer, inert on kinds nobody offers it for — and what confines the
@@ -1615,7 +1620,7 @@ first was, it saved only the track list.
 `track_lines` merges an edge with the last one only, the spans being laid in order — it searched every
 edge, quadratic in the track count.
 
-### 5.3d Components and overrides (designed 2026-10-04; steps 1–6 and most of 7 built; §15 D978–D983)
+### 5.3d Components and overrides (designed 2026-10-04; steps 1–7 built; §15 D978–D985)
 
 > **Design ahead of code, part of it** — decided with the maintainer on 2026-10-04 (session 47). **Build
 > steps 1–4 are built** the same day — the list items' ids (§15 D980, `a83adc8`), the component model,
@@ -1627,8 +1632,9 @@ edge, quadratic in the track count.
 > `6210953`, then session 49; §15 D979's and D981's amendments); so is step 6, the live preview
 > (session 49); and so is step 7's core half, variants and component properties (`3fa5276`, §15 D982,
 > 2026-10-05), and its app half in the inspector and the context menu (`a313b2c`, the same day), then
-> a set's canvas tab and two layers marks (`0ff8f16`). The rest of the canvas and layers chrome, D981's
-> and step 7's, is not. It sits
+> a set's canvas tab and two layers marks (`0ff8f16`); and so is instance swap, with a nested copy's
+> switch (§15 D983, 2026-10-06); and so, the same day, is the rest of the canvas and layers chrome,
+> D981's and step 7's (§15 D985). It sits
 > beside §5.3c
 > because what it changes is the node model. Every other passage of this document still describes `HEAD`; where one states a rule this
 > design will change, it carries a forward pointer here — §4's invariants 4 and 8, §5.11's bump rule
@@ -1637,7 +1643,8 @@ edge, quadratic in the track count.
 > (overrides, free structure, a main's deletion, document-local, what a copy of a main makes) and
 > D980 (list items compared one by one, by id), and the chrome is D981, accepted from a mockup; D982 is
 > variants and properties, a second mockup accepted with its three contradictions of D979 ruled for
-> D979; and D983 is instance swap and a nested copy's switch, ruled and not built.
+> D979; and D983 is instance swap and a nested copy's switch, ruled, then built with seven decisions of
+> the build's own.
 > Everything else here — the model fields, where a link
 > points, the post-conditions, the item ids' shape, the save-format bump, the preview — is the
 > session's design under those rulings, open to overturning, and each paragraph says which it is.
@@ -1859,7 +1866,11 @@ the same order, recursively, no local additions — and a deleted counterpart is
 copies; a move within a main and a reorder follow as above. **Its ops go out inserts → moves → deletes →
 reorders**, delete decisions made after the moves, `untouched` ignoring the children the pass carries
 out; a parent the edit deleted counts as changed, so the children lifted out of it are moves — which is
-what makes *Ungroup* inside a main work. **A move into a parent the same edit made** — *Group
+what makes *Ungroup* inside a main work. 🚨 **But its children are lost only where it was itself lost
+from a parent that stays** — an ungrouped group, a deleted child of a main, at any depth, found as a
+fixed point over the changed parents (§15 D984). A deleted **main** is lost from nothing: counted as
+the rest were, it read every child as lost and emptied each instance that §15 D979 (c) — *deleting a
+main*, below — says keeps its look, with every test green, until 2026-10-06. **A move into a parent the same edit made** — *Group
 selection* — is judged on the final tree: the new parent's copy is pruned to what the edit made
 (`only_new`) and each existing counterpart **moves** into it, carried down the copy chain, so an
 instance's own changes survive grouping and ungrouping, still linked. **A move whose new parent has no
@@ -1932,7 +1943,9 @@ reset always sets them, `state_ops` writing every field. **Not the order of the 
 **Deleting a main component detaches its instances** (§15 D979's ruling (c), the maintainer's), in the
 same transaction: each instance becomes a plain copy that keeps its current look, and undo restores
 the main and the links. Nested chains relink one level up, above, so a nested instance survives its
-outer main's deletion as an instance of its own main.
+outer main's deletion as an instance of its own main. ⚠️ *Keeps its current look* is pinned through the
+real commit since 2026-10-06 (`deleting_a_main_through_the_commit_keeps_its_instances_layers`, §15
+D984): the structural pass had been deleting every untouched layer of the detached instance.
 
 ✅ **The verbs are built** (build step 2, `0ae3cd7`, §15 D979's amendment), on **one rule for every
 way a link's target goes**: `component::relink_past(doc, gone, among)` — a link into `gone` climbs to
@@ -1985,8 +1998,9 @@ a plain instance of that main (`f75dcc5`). A layer *moved* out of its instance i
 
 **`apply`'s post-conditions** (the session's; §15 D491's shape — after the last op, before
 `*self = working`, so a transaction may pass *through* a state that breaks one). ✅ **Built** —
-`component::check`, refused as `OpError::BadLink(NodeId, LinkRule)`, `LinkRule` naming which of eight
-rules broke — or, as a ninth arm, `Variant(VariantRule)`, the six variant and property rules
+`component::check`, refused as `OpError::BadLink(NodeId, LinkRule)`, `LinkRule` naming which of nine
+rules broke — eight, until `Swap` joined them below (§15 D983) — or, as a tenth arm,
+`Variant(VariantRule)`, the six variant and property rules
 `variant::check` runs first (§15 D982, below): **`Dangling`**, a link to a node not in the document or to itself; **`ComponentKind`**,
 `component` on a kind that is not a frame or a group; **`ComponentLinked`**, a node both a main and
 linked; **`NestedMain`**, a main beneath a main or a linked node; **`Membership`**, a linked node —
@@ -1996,7 +2010,11 @@ one instance root linked to one source — a node linked straight to a main exem
 of another main inside one instance are legal, while a nested copy's root is held to both rules like a
 member (tightened with build step 2, §15 D979's amendment); **`LinkCycle`**, a chain of links that never reaches a main; and
 **`ComponentCycle`**, a main containing at some depth an instance whose chain ends at itself, found by
-a depth-first search over a graph from each main to the mains of the instance roots inside it. 🚨 **It
+a depth-first search over a graph from each main to the mains of the instance roots inside it
+(`component::uses` — the mains they **show**, a swap counting where it sits on a chain); and
+**`Swap`**, a swap on anything but a nested copy inside an outer instance, or naming anything but a main
+of the copy's own kind — a dangling swap being `Dangling`, and a swapped root's source, for
+`Membership`, its swap (§15 D983). 🚨 **It
 runs over the whole document, not over `dirty`**: a link breaks when its *target* goes, and a delete
 dirties the deleted node, not the instance pointing at it. **Free when nothing is a main or linked** —
 one scan, and one more for `variant::check`'s own exit when nothing is a set, a variant or an owner of
@@ -2129,8 +2147,8 @@ brief: **component-ness is shape, never the accent** — a filled hexagon on a n
 label, an outline hexagon and a bare label for an instance's, a renamed instance trailing its main's
 name in grey — and 🚨 **a component's label never changes hue on selection**, for components only,
 where an ordinary frame's label still does (the maintainer's ruling). A group that is a main gets a
-canvas label as a frame does, which no group has today (`canvas::draw_frame_labels` walks `artboards()`
-alone); ⚠️ whether a group *instance* gets one is **not ruled** — D981 has the record's reading of the
+canvas label as a frame does, the one group that has one (`OndinApp::tagged`, which
+`canvas::draw_frame_labels` walks in place of `artboards()`); ⚠️ whether a group *instance* gets one is **not ruled** — D981 has the record's reading of the
 mockup. 🚨 **An instance picks like a group, whatever its kind**: a click anywhere on it, its empty
 background included, selects the whole instance — for a frame instance an exception to §15 D22, which
 every ordinary frame keeps. A double-click or `Enter` enters it (§15 D228's agreement), with a path
@@ -2194,13 +2212,34 @@ hand's resize and stops a growing instance growing. A dropdown's
 row's dot has no ↺ — the session's, D981 has each. Some fields are left unmarked on purpose, D981
 lists them. ⚠️ **The filled hexagon has no glyph**:
 the bundled icon font is Phosphor Regular alone, and §15 D10, which hand-drew the one Fill-weight
-glyph the app needed, says *"at two, ship the font"* — so the card's main face draws the outline one.
-The canvas labels and markers and the layers marks are not built.
+glyph the app needed, says *"at two, ship the font"*. ~~So the card's main face draws the outline one.~~
+**It is drawn too** (`ui::paint_hexagon_filled`, §15 D985 — the session's, against D10's trigger), on
+the canvas, in the layers panel and on the Component card's main and variant faces (the instance faces
+keep the outline); its box and orientation are measured against the outline glyph's atlas ink
+(`the_filled_hexagon_sits_on_the_outline_glyphs_ink`).
+
+✅ **The canvas and layers chrome** (2026-10-06, §15 D985). **An instance picks like a group**:
+`query::group_chain`'s trailing trim stops at an instance root as at a group, and `canvas::pick_leaf`
+does not skip an occupied frame that is or sits in an instance; **`Enter` enters one** ahead of its
+text, picture and path arms (`enter_action`), and **so does a double-click on its own background** —
+where the leaf is the instance and the chain starts above it, so `double_click_pick` carries an arm of
+its own after the group step (the first build cropped a picture-filled one there, D228's disagreement;
+fixed the same day). **A main's tag** is a `CARD` chip with the filled
+hexagon, *N instances* while selected; **an instance's** the outline hexagon and its name in `MUTED`,
+its main's name trailing in `DIM` when the two differ, and *Name › Child* while it is entered with a
+layer inside selected; 🚨 neither ever takes `color::SELECT`. `canvas::draw_component_chrome` draws a
+`FAINT` hairline round each instance of a selected main and, round the entered instance, a dashed `DIM`
+boundary and *Editing inside instance · Esc to exit* — for `canvas::entered_instance`, the nearest
+instance root at or above `entered_group`, so they stay while the user steps into a group inside it.
+**The layers rows** wear the hexagon, `STRONG` when selected; a trailing mark at the row's edge
+is **+** for a local layer (an unlinked one inside an instance, or a local instance) and a **dot** for an
+override on the row, and on a collapsed row inside an instance, or a collapsed instance root, for any
+drift (`reset::Drift::any` or a local layer, from `drift_cache`), bubbling no further than the root.
 
 **Variants and component properties** (build step 7; §15 D982). ✅ **The core is built**
 (`3fa5276`, `ondin-core/src/variant.rs`), and ✅ **the app half in the inspector and the context menu**
-(`a313b2c`, below), and ✅ a set's canvas tab and two layers marks (`0ff8f16`, below); the set's `+`
-edge control and value-named variant rows are not. The chrome is a second mockup,
+(`a313b2c`, below), and ✅ a set's canvas tab and two layers marks (`0ff8f16`, below), and ✅ the set's
+`+` edge control and value-named variant rows (§15 D985, below). The chrome is a second mockup,
 `design/Variants.dc.html`, **accepted by the maintainer on 2026-10-05 except where it contradicted §15
 D979**, and there they ruled that *"what we decided … takes precedence over design"*: **deleting a
 variant detaches its instances**, as any main's deletion does (D979 (c)) — and deleting a value deletes
@@ -2214,7 +2253,8 @@ session's design under those rulings, open to overturning.
 a set.** `Node::set: Option<VariantSet>` holds the set's variant properties, each a `VariantProp { name,
 values }`; `Node::variant: Vec<String>` a variant's values, one per property in the set's order; and
 `Node::props: Vec<Keyed<Property>>` the **component properties** a main or a set defines,
-`Property { name, kind: PropKind::{Boolean, Text}, bound: Vec<NodeId> }`. So `NestedMain` is unchanged,
+`Property { name, kind: PropKind::{Boolean, Text, Swap}, bound: Vec<NodeId>, filter: String }` — the
+third kind and the filter since instance swap, below. So `NestedMain` is unchanged,
 and an instance of a variant is an instance of a main, which everything above holds for as it is.
 `SetVariantSet`, `SetVariant` and `SetProperties` write them, each inverting to the old value; they
 change no ink (§5.7), are no-ops in `absorb` (§6.2), `propagate::mode` skips them and `reset::state_ops`
@@ -2250,23 +2290,52 @@ sibling to the k-th, within one kind; a matched counterpart is relinked and each
 does**; a keyed list's items match by id, else by position; an unmatched counterpart goes where
 `propagate::untouched`, else stays as the instance's own; a new layer is copied in at its anchor; the
 order follows where the instance still had the old main's; the root's placement is its own. **A variant
-choice is never an override** — it is the root's `link`, which no reset compares. **A component property
+choice is never an override** — it is the root's `link`, which no reset compares — for a root linked
+straight to a main; a nested copy's choice is a swap, below, and so is one (§15 D983 (6)). **A component property
 is a view over fields**: a boolean is its bound layers' visibility, a text property their content;
 nothing stores its value on an instance, its default is the main's own bound field, an overridden
 property is a bound field differing from its source, and resetting one is resetting that field — so a
 switch carries properties with every other override, and undo, the preview and propagation need nothing
-new. Only an instance linked straight to a main can switch (`propagate::linked_to_main`); a nested
-copy inside an outer instance cannot yet, and **instance swap** is not built, because the link model
-has no place for *"the counterpart of N in the outer main, but an instance of main B"* — §15 D982 has
-why. **Ruled 2026-10-05, not built** (§15 D983, the maintainer's): a `swap` field beside `link`, `link`
-keeping the slot's identity; a swap **is an override**; the slot keeps the root's **placement** —
-position, insets, layout item, size, rotation — and its **visibility**, its own or the slot's, and
-**everything else comes from the target**, the root's own fill, stroke, effects, corner radius, clip,
-`display` and kind included — so `source_of` cannot simply follow `swap`, and `linked_to_main` must
-keep reading `link`; overrides carry as the switch carries them; a root linked straight to a main
-swaps by relinking `link`, so `swap` is only a nested copy's; the fields join v5 unbumped; the mains offered are those whose name starts with a **filter** stored on
-the slot in the main, case-insensitive, with a search box on top — *Preferred mains* is not built; and a
-nested copy's switch is a swap restricted to its set's mains. D983 lists what it leaves to the build.
+new. **An instance switches if it is linked straight to a main, or is a nested copy inside an outer
+instance** (`variant::can_switch`); the first relinks, the second swaps (`swap::swap`), and both rewrite
+through `variant::rewrite`, the switch's body. Until 2026-10-06 only the first could: the link model had
+no place for *"the counterpart of N in the outer main, but an instance of main B"* — §15 D982 has why.
+
+✅ **Instance swap** (§15 D983 — ruled by the maintainer 2026-10-05, built 2026-10-06;
+`ondin-core/src/swap.rs`). **The link keeps the slot, the swap brings the contents.** `Node::swap` names
+the main a nested copy inside an outer instance shows instead of its link's, `link` keeping the slot's
+identity — what places it, orders it and scopes its resets. A root linked straight to a main changes
+main by relinking, so `swap` is only a nested copy's (`swap::can_swap`). **The slot keeps the root's
+placement — transform, insets, layout item — its size and its visibility** (`swap::is_slot_field`),
+following its link; **everything else comes from the swap**, the root's own fill, stroke, effects,
+corner radius, clip and `display` included, and its children are copies of the swap's, linked to them.
+So `propagate`'s `followers` give a swapped copy `Takes::Slot` from its link and `Takes::Content` from
+its swap, `structural_copies` key its children by its swap, `reset::source_of` is `swap::content_source`
+— swap, else link — and `reset::overrides` compares the slot fields with the link and the rest with the
+swap; `linked_to_main` still reads `link`, or a swapped root would stop following its slot's moves.
+⚠️ **The swap goes only to a main of the same kind** — the session's, departing from D983's *kind from
+the target*: no operation turns a layer into another kind, and the copy's id has to survive for its own
+copies to follow it, so two frames keep the slot's size and two groups have none. **A swap is an
+override**, one unit, reset by `SetSwap { None }`; **overrides carry** across it as across a switch.
+🚨 **`SetSwap` is all any door writes, and `swap::settle` makes the rewrite** — the first of the
+components passes in `EditorSession::commit_inner`, before `propagate_structure`, rewriting the copy in
+place through `variant::rewrite`'s swap mode, so the picker, a reset and a nested variant switch get
+one rewrite and undo replays it whole; and an unexpanded swap is refused by `check`'s `Membership`, read
+against the swap, so the pass and the check are two defences. **A copy of a swapped copy follows it one
+link up** with no swap of its own (`make_copy_of` clears it) and may override it. **Landing**
+(`swap::landed`): a swapped copy whose link would end at a main or at nothing — its outer instance
+detached, copied alone — becomes an instance of what it shows; deleting the swapped-to main clears the
+swap and leaves its layers the copy's own; detaching the copy, or dragging it out, leaves plain layers;
+`swap::tidy`, inside `settle_links`, clears a swap that no longer stands. **`component::main_of` answers
+the main a root shows**, through a swap, for *Instance of*, *Select all instances*, *Go to main* and the
+instance's properties. **What is offered**: a swap property (`PropKind::Swap`), bound only to a nested
+instance inside the main and made from that layer's binding line (*Instance*), carries a **filter** — a
+prefix of a main's name, without case, every main when empty, prefilled by `swap::suggested_filter` with
+the shown main's name less its last segment — and the picker searches within it; every nested copy also
+gets a *Swap* row offering every main of its kind, unfiltered (the session's). The filter scopes what is
+offered, never what is valid. *Preferred mains* is not built. ⚠️ **The app's swap UI is untested** — a
+`ComboBox` popup cannot be driven headlessly. D983's amendment has the seven decisions the build made,
+each the session's.
 
 ✅ **The app half, in the inspector and the context menu** (`a313b2c`; `panels/variants.rs`,
 `panels/component.rs`; §15 D982's amendment). **A set** gets its own card, *Variants*, in the Component
@@ -2309,12 +2378,17 @@ selection blue**, D981's component rule kept for a set; *N variants* while the s
 a clash the warning glyph and `panels::clash_text`'s sentence in the count's place; a clashing
 variant's own tag leads with the warning glyph. **The layers badge slot** shows *N variants* on a
 collapsed set's row, and `{}` on a layer bound to a property of the owner above it; the mask wins the
-slot, then the set count, then `{}`, then a frame's size or a subtract base. **Not built**: the `+` on
-the set's bottom edge — the canvas has no hit route for a control of its own, and *Add variant* is on
-the card and the menu — and a variant's row named by its values with the filled hexagon (§15 D10).
+slot, then the set count, then `{}`, then a frame's size or a subtract base. ✅ **The `+` on the set's
+bottom edge** (2026-10-06, §15 D985): a disc at the edge's middle while the set alone is selected, with
+**a hit route of its own** — the select tool's click arm asks `canvas::set_plus_at` before any pick and
+calls `OndinApp::add_variant`, `chrome_claims` keeps guides off it, and `begin_select_drag` starts
+nothing on it; `select_cursor` asks it ahead of the handles too and shows a pointing hand, where the
+first build showed the bottom side's resize over a disc a drag there no longer resizes (read, not run —
+the cursor needs a `Response`). **A variant's row named by its values** needed nothing: its
+name is derived from them (`variant::settle`), and a variant is a main, so it wears the filled hexagon.
 
-**Instance swap and a nested copy's switch are ruled and unbuilt** (§15 D983, above); **exposing
-nested properties, and pushing an instance's changes to its main, come later.** So does real-time collaboration, the one place §15 D978's cost (a) arrives: a non-goal for
+**Exposing nested properties, and pushing an instance's changes to its main, come later** — instance
+swap and a nested copy's switch, which this sentence named with them, are built (§15 D983, above). So does real-time collaboration, the one place §15 D978's cost (a) arrives: a non-goal for
 now and open for the future, in the maintainer's words, and D978's verdict is to revisit linked copies
 if it is built.
 
@@ -2346,8 +2420,10 @@ live preview of main-component edits, the field pass run over the preview's tran
 holds, structure still following on release; (7) ✅ **core built 2026-10-05** (`3fa5276`, §15 D982) —
 variants and component properties: the model, the rules, `variant::settle`, the verbs, the in-place
 switch and properties as views, above — ✅ and its app half in the inspector and the menu the same
-day (`a313b2c`), then the set's tab and the layers panel's set count and `{}` (`0ff8f16`, `adc5f66`).
-**Left**: the set's `+` edge control and value-named variant rows, beside D981's chrome.
+day (`a313b2c`), then the set's tab and the layers panel's set count and `{}` (`0ff8f16`, `adc5f66`),
+then instance swap and a nested copy's switch (§15 D983, 2026-10-06), and the set's `+` and the
+variant rows with D981's canvas and layers chrome the same day (§15 D985).
+~~**Left**: the set's `+` edge control and value-named variant rows, beside D981's chrome.~~
 
 **Handoff, 2026-10-04 (session 47's close)** — what is built, next and owed, in one place. **Built**:
 steps 1–4 above, `Ctrl+Alt+K`/`Ctrl+Alt+B`, five menu rows filed provisionally, D981's two toasts;
@@ -2356,20 +2432,31 @@ part (`26c8434`, `7cf242e`, `7b5961e`, `a18b0b5`, `d66044c`, `5fcff6b`, `d2beb37
 `6033571`, `a345b81`, `c292b50`, `6210953`); then, in session 49, the rest of that look — every other
 card's fields and the exports and layout-grid lists; then step 6, the live preview; then, on
 2026-10-05, step 7's core (`3fa5276`, §15 D982) and its app half in the inspector and the menu
-(`a313b2c`), and a set's tab and two layers marks (`0ff8f16`). **Next**: step 7's `+` edge control
-and value-named variant rows, beside D981's chrome below; its open question — a nested copy's switch and instance swap — ~~is the maintainer's~~ was ruled on
-2026-10-05 (§15 D983) and is unbuilt. Step 6's three defects — a main's pivot preview naming a copy, pinned
+(`a313b2c`), and a set's tab and two layers marks (`0ff8f16`); then, on 2026-10-06, instance swap and
+a nested copy's switch (§15 D983) and the structural pass's deleted-main defect (§15 D984), and the
+canvas and layers chrome — D981's and step 7's `+` and variant rows — with `Enter` into an instance
+and an instance's group-style picking (§15 D985). **Next**: ~~step 7's `+` edge control and
+value-named variant rows, beside D981's chrome below~~ — built (§15 D985), and the three defects the
+record read in it fixed the same day (`f3ac348`); step 7's open question —
+a nested copy's switch and instance swap — ~~is the maintainer's~~ was ruled on 2026-10-05 (§15 D983)
+and ~~is unbuilt~~ built on 2026-10-06. Step 6's three defects — a main's pivot preview naming a copy, pinned
 copies and roots previewed off their release, an in-flow move dragging the copies — are fixed (§15
 D979's amendment), and so is a fourth read in the fix, a pinned copy with its own value for every
 inset a main's move changes; step 6 owes nothing known.
-**Owed, outside the numbered steps**: D981's chrome — the canvas labels,
+**Owed, outside the numbered steps**: ~~D981's chrome — the canvas labels,
 chips, glyphs and markers (a group main's label included; a group *instance*'s label is unruled), the
 layers panel's dot and **+**, `Enter` into an instance (`shortcuts.md` §12 ➕) and
 an instance's group-style picking (§15 D981 (b)); the **filled hexagon**, which has no glyph in the
-bundled Phosphor Regular (§15 D10's *"at two, ship the font"*); the menu rows' final place
+bundled Phosphor Regular (§15 D10's *"at two, ship the font"*)~~ — built 2026-10-06 (§15 D985), a group
+*instance*'s label still unruled; ~~D985's three *Fix* items — the `+`'s cursor, the double-click on a
+frame instance's own background, the Component card's outline hexagon~~ — fixed 2026-10-06
+(`f3ac348`, §15 D985); a test driving a real click or `Enter` through `normal_mode_input`, which
+none of D985's does; the menu rows' final place
 (`context-menus.md` §7) and the text menus' counts, which no test pins; the flex instance's
-exact-equality path, measured for a held resize and unmeasured for the kept flow translations; and a
-verb that un-makes a component, which would owe a detach.
+exact-equality path, measured for a held resize and unmeasured for the kept flow translations; ~~a test
+for the Type resets' live-session restyle (§15 D981's amendment)~~ — written 2026-10-06 (that
+amendment); exposing nested properties, later
+by the mockup; and a verb that un-makes a component, which would owe a detach.
 
 ### 5.4 Text node
 
@@ -3938,6 +4025,9 @@ pub enum Operation {
                                                       // the old value; `changes_ink` false; both
                                                       // checked by `component::check` after the
                                                       // last op, over the whole document
+    SetSwap     { id: NodeId, swap: Option<NodeId> }, // a nested copy's swap — §5.3d, §15 D983; the
+                                                      // field alone, `swap::settle` expanding it
+                                                      // at the commit. SetLink's terms otherwise
     SetVariantSet { id: NodeId, set: Option<VariantSet> }, // make a frame a component set, or not —
     SetVariant  { id: NodeId, values: Vec<String> },  // §5.3d step 7, §15 D982. The three invert to
     SetProperties { id: NodeId, props: Vec<Keyed<Property>> }, // the old value, change no ink, and
@@ -4063,19 +4153,20 @@ pub enum OpError {
   without both, a file's value could not be undone back to or edited around (§15 D937).
 - **`Operation::changes_ink` classifies an op by whether applying it changes what is *drawn*** — the
   artwork, not the chrome round it — and `Transaction::changes_ink` is **any** of its ops, not all,
-  since a transaction that moves a layer *and* renames it has a visible result. Exactly **sixteen**
+  since a transaction that moves a layer *and* renames it has a visible result. Exactly **seventeen**
   answer `false`: `SetName`, `SetLocked`, `SetProportionsLocked`, `SetPivot`, `SetExports`,
   `SetLayoutGrids`, the five guide ops, and — since 2026-10-04, when the list was eleven —
   `SetComponent` and `SetLink` (§5.3d, §15 D978), and — since 2026-10-05, when it was thirteen —
-  `SetVariantSet`, `SetVariant` and `SetProperties` (§15 D982), and every one of them
+  `SetVariantSet`, `SetVariant` and `SetProperties` (§15 D982), and — since 2026-10-06, when it was
+  sixteen — `SetSwap` (§15 D983), and every one of them
   is **a no-op in `RenderOverrides::absorb`** (§6.2), deliberately — "the renderer
   has nothing to do with this" and "this changes nothing drawn" are one fact asked by two callers. Not
   one function, because `absorb` also has to separate the *patchable* ops from the structural ones and
   this question does not. ⚠️ **It is a subset and not an equality, and this bullet said *"the same
   eleven … if the two lists ever disagree, one of them is wrong"* until 2026-09-09** (§15 D659):
   `absorb` has a **second** no-op arm further down the same `match`, `AddImage | RemoveImage`, so its
-  no-ops are **eighteen** (thirteen until the component ops joined the first arm, fifteen until the
-  variant ops did). The two image ops answer `true` here and are absorbed there because
+  no-ops are **nineteen** (thirteen until the component ops joined the first arm, fifteen until the
+  variant ops did, eighteen until `SetSwap` did). The two image ops answer `true` here and are absorbed there because
   `RenderOverrides` has no image table to patch — *"cannot preview this"* rather than *"nothing to
   preview"* — which is written out at both ends. That matters beyond tidiness:
   `EditorSession::has_gesture_preview` is `!overrides.is_empty() && …`, so **every** transaction
@@ -4961,9 +5052,12 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   in a row is part of the row, so it is walked through and kept as a level of its own. Frames above
   the outermost group are trimmed — which keeps a top-level frame's contents directly clickable —
   unless the walk stopped at `inside`, below which everything is inside a group; and asked of `inside`
-  itself the answer is `[]`, a stepped-into frame being clicked on its background. The app also
+  itself the answer is `[]`, a stepped-into frame being clicked on its background. **An instance root
+  ends the trim as a group does**, whatever its kind (§5.3d, §15 D981 (b), D985), so a frame instance
+  is a rung and a click inside it selects it. The app also
   *subtracts* from the list before it walks up: `canvas::pick_leaf` drops any frame that has children
-  and no group above it (§9.4, §15 D22, D876). That is a picking policy, not a hit test — `hit_test`
+  and no group above it (§9.4, §15 D22, D876) — but not one that is an instance or sits inside one
+  (D985). That is a picking policy, not a hit test — `hit_test`
   still reports the frame, because a query asking what covers a point must answer honestly.
 
 ### 5.11 IO
@@ -5204,7 +5298,8 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   instead — a reason that held only if no release shipped between the two, and none did, so v5 is
   complete (§5.3d). **The variant fields joined it unbumped** (`set`, `variant`, `props`; §15 D982,
   2026-10-05) on the same reasoning: no release carries v5's components, so no released v5 reader
-  drops them.
+  drops them. So did `swap` and a property's `filter` (§15 D983, 2026-10-06), as the maintainer ruled
+  — *"No need. Nothing's been released."*
 - **Guides are verified too, but not against a tree** — there is none for one to corrupt. The loader
   rejects a malformed guide id, a duplicate one, and a non-finite position; a guide far off the side
   of the artwork is legal, because panning reaches it. Their ids come out of the same reservation
@@ -5678,10 +5773,10 @@ pub trait ScenePainter {
   cannot be scrubbed at all (§15 D245, D247).
 
   ⚠️ **There is a *second* no-op arm and no document mentioned it until 2026-09-09** (§15 D659):
-  `AddImage | RemoveImage`, which brings `absorb`'s no-ops to **eighteen** against `changes_ink`'s
-  sixteen (§5.7) — thirteen and eleven until `SetComponent` and `SetLink` joined the chrome arm on
+  `AddImage | RemoveImage`, which brings `absorb`'s no-ops to **nineteen** against `changes_ink`'s
+  seventeen (§5.7) — thirteen and eleven until `SetComponent` and `SetLink` joined the chrome arm on
   2026-10-04 (§15 D978), fifteen and thirteen until the three variant ops did on 2026-10-05 (§15
-  D982). It is **the only no-op here that is not also invisible** — an image op changes what is
+  D982), eighteen and sixteen until `SetSwap` did on 2026-10-06 (§15 D983). It is **the only no-op here that is not also invisible** — an image op changes what is
   drawn — and it is a no-op because `RenderOverrides` has no image table to patch, the two honest
   answers being this or refusing the whole preview. Refusing is worse: a transaction that places an
   image is `AddImage` *and* a `CreateNode`, so declining would blank the preview of the shape as well
@@ -5689,8 +5784,10 @@ pub trait ScenePainter {
   which nothing exercises yet — placing is a click, not a drag. *If something ever drags one, the fix
   is a preview table on the overrides, the shape `canvas_background` already has here.*
   `overrides.rs · every_no_op_of_absorb_is_a_no_op_and_two_of_them_still_change_ink` pins all
-  eighteen and asserts its own list lengths; what it cannot do is prove there is no nineteenth, which
-  needs a value of every `Operation` variant and is `op.rs`'s fixture's job.
+  nineteen and asserts its own list lengths; what it cannot do is prove there is no twentieth, which
+  needs a value of every `Operation` variant and is `op.rs`'s fixture's job. ⚠️ **That is not
+  hypothetical**: `SetSwap`'s first build added it to `op.rs`' list and not to this one, which went on
+  passing at eighteen — fixed the same day (§15 D983's amendment).
 
   Empty overrides reduce the walk to the committed document exactly — the world transforms it
   composes down the tree are bit-identical to `Resolved`'s, so export is unaffected. ⚠️ **That holds
@@ -7515,7 +7612,8 @@ under the parent down to the hovered row's elbow, and below that elbow the same 
 rest. That answers "which one is this inside" once, where a lit ladder down every ancestor answers "how
 deep is this", which the indent already says.
 
-**A selected row lights the same path in `color::SELECT`** — the blue its own kind glyph wears, so the
+**A selected row lights the same path in `color::SELECT`** — the blue its own kind glyph wears (a
+main's or an instance's hexagon excepted, which stays `text::STRONG`, §15 D981, D985), so the
 leg and the glyph are one statement about one layer, and a layer picked on the *canvas* lights its leg
 because `session.selection` is one selection for the whole app. Full strength rather than a tier of it:
 a dashed hairline inks 37% of its length, so the blue reads as a tint without being mixed as one.
@@ -12325,13 +12423,16 @@ exemption from the drag-aware click-away rule with it (see above).
 **An occupied frame is picked by its name, not by its background.** Every frame carries its name on
 the canvas, above its own top-left corner and outside the box so the tag never covers artwork — 5px
 in from the left edge, 5px between the bottom of the text and the top edge, 11pt, in `text::MUTED`
-or `color::SELECT` when that frame is selected, drawn under every other overlay bar the pixel grid.
+or `color::SELECT` when that frame is selected, drawn under every other overlay bar the pixel grid —
+except a component's: a main's tag is a neutral chip and an instance's carries an outline hexagon, and
+**neither ever takes `color::SELECT`**; a group main is tagged too (§5.3d, §15 D981, D985).
 That tag exists
 because a frame with anything in it is no longer directly clickable: `canvas::pick_leaf` skips it so
 its background passes the press through to the marquee (§5.10, §15 D22). **Not a frame with a group
 above it** (§15 D876): a card in a row is part of the row, so a click on its background selects the
 row and a press there drags it, the group chain deciding which level — which gives up the marquee
-from a card's background inside a row, even stepped into the card. An **empty** frame is still
+from a card's background inside a row, even stepped into the card. **Nor an instance, or a frame
+inside one** (§15 D981 (b), D985): an instance picks like a group, its empty background included. An **empty** frame is still
 clickable anywhere, and a frame that is *already* the selection stays draggable from anywhere inside
 it (`selected_frame_at`), so picking one by its name and then reaching for the middle of it does not
 rubber-band the selection away.
@@ -12355,7 +12456,8 @@ chain, a difference invisible until a card in a row became a rung. It calls `pic
 
 ⚠️ **And where two tags coincide, the one a click picks is the one the user can read** (§15 D554).
 `OndinApp::artboards` is depth-first in child order — paint order — so every reader of it takes the
-**last** match, and `canvas::frame_label_at` took the first until 2026-09-08. A page frame with a
+**last** match, and `canvas::frame_label_at` took the first until 2026-09-08 (both tag readers walk
+`OndinApp::tagged` since §15 D985, the same walk in the same order with group mains added). A page frame with a
 full-bleed header flush in its top-left corner puts both tags on exactly the same pixels, every tag
 sitting 5px in from its own frame's left edge; `draw_frame_labels` paints the inner one last, so
 *Header* is the only word legible there and the click selected `Page` — with `hover_target`, which
@@ -12513,7 +12615,9 @@ third value on one.
 the hit test found — that is the point of grouping, and it is what makes a group draggable as a
 unit. **A frame between groups is one of the levels** (§5.10, §15 D876): a click on the text in a
 card in a row selects the row, a double-click steps in to the card, the next to the text, and
-`Ctrl`+`Alt` is the card. `Ctrl` reaches straight through to the leaf however deep it sits; `Ctrl`+`Alt` picks the
+`Ctrl`+`Alt` is the card. **An instance is one of the levels too, whatever its kind** (§5.3d, §15
+D981 (b), D985).
+`Ctrl` reaches straight through to the leaf however deep it sits; `Ctrl`+`Alt` picks the
 immediate child of the outermost group, one level in rather than all the way. Over a selection
 handle band the key means a skew instead — handle bands are dispatched before deep-select, which is
 what left `Ctrl` free for that gesture (above). **Both also enter the

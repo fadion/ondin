@@ -2675,24 +2675,15 @@ impl OndinApp {
         if available.is_empty() {
             return;
         }
-        // 🚨 **This section still has no mixed state, and that half of
-        // `[S6.2-L1-05]` is deliberately open** (§15 D636). Over a selection whose
-        // runs disagree, every switch below draws **off** — because `set` resolves
-        // at `range.start`, i.e. the first run — so a selection half of which has
-        // `tnum` on reads as a column of dead switches. The Axes section beside it
-        // was the same and is fixed, because a *number* already had this panel's
-        // word for "I do not know": `mixed_text`'s dash, whose four other callers
-        // cover about ten fields in this file. **A switch does not**, and
-        // inventing a third knob state is a
-        // visual decision rather than a consistency repair — which is why it is
-        // named here and left. `ui::switch_row` and `ui::paint_switch` take `on:
-        // bool` and would both have to grow the state.
-        //
-        // ⚠️ **The write half is a separate ruling and is *not* what this comment
-        // is about**: a toggle over a mixed range writes `set.clone()` — the first
-        // run's whole list — plus the change, over the entire selection, so the
-        // other runs' features are dropped. Whether it should write only the tag
-        // it names or say that it flattens is the maintainer's call.
+        // **Over a selection whose runs disagree, each row reads per tag** (§15
+        // D752, closing the half of `[S6.2-L1-05]` that §15 D636 left open): `set`
+        // resolves at the first run, so a row whose tag the runs disagree about
+        // draws `ui::switch_row_mixed`'s word rather than the first run's knob, and
+        // a toggle over a range writes that one tag into each run's own list
+        // rather than the first run's whole list over all of them
+        // (`write_feature_tag`; a whole-node write flattens, by design). Both
+        // halves were the maintainer's ruling. This comment said both were still
+        // open until 2026-10-06, a month after they were fixed.
         let set = attr!(subject, Features, Features);
         let mut ordered: Vec<(Tag, FeatureLabel)> = available
             .iter()

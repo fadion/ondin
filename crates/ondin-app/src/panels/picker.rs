@@ -303,8 +303,9 @@ impl OndinApp {
             // subject's own list* — so a hex typed after a Shift-click widened
             // the selection recoloured the other frame's grid while keeping its
             // track count, on a row that had stopped being drawn. The `Effect`
-            // arm clones the anchor's whole `Vec`, which is why that one is worse
-            // and why fixing it did not reach this.
+            // arm cloned the anchor's whole `Vec`, which is why that one was worse
+            // and why fixing it did not reach this; it reads each subject's own
+            // list too since §15 D476.
             //
             // **`frame_subjects()` and not `selection.ids()`, which is the one
             // place this differs from the arm above**: the card is drawn over the

@@ -11,14 +11,16 @@
 //! over fields, so its row's dot is the bound field's override and its ↺ that
 //! field's reset.
 //!
-//! ⚠️ **Where the session departs from the mockup, open to overturning:** a value
+//! ⚠️ **Where the session departs from the mockup, accepted by the maintainer on
+//! 2026-10-06 (§15 D982):** a value
 //! is renamed, moved and deleted from a popup on its chip rather than edited in
 //! place and dragged (3B); a layer is bound from one line on the Component card —
 //! *Visibility* and *Content*, each a dropdown of the owner's properties — rather
 //! than from a `{}` button in the layers row, the Appearance card and the Type card
 //! (3J–3L), so no other card had to learn about properties; and a property's
 //! default is the main's own bound field, edited where that field is, so the define
-//! popover (3I) has no *Default* row.
+//! popover (3I) has no *Default* row; and a set's property name is a text field
+//! with a ×.
 
 use crate::app::OndinApp;
 use crate::theme::{self, icon};

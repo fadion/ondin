@@ -35,20 +35,28 @@ which is this file's own §9.5 lesson: **check the section before believing the 
 | --- | --- |
 | *Now · Images* | **Nothing open as of 2026-09-19.** The three Asset rows — *Embed*/*Link*, *Relink…* and *Embed all* — were **decided non-goals for v1** that day (§15 D819) and are in §0: all three waited on one missing thing, a gesture that **authors** a linked source, so they were ruled together. ⚠️ **The model keeps the subject** — `is_linked` and `tools::original_refusal`'s three-state reasoning stay, a foreign `.ondin` being able to put a link in front of the app. The section is the record of the v1 image build. |
 | *Now · SVG import* | **Built the day it was asked for**, all of it (§15 D394). What is left: ~~a `<filter>` that is more than one `<feGaussianBlur>`,~~ `<foreignObject>`, ~~CSS combinators,~~ the rejoined **paragraph**, ~~and an **elliptical radial gradient**~~ — each skipped or approximated *and reported*, so **nothing here is lost silently**. **Filters left this row on 2026-09-03 by being read whole** (§15 D411): the shadow chain, `<feDropShadow>` and the writer's identity `<feOffset/>`, which is what closes *Copy as SVG* for a shadow — until then every effect this app **exported** came back as nothing, reported and lost. ⚠️ **The same audit found the gradient's reason wrong** — not "the model holds circles" but a missing gradient transform, both backends already having the mechanism — **and it left this row the next day by being built** (§15 D412), the field landing on the brush rather than on `Fill` so a gradient-stroked shape gets it too. **`<textPath>` left this row on 2026-09-01 by being read** (§15 D406), hours after the writer started emitting it. ⚠️ **This row was stale in two directions when D405 read it**: it still listed per-run **font** properties as the one silent loss, which §15 D398 built hours after it was written, and it named the elliptical gradient, which appears nowhere in the section below — the file's own §9.5 lesson, twice in one row. **CSS combinators left this row on 2026-09-19 by being built** (§15 D806): compounds, the child combinator and a backtracking descendant walk, with what is still refused — sibling order, a pseudo-class, an attribute — reported once for the sheet as before, so the *skipped or approximated and reported* claim above is unchanged and covers a narrower set. ⚠️ **That leaves `<foreignObject>` and the paragraph**, and only the second of those is work: the section below has recorded `<foreignObject>` as a decided non-goal nobody has said the words for since 2026-09-03 (§15 D411). **The words were said on 2026-09-19 and it is in §0** (§15 D813), so **the rejoined paragraph is the whole of what is open here** — one item, for the first time since this row was written. **And it went on 2026-09-22 as a decided non-goal** (§15 D826), so **this section has nothing open**: the rejoin would have to invent the line height, and the only signal it could read is also exactly what a stack of separate labels in a foreign file looks like. ⚠️ **A file dialog is still not on the list and is still not a non-goal** — the section says so, and it is a sentence to write when someone wants it rather than a gap. |
-| *Now · Canvas* | **Nothing open as of 2026-09-22.** Both of the two that were left closed that day: the layer clipboard **crosses between two `ondin` windows** now (§15 D823), through `ondin_core::io::clip` and the document schema's own `NodeDto`; and the context-menu test's last clause is written (§15 D824) — 🚨 **by a *second* test rather than by the widening `context-menus.md` §10 asked for**, since `escape` pays out one rung per press and in the wider fixture that rung is `entered_group`, so widening the first test would have left it asserting nothing under its own flip. *The text below is the row as it stood before.* **Two, as of 2026-09-19, and neither is a gesture**: the layer clipboard not crossing between two `ondin` windows, and one clause of one context-menu test, kept in `context-menus.md` §10 — that file's Escape bullet asks for `entered_group` and the tool as well as the selection. 🚨 **`Event::Zoom` and touchscreen pinch left this row for *Later* on 2026-09-19** (§15 D822): neither can be built *or tested* on this machine, and the trigger is stated — a Mac, or a touch device. **C5's edge clause closed the same day** (§15 D816), by a new last link on `pick_at_pointer` rather than the widening this file proposed, which would have made a selected frame's interior a target. ⚠️ *The row below is kept because its qualifier is the lesson.* `Event::Zoom` (a macOS portability item, untestable here) and touchscreen pinch (needs a touchscreen) — **nothing else** *of the gestures*, as of 2026-09-01: the extreme-zoom crash closed with §15 D402 and the last unbounded term with **D403**, hours apart. ⚠️ **Two context-menu items were open under this section as of 2026-09-07** and the *"nothing else"* predates both — a frame's *Background…*, and C5's edge clause (§15 D469), which are decisions rather than work. **The first was ruled on 2026-09-19 and is a decided non-goal** (§15 D800), so C5's edge clause is what is left of the pair — **and it was answered hours later** (§15 D816), so neither survives. 🚨 **Four context-menu tests plus a ruler-origin test were added here on 2026-09-09** (`[A7-L8-06]`) as the only **work** in this row, and both are **closed 2026-09-19** — §15 D795 and D797 — leaving the one decision above. They had been queued in `context-menus.md` §10, §15 **D214** (this row said D226, which is the panel's *Paste* slot) and §15 D36, and in none of them was this table or the section bullet. *The row said "nothing else of the gestures" and was scoped so narrowly that it stayed technically true through three additions; a qualifier that survives everything is not doing the job.* |
-| *Now · Text* | **Nothing open as of 2026-09-22**, the four deferred features having been ruled on that day (§15 D825): tab stops, columns and widow/orphan control are **decided non-goals** in §0, and justify-all is in *Later · Parked decisions*, **blocked upstream** — which is the split the entry exists for, since its trigger is a patch to parley and not a ruling here. ⚠️ **What is left is not an item**: the paragraph scope's absence from the MCP snapshot is parked with MCP, and §15 D171's watch-note is a thing to read when a symptom appears. 🚨 **Do not put a count back on this row** — *a count of items is what goes wrong when one of them is a note*, which is this table's own lesson from the *Inspector* row and has now bitten this section's opener twice. *The text below is the row as it stood before.* Justify-all, tab stops, columns, widow/orphan — **four** now, and **not one of them is short of a dependency**; hyphenation was the last to hold that claim, lost it on 2026-09-01 and left this row the same day for §0 as a decided non-goal (§15 D399), and **text-on-path left it hours later by being built** (§15 D405). Plus the paragraph scope's absence from the MCP snapshot, parked with MCP — to which D405 adds `on_path` itself. ⚠️ **And one line to suspect if the canvas ever looks a frame stale during a text session** (§15 D171), which this row had never named. **Whether a chord stops where its field stops was ruled on 2026-09-19** (§15 D817) — it does, and the bound is at the **arm** and deliberately not at `TextStyle::set`, these caps being on the controls rather than on the model. |
-| *Now · Inspector* | **Nothing open as of 2026-09-19**, `char_valve`'s third arm having been ruled on and **deleted** that day (§15 D812) — on a *read* of the five unmeasured call sites rather than a third measurement, all seven being engagement-bearing with both `DragValue` helpers opted out of egui's clamp (§15 D425, D552), so the arm had no live user at all. *The row below is the history of a count that was wrong in three directions.* **One item** as of 2026-09-19, the hex field's routing and the menu-row border having left this row: `[S14.4-L1-04]`'s open half was answered with the **sentence** it asked for rather than with the valve (§15 D808) — `parse_hex` accepts three digits, so a half-typed hex is a real colour and there is nothing a valve could preview. 🚨 **The item's own premise was false while it stood** — it read *"there is nothing measured left to fix"*, and `Escape` was committing a typed colour at that field and at three others beside it, nobody having pressed the other key at any of them. What is left: `char_valve`'s third arm, **which as of 2026-09-19 is a maintainer question and no longer a test** — §15 D802 wrote the test D523 asked for and found the picker's raw sensed regions do not reach the arm at all, and §15 D803 the same day found the one thing that *does* reach it: an egui clamp rewrite `ui::value_field_f64` already opts out of, which makes deleting the arm a second defence against `[S6.2-L1-01]` rather than tidying, so what is open is that ruling. ⚠️ **The menu-row border was never work, and this row counted it as an item for ten days**: this row gained it on 2026-09-09 by being corrected against the section, and the section's bullet had been a standing trap rather than an item since the day it was written — everything in it was in `ui::menu_rows`' and `ui::MENU_ROW_H`'s own docs already, and the one sentence that was not is a paragraph on `ui::MENU_ITEM_H` now (§15 D811). *A count of items is what goes wrong when one of them is a note*, which is this row's own §9.5 lesson from a third direction. 🚨 **This row was stale in *two* directions on 2026-09-09 and was corrected by `arch-scribe` reading it against the section.** It named the multi Transform card's **angle** fields, which §15 **D628** closed and struck from the section that same day, and it did not name the menu-row border, which had been the section's third bullet all along — so *"every one is a remainder of a landed fix"* and *"all three are valve remainders"* were both false. **A row that summarises a section is a second copy of it**, and this is §9.5's lesson at the table rather than in a bullet. |
+| *Now · Canvas* | **Open as of 2026-10-06**, each a live *Fix* this file had never carried, added when the roadmap was made to list every open item the record holds: a locked frame selectable by its name tag (§15 D839), the mask-as-rail guards wanting one question (D456), the railed-text resize rule in two arms (D472), and the guide commit table's untested Alt-drag arm (D474). *The text below is the row as it stood that morning.* **One item as of 2026-10-06**: a locked frame selectable by its name tag, §15 D839's *Fix*, which this file had never carried — added when the roadmap was made to list every open item the record holds. *The text below is the row as it stood before.* **Nothing open as of 2026-09-22.** Both of the two that were left closed that day: the layer clipboard **crosses between two `ondin` windows** now (§15 D823), through `ondin_core::io::clip` and the document schema's own `NodeDto`; and the context-menu test's last clause is written (§15 D824) — 🚨 **by a *second* test rather than by the widening `context-menus.md` §10 asked for**, since `escape` pays out one rung per press and in the wider fixture that rung is `entered_group`, so widening the first test would have left it asserting nothing under its own flip. *The text below is the row as it stood before.* **Two, as of 2026-09-19, and neither is a gesture**: the layer clipboard not crossing between two `ondin` windows, and one clause of one context-menu test, kept in `context-menus.md` §10 — that file's Escape bullet asks for `entered_group` and the tool as well as the selection. 🚨 **`Event::Zoom` and touchscreen pinch left this row for *Later* on 2026-09-19** (§15 D822): neither can be built *or tested* on this machine, and the trigger is stated — a Mac, or a touch device. **C5's edge clause closed the same day** (§15 D816), by a new last link on `pick_at_pointer` rather than the widening this file proposed, which would have made a selected frame's interior a target. ⚠️ *The row below is kept because its qualifier is the lesson.* `Event::Zoom` (a macOS portability item, untestable here) and touchscreen pinch (needs a touchscreen) — **nothing else** *of the gestures*, as of 2026-09-01: the extreme-zoom crash closed with §15 D402 and the last unbounded term with **D403**, hours apart. ⚠️ **Two context-menu items were open under this section as of 2026-09-07** and the *"nothing else"* predates both — a frame's *Background…*, and C5's edge clause (§15 D469), which are decisions rather than work. **The first was ruled on 2026-09-19 and is a decided non-goal** (§15 D800), so C5's edge clause is what is left of the pair — **and it was answered hours later** (§15 D816), so neither survives. 🚨 **Four context-menu tests plus a ruler-origin test were added here on 2026-09-09** (`[A7-L8-06]`) as the only **work** in this row, and both are **closed 2026-09-19** — §15 D795 and D797 — leaving the one decision above. They had been queued in `context-menus.md` §10, §15 **D214** (this row said D226, which is the panel's *Paste* slot) and §15 D36, and in none of them was this table or the section bullet. *The row said "nothing else of the gestures" and was scoped so narrowly that it stayed technically true through three additions; a qualifier that survives everything is not doing the job.* |
+| *Now · Text* | **One item as of 2026-10-06**: whitespace-only content's min-content width, §15 D931's open edge, which this file had never carried — added when the roadmap was made to list every open item the record holds. *The text below is the row as it stood before.* **Nothing open as of 2026-09-22**, the four deferred features having been ruled on that day (§15 D825): tab stops, columns and widow/orphan control are **decided non-goals** in §0, and justify-all is in *Later · Parked decisions*, **blocked upstream** — which is the split the entry exists for, since its trigger is a patch to parley and not a ruling here. ⚠️ **What is left is not an item**: the paragraph scope's absence from the MCP snapshot is parked with MCP, and §15 D171's watch-note is a thing to read when a symptom appears. 🚨 **Do not put a count back on this row** — *a count of items is what goes wrong when one of them is a note*, which is this table's own lesson from the *Inspector* row and has now bitten this section's opener twice. *The text below is the row as it stood before.* Justify-all, tab stops, columns, widow/orphan — **four** now, and **not one of them is short of a dependency**; hyphenation was the last to hold that claim, lost it on 2026-09-01 and left this row the same day for §0 as a decided non-goal (§15 D399), and **text-on-path left it hours later by being built** (§15 D405). Plus the paragraph scope's absence from the MCP snapshot, parked with MCP — to which D405 adds `on_path` itself. ⚠️ **And one line to suspect if the canvas ever looks a frame stale during a text session** (§15 D171), which this row had never named. **Whether a chord stops where its field stops was ruled on 2026-09-19** (§15 D817) — it does, and the bound is at the **arm** and deliberately not at `TextStyle::set`, these caps being on the controls rather than on the model. |
+| *Now · Inspector* | **One item as of 2026-10-06**: *Flatten*'s one refusal sentence, §15 D734's *Fix*, which this file had never carried — added when the roadmap was made to list every open item the record holds. *The text below is the row as it stood before.* **Nothing open as of 2026-09-19**, `char_valve`'s third arm having been ruled on and **deleted** that day (§15 D812) — on a *read* of the five unmeasured call sites rather than a third measurement, all seven being engagement-bearing with both `DragValue` helpers opted out of egui's clamp (§15 D425, D552), so the arm had no live user at all. *The row below is the history of a count that was wrong in three directions.* **One item** as of 2026-09-19, the hex field's routing and the menu-row border having left this row: `[S14.4-L1-04]`'s open half was answered with the **sentence** it asked for rather than with the valve (§15 D808) — `parse_hex` accepts three digits, so a half-typed hex is a real colour and there is nothing a valve could preview. 🚨 **The item's own premise was false while it stood** — it read *"there is nothing measured left to fix"*, and `Escape` was committing a typed colour at that field and at three others beside it, nobody having pressed the other key at any of them. What is left: `char_valve`'s third arm, **which as of 2026-09-19 is a maintainer question and no longer a test** — §15 D802 wrote the test D523 asked for and found the picker's raw sensed regions do not reach the arm at all, and §15 D803 the same day found the one thing that *does* reach it: an egui clamp rewrite `ui::value_field_f64` already opts out of, which makes deleting the arm a second defence against `[S6.2-L1-01]` rather than tidying, so what is open is that ruling. ⚠️ **The menu-row border was never work, and this row counted it as an item for ten days**: this row gained it on 2026-09-09 by being corrected against the section, and the section's bullet had been a standing trap rather than an item since the day it was written — everything in it was in `ui::menu_rows`' and `ui::MENU_ROW_H`'s own docs already, and the one sentence that was not is a paragraph on `ui::MENU_ITEM_H` now (§15 D811). *A count of items is what goes wrong when one of them is a note*, which is this row's own §9.5 lesson from a third direction. 🚨 **This row was stale in *two* directions on 2026-09-09 and was corrected by `arch-scribe` reading it against the section.** It named the multi Transform card's **angle** fields, which §15 **D628** closed and struck from the section that same day, and it did not name the menu-row border, which had been the section's third bullet all along — so *"every one is a remainder of a landed fix"* and *"all three are valve remainders"* were both false. **A row that summarises a section is a second copy of it**, and this is §9.5's lesson at the table rather than in a bullet. |
 | *Now · Path editing* | **Nothing open as of 2026-09-22.** The one item — whole-path geometry patches — **moved to *Later · Parked decisions*** that day: it is non-blocking with a stated trigger (revisited *with* MCP, which is parked), which is what *Later* is for by this file's own table above. ⚠️ **That honours §15 D123's closing note rather than breaking it** — the note asks for it to stay *"in the todo as a decision rather than a gap"*, and it stays in this file; what changes is that it stops sitting under a heading meaning *open work on live code*. ⚠️ **The `retain_valid`/`subpath_lengths` pair left this row on 2026-09-19**, ruled to the narrow `#[allow(dead_code)]` with the no-effect call removed (§15 D637, *Resolved*) — it had been here since 2026-09-09. |
-| *Now · Files, library and storage* | **Nothing open as of 2026-09-23** — the cover cache's lifecycle, opened that day while closing §15 D862, closed the same day: `Covers::pass` drains once a dashboard pass and the project mosaic asks only on screen (§15 D863), and textures past a cap of 128 go least recently asked-for first (§15 D864). *The text below is the row as it stood that morning.* **One item as of 2026-09-23**: the cover cache's lifecycle — no texture is ever evicted, `drain` runs only when a card asks, and the project mosaic is ungated. Found while closing §15 D862; no behaviour is wrong, it is memory and wasted repaints. *The text below is the row as it stood before.* **Nothing open as of 2026-09-19** — the last two closed that day: the cover render moved onto **a worker of its own** rather than onto `Writer`'s FIFO queue, `FRAME_BUDGET` deleted with what it bounded (§15 D820), and **rollback was refused outright** and is a §0 non-goal, the retry being the recovery (§15 D814). 🚨 **The threading then flaked a *dashboard* test 2 runs in 20**, found by running the filter twenty times after six clean runs had said nothing. *The text below is the row as it stood that morning.* **Two**, as of 2026-09-19: a dashboard cover rendered synchronously on the UI thread, which needs a thread, and **rollback** after a partly-failed migration, which needs a ruling. **Three left this row that day.** The non-Unicode filename was **reproduced** — a lone UTF-16 surrogate, which NTFS accepts and `to_str` refuses — and the migration now carries such a file by its `OsStr` name (§15 D809); the per-machine index has an injection point, and it is a `cfg!` rather than any of the four answers the bullet proposed (§15 D807); and the partly-failed migration got its list in the modal and a *Try again* button, leaving only the third of its three asks (§15 D810). ⚠️ **This row said *"Three, all from the codebase review"* while the section held four**, the migration bullet never having been named in it — so it was short by one from the day it was written and the arithmetic in it was never a count of anything. ⚠️ **This row did not exist until 2026-09-09** and the section had held open work since 2026-09-06; the *"nothing open"* line below was the half that got corrected first, and a missing row is the same failure with nothing to contradict. |
+| *Now · Files, library and storage* | **One item as of 2026-10-06**: the project cards' hand-rolled footers, §15 D719's *Fix*, which this file had never carried — added when the roadmap was made to list every open item the record holds. *The text below is the row as it stood before.* **Nothing open as of 2026-09-23** — the cover cache's lifecycle, opened that day while closing §15 D862, closed the same day: `Covers::pass` drains once a dashboard pass and the project mosaic asks only on screen (§15 D863), and textures past a cap of 128 go least recently asked-for first (§15 D864). *The text below is the row as it stood that morning.* **One item as of 2026-09-23**: the cover cache's lifecycle — no texture is ever evicted, `drain` runs only when a card asks, and the project mosaic is ungated. Found while closing §15 D862; no behaviour is wrong, it is memory and wasted repaints. *The text below is the row as it stood before.* **Nothing open as of 2026-09-19** — the last two closed that day: the cover render moved onto **a worker of its own** rather than onto `Writer`'s FIFO queue, `FRAME_BUDGET` deleted with what it bounded (§15 D820), and **rollback was refused outright** and is a §0 non-goal, the retry being the recovery (§15 D814). 🚨 **The threading then flaked a *dashboard* test 2 runs in 20**, found by running the filter twenty times after six clean runs had said nothing. *The text below is the row as it stood that morning.* **Two**, as of 2026-09-19: a dashboard cover rendered synchronously on the UI thread, which needs a thread, and **rollback** after a partly-failed migration, which needs a ruling. **Three left this row that day.** The non-Unicode filename was **reproduced** — a lone UTF-16 surrogate, which NTFS accepts and `to_str` refuses — and the migration now carries such a file by its `OsStr` name (§15 D809); the per-machine index has an injection point, and it is a `cfg!` rather than any of the four answers the bullet proposed (§15 D807); and the partly-failed migration got its list in the modal and a *Try again* button, leaving only the third of its three asks (§15 D810). ⚠️ **This row said *"Three, all from the codebase review"* while the section held four**, the migration bullet never having been named in it — so it was short by one from the day it was written and the arithmetic in it was never a count of anything. ⚠️ **This row did not exist until 2026-09-09** and the section had held open work since 2026-09-06; the *"nothing open"* line below was the half that got corrected first, and a missing row is the same failure with nothing to contradict. |
 | *Now · Text alignment* | **Nothing open as of 2026-09-22.** Side bearings / optical margin alignment moved to *Later · Parked decisions*, undecided — it had been filed `Later:` inside a `Now` section since the section was written, which is the prefix table broken from the inside — **and was built hours later the same day** (§15 D830): both edges, `ParagraphStyle::optical_margins`, off by default, one adjustment to the line's geometry that no arm of reads `align`. ⚠️ **The bullet's own example was backwards the whole time it stood** — it blamed `H` for having *almost no* left bearing, and `H` has the largest of the capitals measured. ⚠️ *This row said "Side bearings / optical margin alignment, marked **Later**" and was perfectly accurate for weeks — it described the bullet exactly, including the contradiction, and that is why nobody acted on it.* What is left in the section is one standing rule: don't use ink bounds for alignment — **which D830 does not break, and which now says it is about the *datum***. |
 | *Now · Distribution* | **Nothing open as of 2026-10-04** — both items closed the day they opened: the release job split so its build steps hold no write token (§15 D976), and the single-package rpm route's waiver narrowed to the file (§15 D977). *The text below is the row as it stood before.* **Two open as of 2026-10-04**, both left by §15 D974's hardening of the release review's findings: the release job is not yet split so that the build steps hold no write token (`[X3-L5-03]`'s last bullet), and the single-package rpm route's `dnf install --nogpgcheck` still waives checking for the whole transaction (`[X3-L5-04]`). And it has run: CI was green on all three legs at `e1f1842`, and v0.4.0's Release workflow built and published every platform; the tag's Pages publish was refused by the `github-pages` environment's `main`-only rule and published from `main`, and the environment admits `v*` tags since `430ed7e`. *The text below is the row as it stood before.* **Nothing open as of 2026-10-03.** Its one item, the package repositories' signing key, opened and closed that day (§15 D957): the maintainer generated the key, set `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE` and turned Pages on, and the fingerprint is in `install.sh` and `README.md`. ⚠️ **Nothing has run** — the first tagged Release is the first time `pages.yml` builds the site, and the first check that the secret's key is the one the fingerprint names. That is the release skill's to do, not an item. |
-| *Next · Container layout* | **Opened 2026-09-23 and designed** (§15 D867–D873): five steps — used geometry behind an identity pass, absolute insets, flex, grid, then components — plus the decisions still open. **Steps 1 and 2 are built** (2026-09-24, §15 D868, D874) — step 2 with its inspector card, so pinning shipped; **step 3, flex, is built** the same day (§15 D875–D877), its inspector cards last (§15 D878–D883), and frames under groups with it (§15 D876) — and the maintainer's first look at the cards came back with seven findings, answered in session 36 (2026-09-26, §15 D884–D889), and the Position card then laid out as the mockup and refined (2026-09-27, §15 D890–D891). **Step 3 committed 2026-09-27**, and the maintainer's six rulings on what flex had left the same day (§15 D892–D897); flex owes nothing since 2026-09-28, the section's *owed* paragraph of tests having landed and been struck (§15 D901's amendment) — its *open* decisions, all grid's, answered before grid's code (§15 D913); **step 4's model and engine built 2026-09-27** (§15 D914), the question it left for the maintainer ruled the same day (§15 D915), and its preview and gestures built (§15 D916), several grid items dragged together moving as a block since (§15 D918), and its cards built (§15 D920), what the sub-steps before them left closed first (§15 D919), and its canvas track lines built 2026-09-28 (§15 D921). The only `Next` section in the file, and not a `Now`, because what is left in it is step 5 — **designed 2026-10-04, its build steps 1–4 (item ids, the component model, the verbs, field and structural propagation) built the same day, step 5's resets, their two menu rows, the component card and the override look on the inspector's cards and lists built, step 6 (live preview) built, the four defects read in it fixed, step 7 (variants and properties) built on 2026-10-05, the mockup accepted with D979's rulings held over it, instance swap and a nested copy's switch ruled the same day and built on 2026-10-06, and the set's `+`, the variant rows and D981's canvas and layers chrome built the same day, the three defects read in them fixed with it, and the menu rows placed — so step 5 owes nothing but exposing nested properties, later by the mockup, beside one open question of exact equality** (§15 D978–D985; `architecture.md` §5.3d), its seven-part order of work in the section: the maintainer's first look at step 4, the last item on its handoff list since 2026-09-29, came back on 2026-10-02 with two findings, both fixed (§15 D926, D927), the owed tests and what was named and left alone having closed on 2026-09-29 (§15 D921's second amendment, D923–D925). |
-| *Later* | The command palette and cheatsheet; the parked decisions; post-v1 (MCP, Command Mode, multiplayer). |
+| *Now · Core, rendering and export* | **Opened 2026-10-06**, each item a live *Fix* in §15 with no feature section here and never carried in this file: core's dependency gate still a denylist (§15 D427), a finite absurd blur accepted at the operation (D454), a descending ramp left descending on load (D455), three rules stated in more than one place (D458, D460, D473), and a sweep gradient's literal radius in SVG (D762). |
+| *Next · Nested component properties* | **One item, opened 2026-10-06**: exposing a nested instance's component properties on the instance that holds it — later by §15 D982, and waiting on its mockup. **The section it came from, *Next · Container layout*, closed into §15 the same day** (D867's amendment): its five steps — used geometry, absolute insets, flex, grid, components — are all built, §15 D867–D927 and D978–D985 their record and `architecture.md` §5.3c and §5.3d their design; the one other thing it held open, exact equality against the commit's arithmetic for a pass not yet written, is a question for that pass and lives in §5.3d and D979. |
+| *Next · The polishing pass over the accepted calls* | **One item, opened 2026-10-06**: the maintainer's review of every call accepted wholesale that day (§15's header). |
+| *Later* | Components and layout past the first build (pushing to a main, un-making a component, §5.3c's deferred properties — opened 2026-10-06); the command palette and cheatsheet; the parked decisions, which gained four on 2026-10-06 (components' unruled questions, the 32-row menu, `AltGr`, the chrome's keyboard traversal); post-v1 (MCP, which gained the snapshot's questions the same day, Command Mode, multiplayer). |
 
-**Sections with nothing open**: *Doc drift*, *Now · Images*, *Now · Inspector*, *Now · Keyboard*,
-*Now · Canvas and interaction*, *Now · SVG import*, *Now · Text*, *Now · Path editing*, *Now · Text
-alignment and measurement*, *Now · Files, library and storage*, *Now · Distribution*. **That is
-every `Now` section** again: *Now · Distribution* opened on 2026-10-03 with the repositories' signing
+**Sections with nothing open**: *Now · Images*, *Now · SVG import*, *Now · Path editing*, *Now · Text
+alignment and measurement*, *Now · Distribution*. **Five more came off this line later on
+2026-10-06** — *Doc drift*, *Now · Inspector*, *Now · Keyboard*, *Now · Text* and *Now · Files,
+library and storage* — when the record's older live *Fix* verdicts were read against the code and
+each of those sections was found holding one, or an open edge, it had never carried; *Now · Core,
+rendering and export* opened the same day for the ones with no feature section. ~~**That is every
+`Now` section but *Canvas and interaction***~~, as this line read that morning: *Canvas* had come off
+it the same day with §15 D839's name-tag *Fix* — open since
+2026-09-22 and never carried here, so the line had been wrong for a fortnight. It was every `Now`
+section before that: *Now · Distribution* opened on 2026-10-03 with the repositories' signing
 key and came off the same day, when the maintainer generated it (§15 D957), and opened again on
 2026-10-04 with the two items §15 D974 left and came off the same day (§15 D976, D977).
 **It had been every `Now` section from 2026-09-23 until then**: *Now · Files, library and storage* came off on 2026-09-23 with the cover cache's lifecycle
@@ -435,11 +443,12 @@ contradicted it.
 
 *Auto layout, constraints and components* left the list on 2026-09-23, and not as non-goals reversed
 on the merits: the maintainer settled that "v1" in these documents names the phase in which the basic
-editing tools were finished, not a release tag, and that phase is over. **Layout is designed and is
-*Next · Container layout* below** — CSS flexbox and CSS grid under CSS's names, with constraints as
+editing tools were finished, not a release tag, and that phase is over. **Layout was designed and
+built as *Next · Container layout*** — CSS flexbox and CSS grid under CSS's names, with constraints as
 CSS absolute insets rather than a feature of their own (§15 D867, D871). **Components and overrides
-follow it**, as the last step of that section's build order. Neither is open work on shipped code,
-which is why they are under *Next* and not *Now*. ⚠️ ***Persistent* constraints in
+followed it**, as the last step of that section's build order (§15 D978–D985). Every step is built,
+and the section closed into §15 on 2026-10-06 (D867's amendment); what it left open is *Next · Nested
+component properties* below. ⚠️ ***Persistent* constraints in
 `architecture.md` §13's sense — a dependency graph between arbitrary properties — are a different
 feature and did not leave with them**; that document's §1 still defers them.
 
@@ -791,6 +800,24 @@ function it named.
   trigger that would re-open the question — a real ~10k-node selection, or a way to cache through the
   preview door. `[S4.2-L4-05]`'s perimeter cache closes with it, its own sketch having read *"cache
   the perimeter beside the outline **if** `[S4.2-L4-04]`'s map is built; otherwise leave it"*.
+- **A locked frame is still selectable by its name tag, and which repair to make is undecided** (§15
+  D839's *Fix*, `architecture.md` §9.4's lock rule). `canvas::frame_label_at` asks `shown_visible` and
+  no lock — read on 2026-10-06 — so §9.4's *"the canvas never selects a locked layer, by any gesture"*
+  is false at the tag. D839 has the two repairs and why they are not symmetric; **the choice between
+  them is the open part**, and it is a decision before it is work. *Added 2026-10-06: a live* Fix *since
+  2026-09-22 that this file never carried.*
+- **A mask is kept off a rail by guards at each door rather than by one question** (§15 D456's *Fix*).
+  `query::outline_at` asks `masked_away` and `build::text_on_new_path` refuses a node with its `mask`
+  flag set, beside that builder's own refusal of a frame — three roles that reached it as ordinary
+  kinds, an operand, a frame and a mask. The entry's fix is one question asking whether the thing
+  being consumed is artwork. *Added 2026-10-06, as the three below: a live* Fix *since 2026-09-07.*
+- **The railed-text resize rule sits in two arms of `tools/mod.rs`** (§15 D472's *Fix*):
+  `resize_to_handle`'s rail arm derives its boxes through `anchored_box` over `Resolved`, and
+  `scale_geometry`'s through `railed_box`. One statement of it before a third door needs a third copy.
+- **One arm of the guide commit table has no test caller** (§15 D474's *Fix*): `finish_guide_drag`'s
+  `(Some(id), false) if d.copying` — an Alt-dragged copy released over the canvas, where the copy is
+  minted. `rulers::the_guide_commit_table_answers_each_of_its_arms` drives the other arms in pairs and
+  not this one; the entry asks for a fourth pair.
 
 ---
 
@@ -897,6 +924,12 @@ neither is a 🚨 paragraph on `ui::MENU_ITEM_H` now: *"any new dropdown"* was *
 height is an **argument** being in the other family and owing neither the helper nor the padding. A
 standing trap is a doc comment's job; this file holds open work.
 
+- **The boolean row's *Flatten* gives one sentence for three refusals** (§15 D734's *Fix*).
+  `OndinApp::flatten_selection` answers *"Select a boolean, or two or more layers, to flatten"*
+  whatever `booleanable_selection` refused, so it is the one control on that row that cannot say
+  why; the fix is to show the `Err` the predicate already computes. *Added 2026-10-06: a live* Fix
+  *since 2026-09-10 that this file never carried.*
+
 ## Now · Keyboard
 
 **The whole keymap — bound, unbound and agreed — is now `shortcuts.md`.** It was specced and
@@ -928,9 +961,21 @@ ever wants it, the order should become a function rather than a third copy.
   guards term for term, and 🚨 **the finishing went to `OndinApp::dispatch` rather than into the
   keymap**, because ending a session first is a fact about the *action* and not about the key — the
   buttons already spelled it there, and a guard in the keymap would be a second copy the next door
-  onto `Undo` would miss. This section has nothing open.
+  onto `Undo` would miss. ~~This section has nothing open.~~ It had nothing open until the item
+  below was added on 2026-10-06.
+- **"A value in flight carries its subject" is written out twice** (§15 D470's *Fix*): the typed
+  opacity digit's `OpacityEntry` carries the layers it was typed against, and
+  `InFlight::session_scrub` carries its node with its lists, each stating the rule on its own. The
+  entry's verdict asks for one statement of it. *Added 2026-10-06: a live* Fix *since 2026-09-07 that
+  this file never carried.*
 
 ## Now · Text
+
+- **Whitespace-only text claims a min-content width its auto box does not have** (§15 D931's *Not
+  fixed*, its verdict *the whitespace edge **open***): content of `"   "` reports a min of 8.89 while
+  its auto box is 0 wide — the figure container layout's measure reads (§15 D872). Read against
+  `text::content_widths` on 2026-10-06, which has no case for it — not re-run. *Added 2026-10-06: open
+  since 2026-10-03 and never carried here; the paragraph below is the section as it stood before.*
 
 **Nothing here is open work as of 2026-09-22**, the four deferred features having been ruled on that
 day (§15 D825): tab stops, columns and widow/orphan control are decided non-goals in §0, and
@@ -1222,10 +1267,19 @@ left:
   is a *unification* worth doing only if the snapshot ever reads a live service, and is not a defect
   in either warning today. Recorded so nobody re-derives the three-state design for a consumer that
   does not need it.
-**Nothing else is open here.** The golden-files claim (corrected at seven sites, built for SVG and
-JSON in §15 D304, the PNG third parked below), the `D103` numbering collision and the missing-font
-warning's UI half all closed 2026-08-19 to 2026-08-22 and are gone rather than struck. **The bullet
-above is a note against re-deriving, not work.**
+- **Hand-written checks whose clean readings the record trusts and nobody has controlled** (§15
+  D827's and D828's *Fix*). D827 controlled ten of `CLAUDE.md`'s commands and found three
+  incapable of a hit; the `///`-run ranking it could not control, having no literal form, has one
+  since (`docrun.awk`, controlled both ways, per `CLAUDE.md`). **Left**: the commands of `review/`'s
+  census beyond the one reading D827 ran, and D828's three greps standing in for
+  `clippy::duplicated_attributes`, which is silent inside every `impl` block — each to be run against
+  a fixture that must match and one that must not. *Added 2026-10-06: live* Fix *verdicts since
+  2026-09-22 that this file never carried.*
+~~**Nothing else is open here.**~~ **Nothing else was open here until 2026-10-06.** The golden-files
+claim (corrected at seven sites, built for SVG and JSON in §15 D304, the PNG third parked below), the
+`D103` numbering collision and the missing-font warning's UI half all closed 2026-08-19 to 2026-08-22
+and are gone rather than struck. **The font-warnings bullet above is a note against re-deriving, not
+work; the hand-written-checks bullet is work.**
 
 ---
 
@@ -1277,6 +1331,13 @@ until 2026-08-03; D125's closing note is about something else, namely `pen_verb`
 the last untested decision in the path-editing work and is now pinned — §15 D318.)
 
 ## Now · Files, library and storage
+
+- **The two project cards still hand-roll their footers** (§15 D719's *Fix*): `new_project_modal` and
+  `edit_project_modal` draw their own button pair rather than calling `settings::modal_footer`, so one
+  footer is written three times. The *Edit project* card's commit is lit on
+  `EditProject::differs_from` since D719, so the copies agree on the rule and not on the drawing; the
+  fold is a layout change, not a behavioural one. *Added 2026-10-06: a live* Fix *since 2026-09-10
+  that this file never carried; the paragraph below is the section as it stood before.*
 
 **Nothing is open here as of 2026-09-23.** The cover cache's lifecycle — the struck bullet directly
 below, left behind by §15 D862 closing the release review's last finding — was opened and closed
@@ -1459,186 +1520,75 @@ job is split so its build steps hold a read-only token and one `publish` job wri
 single-package rpm route waives the signature check for the downloaded file alone (§15 D977). Both
 shipped in **v0.4.1** the same day, the first release built through the split, green end to end.
 
-## Next · Container layout (flexbox, grid, absolute insets)
+## Now · Core, rendering and export
 
-**Designed 2026-09-23; steps 1, 2 and 3 built 2026-09-24** (§15 D868, D874 and D875–D883 have
-what, and are their record now).
-`architecture.md` §5.3c is the design and §15 **D867–D873** its decisions — CSS semantics under
-CSS's names, taffy as the engine, layout derived in `Resolved` and never saved, groups taking
-`display`, a frame allowed under any group, constraints as absolute insets, shapes as replaced
-elements. **This section is the order of work and what is still open; it
-restates none of those.** ⚠️ *Grid* here is the CSS grid container — not §5.3b's layout grids, which
-are chrome.
+**Opened 2026-10-06, when the roadmap was made to list every open item the record holds.** Each item
+is a live *Fix* in §15 that this file never carried, read against the code that day, and none has a
+feature section of its own here. None is met in ordinary work — each is a hostile or hand-edited input,
+a gate narrower than its rule, or a rule stated in more places than one — and each entry has the
+argument, which nothing here restates.
 
-1. ~~Route every geometry consumer through used geometry, behind an identity layout pass.~~ **Built
-   2026-09-24**; §15 D868 is the record.
-2. ~~Absolute insets on frames — constraints, with the inspector card.~~ **Built 2026-09-24**; §15
-   D874 is the record.
-3. **Flex**, with live reflow during gestures and reorder by drag. **BUILT AND COMMITTED
-   2026-09-27** (`30d8b3d` the code, `e48eec3` the record) — the block below was the handoff marker
-   of sessions 35 and 36 and is kept as the account of how the step closed. **Flex owes nothing
-   now**: the tests the *owed* paragraph after this list carried landed 2026-09-28 (§15 D901's
-   amendment) and it is struck; the *open* one, grid's since §15 D892–D897, was answered before grid's
-   code and is struck (§15 D913).
+- **Core's dependency gate is still a denylist** (§15 D427's *Fix*, extended by D775).
+  `ondin-core/tests/deps_forbidden.rs`' `HEADLESS` doc says the right shape is an allowlist asserted
+  against §3's permitted list, and that its blocker — §3's list being wrong — went on 2026-09-06.
+  Ordinary work, unstarted.
+- **`op_set_effects` refuses a non-finite blur and accepts an absurd finite one** (§15 D454's *Fix*).
+  `<feDropShadow stdDeviation="1e30">` still reaches the model and the file; the render's caps make it
+  a wrong picture drawn at once rather than a hang. The entry's fix is a refusal at the operation, with
+  `inspector.rs`' `MAX_BLUR` promoted out of the panel — a shared `OpError` design.
+- **A descending gradient ramp already on disk stays descending** (§15 D455's *Fix*). Rendering, the
+  importer and the SVG writer clamp through `image::make_stops_monotonic`; `io::load` does not, so
+  `panels::paint::with_stops`' sort commits a third picture the moment one colour of such a gradient
+  is touched.
+- **Rules stated in more than one place**, the shape the record keeps finding broken: a region for
+  every SVG element that takes one, where `svg::effect_region`, the `<mask>` writer's inline region and
+  `adjust_def`'s fixed one are three (§15 D458); what a mask group clips with, kept arm for arm across
+  `Resolved::mask_path`, `resolve::mask_extent` and `query::mask_extent_local` (§15 D460); and §6.4's
+  two effect stages, run by `effects::run` and restated by `effect::stack_escape`'s arithmetic with
+  nothing holding the second to the first (§15 D473).
+- **A sweep gradient whose transform will not invert exports `r="50"`** (§15 D762's *Not fixed here*).
+  `svg::sweep_radius` answers `None` there and its caller writes `.unwrap_or(50.0)`, which is §15
+  D647's fixed defect — a literal radius whatever the shape's size — back for that one input.
 
-   **Items 1–4 below are built, tested and committed** (session 34 — the code as one commit, since
-   its parts interleave in the same files, then the record; `git log` has them), and **item 5, the
-   inspector cards, is built and tested in the working tree** (session 35), so step 3 is built. The
-   record is §15 **D875** (engine, model, preview, the maintainer's step-3 rulings, a laid group's
-   resize), **D876** (frames under groups), **D877** (reorder by drag, and its two amendments),
-   **D878–D883** (the cards, the sizing modes, and the maintainer's three rulings of session 35), and
-   `architecture.md` §5.3c; this block restates none of it. Session 34's full gate bar ran green over
-   items 1–4 as committed, the release test run and the 28 GPU `--ignored` tests included; **over
-   item 5 the gates reported green are fmt, `cargo test --workspace`, clippy `--workspace` and per
-   package, `check --release` and the doc gate** — not the release test run, not the GPU tests.
-   **Not verified in the GUI**: none of step 3's app behaviour — frames in groups, reorder by drag,
-   group resize, the two cards — has been looked at on screen. D878–D883 are spent.
+## Next · Nested component properties
 
-   **Session 36 (2026-09-26) answered the maintainer's first look at the cards** — seven findings in
-   six entries, §15 **D884–D889**: labels in sentence case (D884); every number field in both cards
-   committing nothing, fixed (D885); tooltips on the direction and wrap cells, and on the `display`
-   cells, `grid`'s saying why it cannot be picked (D886); the Position
-   card for a laid group's children, and `keep_insets` pinning against the group's box (D887); a
-   square pin diagram (D888); the out-of-flow block in words (D889). Then, on 2026-09-27, the
-   maintainer saw D888's square and asked for the mockup's screen 07 instead: the Position card is
-   laid out as the design, its diagram without a container outline, an unpinned field reading `auto`,
-   and an *Absolute* header badge (D890, superseding D888 in part); and, the same day, three asks
-   after seeing it — the badge only inside a container with a layout, a plain frame's top and left
-   shown as held by default without an inset written, a centred axis solid in the measure red (D891).
-   **Committed 2026-09-27 with item 5**, after a full bar — fmt, `cargo test --workspace` debug and
-   release, clippy `--workspace` and per package, `check --release`, the doc gate; not the GPU
-   `--ignored` tests. The maintainer confirmed D891 in words; nothing is recorded as a look at the
-   GUI. **D884–D891 are all spent**: session 36's reserved block is exhausted, and a further entry
-   needs a new reservation.
+**Exposing a nested instance's component properties on the instance that holds it.** Components are
+built (`architecture.md` §5.3d, §15 D978–D985), and this is the first of what §5.3d's paragraph on
+later work names — left for later by §15 D982, *"Exposing nested properties is later, as the mockup
+has it"*. **It waits on a mockup**, which the maintainer is to commission (2026-10-06); nothing is
+designed, so this entry restates no ruling, and the design goes into §5.3d when it comes. ⚠️ **A `Next`
+section not yet designed** — one of two since 2026-10-06, the polishing pass below being the other —
+against this file's prefix table: it is here rather than under
+*Later* because it is the next work, not a parked one.
 
-   **Then the maintainer's six rulings on what flex had left before grid** (2026-09-27, §15
-   **D892–D897**, the session's recommendations taken whole and committed in four groups): *"Mixed"*
-   in the cards' number fields (D892); a `fit-content` item not stretched across its line (D893); a
-   pin out of a hugging container moving nothing (D894); a sizing field's keyword in its digits where
-   the property is unset (D895); an in-flow item turning about its box centre, the preview now
-   agreeing (D896); no header badges on the Container and Item cards (D897). Not seen in the GUI.
-   D892–D897 are spent from a block reserved to D903; the closing negative grep found D898–D903 at
-   zero code sites, and the session released them — no block is reserved. ⚠️ **True when written, and
-   made false by the work that followed**: D898–D903 were then spent — cited from `crates/` by seven
-   commits, the randomized layout guard through the multi card's X and Y — with no entry written for
-   any of them, and were reconstructed from their citation sites on 2026-09-27 (§15 D898–D903; D898
-   carries the account).
+*Opened 2026-10-06, when* Next · Container layout *closed into §15* (D867's amendment).
 
-   **Still to do, in this order:**
-   1. ~~**Write D875**~~ — done in session 34, and CLAUDE.md's D-number paragraph brought up to date
-      the same session.
-   2. ~~**Frames under groups (D870)**~~ — §15 **D876**.
-   3. ~~**Resizing a group with a layout**~~ — §15 D875's amendment.
-   4. ~~**Drag-to-reorder**, with an insertion indicator~~ — §15 **D877**.
-   5. ~~**Inspector cards**~~ — §15 **D878–D883**.
-   6. ~~**The commit** of item 5 and of session 36's answers~~ — committed 2026-09-27, as above.
-4. **Grid**, with the track editor. **Built, and looked at 2026-10-02.** Its open decisions were answered before its code,
-   §15 **D913**; the order: (1) ~~model and engine~~ — **built 2026-09-27**, §15 **D914** is the
-   record; (2) ~~preview and gestures~~ — **built 2026-09-27**, §15 **D916** is the record; (3) ~~the
-   cards~~ — **built 2026-09-27**, §15 **D920** is the record, and what the first two left, §15
-   **D919**; (4) ~~the canvas track lines~~ — **built 2026-09-28**, §15 **D921** is the record.
-   ~~⚠️ **The grid cards and track lines have not been seen on screen**: the maintainer's first look is
-   owed.~~ Seen 2026-10-02 — the handoff marker's item 1. (D920's breadth-field dash was decided for D906 and dropped the same day — D920's
-   amendment.)
+## Next · The polishing pass over the accepted calls
 
-   **Handoff marker — session 38's close (2026-09-27), for the next session to pick up; items 2–4
-   narrowed by session 39 (2026-09-28) and closed by session 40 (2026-09-29); item 1 closed by
-   session 41 (2026-10-02).** Steps (1)–(4) are built, D913–D927 their record. **Grid owes nothing.**
-   1. ~~**The maintainer's first look at the grid cards and the track lines**~~ — **looked at
-      2026-10-02**, over session 40's ten-item test list: findings on two items and nothing on the
-      other eight. A block whose rows overflow its frame split under the drag, §15 **D926**; a span
-      dropped on the last column hung into an implicit track, §15 **D927**. Both fixed the same day.
-   2. ~~**(4) The canvas track lines**~~ — **built 2026-09-28** (session 39, committed as
-      `09df61c`); §15 **D921** is the record.
-   3. ~~**Owed tests the grid steps left**~~ — the last three driven 2026-09-29; §15 D921's second
-      amendment and **D925** are the record.
-   4. ~~**Named and left alone**~~ — the held `baseline`'s face, §15 **D923**; the two `MAX_TRACKS`,
-      §15 **D924**; the grid item's receipt, §15 **D922**.
-5. **Components and overrides.** **Designed 2026-10-04; items 1–6 built by session 49, most of
-   item 7 on 2026-10-05, and its instance swap and the canvas and layers chrome on 2026-10-06, the
-   menu rows placed the same day. It owes nothing but exposing nested properties, later by the
-   mockup, and the exact-equality question below** —
-   `architecture.md` §5.3d is the design and §15 **D978** (instances as linked copies kept in step at
-   the commit), **D979**
-   (overrides found by comparing values, free structure, a main's deletion detaching, document-local,
-   a copy of a main being an instance), **D980** (the five item lists carrying ids, compared item by
-   item) and **D981** (the chrome, accepted from a mockup) its rulings; this item restates none of
-   them. It read *"on the same pipeline … derived instances are meant to share layout's
-   derive-from-specified path (§15 D868)"*: D978 reinterprets that, and what components share with
-   layout is the commit-time write-back, not `Resolved`. **The order of work:**
-   1. ~~The model: `component` flag, `link`, `SetComponent`/`SetLink`, the `apply` post-conditions,
-      the loader's checks; the five lists' item ids, `Keyed<T>`, schema v5 and its migration~~ —
-      **built 2026-10-04**, item ids in `a83adc8` (§15 D980's amendment) and the model in `e3df69d`
-      (§15 D978's amendment). No release went out between the two, so v5 is complete.
-   2. ~~Create component, create instance, detach, and a main's deletion detaching~~ — **built
-      2026-10-04** (`0ae3cd7`; §15 D979's and D981's amendments), with copies settled, the two chords
-      and five menu rows. That closed four of the five items step 1 left owed: a duplicate inside its
-      own instance, the cross-document paste, a main's deletion, and a main's copy being an instance.
-      The three it left — a layer moved out of its instance, the other delete doors, a nested
-      instance copied alone — closed the same day by `component::settle_links` and `settle_copy`'s
-      climb (`66b48a5`, `f75dcc5`; §15 D979's amendment). ~~**Still owed after it**: the **filled
-      hexagon**~~ — drawn 2026-10-06 (§15 **D985**, against D10's *"at two, ship the font"*), on the
-      canvas, in the layers panel and on the Component card's main and variant faces.
-   3. ~~The propagation pass for **fields** — the compare rule, list items by id, nested chains, user
-      operations winning~~ — **built 2026-10-04** (`45730f6`; §15 D979's and D980's amendments), the
-      exact-equality risk measured for the pinned-child path. The three things the record found left
-      from it — the merge going whole on serde-skipped defaults, the placement skip stopping a nested
-      instance's move, no property test — were fixed in `6ac7d0d` (§15 D979's amendment).
-   4. ~~Propagation for **structure** — insert at an anchor, reorder, reparent, delete or unlink — and
-      §15 D979 (b)'s delete-or-keep for a main's child~~ — **built 2026-10-04** (`6ac7d0d`; §15 D979's
-      amendment); step 2's keep-everything interim is gone. What the record found left in it —
-      *Group selection* inside a main re-copying counterparts, *Ungroup* inside a main refused, and a
-      move with no target counterpart left linked — was fixed in `e38603d` (§15 D979's amendment).
-   5. ~~The reset family — reset a field, reset structure, reset all — the inspector's component
-      card, and the override look on the cards and lists~~ — **built 2026-10-04**: the resets in core
-      (`26c8434`, fixed in `7cf242e` and `7b5961e`), the context menu's *Reset all* and *Reset <name>*
-      (`a18b0b5`, omitted at zero since `d66044c`), the card (`5fcff6b`), the override look in part
-      (`d2beb37`, `d39f7c1`, `6033571`, `a345b81`, `c292b50`, `6210953`) and the rest of it in session
-      49; §15 D979's and D981's amendments. The two defects the record found in that last batch
-      were fixed with it (D981's amendment). ~~**Still owed from it**: a test for the Type resets'
-      live-session restyle~~ — written 2026-10-06 (D981's last amendment). The fields D981 (e) of
-      that amendment leaves unmarked for now — Position's centre buttons, the
-      Type popup, the multi-selection Transform card and radius, a variantless family's bold and
-      italic toggles, per-track fields, the identity card — are unmarked by the session's choice, not
-      by a ruling. ~~The layers panel's marks are D981's chrome, below.~~ Built 2026-10-06 (§15 **D985**).
-   6. ~~The live preview of main-component edits~~ — **built 2026-10-04** (session 49; §15 D979's
-      amendment): the field pass over the preview's transaction, after the flex holds; structure still
-      follows on release. The three defects the record read in its first cut — a main's pivot preview
-      naming the copy, pinned copies and roots previewed off their release, a main's in-flow move
-      dragging its copies — were fixed the same day, each with its own test (that amendment), and so
-      was a fourth read in the fix, a pinned copy with its own value for every inset a main's move
-      changes. Nothing known is owed from it.
-   7. Variants and component properties — ~~the core: the model, the rules, `variant::settle`, the
-      verbs, the in-place switch and properties as views~~ **built 2026-10-05** (`3fa5276`; §15
-      **D982**, which records the mockup's acceptance and the maintainer's ruling that D979's (c), (e)
-      and verbatim instance names win over it). ~~The app half in the inspector and the menu~~ —
-      **built 2026-10-05** (`a313b2c`; D982's amendment, which has the four places it departs from the
-      mockup, each the session's and open to overturning); ~~*Reset properties* omitted at zero~~
-      fixed in `adc5f66`. ~~The canvas set tab, its clash warning, the layers panel's folded-set count
-      and the `{}` marks~~ — **built 2026-10-05** (`0ff8f16`; D982's second amendment). ~~The `+` on
-      the set's bottom edge, and value-named variant rows in the layers panel with the filled
-      hexagon~~ — **built 2026-10-06** (§15 **D985**), the rows by reading: a variant's derived name is
-      its values. ~~Instance swap, and
-      a nested copy's switch inside an outer instance~~ — ruled 2026-10-05 and **built 2026-10-06**
-      (§15 **D983** and its amendment, which has the build's seven decisions). Exposing nested
-      properties is later, by the mockup.
+**The maintainer's review of every call accepted wholesale on 2026-10-06** (§15's header, *the blanket
+acceptance*): every session's or delegated call the record had marked open to overturning was
+accepted that day ahead of this pass — *"I'll make a polishing session and go through everything"* —
+and none of them was examined one by one. The pass is the maintainer's to run; nothing is designed,
+and an answer that overturns a call goes into its entry. ⚠️ Not designed either, and not a build:
+it is here because it is the next work the record names, as the section above is.
 
-   **Owed outside the numbered steps** (`architecture.md` §5.3d's handoff paragraph has the list):
-   ~~D981's chrome — the canvas labels, chips, glyphs and markers, the layers panel's marks, `Enter`
-   into an instance and an instance's group-style picking; the filled hexagon's
-   missing glyph (§15 D10)~~ — built 2026-10-06 (§15 **D985**), the three defects the record read in
-   it fixed the same day (`f3ac348`); ~~the menu rows' final
-   place in `context-menus.md`~~ — placed 2026-10-06 where the accepted mockups draw them
-   (`context-menus.md` §4, §15 D981's amendment). **Nothing is owed outside the steps.**
+*Opened 2026-10-06.*
 
-   **Open, to settle at the step that meets it** (§5.3d has each): exact equality against the
-   commit's arithmetic — **measured at step 3 for an instance resize through `keep_insets`, and held
-   there**; on a flex instance, held for `keep_flex_sizes` and its kept flow translations (step 6;
-   2026-10-06, §15 D979's amendment); any other pass that recomputes a copy's stored value
-   unmeasured. The
-   chrome is accepted (§15 **D981**): its keys, all seven menu rows, the toasts, the component card and
-   the override look on the inspector's cards and lists are built, and the canvas and layers chrome
-   since 2026-10-06 (§15 **D985**), and the menu rows placed the same day; nothing of it is left.
+## Later · Components and layout, past the first build
+
+Each is named as later by the record and is undesigned; the pointer restates no ruling.
+
+- **Pushing an instance's changes to its main** — `architecture.md` §5.3d: *"Exposing nested
+  properties, and pushing an instance's changes to its main, come later"*. The first half is *Next ·
+  Nested component properties*.
+- **A verb that un-makes a component** — none exists, so `SetComponent { component: false }` on a main
+  with instances is unreachable; one that is built owes a detach, as a delete does (§15 D979's step-2
+  amendment, §5.3d's handoff).
+- **The CSS layout properties §5.3c defers** — `margin` other than `auto`, `order`, named grid areas,
+  `auto-fill`/`auto-fit`, `calc`, `aspect-ratio`, block/inline/float layout: §5.3c's *Deferred* row,
+  *"the engine supports each, so each is cheap later"*.
+
+*Opened 2026-10-06, when the roadmap was made to list every open item the record holds.*
 
 ## Later · Command palette (`Ctrl+K`, with `Ctrl+/` as an alias — `shortcuts.md` §8)
 
@@ -1739,8 +1689,11 @@ than an oversight. None blocks v1.
 - **Shared component libraries across documents** — deferred, **not a non-goal** (§15 D979's ruling
   (d), 2026-10-04). Components are document-local in their first version, a document staying
   self-contained as embedded images keep it, and a paste into another document drops the links it
-  cannot resolve (`architecture.md` §5.3d). Libraries are a later, separate feature, undesigned; the
-  trigger is document-local components being built.
+  cannot resolve (`architecture.md` §5.3d). Libraries are a later, separate feature, undesigned. ~~The
+  trigger is document-local components being built.~~ **That trigger is met** — document-local
+  components are built, the last of their steps on 2026-10-06 (§15 D978–D985) — and nothing in the
+  record schedules libraries since, so they stay deferred rather than next: what a met trigger buys is
+  that the question can be asked, not an answer to it.
 - **Every point edit is a whole-path `GeometryPatch::Path`, deliberately.** Right for undo
   granularity — one gesture, one step — and coarse only for **MCP**, where "move anchor 3" would
   rather be an op than a path replacement. **Parked here 2026-09-22**, moved out of *Now · Path
@@ -1915,6 +1868,24 @@ than an oversight. None blocks v1.
   (`clock::local_offset`) per row per frame. ⚠️ **The cover half of the finding is not open** — D862
   gated `Covers::get` on the card being on screen. **No trigger was ruled**; the measurement puts
   the drawing alone near a whole frame at about 3,000 documents.
+- **Components: five questions the record noted and did not rule.** Each is stated where it was
+  found, and none is restated here. A group *instance*'s canvas label (`architecture.md` §5.3d's
+  chrome paragraph, §15 D981, D985); a guide scoped to a main frame not copied into its instances
+  (§5.3d, *Open, and recorded as open*); a linked node moved into a nested instance inside its own
+  instance losing its link (§5.3d's instance-side edits); every instance root exempt from membership, looser
+  than §5.3d (§15 D978's amendment); and a main's layer moved out of its frame previewed on its copies
+  as a follow the release then removes (§15 D979's step-6 amendment, (xiv)). *Added 2026-10-06.*
+- **Whether a 32-row context menu is past the ceiling** — `context-menus.md` *Undecided*, item 7, the
+  maintainer's to rule: §3's ceiling was argued from the boolean's 30, and two component menus measure
+  32 (§15 D981's last amendment). *Added 2026-10-06.*
+- **`Ctrl+Alt` is `AltGr` on many European layouts** — `shortcuts.md` §12, raised for the component
+  chords and shared since by `Ctrl+Alt+G` (§15 D987). A question about the whole keymap, which binds
+  `Ctrl+Alt` chords for the mask, the booleans, the properties clipboard and *export all* as well.
+  *Added 2026-10-06.*
+- **Whether the editor's chrome is meant to be keyboard-traversable at all** — deferred by the
+  maintainer, *"I'll come back to it in the future after spending time with it"* (§15 D747): one
+  `Tab` parks the focus on a ringless control and `Space` then presses it. The two fixes imply opposite
+  code, and D747 has both. *Added 2026-10-06; D747 had noted that this file carried no row for it.*
 
 ---
 
@@ -1929,6 +1900,11 @@ what comes after is visible from one place, not so the design gets restated.
   tool list, no handlers, no socket. **Three things are queued behind it** and whoever builds the
   span emitter should do all three: per-run colour, the list marker and its nesting level (§15 D169,
   D172), and the missing-font warning under *Now · Doc drift*.
+  ⚠️ **And the snapshot's questions, which are this work's by the record's own word**: whether it
+  exposes a node's `component` and `link`, and whether a fill carries its item id (`architecture.md`
+  §5.3d's snapshot paragraph, §15 D980) — a change of the snapshot's own shape, owing its own bump —
+  and whether it carries specified values beside the used ones it reports (§7, §15 D868). *Added
+  2026-10-06.*
   ⚠️ **One thing has to happen *before* the first tool handler rather than behind it** (§15 **D786**,
   `[A2-L7-01]`): the headless half of `tools/mod.rs` and `preview.rs` moves to `ondin-core`.
   `ondin-app` has no lib target, so nothing outside the binary can link `resize_box_to`,
@@ -1942,6 +1918,7 @@ what comes after is visible from one place, not so the design gets restated.
   for the language. The seams v1 must reserve are all cheap and all listed in §13; none is
   outstanding.
 - **Multiplayer** — `architecture.md` §12. Nothing is being built; four properties of the model keep
-  it possible, and they are already true. ⚠️ Components, when built, bend the fourth (§15 D978).
+  it possible, and they are already true. ⚠️ Components bend the fourth (§15 D978), and they are built
+  since 2026-10-04 — `architecture.md` §12 says how.
 - **The command palette** — the section above. Post-v1 in ambition, but `menu.rs` is already the
   registry it wants, which is why it is worth reading before a second one is written.

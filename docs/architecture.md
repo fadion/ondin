@@ -306,7 +306,8 @@ permission.
    is the only record there is. A link exists precisely because the file may be absent; there is
    nothing to derive it from without one. **Not an oversight, and repairing it by re-decoding on load
    is the mistake this clause exists to prevent.**
-   ⚠️ **Components will make it the first of two** (designed, not built — §5.3d, §15 D978): an
+   ⚠️ **Components make it the first of two** (~~designed, not built~~ built since 2026-10-04 —
+   §5.3d, §15 D978): an
    instance's copies are stored nodes whose following fields the commit writes from their sources.
 5. **Uncommitted state never enters the Document.** Interactive gestures (drag, resize, pen preview,
    text-in-progress) live in app-side preview state and reach the renderer as `RenderOverrides`
@@ -1169,8 +1170,8 @@ pub fn next_grid_color(existing: &[LayoutGrid]) -> Color;    // the first of GRI
 > (§15 D877), and the inspector's Container and Item cards (§15 D878–D889); frames sit inside groups
 > since the same day (§15 D876). **Grid's model, engine, preview, gestures and cards are built**
 > (step 4's first three parts, §15 D914, D916 and D920, 2026-09-27), **and its canvas track lines**
-> (the fourth, §15 D921, 2026-09-28); components are not — designed on 2026-10-04 in §5.3d, and not
-> on this section's derived pipeline (§15 D978).
+> (the fourth, §15 D921, 2026-09-28); components are built too, by 2026-10-06 — designed on
+> 2026-10-04 in §5.3d, and not on this section's derived pipeline (§15 D978).
 > Every other passage of this document still describes `HEAD`; where one states a rule this design
 > will change,
 > it carries a forward pointer here instead of being rewritten. **When a step below lands, this
@@ -1479,7 +1480,8 @@ maintainer on 2026-09-26 (§15 D884–D891);
 (4) grid, with the track editor — its model and engine, preview and gestures, and cards **built
 2026-09-27** (§15 D914, D916, D920), its canvas track lines **2026-09-28** (§15 D921); the riskiest
 flex and grid cases looked at by the maintainer on 2026-10-02 (§15 D926, D927); (5) components and
-overrides — **designed 2026-10-04 in §5.3d** (§15 D978, D979), not built. This read *"on the same
+overrides — **designed 2026-10-04 in §5.3d** (§15 D978, D979), its seven build steps **built by
+2026-10-06** (§15 D978–D985). This read *"on the same
 pipeline"*, D868's derivation; the maintainer ruled linked copies instead, and what they share with
 layout is the commit-time write-back `keep_insets` runs, not `Resolved`.
 
@@ -1489,7 +1491,7 @@ text in a grid cell keeps each sizing mode's meaning, D875's ruling carried over
 item writes its size and `justify-self`/`align-self`, keeping its cells; a drag writes explicit
 `grid-column`/`grid-row`; the track editor this step is the inspector's list and read-only lines on
 the canvas; and a grid preview reflows through flex's pass widened to any laid container — the
-session's call, not a ruling. *(An in-flow item's rotation origin and stored translation had left
+session's call, ~~not a ruling~~ accepted in the blanket ruling of 2026-10-06 (§15's header). *(An in-flow item's rotation origin and stored translation had left
 the open list earlier the same day, ruled — §15 D896 — and the preview's disagreement about a
 rotation with it.)*
 
@@ -1647,7 +1649,9 @@ edge, quadratic in the track count.
 > the build's own.
 > Everything else here — the model fields, where a link
 > points, the post-conditions, the item ids' shape, the save-format bump, the preview — is the
-> session's design under those rulings, open to overturning, and each paragraph says which it is.
+> session's design under those rulings, ~~open to overturning~~ accepted in the maintainer's blanket
+> ruling of 2026-10-06 (§15's header — accepted wholesale, not reviewed one by one), and each
+> paragraph says which it is.
 
 **An instance is a linked copy, not a derived one** (§15 D978, the maintainer's ruling). Its subtree
 is stored as ordinary `Node`s in `Document.nodes`, each with its own minted id and each carrying a
@@ -1885,7 +1889,7 @@ counterparts and the main's order.
 
 ✅ **Built 2026-10-04 in core — build step 5's first half** (`26c8434`, three defects the record found
 in it fixed in `7cf242e`, and one in that fix in `7b5961e`; `ondin-core/src/reset.rs`; §15 D979's amendment). The design above is all the design said; **every mechanic below is the session's**,
-open to overturning. **A copy is compared with its source, one link up** (`reset::source_of`), never
+~~open to overturning~~ accepted in the blanket ruling of 2026-10-06 (§15's header). **A copy is compared with its source, one link up** (`reset::source_of`), never
 with the main at the chain's far end, and **`reset::state_ops`** writes a node's whole state as the
 operations that would set it — destructuring `Node` with no wildcard, so a new field stops the build
 until its author says whether a copy can override it. An override is a field whose op differs between
@@ -2201,7 +2205,8 @@ child's one line. Its counts are `reset::Drift`, cached on `EditorSession::revis
 (`OndinApp::drift_cache` — the cache the sentence above asks for, for drift alone, which the menu's
 rows read too), its resets commit through `commit_edit` as every ink-changing inspector edit does
 (`OndinApp::reset_tx`), and **its drift summary counts fields, removed children and order** —
-everything *Reset all* undoes — not fields alone (the session's, open to overturning). ✅ **The
+everything *Reset all* undoes — not fields alone (the session's, ~~open to overturning~~ accepted in
+the blanket ruling of 2026-10-06, §15's header). ✅ **The
 override look, in part** (`d2beb37`, `d39f7c1`, `6033571`, `a345b81`, `c292b50`, `6210953`; §15 D981's
 amendments): **card header counts** on every card — the dot and a unit count after the title, and on an
 open card a hover chip *↺ Reset fill* committing the card's resets — from `reset::overrides` grouped by
@@ -2225,11 +2230,20 @@ is not a resize**: every reset states the layout item of each layer it resizes
 (`OndinApp::items_stated`, in `reset_tx` and `commit_reset`), or `keep_flex_sizes` reads it as the
 hand's resize and stops a growing instance growing. A dropdown's
 ↺ is the first row of its open list, a segmented control's mark sits on its lit cell, and a switch
-row's dot has no ↺ — the session's, D981 has each. Some fields are left unmarked on purpose, D981
-lists them. ⚠️ **The filled hexagon has no glyph**:
+row's dot has no ↺ — the session's, D981 has each. ~~Some fields are left unmarked on purpose, D981
+lists them.~~ ✅ **The fields left unmarked were ruled on 2026-10-06** (the maintainer's, §15 D981's
+last amendment): **marked** since — Position's centre buttons, compared on the auto margins alone and
+reset as the main's whole axis; the bold and italic toggles, through `ui::field_button_marked`,
+⚠️ where a click on a marked toggle is its reset and not the toggle, unlike a switch row's; the Type
+popup, one mark per section label comparing the fields that section writes (`section_marked`), the
+*Sizing* mark on the mode alone, and word spacing, baseline shift and *Optical margins* marked per
+control — still on the node's own style, paragraph and block, never a run's; and the multi-selection
+radius over the selection's subtree. **Decided not to be**: the multi-selection Transform card, each
+grid track's own field, and the identity card — D981 has why. ⚠️ **The filled hexagon has no glyph**:
 the bundled icon font is Phosphor Regular alone, and §15 D10, which hand-drew the one Fill-weight
 glyph the app needed, says *"at two, ship the font"*. ~~So the card's main face draws the outline one.~~
-**It is drawn too** (`ui::paint_hexagon_filled`, §15 D985 — the session's, against D10's trigger), on
+**It is drawn too** (`ui::paint_hexagon_filled`, §15 D985 — the session's, against D10's trigger, and
+accepted by the maintainer on 2026-10-06), on
 the canvas, in the layers panel, on the Component card's main and variant faces (the instance faces
 keep the outline) and, since 2026-10-06, on the two menu rows that make a main, *Create component* and
 *Duplicate as component*, as the mockups draw them (§15 D981's last amendment); its box and orientation are measured against the outline glyph's atlas ink
@@ -2264,7 +2278,8 @@ the variants holding it, so theirs detach too; **`Ctrl+D` on a variant makes an 
 (e)), a plain layer in the set, *Add variant* being the verb that takes the next free combination; and
 **an instance's name is copied verbatim**, above, so an instance of *Large, Hover* is named *Large,
 Hover*, never the set's name. D982 carries the rest of the chrome in words. Everything below is the
-session's design under those rulings, open to overturning.
+session's design under those rulings, ~~open to overturning~~ accepted in the blanket ruling of
+2026-10-06 (§15's header).
 
 **A component set is a frame around mains, never a main itself, and a variant is a main whose parent is
 a set.** `Node::set: Option<VariantSet>` holds the set's variant properties, each a `VariantProp { name,
@@ -2331,7 +2346,7 @@ its swap, `structural_copies` key its children by its swap, `reset::source_of` i
 — swap, else link — and `reset::overrides` compares the slot fields with the link and the rest with the
 swap; `linked_to_main` still reads `link`, or a swapped root would stop following its slot's moves.
 ⚠️ **The swap goes only to a main of the same kind** — the session's, departing from D983's *kind from
-the target*: no operation turns a layer into another kind, and the copy's id has to survive for its own
+the target*, and accepted by the maintainer on 2026-10-06: no operation turns a layer into another kind, and the copy's id has to survive for its own
 copies to follow it, so two frames keep the slot's size and two groups have none. **A swap is an
 override**, one unit, reset by `SetSwap { None }`; **overrides carry** across it as across a switch.
 🚨 **`SetSwap` is all any door writes, and `swap::settle` makes the rewrite** — the first of the
@@ -2352,7 +2367,7 @@ the shown main's name less its last segment — and the picker searches within i
 gets a *Swap* row offering every main of its kind, unfiltered (the session's). The filter scopes what is
 offered, never what is valid. *Preferred mains* is not built. ⚠️ **The app's swap UI is untested** — a
 `ComboBox` popup cannot be driven headlessly. D983's amendment has the seven decisions the build made,
-each the session's.
+each the session's — the first, the same-kind swap, accepted by the maintainer on 2026-10-06.
 
 ✅ **The app half, in the inspector and the context menu** (`a313b2c`; `panels/variants.rs`,
 `panels/component.rs`; §15 D982's amendment). **A set** gets its own card, *Variants*, in the Component
@@ -2380,8 +2395,8 @@ for text, *Content* — *None*, each property of that kind, *New property…*. *
 `menu::Context::holds_main`, `adc5f66`), *Combine as variants* on two or more mains outside any set
 under one parent, *Add variant* on a set or a variant, a set's *Select all instances*, and *Reset
 <property>* on a linked layer whose bound field differs; the toast *Combined N mains into set “Button” ·
-Ctrl+Z to undo*; no new chords. **Four places depart from the mockup**, the session's and open to
-overturning — values edited from a chip's popup rather than in place and dragged; binding from that one
+Ctrl+Z to undo*; no new chords. **Four places depart from the mockup**, the session's and accepted by
+the maintainer on 2026-10-06 — values edited from a chip's popup rather than in place and dragged; binding from that one
 line rather than `{}` buttons on the layers row, Appearance and Type; the define popover as two buttons,
 with no *Default* row and no *Preferred mains*; a set's property name as a field with a × — and D982 has
 each. *Reset properties* is drawn wherever the component defines a property, at "—" and disabled at
@@ -6758,7 +6773,8 @@ other were right, which is why both exist.
   decoupled from the save schema. 🚨 **`local_transform` and `geometry` are *used* values, not what
   the user set** (§15 D868) — `world_transform` and `world_bounds` come from `Resolved`, which
   composes used locals, and a document local would stop multiplying out to its own world transform
-  the first time layout placed something. That is a default the maintainer has not ruled on, and it
+  the first time layout placed something. That is a session's default ~~the maintainer has not ruled
+  on~~ accepted in the maintainer's blanket ruling of 2026-10-06 (§15's header), and it
   means a local an agent computes from these and writes back is a used value saved as typed; whether
   the snapshot also carries specified values is the parked MCP work's question.
   `NodeSnapshot::pivot` is skipped when unset and reports the
@@ -14416,7 +14432,7 @@ What v1 locks in so a future sync layer is possible without re-architecting:
 2. **Ids inside operations** (§5.7) — a transaction replays deterministically on any replica.
 3. **Transactions as the unit of change** — the natural sync/OT/CRDT payload.
 4. **No derived state in the document** — replicas converge by replaying ops; `Resolved` is local.
-   ⚠️ **Components are designed to bend this** (§5.3d, §15 D978, not built): an instance is a stored
+   ⚠️ **Components bend this** (§5.3d, §15 D978, ~~not built~~ built since 2026-10-04): an instance is a stored
    copy its main's edits are written into at the commit, so replay still converges, but a main edit
    racing an instance's creation on two peers would need a resync on merge.
 

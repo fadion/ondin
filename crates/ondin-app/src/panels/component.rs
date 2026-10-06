@@ -16,7 +16,8 @@
 //! fields, removed children and order — where the mockup's *3 overrides* sat over a
 //! *Reset fields 3* and a *Restore removed children 1*. Read literally that hides a
 //! removed child from the summary, and an instance whose only drift is a deleted
-//! layer then reads as untouched; the session's choice, open to overturning.
+//! layer then reads as untouched; the session's choice, accepted in the blanket
+//! ruling of 2026-10-06 (§15's header).
 //!
 //! **The main's glyph is the filled hexagon** (D981), drawn by
 //! `ui::paint_hexagon_filled` since the bundled Phosphor Regular has none (§15 D10,

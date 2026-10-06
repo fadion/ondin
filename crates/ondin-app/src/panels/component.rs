@@ -296,7 +296,9 @@ impl OndinApp {
     ///   commit ahead of the document's, and spans keyed to the reset's string are
     ///   not keyed to its.
     ///
-    /// Both found by `arch-scribe` reading the batch; the restyle is untested.
+    /// Both found by `arch-scribe` reading the batch; the restyle is tested since
+    /// 2026-10-06 (`a_type_reset_restyles_a_live_text_session`, on the editor's
+    /// layout — the node's style cannot see it).
     pub(crate) fn commit_reset(&mut self, tx: Transaction) {
         let tx = self.items_stated(tx);
         let editing = self.text.as_ref().map(|s| s.id);
@@ -2529,6 +2531,69 @@ mod tests {
                 .iter()
                 .any(|t| t == crate::theme::icon::BRACKETS_CURLY),
             "{painted:?}"
+        );
+    }
+
+    /// **A Type reset restyles a live text session** (§15 D981's amendment —
+    /// `commit_reset`'s second point, fixed in session 49 and owed a test since):
+    /// a copy's overridden size reset while its text is being edited reaches the
+    /// **editor**, so its next keystroke draws in the main's size and not the one
+    /// the reset took away.
+    ///
+    /// ⚠️ **Two cuts of this test whose flips did not bite**, both reading the
+    /// node's *style*: straight after the reset (a session that has not drawn has
+    /// no preview, so the canvas read the document), and after `preview_session`
+    /// (whose `SetText` writes content and spans, the style staying the
+    /// document's). The stale thing is the **editor's own layout** — what
+    /// `preview_session` installs as the shaped text, and what the caret moves
+    /// through — so that is what this reads. Flip, run: `commit_reset` without its
+    /// `text_session_restyled_after` fails at the last assertion, the height
+    /// unchanged at 30pt's.
+    #[test]
+    fn a_type_reset_restyles_a_live_text_session() {
+        let ctx = egui::Context::default();
+        let mut v = variants_fixture(&ctx);
+        let label = v.ilabel;
+        let size_of = |app: &OndinApp| match app.session.display_node(label).unwrap().kind() {
+            NodeKind::Text { style, .. } => style.font_size,
+            _ => panic!("the copy is text"),
+        };
+        let style = match v.app.session.doc.get(label).unwrap().kind() {
+            NodeKind::Text { style, .. } => (**style).clone(),
+            _ => panic!("the copy is text"),
+        };
+        assert!(
+            v.app
+                .session
+                .commit(Transaction(vec![Operation::SetTextStyle {
+                    id: label,
+                    style: ondin_core::TextStyle {
+                        font_size: 30.0,
+                        ..style
+                    },
+                    spans: None,
+                }]))
+        );
+        v.app.session.selection.set_one(label);
+        v.app.begin_edit_text(Some(label), None);
+        assert!(v.app.text.is_some(), "the fixture: a live session");
+        assert_eq!(size_of(&v.app), 30.0, "the fixture: the override on screen");
+        let reset: Vec<Operation> = ondin_core::reset::overrides(&v.app.session.doc, label)
+            .into_iter()
+            .map(|o| o.reset)
+            .filter(|op| matches!(op, Operation::SetTextStyle { .. }))
+            .collect();
+        assert_eq!(reset.len(), 1, "the size's reset");
+        let height = |app: &OndinApp| app.text.as_ref().unwrap().editor.text_layout().size.height;
+        let before = height(&v.app);
+        v.app.commit_reset(Transaction(reset));
+        assert_eq!(size_of(&v.app), 12.0, "the document took the main's size");
+        // What the editor lays out — and so what its next keystroke draws
+        // (`preview_session` installs the editor's own shaped layout).
+        assert!(
+            height(&v.app) < before,
+            "the editor laid out at 12, not 30: {} against {before}",
+            height(&v.app)
         );
     }
 

@@ -5985,7 +5985,9 @@ pub trait ScenePainter {
   `render_to_texture` is one — so a renderer doing N passes a frame loses any picture that
   appears in only one of them, which is how an image fill came to draw nothing whenever any layer on
   the page carried an effect. Sibling layers are packed into as few textures as possible
-  (`Scene::append` at each slot's origin) and rasterized together, and **every pass takes the next
+  (`Scene::append` at each slot's origin, **inside a clip to the slot** — a sub-scene is not bounded
+  by its trimmed buffer, and without the clip a layer cut by the view drew into its neighbour's slot,
+  §15 D990) and rasterized together, and **every pass takes the next
   renderer**, built on demand. That leaves every renderer — the page's included — at one pass a frame.
   The passes read their slot out of the packed texture through `fx_gpu::Slice`, so nothing is copied
   on the way in. Measured: 20 effect layers cost the same as eight — flat in the layer count **so

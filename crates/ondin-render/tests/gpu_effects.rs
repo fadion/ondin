@@ -686,6 +686,81 @@ fn a_layer_scrolled_off_the_top_still_casts_into_view() {
     assert_eq!(deep.3, 0, "with nothing further down: {deep:?}");
 }
 
+/// **A sibling cut by the view's edge draws nothing into the slot packed beside
+/// it** (§15 D990).
+///
+/// Sibling effect layers share one batch texture, each in its own slot, and each
+/// layer's buffer is trimmed to the part of it in view — but its sub-scene is not:
+/// a fill draws wherever its path goes. So a layer hanging off the view's left
+/// edge drew its off-screen part at negative x, straight into the slot packed
+/// before it, and that sibling came back with it baked in. Reported from the
+/// canvas as a white rectangle over a card, and as frames *"moving out of
+/// position"* as the view panned and the trim moved with it. The CPU backend
+/// gives every layer a buffer of its own, which is why only the canvas showed it.
+///
+/// Here a white square `a` (packed first) sits in full view and a red bar `b`
+/// hangs 40 units off the left edge; both carry a small shadow, so both are
+/// effect layers on one level. Flip, run: appending the sub-scenes without the
+/// slot clip paints `a` red at its centre.
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn a_sibling_cut_by_the_view_draws_nothing_into_its_neighbour() {
+    let Some(mut g) = gpu() else {
+        return;
+    };
+    let mut ids = IdSource::new(1);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let [a, b] = [(); 2].map(|_| ids.mint());
+    let rect = |id, index, w: f64, x: f64, c: Color| {
+        [
+            Operation::CreateNode {
+                id,
+                parent: root,
+                index,
+                kind: NodeKind::Rect {
+                    size: Size::new(w, 30.0),
+                    corner_radii: Default::default(),
+                },
+                transform: Some(Affine::translate((x, 30.0))),
+                name: None,
+            },
+            Operation::SetFills {
+                id,
+                fills: keyed_by_position([Fill {
+                    brush: Brush::Solid(c),
+                    visible: true,
+                }]),
+            },
+            Operation::SetEffects {
+                id,
+                effects: keyed_by_position([Effect::new(EffectKind::DropShadow(Shadow {
+                    offset: Vec2::new(0.0, 2.0),
+                    blur: 0.0,
+                    spread: 0.0,
+                    color: Color::from_rgba8(0, 0, 0, 255),
+                }))]),
+            },
+        ]
+    };
+    let mut ops = Vec::new();
+    ops.extend(rect(a, 0, 30.0, 60.0, Color::WHITE));
+    ops.extend(rect(b, 1, 60.0, -40.0, Color::from_rgba8(255, 0, 0, 255)));
+    doc.apply(&Transaction(ops)).unwrap();
+    let res = Resolved::rebuild(&doc);
+    let px = render_gpu(&mut g, &doc, &res);
+    assert_eq!(
+        at(&px, 75, 45),
+        (255, 255, 255, 255),
+        "the square is its own white, not its neighbour's red"
+    );
+    let bar = at(&px, 10, 45);
+    assert!(
+        bar.0 > 200 && bar.1 < 40,
+        "and the bar still draws, in view: {bar:?}"
+    );
+}
+
 /// **An image fill keeps its pixels while effect layers are on the page**
 /// (§15 D344).
 ///

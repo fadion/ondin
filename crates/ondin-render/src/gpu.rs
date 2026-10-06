@@ -839,14 +839,33 @@ impl VelloGpuRenderer {
                 let (w, h) = chunk.size;
                 let packed = fx_gpu::fx_texture(device, w, h, "ondin-fx-batch");
                 let view = packed.create_view(&Default::default());
-                // Every sibling's sub-scene, each shifted to its own slot, as one
-                // recording.
+                // Every sibling's sub-scene, each shifted to its own slot **and
+                // clipped to it**, as one recording.
+                //
+                // 🚨 **The clip is what keeps a sibling's drawing out of its
+                // neighbours' slots** (§15 D990). A sub-scene is not bounded by its
+                // buffer: the buffer is trimmed to the visible part of the layer
+                // (`effect::buffer_box_within`), and only an *unclipped* layer opened
+                // inside it is bounded by that (`self.limit`, through `layer_shape`)
+                // — a plain fill, or a layer clipped to its own path, draws wherever
+                // its path goes. So a layer cut by the viewport's left edge drew its
+                // off-screen part at negative x, into the slot packed before it,
+                // and the sibling there came back with a piece of it baked in: a
+                // card's white body standing over the next card, a toolbar's tint
+                // over another toolbar, and moving as the view panned because the
+                // trim does. The CPU backend rasterizes every layer into a buffer
+                // of its own, which is why only the canvas showed it.
                 let mut batch = Scene::new();
                 for &(i, at) in &chunk.items {
-                    batch.append(
-                        &jobs[i].scene,
-                        Some(Affine::translate((at.0 as f64, at.1 as f64))),
+                    let to = Affine::translate((at.0 as f64, at.1 as f64));
+                    let (w, h) = jobs[i].size;
+                    batch.push_clip_layer(
+                        Fill::NonZero,
+                        to,
+                        &Rect::new(0.0, 0.0, f64::from(w), f64::from(h)),
                     );
+                    batch.append(&jobs[i].scene, Some(to));
+                    batch.pop_layer();
                 }
                 // **Transparent, not the page's ground.** Each layer is composited
                 // over whatever is behind it once it comes back, so a cleared

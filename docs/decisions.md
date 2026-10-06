@@ -1385,6 +1385,7 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D987** — **`Ctrl+Alt+G` binds *Frame selection*, and D249's rule is kept by binding it in `shortcuts.md` first.** D249 left the row unbound because a chord invented at a menu row is one the keymap's source does not know about. Figma's chord, and the one the accepted components mockup (D981) draws on the row in menu screen 5A, which D981's last amendment had declined as a mockup's accelerator column rather than a keymap ruling — the ruling is this entry. `input::Action::FrameSelection`, `cmd && alt && !shift && G`; the row shows the chord and dispatches the action, one door. Free: `Ctrl+G` and `Ctrl+Shift+G` are `cmd_only`, which excludes `Alt`. ⚠️ `AltGr`, `shortcuts.md` §12's open question for `Ctrl+Alt+K` and `B`, now covers this too. Test `ctrl_alt_g_frames_and_leaves_the_group_chords_alone`. *(Bound 2026-10-06, uncommitted when recorded. **Keep**, the session's under the maintainer's delegation, ~~open to overturning~~ accepted in the blanket ruling of 2026-10-06 (§15's header). D249 and D981 amended; `shortcuts.md` §11; `context-menus.md` §4)*
 - **D988** — **Nested component properties: a main's author shows a nested instance's own properties on every instance of the main, a shown row counts as a property and never an override, a nested copy's variant dropdown draws the dot, and values carry across a swap by property name.** From `design/Variants.dc.html` 4K–4S and the rules under 4H — regenerated, so the body carries it in words — which the maintainer commissioned and handed over, *"Nested properties updated in design/ … You can start on it"*; its decisions are the maintainer's design, the gaps it left the session's. What surfaces is a nested instance's **own** properties — variant dropdowns, booleans, text, swaps — raw fields still meaning selecting it (4G); the outer main's author opts in once per nested instance, *Show properties on instances* on its card inside the main (4K), listed in the main's Properties card under *Shown from nested* with −, the others as *Not shown* (4L); one sub-heading per instance, *layer · current main*, in layers order, two levels flattened with a › path and the opt-in carried through each (4P), the group following an outer swap because the opt-in is the slot's (4Q); swap rows bound to outer properties not repeated (4O); a hidden group dims, read-only, *Hidden by <property>*, its dot and the resets still reaching it (4R); several selected match by slot, *Different mains* where the slot disagrees (4S). 🚨 **The mockup's one departure reverses D983's build**: a nested copy's variant choice is a swap and so already an override, and its dropdown draws the dot — *"without the dot, the drift summary would count something no row admits to"*. The build, the session's: `PropKind::Nested`, a fourth kind on the owner, at most one, nameless, exempt from `check`'s and `settle`'s naming; `set_shown` binding the slot at its name path in every variant; `shown_nested` keyed by layer name path, each step a name and which same-named sibling; the nested dot against the slot's own main's same-named property, reset within the set the copy shows now; the carry by name for shown copies only, booleans and text keeping the rewrite's name-path carry against the mockup's letter; `hidden_by`. No schema bump. ⚠️ **Not looked at in the GUI.** Four found by the record reading the first cut, all fixed the same day: two same-named nested instances collided, a variant's group was headed by its values, a group drew a Swap row 4O does not, and a delete left an empty showing. *(Built 2026-10-06, uncommitted when recorded. **Keep**; the build's calls the session's, open to the maintainer's look. ~~***Fix*** the same-named collision, or rule it~~ fixed the same day. D867, D982, D983 and D985 amended; `architecture.md` §5, §5.3d and §5.11; `roadmap.md` *Next · Nested component properties* edited down to what is open)*
 - **D989** — **A nested instance selected inside a main never drew the binding line, so the swap property D983 (iii) makes there could not be made from the UI.** `component_face` asks `component::instance_root` before `variant::owner_above`, and a nested instance inside a main is an instance root by its own link, so its card took `Face::Instance` — and only `Face::InMain` drew `bind_line`, the one place D983 (iii) makes a swap property (*Instance*) and where the nested instance's *Visibility* binding lives. The function was right and its caller never reached it: D983's amendment described the line by reading `bind_line`, and no test drew that card — `tests/swap.rs` makes its swap properties with `variant::define`. `inspector_component` now draws `bind_line` under the card for an instance face whose root has an owner above it. Test `a_nested_instance_in_a_main_opts_in_from_its_card`, asserting *"Bind to a component property"*, its flip — the condition made never true — failing at *"the binding line"*, as predicted and as the caller reports it. Found building D988. *(Found and fixed 2026-10-06, uncommitted when recorded. **Resolved.** D983 amended; `architecture.md` §5.3d)*
+- **D990** — **A sibling effect layer cut by the view drew into the slot packed beside it, because a slot was an offset and not a clip.** `resolve_effects` packs a level's siblings into one batch texture (D344, D402's budget) and appended each sub-scene with a translate alone; a buffer is trimmed to the layer's visible part (`buffer_box_within`), but only an unclipped layer inside the sub-scene is bounded by it, so a layer off the view's left edge drew at negative x into the slot before it — reported as a white rectangle over a card, a toolbar's tint over another, and frames moving and flickering as the view panned. The CPU backend, one buffer per layer, never showed it. Each append now sits in `push_clip_layer` over its slot. ⚠️ The clip removes no paths, so D402's argument is unchanged. GPU-against-CPU error grid, worst cell 21.0 → 0.9 and 31.9 → 4.9, the rest text antialiasing. *(Fixed and tested on-device 2026-10-06, uncommitted when recorded. **Resolved.** Test `a_sibling_cut_by_the_view_draws_nothing_into_its_neighbour`, its flip reading `(255, 0, 0, 255)` at the square's centre, as the caller reports it. `architecture.md` §6.3)*
 
 ---
 
@@ -32360,6 +32361,48 @@ registration back on the page renderer was expected to fail the pixel comparison
 `render` instead, before a single pixel is compared. So *the comparison is not what catches this bug*
 — it catches a slot registered on the **wrong** renderer, where the panic catches one registered on
 none, and the test needs both halves for reasons that are now written on it.
+
+**D990 — A sibling effect layer cut by the view drew into the slot packed beside it, because a slot
+was an offset and not a clip. *Fixed and tested on-device 2026-10-06; Resolved.*** Reported from
+the canvas on a component-heavy file (`components.ondin`, generated for testing and not in the tree):
+a white bordered rectangle standing over the *Overridden title* card and the *+STAR* card in its first
+section, toolbars in its fifth showing another toolbar's tint and pieces of it, and frames *"moving out
+of position"* and flickering while the view panned.
+
+**The mechanism is D344's packing meeting D402's trim.** Sibling effect layers of one level are
+shelf-packed into one batch texture and rasterized in one pass (`pack`, D344's one pass per renderer,
+D402's page budget), and each sub-scene went in with `Scene::append(.., Some(translate(at)))` — an
+offset to its slot and nothing else. But a sub-scene is not bounded by its buffer. The buffer is trimmed
+to the part of the layer in view (`effect::buffer_box_within`, D342 and D402), and inside the sub-scene
+only an **unclipped layer** takes that buffer as its bound (`GpuScenePainter::push_layer` →
+`layer_shape(self.limit, ..)`); a plain fill draws wherever its path goes. So a layer hanging off the
+viewport's left edge drew its off-screen part at negative x — into the slot packed before it — and the
+sibling there came back from its passes with a piece of its neighbour baked in. That is the white
+rectangle; and because the trim moves with the view, so did the intrusion, which is the flicker.
+**The CPU backend rasterizes each layer into a buffer of its own**, so it could not show this, and an
+export never did.
+
+**The fix**: each append is bracketed by `push_clip_layer(Fill::NonZero, to, &Rect(0, 0, w, h))` and a
+`pop_layer` — the slot as a clip, in the slot's own transform. ⚠️ *Do not "simplify" it back to the
+append alone because the slots look disjoint*: the slots are; the drawings are not. ⚠️ **The clip
+removes no work**: every path still reaches the batch, now with one clip rectangle and one clip layer
+per sibling beside it, so D402's argument — a batch of at most the page's pixels carrying at most the
+page's paths — is unchanged by it, neither strengthened nor weakened. D992's sweep ran with it.
+
+**Measured** with a throwaway on-device probe, as the caller reports it: the file rendered by both
+backends at 1600×1000 and compared on a 32×20 grid of mean absolute channel error. At zoom 1 centred on
+section 1 the worst cell went from **21.0 to 0.9**; on section 5 from **31.9 to 4.9**. The cells left,
+none above 7.7, sit on text and are the two backends' glyph antialiasing, not this.
+
+**Test**: `ondin-render/tests/gpu_effects.rs ·
+a_sibling_cut_by_the_view_draws_nothing_into_its_neighbour`, `#[ignore]`d and on-device — a white
+square packed first, in full view, and a red bar hanging 40 units off the view's left edge, both
+carrying a small shadow so they are siblings of one level. Its flip, the clip removed, reads
+`(255, 0, 0, 255)` at the square's centre, the predicted site, as the caller reports it. The probe's
+comparison could see this where D342's could not because the mistake was the GPU backend's own: the
+CPU backend has no batch to share it. *(Found and fixed 2026-10-06, uncommitted when
+recorded; from the caller's brief and a read of `resolve_effects`, `pack`, `layer_shape` and the test.
+**Resolved.** `architecture.md` §6.3's one-pass-per-renderer paragraph)*
 
 **D405 — Type on a path: the rail belongs to the text node, and the layout is bent onto it as a pass
 over the finished flat one.

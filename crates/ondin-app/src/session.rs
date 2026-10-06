@@ -2153,8 +2153,9 @@ mod tests {
     /// main's first rect, each previewed and then committed: a move in a plain
     /// frame, a move of a layer pinned by insets (which the commit turns into new
     /// insets, `keep_insets`), and a resize of a flex item (which the commit holds,
-    /// `keep_flex_sizes` — the flex instance's exact-equality path §5.3d records as
-    /// unmeasured). In each, the copy's previewed box moved, and it equals the box
+    /// `keep_flex_sizes` — measured here for the held size at the box level, and on
+    /// stored values by `a_tool_write_on_a_mains_flex_item_follows_onto_its_copy_exactly`).
+    /// In each, the copy's previewed box moved, and it equals the box
     /// the commit then gives it. Flips, both run: `set_preview` without its
     /// `propagate` call leaves the copy unmoved and fails *"the copy follows the
     /// preview"* on the first edit; the pass run *before* the flex holds are added
@@ -2202,6 +2203,112 @@ mod tests {
                     && (shown.width() - landed.width()).abs() < 1e-9
                     && (shown.height() - landed.height()).abs() < 1e-9,
                 "{what}: previewed {shown:?}, committed {landed:?}"
+            );
+        }
+    }
+
+    /// **A tool's transform write on a main's in-flow flex item follows onto its
+    /// copy bit for bit** — the flex instance's exact-equality path §5.3d had left
+    /// unmeasured, the kept flow translations. `rotate_node` and a left-handle
+    /// `resize_layer` each compose on the item's **slot** and write a transform
+    /// the door then rewrites (`kept_flow_translations`: the stored translation
+    /// kept, the new linear part taken) — so the value the main stores is the
+    /// door's arithmetic, never the tool's, and a copy that took anything else
+    /// would read as an override from then on, silently. The instance is resized
+    /// to 437.5 × 213 first, so the copy is laid unlike the main's item — the row
+    /// stretches it 213 tall where the main's is 200; the slot's origin is (0, 0)
+    /// in both, so it is the **height** doing this work, not the width (the
+    /// lesson of build step 5, whose fixtures were all instances the size of
+    /// their main): a follow computed from the copy's own slot would differ.
+    ///
+    /// Measured: it follows exactly — `propagate` runs after `keep_flex_sizes` in
+    /// `commit_inner`, so the follow carries the door's value, not the tool's —
+    /// and the next edit still follows, so nothing was left reading as an
+    /// override. The left-handle resize on the turned item writes a transform the
+    /// door then drops whole (the shift kept at the stored translation changes
+    /// nothing), so there the size is what follows.
+    ///
+    /// Flip, run: `commit_inner`'s `propagate` handed the transaction as it
+    /// arrived, before `keep_insets` and `keep_flex_sizes` — the follows made from
+    /// the tool's write — fails *"a rotate: the transform followed exactly"*, the
+    /// copy's translation (37.51, −0.47) — the slot the tool composed on —
+    /// against the main's kept (20, 20).
+    #[test]
+    fn a_tool_write_on_a_mains_flex_item_follows_onto_its_copy_exactly() {
+        use crate::preview::Handle;
+        use ondin_core::container::{Display, Flex};
+        let (mut s, a, copy) = main_and_instance(
+            Some(Display::Flex(Flex::default())),
+            ondin_core::Insets::default(),
+        );
+        let inst = instance_of(&s, copy);
+        assert!(s.commit(Transaction(vec![Operation::SetGeometry {
+            id: inst,
+            geometry: ondin_core::GeometryPatch::Size(Size::new(437.5, 213.0)),
+        }])));
+        let stored = s.doc.get(a).unwrap().transform().translation();
+        assert_ne!(
+            s.resolved.used_local(&s.doc, a).map(|t| t.translation()),
+            Some(stored),
+            "the fixture: the item's slot is not its stored translation, so the \
+             door has something to keep"
+        );
+        type Edit = fn(&EditorSession, NodeId) -> Transaction;
+        let edits: [(&str, Edit); 3] = [
+            ("a rotate", |s, a| {
+                let pivot = s.resolved.world_bounds(a).unwrap().center();
+                crate::tools::rotate_node(&s.doc, &s.resolved, a, pivot, 0.37)
+            }),
+            ("a left-handle resize", |s, a| {
+                let b = s.resolved.world_bounds(a).unwrap();
+                crate::tools::resize_layer(
+                    &s.doc,
+                    &s.resolved,
+                    a,
+                    Handle::Left,
+                    Point::new(b.min_x() - 13.7, b.center().y),
+                    crate::tools::Resize::geometry(false, false),
+                )
+            }),
+            ("a second rotate", |s, a| {
+                let pivot = s.resolved.world_bounds(a).unwrap().center();
+                crate::tools::rotate_node(&s.doc, &s.resolved, a, pivot, -0.11)
+            }),
+        ];
+        for (what, edit) in edits {
+            let was = s.doc.get(a).unwrap().clone();
+            let tx = edit(&s, a);
+            assert!(
+                tx.0.iter()
+                    .any(|op| matches!(op, Operation::SetTransform { id, .. } if *id == a)),
+                "{what}: the fixture — the tool wrote a transform for the door to keep"
+            );
+            assert!(s.commit(tx), "{what}: committed");
+            let (main, cp) = (s.doc.get(a).unwrap(), s.doc.get(copy).unwrap());
+            // A resize's write is the slot shifted to hold the far edge, with the
+            // linear part as it was: kept at the stored translation it changes
+            // nothing and the door drops it, so the size is what moved.
+            assert!(
+                main.transform().as_coeffs() != was.transform().as_coeffs()
+                    || main.kind() != was.kind(),
+                "{what}: the fixture — the main changed"
+            );
+            assert_eq!(
+                main.transform().translation(),
+                stored,
+                "{what}: the door kept the stored translation"
+            );
+            assert_eq!(
+                cp.transform().as_coeffs(),
+                main.transform().as_coeffs(),
+                "{what}: the transform followed exactly"
+            );
+            assert_eq!(cp.kind(), main.kind(), "{what}: and the geometry");
+            assert_eq!(cp.item(), main.item(), "{what}: and the layout item");
+            assert_eq!(
+                ondin_core::reset::overrides(&s.doc, copy),
+                Vec::new(),
+                "{what}: so nothing reads as an override"
             );
         }
     }

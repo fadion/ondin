@@ -4301,8 +4301,11 @@ fn grid_resize_held(
 /// `SetGeometry`. Drawn nowhere while the item is in the flow, since its
 /// container places it (§15 D875); and when the layout is taken away the item
 /// would land at (0, 20) rather than where its own transform had it. A rotation
-/// about a pivot is expected to do the same — `rotate_node` also composes on the
-/// used transform — which is read, not measured. So every such write keeps the stored
+/// about a pivot does the same — `rotate_node` also composes on the used
+/// transform — measured since by the flip in the app's
+/// `a_tool_write_on_a_mains_flex_item_follows_onto_its_copy_exactly`: a 0.37 rad
+/// turn of a 40 × 200 item laid at (0, 0) wrote the slot's (37.51, −0.47), not
+/// one built on its stored (20, 20). So every such write keeps the stored
 /// translation, here, once, rather than in every tool — the move's own answer
 /// (§15 D877), which stores nothing at all, arriving for the others.
 ///

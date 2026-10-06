@@ -19865,6 +19865,143 @@ mod component_verb_tests {
         assert_eq!(app.session.selection.single(), Some(top));
     }
 
+    /// **Picking and entering an instance, driven through the whole app** (§15
+    /// D981 (b), (c), D985): real pointer and key events into
+    /// `eframe::App::ui`, so `normal_mode_input`'s select arm, its double-click
+    /// branch and the keymap's `Enter` are on the path — the door D985's own
+    /// tests stop below, each calling the function it names.
+    ///
+    /// In order: a click on the instance's background selects the instance (its
+    /// main's background, an ordinary occupied frame, selects nothing — D22); a
+    /// click on the instance's rect selects the instance too, where the main's
+    /// rect is picked directly; a double-click on the instance's background
+    /// enters it; `Escape` leaves, the instance selected; and `Enter` enters it
+    /// again, its topmost layer selected.
+    ///
+    /// Flips, both run: `pick_leaf` without its instance clause fails the first
+    /// assertion, the background click picking `None`; `enter_action` without its
+    /// instance arm fails *"Enter steps back in"*, everything before it green.
+    #[test]
+    fn a_click_a_double_click_and_enter_reach_an_instance_through_the_app() {
+        use super::library_wiring_tests::whole_frame;
+        use ondin_core::kurbo::Point;
+        let primary = |pos: egui::Pos2, pressed: bool| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        let key = |key: egui::Key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        };
+        let ctx = egui::Context::default();
+        let (mut app, m, i) = main_and_instance(&ctx);
+        // The duplicate lands on its main; set it beside, its placement its own.
+        assert!(
+            app.session
+                .commit(Transaction(vec![Operation::SetTransform {
+                    id: i,
+                    transform: ondin_core::kurbo::Affine::translate((200.0, 0.0)),
+                }]))
+        );
+        app.session.selection.clear();
+        whole_frame(&ctx, &mut app, Vec::new());
+        let (canvas, ppp) = (app.canvas_rect, ctx.pixels_per_point());
+        let bounds = |app: &OndinApp, id| app.session.resolved.world_bounds(id).expect("bounds");
+        let (main_box, inst_box) = (bounds(&app, m), bounds(&app, i));
+        assert!(
+            main_box.intersect(inst_box).area() == 0.0,
+            "the fixture: the main and its instance side by side, {main_box:?} {inst_box:?}"
+        );
+        let (r, ir) = (
+            app.session.doc.get(m).unwrap().children()[0],
+            app.session.doc.get(i).unwrap().children()[0],
+        );
+        // The 10² rect sits in each frame's top-left corner; the middle is
+        // background.
+        let on = |app: &OndinApp, p: Point| app.to_screen(p, canvas, ppp);
+        let inst_ground = on(&app, inst_box.center());
+        let main_ground = on(&app, main_box.center());
+        let inst_rect = on(&app, bounds(&app, ir).center());
+        let main_rect = on(&app, bounds(&app, r).center());
+        for p in [inst_ground, main_ground, inst_rect, main_rect] {
+            assert!(
+                canvas.contains(p),
+                "the fixture: {p:?} is on the canvas {canvas:?}"
+            );
+        }
+        let click = |app: &mut OndinApp, at: egui::Pos2| {
+            whole_frame(&ctx, app, vec![egui::Event::PointerMoved(at)]);
+            whole_frame(&ctx, app, vec![primary(at, true)]);
+            whole_frame(&ctx, app, vec![primary(at, false)]);
+        };
+
+        click(&mut app, inst_ground);
+        assert_eq!(
+            app.session.selection.single(),
+            Some(i),
+            "a click on the instance's background picks it, as a group's would"
+        );
+        click(&mut app, main_ground);
+        assert!(
+            app.session.selection.is_empty(),
+            "control: the main's background is an occupied frame's, and picks nothing"
+        );
+        click(&mut app, inst_rect);
+        assert_eq!(
+            app.session.selection.single(),
+            Some(i),
+            "a click on a layer inside the instance picks the instance"
+        );
+        click(&mut app, main_rect);
+        assert_eq!(
+            app.session.selection.single(),
+            Some(r),
+            "control: a main's layer is picked directly"
+        );
+        assert_eq!(app.entered_group, None, "and nothing was entered");
+
+        // ⚠️ **The idle frames are not padding.** egui 0.35 counts a release
+        // within `2 × max_double_click_delay` (0.6 s) of the click *before last*
+        // as a triple, measuring the distance from the last click only — so with
+        // the click on the main's rect a few frames back, the double-click's
+        // second release reads as count 3 and `double_clicked()` is false. A pass
+        // with no `time` advances the clock by `predicted_dt`, 1/60 s; forty clear
+        // the window. Two clicks a frame apart are then well inside the 0.3 s.
+        for _ in 0..40 {
+            whole_frame(&ctx, &mut app, Vec::new());
+        }
+        whole_frame(&ctx, &mut app, vec![egui::Event::PointerMoved(inst_ground)]);
+        for pressed in [true, false, true, false] {
+            whole_frame(&ctx, &mut app, vec![primary(inst_ground, pressed)]);
+        }
+        assert_eq!(
+            app.entered_group,
+            Some(i),
+            "a double-click on the instance's background enters it"
+        );
+
+        whole_frame(&ctx, &mut app, vec![key(egui::Key::Escape)]);
+        assert_eq!(app.entered_group, None, "Escape leaves it");
+        assert_eq!(
+            app.session.selection.single(),
+            Some(i),
+            "with the instance selected — the rung Enter starts from"
+        );
+
+        whole_frame(&ctx, &mut app, vec![key(egui::Key::Enter)]);
+        assert_eq!(app.entered_group, Some(i), "Enter steps back in");
+        assert_eq!(
+            app.session.selection.single(),
+            Some(ir),
+            "its topmost layer selected"
+        );
+    }
+
     /// **The session's commit makes a swap's rewrite** (§15 D983): a `SetSwap`
     /// alone, committed, comes back with the nested copy's layer relinked to the
     /// swapped-to main's — `EditorSession::commit_inner` runs `swap::settle` — and

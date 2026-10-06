@@ -1904,12 +1904,16 @@ variant is not its source's compares only the fields every node has. **What a co
 payload — the three text styles, insets, display, layout item — counts each differing leaf, read
 through JSON as the fields merge reads it, absence a value and a changed variant one; a keyed list
 counts each of its source's items the copy changed or removed, plus one if the shared items' order
-differs, and **the copy's own items count nothing**. A list's reset is the source's list with the
-copy's own items reinserted after the item they followed, or first if they led; `reset::reset_item`
-restores one item (a ghost row's *Restore*) after its predecessor's counterpart, else before its
-successor's, else **first** — the list rule `propagate::items` and the list reset follow, where a
-child's last resort is topmost — and `item_states`/`removed_items` are what the trailing slot and ghost
-rows will read. **Scope** (`scope_nodes`): the nodes at or under the scope whose link lies inside the source
+differs, and **one for each of the copy's own items** — they counted nothing until §15 D994, while every
+reset kept them. 🚨 **A list's reset is the source's list, exactly** (`reset_items`, §15 D994, the
+maintainer's ruling): its items, order and values, the copy's own items removed — through a card header's
+chip, *Reset fields* and *Reset all* alike, and a ghost row's restore is the same reset for its whole
+list. Until then it reinserted the copy's own items after the item they followed. `reset::reset_item`
+resets one overridden item in place (a row's ↺); its other branch, putting an item the copy lacks back
+after its predecessor's counterpart, else before its successor's, else **first** — the list rule
+`propagate::items` follows, where a child's last resort is topmost — was a ghost row's *Restore* until
+§15 D994 and has no caller in the app since. `item_states`/`removed_items` are what the trailing slot and
+ghost rows read. **Scope** (`scope_nodes`): the nodes at or under the scope whose link lies inside the source
 subtree of its instance root — a nested copy's members included, since they are the outer main's
 content, and **a local instance of another main placed inside excluded**, since it is a local
 addition. **`reset::Drift`** counts four things: field units; **removed** children — a source child with
@@ -2179,10 +2183,13 @@ it differs from its main in any way** — overrides, local layers and removed ch
 card's drift summary counts them, a removed child having no row of its own; 🚨 **a kept child shows as local** (the maintainer's ruling), since nothing records
 provenance. The inspector gains a **component card** above Transform per selection state, its resets —
 *Reset all*, *Reset fields*, *Restore removed children*, *Reset order*, each with a count — disabled
-rather than hidden when there is nothing to do, and **no reset deletes a local addition**. An override
+rather than hidden when there is nothing to do, and **no reset deletes a local addition** — ⚠️ a local
+*layer*; a list item the instance added is removed by every list reset since §15 D994, which overturned
+that clarification for lists. An override
 is marked by a **4px neutral dot and a full-brightness label**, swapped for ↺ on hover with the main's
 value in a tooltip; a list item has a 14px trailing slot (empty, dot, +), and an item the instance
-deleted is a dashed ghost row with *Restore* (an icon in the eye's column since §15 D993) — 🚨 **a
+deleted is a dashed ghost row with *Restore* (an icon in the eye's column since §15 D993), which puts the
+main's **whole list** back since §15 D994, the instance's own items gone with it — 🚨 **a
 deleted child layer gets no ghost row**, on purpose.
 **Mixed keeps §15 D130's drawing** (`ui::segment_mixed` on a segmented row, no cell raised, one dash),
 not the mockup's dashed cells; Mixed is about the value and an override about the label under either.
@@ -2204,7 +2211,8 @@ origin*'s rule; the first build dimmed them, which broke it. D981's *disabled, n
 card's counted rows alone. ✅ **The component card is built** (`5fcff6b`, `panels/component.rs`, §15
 D981's amendment), **directly under the identity card** on one layer and on several, with D981's faces:
 a main, an instance, several instances of one main or of several, instances among other layers, and a
-child's one line. Its counts are `reset::Drift`, cached on `EditorSession::revision`
+child's one line — the child's line and the mixed selection's, with the binding line, rows inside the
+identity card since §15 D995 (`ComponentPart::Identity`). Its counts are `reset::Drift`, cached on `EditorSession::revision`
 (`OndinApp::drift_cache` — the cache the sentence above asks for, for drift alone, which the menu's
 rows read too), its resets commit through `commit_edit` as every ink-changing inspector edit does
 (`OndinApp::reset_tx`), and **its drift summary counts fields, removed children and order** —
@@ -2263,6 +2271,18 @@ box is the field's box, rounded 3px, its chip, glyph or bare label where the liv
 restore an icon-only ↺ in the column the live row's eye takes, on every list. On the canvas a main's
 filled hexagon sits a point above its glyph cell's centre, and its chip is a point wider at the right
 while the instance count is not showing.
+
+✅ **The maintainer's second polish pass** (2026-10-07, §15 D995). A main's count, *Select all* and
+*Duplicate* sit 4pt closer under its name (`main_body`, not the variant face's shared `main_tail`). The
+Properties card's buttons read *Bool*, *Text* and *Var*, the properties they make keeping *Boolean* and
+*Text*. A marked field's label strip shows the **plain arrow** while it is a reset and the scrub's
+`ResizeHorizontal` once dragged, its *Reset to main* tooltip unchanged. **The one-line rows are rows of
+the identity card**: `inspector_component` takes a `ComponentPart`, `Identity` drawn inside
+`identity_card` under the boolean row — a child's *In Card instance* or *Local to this instance*, a mixed
+selection's line, and the binding line, a nested instance in a main's included — and `Cards` where the
+one call stood, the Component, Variants and Properties cards; no divider, the session's call. The
+binding line's heading has no `{}`, and a local layer's line leads with a link-break glyph rather than
+`+`, the linked line's hexagon a point higher.
 
 ✅ **The canvas and layers chrome** (2026-10-06, §15 D985). **An instance picks like a group**:
 `query::group_chain`'s trailing trim stops at an instance root as at a group, and `canvas::pick_leaf`
@@ -2412,10 +2432,12 @@ properties apart**, a property's field units subtracted from the overrides (`Pro
 fields alone; several instances' summary reads *K with changes*. **A lone main or a set** gets a
 *Properties* card under the Component card — each property's kind glyph, name and ×, its default and
 what it is bound to; *Boolean*, *Text*, and on a lone main *Variant*, which combines it alone into a set
-— and **a layer inside a main** one line, *Bind to a component property*: a *Visibility* dropdown and,
+— labelled *Bool*, *Text* and *Var* since §15 D995 — and **a layer inside a main** one line, *Bind to a
+component property*: a *Visibility* dropdown and,
 for text, *Content* — *None*, each property of that kind, *New property…*; a nested instance inside a
 main is an instance root, so its card is the instance's, and the line is drawn under that card (§15
-D989 — until then it was never drawn for one, and a swap property could not be made). **The menu** gains
+D989 — until then it was never drawn for one, and a swap property could not be made). ⚠️ Since §15 D995
+the line, for both, is rows of the identity card, above the Component card, with no `{}` glyph. **The menu** gains
 `menu::Role::Set` (no *Create component* on a set, nor on any selection holding a main or a set —
 `menu::Context::holds_main`, `adc5f66`), *Combine as variants* on two or more mains outside any set
 under one parent, *Add variant* on a set or a variant, a set's *Select all instances*, and *Reset
@@ -7797,7 +7819,8 @@ reserved strip sits *outside* the `DragValue`'s box, which is the whole reason t
 with its contents, so the only way that strip can scrub is a **second claimant**: `ui.interact` over it,
 the pointer's own delta at the field's speed applied to the value, and `wrap_scrub` as for the digits. A
 strip shows the same `ResizeHorizontal` cursor, so the two
-halves are one control in both gestures; the strip's response is `union`ed into the number's, so a
+halves are one control in both gestures — except on a field marked as an instance's override, whose strip
+is its reset and shows the plain arrow until a drag makes it a scrub (§15 D995); the strip's response is `union`ed into the number's, so a
 caller's `dragged()` / `drag_stopped()` / `changed()` — and so the edit valve (§9.3) — cannot tell them
 apart. `N` is egui's `Numeric`, so the `f32` opacity fields and the `f64` rest read alike at the call
 site, and internally it is all `f64`, written back **only on a real change** so an `f32` field is not
@@ -8148,9 +8171,13 @@ before being caught on screen (§15 D270). A control that wants to answer the po
 own ground. ⚠️ **The exception this paragraph used to name is gone, and so are three others** (§15
 D371): `panels/typography.rs`'s *Show all features* reveal, the editor's brand mark, the breadcrumb's
 project name and the dashboard's project card all set the hand until 2026-08-26 and none of them does
-now. Re-running the census command above finds no `PointingHand` in production — the only one left in
-the crate is inside the reveal's own test, which keeps the declined alternative measured so the arrow
-reads as a decision rather than as an accident of egui.
+now. ~~Re-running the census command above finds no `PointingHand` in production~~ — 🚨 **false as of
+2026-10-07, and the rule stands**: the census finds four, none ruled an exception — a card header's reset
+chip (`ui::section_head_full`), the Component card's link to the main (`component::heading`), the *Undo*
+on a layout card's *Resizing set …* receipt (`panels/layout.rs`), and on the canvas the selected set's
+`+` — and they are §15 D995's ***Fix***. Besides those, the one left in the crate is inside the reveal's
+own test, which keeps the declined alternative measured so the arrow reads as a decision rather than as
+an accident of egui.
 
 **Chrome does not show the I-beam either, and that is a style flag rather than a habit.** egui's
 labels are selectable by default, and `LabelSelectionState::on_label` claims `CursorIcon::Text` for

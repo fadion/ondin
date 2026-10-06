@@ -67,9 +67,19 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 993 index rows, 993 body headings, next free
-D994** (measured at session 54's close) — but trust the procedure over any number
+anywhere cited either. **The live figures: 995 index rows, 995 body headings, next free
+D996** (measured at session 54's close, 2026-10-07) — but trust the procedure over any number
 written down here, including that one. **No block is reserved**: the next session reserves its own.
+⚠️ **Session 54's third request (the maintainer's second polish list) reserved D994–D999 at
+`4e1f458` and spent two** — D994 (a list reset is the main's list, the copy's own items gone,
+overturning D981 (1) for lists) and D995 (the component rows folded into the identity card, and
+polish). The closing negative grep over **D996–D999 found zero sites** and they are released —
+**and D1000 still needs the census regex widened before anyone spends it.** Census: **893**, two
+arrivals, none unresolved; §15.0 995 rows, 995 headings, in order. 🚨 **A `git apply --cached
+--unidiff-zero` split of zero-context hunks staged a `component.rs` that did not parse** — caught
+only because the staged tree was checked out (`git checkout-index -a --prefix=…`) and built with
+its own `CARGO_TARGET_DIR` before committing. Split with context (`-U3`) and `--recount`, and build
+what is staged, not what is in the working tree.
 ⚠️ **Session 54's second request (the maintainer's polish list) reserved D993–D999 at `cfa517b` and
 spent one** — D993, the first polish pass over the components chrome, the maintainer overriding the
 accepted mockups. The closing negative grep over **D994–D999 found zero sites** and they are

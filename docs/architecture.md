@@ -2230,8 +2230,9 @@ lists them. ⚠️ **The filled hexagon has no glyph**:
 the bundled icon font is Phosphor Regular alone, and §15 D10, which hand-drew the one Fill-weight
 glyph the app needed, says *"at two, ship the font"*. ~~So the card's main face draws the outline one.~~
 **It is drawn too** (`ui::paint_hexagon_filled`, §15 D985 — the session's, against D10's trigger), on
-the canvas, in the layers panel and on the Component card's main and variant faces (the instance faces
-keep the outline); its box and orientation are measured against the outline glyph's atlas ink
+the canvas, in the layers panel, on the Component card's main and variant faces (the instance faces
+keep the outline) and, since 2026-10-06, on the two menu rows that make a main, *Create component* and
+*Duplicate as component*, as the mockups draw them (§15 D981's last amendment); its box and orientation are measured against the outline glyph's atlas ink
 (`the_filled_hexagon_sits_on_the_outline_glyphs_ink`).
 
 ✅ **The canvas and layers chrome** (2026-10-06, §15 D985). **An instance picks like a group**:
@@ -2471,7 +2472,10 @@ frame instance's own background, the Component card's outline hexagon~~ — fixe
 none of D985's does~~ — written 2026-10-06 (D985's amendment); ~~the menu rows' final place
 (`context-menus.md` §7) and the text menus' counts, which no test pins~~ — placed 2026-10-06 where
 the accepted mockups draw them, `context-menus.md` §4, and the plain text menu's 28 pinned, a
-railed one's 30 still not (§15 D981's amendment); ~~the flex instance's
+railed one's 30 ~~still not~~ pinned the same day with four role menus (§15 D981's last amendment) —
+a linked boolean and a railed bound text child measured at 32 the same day, two past
+`context-menus.md` §3's 30, whether that is past its ceiling the maintainer's open question (that
+file's *Undecided*); ~~the flex instance's
 exact-equality path, measured for a held resize and unmeasured for the kept flow translations~~ —
 measured 2026-10-06 (D979's amendment); ~~a test
 for the Type resets' live-session restyle (§15 D981's amendment)~~ — written 2026-10-06 (that
@@ -7176,7 +7180,8 @@ the mark, since egui spaces an item when it is placed — so the two bars line t
 **The window draws its own title bar on Windows and Linux (2026-10-03, §15 D952).** Both open
 undecorated, and `chrome.rs` supplies what the system's frame did: `caption_buttons` — minimize,
 maximize or restore, close — flush against the right end of each top bar, `drag_strip` laid first
-under each bar so its empty parts move the window and a double-click maximizes it, and `resize_zones`,
+under each bar so its empty parts move the window and a double-click maximizes it — counted by
+`ui::double_clicked`, as the app's other double-click readers are (§15 D986) — and `resize_zones`,
 twelve `Order::Foreground` areas round the edge — the four edges, and two arms for each corner's L,
 an area being a rectangle and the bounding box that stood in for one having resized the window from
 the close button (§15 D973) — none while maximized. ⚠️ **A modal card refuses every layer beneath
@@ -12730,6 +12735,17 @@ far in you are, so the third double-click on a picture nested one group deep is 
 It changed text and paths as well as pictures — they had the identical fault and nobody had reported
 it — and "one level means one" is the rule that fixes all three at once.
 
+**What counts as a double-click is the app's, not egui's** (`ui::double_clicked`, §15 D986): a primary
+click whose click before was within egui's `max_double_click_delay` and `max_click_dist`, and was not
+itself the second of a double — so a third click on one spot is a single one, and a click on one layer
+followed by a fast double-click on another is a double, which egui 0.35 counts as a triple and
+`Response::double_clicked` refuses. All six of the app's double-click readers ask it — the select arm
+above, the pen's finish, the node tool's added point, the text editor's word select, the layers
+panel's rename and the window's title strip — and none is left on egui's count. ⚠️ **A double needs
+both its clicks delivered to a widget that asks**: egui gives a press to the widgets it knew the pass
+before, so a press with no pointer move ahead of it is nobody's click, and the first click of a pair
+never reaches the record. A hand is always over a widget first; a test has to send the move.
+
 **`Alt`+`Shift`+click designates the key layer** — the member align aligns to, the base operand of a
 boolean (§15 D113), and, since 2026-08-21, **which layer of a selection becomes the mask** (§15 D286). Not `Ctrl`+`Shift`, which is the natural composition of deep-select and extend and
 stays free for it. On a layer that is not selected yet it adds it first, since a key needs something to
@@ -13965,9 +13981,9 @@ the text inset with it. `ui::text_field` gets its inset from `ui::field_row`'s p
 down a column, has to put its own in the frame.
 
 **A single click opens a document, and the outline is the keyboard's cursor (§15 D381).**
-`OndinApp::pick_or_open` is that rule for the grid and the list alike — nothing
-reads `double_clicked` anywhere on this screen, because the first click of a double has already opened
-the document. ⚠️ **It does one other thing, and it is `context-menus.md` §0's R4 arriving on a second
+`OndinApp::pick_or_open` is that rule for the grid and the list alike — no card reads a double-click,
+because the first click of a double has already opened the document; the window's title strip above
+them does, through `ui::double_clicked` (§15 D986), and that is the bar's maximise, not a card's. ⚠️ **It does one other thing, and it is `context-menus.md` §0's R4 arriving on a second
 screen** (§15 D558): **a click that dismisses one of the library's two floating menus is spent doing
 so.** The ⋮ popup and the *All projects ⌄* dropdown are `egui::Area`s covering only their own rects
 and their dismissals read `any_click()` without consuming it, so clicking another card to get rid of

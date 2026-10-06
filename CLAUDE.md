@@ -67,9 +67,15 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 985 index rows, 985 body headings, next free
-D986** (measured at session 51's close, and again at session 52's) — but trust the procedure over any number
+anywhere cited either. **The live figures: 987 index rows, 987 body headings, next free
+D988** (measured at session 52's close) — but trust the procedure over any number
 written down here, including that one. **No block is reserved**: the next session reserves its own.
+⚠️ **Session 52's second request ("fix the noticed items") reserved D986–D997 again at `9bf24c4`
+as its first act and spent two** — D986 (the app counts its own double-clicks, `ui::double_clicked`,
+egui 0.35 reading a fast double-click after a click elsewhere as a triple) and D987 (`Ctrl+Alt+G`
+binds *Frame selection*). The closing negative grep over **D988–D997 found zero sites** and they
+are released. Census: **885**, two arrivals (D986, D987) and no departures against `9bf24c4`, none
+unresolved; §15.0 987 rows, 987 headings, in order.
 ⚠️ **Session 52 (2026-10-06) reserved D986–D997 at `6a57165` as the first act of its request and
 spent none**: the three owed components items — the whole-app instance test, the flow-translation
 measurement, the menu rows' place and the text count — went into amendments to D979, D981 and D985.
@@ -1041,8 +1047,11 @@ missed:
   `2 × max_double_click_delay` (0.6 s) of the click *before last* as count 3, measuring distance
   from the *last* click only — and a pass with no `RawInput::time` advances the clock by
   `predicted_dt`, 1/60 s. So a click elsewhere a few frames earlier turns the double-click's second
-  release into a triple and `double_clicked()` answers false. Pump ~40 idle frames first (§15
-  D985's 2026-10-06 amendment, `a_click_a_double_click_and_enter_reach_an_instance_through_the_app`).
+  release into a triple and `double_clicked()` answers false. ⚠️ **The app no longer reads it** —
+  the canvas, the layers panel and the title strip ask `ui::double_clicked`, which counts its own
+  chain (§15 D986), so a probe of those needs no idle frames; but it counts only clicks a widget
+  *asked about*, so **move the pointer onto the widget before the first press** — a press with no
+  move before it is nobody's click. A probe of plain egui widgets still pumps ~40 idle frames.
 - **A tooltip's ink never arrives.** `on_hover_text` defers an `Area`, and its galley is not
   in `.shapes` however many frames you pump — checked with time past the 0.5s
   `tooltip_delay`, pointer still, the row reporting `hovered()` throughout. So "does this

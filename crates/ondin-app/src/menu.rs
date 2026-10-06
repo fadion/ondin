@@ -308,7 +308,8 @@ pub enum Item {
     /// *Duplicate as component* (§15 D981) — on a main: a copy that is a new main,
     /// where *Duplicate* makes an instance.
     DuplicateAsComponent,
-    /// *Select all instances* (§15 D981) — on a main.
+    /// *Select all instances* (§15 D981) — on a main, and on a set, every
+    /// variant's (§15 D982).
     SelectAllInstances,
     /// *Go to main component* (§15 D981) — on an instance, or a linked layer in one.
     GoToMain,
@@ -850,9 +851,9 @@ impl Item {
                 None,
                 Group::Structure,
             ),
-            // D981's rows and chords (`shortcuts.md` §12). Filed under Structure
-            // beside *Frame selection* for now: `context-menus.md` §7 places them
-            // when components are built, and that placement is not decided here.
+            // D981's rows and chords (`shortcuts.md` §12), in Structure directly
+            // after *Frame selection* — where the accepted mockups draw every one of
+            // them (`context-menus.md` §4's Structure table records it).
             Item::CreateComponent => s(
                 "Create component",
                 icon::HEXAGON,
@@ -1773,9 +1774,11 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
 
     // --- structure --------------------------------------------------------
     //
-    // Every row here is kind-gated, and the gates are the code's rather than this
-    // file's: `build::ungroup` takes a Group or a Boolean and nothing else, and
-    // `build::boolean` wants two or more members.
+    // Every row here is kind-gated — the component rows by role instead
+    // (`Role`, with `combinable`, `holds_main`, `drifted` and `property_reset`) —
+    // and the gates are the code's rather than this file's: `build::ungroup`
+    // takes a Group or a Boolean and nothing else, and `build::boolean` wants two
+    // or more members.
     // Frames among the members too, since a frame may sit in a group (§15 D870,
     // D876): a row of cards is a group of frames. The row was absent on a frame
     // until then, when `build::group` refused one.
@@ -3683,7 +3686,7 @@ mod tests {
                 // row that took this menu from 17 to 18 (§15 D249).
                 "Frame selection",
                 // D981's row for an ordinary layer, beside the verb it uses to
-                // wrap one (23 → 24). Placement provisional: `context-menus.md` §7.
+                // wrap one (23 → 24) — the mockup's place, `context-menus.md` §4.
                 "Create component",
                 // After the group verbs and before the booleans, which is where it
                 // belongs on the merits: with the group-wrapping arm it *is* one of
@@ -3775,9 +3778,10 @@ mod tests {
     ///
     /// The arithmetic, so a future disagreement is a comparison and not an argument:
     /// head 3 (*Enter*, plus *Flatten* and *Ungroup* promoted) · Clipboard 5 ·
-    /// Properties 2 · Structure 7 (four operations, *Group selection*, *Frame
-    /// selection*, *Use as mask*) · Order 4 · Transform 2 · State 3 · Navigate 1 ·
-    /// Export 2. Structure went 6 → 7 with the mask row (§15 D286).
+    /// Properties 2 · Structure 8 (four operations, *Group selection*, *Frame
+    /// selection*, *Create component*, *Use as mask*) · Order 4 · Transform 2 ·
+    /// State 3 · Navigate 1 · Export 2. Structure went 6 → 7 with the mask row
+    /// (§15 D286) and 7 → 8 with *Create component* (§15 D981).
     #[test]
     fn a_booleans_menu_is_the_long_end_of_the_range() {
         let sel = [id(1)];
@@ -3792,6 +3796,141 @@ mod tests {
         ));
         // 30 since *Create component* (§15 D981); 29 before it.
         assert_eq!(flat(&groups).len(), 30, "{:?}", labels(&groups));
+    }
+
+    /// **Text's count, which `context-menus.md` §3 states and nothing measured**
+    /// — four row moves had been applied to it by reading, the last *Create
+    /// component* (§15 D981), against a probe taken once on 2026-08-20.
+    ///
+    /// §3's arithmetic: head 4 · Clipboard 5 · Properties 2 · Structure 5 (*Group
+    /// selection*, *Frame selection*, *Create component*, *Use as mask*, *Convert
+    /// to path*) · Order 4 · Transform 2 · State 3 · Navigate 1 · Export 2.
+    /// Measured at 28 on 2026-10-06, the reading confirmed. ⚠️ Its first run read
+    /// **25**: `open`'s default state carries no `text_sizing`, which drops §5.6's
+    /// three rows — a fixture short of the state a real text layer is always in,
+    /// not a defect.
+    #[test]
+    fn a_text_layers_menu_is_twenty_eight_rows() {
+        let sel = [id(1)];
+        let kinds = [Kind::Text];
+        let mut cx = open(
+            Target::Layer {
+                id: id(1),
+                door: Door::Canvas,
+            },
+            &sel,
+            &kinds,
+        );
+        // A text layer always has a sizing cell, which is what puts §5.6's three
+        // rows under *Edit text*; the fixture's default state has none.
+        cx.state = LayerState {
+            text_sizing: Some(0),
+            ..LayerState::default()
+        };
+        let groups = build(&cx);
+        assert_eq!(flat(&groups).len(), 28, "{:?}", labels(&groups));
+    }
+
+    /// **The component rows sit in Structure directly after *Frame selection***
+    /// — the place the accepted components and variants mockups draw them, on
+    /// their menu screens 5A–5D (§15 D981, D982), which `context-menus.md` §4
+    /// records. One role at a time, each row in the order
+    /// the mockup gives: an ordinary layer's *Create component*; a main's
+    /// *Duplicate as component* and *Select all instances*; a set's *Add
+    /// variant* and *Select all instances*; an instance's *Go to main
+    /// component*, *Reset all* and *Detach instance*; a child's *Go to main
+    /// component*, *Reset <property>* and *Reset <layer>*; and several mains'
+    /// *Combine as variants*.
+    ///
+    /// Flip, run: *Go to main component* filed under `Group::Navigate` — the
+    /// plausible "group it by what it does" version — fails *"an instance"*, its
+    /// Structure rows after *Frame selection* reading `["Reset all", "Detach
+    /// instance"]`; and `structure_rows` without its `holds_main` guard fails
+    /// *"several mains: Combine and nothing else"*, *Create component* after it.
+    #[test]
+    fn the_component_rows_follow_frame_selection_in_structure() {
+        let sel = [id(1)];
+        let target = Target::Layer {
+            id: id(1),
+            door: Door::Canvas,
+        };
+        let cases: [(&str, Kind, Role, &[&str]); 5] = [
+            ("a shape", Kind::Shape, Role::Plain, &["Create component"]),
+            (
+                "a main",
+                Kind::Frame,
+                Role::Main,
+                &["Duplicate as component", "Select all instances"],
+            ),
+            (
+                "a set",
+                Kind::Frame,
+                Role::Set,
+                &["Add variant", "Select all instances"],
+            ),
+            (
+                "an instance",
+                Kind::Frame,
+                Role::Instance,
+                &["Go to main component", "Reset all", "Detach instance"],
+            ),
+            (
+                "a child in an instance",
+                Kind::Text,
+                Role::Member,
+                &["Go to main component", "Reset Label text", "Reset Label"],
+            ),
+        ];
+        let after_frame = |cx: &Context<'_>| -> Vec<String> {
+            let groups = build(cx);
+            let structure: Vec<&Row> = groups
+                .iter()
+                .flatten()
+                .filter(|r| r.item.spec().group == Group::Structure)
+                .collect();
+            let at = structure
+                .iter()
+                .position(|r| r.item == Item::FrameSelection)
+                .unwrap_or_else(|| panic!("no Frame selection in {:?}", labels(&groups)));
+            structure[at + 1..]
+                .iter()
+                .map(|r| r.label.to_string())
+                .collect()
+        };
+        for (what, kind, role, want) in cases {
+            let kinds = [kind];
+            let mut cx = open(target, &sel, &kinds);
+            cx.role = role;
+            cx.layer_name = "Label".into();
+            cx.property_reset = Some("Label text".into());
+            let got = after_frame(&cx);
+            assert_eq!(&got[..want.len().min(got.len())], want, "{what}: {got:?}");
+        }
+        // Several mains, as the app describes them: a selection of more than one
+        // is `Role::Plain` (`component_role`), *Create component* is withheld by
+        // `holds_main`, and `combinable` offers *Combine as variants* — the
+        // mockup's one component row there, and nothing else of the block.
+        let two = [id(1), id(2)];
+        let kinds = [Kind::Frame, Kind::Frame];
+        let mut cx = open(target, &two, &kinds);
+        cx.holds_main = true;
+        cx.combinable = true;
+        let got = after_frame(&cx);
+        assert_eq!(
+            got.first().map(String::as_str),
+            Some("Combine as variants"),
+            "several mains: {got:?}"
+        );
+        let others = [
+            "Create component",
+            "Duplicate as component",
+            "Select all instances",
+            "Add variant",
+        ];
+        assert!(
+            !got.iter().any(|l| others.contains(&l.as_str())),
+            "several mains: Combine and nothing else of the block, {got:?}"
+        );
     }
 
     /// **The whole menu is present on a locked layer and every editing row is

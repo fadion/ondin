@@ -276,7 +276,7 @@ same place relative to the rows that survive beside it. Nine groups, separated b
 | 1 | **Head** | the kind's own verbs — 0 to 4 rows, §5 |
 | 2 | Clipboard | Cut · Copy · Paste here · Duplicate · Delete |
 | 3 | Properties | Copy properties · Paste properties |
-| 4 | Structure | Group · Frame selection · Ungroup · the four booleans · Flatten · Outline shape / Convert to path |
+| 4 | Structure | Group · Frame selection · the component rows (§4) · Ungroup · the four booleans · Flatten · Outline shape / Convert to path |
 | 5 | Order | Bring to front · Bring forward · Send backward · Send to back |
 | 6 | Transform | Flip horizontal · Flip vertical · Reset origin |
 | 7 | State | Hide/Show · Lock/Unlock · Rename |
@@ -332,7 +332,9 @@ the dispatch arm), which `roadmap.md` had already corrected on 2026-08-21, and s
   crop**: *Reset crop* was a menu row obeying the omission rule until 2026-08-23 and is the card's
   alone since (§5.7, §15 D305), so the rule keeps its example and loses its live demonstration.
   **Components' *Reset all* and *Reset Label* are its second case** (2026-10-04, §7's components
-  bullet, §15 D981's amendment): omitted when nothing differs from the main. ⚠️ They were dimmed for a
+  bullet, §15 D981's amendment): omitted when nothing differs from the main — and variants' *Reset
+  <property>* the same way since 2026-10-05 (§15 D982's amendment), offered only while the bound
+  field differs (`menu::Context::property_reset`). ⚠️ They were dimmed for a
   commit (`a18b0b5`), the build carrying over D981's *disabled, not hidden* — which is the inspector
   card's rule, as image editing's dimming is its card's.
 
@@ -371,8 +373,13 @@ Export group entirely rewritten underneath. What moved is the *labels*, which is
 test spells them out rather than only counting them — either move alone would have failed it, and
 together they do not touch the count at all.
 **And a fifth, on 2026-10-04: *Create component*** (§15 D979's amendment, D981), filed in Structure
-after *Frame selection* — **provisionally**, by the build and not by this file (§7) — took both ends
-to **24 and 30** and a primitive's Structure group from 7 to 8. The tail is untouched.
+after *Frame selection* — provisionally, by the build, until 2026-10-06, when the place was found to
+be the accepted mockups' own (§4's Structure table) — took both ends
+to **24 and 30** and a primitive's Structure group from 7 to 8. The tail is untouched. ⚠️ **Both are
+an ordinary layer's counts** (`menu::Role::Plain`): a main, a set, an instance or a linked child
+carries its role's component rows in *Create component*'s place — up to three, §4 — so its menu
+can run two rows longer, and no test counts those menus; the sequence test in §4 pins the rows, not a
+total.
 **Both totals are the menu as actually
 built, and both ends are pinned by name** —
 `a_primitives_menu_is_twenty_four_rows_in_canonical_group_order` (named `…twenty_three…` until
@@ -389,15 +396,21 @@ the same day and has since taken that one back down.
 **Text is 28 rows, and the range still holds** — head 4 · Clipboard 5 · Properties 2 · Structure 5 ·
 Order 4 · Transform 2 · State 3 · Navigate 1 · Export 2. ⚠️ **It was 27 until 2026-10-04**, when
 *Create component* (`menu::Role::Plain`) joined Structure on a text layer as on every plain layer — a
-**fourth** move applied by reading, counted from the rule in the code and not from a built menu. The 27
+**fourth** move applied by reading, counted from the rule in the code and not from a built menu.
+**Measured and pinned on 2026-10-06** — `a_text_layers_menu_is_twenty_eight_rows` — and the reading
+was right; the history below is how it stood for six weeks. The 27
 was counted once with a throwaway probe on
 2026-08-20 when §5.6's last two rows landed (§15 D260, D261) and **not pinned by a test name**, unlike
 the two ends. ⚠️ It was 26 then, and the one extra row is *Use as mask*, **read rather than
 re-measured**: it is pushed for any selection with no frame in it and not inside a boolean, which a
 text layer satisfies. *Copy as PNG* and *Export as…* both moved it on 2026-08-22 and in opposite
 directions, being §4's invariant tail, which every layer menu gets whole — so this number cancelled
-exactly as the two ends did. Re-probe it if it is ever load-bearing: four row moves have now been
-applied to this number by reading rather than by measuring, where the two ends have a test each. It is stated because the sentence above reads as though the primitive and the boolean
+exactly as the two ends did. ~~Re-probe it if it is ever load-bearing: four row moves have now been
+applied to this number by reading rather than by measuring, where the two ends have a test each.~~
+It has a test of its own now, as the two ends do. ⚠️ **The test's first run read 25**: the fixture
+carried no `text_sizing`, which drops §5.6's three rows — so a probe of this number has to give the
+layer the state every real text layer is in. Text's count is stated because the length paragraph
+above reads as though the primitive and the boolean
 bracket a spread of *kinds*, and they no longer do in the way they did: text used to be the obviously
 short kind and now sits two rows off the long end. The endpoints do not move — the three sizing rows
 are a head and *Convert to path* takes *Outline shape*'s slot — so nothing here is a new ceiling.
@@ -467,12 +480,14 @@ sentences rather than one; both rows are otherwise present on every kind, a grou
 
 ### Structure
 
-Every row here is kind-gated, and the gates are the code's, not this file's.
+Every row here is kind-gated — the component rows by role instead (`menu::Role`) — and the gates are
+the code's, not this file's.
 
 | Row | Chord | Cost | |
 |---|---|---|---|
 | Group selection | `Ctrl+G` | wiring | ✅ `build::group`. Present on one layer too, as Figma's is |
 | **Frame selection** | — | feature | ✅ **built 2026-08-20** (§15 D249). The scoring was right that it is new work — `build::frame` is a second builder, not a flag on `group` — and the reason is the frame having a *box*: it is created at the union's corner, so every member is moved back by exactly that corner where a group touches nothing. **Beside *Group selection* everywhere** since 2026-09-24 (§15 D876) — it was present where that row was absent, on a selection of frames, until frames could be grouped. Dim, with *"A frame cannot go inside a boolean or a mask"*, where `build::can_frame` refuses: among a boolean's operands or anywhere under a mask (§5.3's ancestor rule; inside a plain `Group` it frames where it stands, and dimmed there until then), and **no accelerator** — `shortcuts.md` binds none and a chord invented at a row is one that file does not know about |
+| **The component rows** | `Ctrl+Alt+K`, `Ctrl+Alt+B` | feature | ✅ **built 2026-10-04 and 2026-10-05** (§15 D979, D981, D982 and their amendments), and **placed here on 2026-10-06**: directly after *Frame selection*, which is where the accepted components and variants mockups draw every one of them, on their menu screens 5A–5D — so the build's "provisional" filing was the design's all along, and this table is where it is recorded rather than §7. Gated by **role**, not kind (`menu::Role`), in the mockups' order: *Combine as variants* on two or more mains outside any set under one parent, ahead of the rest; an ordinary layer's *Create component* (`Ctrl+Alt+K`) — withheld from a selection holding a main or a set, which it would nest; a main's *Add variant* (in a set only), *Duplicate as component* and *Select all instances*; a set's *Add variant* and *Select all instances*; an instance's *Go to main component*, *Reset all* and *Detach instance* (`Ctrl+Alt+B`); a linked child's *Go to main component*, *Reset* named for its property (*Reset Label text*) and *Reset* named for itself (*Reset Label*). **The three resets are omitted when nothing differs** — §3's one exception — and every row but *Go to main component* and *Select all instances*, which change only the selection, dims on a lock. Those two stay here rather than in Navigate because the mockups draw them inside the block; the session's reading, not the mockups' words, is that splitting it would scatter one role's rows over two groups. **Placed by the session under the maintainer's delegation, open to overturning** (§15 D981's 2026-10-06 amendment). The mockup's `CTRL+ALT+G` beside *Frame selection* is not taken as a ruling — that row stays unbound (§15 D249). `the_component_rows_follow_frame_selection_in_structure` pins the place, role by role |
 | Ungroup | `Ctrl+Shift+G` | wiring | ✅ — and **only on a Group or a Boolean**: `build::ungroup`'s kind gate is exactly those two, so the row is absent on a frame, which is honest rather than a bug to hide |
 | **Use as mask** | `Ctrl+Alt+M` | feature | ✅ **built 2026-08-21** (§15 D286), reversing §7's non-row. Directly after the group verbs and before the booleans, because with the group-wrapping arm it *is* one of the container-making verbs — after *Ungroup* where that row is present, after *Frame selection* on a shape, where it is not. **Checkable like *Clip content*, not like the booleans**: a toggle whose off-state is worth showing, ticked off `LayerState::masked`, which is true when the layer **is** a mask *or* holds one — the second half being the state the verb itself leaves behind. **Absent** on a selection of nothing but frames (a frame cannot be a mask, so no member could be one — narrowed 2026-09-24 from *"containing a frame"*, since frames group now and a frame beside a shape is masked content, `build::mask_target` passing over it, §15 D876) and inside a boolean, where operands are combined rather than drawn. **Dim, with the inspector's own sentence, wherever the verb would refuse** — `Inspector::mask_action`'s `Err`, read into `menu::Context::mask_refused` through `OndinApp::mask_refusal`, so the row and the control one panel over cannot disagree (since 2026-09-24, §15 D876's amendment: a lone group holding a frame had been offered live and refused after the click, against §3's *state decides enabled*, and no refusal but a lock dimmed the row) — and dim on a lock, whose sentence wins when both apply. `build::mask` is the verb |
 | **Even-odd fill ✓** | feature | ✅ **built 2026-08-31** (§15 D239), and **a row this file never specified** — it arrived with the fill rule itself. Directly after *Use as mask* and before the booleans, which is where the emitted order puts it. **Checkable, like *Use as mask* and unlike the four booleans**: two rules, and the off-state is worth showing, where four alternatives need four labels. **On a lone `Path` only** — the one authored kind whose shape can differ between the rules, a rect, an ellipse, a star and a polygon being single non-crossing outlines where the control would visibly do nothing; and one layer at a time, because the tick reports *this* shape's rule and a mixed selection has no answer to show. **Absent on a boolean, deliberately**: an `Exclude` is even-odd because that is what a symmetric difference is, and `Node::fill_rule` derives it from the operation, so a row appearing to toggle it would be offering to make the shape wrong. Dim on a lock |
@@ -629,7 +644,8 @@ clipboard rows to two clipboard rows and nothing else.
 whole argument for asserting a sequence rather than a length.
 
 **And 24 again on 2026-10-04**, *Create component* in Structure after *Frame selection* (§15 D979's
-amendment, D981) — filed there provisionally by the build, its place §7's to decide. The test is
+amendment, D981) — filed there by the build, ~~provisionally, its place §7's to decide~~ the accepted
+mockups' own place, recorded in §4's Structure table on 2026-10-06. The test is
 `a_primitives_menu_is_twenty_four_rows_in_canonical_group_order` now, renamed with the count — a name
 this menu has carried once before, between *Copy as PNG* and *Export as…*'s removal.
 
@@ -653,14 +669,15 @@ rows** — head 4 · Clipboard 5 · Properties 2 · Structure 5 · Order 4 · Tr
 1 · Export 2 — which sits inside §3's range without moving either end of it, and a **railed** text
 layer's is **30**, Structure being 7 there. ⚠️ **27 and 29 until 2026-10-04**, when *Create component*
 (`menu::Role::Plain`, §15 D979's amendment) joined Structure on text layers too — counted from the rule
-in the code, not from a built menu, and **no test pins either number**, so nothing failed when they
-moved. It read 26 with Structure
+in the code, not from a built menu, and **no test pinned either number**, so nothing failed when they
+moved. The plain 28 is pinned since 2026-10-06 (`a_text_layers_menu_is_twenty_eight_rows`, §3), the
+reading confirmed; the railed 30 is still not. It read 26 with Structure
 3 until 2026-08-22, and the term that moved is one this section does not own: *Use as mask* in
 Structure (§15 D286). **Export moved twice that day and came back to where it started** — *Copy as
 PNG* added (§15 D259's other half) and *Export as…* removed (§15 D264), both in §4's tail, which every
-layer menu gets whole. §3's own copy of this count carries the ⚠️ about it being read rather than
+layer menu gets whole. ~~§3's own copy of this count carries the ⚠️ about it being read rather than
 re-probed, and that warning is worth more now than it was: this number has survived three row moves
-without anyone measuring it.
+without anyone measuring it.~~ Measured on 2026-10-06, and §3's warning struck with it.
 
 ### 5.7 Any layer with a picture in it
 
@@ -908,9 +925,13 @@ Recorded so they are not re-argued, the way `shortcuts.md`'s *Deliberately unbou
   for the property — *Reset Label text* — on a `Member` whose bound field differs, omitted otherwise by
   the same exception. No chords. And *Create component* is withheld from any selection holding a main
   or a set (`menu::Context::holds_main`, `adc5f66`), which it would nest and be refused.
-  ⚠️ **They are filed in `Group::Structure`
+  ~~⚠️ **They are filed in `Group::Structure`
   after *Frame selection* provisionally** — the build's choice, not a ruling and not this file's yet:
-  where each belongs in §5's heads or §4's tail, and its §9 score, are still this file's to decide.
+  where each belongs in §5's heads or §4's tail, and its §9 score, are still this file's to decide.~~
+  **Placed on 2026-10-06, and the place is the one they were filed in**: §4's Structure table, directly
+  after *Frame selection*, scored *feature* — the accepted mockups draw every one of them there, so the
+  "provisional" filing was the design's and only this file had not said so. **They are rows now, and
+  this bullet is their history; §4 is the record.**
   *Create component* took a primitive's menu to 24 and a boolean's to 30 (§3). ⚠️ **The
   other two are not deferred and are still not rows**: effects were built on 2026-08-24 and are
   authored in the inspector's Effects card (§5.3a), and auto layout left §1's list on 2026-09-23 and
@@ -1301,6 +1322,12 @@ beyond itself: the
 clipboard wants **raw RGBA**, so `raster_of` and not `png_of`, a mistake that compiles and pastes as
 noise; and the decision is lifted into `OndinApp::png_for_the_clipboard` so it can be tested at all,
 `copy_as_png` ending in the OS clipboard.
+
+**Landed 2026-10-04 and 2026-10-05, placed 2026-10-06: the component rows** (§4's Structure table,
+§15 D979, D981, D982). Scored *feature* — each needed its verb built in core first — and never listed
+in §9.1–§9.4, components having sat in §7 until they were designed. The place was the last thing open
+and was not a choice left to this file after all: the accepted mockups draw it.
+`the_component_rows_follow_frame_selection_in_structure` pins it.
 
 ### 9.6 Where the code differs from this file, and why
 

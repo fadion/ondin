@@ -663,6 +663,12 @@ pub struct Spec {
     pub group: Group,
     /// Destroys something: red, per `design/Editor.dc.html`'s one red.
     pub danger: bool,
+    /// Draw the **filled** hexagon in the glyph's place (`ui::paint_hexagon_filled`)
+    /// — *Create component* and *Duplicate as component*, which the accepted
+    /// mockups mark with a main's own filled mark (§15 D981). The font has no
+    /// filled weight, so it is painted in `glyph`'s place and the outline is not
+    /// drawn.
+    pub filled_hexagon: bool,
 }
 
 impl Item {
@@ -758,6 +764,7 @@ impl Item {
             accel,
             group,
             danger: false,
+            filled_hexagon: false,
         };
         match self {
             Item::EnterGroup => s("Enter group", icon::SIGN_IN, None, Group::Head),
@@ -853,18 +860,25 @@ impl Item {
             // D981's rows and chords (`shortcuts.md` §12), in Structure directly
             // after *Frame selection* — where the accepted mockups draw every one of
             // them (`context-menus.md` §4's Structure table records it).
-            Item::CreateComponent => s(
-                "Create component",
-                icon::HEXAGON,
-                Some("Ctrl+Alt+K"),
-                Group::Structure,
-            ),
-            Item::DuplicateAsComponent => s(
-                "Duplicate as component",
-                icon::HEXAGON,
-                None,
-                Group::Structure,
-            ),
+            // Both mark what they make — a main — with its filled hexagon.
+            Item::CreateComponent => Spec {
+                filled_hexagon: true,
+                ..s(
+                    "Create component",
+                    icon::HEXAGON,
+                    Some("Ctrl+Alt+K"),
+                    Group::Structure,
+                )
+            },
+            Item::DuplicateAsComponent => Spec {
+                filled_hexagon: true,
+                ..s(
+                    "Duplicate as component",
+                    icon::HEXAGON,
+                    None,
+                    Group::Structure,
+                )
+            },
             Item::SelectAllInstances => s(
                 "Select all instances",
                 icon::SELECTION_ALL,
@@ -873,7 +887,7 @@ impl Item {
             ),
             Item::GoToMain => s(
                 "Go to main component",
-                icon::ARROW_SQUARE_OUT,
+                icon::ARROW_UP_RIGHT,
                 None,
                 Group::Structure,
             ),
@@ -2620,6 +2634,7 @@ impl OndinApp {
                             let mut style = crate::ui::MenuRow::new(spec.glyph, &row.label)
                                 .accel(spec.accel)
                                 .danger(spec.danger)
+                                .filled_hexagon(spec.filled_hexagon)
                                 .enabled(row.enabled);
                             if let Some(on) = row.checked {
                                 style = style.checked(on);
@@ -3477,6 +3492,7 @@ mod tests {
                                     enabled: true,
                                     danger: false,
                                     highlight: None,
+                                    filled_hexagon: false,
                                 },
                                 ROW_H,
                             );
@@ -3795,6 +3811,145 @@ mod tests {
         ));
         // 30 since *Create component* (§15 D981); 29 before it.
         assert_eq!(flat(&groups).len(), 30, "{:?}", labels(&groups));
+    }
+
+    /// **The menus §3's two ends do not count**: a text layer on a rail, and the
+    /// component roles, whose rows sit where an ordinary layer's single *Create
+    /// component* does. Each pinned by its labels' count with the arithmetic in
+    /// the message, so a future disagreement is a comparison — and the first five
+    /// messages were read against their printed labels once, by forcing them to
+    /// report, since a count that passes first time says nothing about which rows
+    /// it counted. The last two are **32**, two past the boolean's 30 that §3's
+    /// ceiling rests on: a bound child's three rows stand in for *Create
+    /// component* on any kind, a railed text layer and a boolean included — the
+    /// arithmetic in each message is those two menus' own, already read above.
+    #[test]
+    fn the_menus_the_two_ends_do_not_count() {
+        let sel = [id(1)];
+        let target = Target::Layer {
+            id: id(1),
+            door: Door::Canvas,
+        };
+        let count = |kind: Kind, f: &dyn Fn(&mut Context<'_>)| {
+            let kinds = [kind];
+            let mut cx = open(target, &sel, &kinds);
+            f(&mut cx);
+            let groups = build(&cx);
+            (flat(&groups).len(), format!("{:?}", labels(&groups)))
+        };
+        let cases: [(&str, usize, (usize, String)); 7] = [
+            (
+                "text on a rail: the plain 28, plus *Flip to other side* and \
+                 *Detach from path*",
+                30,
+                count(Kind::Text, &|cx| {
+                    cx.state.text_sizing = Some(0);
+                    cx.on_a_rail = true;
+                }),
+            ),
+            (
+                "a main frame: head 1 · Clipboard 5 · Properties 2 · Structure 4 \
+                 (*Group selection*, *Frame selection*, *Duplicate as component*, \
+                 *Select all instances*) · Order 4 · Transform 2 · State 3 · \
+                 Navigate 1 · Export 2",
+                24,
+                count(Kind::Frame, &|cx| cx.role = Role::Main),
+            ),
+            (
+                "an instance frame: a main's, with *Go to main component*, *Reset \
+                 all* and *Detach instance* for its two",
+                25,
+                count(Kind::Frame, &|cx| cx.role = Role::Instance),
+            ),
+            (
+                "a linked shape in an instance: the primitive's 24, with *Go to \
+                 main component* and *Reset <layer>* for *Create component*",
+                25,
+                count(Kind::Shape, &|cx| {
+                    cx.role = Role::Member;
+                    cx.layer_name = "Label".into();
+                }),
+            ),
+            (
+                "a bound text child: text's 28, with *Go to main component*, \
+                 *Reset <property>* and *Reset <layer>* for *Create component*",
+                30,
+                count(Kind::Text, &|cx| {
+                    cx.state.text_sizing = Some(0);
+                    cx.role = Role::Member;
+                    cx.layer_name = "Label".into();
+                    cx.property_reset = Some("Label text".into());
+                }),
+            ),
+            (
+                "a bound text child on a rail: the railed 30, with the bound \
+                 child's three rows for *Create component* — the long end",
+                32,
+                count(Kind::Text, &|cx| {
+                    cx.state.text_sizing = Some(0);
+                    cx.on_a_rail = true;
+                    cx.role = Role::Member;
+                    cx.layer_name = "Label".into();
+                    cx.property_reset = Some("Label text".into());
+                }),
+            ),
+            (
+                "a linked boolean whose bound visibility differs: the boolean's \
+                 30, with the bound child's three rows for *Create component* — \
+                 the long end too",
+                32,
+                count(Kind::Boolean(BoolOp::Union), &|cx| {
+                    cx.role = Role::Member;
+                    cx.layer_name = "Label".into();
+                    cx.property_reset = Some("Label".into());
+                }),
+            ),
+        ];
+        let wrong: Vec<String> = cases
+            .into_iter()
+            .filter(|(_, want, (got, _))| got != want)
+            .map(|(what, want, (got, labels))| format!("{what}: {got} not {want}, {labels}"))
+            .collect();
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+
+    /// **The two rows that make a main draw its filled hexagon** — *Create
+    /// component* and *Duplicate as component*, as the accepted components mockup
+    /// marks them (§15 D981) — and no other row does. The font has no filled
+    /// weight, so `menu_row` paints `ui::paint_hexagon_filled`'s six-point polygon
+    /// in the glyph's place. Flip, run: `menu_row` ignoring the flag paints no
+    /// polygon and fails *"the filled row paints it"*.
+    #[test]
+    fn the_rows_that_make_a_main_draw_its_filled_hexagon() {
+        for item in Item::ALL {
+            assert_eq!(
+                item.spec().filled_hexagon,
+                matches!(item, Item::CreateComponent | Item::DuplicateAsComponent),
+                "{item:?}"
+            );
+        }
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let hexagons = |filled: bool| {
+            let out = ctx.run_ui(Default::default(), |ui| {
+                crate::ui::menu_row(
+                    ui,
+                    crate::ui::MenuRow::new(icon::HEXAGON, "Create component")
+                        .filled_hexagon(filled),
+                    ROW_H,
+                );
+            });
+            out.shapes
+                .iter()
+                .filter(|c| {
+                    matches!(&c.shape, egui::Shape::Path(p)
+                        if p.closed && p.points.len() == 6 && p.fill != egui::Color32::TRANSPARENT)
+                })
+                .count()
+        };
+        assert_eq!(hexagons(true), 1, "the filled row paints it");
+        assert_eq!(hexagons(false), 0, "an ordinary row paints its glyph");
     }
 
     /// **Text's count, which `context-menus.md` §3 states and nothing measured**

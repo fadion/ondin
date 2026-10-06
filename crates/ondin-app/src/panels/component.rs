@@ -1057,7 +1057,7 @@ fn heading(
                         );
                         let arrow = ui.add(
                             egui::Label::new(
-                                egui::RichText::new(icon::ARROW_SQUARE_OUT)
+                                egui::RichText::new(icon::ARROW_UP_RIGHT)
                                     .font(theme::icon_font(12.0))
                                     .color(theme::text::DIM),
                             )
@@ -1270,7 +1270,7 @@ fn child_line(ui: &mut egui::Ui, main_name: &str, linked: bool, act: &mut Option
                 let w = ui::action_button_w(ui.ctx(), label);
                 if ui::action_button(
                     ui,
-                    icon::ARROW_SQUARE_OUT,
+                    icon::ARROW_UP_RIGHT,
                     label,
                     FieldButton::Off,
                     egui::vec2(w, ui::CONTROL_H),

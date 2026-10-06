@@ -20732,18 +20732,44 @@ mod frame_menu_door_tests {
     /// **A selected set's `+` has its own hit route** (§15 D982): on the middle of
     /// the set's bottom edge, claimed ahead of the artwork (`chrome_claims`, so a
     /// guide does not take it either), and only while the set is the selection.
-    /// What the click does is *Add variant*, the card's verb; the click arm that
-    /// calls it is read, not driven.
+    /// What the click does is *Add variant*, the card's verb — driven through
+    /// `normal_mode_input` by `a_click_on_a_sets_plus_adds_a_variant`.
     ///
     /// Flip: dropping the `+` from `chrome_claims` fails at *"a guide does not
     /// take it"*.
     #[test]
     fn a_selected_sets_plus_is_its_own_target() {
-        use ondin_core::variant::{VariantProp, VariantSet};
         let ctx = egui::Context::default();
-        crate::theme::install(&ctx);
+        let (mut app, set) = app_with_a_set(&ctx);
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        app.session.selection.set_one(set);
+        let (_, at) = app.set_plus(rect, 1.0).expect("a selected set has its +");
+        let q = app.selection_quad(set, rect, 1.0).unwrap();
+        assert!(
+            (at.y - (q[2].y + q[3].y) / 2.0).abs() < 0.01,
+            "on the bottom edge: {at:?} {q:?}"
+        );
+        assert_eq!(app.set_plus_at(at, rect, 1.0), Some(set));
+        assert!(
+            app.chrome_claims(at, rect, 1.0, &None),
+            "a guide does not take it"
+        );
+        assert_eq!(
+            app.set_plus_at(at + egui::vec2(0.0, -40.0), rect, 1.0),
+            None,
+            "inside the set is the artwork's"
+        );
+        app.session.selection.clear();
+        assert_eq!(app.set_plus_at(at, rect, 1.0), None, "only while selected");
+    }
+
+    /// `app_with_an_occupied_frame`'s frame made a component set of one variant,
+    /// *Small* — the frame's id, which is the set's.
+    fn app_with_a_set(ctx: &egui::Context) -> (OndinApp, NodeId) {
+        use ondin_core::variant::{VariantProp, VariantSet};
+        crate::theme::install(ctx);
         let _ = ctx.run_ui(Default::default(), |_| {});
-        let (mut app, set) = app_with_an_occupied_frame(&ctx);
+        let (mut app, set) = app_with_an_occupied_frame(ctx);
         let small = app.session.ids.mint();
         assert!(app.session.commit(Transaction(vec![
             Operation::CreateNode {
@@ -20774,26 +20800,186 @@ mod frame_menu_door_tests {
                 values: vec!["Small".into()],
             },
         ])));
-        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        (app, set)
+    }
+
+    /// The variants under `set`, counted.
+    fn variants_in(app: &OndinApp, set: NodeId) -> usize {
+        let doc = &app.session.doc;
+        doc.get(set)
+            .map(|n| {
+                n.children()
+                    .iter()
+                    .filter(|c| doc.get(**c).is_some_and(|c| c.component()))
+                    .count()
+            })
+            .unwrap_or(0)
+    }
+
+    /// **A click on a selected set's `+` adds a variant, through
+    /// `normal_mode_input`** (§15 D982) — the arm `a_selected_sets_plus_is_its_own_target`
+    /// leaves read, driven with real pointer events: a press and release on the
+    /// disc, the set selected. And a click a little inside the set, off the disc,
+    /// adds nothing — the control is the disc, not the set.
+    ///
+    /// Flip, run: the `+` arm deleted from `normal_mode_input` fails *"the click
+    /// on the + adds one"*, the count still 1.
+    #[test]
+    fn a_click_on_a_sets_plus_adds_a_variant() {
+        const AREA: egui::Rect = egui::Rect {
+            min: egui::Pos2::ZERO,
+            max: egui::Pos2::new(800.0, 600.0),
+        };
+        let ctx = egui::Context::default();
+        let (mut app, set) = app_with_a_set(&ctx);
+        let frame = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(AREA),
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| {
+                let resp = ui.interact(
+                    AREA,
+                    egui::Id::new("set-plus-probe"),
+                    egui::Sense::click_and_drag(),
+                );
+                app.normal_mode_input(ui, &resp, AREA, 1.0);
+            });
+        };
+        let click = |app: &mut OndinApp, at: egui::Pos2| {
+            let button = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            };
+            frame(app, vec![egui::Event::PointerMoved(at)]);
+            frame(app, vec![button(true)]);
+            frame(app, vec![button(false)]);
+        };
         app.session.selection.set_one(set);
-        let (_, at) = app.set_plus(rect, 1.0).expect("a selected set has its +");
-        let q = app.selection_quad(set, rect, 1.0).unwrap();
-        assert!(
-            (at.y - (q[2].y + q[3].y) / 2.0).abs() < 0.01,
-            "on the bottom edge: {at:?} {q:?}"
+        let (_, at) = app.set_plus(AREA, 1.0).expect("the +");
+        assert_eq!(variants_in(&app, set), 1, "the fixture: one variant");
+
+        click(&mut app, at + egui::vec2(0.0, -40.0));
+        assert_eq!(
+            variants_in(&app, set),
+            1,
+            "control: a click inside the set, off the disc, adds nothing"
         );
-        assert_eq!(app.set_plus_at(at, rect, 1.0), Some(set));
+        app.session.selection.set_one(set);
+        click(&mut app, at);
+        assert_eq!(variants_in(&app, set), 2, "the click on the + adds one");
+    }
+
+    /// **The components chrome paints what §15 D981, D982 and D985 say it
+    /// does**, read off the frame's shapes:
+    /// - a main's tag is a **chip** — a `CARD` ground with a `CARD_BORDER` edge —
+    ///   with the **filled hexagon** drawn on it, and an instance's tag has
+    ///   neither;
+    /// - a selected main's instance gets four **hairlines** in `text::FAINT`;
+    /// - an entered instance's edge is **dashed** in `text::DIM`, with the quiet
+    ///   *Esc to exit* tag under it;
+    /// - a selected set's `+` is a `CARD` **disc** with two `STRONG` arms.
+    ///
+    /// Flips, each run: `draw_frame_labels` without its `paint_hexagon_filled`
+    /// call fails *"one filled hexagon"*, 0 for 1; the entered edge drawn as four
+    /// solid segments fails *"dashed"*, counting 4 — **run alone**, since beside
+    /// the first flip the hexagon assertion fails first and hides it.
+    #[test]
+    fn the_components_chrome_paints_its_chip_hexagon_hairlines_dashes_and_disc() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let (mut app, main) = app_with_an_occupied_frame(&ctx);
+        let inst = main_with_an_instance(&mut app, main);
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let shapes = |app: &OndinApp, labels: bool| {
+            let out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(rect),
+                    ..Default::default()
+                },
+                |ui| {
+                    if labels {
+                        app.draw_frame_labels(ui, ui.painter(), rect, 1.0);
+                    } else {
+                        app.draw_component_chrome(ui.painter(), rect, 1.0);
+                    }
+                },
+            );
+            out.shapes.into_iter().map(|c| c.shape).collect::<Vec<_>>()
+        };
+        let segments = |shapes: &[egui::Shape], ink: egui::Color32| {
+            shapes
+                .iter()
+                .filter(
+                    |s| matches!(s, egui::Shape::LineSegment { stroke, .. } if stroke.color == ink),
+                )
+                .count()
+        };
+
+        // The tags, nothing selected.
+        app.session.selection.clear();
+        let tags = shapes(&app, true);
+        let chips = tags
+            .iter()
+            .filter(|s| {
+                matches!(s, egui::Shape::Rect(r)
+                    if r.fill == theme::color::CARD && r.stroke.color == theme::color::CARD_BORDER)
+            })
+            .count();
+        assert_eq!(chips, 1, "one chip — the main's, not the instance's");
+        let hexagons = tags
+            .iter()
+            .filter(|s| {
+                matches!(s, egui::Shape::Path(p)
+                    if p.closed && p.points.len() == 6 && p.fill == theme::text::STRONG)
+            })
+            .count();
+        assert_eq!(hexagons, 1, "one filled hexagon, on the main's chip");
+
+        // A selected main's instance hairlines.
+        app.session.selection.set_one(main);
+        let chrome = shapes(&app, false);
+        assert_eq!(
+            segments(&chrome, theme::text::FAINT),
+            4,
+            "four hairlines round the one instance"
+        );
+
+        // An entered instance's dashed edge and its tag.
+        app.session.selection.clear();
+        app.entered_group = Some(inst);
+        let chrome = shapes(&app, false);
         assert!(
-            app.chrome_claims(at, rect, 1.0, &None),
-            "a guide does not take it"
+            segments(&chrome, theme::text::DIM) > 8,
+            "dashed: many short segments, not four sides — {}",
+            segments(&chrome, theme::text::DIM)
+        );
+        assert!(
+            chrome.iter().any(|s| matches!(s, egui::Shape::Text(t)
+                if t.galley.text().contains("Esc to exit"))),
+            "and the tag under it"
+        );
+        app.entered_group = None;
+
+        // A selected set's disc.
+        let (mut app, set) = app_with_a_set(&ctx);
+        app.session.selection.set_one(set);
+        let (_, at) = app.set_plus(rect, 1.0).expect("the +");
+        let chrome = shapes(&app, false);
+        assert!(
+            chrome.iter().any(|s| matches!(s, egui::Shape::Circle(c)
+                if c.fill == theme::color::CARD && c.center == at && c.radius == SET_PLUS_R)),
+            "the disc on the set's bottom edge"
         );
         assert_eq!(
-            app.set_plus_at(at + egui::vec2(0.0, -40.0), rect, 1.0),
-            None,
-            "inside the set is the artwork's"
+            segments(&chrome, theme::text::STRONG),
+            2,
+            "and its two arms"
         );
-        app.session.selection.clear();
-        assert_eq!(app.set_plus_at(at, rect, 1.0), None, "only while selected");
     }
 
     /// `main` made a main by *Create component*, and an instance of it placed 300

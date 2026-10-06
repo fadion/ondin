@@ -728,13 +728,18 @@ pub mod icon {
     pub const COPY_SIMPLE: &str = "\u{e1cc}";
     /// *Paste*.
     pub const CLIPBOARD: &str = "\u{e196}";
-    /// *Create component* and *Duplicate as component* — the outline hexagon
-    /// §15 D981 gives components. Regular weight only: the bundled font has no
-    /// filled hexagon, which D981 wants for a main's own mark in the layers panel.
+    /// The outline hexagon §15 D981 gives components — an instance's mark. Regular
+    /// weight only: the bundled font has no filled hexagon, so a main's mark and
+    /// the *Create component* and *Duplicate as component* rows draw it
+    /// (`ui::paint_hexagon_filled`, §15 D985) over this glyph's box.
     pub const HEXAGON: &str = "\u{e2ae}";
     /// *Detach instance* — "no longer from the main" (§15 D981).
     pub const LINK_BREAK: &str = "\u{e2e4}";
-    /// *Go to main component*.
+    /// *Go to main component*, everywhere it is offered — the menu row, the
+    /// Component card's main link and its *Go to main* button — as the accepted
+    /// mockups draw it (§15 D981).
+    pub const ARROW_UP_RIGHT: &str = "\u{e092}";
+    /// A variant clash's *Select it* — go to the other layer.
     pub const ARROW_SQUARE_OUT: &str = "\u{e5de}";
     /// *Select all instances*.
     pub const SELECTION_ALL: &str = "\u{e746}";
@@ -1032,6 +1037,7 @@ pub mod icon {
         ("clipboard", CLIPBOARD),
         ("hexagon", HEXAGON),
         ("link-break", LINK_BREAK),
+        ("arrow-up-right", ARROW_UP_RIGHT),
         ("arrow-square-out", ARROW_SQUARE_OUT),
         ("selection-all", SELECTION_ALL),
         ("warning", WARNING),

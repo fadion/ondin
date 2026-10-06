@@ -241,6 +241,16 @@ const GHOST_ALPHA: f32 = 0.3;
 /// A component set's tab's padding round its text (§15 D982, the design's 1C).
 const SET_TAB_PAD: egui::Vec2 = egui::vec2(6.0, 3.0);
 
+/// A frame tag's point size.
+const LABEL_PT: f32 = 11.0;
+
+/// The padding inside a main's chip (§15 D981): its tag on a neutral ground.
+const CHIP_PAD: egui::Vec2 = egui::vec2(4.0, 2.0);
+
+/// The radius of a selected set's `+` disc on its bottom edge (§15 D982), in
+/// points.
+const SET_PLUS_R: f32 = 8.0;
+
 /// The id the crop ghost wears — see `OndinApp::image_ghost`.
 const GHOST_ID: NodeId = NodeId {
     actor: u64::MAX,
@@ -1765,6 +1775,19 @@ impl OndinApp {
             return;
         }
 
+        // **A selected set's `+`** (§15 D982, the design's 1C): its own hit route,
+        // ahead of every pick — the control sits on the set's edge, over whatever
+        // is behind it — and the same verb as the card's and the menu's *Add
+        // variant*, the set being what is selected.
+        if self.tool.selects()
+            && clicked
+            && let Some(p) = resp.interact_pointer_pos()
+            && self.set_plus_at(p, rect, ppp).is_some()
+        {
+            self.add_variant();
+            return;
+        }
+
         // Select tool clicks: pick, extend, step into a group, or open a text
         // node.
         if self.tool.selects()
@@ -2064,6 +2087,7 @@ impl OndinApp {
         handles: &Option<Handles>,
     ) -> bool {
         self.on_pivot(screen, rect, ppp).is_some()
+            || self.set_plus_at(screen, rect, ppp).is_some()
             || (self.line_ends(rect, ppp).is_some()
                 && self.grab_line_end(screen, rect, ppp).is_some())
             || self.grab_rail_handle(screen, rect, ppp).is_some()
@@ -2107,6 +2131,13 @@ impl OndinApp {
         // [`Self::on_pivot`] for why it has to.
         if let Some(id) = self.on_pivot(grab, rect, ppp) {
             self.drag = Drag::Pivot { id };
+            return;
+        }
+
+        // A set's `+` is a button, not a handle (§15 D982): a press that slides
+        // off it starts nothing, as `chrome_claims` promised the guides it would
+        // not. The click arm adds the variant.
+        if self.set_plus_at(grab, rect, ppp).is_some() {
             return;
         }
 
@@ -9397,12 +9428,20 @@ impl OndinApp {
     /// the row — where a skipped card would start a marquee over a group whose
     /// contents a marquee does not select one by one anyway. Stepped into the
     /// row, the same click selects the card; the chain says which.
+    ///
+    /// **Nor a frame that is an instance, or inside one** (§15 D981 (b)): an
+    /// instance picks like a group whatever its kind, its empty background
+    /// included, and `group_chain` hands the click up to its root.
     pub(crate) fn pick_leaf(&self, world: Point) -> Option<NodeId> {
         let doc = &self.session.doc;
         hit_test(&self.session.resolved, doc, world, self.pick_slop())
             .iter()
             .copied()
-            .find(|id| !self.is_occupied_frame(*id) || group_fence(doc, *id).is_some())
+            .find(|id| {
+                !self.is_occupied_frame(*id)
+                    || group_fence(doc, *id).is_some()
+                    || ondin_core::component::instance_root(doc, *id).is_some()
+            })
     }
 
     /// The picking allowance a hit test gets, in **world** units — [`PICK_SLOP_PX`] at
@@ -9614,7 +9653,7 @@ impl OndinApp {
         rect: egui::Rect,
         ppp: f32,
     ) -> Option<NodeId> {
-        self.artboards().into_iter().rev().find(|id| {
+        self.tagged().into_iter().rev().find(|id| {
             self.frame_label(ui, *id, rect, ppp)
                 .is_some_and(|(r, _)| r.contains(screen))
         })
@@ -9632,12 +9671,21 @@ impl OndinApp {
         rect: egui::Rect,
         ppp: f32,
     ) -> Option<(egui::Rect, std::sync::Arc<egui::Galley>)> {
-        const PT: f32 = 11.0;
+        const PT: f32 = LABEL_PT;
         const INSET_X: f32 = 5.0;
         const GAP_Y: f32 = 5.0;
 
         let node = self.session.doc.get(id)?;
-        if !matches!(node.kind(), NodeKind::Artboard { .. }) {
+        let is_main = node.component();
+        // A frame, or a **group that is a main** (§15 D981 (f)), which gets a tag
+        // so it can carry the chip and the glyph. A group *instance*'s tag is
+        // unruled (D981), so it has none.
+        let tagged = match node.kind() {
+            NodeKind::Artboard { .. } => true,
+            NodeKind::Group => is_main,
+            _ => false,
+        };
+        if !tagged {
             return None;
         }
         // A hidden frame has no name tag. The tag is the one piece of a frame that
@@ -9690,6 +9738,52 @@ impl OndinApp {
                 };
                 words(&mut job, &count, 8.0, theme::text::DIM);
             }
+        } else if is_main {
+            // A main (§15 D981): the **filled** hexagon on a neutral chip. The
+            // outline glyph is laid out unpainted to hold its cell, and
+            // `draw_frame_labels` fills it (`ui::paint_hexagon_filled`) — Phosphor
+            // Regular has no filled one (§15 D10, D985). A clash's warning first,
+            // and the instance count while the main is selected.
+            if clashing {
+                glyph(&mut job, icon::WARNING, egui::Color32::PLACEHOLDER);
+            }
+            glyph(&mut job, icon::HEXAGON, egui::Color32::TRANSPARENT);
+            words(&mut job, node.name(), 4.0, egui::Color32::PLACEHOLDER);
+            if self.session.selection.contains(id) {
+                let n = ondin_core::component::instances_of(doc, id).len();
+                let count = match n {
+                    1 => "1 instance".to_string(),
+                    n => format!("{n} instances"),
+                };
+                words(&mut job, &count, 8.0, theme::text::DIM);
+            }
+        } else if ondin_core::component::instance_root(doc, id) == Some(id) {
+            // An instance (§15 D981): the outline hexagon and a bare label. Renamed,
+            // it trails its main's name in grey; entered, the label is a path to
+            // the layer selected inside it.
+            glyph(&mut job, icon::HEXAGON, egui::Color32::PLACEHOLDER);
+            let main_name = ondin_core::component::main_of(doc, id)
+                .and_then(|m| doc.get(m))
+                .map(|m| m.name().to_string())
+                .unwrap_or_default();
+            let inside = (self.entered_group == Some(id))
+                .then(|| self.session.selection.single())
+                .flatten()
+                .filter(|s| *s != id && ondin_core::is_within(doc, *s, id))
+                .and_then(|s| doc.get(s));
+            match inside {
+                Some(child) => {
+                    words(&mut job, node.name(), 4.0, egui::Color32::PLACEHOLDER);
+                    words(&mut job, "›", 5.0, theme::text::DIM);
+                    words(&mut job, child.name(), 5.0, egui::Color32::PLACEHOLDER);
+                }
+                None => {
+                    words(&mut job, node.name(), 4.0, egui::Color32::PLACEHOLDER);
+                    if !main_name.is_empty() && main_name != node.name() {
+                        words(&mut job, &main_name, 6.0, theme::text::DIM);
+                    }
+                }
+            }
         } else {
             if clashing {
                 glyph(&mut job, icon::WARNING, egui::Color32::PLACEHOLDER);
@@ -9709,8 +9803,106 @@ impl OndinApp {
             let tab = egui::Rect::from_min_size(min, size + SET_TAB_PAD * 2.0);
             return Some((tab, galley));
         }
+        if is_main {
+            // The chip's padded box, clear of the frame by the tag's own gap.
+            let min = egui::pos2(
+                corner.x + INSET_X - CHIP_PAD.x,
+                corner.y - GAP_Y - size.y - CHIP_PAD.y * 2.0,
+            );
+            return Some((
+                egui::Rect::from_min_size(min, size + CHIP_PAD * 2.0),
+                galley,
+            ));
+        }
         let min = egui::pos2(corner.x + INSET_X, corner.y - GAP_Y - size.y);
         Some((egui::Rect::from_min_size(min, size), galley))
+    }
+
+    /// Where the `+` of the one selected **component set** sits on screen (§15
+    /// D982, the design's 1C) — the middle of its bottom edge — or `None` when
+    /// the selection is not a single set on screen.
+    fn set_plus(&self, rect: egui::Rect, ppp: f32) -> Option<(NodeId, egui::Pos2)> {
+        let set = self.session.selection.single()?;
+        if !ondin_core::variant::is_set(&self.session.doc, set) || !self.shown_visible(set) {
+            return None;
+        }
+        let q = self.selection_quad(set, rect, ppp)?;
+        Some((set, q[2] + (q[3] - q[2]) / 2.0))
+    }
+
+    /// The selected set whose `+` is under `screen` (§15 D982) — the control's
+    /// own hit route, a disc of [`SET_PLUS_R`] and the pick slop.
+    fn set_plus_at(&self, screen: egui::Pos2, rect: egui::Rect, ppp: f32) -> Option<NodeId> {
+        let (set, at) = self.set_plus(rect, ppp)?;
+        (at.distance(screen) <= SET_PLUS_R + PICK_SLOP_PX).then_some(set)
+    }
+
+    /// The components chrome over the artwork (§15 D981) — neutral throughout,
+    /// component-ness being carried by shape and never by the accent:
+    /// - **a selected main's instances** each get a hairline round their box, so
+    ///   *where is this used* is answered by looking;
+    /// - **an entered instance** keeps a dashed boundary while it is entered, so it
+    ///   is clear where *inside* ends, and a quiet tag under it says how to leave.
+    ///
+    /// The instance hairlines ask `component::instances_of` per selected main per
+    /// frame — one scan of the document each, and only while a main is selected.
+    fn draw_component_chrome(&self, painter: &egui::Painter, rect: egui::Rect, ppp: f32) {
+        let doc = &self.session.doc;
+        let hair = egui::Stroke::new(1.0, theme::text::FAINT);
+        let outline = |q: [egui::Pos2; 4]| {
+            for i in 0..4 {
+                painter.line_segment([q[i], q[(i + 1) % 4]], hair);
+            }
+        };
+        // A selected set's `+` (§15 D982): a disc on the middle of its bottom
+        // edge, the set's tab's ground and border, adding a variant on a click.
+        if let Some((_, at)) = self.set_plus(rect, ppp) {
+            painter.circle(
+                at,
+                SET_PLUS_R,
+                theme::color::CARD,
+                egui::Stroke::new(1.0, theme::color::CARD_BORDER),
+            );
+            let s = egui::Stroke::new(1.5, theme::text::STRONG);
+            let arm = SET_PLUS_R * 0.5;
+            painter.line_segment([at - egui::vec2(arm, 0.0), at + egui::vec2(arm, 0.0)], s);
+            painter.line_segment([at - egui::vec2(0.0, arm), at + egui::vec2(0.0, arm)], s);
+        }
+        for main in self.session.selection.ids() {
+            if !doc.get(*main).is_some_and(|n| n.component()) {
+                continue;
+            }
+            for inst in ondin_core::component::instances_of(doc, *main) {
+                if self.shown_visible(inst)
+                    && let Some(q) = self.selection_quad(inst, rect, ppp)
+                {
+                    outline(q);
+                }
+            }
+        }
+        let Some(entered) = self
+            .entered_group
+            .filter(|g| ondin_core::component::instance_root(doc, *g) == Some(*g))
+        else {
+            return;
+        };
+        let Some(q) = self.selection_quad(entered, rect, ppp) else {
+            return;
+        };
+        let edge = egui::Stroke::new(1.0, theme::text::DIM);
+        painter.extend(egui::Shape::dashed_line(
+            &[q[0], q[1], q[2], q[3], q[0]],
+            edge,
+            4.0,
+            3.0,
+        ));
+        painter.text(
+            q[3] + egui::vec2(5.0, 5.0),
+            egui::Align2::LEFT_TOP,
+            "Editing inside instance · Esc to exit",
+            egui::FontId::proportional(LABEL_PT),
+            theme::text::DIM,
+        );
     }
 
     /// Every frame's name, drawn under the selection chrome.
@@ -9721,10 +9913,43 @@ impl OndinApp {
         rect: egui::Rect,
         ppp: f32,
     ) {
-        for id in self.artboards() {
+        for id in self.tagged() {
             let Some((label, galley)) = self.frame_label(ui, id, rect, ppp) else {
                 continue;
             };
+            // A main's chip and its filled hexagon (§15 D981), **never the
+            // selection's hue** — the maintainer's ruling for a component's label,
+            // as the set's tab below keeps it.
+            if self.session.doc.get(id).is_some_and(|n| n.component()) {
+                painter.rect(
+                    label,
+                    3.0,
+                    theme::color::CARD,
+                    egui::Stroke::new(1.0, theme::color::CARD_BORDER),
+                    egui::StrokeKind::Inside,
+                );
+                let at = label.min + CHIP_PAD;
+                if let Some(cell) = galley.rows.first().and_then(|r| {
+                    r.glyphs
+                        .iter()
+                        .find(|g| g.chr.to_string() == icon::HEXAGON)
+                        .map(|g| g.logical_rect().translate(r.pos.to_vec2()))
+                }) {
+                    crate::ui::paint_hexagon_filled(
+                        painter,
+                        at + cell.center().to_vec2(),
+                        LABEL_PT,
+                        theme::text::STRONG,
+                    );
+                }
+                painter.galley(at, galley, theme::text::STRONG);
+                continue;
+            }
+            // An instance's tag stays neutral selected or not (§15 D981).
+            if ondin_core::component::instance_root(&self.session.doc, id) == Some(id) {
+                painter.galley(label.min, galley, theme::text::MUTED);
+                continue;
+            }
             let is_set = self.session.doc.get(id).is_some_and(|n| n.set().is_some());
             if is_set {
                 // A set's tab and its resting hairline (§15 D982, 1C): neutral, and
@@ -10919,6 +11144,10 @@ impl OndinApp {
         // it is a label on the artwork, not part of the chrome that answers a
         // gesture.
         self.draw_frame_labels(ui, painter, rect, ppp);
+
+        // A selected main's instances, and an entered instance's edge — neutral,
+        // with the labels (§15 D981).
+        self.draw_component_chrome(painter, rect, ppp);
 
         // A selected grid container's tracks, over the artwork and its labels and
         // under everything that answers the pointer — see the function.
@@ -20461,6 +20690,216 @@ mod frame_menu_door_tests {
         assert!(tag(&app, set).1.ends_with("2 variants are Small"));
         assert!(tag(&app, b).1.starts_with(icon::WARNING));
         assert!(tag(&app, a).1.starts_with(icon::WARNING));
+    }
+
+    /// **A selected set's `+` has its own hit route** (§15 D982): on the middle of
+    /// the set's bottom edge, claimed ahead of the artwork (`chrome_claims`, so a
+    /// guide does not take it either), and only while the set is the selection.
+    /// What the click does is *Add variant*, the card's verb; the click arm that
+    /// calls it is read, not driven.
+    ///
+    /// Flip: dropping the `+` from `chrome_claims` fails at *"a guide does not
+    /// take it"*.
+    #[test]
+    fn a_selected_sets_plus_is_its_own_target() {
+        use ondin_core::variant::{VariantProp, VariantSet};
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let (mut app, set) = app_with_an_occupied_frame(&ctx);
+        let small = app.session.ids.mint();
+        assert!(app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: small,
+                parent: set,
+                index: 1,
+                kind: NodeKind::Artboard {
+                    size: Size::new(20.0, 20.0),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetComponent {
+                id: small,
+                component: true,
+            },
+            Operation::SetVariantSet {
+                id: set,
+                set: Some(VariantSet {
+                    props: vec![VariantProp {
+                        name: "Size".into(),
+                        values: vec!["Small".into()],
+                    }],
+                }),
+            },
+            Operation::SetVariant {
+                id: small,
+                values: vec!["Small".into()],
+            },
+        ])));
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        app.session.selection.set_one(set);
+        let (_, at) = app.set_plus(rect, 1.0).expect("a selected set has its +");
+        let q = app.selection_quad(set, rect, 1.0).unwrap();
+        assert!(
+            (at.y - (q[2].y + q[3].y) / 2.0).abs() < 0.01,
+            "on the bottom edge: {at:?} {q:?}"
+        );
+        assert_eq!(app.set_plus_at(at, rect, 1.0), Some(set));
+        assert!(
+            app.chrome_claims(at, rect, 1.0, &None),
+            "a guide does not take it"
+        );
+        assert_eq!(
+            app.set_plus_at(at + egui::vec2(0.0, -40.0), rect, 1.0),
+            None,
+            "inside the set is the artwork's"
+        );
+        app.session.selection.clear();
+        assert_eq!(app.set_plus_at(at, rect, 1.0), None, "only while selected");
+    }
+
+    /// `main` made a main by *Create component*, and an instance of it placed 300
+    /// to its right through the commit — the instance's id.
+    fn main_with_an_instance(app: &mut OndinApp, main: NodeId) -> NodeId {
+        app.session.selection.set_one(main);
+        app.create_component();
+        assert!(
+            app.session.doc.get(main).is_some_and(|n| n.component()),
+            "the fixture's main"
+        );
+        let doc = &app.session.doc;
+        let (tx, made) = ondin_core::insert_subtrees(
+            doc,
+            &mut app.session.ids,
+            &[ondin_core::Placement {
+                nodes: doc.capture_subtree(main).expect("the main"),
+                parent: doc.root(),
+                index: None,
+            }],
+            ondin_core::kurbo::Vec2::new(300.0, 0.0),
+        );
+        assert!(app.session.commit(tx));
+        made[0]
+    }
+
+    /// **A main's tag is a chip with the filled hexagon, an instance's names its
+    /// main, and neither turns the accent when selected** (§15 D981, D985): the
+    /// main's tag counts its instances while selected; a renamed instance's tag
+    /// trails its main's name; entered, the instance's tag is a path to the layer
+    /// selected inside it; and a **selected** main's or instance's tag paints in
+    /// a neutral ink, where an ordinary frame's turns `color::SELECT`.
+    ///
+    /// Flip: `draw_frame_labels` without the two component arms paints the
+    /// selected main's tag in `color::SELECT` and fails at the hue assertion.
+    #[test]
+    fn a_mains_tag_is_a_chip_and_an_instances_tag_names_its_main() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let (mut app, main) = app_with_an_occupied_frame(&ctx);
+        let inst = main_with_an_instance(&mut app, main);
+        assert!(app.session.commit(Transaction(vec![Operation::SetName {
+            id: inst,
+            name: "Mine".into(),
+        }])));
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let tag = |app: &OndinApp, id| {
+            let mut out = None;
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(rect),
+                    ..Default::default()
+                },
+                |ui| {
+                    let (_, g) = app.frame_label(ui, id, rect, 1.0).expect("a tag");
+                    out = Some(g.text().to_string());
+                },
+            );
+            out.expect("the closure ran")
+        };
+        app.session.selection.clear();
+        let text = tag(&app, main);
+        assert!(
+            text.starts_with(icon::HEXAGON) && text.ends_with("Board"),
+            "the glyph's cell, then the name: {text:?}"
+        );
+        app.session.selection.set_one(main);
+        assert!(tag(&app, main).ends_with("1 instance"));
+        let text = tag(&app, inst);
+        assert!(
+            text.starts_with(icon::HEXAGON) && text.contains("Mine") && text.ends_with("Board"),
+            "renamed, it trails its main's name: {text:?}"
+        );
+        let child = app.session.doc.get(inst).unwrap().children()[0];
+        let child_name = app.session.doc.get(child).unwrap().name().to_string();
+        app.entered_group = Some(inst);
+        app.session.selection.set_one(child);
+        let text = tag(&app, inst);
+        assert!(
+            text.contains('›') && text.ends_with(&child_name),
+            "entered, a path: {text:?}"
+        );
+        app.entered_group = None;
+
+        // The hue: every tag's ink with the main and the instance selected.
+        app.session.selection.set(vec![main, inst]);
+        let mut inks = Vec::new();
+        let out = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(rect),
+                ..Default::default()
+            },
+            |ui| app.draw_frame_labels(ui, ui.painter(), rect, 1.0),
+        );
+        for clipped in &out.shapes {
+            if let egui::Shape::Text(t) = &clipped.shape {
+                inks.push(t.fallback_color);
+            }
+        }
+        assert_eq!(inks.len(), 2, "two tags painted: {inks:?}");
+        assert!(
+            !inks.contains(&color::SELECT),
+            "a component's tag never takes the accent: {inks:?}"
+        );
+    }
+
+    /// **An instance picks like a group, its empty background included** (§15
+    /// D981 (b)): `pick_leaf` answers the occupied instance frame where it answers
+    /// nothing for its main, an ordinary occupied frame, whose background stays
+    /// the marquee's (§15 D22); and a click on the instance's child resolves up
+    /// to the instance through `group_chain`.
+    ///
+    /// Flip: `pick_leaf` without its instance clause answers `None` on the
+    /// instance's background.
+    #[test]
+    fn an_instance_picks_like_a_group() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let (mut app, main) = app_with_an_occupied_frame(&ctx);
+        let inst = main_with_an_instance(&mut app, main);
+        let middle = |id| {
+            app.session
+                .resolved
+                .world_bounds(id)
+                .expect("bounds")
+                .center()
+        };
+        // The 40² rect sits in the top-left corner; the middle is background.
+        assert_eq!(app.pick_leaf(middle(main)), None, "a main is a frame (D22)");
+        assert_eq!(app.pick_leaf(middle(inst)), Some(inst));
+        let child = app.session.doc.get(inst).unwrap().children()[0];
+        assert_eq!(
+            ondin_core::group_chain(&app.session.doc, child, None),
+            vec![inst],
+            "a click on its child resolves to the instance"
+        );
+        let main_child = app.session.doc.get(main).unwrap().children()[0];
+        assert!(
+            ondin_core::group_chain(&app.session.doc, main_child, None).is_empty(),
+            "a main's child stays directly clickable"
+        );
     }
 
     /// ⚠️ **Flipped** by replacing `pick_at_pointer`'s body with `self

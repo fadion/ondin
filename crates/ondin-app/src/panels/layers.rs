@@ -68,6 +68,20 @@ const ICON_HALF: f32 = 8.0;
 const NAME_GAP: f32 = 15.0;
 /// The lock glyph's centre, in from the row's right edge.
 const LOCK_INSET: f32 = 14.0;
+
+/// The room a component mark takes at a row's right edge (§15 D981) — the dot
+/// for an override, `+` for a layer of the instance's own — clear of the lock's
+/// glyph beside it, and what a badge moves left by to make way for it.
+const MARK_SLOT: f32 = 9.0;
+
+/// A row's component mark (§15 D981).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RowMark {
+    /// An override — on the row, or, collapsed, anything inside it differing.
+    Override,
+    /// A layer of the instance's own.
+    Local,
+}
 /// From the lock's centre to the eye's — the glyphs are 15pt, so the old 18pt
 /// pitch left them almost touching.
 const EYE_PITCH: f32 = 23.0;
@@ -1831,6 +1845,22 @@ impl OndinApp {
         let locked = node.locked();
         let name = node.name().to_string();
         let (glyph, mut glyph_col) = node_icon(node.kind());
+        // **A main or an instance wears the hexagon** (§15 D981) — filled for a
+        // main (`ui::paint_hexagon_filled`, Phosphor Regular having no filled
+        // one, §15 D985), outline for an instance — in place of its kind's glyph,
+        // and **neutral, selected or not**: component-ness is shape, never hue.
+        let hexagon = if node.component() {
+            Some(true)
+        } else if ondin_core::component::instance_root(&self.session.doc, id) == Some(id) {
+            Some(false)
+        } else {
+            None
+        };
+        let glyph = if hexagon.is_some() {
+            icon::HEXAGON
+        } else {
+            glyph
+        };
         // **A layer whose picture cannot be drawn wears the warning in its own
         // icon** — §5.5a's rule that a missing picture is never a silent blank has
         // a layers half as well as a canvas one (§15 D179). Asked of the
@@ -1924,6 +1954,34 @@ impl OndinApp {
             // While filtering, every branch is open: a match hidden inside a
             // collapsed ancestor is a search that found nothing.
             let expanded = has_children && (shown.is_some() || !self.collapsed.contains(&id));
+            // **The row's component mark** (§15 D981): `+` for a layer of an
+            // instance's own — a local addition, a kept child (which reads as
+            // local, the maintainer's ruling), or a local instance placed inside —
+            // and a dot for an override: on the row that holds it while expanded,
+            // and on a **collapsed** row for *anything* inside differing from its
+            // main, local layers and removed children included (ruling (e)).
+            let mark = {
+                let doc = &self.session.doc;
+                let in_instance = doc
+                    .get(id)
+                    .and_then(|n| n.parent())
+                    .and_then(|p| ondin_core::component::instance_root(doc, p))
+                    .is_some();
+                let local = in_instance
+                    && doc.get(id).is_some_and(|n| {
+                        n.link()
+                            .is_none_or(|l| doc.get(l).is_some_and(|l| l.component()))
+                    });
+                if local {
+                    Some(RowMark::Local)
+                } else if has_children && !expanded && (in_instance || hexagon == Some(false)) {
+                    let d = self.drift_of(id);
+                    (d.any() || d.local > 0).then_some(RowMark::Override)
+                } else {
+                    (!ondin_core::reset::overrides(&self.session.doc, id).is_empty())
+                        .then_some(RowMark::Override)
+                }
+            };
 
             let (rect, resp) = ui.allocate_exact_size(
                 egui::vec2(ui.available_width(), ROW_H),
@@ -2086,6 +2144,7 @@ impl OndinApp {
             };
             let glyph_col = match (drop_host, selected, dimmed) {
                 (true, ..) => color::SELECT,
+                (_, true, _) if hexagon.is_some() => theme::text::STRONG,
                 (_, true, _) => color::SELECT,
                 (_, false, true) => dim_to(glyph_col, 102),
                 (_, false, false) => glyph_col,
@@ -2118,6 +2177,9 @@ impl OndinApp {
                         )
                         .with_texture(id, crate::thumbs::FULL_UV),
                     ));
+                }
+                None if hexagon == Some(true) => {
+                    crate::ui::paint_hexagon_filled(p, egui::pos2(icon_x, cy), ICON_PT, glyph_col);
                 }
                 None => {
                     p.text(
@@ -2191,13 +2253,31 @@ impl OndinApp {
                     RowBadge::Text(s) => (s.as_str(), egui::FontId::proportional(10.5)),
                     RowBadge::Icon(g, size) => (*g, theme::icon_font(*size)),
                 };
+                // Clear of a component mark, which holds the very edge.
+                let edge = if mark.is_some() { MARK_SLOT } else { 4.0 };
                 p.text(
-                    egui::pos2(rect.right() - 4.0, cy),
+                    egui::pos2(rect.right() - edge, cy),
                     egui::Align2::RIGHT_CENTER,
                     s,
                     font,
                     theme::text::FAINT,
                 );
+            }
+            // The mark sits **after** the lock and the eye, at the row's very
+            // edge, so it never shifts them, and shows in every row state (§15
+            // D981) — neutral, like everything about a component.
+            if let Some(m) = mark {
+                let at = egui::pos2(rect.right() - MARK_SLOT / 2.0 + 1.0, cy);
+                match m {
+                    RowMark::Override => {
+                        p.circle_filled(at, 2.0, theme::text::MUTED);
+                    }
+                    RowMark::Local => {
+                        let s = egui::Stroke::new(1.2, theme::text::MUTED);
+                        p.line_segment([at - egui::vec2(2.5, 0.0), at + egui::vec2(2.5, 0.0)], s);
+                        p.line_segment([at - egui::vec2(0.0, 2.5), at + egui::vec2(0.0, 2.5)], s);
+                    }
+                }
             }
 
             // Not while the row is being renamed: the text field sitting on top

@@ -2597,6 +2597,73 @@ mod tests {
         );
     }
 
+    /// **The layers panel's component marks** (§15 D981): an instance's row wears
+    /// the outline hexagon (a main's is the filled one, painted rather than set,
+    /// so it is not text); an override puts a dot on the row that holds it, and
+    /// on a **collapsed** instance the dot bubbles up to it; a layer of the
+    /// instance's own wears `+`; and an untouched instance wears neither.
+    ///
+    /// Flip: the collapsed arm reading only the row's own overrides leaves the
+    /// collapsed instance without its dot.
+    #[test]
+    fn the_layers_panel_marks_overrides_and_local_layers() {
+        let ctx = egui::Context::default();
+        let mut v = variants_fixture(&ctx);
+        // Each mark's shapes: a dot is a 2pt circle, a `+` two 1.2pt strokes.
+        let marks = |app: &mut OndinApp| {
+            let mut out = None;
+            for _ in 0..3 {
+                out = Some(ctx.run_ui(Default::default(), |ui| app.layers_tree(ui)));
+            }
+            let out = out.expect("drawn");
+            fn walk(s: &egui::Shape, dots: &mut usize, strokes: &mut usize) {
+                match s {
+                    egui::Shape::Circle(c) if c.radius == 2.0 => *dots += 1,
+                    egui::Shape::LineSegment { stroke, .. } if stroke.width == 1.2 => *strokes += 1,
+                    egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, dots, strokes)),
+                    _ => {}
+                }
+            }
+            let (mut dots, mut strokes) = (0, 0);
+            for s in &out.shapes {
+                walk(&s.shape, &mut dots, &mut strokes);
+            }
+            let hexagons = texts(&out)
+                .into_iter()
+                .filter(|(t, _)| t == crate::theme::icon::HEXAGON)
+                .count();
+            (dots, strokes / 2, hexagons)
+        };
+        let (dots, pluses, hexagons) = marks(&mut v.app);
+        assert_eq!((dots, pluses), (0, 0), "an untouched instance");
+        assert_eq!(hexagons, 1, "one instance row, the outline hexagon");
+        assert!(v.app.session.commit(Transaction(vec![Operation::SetName {
+            id: v.ilabel,
+            name: "Mine".into(),
+        }])));
+        assert_eq!(marks(&mut v.app).0, 1, "the override's own row");
+        v.app.collapsed.insert(v.i);
+        assert_eq!(marks(&mut v.app).0, 1, "bubbled to the collapsed instance");
+        v.app.collapsed.clear();
+        let extra = v.app.session.ids.mint();
+        assert!(
+            v.app
+                .session
+                .commit(Transaction(vec![Operation::CreateNode {
+                    id: extra,
+                    parent: v.i,
+                    index: 0,
+                    kind: NodeKind::Rect {
+                        size: ondin_core::kurbo::Size::new(4.0, 4.0),
+                        corner_radii: Default::default(),
+                    },
+                    transform: None,
+                    name: None,
+                }]))
+        );
+        assert_eq!(marks(&mut v.app).1, 1, "a layer of the instance's own");
+    }
+
     /// The set's card draws its counts and its property, and the context menu's
     /// verbs land: *Add variant* after a third value takes it, and *Reset Label
     /// text* puts the property back.

@@ -303,6 +303,13 @@ pub fn pivot_world(doc: &Document, res: &Resolved, id: NodeId) -> Option<Point> 
 /// frame's contents as directly clickable as they always were: the chain that
 /// ends in frames ends before them.
 ///
+/// **An instance root is a rung of its own, whatever its kind** (§15 D981 (b),
+/// the maintainer's ruling): a click on anything inside an instance selects the
+/// whole instance, as a click inside a group selects the group, and a
+/// double-click steps in. For an instance whose root is a frame that is an
+/// exception to §15 D22, not a change to it — every ordinary frame keeps its
+/// rule.
+///
 /// `inside` is the group the user has stepped into (Figma's double-click
 /// isolation): groups at or above it are not candidates, so a click inside picks
 /// something *within* it rather than re-selecting the whole thing. An `inside`
@@ -336,12 +343,15 @@ pub fn group_chain(doc: &Document, id: NodeId, inside: Option<NodeId>) -> Vec<No
     // Frames above the outermost group are not rungs: nothing above them was
     // assembled by hand, so the chain ends where the last group does. Not when
     // the walk stopped at `inside`, though — everything below the group the user
-    // stepped into is inside a group, frames included.
+    // stepped into is inside a group, frames included. **An instance is not a
+    // plain frame here** (§15 D981 (b)): it picks like a group whatever its kind,
+    // so a frame that is an instance root ends the trimming as a group does.
+    let nodes = doc.node_map();
     while !reached_inside
         && chain
             .last()
             .and_then(|c| doc.get(*c))
-            .is_some_and(|n| is_frame(n.kind()))
+            .is_some_and(|n| is_frame(n.kind()) && !crate::component::is_instance_root(nodes, n))
     {
         chain.pop();
     }

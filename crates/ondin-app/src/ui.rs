@@ -3709,6 +3709,40 @@ pub fn paint_lock_filled(
     }
 }
 
+/// The **filled hexagon** a main component carries (§15 D981) — the second
+/// Fill-weight glyph §15 D10 counted to, drawn rather than shipped, as the lock
+/// above is: a hexagon is six points, and the font would be 480 KB for them
+/// (the session's, §15 D985). Phosphor's `hexagon` geometry in its 256-unit box,
+/// pointy-top, its vertices on the outline glyph's centre line — `128,20` at the
+/// top, `220,72` and `220,184` down the right, `128,236` at the bottom — so it sits
+/// in the box [`crate::theme::icon::HEXAGON`] outlines at the same `size`.
+pub fn paint_hexagon_filled(
+    painter: &egui::Painter,
+    center: egui::Pos2,
+    size: f32,
+    color: egui::Color32,
+) {
+    painter.add(hexagon_filled_shape(center, size, color));
+}
+
+/// The polygon [`paint_hexagon_filled`] draws, centred on `center`.
+fn hexagon_filled_shape(center: egui::Pos2, size: f32, color: egui::Color32) -> egui::Shape {
+    const POINTS: [(f32, f32); 6] = [
+        (128.0, 20.0),
+        (220.0, 72.0),
+        (220.0, 184.0),
+        (128.0, 236.0),
+        (36.0, 184.0),
+        (36.0, 72.0),
+    ];
+    let k = size / 256.0;
+    let points = POINTS
+        .iter()
+        .map(|(x, y)| center + egui::vec2((x - 128.0) * k, (y - 128.0) * k))
+        .collect();
+    egui::Shape::convex_polygon(points, color, egui::Stroke::NONE)
+}
+
 /// The two shapes [`paint_lock_filled`] draws — split out so the drawing can be
 /// checked against the box it is supposed to fill, the way [`corner_mask`] is.
 fn lock_filled_shapes(

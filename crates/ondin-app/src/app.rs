@@ -496,6 +496,10 @@ pub(crate) struct FrameIndex {
     /// Every artboard, depth-first in child order — which is paint order, and
     /// which everything reading this list relies on ([`OndinApp::artboards`]).
     frames: Vec<NodeId>,
+    /// Every layer that carries a tag on the canvas — the frames and each **group
+    /// main** (§15 D981 (f)) — in the same paint order, read in the same walk
+    /// ([`OndinApp::tagged`]).
+    tagged: Vec<NodeId>,
     /// Those of them with world bounds, paired with the bounds.
     pub(crate) boxes: Vec<(NodeId, Rect)>,
     /// How many times the document walk has actually run.
@@ -3582,6 +3586,21 @@ impl OndinApp {
         let [id] = *self.session.selection.ids() else {
             return;
         };
+        // **An instance steps in first, whatever its kind** (§15 D981 (c)): the
+        // double-click's group step, which `group_chain` gives an instance root
+        // (§15 D981 (b)), comes before every content arm there — so a frame
+        // instance with a picture fill is entered here, not cropped, as the
+        // double-click enters it.
+        if ondin_core::component::instance_root(&self.session.doc, id) == Some(id)
+            && self
+                .session
+                .doc
+                .get(id)
+                .is_some_and(|n| !n.children().is_empty())
+        {
+            self.enter_container(id, None);
+            return;
+        }
         // **The arms below are `double_click_pick`'s order, and that is the point**
         // (§15 D228): text, then the picture, then the points, then one group deeper.
         // "One level in" means something different on every kind, and the two gestures
@@ -4749,11 +4768,24 @@ impl OndinApp {
             // frame that owns these bounds" both take the *last* match, and the
             // last match of two nested frames is the inner one, which is the one
             // the pointer is really in.
-            index.frames = ondin_core::subtree_nodes(&self.session.doc, &[self.session.doc.root()])
+            let doc = &self.session.doc;
+            index.tagged = ondin_core::subtree_nodes(doc, &[doc.root()])
                 .into_iter()
                 .filter(|id| {
+                    doc.get(*id).is_some_and(|n| match n.kind() {
+                        NodeKind::Artboard { .. } => true,
+                        NodeKind::Group => n.component(),
+                        _ => false,
+                    })
+                })
+                .collect();
+            index.frames = index
+                .tagged
+                .iter()
+                .copied()
+                .filter(|id| {
                     matches!(
-                        self.session.doc.get(*id).map(|n| n.kind()),
+                        doc.get(*id).map(|n| n.kind()),
                         Some(NodeKind::Artboard { .. })
                     )
                 })
@@ -4787,6 +4819,13 @@ impl OndinApp {
     /// memo lookup and a four-element clone rather than a walk of the document.
     pub(crate) fn artboards(&self) -> Vec<NodeId> {
         self.with_frames(|i| i.frames.clone())
+    }
+
+    /// Every layer that carries a tag on the canvas — every artboard, and each
+    /// group that is a main (§15 D981 (f)) — in paint order, from the same memo
+    /// as [`Self::artboards`].
+    pub(crate) fn tagged(&self) -> Vec<NodeId> {
+        self.with_frames(|i| i.tagged.clone())
     }
 
     /// The frames sitting straight on the canvas, in z-order.
@@ -19803,6 +19842,26 @@ mod component_verb_tests {
             kids.as_slice(),
             "with its layers"
         );
+    }
+
+    /// **`Enter` steps into an instance** (§15 D981 (c)), as the double-click does
+    /// — D228's rule that the two agree — whatever its kind: a frame instance,
+    /// which `Enter` never reached before, is entered and its topmost layer
+    /// selected. Its main, an ordinary frame, is not.
+    ///
+    /// Flip: `enter_action` without its instance arm leaves `entered_group` empty.
+    #[test]
+    fn enter_steps_into_an_instance() {
+        let ctx = egui::Context::default();
+        let (mut app, m, i) = main_and_instance(&ctx);
+        app.session.selection.set_one(m);
+        app.enter_action();
+        assert_eq!(app.entered_group, None, "a main is a frame, not entered");
+        app.session.selection.set_one(i);
+        app.enter_action();
+        assert_eq!(app.entered_group, Some(i));
+        let top = *app.session.doc.get(i).unwrap().children().last().unwrap();
+        assert_eq!(app.session.selection.single(), Some(top));
     }
 
     /// **The session's commit makes a swap's rewrite** (§15 D983): a `SetSwap`

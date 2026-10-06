@@ -1469,6 +1469,16 @@ impl OndinApp {
             _ => {}
         }
 
+        // A selected set's `+` (§15 D982) is a button, and the press resolves it
+        // ahead of the box handles (`begin_select_drag`) — so the cursor does too,
+        // or it promised the bottom edge's resize over a disc that will not
+        // resize (`arch-scribe`'s find, §15 D985).
+        if let Some(p) = resp.hover_pos()
+            && self.set_plus_at(p, rect, ppp).is_some()
+        {
+            return (egui::CursorIcon::PointingHand, None);
+        }
+
         // A line's ends, before the box handles — which it does not have — and before
         // falling through to the default arrow over the shape itself.
         if let Some(p) = resp.hover_pos()
@@ -1961,6 +1971,22 @@ impl OndinApp {
             self.session
                 .selection
                 .set_one(rest.first().copied().unwrap_or(leaf));
+            return;
+        }
+        // **An instance double-clicked on its own background steps in**, as
+        // `Enter` does (§15 D981 (c), D228's rule that the two agree): the
+        // background picks the instance itself, whose chain starts above it, so
+        // without this a picture-filled frame instance was cropped here and
+        // entered by `Enter` (`arch-scribe`'s find, §15 D985).
+        if ondin_core::component::instance_root(&self.session.doc, leaf) == Some(leaf)
+            && self.entered_group != Some(leaf)
+            && self
+                .session
+                .doc
+                .get(leaf)
+                .is_some_and(|n| !n.children().is_empty())
+        {
+            self.enter_container(leaf, Some(world));
             return;
         }
         if matches!(
@@ -9766,7 +9792,7 @@ impl OndinApp {
                 .and_then(|m| doc.get(m))
                 .map(|m| m.name().to_string())
                 .unwrap_or_default();
-            let inside = (self.entered_group == Some(id))
+            let inside = (self.entered_instance() == Some(id))
                 .then(|| self.session.selection.single())
                 .flatten()
                 .filter(|s| *s != id && ondin_core::is_within(doc, *s, id))
@@ -9816,6 +9842,16 @@ impl OndinApp {
         }
         let min = egui::pos2(corner.x + INSET_X, corner.y - GAP_Y - size.y);
         Some((egui::Rect::from_min_size(min, size), galley))
+    }
+
+    /// The instance the user is working inside — the nearest instance root at or
+    /// above [`OndinApp::entered_group`] — whose tag is a path and whose edge is
+    /// dashed (§15 D981). At *or above*, so the chrome stays while the user steps
+    /// further in, to a group inside it (`arch-scribe`'s find, §15 D985: it
+    /// asked for the entered group *being* the root, and went at the next step).
+    fn entered_instance(&self) -> Option<NodeId> {
+        self.entered_group
+            .and_then(|g| ondin_core::component::instance_root(&self.session.doc, g))
     }
 
     /// Where the `+` of the one selected **component set** sits on screen (§15
@@ -9880,10 +9916,7 @@ impl OndinApp {
                 }
             }
         }
-        let Some(entered) = self
-            .entered_group
-            .filter(|g| ondin_core::component::instance_root(doc, *g) == Some(*g))
-        else {
+        let Some(entered) = self.entered_instance() else {
             return;
         };
         let Some(q) = self.selection_quad(entered, rect, ppp) else {
@@ -20862,6 +20895,36 @@ mod frame_menu_door_tests {
             !inks.contains(&color::SELECT),
             "a component's tag never takes the accent: {inks:?}"
         );
+    }
+
+    /// **A double-click on an instance's own background steps in**, as `Enter`
+    /// does (§15 D981 (c), D228): the background picks the instance itself, whose
+    /// `group_chain` starts above it, and the first build fell through to the
+    /// content arms — selecting it again, or cropping a picture-filled one.
+    /// `arch-scribe`'s find (§15 D985).
+    ///
+    /// Flip: `double_click_pick` without its instance arm leaves `entered_group`
+    /// empty.
+    #[test]
+    fn a_double_click_on_an_instances_background_enters_it() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let (mut app, main) = app_with_an_occupied_frame(&ctx);
+        let inst = main_with_an_instance(&mut app, main);
+        let middle = app
+            .session
+            .resolved
+            .world_bounds(inst)
+            .expect("bounds")
+            .center();
+        assert_eq!(
+            app.pick_leaf(middle),
+            Some(inst),
+            "the fixture: its background"
+        );
+        app.double_click_pick(Some(inst), middle);
+        assert_eq!(app.entered_group, Some(inst));
     }
 
     /// **An instance picks like a group, its empty background included** (§15

@@ -18,9 +18,10 @@
 //! removed child from the summary, and an instance whose only drift is a deleted
 //! layer then reads as untouched; the session's choice, open to overturning.
 //!
-//! ⚠️ **The main's glyph is the outline hexagon** — D981 gives a main the *filled*
-//! one, which the bundled Phosphor Regular does not have (§15 D10's *"at two, ship
-//! the font"*), owed with the layers panel's and the canvas's marks.
+//! **The main's glyph is the filled hexagon** (D981), drawn by
+//! `ui::paint_hexagon_filled` since the bundled Phosphor Regular has none (§15 D10,
+//! D985); a main's and a variant's face carry it, an instance's the outline one.
+//! Until 2026-10-06 every face drew the outline, the filled one owed.
 
 use crate::app::OndinApp;
 use crate::theme::{self, icon};
@@ -545,7 +546,7 @@ impl OndinApp {
                             .map(|n| n.name().to_string())
                             .unwrap_or_default();
                         let link = Some((*set, set_name.as_str()));
-                        heading(ui, "Variant in", link, None, "", &mut act);
+                        heading(ui, true, "Variant in", link, None, "", &mut act);
                         ui.label(
                             egui::RichText::new(name)
                                 .size(13.0)
@@ -562,7 +563,7 @@ impl OndinApp {
                     } => {
                         let summary = drift_summary(*drift, *props);
                         let link = Some((*main, main_name.as_str()));
-                        heading(ui, "Instance of", link, None, &summary, &mut act);
+                        heading(ui, false, "Instance of", link, None, &summary, &mut act);
                         let roots = app.session.selection.ids().to_vec();
                         app.instance_rows(ui, &roots);
                         reset_row(ui, *drift, *props, true, &mut act);
@@ -583,7 +584,15 @@ impl OndinApp {
                         match main {
                             Some((m, n)) => {
                                 let caption = format!("{count} instances of");
-                                heading(ui, &caption, Some((*m, n)), None, &summary, &mut act);
+                                heading(
+                                    ui,
+                                    false,
+                                    &caption,
+                                    Some((*m, n)),
+                                    None,
+                                    &summary,
+                                    &mut act,
+                                );
                                 if let Some(roots) = shared {
                                     app.instance_rows(ui, roots);
                                 }
@@ -593,7 +602,7 @@ impl OndinApp {
                             // overflow of counted resets.
                             None => {
                                 let title = format!("Instances of {mains} components");
-                                heading(ui, "", None, Some(&title), &summary, &mut act);
+                                heading(ui, false, "", None, Some(&title), &summary, &mut act);
                                 reset_row(ui, *drift, *props, false, &mut act);
                             }
                         }
@@ -1012,6 +1021,7 @@ fn plural(n: usize, what: &str) -> String {
 /// summary on the right.
 fn heading(
     ui: &mut egui::Ui,
+    main: bool,
     caption: &str,
     link: Option<(NodeId, &str)>,
     title: Option<&str>,
@@ -1069,7 +1079,7 @@ fn heading(
                 );
             }
         });
-        paint_glyph(ui, icon::HEXAGON, slot, block.response.rect);
+        paint_hexagon(ui, main, slot, block.response.rect);
         if !summary.is_empty() {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(
@@ -1173,8 +1183,8 @@ fn reset_row(ui: &mut egui::Ui, d: Drift, p: PropDrift, overflow: bool, act: &mu
     });
 }
 
-/// 3A: the filled hexagon (owed — see the module doc), *Main component* over the
-/// name, the instance count with *Select all*, and *Duplicate as component*.
+/// 3A: the filled hexagon, *Main component* over the name, the instance count
+/// with *Select all*, and *Duplicate as component*.
 fn main_body(ui: &mut egui::Ui, name: &str, instances: usize, act: &mut Option<Act>) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 9.0;
@@ -1192,7 +1202,7 @@ fn main_body(ui: &mut egui::Ui, name: &str, instances: usize, act: &mut Option<A
                     .color(theme::text::STRONG),
             );
         });
-        paint_glyph(ui, icon::HEXAGON, slot, block.response.rect);
+        paint_hexagon(ui, true, slot, block.response.rect);
     });
     main_tail(ui, instances, act);
 }
@@ -1335,6 +1345,21 @@ fn paint_glyph(ui: &egui::Ui, glyph: &str, slot: egui::Rect, beside: egui::Rect)
         theme::icon_font(16.0),
         theme::text::STRONG,
     );
+}
+
+/// The hexagon in a face's glyph slot (§15 D981): **filled** for a main or a
+/// variant (`ui::paint_hexagon_filled`, §15 D985), outline for an instance.
+fn paint_hexagon(ui: &egui::Ui, filled: bool, slot: egui::Rect, beside: egui::Rect) {
+    if filled {
+        crate::ui::paint_hexagon_filled(
+            ui.painter(),
+            egui::pos2(slot.center().x, beside.center().y),
+            16.0,
+            theme::text::STRONG,
+        );
+    } else {
+        paint_glyph(ui, icon::HEXAGON, slot, beside);
+    }
 }
 
 /// A card with no header — the one-line faces (3D, 3G).

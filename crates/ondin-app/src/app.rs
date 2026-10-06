@@ -3556,9 +3556,10 @@ impl OndinApp {
     /// Escape alias would have taken two presses to leave a path with points
     /// selected, and would have had Enter closing the colour picker.
     ///
-    /// A path and a picture today. A group would be the obvious third case (Enter
-    /// to step inside, which `entered_group` already models), and text the fourth;
-    /// neither is built, and adding one is an arm here rather than a new key.
+    /// An instance, text, a picture, a path and a group, each an arm (§15 D228,
+    /// D981 (c)) — a new kind of "in" is an arm here rather than a new key. (This
+    /// read *"A path and a picture today … neither is built"* of groups and text
+    /// long after D228 built both.)
     ///
     /// ⚠️ **This paragraph spent months on `enter_container`** (§15 D697,
     /// `[S16.2-L3-05]`) — the twin of the theft on `escape` above, one rung up

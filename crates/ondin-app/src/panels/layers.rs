@@ -71,7 +71,8 @@ const LOCK_INSET: f32 = 14.0;
 
 /// The room a component mark takes at a row's right edge (§15 D981) — the dot
 /// for an override, `+` for a layer of the instance's own — clear of the lock's
-/// glyph beside it, and what a badge moves left by to make way for it.
+/// glyph beside it. With a mark, a badge's right edge sits this far in from the
+/// row's edge rather than 4 (so it moves left by 5, not by this).
 const MARK_SLOT: f32 = 9.0;
 
 /// A row's component mark (§15 D981).

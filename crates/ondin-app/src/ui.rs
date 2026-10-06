@@ -3716,6 +3716,9 @@ pub fn paint_lock_filled(
 /// pointy-top, its vertices on the outline glyph's centre line — `128,20` at the
 /// top, `220,72` and `220,184` down the right, `128,236` at the bottom — so it sits
 /// in the box [`crate::theme::icon::HEXAGON`] outlines at the same `size`.
+/// **Measured, not recalled**: the test against the outline glyph's atlas ink at
+/// 64pt (`the_filled_hexagon_sits_on_the_outline_glyphs_ink`) — the first build
+/// stated it from memory, `arch-scribe`'s find.
 pub fn paint_hexagon_filled(
     painter: &egui::Painter,
     center: egui::Pos2,
@@ -5977,6 +5980,78 @@ mod tests {
             !on.is_empty() && on.windows(2).any(|p| p[1] - p[0] > 1)
         });
         assert!(banded, "the shackle has no hole — it is a blob, not a lock");
+    }
+
+    /// **The drawn filled hexagon sits on the outline glyph's ink** (§15 D985) —
+    /// what `arch-scribe` read the first build claiming without a check. At 64pt
+    /// the outline `HEXAGON` is laid out and its coverage read off the font atlas;
+    /// the polygon, centred where the canvas centres it (the glyph's logical
+    /// cell), must sit inside that ink's box by about half Phosphor's 16-unit
+    /// stroke on every side — its vertices are the stroke's centre line — and the
+    /// glyph must be pointy-top, its ink narrow at the top, as the polygon is.
+    #[test]
+    fn the_filled_hexagon_sits_on_the_outline_glyphs_ink() {
+        const SIZE: f32 = 64.0;
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let galley = ctx.fonts_mut(|f| {
+            f.layout_no_wrap(
+                theme::icon::HEXAGON.to_owned(),
+                theme::icon_font(SIZE),
+                egui::Color32::WHITE,
+            )
+        });
+        let row = &galley.rows[0];
+        let g = &row.row.glyphs[0];
+        let uv = g.uv_rect;
+        assert!(!uv.is_nothing(), "the glyph rasterized");
+        let cell = g.logical_rect().translate(row.pos.to_vec2());
+        let origin = row.pos + g.pos.to_vec2() + uv.offset;
+        // Read into locals before the next `Context` accessor (no nesting).
+        let atlas = ctx.fonts(|f| f.image());
+        let ppp = ctx.pixels_per_point();
+        let (gw, gh) = (
+            usize::from(uv.max[0] - uv.min[0]),
+            usize::from(uv.max[1] - uv.min[1]),
+        );
+        let ink = |x: usize, y: usize| {
+            let (ax, ay) = (usize::from(uv.min[0]) + x, usize::from(uv.min[1]) + y);
+            atlas.pixels[ay * atlas.size[0] + ax].a() > 127
+        };
+        let rows: Vec<usize> = (0..gh).filter(|y| (0..gw).any(|x| ink(x, *y))).collect();
+        let cols: Vec<usize> = (0..gw).filter(|x| (0..gh).any(|y| ink(*x, y))).collect();
+        let (r0, r1) = (rows[0], *rows.last().unwrap());
+        let (c0, c1) = (cols[0], *cols.last().unwrap());
+        let ink_box = egui::Rect::from_min_max(
+            origin + egui::vec2(c0 as f32, r0 as f32) / ppp,
+            origin + egui::vec2((c1 + 1) as f32, (r1 + 1) as f32) / ppp,
+        );
+        let poly =
+            hexagon_filled_shape(cell.center(), SIZE, egui::Color32::WHITE).visual_bounding_rect();
+        let half_stroke = SIZE * 8.0 / 256.0;
+        for (side, gap) in [
+            ("left", poly.left() - ink_box.left()),
+            ("right", ink_box.right() - poly.right()),
+            ("top", poly.top() - ink_box.top()),
+            ("bottom", ink_box.bottom() - poly.bottom()),
+        ] {
+            assert!(
+                (gap - half_stroke).abs() <= 1.5,
+                "{side}: the polygon sits {gap:.2} inside the ink, want about \
+                 {half_stroke:.2} — ink {ink_box:?}, polygon {poly:?}"
+            );
+        }
+        // Pointy-top: a row a tenth of the way down is far narrower than the middle.
+        let width = |y: usize| (0..gw).filter(|x| ink(*x, y)).count();
+        let near_top = width(r0 + (r1 - r0) / 10);
+        let mid = (r0 + r1) / 2;
+        let middle = (0..gw).rev().find(|x| ink(*x, mid)).unwrap_or(0)
+            - (0..gw).find(|x| ink(*x, mid)).unwrap_or(0);
+        assert!(
+            (near_top as f32) < middle as f32 / 2.0,
+            "the outline glyph is not pointy-top: {near_top} near the top, {middle} across"
+        );
     }
 
     /// A label too long for its button is elided *inside* it.

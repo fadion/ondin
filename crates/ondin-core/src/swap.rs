@@ -173,9 +173,11 @@ pub fn options(doc: &Document, root: NodeId, filter: &str, search: &str) -> Vec<
 
 /// A swap property's suggested filter (§15 D983 (5)): the name of the main the
 /// slot shows, less its last segment — `Button - Icons - Star` gives
-/// `Button - Icons`. The separator is guessed here and only here: the last run of
-/// non-alphanumeric characters (spaces aside) that splits the name. Empty when
-/// the name has none.
+/// `Button - Icons`. The separator is guessed here and only here: the last
+/// character that is neither alphanumeric nor a space, cut with any more of that
+/// same character and the spaces around it — so `Button -- Star` gives `Button`
+/// and `Icons (v2) / Star` keeps its `)`, while a mixed run keeps all but its
+/// last kind (`Icons -/ Star` gives `Icons -`). Empty when the name has none.
 pub fn suggested_filter(name: &str) -> String {
     let trimmed = name.trim_end();
     let Some(cut) = trimmed

@@ -718,6 +718,7 @@ and the cheatsheet can be rendered from one source.
 | `Ctrl+Shift+Z`, `Ctrl+Y` | redo | ✅ both spellings |
 | `Ctrl+A` | select all | ✅ |
 | `Ctrl+G` / `Ctrl+Shift+G` | group / ungroup | ✅ |
+| `Ctrl+Alt+G` | frame selection | ✅ Figma — bound 2026-10-06 (§15 D987), the chord the accepted components mockup draws on the menu row. Free: the two group chords are `cmd_only`, which excludes `Alt`. Unbound until then on D249's rule that a chord invented at a menu row is one this file does not know about — this row is what makes it known. `Ctrl+Alt` is `AltGr` on many European layouts, §12's question for `Ctrl+Alt+K` and `B` as well; `ctrl_alt_g_frames_and_leaves_the_group_chords_alone` pins it and its neighbours |
 | `Ctrl+E` | flatten | ✅ Figma |
 | `Ctrl+Alt+M` | use as mask / release it | ✅ Figma — bound 2026-08-21 (§15 D286). `M` was **completely unspent** in any combination, so this chord cost nothing and had no collision to argue about; `masking_is_a_chord_and_the_bare_letter_is_still_unspent` asserts the chord *and* that plain `M` and `Ctrl+M` stay free, which is the half that matters — the risk is someone later giving `M` a tool |
 | `Ctrl+Alt+U` `S` `I` `X` | union, subtract, intersect, exclude | ✅ Figma — `X` is read from the **release**, §L2 |

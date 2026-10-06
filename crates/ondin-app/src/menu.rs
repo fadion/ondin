@@ -843,12 +843,11 @@ impl Item {
             Item::FrameSelection => s(
                 "Frame selection",
                 icon::FRAME_CORNERS,
-                // **No accelerator, and that is a statement rather than an
-                // omission.** `shortcuts.md` is the keymap's source of truth and it
-                // does not bind this; Figma's `Ctrl+Alt+G` is free here, but a chord
-                // invented at a menu row is a chord that file does not know about
-                // (§15 D249).
-                None,
+                // Figma's chord, which the accepted components mockup draws here —
+                // bound in `shortcuts.md` §11 and `input` on 2026-10-06 (§15 D987).
+                // It had none until then on D249's rule that a chord invented at a
+                // menu row is one the keymap does not know about; the keymap knows.
+                Some("Ctrl+Alt+G"),
                 Group::Structure,
             ),
             // D981's rows and chords (`shortcuts.md` §12), in Structure directly
@@ -2916,13 +2915,13 @@ impl OndinApp {
             }
             // **The selection, not the hit**, which is *Group selection*'s rule and
             // has to be: the row is named for the selection and C2 guarantees a hit
-            // inside it left it whole. `frame_selection` is a method rather than an
-            // `Action` because nothing binds a chord to it (§15 D249) — if
-            // `shortcuts.md` ever does, this becomes a `dispatch` like its sibling.
-            Item::FrameSelection => self.frame_selection(),
+            // inside it left it whole. A `dispatch` like its sibling since
+            // `Ctrl+Alt+G` bound it (§15 D987), so the row and the chord are one door.
+            Item::FrameSelection => self.dispatch(ctx, Action::FrameSelection),
             Item::CreateComponent => self.dispatch(ctx, Action::CreateComponent),
             Item::DetachInstance => self.dispatch(ctx, Action::DetachInstance),
-            // No chord, so no `Action` — `FrameSelection`'s reason.
+            // No chord, so no `Action`: a method, as *Frame selection* was until
+            // `Ctrl+Alt+G` (§15 D987).
             Item::DuplicateAsComponent => self.duplicate_as_component(),
             Item::SelectAllInstances => self.select_all_instances(),
             Item::GoToMain => self.go_to_main(),

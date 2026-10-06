@@ -2935,6 +2935,7 @@ impl OndinApp {
             Action::Escape => self.escape(ctx),
             Action::Group => self.group_selection(),
             Action::Mask => self.toggle_mask(),
+            Action::FrameSelection => self.frame_selection(),
             Action::CreateComponent => self.create_component(),
             Action::DetachInstance => self.detach_instances(),
             Action::Boolean(op) => self.apply_boolean(op),

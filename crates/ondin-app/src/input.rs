@@ -164,6 +164,9 @@ pub enum Action {
     /// has — `inspector::mask_action` decides which, and it is the same toggle
     /// the identity row's button and the context-menu row reach.
     Mask,
+    /// *Frame selection* (`Ctrl+Alt+G`, §15 D987): wrap the selection in a frame
+    /// at the union's corner — `build::frame`, the menu row's verb.
+    FrameSelection,
     /// *Create component* (`Ctrl+Alt+K`, §15 D981): the selected frame or group
     /// becomes a main, or the selection is framed and the frame becomes one.
     CreateComponent,
@@ -1110,6 +1113,14 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
         on(
             cmd && m.alt && !m.shift && i.key_pressed(egui::Key::B),
             Action::DetachInstance,
+            &mut out,
+        );
+        // *Frame selection*, on Figma's chord and the accepted components
+        // mockup's (§15 D987). Free: `Ctrl+G` and `Ctrl+Shift+G` are `cmd_only`,
+        // which excludes `Alt`, and `G` has no other modified binding.
+        on(
+            cmd && m.alt && !m.shift && i.key_pressed(egui::Key::G),
+            Action::FrameSelection,
             &mut out,
         );
 
@@ -2483,6 +2494,37 @@ mod tests {
             !actions(Mode::Normal, vec![key(egui::Key::B, cmd)], cmd)
                 .contains(&Action::DetachInstance),
             "Ctrl+B is not an alias"
+        );
+    }
+
+    /// **`Ctrl+Alt+G` frames the selection, and `G`'s three neighbours are
+    /// untouched** (§15 D987): `Ctrl+G` still groups, `Ctrl+Shift+G` still
+    /// ungroups, plain `G` is still the Polygon tool's letter rather than this.
+    ///
+    /// Flip, run: the binding without `m.alt` takes `Ctrl+G` as well and fails
+    /// *"Ctrl+G still groups"*, both actions answering.
+    #[test]
+    fn ctrl_alt_g_frames_and_leaves_the_group_chords_alone() {
+        let with = |alt, shift| egui::Modifiers {
+            alt,
+            shift,
+            ..egui::Modifiers::COMMAND
+        };
+        let on_g = |m| actions(Mode::Normal, vec![key(egui::Key::G, m)], m);
+        assert_eq!(on_g(with(true, false)), vec![Action::FrameSelection]);
+        assert_eq!(
+            on_g(with(false, false)),
+            vec![Action::Group],
+            "Ctrl+G still groups"
+        );
+        assert_eq!(
+            on_g(with(false, true)),
+            vec![Action::Ungroup],
+            "Ctrl+Shift+G still ungroups"
+        );
+        assert!(
+            !on_g(egui::Modifiers::NONE).contains(&Action::FrameSelection),
+            "plain G is not this"
         );
     }
 

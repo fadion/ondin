@@ -505,7 +505,7 @@ impl OndinApp {
                     .unwrap_or_default()
                 {
                     let label = format!("{} {}", gone.scale.label(), gone.format.label());
-                    if super::component::ghost_row(ui, &label, ui.available_width()) {
+                    if super::component::ghost_row(ui, super::component::GhostLead::Plain, &label) {
                         reset = Some(gone.id);
                     }
                 }

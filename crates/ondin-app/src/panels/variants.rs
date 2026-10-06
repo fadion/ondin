@@ -1,8 +1,9 @@
 //! Variants and component properties in the inspector (§5.3d build step 7, §15
 //! D982, from `design/Variants.dc.html` with the maintainer's three rulings held
 //! over it): a set's **Variants** card, a variant's face inside the Component card,
-//! an instance's variant dropdowns and property rows between *Instance of* and
-//! *Reset all*, the **Properties** card on a main or a set, and the binding line on
+//! an instance's variant dropdowns and property rows between the card's heading (the
+//! main's name, its *Instance of* caption gone since §15 D993) and *Reset all*, the
+//! **Properties** card on a main or a set, and the binding line on
 //! a layer inside a main.
 //!
 //! **A variant choice is never an override** (the design's rule): its dropdowns
@@ -536,8 +537,8 @@ impl OndinApp {
         }
     }
 
-    /// The rows an instance — or several sharing one owner — gets between
-    /// *Instance of* and *Reset all* (4A–4E): a dropdown per variant property,
+    /// The rows an instance — or several sharing one owner — gets between the
+    /// card's heading and *Reset all* (4A–4E): a dropdown per variant property,
     /// switching the instances (a missing combination greyed, with the reason),
     /// then each component property, with its override mark — and then **the
     /// nested instances it shows**, each under a sub-heading of its own with the
@@ -1077,7 +1078,10 @@ impl OndinApp {
             if props.is_empty() {
                 ui.label(
                     egui::RichText::new(
-                        "Bind a layer's visibility or text, or a nested instance's main, to a property from that layer's Component line",
+                        // Short on purpose (§15 D993): the sentence it replaced
+                        // named all three kinds of binding, and the maintainer
+                        // cut it as *"no one will read it"*.
+                        "Bind layers from their Component line",
                     )
                     .size(11.5)
                     .color(theme::text::DIM),
@@ -1095,7 +1099,10 @@ impl OndinApp {
                 for (slot, shown) in &slots {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 4.0;
-                        let name = doc.get(*slot).map(|n| n.name().to_string()).unwrap_or_default();
+                        let name = doc
+                            .get(*slot)
+                            .map(|n| n.name().to_string())
+                            .unwrap_or_default();
                         let name_resp = ui
                             .add(
                                 egui::Label::new(
@@ -1115,14 +1122,28 @@ impl OndinApp {
                         };
                         ui.label(egui::RichText::new(what).size(12.0).color(theme::text::DIM));
                         if *shown {
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui::field_button(ui, icon::MINUS, ui::CONTROL_H, 13.0, FieldButton::Off)
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui::field_button(
+                                        ui,
+                                        icon::MINUS,
+                                        ui::CONTROL_H,
+                                        13.0,
+                                        FieldButton::Off,
+                                    )
                                     .on_hover_text("Stop showing its properties on instances")
                                     .clicked()
-                                {
-                                    out = variant::set_shown(doc, &mut app.session.ids, *slot, false);
-                                }
-                            });
+                                    {
+                                        out = variant::set_shown(
+                                            doc,
+                                            &mut app.session.ids,
+                                            *slot,
+                                            false,
+                                        );
+                                    }
+                                },
+                            );
                         }
                     });
                 }
@@ -1135,26 +1156,47 @@ impl OndinApp {
                     (icon::EYE, "Boolean", PropKind::Boolean),
                     (icon::TEXT_T, "Text", PropKind::Text),
                 ] {
-                    if ui::action_button(ui, glyph, label, FieldButton::Off, egui::vec2(w, ui::CONTROL_H))
-                        .on_hover_text(match kind {
-                            PropKind::Boolean => "A property that shows and hides the layers bound to it",
-                            PropKind::Text => "A property that sets the text of the layers bound to it",
-                            // Made from a nested instance's binding line, never here.
-                            PropKind::Swap => "A property that swaps the nested instances bound to it",
-                            // Made from a nested instance's own card, never here.
-                            PropKind::Nested => "",
-                        })
-                        .clicked()
+                    if ui::action_button(
+                        ui,
+                        glyph,
+                        label,
+                        FieldButton::Off,
+                        egui::vec2(w, ui::CONTROL_H),
+                    )
+                    .on_hover_text(match kind {
+                        PropKind::Boolean => {
+                            "A property that shows and hides the layers bound to it"
+                        }
+                        PropKind::Text => "A property that sets the text of the layers bound to it",
+                        // Made from a nested instance's binding line, never here.
+                        PropKind::Swap => "A property that swaps the nested instances bound to it",
+                        // Made from a nested instance's own card, never here.
+                        PropKind::Nested => "",
+                    })
+                    .clicked()
                     {
                         let name = fresh_name(&props, label);
-                        out = variant::define(doc, &mut app.session.ids, owner, &name, kind, Vec::new())
-                            .map(|(tx, _)| tx);
+                        out = variant::define(
+                            doc,
+                            &mut app.session.ids,
+                            owner,
+                            &name,
+                            kind,
+                            Vec::new(),
+                        )
+                        .map(|(tx, _)| tx);
                     }
                 }
                 if lone_main
-                    && ui::action_button(ui, icon::SQUARES_FOUR, "Variant", FieldButton::Off, egui::vec2(w, ui::CONTROL_H))
-                        .on_hover_text("Make a set — this main becomes its first variant")
-                        .clicked()
+                    && ui::action_button(
+                        ui,
+                        icon::SQUARES_FOUR,
+                        "Variant",
+                        FieldButton::Off,
+                        egui::vec2(w, ui::CONTROL_H),
+                    )
+                    .on_hover_text("Make a set — this main becomes its first variant")
+                    .clicked()
                 {
                     combine = true;
                 }

@@ -568,7 +568,10 @@ impl OndinApp {
                     } => {
                         let summary = drift_summary(*drift, *props);
                         let link = Some((*main, main_name.as_str()));
-                        heading(ui, false, "Instance of", link, None, &summary, &mut act);
+                        // One line, the main's name alone: the mockup's *Instance
+                        // of* caption over it is gone, the outline hexagon saying
+                        // it (§15 D993, as the main's face).
+                        heading(ui, false, "", link, None, &summary, &mut act);
                         let roots = app.session.selection.ids().to_vec();
                         if let Some(&root) = roots.first() {
                             app.chosen_by_note(ui, root);
@@ -790,55 +793,107 @@ pub(super) fn item_slot(ui: &mut egui::Ui, state: ondin_core::reset::ItemState, 
     }
 }
 
+/// What leads a [`ghost_row`]'s label — the live row's own lead, so the two line
+/// up down a list.
+#[derive(Clone, Copy)]
+pub(super) enum GhostLead<'a> {
+    /// A paint row's: the grip's column left blank, then a dimmed chip where the
+    /// swatch sits.
+    Chip,
+    /// An effect row's: its kind's glyph.
+    Glyph(&'a str),
+    /// Nothing: the label at the field's inset (an export, a layout grid).
+    Plain,
+}
+
 /// A **ghost row**: an item the instance removed while its main still has it,
-/// drawn dashed and dim with *Restore* (§15 D981, 4D) — the list half of the
-/// reset family. `label` is the item's own words (a hex, *Linear*, *Drop
-/// shadow*). Answers whether *Restore* was clicked.
+/// drawn dashed and dim with a restore button (§15 D981, 4D) — the list half of
+/// the reset family. `label` is the item's own words (a hex, *Linear*, *Drop
+/// shadow*). Answers whether the restore button was clicked.
+///
+/// **Laid out as the live row is** (§15 D993, the maintainer's look): the dashed
+/// box is the field's box, its corners rounded 3px — the maintainer's number,
+/// where the live field's own are 5 (`ui::field_frame`) — and its chip or
+/// glyph and label stand where the live row's do; *restore* is an icon-only
+/// button in the column the live row's eye takes, rather than a worded button
+/// inside the field. A row with no eye column ([`GhostLead::Plain`]) still gets
+/// one, so every list's restore is in the same place.
 ///
 /// ⚠️ **Lists only.** A deleted child *layer* gets no ghost row in the layers
 /// panel — D981's asymmetry, ruled: only the card's *Restore removed children*.
-pub(super) fn ghost_row(ui: &mut egui::Ui, label: &str, width: f32) -> bool {
+pub(super) fn ghost_row(ui: &mut egui::Ui, lead: GhostLead<'_>, label: &str) -> bool {
     let h = ui::CONTROL_H;
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, h), egui::Sense::hover());
-    let p = ui.painter();
-    let dash = egui::Stroke::new(1.0, theme::text::FAINT);
-    let r = rect.shrink(0.5);
-    for (a, b) in [
-        (r.left_top(), r.right_top()),
-        (r.right_top(), r.right_bottom()),
-        (r.right_bottom(), r.left_bottom()),
-        (r.left_bottom(), r.left_top()),
-    ] {
-        p.extend(egui::Shape::dashed_line(&[a, b], dash, 3.0, 3.0));
+    let gap = ui::CARD_COL_GAP;
+    let width = ui.available_width() - h - gap;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = gap;
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(width, h), egui::Sense::hover());
+        let p = ui.painter();
+        let dash = egui::Stroke::new(1.0, theme::text::FAINT);
+        p.extend(egui::Shape::dashed_line(
+            &rounded_outline(rect.shrink(0.5), 3.0),
+            dash,
+            3.0,
+            3.0,
+        ));
+        // The field's content edge: its hairline, then `FIELD_PAD_X`.
+        let x0 = rect.left() + 1.0 + ui::FIELD_PAD_X;
+        let y = rect.center().y;
+        let text_x = match lead {
+            GhostLead::Chip => {
+                // The grip's 11pt and the row's 9pt spacing, then the 16pt chip.
+                let chip = egui::Rect::from_min_size(
+                    egui::pos2(x0 + 11.0 + 9.0, y - 8.0),
+                    egui::vec2(16.0, 16.0),
+                );
+                p.rect_filled(chip, 4.0, theme::text::FAINT.gamma_multiply(0.5));
+                chip.right() + 9.0
+            }
+            GhostLead::Glyph(g) => {
+                let r = p.text(
+                    egui::pos2(x0, y),
+                    egui::Align2::LEFT_CENTER,
+                    g,
+                    theme::icon_font(15.0),
+                    theme::text::FAINT,
+                );
+                r.right() + 9.0
+            }
+            GhostLead::Plain => x0,
+        };
+        p.text(
+            egui::pos2(text_x, y),
+            egui::Align2::LEFT_CENTER,
+            label,
+            egui::FontId::proportional(12.0),
+            theme::text::FAINT,
+        );
+        ui::field_button(ui, icon::ARROW_COUNTER_CLOCKWISE, h, 14.0, FieldButton::Off)
+            .on_hover_text("Restore — put the main's item back")
+            .clicked()
+    })
+    .inner
+}
+
+/// The closed outline of `r` with corners of radius `radius`, as points for
+/// [`egui::Shape::dashed_line`] — which has no rounded-rect form of its own.
+fn rounded_outline(r: egui::Rect, radius: f32) -> Vec<egui::Pos2> {
+    const STEPS: usize = 4;
+    let corners = [
+        (r.right_top() + egui::vec2(-radius, radius), -90.0_f32),
+        (r.right_bottom() + egui::vec2(-radius, -radius), 0.0),
+        (r.left_bottom() + egui::vec2(radius, -radius), 90.0),
+        (r.left_top() + egui::vec2(radius, radius), 180.0),
+    ];
+    let mut pts = vec![egui::pos2(r.left() + radius, r.top())];
+    for (c, start) in corners {
+        for i in 0..=STEPS {
+            let a = (start + 90.0 * i as f32 / STEPS as f32).to_radians();
+            pts.push(c + radius * egui::vec2(a.cos(), a.sin()));
+        }
     }
-    let chip = egui::Rect::from_center_size(
-        egui::pos2(rect.left() + ui::FIELD_PAD_X + 8.0, rect.center().y),
-        egui::vec2(12.0, 12.0),
-    );
-    p.rect_filled(chip, 2.0, theme::text::FAINT.gamma_multiply(0.5));
-    p.text(
-        egui::pos2(chip.right() + 9.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        label,
-        egui::FontId::proportional(12.0),
-        theme::text::FAINT,
-    );
-    let word = "Restore";
-    let w = ui::action_button_w(ui.ctx(), word) - 8.0;
-    let at = egui::Rect::from_min_size(
-        egui::pos2(rect.right() - w - 4.0, rect.top() + 4.0),
-        egui::vec2(w, h - 8.0),
-    );
-    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(at));
-    ui::action_button(
-        &mut child,
-        icon::ARROW_COUNTER_CLOCKWISE,
-        word,
-        FieldButton::Off,
-        at.size(),
-    )
-    .on_hover_text("Put the main's item back")
-    .clicked()
+    pts.push(pts[0]);
+    pts
 }
 
 /// The inspector card that shows the field `op` writes — its title, as `panel`
@@ -1034,10 +1089,12 @@ fn plural(n: usize, what: &str) -> String {
     }
 }
 
-/// The two-line face of an instance card — or a variant's, with `main` — the
-/// hexagon (outline for an instance, filled for a `main`, `paint_hexagon`), a
+/// The face of an instance card — or a variant's, with `main` — the hexagon
+/// (outline for an instance, filled for a `main`, `paint_hexagon`), an optional
 /// small caption over the main's name as a link (or over a plain `title`), and
-/// the grey drift summary on the right.
+/// the grey drift summary on the right. One line when `caption` is empty — a
+/// single instance's face since §15 D993; several instances keep their count as
+/// the caption, and a variant its set.
 fn heading(
     ui: &mut egui::Ui,
     main: bool,
@@ -1161,23 +1218,27 @@ fn reset_row(ui: &mut egui::Ui, d: Drift, p: PropDrift, overflow: bool, act: &mu
                 .align(egui::RectAlign::BOTTOM_END)
                 .show(|ui| {
                     ui::menu_rows(ui);
-                    // 4C: properties and fields count, and reset, separately.
-                    // Present wherever the component has properties, and
-                    // disabled at zero like its neighbours (D981) — `arch-scribe`
-                    // read the first cut hiding it.
-                    if p.defined {
-                        let count = match p.props {
-                            0 => "—".to_string(),
-                            n => n.to_string(),
-                        };
-                        let row = ui::MenuRow::new("", "Reset properties")
-                            .accel(Some(&count))
-                            .enabled(p.props > 0);
-                        if ui::menu_row(ui, row, ui::MENU_ROW_H).clicked() && p.props > 0 {
-                            *act = Some(Act::ResetProperties);
-                        }
-                    }
-                    for (kind, label, n) in [
+                    // **As wide as its longest row, not as the screen** (§15 D993):
+                    // `menu_row` takes the available width, which in a popup's
+                    // `Area` is however far the screen goes, so the menu ran most
+                    // of the way across the canvas. The rows have no glyph column
+                    // (`menu_row`'s bare form) and a count of at most a few digits.
+                    let ctx = ui.ctx().clone();
+                    let label_w = |t: &str| {
+                        ctx.fonts_mut(|f| {
+                            f.layout_no_wrap(
+                                t.to_string(),
+                                egui::FontId::proportional(11.5),
+                                egui::Color32::WHITE,
+                            )
+                            .size()
+                            .x
+                        })
+                    };
+                    // The labels once, measured here and drawn below, so a row
+                    // renamed longer cannot outgrow the width set for it.
+                    const PROPS: &str = "Reset properties";
+                    let rows = [
                         (
                             Kind::Fields,
                             "Reset fields",
@@ -1185,13 +1246,33 @@ fn reset_row(ui: &mut egui::Ui, d: Drift, p: PropDrift, overflow: bool, act: &mu
                         ),
                         (Kind::Children, "Restore removed children", d.removed),
                         (Kind::Order, "Reset order", d.order),
-                    ] {
-                        let count = match n {
-                            0 => "—".to_string(),
-                            n => n.to_string(),
-                        };
+                    ];
+                    let widest = std::iter::once(PROPS)
+                        .chain(rows.iter().map(|(_, l, _)| *l))
+                        .map(label_w)
+                        .fold(0.0, f32::max);
+                    ui.set_width((8.0 + widest + 24.0 + 16.0 + 8.0).ceil());
+                    // A count only where there is something to reset: the `—` a
+                    // zero row carried read as a stray mark, and the dimmed row
+                    // already says there is nothing (§15 D993).
+                    let count_of = |n: usize| (n > 0).then(|| n.to_string());
+                    // 4C: properties and fields count, and reset, separately.
+                    // Present wherever the component has properties, and
+                    // disabled at zero like its neighbours (D981) — `arch-scribe`
+                    // read the first cut hiding it.
+                    if p.defined {
+                        let count = count_of(p.props);
+                        let row = ui::MenuRow::new("", PROPS)
+                            .accel(count.as_deref())
+                            .enabled(p.props > 0);
+                        if ui::menu_row(ui, row, ui::MENU_ROW_H).clicked() && p.props > 0 {
+                            *act = Some(Act::ResetProperties);
+                        }
+                    }
+                    for (kind, label, n) in rows {
+                        let count = count_of(n);
                         let row = ui::MenuRow::new("", label)
-                            .accel(Some(&count))
+                            .accel(count.as_deref())
                             .enabled(n > 0);
                         if ui::menu_row(ui, row, ui::MENU_ROW_H).clicked() && n > 0 {
                             *act = Some(Act::Reset(kind));
@@ -1202,19 +1283,14 @@ fn reset_row(ui: &mut egui::Ui, d: Drift, p: PropDrift, overflow: bool, act: &mu
     });
 }
 
-/// 3A: the filled hexagon, *Main component* over the name, the instance count
-/// with *Select all*, and *Duplicate as component*.
+/// 3A: the filled hexagon and the name on **one line**, the instance count with
+/// *Select all*, and *Duplicate*. The mockup's *Main component* caption over the
+/// name is gone (§15 D993): the filled hexagon already says it.
 fn main_body(ui: &mut egui::Ui, name: &str, instances: usize, act: &mut Option<Act>) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 9.0;
         let slot = glyph_slot(ui);
         let block = ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing.y = 1.0;
-            ui.label(
-                egui::RichText::new("Main component")
-                    .size(11.0)
-                    .color(theme::text::DIM),
-            );
             ui.label(
                 egui::RichText::new(name)
                     .size(13.0)
@@ -1226,8 +1302,10 @@ fn main_body(ui: &mut egui::Ui, name: &str, instances: usize, act: &mut Option<A
     main_tail(ui, instances, act);
 }
 
-/// A main's count with *Select all*, and *Duplicate as component* — 3A's lower
-/// half, which a variant's face shares (3D).
+/// A main's count with *Select all*, and *Duplicate* — 3A's lower half, which a
+/// variant's face shares (3D). The mockup's *Duplicate as component*, shortened on
+/// the card that already says what it is (§15 D993); the context menu keeps the
+/// long name, where nothing around it does.
 fn main_tail(ui: &mut egui::Ui, instances: usize, act: &mut Option<Act>) {
     let h = ui::CONTROL_H;
     ui.horizontal(|ui| {
@@ -1254,7 +1332,7 @@ fn main_tail(ui: &mut egui::Ui, instances: usize, act: &mut Option<Act>) {
     if ui::action_button(
         ui,
         icon::COPY,
-        "Duplicate as component",
+        "Duplicate",
         FieldButton::Off,
         egui::vec2(w, h),
     )
@@ -1548,6 +1626,21 @@ mod tests {
         v
     }
 
+    /// The restore button of the ghost row labelled `label` — the ↺ on the
+    /// label's line, to its right (§15 D993: an icon in the eye's column).
+    fn ghost_restore(painted: &[(String, egui::Rect)], label: &str) -> Option<egui::Pos2> {
+        let row = painted.iter().find(|(t, _)| t == label)?.1;
+        painted
+            .iter()
+            .filter(|(t, r)| {
+                t == icon::ARROW_COUNTER_CLOCKWISE
+                    && (r.center().y - row.center().y).abs() < 4.0
+                    && r.left() > row.right()
+            })
+            .map(|(_, r)| r.center())
+            .next()
+    }
+
     fn frame(
         app: &mut OndinApp,
         ctx: &egui::Context,
@@ -1567,10 +1660,11 @@ mod tests {
         })
     }
 
-    /// **The card, drawn and clicked.** An instance with a renamed child shows
-    /// *Instance of* over its main's name and *1 override*; a press and release on
-    /// *Reset all* puts the name back and the summary goes. Driven through
-    /// `RawInput`, so the button's `Response` is the one the card reads.
+    /// **The card, drawn and clicked.** An instance with a renamed child shows its
+    /// main's name on one line — no *Instance of* caption since §15 D993 — and
+    /// *1 override*; a press and release on *Reset all* puts the name back and the
+    /// summary goes. Driven through `RawInput`, so the button's `Response` is the
+    /// one the card reads.
     #[test]
     fn reset_all_on_the_card_puts_the_instance_back() {
         let ctx = egui::Context::default();
@@ -1585,23 +1679,35 @@ mod tests {
             out = frame(&mut f.app, &ctx, Vec::new());
         }
         let painted = texts(&out);
-        // The hexagon is centred on the caption-and-name block, not on its own
-        // first line (`glyph_slot`): it measured y≈151 against the block's ≈158
-        // laid out as a leading label.
-        let at = painted
-            .iter()
-            .position(|(t, _)| t == "Instance of")
-            .unwrap();
-        let after = &painted[at..];
-        let rect_of = |s: &str| after.iter().find(|(t, _)| t == s).unwrap().1;
-        let block = rect_of("Instance of").union(rect_of("Button"));
-        let hex = rect_of(icon::HEXAGON);
-        assert!(
-            (hex.center().y - block.center().y).abs() <= 1.0,
-            "hexagon {hex:?} beside block {block:?}"
-        );
         let has = |s: &str| painted.iter().any(|(t, _)| t == s);
-        assert!(has("Instance of") && has("Button"), "{painted:?}");
+        assert!(!has("Instance of"), "the caption is gone: {painted:?}");
+        // The hexagon is centred on the name's line (`glyph_slot`, `paint_glyph`),
+        // the block being the name alone now.
+        let hex = painted
+            .iter()
+            .find(|(t, _)| t == icon::HEXAGON)
+            .expect("the outline hexagon")
+            .1;
+        // The name the hexagon leads: the nearest *Button* to its right — the
+        // identity card above paints the layer's name too.
+        let name = painted
+            .iter()
+            .filter(|(t, r)| t == "Button" && r.left() > hex.right())
+            .map(|(_, r)| *r)
+            .min_by(|a, b| {
+                let d = |r: &egui::Rect| (r.center().y - hex.center().y).abs();
+                d(a).total_cmp(&d(b))
+            })
+            .expect("the main's name");
+        // Against the name's **cap band**, not its box: the link's underline
+        // hangs 3.5pt below the baseline and drags the box's centre down with it
+        // (measured 2.25 off where the cap band is 0.3). Inter's cap height is
+        // 0.727em, the name 13pt.
+        let cap_mid = name.top() + 13.0 * 0.727 / 2.0;
+        assert!(
+            (hex.center().y - cap_mid).abs() <= 1.0,
+            "hexagon {hex:?} beside name {name:?}"
+        );
         assert!(has("1 override"), "{painted:?}");
         let at = painted
             .iter()
@@ -1968,15 +2074,17 @@ mod tests {
             },
         ])));
         f.app.session.selection.set_one(f.ir);
+        let gone_hex = crate::ui::hex_of(ondin_core::peniko::Color::from_rgb8(10, 2, 30));
+        let gone_export = format!("{} {}", exports[0].scale.label(), exports[0].format.label());
         let restores = |app: &mut OndinApp| {
             let mut out = frame(app, &ctx, Vec::new());
             for _ in 0..3 {
                 out = frame(app, &ctx, Vec::new());
             }
-            texts(&out)
-                .into_iter()
-                .filter(|(t, _)| t == "Restore")
-                .map(|(_, r)| r.center())
+            let painted = texts(&out);
+            [gone_hex.as_str(), gone_export.as_str()]
+                .iter()
+                .filter_map(|l| ghost_restore(&painted, l))
                 .collect::<Vec<_>>()
         };
         let found = restores(&mut f.app);
@@ -2056,11 +2164,28 @@ mod tests {
             frame(app, &ctx, vec![press(true)]);
             frame(app, &ctx, vec![press(false)]);
         };
-        let restore = painted
+        // **The ghost row is laid out as the live one** (§15 D993): its hex
+        // starts where a live row's hex does, and its restore stands in the eye's
+        // column. Flips, both run: the label at the old lead (a 12pt chip at the
+        // field's inset) fails *"the hex's x"*; the restore back inside the field
+        // fails *"the eye's column"*.
+        let own_hex = crate::ui::hex_of(ondin_core::peniko::Color::from_rgb8(10, 3, 30));
+        let rect_of = |s: &str| painted.iter().find(|(t, _)| t == s).map(|(_, r)| *r);
+        let (ghost, live) = (rect_of(&gone_hex).unwrap(), rect_of(&own_hex).unwrap());
+        assert!(
+            (ghost.left() - live.left()).abs() <= 1.0,
+            "the hex's x: ghost {ghost:?}, live {live:?}"
+        );
+        let restore = ghost_restore(&painted, &gone_hex).expect("the ghost row's restore");
+        let eye = painted
             .iter()
-            .find(|(t, _)| t == "Restore")
+            .find(|(t, r)| t == icon::EYE && (r.center().y - live.center().y).abs() < 4.0)
             .map(|(_, r)| r.center())
-            .expect("the ghost row's Restore");
+            .expect("the live row's eye");
+        assert!(
+            (restore.x - eye.x).abs() <= 1.0,
+            "the eye's column: restore {restore:?}, eye {eye:?}"
+        );
         click(&mut f.app, restore);
         let now = fills_of(&f.app, f.ir);
         assert!(now.iter().any(|k| k.id == main[1].id), "restored by its id");
@@ -2139,10 +2264,7 @@ mod tests {
         for _ in 0..3 {
             out = frame(&mut f.app, &ctx, Vec::new());
         }
-        let restore = texts(&out)
-            .into_iter()
-            .find(|(t, _)| t == "Restore")
-            .map(|(_, r)| r.center())
+        let restore = ghost_restore(&texts(&out), b.label())
             .unwrap_or_else(|| panic!("no ghost row in {:?}", texts(&out)));
         click(&mut f.app, restore);
         assert!(

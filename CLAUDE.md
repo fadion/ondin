@@ -67,9 +67,13 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 992 index rows, 992 body headings, next free
-D993** (measured at session 54's close) — but trust the procedure over any number
+anywhere cited either. **The live figures: 993 index rows, 993 body headings, next free
+D994** (measured at session 54's close) — but trust the procedure over any number
 written down here, including that one. **No block is reserved**: the next session reserves its own.
+⚠️ **Session 54's second request (the maintainer's polish list) reserved D993–D999 at `cfa517b` and
+spent one** — D993, the first polish pass over the components chrome, the maintainer overriding the
+accepted mockups. The closing negative grep over **D994–D999 found zero sites** and they are
+released. Census: **891**, one arrival (D993), none unresolved; §15.0 993 rows, 993 headings, in order.
 ⚠️ **Session 54 (2026-10-06) reserved D990–D999 at `c3b7276` and spent three** — D990 (sibling
 effect layers spilled into each other's slots in the GPU batch), D991 (a swap carries an override
 made on its slot) and D992 (a lost GPU device is logged; the crash it explains is open, roadmap

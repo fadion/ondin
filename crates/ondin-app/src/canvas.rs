@@ -9834,13 +9834,22 @@ impl OndinApp {
             return Some((tab, galley));
         }
         if is_main {
-            // The chip's padded box, clear of the frame by the tag's own gap.
+            // The chip's padded box, clear of the frame by the tag's own gap — and
+            // a point wider at the right while it ends on the name rather than on
+            // the instance count: the bare chip read tighter on the right than on
+            // the left, and with the count showing it did not (the maintainer's
+            // look, §15 D993 — judged on screen, not measured).
+            let tail = if self.session.selection.contains(id) {
+                0.0
+            } else {
+                1.0
+            };
             let min = egui::pos2(
                 corner.x + INSET_X - CHIP_PAD.x,
                 corner.y - GAP_Y - size.y - CHIP_PAD.y * 2.0,
             );
             return Some((
-                egui::Rect::from_min_size(min, size + CHIP_PAD * 2.0),
+                egui::Rect::from_min_size(min, size + CHIP_PAD * 2.0 + egui::vec2(tail, 0.0)),
                 galley,
             ));
         }
@@ -9972,9 +9981,12 @@ impl OndinApp {
                         .find(|g| g.chr.to_string() == icon::HEXAGON)
                         .map(|g| g.logical_rect().translate(r.pos.to_vec2()))
                 }) {
+                    // A point above the glyph cell's centre, where it sat low
+                    // against the name beside it (the maintainer's look, §15
+                    // D993).
                     crate::ui::paint_hexagon_filled(
                         painter,
-                        at + cell.center().to_vec2(),
+                        at + cell.center().to_vec2() - egui::vec2(0.0, 1.0),
                         LABEL_PT,
                         theme::text::STRONG,
                     );

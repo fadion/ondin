@@ -2182,7 +2182,8 @@ provenance. The inspector gains a **component card** above Transform per selecti
 rather than hidden when there is nothing to do, and **no reset deletes a local addition**. An override
 is marked by a **4px neutral dot and a full-brightness label**, swapped for ↺ on hover with the main's
 value in a tooltip; a list item has a 14px trailing slot (empty, dot, +), and an item the instance
-deleted is a dashed ghost row with *Restore* — 🚨 **a deleted child layer gets no ghost row**, on purpose.
+deleted is a dashed ghost row with *Restore* (an icon in the eye's column since §15 D993) — 🚨 **a
+deleted child layer gets no ghost row**, on purpose.
 **Mixed keeps §15 D130's drawing** (`ui::segment_mixed` on a segmented row, no cell raised, one dash),
 not the mockup's dashed cells; Mixed is about the value and an override about the label under either.
 Rows and keys: *Create component* `Ctrl+Alt+K`, *Detach instance* `Ctrl+Alt+B`, *Duplicate as
@@ -2250,6 +2251,18 @@ the canvas, in the layers panel, on the Component card's main and variant faces 
 keep the outline) and, since 2026-10-06, on the two menu rows that make a main, *Create component* and
 *Duplicate as component*, as the mockups draw them (§15 D981's last amendment); its box and orientation are measured against the outline glyph's atlas ink
 (`the_filled_hexagon_sits_on_the_outline_glyphs_ink`).
+
+✅ **The maintainer's first polish pass, over the accepted mockups** (2026-10-06, §15 D993). The main's
+face is **one line**, the filled hexagon and the name, with no *Main component* caption, and its button
+reads *Duplicate* — the context menu's row keeps *Duplicate as component*; a single instance's face is
+one line too, the main's name as the link, with no *Instance of* caption (several instances keep *N
+instances of*, a variant *Variant in*). The ⋯ overflow is **as wide as its longest row**, its counts
+shown only above zero, and its rows have no glyph column — `ui::menu_row` sets a row handed an empty
+glyph at the row's 8pt inset rather than 32. A **ghost row is laid out as the live row**: the dashed
+box is the field's box, rounded 3px, its chip, glyph or bare label where the live row's stand, and its
+restore an icon-only ↺ in the column the live row's eye takes, on every list. On the canvas a main's
+filled hexagon sits a point above its glyph cell's centre, and its chip is a point wider at the right
+while the instance count is not showing.
 
 ✅ **The canvas and layers chrome** (2026-10-06, §15 D985). **An instance picks like a group**:
 `query::group_chain`'s trailing trim stops at an instance root as at a group, and `canvas::pick_leaf`
@@ -2367,7 +2380,7 @@ link up** with no swap of its own (`make_copy_of` clears it) and may override it
 detached, copied alone — becomes an instance of what it shows; deleting the swapped-to main clears the
 swap and leaves its layers the copy's own; detaching the copy, or dragging it out, leaves plain layers;
 `swap::tidy`, inside `settle_links`, clears a swap that no longer stands. **`component::main_of` answers
-the main a root shows**, through a swap, for *Instance of*, *Select all instances*, *Go to main* and the
+the main a root shows**, through a swap, for the card's link to it, *Select all instances*, *Go to main* and the
 instance's properties. **What is offered**: a swap property (`PropKind::Swap`), bound only to a nested
 instance inside the main and made from that layer's binding line (*Instance*), carries a **filter** — a
 prefix of a main's name, without case, every main when empty, prefilled by `swap::suggested_filter` with
@@ -2387,7 +2400,8 @@ variants use it and are deleted with it. M instances will detach.* — and *Prop
 sit under them. **A variant** gets the Component card with *Variant in* and the set as a link, its
 derived, read-only name, a dropdown per property — a taken combination not refused but noted, *Another
 variant is also X* with *Select it* — then a main's count and verbs. **An instance's card** gains, between
-*Instance of* and *Reset all*, a dropdown per variant property with **no dot** — on a nested copy, whose
+its heading (*Instance of* and the main's name until §15 D993, the name alone since) and *Reset all*, a
+dropdown per variant property with **no dot** — on a nested copy, whose
 choice is a swap, the dot since §15 D988 — switching through
 `variant::switch` (several selected together, *Mixed* where they disagree, a missing combination greyed
 with *No Large, Disabled variant in Button*, the dropdown disabled where any selected root fails
@@ -2410,8 +2424,8 @@ Ctrl+Z to undo*; no new chords. **Four places depart from the mockup**, the sess
 the maintainer on 2026-10-06 — values edited from a chip's popup rather than in place and dragged; binding from that one
 line rather than `{}` buttons on the layers row, Appearance and Type; the define popover as two buttons,
 with no *Default* row and no *Preferred mains*; a set's property name as a field with a × — and D982 has
-each. *Reset properties* is drawn wherever the component defines a property, at "—" and disabled at
-zero like the card's other counted resets (`adc5f66`; the first cut hid it, D982's amendment).
+each. *Reset properties* is drawn wherever the component defines a property, ~~at "—"~~ with no count
+since §15 D993, and disabled at zero like the card's other counted resets (`adc5f66`; the first cut hid it, D982's amendment).
 
 ✅ **A set's tab and two layers marks** (`0ff8f16`, §15 D982's second amendment). **A set's tag is a
 tab** (`canvas::frame_label`): the four-squares glyph and the name in a box padded by `SET_TAB_PAD`

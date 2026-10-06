@@ -317,10 +317,16 @@ pub fn menu_row(ui: &mut egui::Ui, row: MenuRow<'_>, height: f32) -> egui::Respo
         _ if hovered => (color::TEXT, color::TEXT, theme::text::FAINT),
         _ => (theme::text::DIM, theme::text::MUTED, theme::text::FAINT),
     };
+    // **No glyph, no glyph column** (§15 D993): a row handed `""` sets its label
+    // at the row's own inset instead of leaving 24pt of blank where a glyph would
+    // go. Only the small inline popups do that — the instance card's resets, a
+    // variant value's menu — since a context menu's rows all carry one (`menu`'s
+    // registry test), so no menu mixes the two and a column of labels stays one x.
+    let bare = row.glyph.is_empty() && !row.filled_hexagon;
     let glyph_at = egui::pos2(rect.left() + 8.0 + 7.5, rect.center().y);
     if row.filled_hexagon {
         paint_hexagon_filled(p, glyph_at, 15.0, glyph_col);
-    } else {
+    } else if !bare {
         p.text(
             glyph_at,
             egui::Align2::CENTER_CENTER,
@@ -329,8 +335,9 @@ pub fn menu_row(ui: &mut egui::Ui, row: MenuRow<'_>, height: f32) -> egui::Respo
             glyph_col,
         );
     }
+    let label_x = if bare { 8.0 } else { 8.0 + 15.0 + 9.0 };
     p.text(
-        egui::pos2(rect.left() + 8.0 + 15.0 + 9.0, rect.center().y),
+        egui::pos2(rect.left() + label_x, rect.center().y),
         egui::Align2::LEFT_CENTER,
         row.label,
         egui::FontId::proportional(11.5),
@@ -6122,10 +6129,12 @@ mod tests {
     /// **The drawn filled hexagon sits on the outline glyph's ink** (§15 D985) —
     /// what `arch-scribe` read the first build claiming without a check. At 64pt
     /// the outline `HEXAGON` is laid out and its coverage read off the font atlas;
-    /// the polygon, centred where the canvas centres it (the glyph's logical
-    /// cell), must sit inside that ink's box by about half Phosphor's 16-unit
-    /// stroke on every side — its vertices are the stroke's centre line — and the
-    /// glyph must be pointy-top, its ink narrow at the top, as the polygon is.
+    /// the polygon, centred on the glyph's logical cell, must sit inside that
+    /// ink's box by about half Phosphor's 16-unit stroke on every side — its
+    /// vertices are the stroke's centre line — and the glyph must be pointy-top,
+    /// its ink narrow at the top, as the polygon is. ⚠️ The canvas centred it on
+    /// that cell too until §15 D993 lifted it a point, by eye, so this pins the
+    /// polygon against the glyph and not the canvas's placement.
     #[test]
     fn the_filled_hexagon_sits_on_the_outline_glyphs_ink() {
         const SIZE: f32 = 64.0;

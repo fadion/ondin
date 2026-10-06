@@ -6030,8 +6030,8 @@ impl OndinApp {
                 .map(|s| ondin_core::reset::removed_items(s, fills))
                 .unwrap_or_default()
             {
-                let w = ui.available_width() - 28.0 - ui::CARD_COL_GAP;
-                if super::component::ghost_row(ui, &paint::label_of(&gone.brush), w) {
+                let lead = super::component::GhostLead::Chip;
+                if super::component::ghost_row(ui, lead, &paint::label_of(&gone.brush)) {
                     restore = Some(gone.id);
                 }
             }
@@ -6190,8 +6190,8 @@ impl OndinApp {
                 .map(|s| ondin_core::reset::removed_items(s, strokes))
                 .unwrap_or_default()
             {
-                let w = ui.available_width() - 28.0 - ui::CARD_COL_GAP;
-                if super::component::ghost_row(ui, &paint::label_of(&gone.brush), w) {
+                let lead = super::component::GhostLead::Chip;
+                if super::component::ghost_row(ui, lead, &paint::label_of(&gone.brush)) {
                     restore = Some(gone.id);
                 }
             }
@@ -7951,7 +7951,7 @@ impl OndinApp {
             {
                 ui.add_space(GRID_ROW_GAP);
                 let label = format!("{} · {}", grid_axis_word(gone.axis), gone.count);
-                if super::component::ghost_row(ui, &label, ui.available_width()) {
+                if super::component::ghost_row(ui, super::component::GhostLead::Plain, &label) {
                     reset = Some(gone.id);
                 }
             }
@@ -10844,8 +10844,8 @@ impl OndinApp {
                 .map(|s| ondin_core::reset::removed_items(s, &effects))
                 .unwrap_or_default()
             {
-                let w = ui.available_width() - 28.0 - ui::CARD_COL_GAP;
-                if super::component::ghost_row(ui, gone.kind.label(), w) {
+                let lead = super::component::GhostLead::Glyph(effect_glyph(&gone.kind));
+                if super::component::ghost_row(ui, lead, gone.kind.label()) {
                     restore = Some(gone.id);
                 }
             }

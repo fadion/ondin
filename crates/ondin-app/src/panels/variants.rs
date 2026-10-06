@@ -1152,9 +1152,14 @@ impl OndinApp {
                 ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
                 let n = if lone_main { 3.0 } else { 2.0 };
                 let w = (ui.available_width() - ui::CARD_COL_GAP * (n - 1.0)) / n;
-                for (glyph, label, kind) in [
-                    (icon::EYE, "Boolean", PropKind::Boolean),
-                    (icon::TEXT_T, "Text", PropKind::Text),
+                // **Short words, because the card is never wider** (§15 D995): a
+                // third of the inspector leaves about 38pt beside the glyph, and
+                // *Boolean* measures 46 and *Variant* 40 at 12pt, so both were cut
+                // to *Bool…* and *Vari…* on every screen. The property they make
+                // keeps the long name (`name`).
+                for (glyph, label, name, kind) in [
+                    (icon::EYE, "Bool", "Boolean", PropKind::Boolean),
+                    (icon::TEXT_T, "Text", "Text", PropKind::Text),
                 ] {
                     if ui::action_button(
                         ui,
@@ -1175,7 +1180,7 @@ impl OndinApp {
                     })
                     .clicked()
                     {
-                        let name = fresh_name(&props, label);
+                        let name = fresh_name(&props, name);
                         out = variant::define(
                             doc,
                             &mut app.session.ids,
@@ -1191,7 +1196,7 @@ impl OndinApp {
                     && ui::action_button(
                         ui,
                         icon::SQUARES_FOUR,
-                        "Variant",
+                        "Var",
                         FieldButton::Off,
                         egui::vec2(w, ui::CONTROL_H),
                     )
@@ -1252,20 +1257,15 @@ impl OndinApp {
             ],
             (false, false) => &[(PropKind::Boolean, "Visibility")],
         };
-        ui::card_at(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
-                ui.label(
-                    egui::RichText::new(icon::BRACKETS_CURLY)
-                        .font(theme::icon_font(14.0))
-                        .color(theme::text::STRONG),
-                );
-                ui.label(
-                    egui::RichText::new("Bind to a component property")
-                        .size(12.0)
-                        .color(theme::text::STRONG),
-                );
-            });
+        // **Rows of the identity card, not a card of their own** (§15 D995): the
+        // heading has no curly-brace glyph, and the rows sit under the layer's name
+        // and its boolean row, where the card the mockup drew had no title.
+        ui.scope(|ui| {
+            ui.label(
+                egui::RichText::new("Bind to a component property")
+                    .size(12.0)
+                    .color(theme::text::STRONG),
+            );
             for (kind, label) in kinds {
                 let of_kind: Vec<&Keyed<Property>> =
                     props.iter().filter(|p| p.kind == *kind).collect();

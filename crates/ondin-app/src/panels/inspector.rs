@@ -1604,10 +1604,12 @@ impl OndinApp {
             // default-styled text buttons above it, which is the one place in the
             // inspector that looked like an unstyled prototype.
             self.identity_boolean_row(ui);
+            // A mixed selection's instance line, inside this card (§15 D995).
+            self.inspector_component(ui, super::component::ComponentPart::Identity);
         });
         // Several instances, or instances among other layers (§15 D981, 3E–3G) —
         // under the identity card, as on a single layer.
-        self.inspector_component(ui);
+        self.inspector_component(ui, super::component::ComponentPart::Cards);
         // **The same frame and layout panels, in the same order as on a single
         // layer** — templates under the identity card, the layout cards and the grid
         // under Position. Each draws nothing unless the selection has something it
@@ -1741,8 +1743,9 @@ impl OndinApp {
         let node_kind = node.kind().clone();
         self.inspector_header(ui, id, glyph, &name0, visible0, locked0);
         // What the layer is to the components machinery — also a fact about what
-        // it *is*, so under its name and above the mask (§15 D981, 3H).
-        self.inspector_component(ui);
+        // it *is*, so under its name and above the mask (§15 D981, 3H). Its
+        // one-line rows are inside the identity card itself (§15 D995).
+        self.inspector_component(ui, super::component::ComponentPart::Cards);
         // Directly under the identity card, because it is a fact about *what this
         // layer is* rather than about how it is drawn — and because a mask draws
         // nothing, so every card below it describes ink nobody will see.
@@ -2250,6 +2253,10 @@ impl OndinApp {
             });
             // The design's second row, inside the same card.
             self.identity_boolean_row(ui);
+            // What the layer is inside a component — *In Card instance*, *Local to
+            // this instance*, the binding line — under it, in the same card (§15
+            // D995).
+            self.inspector_component(ui, super::component::ComponentPart::Identity);
         });
     }
     /// The identity card's second row (`design/Editor.dc.html`): the boolean

@@ -2680,23 +2680,31 @@ fn value_field_f64_marked(
                     egui::epaint::RectShape::filled(bar, corner, meter_wash()),
                 );
             }
-            let lead_resp = ui
-                .interact(
-                    strip,
-                    ui.auto_id_with("prefix-scrub"),
-                    // **`CLICK | DRAG` spelled out, because `Sense::click_and_drag()`
-                    // is `CLICK | DRAG | FOCUSABLE` and this strip must not be a tab
-                    // stop.** It is a scrub handle with no keyboard face of its own —
-                    // the digits beside it are the thing you type into — so focus on
-                    // it lands nowhere visible. Tabbing across the Transform panel
-                    // stopped on one of these before each field, so X → Y took two
-                    // presses and the first went somewhere with nothing drawn on it
-                    // (§15 D290).
-                    egui::Sense::CLICK | egui::Sense::DRAG,
-                )
-                // The same cursor the number shows, so the strip advertises what it
-                // does instead of looking like a label that happens to be draggable.
-                .on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+            let lead_resp = ui.interact(
+                strip,
+                ui.auto_id_with("prefix-scrub"),
+                // **`CLICK | DRAG` spelled out, because `Sense::click_and_drag()`
+                // is `CLICK | DRAG | FOCUSABLE` and this strip must not be a tab
+                // stop.** It is a scrub handle with no keyboard face of its own —
+                // the digits beside it are the thing you type into — so focus on
+                // it lands nowhere visible. Tabbing across the Transform panel
+                // stopped on one of these before each field, so X → Y took two
+                // presses and the first went somewhere with nothing drawn on it
+                // (§15 D290).
+                egui::Sense::CLICK | egui::Sense::DRAG,
+            );
+            // The same cursor the number shows, so the strip advertises what it does
+            // instead of looking like a label that happens to be draggable — and,
+            // while the field is marked and the slot is its ↺, the **plain arrow**
+            // every other button in the chrome shows (§9.2, §15 D371): the click is
+            // what it is for, and the scrub arrows over a reset left no way to tell
+            // the two apart (§15 D995). A drag that starts there is still a scrub,
+            // and wears the scrub arrows once it is one.
+            let cursor = match mark {
+                Some(_) if !lead_resp.dragged() => egui::CursorIcon::Default,
+                _ => egui::CursorIcon::ResizeHorizontal,
+            };
+            let lead_resp = lead_resp.on_hover_cursor(cursor);
             // A marked field's label slot is its reset (`FieldMark`): a press that
             // never became a drag. A scrub that starts there is still a scrub.
             let lead_resp = match mark {

@@ -3,7 +3,9 @@
 //! (`design/Components.dc.html`, sections 3A–3H): a main's instance count and its
 //! two verbs, an instance's link to its main, its drift and the reset family, and
 //! the summaries several selected instances get. A layer *inside* an instance gets
-//! one line instead of a card — D981's *"one line, not a card"*.
+//! one line instead of a card — D981's *"one line, not a card"* — drawn as a row of
+//! the identity card since §15 D995 (`ComponentPart::Identity`), as are a mixed
+//! selection's line and the binding line.
 //!
 //! **Directly under the identity card** (3H), because it says what the layer *is*.
 //!
@@ -143,6 +145,16 @@ pub(crate) fn prop_drift(doc: &ondin_core::Document, root: NodeId) -> PropDrift 
         units,
         defined,
     }
+}
+
+/// Which half of the components inspector a call draws (§15 D995): the rows that
+/// sit **inside the identity card** — a child's *In Card instance* or *Local to
+/// this instance*, a mixed selection's line, and the binding line — or the
+/// **cards** under it, *Component*, *Variants* and *Properties*.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ComponentPart {
+    Identity,
+    Cards,
 }
 
 /// What a click on the card asked for, acted on after it is drawn so nothing is
@@ -513,19 +525,39 @@ impl OndinApp {
     }
 
     /// The Component card (§15 D981) — see the module doc.
-    pub(super) fn inspector_component(&mut self, ui: &mut egui::Ui) {
+    pub(super) fn inspector_component(&mut self, ui: &mut egui::Ui, part: ComponentPart) {
         let Some(face) = self.component_face() else {
             return;
         };
         let mut act = None;
+        if part == ComponentPart::Identity {
+            // **Inside the identity card, under its second row** (§15 D995): the
+            // one-line faces and the binding line were cards of their own with no
+            // title — the maintainer's look found them orphaned, and each is a
+            // fact about what the layer *is*, which is that card's subject.
+            match &face {
+                Face::Child { main_name, linked } => {
+                    child_line(ui, main_name, *linked, &mut act);
+                }
+                Face::Mixed { roots, others } => mixed_line(ui, roots, *others, &mut act),
+                Face::InMain { node } => self.bind_line(ui, *node),
+                _ => {}
+            }
+            // A nested instance inside a main is an instance root, so it takes the
+            // instance's face — and its binding line too, which is where a swap
+            // property is made (§15 D983 (iii)) and which that face had never
+            // drawn (§15 D989).
+            if let Face::Instance { .. } = &face
+                && let Some(root) = self.session.selection.single()
+                && ondin_core::variant::owner_above(&self.session.doc, root).is_some()
+            {
+                self.bind_line(ui, root);
+            }
+            self.component_act(act);
+            return;
+        }
         match &face {
-            Face::Child { main_name, linked } => {
-                slim_row(ui, |ui| child_line(ui, main_name, *linked, &mut act));
-            }
-            Face::Mixed { roots, others } => {
-                slim_row(ui, |ui| mixed_line(ui, roots, *others, &mut act));
-            }
-            Face::InMain { node } => self.bind_line(ui, *node),
+            Face::Child { .. } | Face::Mixed { .. } | Face::InMain { .. } => {}
             Face::Set { set } => {
                 let set = *set;
                 self.panel(ui, "Variants", None, |app, ui| app.set_body(ui, set));
@@ -628,18 +660,13 @@ impl OndinApp {
                 });
             }
         }
-        // A nested instance inside a main is an instance root, so it takes the
-        // instance's face — and its binding line too, which is where a swap
-        // property is made (§15 D983 (iii)) and which that face had never drawn
-        // (§15 D989).
-        if let Face::Instance { .. } = &face
-            && let Some(root) = self.session.selection.single()
-            && ondin_core::variant::owner_above(&self.session.doc, root).is_some()
-        {
-            self.bind_line(ui, root);
-        }
         // A main's or a set's own properties, under its card (3G).
         self.inspector_properties(ui);
+        self.component_act(act);
+    }
+
+    /// What a click on either part of the components inspector asked for, done.
+    fn component_act(&mut self, act: Option<Act>) {
         match act {
             None => {}
             Some(Act::ResetProperties) => {
@@ -1299,6 +1326,11 @@ fn main_body(ui: &mut egui::Ui, name: &str, instances: usize, act: &mut Option<A
         });
         paint_hexagon(ui, true, slot, block.response.rect);
     });
+    // The count, *Select all* and *Duplicate* 4pt closer under the one-line face,
+    // the gap an instance's face leaves above its *Reset all* (§15 D995, the
+    // maintainer's look). Here and not in `main_tail`, which a variant's face
+    // shares under its property rows.
+    ui.add_space(-4.0);
     main_tail(ui, instances, act);
 }
 
@@ -1344,12 +1376,16 @@ fn main_tail(ui: &mut egui::Ui, instances: usize, act: &mut Option<Act>) {
 }
 
 /// 3D: *In Button instance · Go to main*, or *Local to this instance · no
-/// counterpart*.
+/// counterpart* — a row of the identity card since §15 D995.
+///
+/// A local layer leads with the **broken link**, where the mockup had `+`: a `+`
+/// at the head of a row reads as a button that adds something, and this one is a
+/// statement that the layer has no counterpart (§15 D995, the maintainer's look).
 fn child_line(ui: &mut egui::Ui, main_name: &str, linked: bool, act: &mut Option<Act>) {
     let (glyph, text) = if linked {
         (icon::HEXAGON, format!("In {main_name} instance"))
     } else {
-        (icon::PLUS, "Local to this instance".to_string())
+        (icon::LINK_BREAK, "Local to this instance".to_string())
     };
     let mut slot = egui::Rect::NOTHING;
     let row = ui.horizontal(|ui| {
@@ -1385,7 +1421,15 @@ fn child_line(ui: &mut egui::Ui, main_name: &str, linked: bool, act: &mut Option
             }
         });
     });
-    paint_glyph(ui, glyph, slot, row.response.rect);
+    // The hexagon a point above the row's centre, where it sat low against the
+    // words beside it (§15 D995, the maintainer's look).
+    let lift = if linked { 1.0 } else { 0.0 };
+    paint_glyph(
+        ui,
+        glyph,
+        slot,
+        row.response.rect.translate(egui::vec2(0.0, -lift)),
+    );
 }
 
 /// 3G: *2 instances · 3 other layers*, and *Select instances* to narrow to them.
@@ -1457,11 +1501,6 @@ fn paint_hexagon(ui: &egui::Ui, filled: bool, slot: egui::Rect, beside: egui::Re
     } else {
         paint_glyph(ui, icon::HEXAGON, slot, beside);
     }
-}
-
-/// A card with no header — the one-line faces (3D, 3G).
-fn slim_row(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
-    ui::card_at(ui, |ui| add(ui));
 }
 
 #[cfg(test)]
@@ -1805,6 +1844,70 @@ mod tests {
             doc.get(f.ir).unwrap().transform(),
             doc.get(main_rect).unwrap().transform(),
             "the main's x is back"
+        );
+    }
+
+    /// **A marked field's ↺ reads as a button, not as a scrub handle** (§15 D995):
+    /// with the pointer resting on X's label slot the cursor is the plain arrow
+    /// (§9.2's rule, §15 D371), where an unmarked label shows the scrub's
+    /// horizontal arrows, and a tooltip
+    /// opens naming the reset. Flips, both run: the strip's cursor left at the
+    /// arrows fails *"the marked label's cursor"*; dropping the strip's
+    /// `on_hover_text` fails *"a tooltip is open"* — which says the tooltip was
+    /// there before this entry (*Reset to main ·* the main's value, after egui's
+    /// 0.5s delay), and only the cursor was wrong.
+    #[test]
+    fn a_marked_fields_reset_shows_an_arrow_and_a_tooltip() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![Operation::SetTransform {
+                    id: f.ir,
+                    transform: ondin_core::kurbo::Affine::translate((7.0, 0.0)),
+                }]))
+        );
+        f.app.session.selection.set_one(f.ir);
+        let mut out = frame(&mut f.app, &ctx, Vec::new());
+        for _ in 0..3 {
+            out = frame(&mut f.app, &ctx, Vec::new());
+        }
+        let painted = inks(&out);
+        let at_of = |s: &str| {
+            painted
+                .iter()
+                .find(|(t, ..)| t == s)
+                .map(|(_, r, _)| r.center())
+                .unwrap_or_else(|| panic!("no {s} in {painted:?}"))
+        };
+        let (x, y) = (at_of("X"), at_of("Y"));
+        let rest = |app: &mut OndinApp, at: egui::Pos2| {
+            let mut out = frame(app, &ctx, vec![egui::Event::PointerMoved(at)]);
+            // Past egui's 0.5s tooltip delay: a pass with no time advances 1/60s.
+            for _ in 0..45 {
+                out = frame(app, &ctx, Vec::new());
+            }
+            out
+        };
+        let out = rest(&mut f.app, x);
+        assert_eq!(
+            out.platform_output.cursor_icon,
+            egui::CursorIcon::Default,
+            "the marked label's cursor"
+        );
+        let tooltip = ctx.memory(|m| {
+            m.areas()
+                .visible_layer_ids()
+                .iter()
+                .any(|l| l.order == egui::Order::Tooltip)
+        });
+        assert!(tooltip, "a tooltip is open over the marked label");
+        let out = rest(&mut f.app, y);
+        assert_eq!(
+            out.platform_output.cursor_icon,
+            egui::CursorIcon::ResizeHorizontal,
+            "an unmarked label still scrubs"
         );
     }
 

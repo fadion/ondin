@@ -1387,6 +1387,7 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D989** — **A nested instance selected inside a main never drew the binding line, so the swap property D983 (iii) makes there could not be made from the UI.** `component_face` asks `component::instance_root` before `variant::owner_above`, and a nested instance inside a main is an instance root by its own link, so its card took `Face::Instance` — and only `Face::InMain` drew `bind_line`, the one place D983 (iii) makes a swap property (*Instance*) and where the nested instance's *Visibility* binding lives. The function was right and its caller never reached it: D983's amendment described the line by reading `bind_line`, and no test drew that card — `tests/swap.rs` makes its swap properties with `variant::define`. `inspector_component` now draws `bind_line` under the card for an instance face whose root has an owner above it. Test `a_nested_instance_in_a_main_opts_in_from_its_card`, asserting *"Bind to a component property"*, its flip — the condition made never true — failing at *"the binding line"*, as predicted and as the caller reports it. Found building D988. *(Found and fixed 2026-10-06, uncommitted when recorded. **Resolved.** D983 amended; `architecture.md` §5.3d)*
 - **D990** — **A sibling effect layer cut by the view drew into the slot packed beside it, because a slot was an offset and not a clip.** `resolve_effects` packs a level's siblings into one batch texture (D344, D402's budget) and appended each sub-scene with a translate alone; a buffer is trimmed to the layer's visible part (`buffer_box_within`), but only an unclipped layer inside the sub-scene is bounded by it, so a layer off the view's left edge drew at negative x into the slot before it — reported as a white rectangle over a card, a toolbar's tint over another, and frames moving and flickering as the view panned. The CPU backend, one buffer per layer, never showed it. Each append now sits in `push_clip_layer` over its slot. ⚠️ The clip removes no paths, so D402's argument is unchanged. GPU-against-CPU error grid, worst cell 21.0 → 0.9 and 31.9 → 4.9, the rest text antialiasing. *(Fixed and tested on-device 2026-10-06, uncommitted when recorded. **Resolved.** Test `a_sibling_cut_by_the_view_draws_nothing_into_its_neighbour`, its flip reading `(255, 0, 0, 255)` at the square's centre, as the caller reports it. `architecture.md` §6.3)*
 - **D991** — **An override made on a swap's slot carries through the swap: the rewrite measures a copy against the main its slot shows, not against the slot.** The maintainer's ruling, *"The Save label should carry through the variant switch"*: a Toolbar main's nested Button labelled "Save", switched to another variant in a Toolbar instance — a swap (D983 (6)) — read "Button", because `carry` compared the copy with `from`, the slot, whose "Save" it shared. `variant::rewrite`'s `base_of` walks `swap::content_source` to the counterpart inside `swap::shown_main(from)` and **stops there**, so a variant switch is unchanged and a variant's own nested overrides still give way to the target's. Reset still measures one link up (D979), so a value carried this way is no override before the swap and the copy's own after it. `base_of`'s walk is bounded by the document, as `shown_main`'s is. *(Ruled and fixed 2026-10-06, uncommitted when recorded. **Keep.** Tests `a_swap_carries_an_override_made_on_the_slot` and `a_variant_switch_drops_the_old_variants_own_nested_override`, each flip as the caller reports it. D983 (4) amended; `architecture.md` §5.3d)*
+- **D992** — **A lost GPU device is logged with its reason; the three crashes it would have explained are not.** Three panics on 2026-10-06, each 150–195 s into zooming and panning `components.ondin`: `create_view` on an invalid `ondin-fx-batch` texture, after egui dropped a frame. wgpu 29.0.4 swallows `DeviceLost` errors for the callback, so on a lost device `fx_texture` returns an invalid texture silently and the panic names only the first thing used after the loss. No driver reset in the event log, so not D402's watchdog. `OndinApp::new` installs `set_device_lost_callback`, logging the reason and message. Not reproduced: 16,529 headless frames at 3840×2160, worst 20 ms. The leading suspect is the fx textures allocated fresh every frame — 5.7 GB allocated with frames in flight unpolled, ~790 MB polled. ⚠️ Read, not run: wgpu-core loses a device on OOM at a submit or an encode, but reports a texture creation's OOM as an error of its own. *(Logged 2026-10-06, uncommitted when recorded. ***Fix*** — cause unmeasured; the maintainer declined having the session drive the GUI. `roadmap.md` *Now · Canvas and interaction*)*
 
 ---
 
@@ -32457,6 +32458,53 @@ comparison could see this where D342's could not because the mistake was the GPU
 CPU backend has no batch to share it. *(Found and fixed 2026-10-06, uncommitted when
 recorded; from the caller's brief and a read of `resolve_effects`, `pack`, `layer_shape` and the test.
 **Resolved.** `architecture.md` §6.3's one-pass-per-renderer paragraph)*
+
+**D992 — A lost GPU device is logged with its reason; the three crashes it would have explained are
+not. *Logged 2026-10-06; Fix — cause unmeasured.*** Three panics in the maintainer's log
+(`%APPDATA%\Ondin\ondin.log`) on 2026-10-06, at 20:25:52, 20:29:52 and 20:36:12 local, each 150–195 s
+after launch and each while zooming and panning `components.ondin` (D990's file): `wgpu error:
+Validation Error … In Texture::create_view … Texture with 'ondin-fx-batch' label is invalid`, each
+preceded in the same second by `egui_wgpu: Dropped frame with error: Validation`.
+
+**Why the log said nothing useful.** wgpu 29.0.4's `handle_error_inner` returns without a word for
+`ErrorType::DeviceLost` — *"will be surfaced via callback"* — so once the device is lost,
+`fx_gpu::fx_texture` hands back an invalid texture with no error, and the next call to touch it,
+`create_view` on the next line of `resolve_effects`, is the first thing to complain, through the default
+handler's panic. egui's surface acquisition hit the same loss first, by the caller's reading of its
+line. So the panic names the **batch texture**, which is only where the app first used something after
+the loss, not where it happened. The shape is D402's — a panic in whatever the next frame touches first
+— but **not its mechanism as recorded there**: the system event log holds no display-driver reset (no
+4101), no LiveKernelEvent and no WER report at those times, where D402's hangs were watchdog resets.
+
+**The change**: `OndinApp::new` installs `device.set_device_lost_callback`, logging `GPU device lost
+({reason:?}): {message}` at error level to target `ondin`, so the next occurrence names its cause. It
+fixes nothing.
+
+**What was measured, none of which reproduces it.** A headless sweep of the file at 3840×2160, zoom 1×
+to 14.5× in 1.25 steps with pans of 400 device pixels: **16,529 frames, worst 20 ms**, the device alive
+throughout — with D990's fix in; the old code also survived a coarser sweep, 0.25× to 48×.
+`device.generate_allocator_report()` gave the leading suspect: with a `poll(wait)` every frame,
+allocation plateaus at about 790 MB allocated and 1.2 GB reserved as the passes' high-water mark grows;
+**without polling, frames in flight accumulating, it reached 5.7 GB allocated and 7.6 GB reserved**,
+because every frame allocates its batch texture (`fx_texture`, one per chunk) and every filter pass's
+textures fresh. The app is vsync-throttled, so this alone should not exhaust the 12 GB of the RTX 4070
+Ti it ran on — it is a candidate, not a finding. (As the caller reports it.)
+
+⚠️ **Out of memory does not lose a device at every door**, read in wgpu-core 29.0.4 and not run.
+`Device::handle_hal_error` loses it on a hal `OutOfMemory`, `Lost` or `Unexpected` — at a submit, while
+encoding, building a pipeline, presenting — but texture and buffer **creation** goes through
+`handle_hal_error_with_nonfatal_oom`, which returns the out-of-memory error without losing anything;
+and wgpu would report that through its sink as `Error::OutOfMemory`, not as the validation error the log
+holds. So if allocation is the cause, the loss came at a submit or an encode while memory was short, and
+not at the `fx_texture` the panic names. wgpu's own budget-based loss
+(`MemoryBudgetThresholds::for_device_loss`) is off by default, and nothing in `crates/` sets it.
+
+⚠️ **The maintainer declined having the session drive the GUI**, so the reproduction waits on the next
+occurrence in ordinary use. *(Logged 2026-10-06, uncommitted when recorded; from the caller's brief, a
+read of `OndinApp::new` and `resolve_effects`, and of wgpu 29.0.4's `handle_error_inner` and
+wgpu-core's two `handle_hal_error`s. ***Fix*** — the cause is unmeasured; the log line is the next
+step, and the per-frame fx-texture allocation the leading suspect. `roadmap.md` *Now · Canvas and
+interaction*)*
 
 **D405 — Type on a path: the rail belongs to the text node, and the layout is bent onto it as a pass
 over the finished flat one.

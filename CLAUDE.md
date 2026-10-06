@@ -67,9 +67,18 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 989 index rows, 989 body headings, next free
-D990** (measured at session 53's close) — but trust the procedure over any number
+anywhere cited either. **The live figures: 992 index rows, 992 body headings, next free
+D993** (measured at session 54's close) — but trust the procedure over any number
 written down here, including that one. **No block is reserved**: the next session reserves its own.
+⚠️ **Session 54 (2026-10-06) reserved D990–D999 at `c3b7276` and spent three** — D990 (sibling
+effect layers spilled into each other's slots in the GPU batch), D991 (a swap carries an override
+made on its slot) and D992 (a lost GPU device is logged; the crash it explains is open, roadmap
+*Now · Canvas*). ⚠️ **D1000 was deliberately not reserved**: the census sieve `D[0-9]{1,3}\b`
+cannot see a four-digit number, so the first entry past D999 needs that regex widened *first*.
+The closing negative grep over **D993–D999 found zero sites** and they are released. Census:
+**890**, three arrivals and no departures, none unresolved; §15.0 992 rows, 992 headings, in order.
+⚠️ **`arch-scribe` found a live defect again** — `variant::rewrite`'s `base_of` bounded by the
+shown main's node count rather than the document — fixed before commit.
 ⚠️ **Session 53 (2026-10-06) reserved D988–D999 three times, once per request, and spent two.**
 The first two requests spent none: closing *Next · Container layout*, the maintainer's
 acceptance of four delegated calls and then a **blanket acceptance of every other one** (stated

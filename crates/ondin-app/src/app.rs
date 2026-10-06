@@ -1916,6 +1916,23 @@ impl OndinApp {
             .wgpu_render_state
             .clone()
             .expect("ondin requires the wgpu backend");
+        // **A lost device says why only here** (§15 D992). wgpu's error sink drops
+        // a `DeviceLost` error and leaves it to this callback, and every resource
+        // made after the loss comes back invalid with no error of its own — so the
+        // first thing the log used to hold was the first *use* of one, the
+        // `create_view` on `resolve_effects`' batch texture, panicking on a texture
+        // that was never made: *"Texture with 'ondin-fx-batch' label is
+        // invalid"*, three times on 2026-10-06, with no driver reset in the system
+        // log. Out of memory loses a device too — at a submit or while encoding,
+        // among others (wgpu-core's `handle_hal_error`); a texture or buffer that
+        // cannot be allocated is reported as an out-of-memory error of its own
+        // instead (`handle_hal_error_with_nonfatal_oom`) — so the reason and wgpu's
+        // message are the record that tells the causes apart.
+        render_state
+            .device
+            .set_device_lost_callback(|reason, message| {
+                log::error!(target: "ondin", "GPU device lost ({reason:?}): {message}");
+            });
         crate::theme::install(&cc.egui_ctx);
         // **Read before the font service, because the service is built from it.**
         // `Prefs::web_fonts` decides whether the catalog thread is spawned at all,

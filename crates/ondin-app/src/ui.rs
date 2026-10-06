@@ -655,9 +655,13 @@ pub fn menu_check(ui: &mut egui::Ui, label: &str, on: bool, height: f32) -> bool
 /// A small-caps section eyebrow (`LAYERS`, `TRANSFORM`, …).
 pub fn eyebrow(label: &str) -> egui::RichText {
     egui::RichText::new(label.to_uppercase())
-        .size(9.5)
+        .size(EYEBROW_PT)
         .color(theme::text::FAINT)
 }
+
+/// An [`eyebrow`]'s size, named for the popover sections that draw a marked one
+/// by hand (`typography::section_marked`).
+pub const EYEBROW_PT: f32 = 9.5;
 
 /// An inspector card — a surface-filled rounded box with padding.
 ///
@@ -3206,6 +3210,58 @@ pub fn field_button_sized(
         fg,
     );
     resp
+}
+
+/// [`field_button_sized`] with an override mark ([`FieldMark`], §15 D981); the
+/// second return value is whether the mark's reset was clicked, and when it was
+/// the button's own click is not the caller's to act on.
+///
+/// **[`segmented_marked`]'s lit cell, for a toggle**: the dot at the button's top
+/// right at rest, and with the pointer on it the glyph traded for ↺ in the same
+/// box and the mark's tooltip in place of the button's. **A click on a marked
+/// toggle is the reset**, not the toggle — for a two-state toggle the two are the
+/// same edit, and where they are not (a bold toggle over a main at 600) the reset
+/// is the one the ↺ promised. A second click then toggles as usual.
+pub fn field_button_marked(
+    ui: &mut egui::Ui,
+    glyph: &str,
+    box_size: egui::Vec2,
+    glyph_size: f32,
+    state: FieldButton,
+    mark: Option<FieldMark<'_>>,
+) -> (egui::Response, bool) {
+    let (rect, resp, fg) = button_face(ui, box_size, state);
+    let Some(m) = mark else {
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            glyph,
+            theme::icon_font(glyph_size),
+            fg,
+        );
+        return (resp, false);
+    };
+    if resp.hovered() {
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            icon::ARROW_COUNTER_CLOCKWISE,
+            theme::icon_font(glyph_size),
+            fg,
+        );
+    } else {
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            glyph,
+            theme::icon_font(glyph_size),
+            fg,
+        );
+        override_dot(ui.painter(), rect.right_top() + egui::vec2(-4.0, 4.0));
+    }
+    let resp = resp.on_hover_text(m.tip);
+    let reset = resp.clicked();
+    (resp, reset)
 }
 
 /// [`field_button_sized`] with a **word** in it instead of a glyph.

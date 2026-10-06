@@ -74,6 +74,7 @@
 //! ignores the selection reads as broken rather than as limited.
 
 use super::component::{OverrideMark, mark_num};
+use super::inspector::tip_unless_marked;
 use super::paint::{CharSlot, CharWrite, DecorationSide};
 use super::{ClickAway, dismissed_by_click};
 use crate::app::{OndinApp, TypeTab};
@@ -751,6 +752,100 @@ impl OndinApp {
         )
     }
 
+    /// One paragraph style field's override mark on text `id` (§15 D981), the
+    /// paragraph twin of [`Self::style_mark`]: the node's own paragraph, never a
+    /// span's.
+    fn para_mark<V: PartialEq + Clone>(
+        &self,
+        id: NodeId,
+        get: impl Fn(&ParagraphStyle) -> V,
+        put: impl Fn(&mut ParagraphStyle, V),
+        say: impl Fn(&V) -> String,
+    ) -> Option<OverrideMark> {
+        self.sub_mark(
+            &[id],
+            |op| match op {
+                Operation::SetParagraphStyle { paragraph, .. } => Some(paragraph.clone()),
+                _ => None,
+            },
+            |n| match n.kind() {
+                ondin_core::NodeKind::Text { paragraph, .. } => Some(paragraph.clone()),
+                _ => None,
+            },
+            get,
+            put,
+            |id, paragraph| Operation::SetParagraphStyle {
+                id,
+                paragraph,
+                spans: None,
+            },
+            say,
+        )
+    }
+
+    /// One text box field's override mark on text `id` (§15 D981).
+    fn block_mark<V: PartialEq + Clone>(
+        &self,
+        id: NodeId,
+        get: impl Fn(&BlockStyle) -> V,
+        put: impl Fn(&mut BlockStyle, V),
+        say: impl Fn(&V) -> String,
+    ) -> Option<OverrideMark> {
+        self.sub_mark(
+            &[id],
+            |op| match op {
+                Operation::SetBlockStyle { block, .. } => Some(*block),
+                _ => None,
+            },
+            |n| match n.kind() {
+                ondin_core::NodeKind::Text { block, .. } => Some(*block),
+                _ => None,
+            },
+            get,
+            put,
+            |id, block| Operation::SetBlockStyle { id, block },
+            say,
+        )
+    }
+
+    /// The Sizing section's override mark on text `id` (§15 D981): compared on
+    /// the **mode** — auto width, auto height, fixed — and reset to the main's
+    /// whole sizing, its width with it. The width an auto-height box carries is
+    /// the Transform card's W, marked there; comparing it here as well would mark
+    /// one difference twice. An instance root's sizing is its own size, and
+    /// `sub_mark` never marks it.
+    fn sizing_mark(&self, id: NodeId) -> Option<OverrideMark> {
+        // The sizing as the mark compares it: equal when the modes are.
+        #[derive(Clone)]
+        struct Mode(TextSizing);
+        impl PartialEq for Mode {
+            fn eq(&self, other: &Self) -> bool {
+                self.0.cell() == other.0.cell()
+            }
+        }
+        self.sub_mark(
+            &[id],
+            |op| match op {
+                Operation::SetGeometry {
+                    geometry: GeometryPatch::TextSizing(s),
+                    ..
+                } => Some(*s),
+                _ => None,
+            },
+            |n| match n.kind() {
+                ondin_core::NodeKind::Text { sizing, .. } => Some(*sizing),
+                _ => None,
+            },
+            |s| Mode(*s),
+            |s, Mode(from)| *s = from,
+            |id, sizing| Operation::SetGeometry {
+                id,
+                geometry: GeometryPatch::TextSizing(sizing),
+            },
+            |Mode(s)| TextSizing::LABELS[s.cell()].to_owned(),
+        )
+    }
+
     /// The Type card's override marks for text `id` (§15 D981): the five style
     /// fields, the paragraph's alignment and the box's vertical alignment.
     fn type_marks(&self, id: NodeId) -> TypeMarks {
@@ -1177,36 +1272,59 @@ impl OndinApp {
     }
 
     /// The bold/italic pair, for a family that offers no variant list.
+    ///
+    /// Each button carries an instance's override mark on its own value (§15
+    /// D981) — the weight on Bold, the slant on Italic, compared on the node's
+    /// own style as the variant dropdown's mark is — and a click on a marked one
+    /// is its reset (`ui::field_button_marked`).
     fn type_weight_toggles(&mut self, ui: &mut egui::Ui, subject: &TypeSubject, size: egui::Vec2) {
         let weight = attr!(subject, Weight, Weight);
         let italic = attr!(subject, Italic, Italic);
         let cell = (size.x - 2.0) / 2.0;
+        let bold_mark = self.style_mark(
+            subject.id,
+            |s| s.weight,
+            |s, v| s.weight = v,
+            |w| w.to_string(),
+        );
+        let italic_mark = self.style_mark(
+            subject.id,
+            |s| s.italic,
+            |s, v| s.italic = v,
+            |i| match i {
+                true => "italic".to_owned(),
+                false => "upright".to_owned(),
+            },
+        );
+        let side = egui::Vec2::splat(cell.min(size.y));
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             let (bold_on, bold_next) = bold_toggle(weight, subject.mixed(CharAttrKind::Weight));
-            if field_button(
+            let (resp, reset) = ui::field_button_marked(
                 ui,
                 icon::TEXT_BOLD,
-                cell.min(size.y),
+                side,
                 14.0,
                 ui::FieldButton::on_if(bold_on),
-            )
-            .on_hover_text("Bold")
-            .clicked()
-            {
+                bold_mark.as_ref().map(OverrideMark::field),
+            );
+            if reset {
+                self.reset_marked(true, &bold_mark);
+            } else if tip_unless_marked(resp, &bold_mark, "Bold").clicked() {
                 self.apply_char_attrs(subject, vec![CharAttr::Weight(bold_next)]);
             }
             let italic_on = italic && !subject.mixed(CharAttrKind::Italic);
-            if field_button(
+            let (resp, reset) = ui::field_button_marked(
                 ui,
                 icon::TEXT_ITALIC,
-                cell.min(size.y),
+                side,
                 14.0,
                 ui::FieldButton::on_if(italic_on),
-            )
-            .on_hover_text("Italic")
-            .clicked()
-            {
+                italic_mark.as_ref().map(OverrideMark::field),
+            );
+            if reset {
+                self.reset_marked(true, &italic_mark);
+            } else if tip_unless_marked(resp, &italic_mark, "Italic").clicked() {
                 self.apply_char_attrs(subject, vec![CharAttr::Italic(!italic_on)]);
             }
         });
@@ -1743,9 +1861,16 @@ impl OndinApp {
     /// swatch can show a *gradient* while the slot itself holds only one colour — a
     /// run cannot be filled with a ramp (D154), but it can inherit a layer that is.
     fn color_section(&mut self, ui: &mut egui::Ui, subject: &TypeSubject) {
-        section(ui, "Colour", |ui| {
+        let mark = self.style_mark(
+            subject.id,
+            |s| s.color,
+            |s, v| s.color = v,
+            |v| v.map_or_else(|| "the layer's fill".to_owned(), ui::hex_of),
+        );
+        let (_, hit) = section_marked(ui, "Colour", mark.as_ref(), |ui| {
             self.char_color_row(ui, subject, CharSlot::Color);
         });
+        self.reset_marked(hit, &mark);
     }
 
     /// **Case is a display transform, and small caps is not here.** Real drawn
@@ -1757,7 +1882,13 @@ impl OndinApp {
         let case = attr!(subject, Case, Case);
         let mixed = subject.mixed(CharAttrKind::Case);
         let current = TextCase::ALL.iter().position(|c| *c == case).unwrap_or(0);
-        section(ui, "Case", |ui| {
+        let mark = self.style_mark(
+            subject.id,
+            |s| s.case,
+            |s, v| s.case = v,
+            |v| v.label().to_owned(),
+        );
+        let (_, hit) = section_marked(ui, "Case", mark.as_ref(), |ui| {
             if let Some(i) = segmented(
                 ui,
                 MENU_INNER,
@@ -1776,6 +1907,7 @@ impl OndinApp {
                 self.apply_char_attrs(subject, vec![CharAttr::Case(TextCase::ALL[i])]);
             }
         });
+        self.reset_marked(hit, &mark);
     }
 
     /// The decoration, and everything under it: thickness, offset, line style and
@@ -1803,7 +1935,22 @@ impl OndinApp {
         let mixed =
             subject.mixed(CharAttrKind::Underline) || subject.mixed(CharAttrKind::Strikethrough);
         let current = decoration_cell(under, strike);
-        section(ui, "Decoration", |ui| {
+        // Both lines and everything under them — thickness, offset, style,
+        // skip-ink and colour all live in the `Decoration`.
+        let mark = self.style_mark(
+            subject.id,
+            |s| (s.underline, s.strikethrough),
+            |s, (u, k)| {
+                s.underline = u;
+                s.strikethrough = k;
+            },
+            |(u, k)| match (u, k) {
+                (Some(_), _) => "underline".to_owned(),
+                (None, Some(_)) => "strikethrough".to_owned(),
+                (None, None) => "none".to_owned(),
+            },
+        );
+        let (_, hit) = section_marked(ui, "Decoration", mark.as_ref(), |ui| {
             let picked = segmented(
                 ui,
                 MENU_INNER,
@@ -1957,6 +2104,7 @@ impl OndinApp {
                 self.char_color_row(ui, subject, CharSlot::Decoration(side));
             }
         });
+        self.reset_marked(hit, &mark);
     }
 
     /// The decoration's colour: a swatch, its hex, its opacity, and a reset.
@@ -2132,12 +2280,27 @@ impl OndinApp {
     ///
     /// Baseline shift is signed and is a *draw* offset — it moves the run without
     /// changing the line box, which is what keeps neighbouring baselines aligned.
+    ///
+    /// Two fields with prefixes of their own, so each carries its own mark (§15
+    /// D981), as the card's letter spacing does, rather than the section's label.
     fn spacing_section(&mut self, ui: &mut egui::Ui, subject: &TypeSubject) {
+        let word = self.style_mark(
+            subject.id,
+            |s| s.word_spacing,
+            |s, v| s.word_spacing = v,
+            length_words,
+        );
+        let shift = self.style_mark(
+            subject.id,
+            |s| s.baseline_shift,
+            |s, v| s.baseline_shift = v,
+            length_words,
+        );
         section(ui, "Baseline & word spacing", |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = COL_GAP;
                 let half = (MENU_INNER - COL_GAP) / 2.0;
-                self.length_char_field(
+                self.length_char_field_marked(
                     ui,
                     subject,
                     egui::vec2(half, CELL),
@@ -2145,8 +2308,9 @@ impl OndinApp {
                     Prefix::Icon(icon::ARROWS_IN_LINE_HORIZONTAL),
                     Bounds::TRACKING,
                     "Word spacing",
+                    word.as_ref(),
                 );
-                self.length_char_field(
+                self.length_char_field_marked(
                     ui,
                     subject,
                     egui::vec2(half, CELL),
@@ -2154,6 +2318,7 @@ impl OndinApp {
                     Prefix::Icon(icon::TEXT_SUPERSCRIPT),
                     Bounds::SIGNED_TRACKING,
                     "Baseline shift",
+                    shift.as_ref(),
                 );
             });
         });
@@ -2173,7 +2338,20 @@ impl OndinApp {
             return;
         };
         let auto = !coords.iter().any(|a| a.tag == OPSZ);
-        section(ui, "Optical size", |ui| {
+        // The one coordinate, absent for Auto. The Axes section's mark compares
+        // the rest, so a difference shows on the section that draws it.
+        let mark = self.style_mark(
+            subject.id,
+            |s| opsz_of(&s.variations),
+            |s, v| {
+                s.variations.retain(|a| a.tag != OPSZ);
+                if let Some(v) = v {
+                    s.variations.push(AxisSetting::new(OPSZ, v));
+                }
+            },
+            |v| v.map_or_else(|| "auto".to_owned(), mark_num),
+        );
+        let (_, hit) = section_marked(ui, "Optical size", mark.as_ref(), |ui| {
             if let Some(i) = segmented(
                 ui,
                 MENU_INNER,
@@ -2206,6 +2384,7 @@ impl OndinApp {
             // spell the cell directly above.
             self.opsz_row(ui, subject, opsz, coords);
         });
+        self.reset_marked(hit, &mark);
     }
 
     /// The list marker: a dropdown of `None` plus the eight kinds.
@@ -2239,7 +2418,18 @@ impl OndinApp {
         };
         let mut pick: Option<Option<ListMarker>> = None;
         let mut nest: Option<(egui::Response, u8)> = None;
-        section(ui, "List", |ui| {
+        // The marker and its level. The gutter a pick opens is the Spacing &
+        // indent section's start indent, and marked there.
+        let mark = self.para_mark(
+            subject.id,
+            |p| (p.marker, p.level),
+            |p, (m, l)| {
+                p.marker = m;
+                p.level = l;
+            },
+            |(m, _)| m.map_or_else(|| "None".to_owned(), |m| m.label().to_owned()),
+        );
+        let (_, hit) = section_marked(ui, "List", mark.as_ref(), |ui| {
             ui.scope(|ui| {
                 // `CELL` whole: a combo strokes inside its own rect (§15 D85).
                 ui.spacing_mut().interact_size.y = CELL;
@@ -2300,6 +2490,10 @@ impl OndinApp {
                 ));
             }
         });
+        if hit {
+            self.reset_marked(hit, &mark);
+            return;
+        }
         // **Or the frame the scrub ended on**, which carries no new value and is the
         // one the valve commits on — the same rule the `Length` fields state at
         // [`length_field`]'s return, and for the same reason. Without it the last drag
@@ -2354,7 +2548,19 @@ impl OndinApp {
                 .map_or_else(|| tag.to_string(), |(_, name)| (*name).to_string()),
         };
         let mut pick: Option<Option<String>> = None;
-        section(ui, "Language", |ui| {
+        let mark = self.style_mark(
+            subject.id,
+            |s| s.locale.clone(),
+            |s, v| s.locale = v,
+            |v| match v.as_deref() {
+                None => "None".to_owned(),
+                Some(tag) => LANGUAGES
+                    .iter()
+                    .find(|(t, _)| *t == tag)
+                    .map_or_else(|| tag.to_owned(), |(_, name)| (*name).to_owned()),
+            },
+        );
+        let (_, hit) = section_marked(ui, "Language", mark.as_ref(), |ui| {
             ui.scope(|ui| {
                 // `CELL` whole: a combo strokes inside its own rect (§15 D85).
                 ui.spacing_mut().interact_size.y = CELL;
@@ -2377,7 +2583,9 @@ impl OndinApp {
                     });
             });
         });
-        if let Some(next) = pick {
+        if hit {
+            self.reset_marked(hit, &mark);
+        } else if let Some(next) = pick {
             self.apply_char_attrs(subject, vec![CharAttr::Locale(next)]);
         }
     }
@@ -2399,7 +2607,23 @@ impl OndinApp {
         if listed.is_empty() {
             return;
         }
-        section(ui, "Axes", |ui| {
+        // The coordinates this list draws: not `opsz`, which is Optical size's,
+        // and not the axes the variant drives, which are the card's face mark.
+        let own = |a: &AxisSetting| a.tag != OPSZ && !AXES_DRIVEN_ELSEWHERE.contains(&a.tag);
+        let mark = self.style_mark(
+            subject.id,
+            move |s| s.variations.iter().copied().filter(own).collect::<Vec<_>>(),
+            move |s, v| {
+                s.variations.retain(|a| !own(a));
+                s.variations.extend(v);
+            },
+            |v| match v.len() {
+                0 => "the font's defaults".to_owned(),
+                1 => "1 axis set".to_owned(),
+                n => format!("{n} axes set"),
+            },
+        );
+        let (_, hit) = section_marked(ui, "Axes", mark.as_ref(), |ui| {
             egui::ScrollArea::vertical()
                 .id_salt("type-axes")
                 .max_height(LIST_MAX_H)
@@ -2410,6 +2634,7 @@ impl OndinApp {
                     }
                 });
         });
+        self.reset_marked(hit, &mark);
     }
 
     /// The face's OpenType features as switches, named, described on hover, and
@@ -2491,7 +2716,19 @@ impl OndinApp {
         // be two `apply_char_attrs` calls off one `set` clone in a frame where both
         // fired, which silently drops the first.
         let mut written: Option<(Tag, u16)> = None;
-        section(ui, "OpenType", |ui| {
+        // The whole list: a feature set on the main and cleared here is as much
+        // a difference as one set here alone.
+        let mark = self.style_mark(
+            subject.id,
+            |s| s.features.clone(),
+            |s, v| s.features = v,
+            |v| match v.len() {
+                0 => "none set".to_owned(),
+                1 => "1 feature set".to_owned(),
+                n => format!("{n} features set"),
+            },
+        );
+        let (_, hit) = section_marked(ui, "OpenType", mark.as_ref(), |ui| {
             field_row(ui, egui::vec2(MENU_INNER, CELL), |ui| {
                 ui.spacing_mut().item_spacing.x = SEARCH_GAP;
                 ui.label(theme::icon_text(
@@ -2641,7 +2878,9 @@ impl OndinApp {
                 self.show_all_features = !self.show_all_features;
             }
         });
-        if let Some((tag, value)) = written {
+        if hit {
+            self.reset_marked(hit, &mark);
+        } else if let Some((tag, value)) = written {
             self.write_feature_tag(subject, tag, value);
         }
     }
@@ -2950,7 +3189,32 @@ impl OndinApp {
         let p = subject.paragraph.clone();
         let shown = subject.shown_paragraph();
         let font_size = subject.font_size();
-        section(ui, "Spacing & indent", |ui| {
+        // The section's five values as one: its fields have prefixes and no
+        // labels, and its two buttons are one value between them.
+        let spacing_mark = self.para_mark(
+            subject.id,
+            |p| (p.spacing, p.indent, p.hanging, p.indent_start, p.indent_end),
+            |p, (s, i, h, a, b)| {
+                p.spacing = s;
+                p.indent = i;
+                p.hanging = h;
+                p.indent_start = a;
+                p.indent_end = b;
+            },
+            |(s, i, h, a, b)| {
+                let i = match h {
+                    true => format!("hanging {}", length_words(i)),
+                    false => format!("first line {}", length_words(i)),
+                };
+                format!(
+                    "space {}, {i}, start {}, end {}",
+                    length_words(s),
+                    length_words(a),
+                    length_words(b)
+                )
+            },
+        );
+        let (_, hit) = section_marked(ui, "Spacing & indent", spacing_mark.as_ref(), |ui| {
             let half = (MENU_INNER - COL_GAP) / 2.0;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = COL_GAP;
@@ -3074,13 +3338,23 @@ impl OndinApp {
                 self.paragraph_length(subject, &e, ParaAttr::IndentEnd);
             });
         });
+        if hit {
+            self.reset_marked(hit, &spacing_mark);
+            return;
+        }
 
         self.list_section(ui, subject, &shown);
 
         // **Only under Justify**, because it only means anything there: a
         // left-aligned paragraph's last line is already at the start.
         if p.align == TextAlign::Justify {
-            let row = section(ui, "Last line", |ui| {
+            let mark = self.para_mark(
+                subject.id,
+                |p| p.justify_last,
+                |p, v| p.justify_last = v,
+                |v| v.label().to_owned(),
+            );
+            let (row, hit) = section_marked(ui, "Last line", mark.as_ref(), |ui| {
                 ui.scope(|ui| {
                     let current = JustifyLast::ALL
                         .iter()
@@ -3104,9 +3378,19 @@ impl OndinApp {
                 .response
             });
             row.on_hover_text(WHOLE_LAYER);
+            if hit {
+                self.reset_marked(hit, &mark);
+                return;
+            }
         }
 
-        let row = section(ui, "Text direction", |ui| {
+        let mark = self.para_mark(
+            subject.id,
+            |p| p.direction,
+            |p, v| p.direction = v,
+            |v| v.label().to_owned(),
+        );
+        let (row, hit) = section_marked(ui, "Text direction", mark.as_ref(), |ui| {
             ui.scope(|ui| {
                 let current = TextDirection::ALL
                     .iter()
@@ -3130,6 +3414,7 @@ impl OndinApp {
             .response
         });
         row.on_hover_text(WHOLE_LAYER);
+        self.reset_marked(hit, &mark);
     }
 
     /// Route one of the four spannable `Length` fields: a unit click commits now, a
@@ -3198,7 +3483,10 @@ impl OndinApp {
     /// **Vertical alignment is not here** — it is inline in the main panel.
     fn type_block_tab(&mut self, ui: &mut egui::Ui, subject: &TypeSubject) {
         let b = subject.block;
-        section(ui, "Sizing", |ui| {
+        // Each section here is one value, so one mark each (§15 D981); a reset
+        // ends the tab's frame, so no section below acts on the `b` it replaced.
+        let mark = self.sizing_mark(subject.id);
+        let (_, hit) = section_marked(ui, "Sizing", mark.as_ref(), |ui| {
             if let Some(i) = segmented(
                 ui,
                 MENU_INNER,
@@ -3211,9 +3499,19 @@ impl OndinApp {
                 self.set_text_sizing(subject.id, i);
             }
         });
+        if hit {
+            self.reset_marked(hit, &mark);
+            return;
+        }
 
         let trim_index = BoxTrim::ALL.iter().position(|t| *t == b.trim).unwrap_or(0);
-        let trim_row = section(ui, "Box trim", |ui| {
+        let mark = self.block_mark(
+            subject.id,
+            |b| b.trim,
+            |b, v| b.trim = v,
+            |v| v.label().to_owned(),
+        );
+        let (trim_row, hit) = section_marked(ui, "Box trim", mark.as_ref(), |ui| {
             ui.scope(|ui| {
                 if let Some(i) =
                     segmented(ui, MENU_INNER, SEG_H, 3, trim_index, |p, i, rect, on| {
@@ -3233,8 +3531,18 @@ impl OndinApp {
             .response
         });
         trim_row.on_hover_text(b.trim.hint());
+        if hit {
+            self.reset_marked(hit, &mark);
+            return;
+        }
 
-        section(ui, "Overflow", |ui| {
+        let mark = self.block_mark(
+            subject.id,
+            |b| b.overflow,
+            |b, v| b.overflow = v,
+            |v| v.label().to_owned(),
+        );
+        let (_, hit) = section_marked(ui, "Overflow", mark.as_ref(), |ui| {
             let over_index = TextOverflow::ALL
                 .iter()
                 .position(|o| *o == b.overflow)
@@ -3252,11 +3560,24 @@ impl OndinApp {
                 );
             }
         });
+        if hit {
+            self.reset_marked(hit, &mark);
+            return;
+        }
 
         // **Directly under Overflow because neither means much alone.** An
         // ellipsis needs somewhere to stop, and a line limit with nothing to say
         // about the overflow just cuts the text off.
-        section(ui, "Max lines", |ui| {
+        let mark = self.block_mark(
+            subject.id,
+            |b| b.max_lines,
+            |b, v| b.max_lines = v,
+            |v| match v {
+                0 => "no limit".to_owned(),
+                n => n.to_string(),
+            },
+        );
+        let (_, hit) = section_marked(ui, "Max lines", mark.as_ref(), |ui| {
             let mut lines = f64::from(b.max_lines);
             let resp = value_field(
                 ui,
@@ -3294,6 +3615,10 @@ impl OndinApp {
                 );
             }
         });
+        if hit {
+            self.reset_marked(hit, &mark);
+            return;
+        }
 
         self.wrap_section(ui, subject);
         self.optical_margin_section(ui, subject);
@@ -3320,7 +3645,29 @@ impl OndinApp {
     fn wrap_section(&mut self, ui: &mut egui::Ui, subject: &TypeSubject) {
         let p = subject.paragraph.clone();
         let wraps = p.wrap != WrapMode::NoWrap;
-        section(ui, "Wrap", |ui| {
+        // One mark per label (§15 D981). The two inside the gate dim with it, and
+        // a dimmed label takes no click: under `NoWrap` their reset is the card
+        // header's.
+        let wrap_mark = self.para_mark(
+            subject.id,
+            |p| p.wrap,
+            |p, v| p.wrap = v,
+            |v| v.label().to_owned(),
+        );
+        let break_mark = self.para_mark(
+            subject.id,
+            |p| p.word_break,
+            |p, v| p.word_break = v,
+            |v| v.label().to_owned(),
+        );
+        let long_mark = self.para_mark(
+            subject.id,
+            |p| p.overflow_wrap,
+            |p, v| p.overflow_wrap = v,
+            |v| v.label().to_owned(),
+        );
+        let mut inner_hit = None;
+        let (_, hit) = section_marked(ui, "Wrap", wrap_mark.as_ref(), |ui| {
             let current = WrapMode::ALL.iter().position(|w| *w == p.wrap).unwrap_or(0);
             if let Some(i) = segmented(ui, MENU_INNER, SEG_H, 2, current, |painter, i, rect, on| {
                 segment_label(painter, rect, WrapMode::ALL[i].label(), on)
@@ -3346,7 +3693,7 @@ impl OndinApp {
                 // and the next section's label, which is the gap that belongs
                 // between a label and the thing it names (§15 D386).
                 ui.spacing_mut().item_spacing.y = SECTION_GAP;
-                section(ui, "Word break", |ui| {
+                let (_, hit) = section_marked(ui, "Word break", break_mark.as_ref(), |ui| {
                     let current = WordBreak::ALL
                         .iter()
                         .position(|w| *w == p.word_break)
@@ -3366,7 +3713,10 @@ impl OndinApp {
                         );
                     }
                 });
-                section(ui, "Long words", |ui| {
+                if hit {
+                    inner_hit = Some(&break_mark);
+                }
+                let (_, hit) = section_marked(ui, "Long words", long_mark.as_ref(), |ui| {
                     let current = OverflowWrap::ALL
                         .iter()
                         .position(|w| *w == p.overflow_wrap)
@@ -3386,6 +3736,9 @@ impl OndinApp {
                         );
                     }
                 });
+                if hit {
+                    inner_hit = Some(&long_mark);
+                }
             });
             // A claimant of its own, for the reason `type_alignment_row` spells
             // out: a scope's response never hovers, and a disabled one could not
@@ -3399,6 +3752,11 @@ impl OndinApp {
                 .on_hover_text("Nothing to break: the lines do not wrap");
             }
         });
+        if hit {
+            self.reset_marked(hit, &wrap_mark);
+        } else if let Some(mark) = inner_hit {
+            self.reset_marked(true, mark);
+        }
     }
 
     /// **Optical margins: place each line by its ink rather than by its advance**
@@ -3417,8 +3775,25 @@ impl OndinApp {
     /// canvas is where it is visible, and the tooltip says what to look at.
     fn optical_margin_section(&mut self, ui: &mut egui::Ui, subject: &TypeSubject) {
         let p = subject.paragraph.clone();
+        // A switch row's mark (§15 D981): the dot after its own label and no ↺ —
+        // a switch has two values, so its toggle is the reset.
+        let mark = self.para_mark(
+            subject.id,
+            |p| p.optical_margins,
+            |p, v| p.optical_margins = v,
+            |v| match v {
+                true => "on".to_owned(),
+                false => "off".to_owned(),
+            },
+        );
         section(ui, "Margins", |ui| {
-            let resp = ui::switch_row(ui, "Optical margins", p.optical_margins, SEG_H);
+            let resp = ui::switch_row_marked(
+                ui,
+                "Optical margins",
+                p.optical_margins,
+                SEG_H,
+                mark.is_some(),
+            );
             if resp.clicked() {
                 self.commit_paragraph(
                     subject.id,
@@ -3428,31 +3803,22 @@ impl OndinApp {
                     },
                 );
             }
-            resp.on_hover_text(
-                "Hang the first and last glyph of every line out to the edges, so \
-                 the text lines up by its ink instead of by its spacing",
-            );
+            match &mark {
+                Some(m) => resp.on_hover_text(&m.tip),
+                None => resp.on_hover_text(
+                    "Hang the first and last glyph of every line out to the edges, so \
+                     the text lines up by its ink instead of by its spacing",
+                ),
+            };
         });
     }
 
     // --- writing ----------------------------------------------------------
 
-    /// One `Length` character attribute as a field with a `%`/`px` suffix.
-    #[allow(clippy::too_many_arguments)]
-    fn length_char_field(
-        &mut self,
-        ui: &mut egui::Ui,
-        subject: &TypeSubject,
-        size: egui::Vec2,
-        kind: CharAttrKind,
-        prefix: Prefix,
-        bounds: Bounds,
-        tooltip: &str,
-    ) {
-        self.length_char_field_marked(ui, subject, size, kind, prefix, bounds, tooltip, None);
-    }
-
-    /// [`Self::length_char_field`] with an instance's override mark (§15 D981).
+    /// One `Length` character attribute as a field with a `%`/`px` suffix, with
+    /// an instance's override mark (§15 D981). (Its unmarked twin,
+    /// `length_char_field`, lost its last caller when the popup's two fields took
+    /// marks too, and went.)
     #[allow(clippy::too_many_arguments)]
     fn length_char_field_marked(
         &mut self,
@@ -4163,6 +4529,51 @@ fn section<R>(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui) ->
     ui::labelled(ui, label, add)
 }
 
+/// A [`section`] whose fields an instance overrides (§15 D981): the mark on the
+/// **section's label**, as 4C has row-labelled controls carry it — the label at
+/// full brightness with the dot after it, ↺ under the pointer, and a click on it
+/// the reset, which the second return value reports. Unmarked, exactly
+/// [`section`].
+///
+/// One mark per section rather than per control: a section is the unit the
+/// popup names, every control in one writes the fields its mark compares, and
+/// the controls inside — tracks, combos, sliders, the OpenType list — are of
+/// many kinds, most with no label of their own to carry a dot. The exceptions
+/// carry their own: the two prefixed spacing fields, and the switch row under
+/// *Margins*.
+fn section_marked<R>(
+    ui: &mut egui::Ui,
+    label: &str,
+    mark: Option<&OverrideMark>,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> (R, bool) {
+    if mark.is_none() {
+        return (section(ui, label, add), false);
+    }
+    let mut hit = false;
+    let r = ui
+        .scope(|ui| {
+            // `ui::labelled`'s two gaps, with the eyebrow drawn by `label_mark`.
+            ui.spacing_mut().item_spacing.y = 0.0;
+            hit = super::component::label_mark(
+                ui,
+                None,
+                &label.to_uppercase(),
+                ui::EYEBROW_PT,
+                theme::text::FAINT,
+                mark,
+            );
+            ui.add_space(ui::SECTION_LABEL_GAP);
+            ui.scope(|ui| {
+                ui.spacing_mut().item_spacing.y = ui::CARD_ROW_GAP;
+                add(ui)
+            })
+            .inner
+        })
+        .inner;
+    (r, hit)
+}
+
 /// The square button at the end of a row that puts a value back to the font's
 /// own. Returns whether it was pressed.
 ///
@@ -4280,6 +4691,11 @@ fn axis_value(axis: &FontAxis, coords: &[AxisSetting]) -> f64 {
         .find(|a| a.tag == axis.tag)
         .map(|a| a.value)
         .unwrap_or(axis.default)
+}
+
+/// The `opsz` coordinate in `coords`, or `None` where the optical size is Auto.
+fn opsz_of(coords: &[AxisSetting]) -> Option<f64> {
+    coords.iter().find(|a| a.tag == OPSZ).map(|a| a.value)
 }
 
 /// The attribute that puts `color` in `slot` — `None` meaning "inherit".
@@ -4714,7 +5130,7 @@ struct OptionalLengthEdit {
 /// `[S6.2-L3-09]` was filed about.
 ///
 /// ⚠️ **The two `char_valve` callers are *not* a third answer to this question.**
-/// `length_char_field` and `type_line_height_field` hand `char_valve` a value
+/// `length_char_field_marked` and `type_line_height_field` hand `char_valve` a value
 /// unconditionally because that function takes a `CharAttr` rather than an
 /// `Option`, and its own doc records D109 being caused by a guard in that position.
 /// They have a different contract, not a different opinion.
@@ -9613,7 +10029,7 @@ mod skip_ink_tests {
     /// all 82 numeric fields, landed for a blur radius rather than for this. What
     /// was missing is a test on **this** panel, which reaches the widget by three
     /// different routes and is the panel the finding measured:
-    /// `length_char_field` through `char_valve`, `type_line_height_field`, and
+    /// `length_char_field_marked` through `char_valve`, `type_line_height_field`, and
     /// `axis_field`, which discards the `Response` entirely and writes through
     /// `write_axis` whose only guard is `if value == current { return; }` — a
     /// guard the clamp had just made false.
@@ -11729,6 +12145,264 @@ mod wrap_gate_tests {
             WrapMode::Wrap,
             "the Wrap strip itself is outside the gate and still works — without \
              this assertion the two above pass against a section nobody drew"
+        );
+    }
+}
+
+/// The marks §15 D981 (e) left off the Type controls and 2026-10-06 put on: the
+/// bold/italic pair a family without variants shows, and the popup's sections.
+#[cfg(test)]
+mod instance_mark_tests {
+    use super::*;
+    use crate::app::OndinApp;
+    use ondin_core::{NodeId, Operation, Transaction};
+
+    /// A text inside a main group *Label*, an instance of it, and the instance's
+    /// copy of the text: `(ctx, app, main's text, copy)`.
+    fn instance() -> (egui::Context, OndinApp, NodeId, NodeId) {
+        let (ctx, mut app, text) = super::app_with_text();
+        let group = app.session.ids.mint();
+        let root = app.session.doc.root();
+        assert!(app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: group,
+                parent: root,
+                index: 0,
+                kind: ondin_core::NodeKind::Group,
+                transform: None,
+                name: Some("Label".into()),
+            },
+            Operation::Reparent {
+                id: text,
+                new_parent: group,
+                index: 0,
+            },
+            Operation::SetComponent {
+                id: group,
+                component: true,
+            },
+        ])));
+        let inst = {
+            let doc = &app.session.doc;
+            let (tx, made) = ondin_core::insert_subtrees(
+                doc,
+                &mut app.session.ids,
+                &[ondin_core::Placement {
+                    nodes: doc.capture_subtree(group).unwrap(),
+                    parent: root,
+                    index: None,
+                }],
+                Default::default(),
+            );
+            assert!(app.session.commit(tx));
+            made[0]
+        };
+        let copy = app.session.doc.get(inst).unwrap().children()[0];
+        app.session.selection.set_one(copy);
+        (ctx, app, text, copy)
+    }
+
+    fn style(app: &OndinApp, id: NodeId) -> TextStyle {
+        match app.session.doc.get(id).unwrap().kind() {
+            ondin_core::NodeKind::Text { style, .. } => (**style).clone(),
+            _ => unreachable!("a text"),
+        }
+    }
+
+    /// Write `edit` into `id`'s own style.
+    fn restyle(app: &mut OndinApp, id: NodeId, edit: impl FnOnce(&mut TextStyle)) {
+        let mut s = style(app, id);
+        edit(&mut s);
+        assert!(
+            app.session
+                .commit(Transaction(vec![Operation::SetTextStyle {
+                    id,
+                    style: s,
+                    spans: None,
+                }]))
+        );
+    }
+
+    /// One frame of `draw` over the copy's subject, with `events` delivered.
+    fn frame(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        id: NodeId,
+        events: Vec<egui::Event>,
+        draw: impl Fn(&mut OndinApp, &mut egui::Ui, &TypeSubject),
+    ) -> egui::FullOutput {
+        app.gather_card_overrides();
+        let subject = TypeSubject::of(app, id).expect("a text node has a subject");
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(400.0, 600.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        ctx.run_ui(input, |ui| {
+            ui.set_width(MENU_INNER);
+            draw(app, ui, &subject);
+        })
+    }
+
+    /// Every painted text with its rect and colour, and every override dot's
+    /// centre (`ui::override_dot`'s 2-pt muted circle).
+    #[allow(clippy::type_complexity)]
+    fn painted(
+        out: &egui::FullOutput,
+    ) -> (Vec<(String, egui::Rect, egui::Color32)>, Vec<egui::Pos2>) {
+        fn walk(
+            shape: &egui::Shape,
+            texts: &mut Vec<(String, egui::Rect, egui::Color32)>,
+            dots: &mut Vec<egui::Pos2>,
+        ) {
+            match shape {
+                egui::Shape::Text(t) => texts.push((
+                    t.galley.text().to_string(),
+                    t.visual_bounding_rect(),
+                    t.fallback_color,
+                )),
+                egui::Shape::Circle(c) if c.radius == 2.0 && c.fill == theme::text::MUTED => {
+                    dots.push(c.center)
+                }
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, texts, dots)),
+                _ => {}
+            }
+        }
+        let (mut texts, mut dots) = (Vec::new(), Vec::new());
+        for s in &out.shapes {
+            walk(&s.shape, &mut texts, &mut dots);
+        }
+        (texts, dots)
+    }
+
+    /// The pointer moved to `at`, then a press and a release there, each a frame.
+    fn click(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        id: NodeId,
+        at: egui::Pos2,
+        draw: impl Fn(&mut OndinApp, &mut egui::Ui, &TypeSubject),
+    ) {
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(ctx, app, id, vec![egui::Event::PointerMoved(at)], &draw);
+        frame(ctx, app, id, vec![press(true)], &draw);
+        frame(ctx, app, id, vec![press(false)], &draw);
+    }
+
+    /// **The bold/italic pair marks the slant an instance overrides, and a click
+    /// on the marked button is its reset.** The copy is italic where its main is
+    /// upright: one dot, at the Italic button's top right — right of its glyph,
+    /// so not Bold's — and a click on Italic writes the main's slant back, the
+    /// copy's style then equal to its main's, the slant being all that differed.
+    /// Flip: the Italic mark comparing the weight (`|s| s.weight`) leaves it
+    /// unmarked and fails *"one dot"* with none.
+    #[test]
+    fn the_weight_toggles_mark_the_slant_an_instance_overrides() {
+        let (ctx, mut app, main, copy) = instance();
+        restyle(&mut app, copy, |s| s.italic = true);
+        let draw = |app: &mut OndinApp, ui: &mut egui::Ui, s: &TypeSubject| {
+            app.type_weight_toggles(ui, s, egui::vec2(58.0, 28.0));
+        };
+        let out = frame(&ctx, &mut app, copy, Vec::new(), draw);
+        let (texts, dots) = painted(&out);
+        let italic = texts
+            .iter()
+            .find(|(t, ..)| t == icon::TEXT_ITALIC)
+            .map(|(_, r, _)| *r)
+            .expect("the Italic button");
+        assert_eq!(dots.len(), 1, "one dot: {dots:?}");
+        assert!(
+            dots[0].x > italic.center().x,
+            "Italic's, not Bold's: {dots:?}"
+        );
+        click(&ctx, &mut app, copy, italic.center(), draw);
+        assert_eq!(
+            style(&app, copy),
+            style(&app, main),
+            "the main's slant is back"
+        );
+    }
+
+    /// **A popup section carries its mark on its label, and a click on the label
+    /// is the reset.** The copy's case is upper where its main's is none. Drawn
+    /// with the Language section under it, which the copy does not override: one
+    /// dot, on *CASE*'s row, and *CASE* painted bright; a click on *CASE* puts the
+    /// main's case back. Flip: `section_marked` drawing the plain `section`
+    /// whatever its mark leaves no dot and fails *"one dot"* with none.
+    #[test]
+    fn a_popup_section_marks_its_own_fields_and_its_label_resets_them() {
+        let (ctx, mut app, main, copy) = instance();
+        restyle(&mut app, copy, |s| s.case = TextCase::Upper);
+        let draw = |app: &mut OndinApp, ui: &mut egui::Ui, s: &TypeSubject| {
+            app.case_section(ui, s);
+            app.language_section(ui, s);
+        };
+        let out = frame(&ctx, &mut app, copy, Vec::new(), draw);
+        let (texts, dots) = painted(&out);
+        let ink = |s: &str| {
+            texts
+                .iter()
+                .find(|(t, ..)| t == s)
+                .map(|(_, r, c)| (*r, *c))
+                .unwrap_or_else(|| panic!("no {s} in {texts:?}"))
+        };
+        assert_eq!(dots.len(), 1, "one dot: {dots:?}");
+        let (case_at, case_ink) = ink("CASE");
+        assert_eq!(case_ink, theme::text::STRONG, "Case is overridden");
+        // Language's label is egui's own, its ink in the galley rather than in
+        // `fallback_color`; that the one dot is Case's says Language follows.
+        assert!(
+            (dots[0].y - case_at.center().y).abs() < 8.0 && ink("LANGUAGE").0.top() > dots[0].y,
+            "the dot is Case's: {dots:?} beside {case_at:?}"
+        );
+        click(&ctx, &mut app, copy, case_at.center(), draw);
+        assert_eq!(
+            style(&app, copy),
+            style(&app, main),
+            "the main's case is back"
+        );
+    }
+
+    /// **The Sizing section's mark compares the mode, not the width.** Main and
+    /// copy both auto-height at different widths: no mark — the width is the
+    /// Transform card's W. The copy fixed: a mark naming the main's *Auto H*,
+    /// whose reset writes the main's whole sizing. Flip: `Mode`'s equality
+    /// comparing the whole sizing marks the first case and fails *"the width is
+    /// W's"*.
+    #[test]
+    fn the_sizing_mark_compares_the_mode_and_not_the_width() {
+        let (_ctx, mut app, main, copy) = instance();
+        let sizing = |id, s| Operation::SetGeometry {
+            id,
+            geometry: GeometryPatch::TextSizing(s),
+        };
+        assert!(app.session.commit(Transaction(vec![sizing(
+            main,
+            TextSizing::AutoHeight(100.0)
+        )])));
+        assert!(app.session.commit(Transaction(vec![sizing(
+            copy,
+            TextSizing::AutoHeight(150.0)
+        )])));
+        app.gather_card_overrides();
+        assert!(app.sizing_mark(copy).is_none(), "the width is W's");
+        let fixed = TextSizing::Fixed(Size::new(150.0, 40.0));
+        assert!(app.session.commit(Transaction(vec![sizing(copy, fixed)])));
+        app.gather_card_overrides();
+        let mark = app.sizing_mark(copy).expect("the mode is overridden");
+        assert_eq!(mark.tip, "Reset to main · Auto H");
+        assert_eq!(
+            mark.tx,
+            Transaction(vec![sizing(copy, TextSizing::AutoHeight(100.0))]),
+            "the main's whole sizing"
         );
     }
 }

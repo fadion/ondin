@@ -1745,6 +1745,168 @@ mod tests {
         assert_eq!(f.app.session.doc.get(f.ir).unwrap().opacity(), 1.0);
     }
 
+    /// The centre of every override dot the frame painted (`ui::override_dot`'s
+    /// 2-pt muted circle).
+    fn dots(out: &egui::FullOutput) -> Vec<egui::Pos2> {
+        fn walk(shape: &egui::Shape, out: &mut Vec<egui::Pos2>) {
+            match shape {
+                egui::Shape::Circle(c) if c.radius == 2.0 && c.fill == theme::text::MUTED => {
+                    out.push(c.center);
+                }
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+                _ => {}
+            }
+        }
+        let mut v = Vec::new();
+        for s in &out.shapes {
+            walk(&s.shape, &mut v);
+        }
+        v
+    }
+
+    /// Press and release the primary button at `at`, the pointer moved there
+    /// first.
+    fn click(app: &mut OndinApp, ctx: &egui::Context, at: egui::Pos2) {
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(app, ctx, vec![egui::Event::PointerMoved(at)]);
+        frame(app, ctx, vec![press(true)]);
+        frame(app, ctx, vec![press(false)]);
+    }
+
+    /// **The Position card's centre buttons carry a mark** (§15 D981 (e), closed
+    /// 2026-10-06). The main's rect is centred horizontally, between 30 and 60;
+    /// the instance's copy is pinned left at 5 alone. The horizontal button draws
+    /// the dot at its own top right, between the two glyphs, and the vertical
+    /// button none, both centred nowhere. A click on the marked button is its
+    /// reset: the main's whole horizontal axis comes back — both insets and the
+    /// auto margins — and the vertical axis is not written. Flip: `centred`
+    /// reading the margins of the wrong axis (top and bottom) leaves the
+    /// horizontal button unmarked and fails *"one dot"* with none.
+    #[test]
+    fn a_centre_button_marks_a_centring_the_main_does_not_share() {
+        use ondin_core::container::AutoMargins;
+        use ondin_core::{Insets, LengthPct};
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let main_rect = f.app.session.doc.get(f.m).unwrap().children()[0];
+        let centred = Insets {
+            left: Some(LengthPct::Px(30.0)),
+            right: Some(LengthPct::Px(60.0)),
+            margin_auto: AutoMargins {
+                left: true,
+                right: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(f.app.session.commit(Transaction(vec![Operation::SetInsets {
+            id: main_rect,
+            insets: centred,
+        }])));
+        assert_eq!(
+            *f.app.session.doc.get(f.ir).unwrap().insets(),
+            centred,
+            "the fixture's copy follows its main"
+        );
+        let pinned = Insets {
+            left: Some(LengthPct::Px(5.0)),
+            ..Default::default()
+        };
+        assert!(f.app.session.commit(Transaction(vec![Operation::SetInsets {
+            id: f.ir,
+            insets: pinned,
+        }])));
+        f.app.session.selection.set_one(f.ir);
+        let mut out = frame(&mut f.app, &ctx, Vec::new());
+        for _ in 0..3 {
+            out = frame(&mut f.app, &ctx, Vec::new());
+        }
+        let painted = inks(&out);
+        // The last of each: the align row above the Position card draws the same
+        // two glyphs.
+        let glyph = |g: &str| {
+            painted
+                .iter()
+                .rfind(|(t, ..)| t == g)
+                .map(|(_, r, _)| *r)
+                .unwrap_or_else(|| panic!("no {g} glyph"))
+        };
+        let h = glyph(icon::ALIGN_CENTER_VERTICAL);
+        let v = glyph(icon::ALIGN_CENTER_HORIZONTAL);
+        let row: Vec<_> = dots(&out)
+            .into_iter()
+            .filter(|d| (d.y - h.center().y).abs() < 14.0)
+            .collect();
+        assert_eq!(row.len(), 1, "one dot on the centre buttons' row: {row:?}");
+        assert!(
+            row[0].x > h.center().x && row[0].x < v.center().x,
+            "the horizontal button's: {row:?} between {h:?} and {v:?}"
+        );
+        click(&mut f.app, &ctx, h.center());
+        let now = *f.app.session.doc.get(f.ir).unwrap().insets();
+        assert_eq!(
+            (now.left, now.right, now.margin_auto),
+            (centred.left, centred.right, centred.margin_auto),
+            "the main's horizontal axis is back"
+        );
+        assert_eq!(
+            (now.top, now.bottom),
+            (None, None),
+            "the vertical axis untouched"
+        );
+    }
+
+    /// **The shared radius over several layers carries a mark** (§15 D981 (e),
+    /// closed 2026-10-06). The instance and a plain rect are selected; the copy's
+    /// radius is 6 where its main's is 0, the plain rect's 6 with no main. The
+    /// field's glyph is bright — any rect in the selection's subtree that overrides
+    /// it marks it — and a click on the glyph writes the main's radius into the
+    /// copy alone, the plain rect keeping its 6. Flip: subjects taken as the
+    /// selection rather than its subtree reach only the instance's frame, which
+    /// has no radius, and fail *"the radius is overridden"* with the glyph dim.
+    #[test]
+    fn the_shared_radius_marks_an_override_in_the_selections_subtree() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let six = ondin_core::kurbo::RoundedRectRadii::from_single_radius(6.0);
+        let radius = |id| Operation::SetGeometry {
+            id,
+            geometry: ondin_core::GeometryPatch::CornerRadii(six),
+        };
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![radius(f.ir), radius(f.plain)]))
+        );
+        f.app.session.selection.set(vec![f.i, f.plain]);
+        let mut out = frame(&mut f.app, &ctx, Vec::new());
+        for _ in 0..3 {
+            out = frame(&mut f.app, &ctx, Vec::new());
+        }
+        let (at, ink) = inks(&out)
+            .into_iter()
+            .find(|(t, ..)| t == icon::CORNERS_OUT)
+            .map(|(_, r, c)| (r, c))
+            .expect("the multi-selection radius field");
+        assert_eq!(ink, theme::text::STRONG, "the radius is overridden");
+        click(&mut f.app, &ctx, at.center());
+        let radii = |id| match f.app.session.doc.get(id).unwrap().kind() {
+            NodeKind::Rect { corner_radii, .. } => *corner_radii,
+            _ => unreachable!("a rect"),
+        };
+        assert_eq!(radii(f.ir), Default::default(), "the main's radius is back");
+        assert_eq!(
+            radii(f.plain),
+            six,
+            "the plain rect has no main to go back to"
+        );
+    }
+
     /// **An instance that removed every item still shows its ghost rows** (§15
     /// D981, 4D). The main's rect has a fill and an export; the instance removes
     /// both, leaving each list empty. Both cards stay open and each draws its

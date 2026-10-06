@@ -3329,6 +3329,43 @@ impl OndinApp {
             |id, opacity| Operation::SetOpacity { id, opacity },
             |v| format!("{}%", super::component::mark_num(f64::from(*v) * 100.0)),
         );
+        // And the radius, over every rect the field writes — the selection's
+        // subtree, as `set_corner_radius_all` reaches it — compared on the whole
+        // four radii as the single-layer field's mark is. A layer outside any
+        // instance has no source and costs one lookup.
+        let rects: Vec<NodeId> = match has_rect {
+            true => ondin_core::subtree_nodes(&self.session.doc, &ids)
+                .into_iter()
+                .filter(|id| {
+                    self.session
+                        .doc
+                        .get(*id)
+                        .is_some_and(|n| matches!(n.kind(), NodeKind::Rect { .. }))
+                })
+                .collect(),
+            false => Vec::new(),
+        };
+        let radius_mark = self.sub_mark(
+            &rects,
+            |op| match op {
+                Operation::SetGeometry {
+                    geometry: GeometryPatch::CornerRadii(r),
+                    ..
+                } => Some(*r),
+                _ => None,
+            },
+            |n| match n.kind() {
+                NodeKind::Rect { corner_radii, .. } => Some(*corner_radii),
+                _ => None,
+            },
+            |r| *r,
+            |c, v| *c = v,
+            |id, r| Operation::SetGeometry {
+                id,
+                geometry: GeometryPatch::CornerRadii(r),
+            },
+            |r| uniform(*r).map_or_else(|| "per corner".to_owned(), super::component::mark_num),
+        );
         self.panel(ui, "Appearance", None, |app, ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
@@ -3387,10 +3424,11 @@ impl OndinApp {
                 }
                 let mixed = radius.is_none();
                 let mut r = radius.unwrap_or(0.0);
-                let rr = value_field(
+                let (rr, hit) = ui::value_field_marked(
                     ui,
                     egui::vec2(fw, 28.0),
                     Prefix::Icon(icon::CORNERS_OUT),
+                    radius_mark.as_ref().map(Mark::field),
                     &mut r,
                     Scrub::whole(0.5).range(0.0..=f64::MAX),
                     |d| {
@@ -3412,8 +3450,14 @@ impl OndinApp {
                             }
                         })
                     },
-                )
-                .on_hover_text("Corner radius of every rectangle in the selection");
+                );
+                // A marked field's tip names the main's radius instead.
+                let rr = tip_unless_marked(
+                    rr,
+                    &radius_mark,
+                    "Corner radius of every rectangle in the selection",
+                );
+                app.reset_marked(hit, &radius_mark);
                 if interacting(&rr) {
                     let tx = ondin_core::set_corner_radius_all(&app.session.doc, &ids, r.max(0.0));
                     app.edit_valve(&rr, tx);
@@ -8078,10 +8122,20 @@ impl OndinApp {
                     } else {
                         ui::FieldButton::Off
                     };
-                    if ui::field_button_sized(ui, glyph, button, 15.0, state)
-                        .on_hover_text(tip)
-                        .clicked()
-                    {
+                    let mark = app.centre_mark(&subjects, horizontal);
+                    let (resp, reset) = ui::field_button_marked(
+                        ui,
+                        glyph,
+                        button,
+                        15.0,
+                        state,
+                        mark.as_ref().map(Mark::field),
+                    );
+                    // A marked button's tip names the main's state instead.
+                    let resp = tip_unless_marked(resp, &mark, tip);
+                    if reset {
+                        app.reset_marked(true, &mark);
+                    } else if resp.clicked() {
                         app.toggle_centre(&subjects, horizontal, !on);
                     }
                 }
@@ -8260,6 +8314,62 @@ impl OndinApp {
             Some(node) => build::baked_ops(id, node, p.local, &p.kind),
             None => Vec::new(),
         }
+    }
+
+    /// The override mark on a centre button (§15 D981): whether an instance's
+    /// layer is centred on the axis where its main's counterpart is not, or the
+    /// other way round. Compared on the **auto margins alone** — the distances
+    /// either side are the inset fields' marks — and reset as the whole axis, the
+    /// main's two insets with its margins, since auto margins between edges that
+    /// are not both pinned centre nothing. An instance root's insets are its own
+    /// placement and never marked, `sub_mark`'s rule.
+    fn centre_mark(&self, subjects: &[NodeId], horizontal: bool) -> Option<Mark> {
+        use ondin_core::Insets;
+        // The axis as the mark compares it: equal when both are centred or
+        // neither is, whatever the distances.
+        #[derive(Clone)]
+        struct Axis(Insets, bool);
+        impl PartialEq for Axis {
+            fn eq(&self, other: &Self) -> bool {
+                self.centred() == other.centred()
+            }
+        }
+        impl Axis {
+            fn centred(&self) -> bool {
+                let m = self.0.margin_auto;
+                match self.1 {
+                    true => m.left && m.right,
+                    false => m.top && m.bottom,
+                }
+            }
+        }
+        self.sub_mark(
+            subjects,
+            |op| match op {
+                Operation::SetInsets { insets, .. } => Some(*insets),
+                _ => None,
+            },
+            |n| Some(*n.insets()),
+            move |i| Axis(*i, horizontal),
+            |i, Axis(from, h)| {
+                if h {
+                    i.left = from.left;
+                    i.right = from.right;
+                    i.margin_auto.left = from.margin_auto.left;
+                    i.margin_auto.right = from.margin_auto.right;
+                } else {
+                    i.top = from.top;
+                    i.bottom = from.bottom;
+                    i.margin_auto.top = from.margin_auto.top;
+                    i.margin_auto.bottom = from.margin_auto.bottom;
+                }
+            },
+            |id, insets| Operation::SetInsets { id, insets },
+            |a| match a.centred() {
+                true => "centred".to_owned(),
+                false => "not centred".to_owned(),
+            },
+        )
     }
 
     /// Centre every subject on an axis the CSS way — both insets, each at its

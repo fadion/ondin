@@ -3010,10 +3010,11 @@ impl OndinApp {
     /// could enter, could see, and could do nothing with; opening needed a second
     /// click on top of it.
     ///
-    /// **`Response::double_clicked` is not read anywhere now**, which is the part to
-    /// be deliberate about: the first click of a double already opened the document
-    /// and the editor is up before the second lands, so there is no second gesture
-    /// to give a meaning to.
+    /// **No card reads a double-click now**, and that is the part to be deliberate
+    /// about: the first click of a double already opened the document and the
+    /// editor is up before the second lands, so there is no second gesture to give
+    /// a meaning to. (The window's title strip above them does read one, through
+    /// `ui::double_clicked`, §15 D986 — the bar's maximise, not a card's.)
     ///
     /// ⚠️ **The keyboard's cursor survives all of this** (§15 D374) — arrows move it,
     /// `Enter` opens it, `Delete` asks, `Escape` clears it, and the outline draws for

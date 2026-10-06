@@ -2341,7 +2341,9 @@ impl OndinApp {
             // double-click is where everyone reaches for it. Rename used to live
             // only in the inspector, which meant tidying up a tree was a trip to
             // the other side of the window per layer.
-            if resp.double_clicked() {
+            // Counted by `ui::double_clicked`, so a click on one row and a fast
+            // double-click on the next still renames it (§15 D986).
+            if crate::ui::double_clicked(ui, &resp) {
                 self.renaming_layer = Some((id, name.clone()));
                 // **Opening it is all this does.** The caret is the field's own
                 // business, asked for on the frame it first draws — which is the

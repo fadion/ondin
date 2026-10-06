@@ -254,8 +254,10 @@ fn strip(ui: &mut egui::Ui, rect: Rect, act: bool, id: Id) {
     });
     // ⚠️ **Neither press of a double-click spent**, not only the second: the
     // first may be the one a menu was dismissed by, and then the pair is not a
-    // double-click on the bar but a dismissal and a click.
-    if strip.double_clicked() {
+    // double-click on the bar but a dismissal and a click. Counted by
+    // `ui::double_clicked` rather than egui, so a click somewhere else just
+    // before does not turn the pair into a triple (§15 D986).
+    if crate::ui::double_clicked(ui, &strip) {
         if !spent && !spent_before {
             ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized(&ctx)));
         }
@@ -882,7 +884,9 @@ mod tests {
     /// press): fails on *"a press-drag on a button is the button's"* with
     /// `[StartDrag]` — the predicted site, and the defect the first draft had:
     /// egui gives a click-only button the click and the strip beneath it the
-    /// drag.
+    /// drag. And the strip reading egui's `Response::double_clicked` again fails
+    /// *"a double-click just after a click elsewhere"* with nothing sent — §15
+    /// D986's case, on the bar.
     #[test]
     fn the_empty_bar_drags_and_double_clicks_maximize() {
         use egui::ViewportCommand as C;
@@ -902,13 +906,39 @@ mod tests {
             "drags: {sent:?}"
         );
 
+        // ⚠️ **The pointer arrives first.** egui gives a press to the widgets it
+        // knew last pass, so a press with no move before it is nobody's click; its
+        // own count is global and never cared, but `ui::double_clicked` counts the
+        // clicks a widget asked about (§15 D986), and a hand is always over the
+        // bar before it clicks.
         let ctx = fresh();
-        let mut sent = Vec::new();
+        let mut sent = frame(&ctx, vec![egui::Event::PointerMoved(at)], false);
         for _ in 0..2 {
             sent.extend(frame(&ctx, vec![press(at, true)], false));
             sent.extend(frame(&ctx, vec![press(at, false)], false));
         }
         assert!(sent.contains(&C::Maximized(true)), "double-click: {sent:?}");
+
+        // **A click elsewhere on the bar, then a fast double-click** (§15 D986):
+        // egui 0.35 counts the pair's second release a triple off the first click
+        // and answers `double_clicked()` false; the app's own count does not.
+        let ctx = fresh();
+        let elsewhere = Pos2::new(100.0, 23.0);
+        let mut sent = frame(&ctx, vec![egui::Event::PointerMoved(elsewhere)], false);
+        for (p, pressed) in [
+            (elsewhere, true),
+            (elsewhere, false),
+            (at, true),
+            (at, false),
+            (at, true),
+            (at, false),
+        ] {
+            sent.extend(frame(&ctx, vec![press(p, pressed)], false));
+        }
+        assert!(
+            sent.contains(&C::Maximized(true)),
+            "a double-click just after a click elsewhere: {sent:?}"
+        );
 
         // A press-drag that starts on a caption button.
         let ctx = fresh();

@@ -1806,7 +1806,9 @@ impl OndinApp {
         {
             let world = self.to_world(p, rect, ppp);
             let leaf = self.pick_at_pointer(ui, p, world, rect, ppp);
-            if resp.double_clicked() {
+            // Counted by `ui::double_clicked`, not egui's — a click elsewhere just
+            // before must not turn this into a triple (§15 D986).
+            if crate::ui::double_clicked(ui, resp) {
                 self.double_click_pick(leaf, world);
             } else {
                 let picked = leaf.map(|id| self.pick_for_click(id, ui));
@@ -4231,8 +4233,9 @@ impl OndinApp {
         }
         // A double-click finishes, but its second press already planted an
         // anchor on top of the first — drop that one rather than leaving a
-        // duplicate at the end of the path.
-        if resp.double_clicked() {
+        // duplicate at the end of the path. Counted by `ui::double_clicked`
+        // (§15 D986).
+        if crate::ui::double_clicked(ui, resp) {
             if let Some(pen) = self.pen.as_mut()
                 && pen.anchors.len() > 1
             {
@@ -5416,8 +5419,8 @@ impl OndinApp {
         // spoken for in this tool (curvature, and breaking a handle pair), and
         // because "one level finer" is what a double-click already means
         // everywhere else in the app — into a group, into a text node, into a
-        // path's points.
-        if resp.double_clicked()
+        // path's points. Counted by `ui::double_clicked` (§15 D986).
+        if crate::ui::double_clicked(ui, resp)
             && let Drag::Segment { id, at, t, .. } = self.drag
         {
             self.drag = Drag::None;
@@ -7740,7 +7743,8 @@ impl OndinApp {
             if let Some(local) = self.text_local(id, world)
                 && let Some(s) = self.text.as_mut()
             {
-                if resp.double_clicked() {
+                // Counted by `ui::double_clicked` (§15 D986).
+                if crate::ui::double_clicked(ui, resp) {
                     s.editor.select_word_at(local);
                 } else {
                     s.editor.click(local);

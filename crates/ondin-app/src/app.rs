@@ -19878,9 +19878,11 @@ mod component_verb_tests {
     /// enters it; `Escape` leaves, the instance selected; and `Enter` enters it
     /// again, its topmost layer selected.
     ///
-    /// Flips, both run: `pick_leaf` without its instance clause fails the first
+    /// Flips, all run: `pick_leaf` without its instance clause fails the first
     /// assertion, the background click picking `None`; `enter_action` without its
-    /// instance arm fails *"Enter steps back in"*, everything before it green.
+    /// instance arm fails *"Enter steps back in"*, everything before it green; and
+    /// the select arm reading egui's `Response::double_clicked` again fails *"a
+    /// double-click on the instance's background enters it"* — §15 D986's case.
     #[test]
     fn a_click_a_double_click_and_enter_reach_an_instance_through_the_app() {
         use super::library_wiring_tests::whole_frame;
@@ -19965,16 +19967,14 @@ mod component_verb_tests {
         );
         assert_eq!(app.entered_group, None, "and nothing was entered");
 
-        // ⚠️ **The idle frames are not padding.** egui 0.35 counts a release
-        // within `2 × max_double_click_delay` (0.6 s) of the click *before last*
-        // as a triple, measuring the distance from the last click only — so with
-        // the click on the main's rect a few frames back, the double-click's
-        // second release reads as count 3 and `double_clicked()` is false. A pass
-        // with no `time` advances the clock by `predicted_dt`, 1/60 s; forty clear
-        // the window. Two clicks a frame apart are then well inside the 0.3 s.
-        for _ in 0..40 {
-            whole_frame(&ctx, &mut app, Vec::new());
-        }
+        // ⚠️ **No idle frames, and that is the regression test for §15 D986.**
+        // The click on the main's rect is a few frames back, and egui 0.35 counts
+        // a release within `2 × max_double_click_delay` (0.6 s) of the click
+        // *before last* as a triple, measuring the distance from the last click
+        // only — so through `Response::double_clicked` this double-click's second
+        // release read count 3 and entered nothing. This test's first version
+        // pumped forty idle frames to dodge it; the app now counts its own
+        // (`ui::double_clicked`), where a click elsewhere starts a fresh chain.
         whole_frame(&ctx, &mut app, vec![egui::Event::PointerMoved(inst_ground)]);
         for pressed in [true, false, true, false] {
             whole_frame(&ctx, &mut app, vec![primary(inst_ground, pressed)]);

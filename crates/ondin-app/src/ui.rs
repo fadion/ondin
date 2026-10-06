@@ -3709,6 +3709,73 @@ pub fn paint_lock_filled(
     }
 }
 
+/// Whether `resp`'s primary click this pass is the **second of a double-click**,
+/// counted the way a hand means one: within egui's `max_double_click_delay` and
+/// `max_click_dist` of the click before it, and not itself after a double.
+///
+/// **Not `Response::double_clicked`, because egui 0.35 miscounts one case a
+/// designer makes all the time.** It reads a release within `2 ×
+/// max_double_click_delay` of the click *before last* as a **triple**, measuring
+/// distance from the *last* click only — so a click on one layer and then a fast
+/// double-click on another, all inside 0.6 s, came back count 3 and
+/// `double_clicked()` answered false: the group was not entered, the text not
+/// opened (§15 D986). Here the chain restarts wherever the pointer moved too far,
+/// and a third click on one spot is a single click, as egui's triple was.
+///
+/// The record is one per context, so every reader shares it — the canvas's
+/// select arm, the pen's finish, the node tool's added point, the text editor's
+/// word, the layers panel's rename and the window's title strip; a second ask in
+/// the same pass about the same click is answered from it rather than counted
+/// twice. ⚠️ The chain is the clicks *asked about*: a click no reader asks of — a
+/// set's `+`, which returns before the select arm — does not enter it.
+pub fn double_clicked(ui: &egui::Ui, resp: &egui::Response) -> bool {
+    #[derive(Clone, Copy)]
+    struct Last {
+        time: f64,
+        pos: egui::Pos2,
+        double: bool,
+        pass: u64,
+    }
+    if !resp.clicked_by(egui::PointerButton::Primary) {
+        return false;
+    }
+    let Some(pos) = resp.interact_pointer_pos() else {
+        return false;
+    };
+    let ctx = ui.ctx();
+    // One accessor at a time — two nested take the context's lock twice.
+    let pass = ctx.cumulative_pass_nr();
+    let now = ctx.input(|i| i.time);
+    let (delay, dist) = ctx.options(|o| {
+        (
+            o.input_options.max_double_click_delay,
+            o.input_options.max_click_dist,
+        )
+    });
+    let id = egui::Id::new("ondin-double-click");
+    let last: Option<Last> = ctx.data(|d| d.get_temp(id));
+    if let Some(l) = last
+        && l.pass == pass
+        && l.pos == pos
+    {
+        return l.double;
+    }
+    let double =
+        last.is_some_and(|l| !l.double && now - l.time < delay && l.pos.distance(pos) < dist);
+    ctx.data_mut(|d| {
+        d.insert_temp(
+            id,
+            Last {
+                time: now,
+                pos,
+                double,
+                pass,
+            },
+        )
+    });
+    double
+}
+
 /// The **filled hexagon** a main component carries (§15 D981) — the second
 /// Fill-weight glyph §15 D10 counted to, drawn rather than shipped, as the lock
 /// above is: a hexagon is six points, and the font would be 480 KB for them
@@ -9874,5 +9941,101 @@ mod picture_swatch_tests {
             (t.g(), t.b()),
             "r = g = b, or the chip is tinting the photograph rather than fading it"
         );
+    }
+}
+
+#[cfg(test)]
+mod double_click_tests {
+    //! `ui::double_clicked`'s counting (§15 D986), with egui's own answer beside
+    //! it as the control that the quirk is really being exercised. Plain
+    //! backticks, per §15 D319.
+
+    use super::double_clicked;
+
+    const AREA: egui::Rect = egui::Rect {
+        min: egui::Pos2::ZERO,
+        max: egui::Pos2::new(400.0, 300.0),
+    };
+
+    /// One pass, `events` delivered, over a widget covering the area: ours, then
+    /// egui's `Response::double_clicked`.
+    fn pass(ctx: &egui::Context, events: Vec<egui::Event>) -> (bool, bool) {
+        let mut out = (false, false);
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(AREA),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                let resp = ui.interact(AREA, egui::Id::new("probe"), egui::Sense::click());
+                out = (double_clicked(ui, &resp), resp.double_clicked());
+            },
+        );
+        out
+    }
+
+    /// A click at `at`, a pass per event; what the release pass answered.
+    fn click(ctx: &egui::Context, at: egui::Pos2) -> (bool, bool) {
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        pass(ctx, vec![egui::Event::PointerMoved(at)]);
+        pass(ctx, vec![button(true)]);
+        pass(ctx, vec![button(false)])
+    }
+
+    /// **The chain is the click before, near and soon, and a third click is a
+    /// single one**: a fast pair on one spot is a double; a third there is not,
+    /// as egui's triple was not; a fourth starts the next double; a click and then
+    /// a fast pair somewhere else is a double, where egui answers *no* — the
+    /// quirk, asserted as the control so this test is known to be about it; and a
+    /// pair slower than `max_double_click_delay` is two singles.
+    ///
+    /// Flip, run: the `!l.double` term dropped from the chain fails *"a third
+    /// click on one spot is a single one"*.
+    #[test]
+    fn a_double_click_is_the_click_before_near_and_soon() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        pass(&ctx, Vec::new());
+        let (a, b) = (egui::pos2(50.0, 50.0), egui::pos2(300.0, 200.0));
+        assert!(!click(&ctx, a).0, "a first click is a single one");
+        assert_eq!(
+            click(&ctx, a),
+            (true, true),
+            "a fast second on the spot is a double"
+        );
+        assert!(
+            !click(&ctx, a).0,
+            "a third click on one spot is a single one"
+        );
+        assert!(click(&ctx, a).0, "and a fourth starts the next double");
+
+        // Clear of every window, then a click at A and a fast pair at B.
+        for _ in 0..60 {
+            pass(&ctx, Vec::new());
+        }
+        click(&ctx, a);
+        assert!(!click(&ctx, b).0, "a click elsewhere starts a fresh chain");
+        assert_eq!(
+            click(&ctx, b),
+            (true, false),
+            "the pair at B is a double — and egui, counting it a triple off the click \
+             at A, says no: the quirk this function exists for"
+        );
+
+        // Slower than the delay: two singles.
+        for _ in 0..60 {
+            pass(&ctx, Vec::new());
+        }
+        click(&ctx, a);
+        for _ in 0..30 {
+            pass(&ctx, Vec::new());
+        }
+        assert!(!click(&ctx, a).0, "half a second apart is two clicks");
     }
 }

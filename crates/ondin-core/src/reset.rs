@@ -391,7 +391,7 @@ fn list<T: Clone + PartialEq>(
 ) -> Option<Override> {
     let units = item_units(src, cur);
     (units > 0).then(|| Override {
-        reset: op(reset_items(src, cur)),
+        reset: op(reset_items(src)),
         units,
     })
 }
@@ -432,9 +432,15 @@ pub fn removed_items<T: Clone>(src: &[Keyed<T>], cur: &[Keyed<T>]) -> Vec<Keyed<
 /// after the counterpart of the item before it in the source, else before the
 /// counterpart of the one after, else first: the children's anchor rule one level
 /// down (§15 D980), except that a list's last resort is **first**, as
-/// `propagate::items` and [`reset_items`] place an item with nothing to follow —
-/// where a child's is topmost. The *Restore* of a ghost row, and of one overridden
-/// item's reset. `cur` unchanged when the source has no such item.
+/// `propagate::items` places an item with nothing to follow — where a child's is
+/// topmost. One overridden item's reset (its row's ↺). `cur` unchanged when the
+/// source has no such item.
+///
+/// ⚠️ **Not a ghost row's *Restore* any more** (§15 D994): that resets the whole
+/// list to the source's, the copy's own items included, so this function's
+/// putting-back branch — the item absent from `cur` — has no caller in the app.
+/// It stays because it is right and tested, and is the shape a per-item restore
+/// would want if one is asked for again.
 ///
 /// ⚠️ It called `propagate::anchor` until `arch-scribe` read the fallback: that
 /// one ends at the end of the list, and this doc already said first.
@@ -459,8 +465,13 @@ pub fn reset_item<T: Clone>(src: &[Keyed<T>], cur: &[Keyed<T>], id: ItemId) -> V
     out
 }
 
-/// How many of `src`'s items `cur` changed or removed, plus one if it reordered
-/// the ones both still hold.
+/// How many of `src`'s items `cur` changed or removed, plus one for each item of
+/// its own, plus one if it reordered the ones both still hold.
+///
+/// **An item of the copy's own counts** (§15 D994): a list's reset removes it
+/// ([`reset_items`]), so a list that differs from its source only by an added
+/// fill is a list with something to reset. It counted nothing while every reset
+/// kept it (D981's clarification (1), overturned for lists).
 fn item_units<T: PartialEq>(src: &[Keyed<T>], cur: &[Keyed<T>]) -> usize {
     let mut n = src
         .iter()
@@ -472,6 +483,7 @@ fn item_units<T: PartialEq>(src: &[Keyed<T>], cur: &[Keyed<T>]) -> usize {
         .count();
     let in_src: FxHashSet<ItemId> = src.iter().map(|s| s.id).collect();
     let in_cur: FxHashSet<ItemId> = cur.iter().map(|c| c.id).collect();
+    n += cur.iter().filter(|c| !in_src.contains(&c.id)).count();
     let a: Vec<ItemId> = src
         .iter()
         .map(|s| s.id)
@@ -488,23 +500,18 @@ fn item_units<T: PartialEq>(src: &[Keyed<T>], cur: &[Keyed<T>]) -> usize {
     n
 }
 
-/// The source's list, in its order and with its values, and each of `cur`'s own
-/// items kept after the item it followed — or first, when it led.
-fn reset_items<T: Clone>(src: &[Keyed<T>], cur: &[Keyed<T>]) -> Vec<Keyed<T>> {
-    let in_src: FxHashSet<ItemId> = src.iter().map(|s| s.id).collect();
-    let mut out = src.to_vec();
-    for (i, c) in cur.iter().enumerate() {
-        if in_src.contains(&c.id) {
-            continue;
-        }
-        let at = cur[..i]
-            .iter()
-            .rev()
-            .find_map(|p| out.iter().position(|o| o.id == p.id))
-            .map_or(0, |p| p + 1);
-        out.insert(at, c.clone());
-    }
-    out
+/// A list reset: **the source's list, exactly** — its items, its order, its values,
+/// and none of the copy's own (§15 D994, the maintainer's ruling: *"reset the whole
+/// fill card to the original's … removing anything the user added"*).
+///
+/// ⚠️ **This overturns D981's clarification (1) for lists**, which kept a copy's
+/// own items through every reset, reinserted after the item they followed. That
+/// left the recoloured case broken in the way that matters: an instance whose fill
+/// was replaced holds its own item where the main's was, and a reset that put the
+/// main's back *after* it left the instance's colour on top and nothing on screen
+/// changed. Local **layers** still survive every reset; this is about lists.
+fn reset_items<T: Clone>(src: &[Keyed<T>]) -> Vec<Keyed<T>> {
+    src.to_vec()
 }
 
 // ── Scope ──────────────────────────────────────────────────────────────────────

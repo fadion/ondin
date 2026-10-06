@@ -6041,8 +6041,11 @@ impl OndinApp {
                 app.remap_paint_indices(anchor, PaintList::Fill, |i| {
                     paint::reordered_index(n, from, to, i)
                 });
-            } else if let (Some(item), Some(src)) =
-                (reset.map(|i| fills[i].id).or(restore), source.as_deref())
+            } else if let (Some(_), Some(src)) = (restore, source.as_deref()) {
+                // A ghost row's restore is the whole list back as the main has it,
+                // the instance's own fills gone with it (§15 D994).
+                app.write_fill_list(scope, src.to_vec());
+            } else if let (Some(item), Some(src)) = (reset.map(|i| fills[i].id), source.as_deref())
             {
                 app.write_fill_list(scope, ondin_core::reset::reset_item(src, fills, item));
             } else if let Some(i) = toggle {
@@ -6207,8 +6210,11 @@ impl OndinApp {
                 app.remap_paint_indices(anchor, PaintList::Stroke, |i| {
                     paint::reordered_index(n, from, to, i)
                 });
+            } else if let (Some(_), Some(src)) = (restore, source.as_deref()) {
+                // The whole list, as the fill card's restore (§15 D994).
+                app.write_strokes(scope, src.to_vec());
             } else if let (Some(item), Some(src)) =
-                (reset.map(|i| strokes[i].id).or(restore), source.as_deref())
+                (reset.map(|i| strokes[i].id), source.as_deref())
             {
                 app.write_strokes(scope, ondin_core::reset::reset_item(src, strokes, item));
             } else if let Some(i) = toggle {
@@ -7921,6 +7927,7 @@ impl OndinApp {
                 .as_ref()
                 .map(|s| ondin_core::reset::item_states(s, &grids));
             let mut reset = None;
+            let mut restore = false;
             for (index, grid) in grids.iter().enumerate() {
                 let item = states.as_ref().map(|s| s[index]);
                 let out = app.grid_rows(ui, &subjects, index, grid.value, item);
@@ -7952,16 +7959,25 @@ impl OndinApp {
                 ui.add_space(GRID_ROW_GAP);
                 let label = format!("{} · {}", grid_axis_word(gone.axis), gone.count);
                 if super::component::ghost_row(ui, super::component::GhostLead::Plain, &label) {
-                    reset = Some(gone.id);
+                    restore = true;
                 }
             }
             // Written whole, not through `retarget_grids` — which mints an id for
             // an item the anchor does not hold, and a restored grid is the main's
-            // by its id (the export card's restore says the same).
-            if let (Some(item), Some(src), [id]) = (reset, source.as_deref(), subjects.as_slice()) {
+            // by its id (the export card's restore says the same). A ghost row's
+            // restore is the whole list back as the main has it (§15 D994); a
+            // row's ↺ is that item.
+            let list = match (restore, reset, source.as_deref()) {
+                (true, _, Some(src)) => Some(src.to_vec()),
+                (false, Some(item), Some(src)) => {
+                    Some(ondin_core::reset::reset_item(src, &grids, item))
+                }
+                _ => None,
+            };
+            if let (Some(grids), [id]) = (list, subjects.as_slice()) {
                 app.commit_edit(Transaction(vec![Operation::SetLayoutGrids {
                     id: *id,
-                    grids: ondin_core::reset::reset_item(src, &grids, item),
+                    grids,
                 }]));
                 // The rows' own edits stand down that frame, so nothing writes twice.
                 next = None;
@@ -10891,8 +10907,8 @@ impl OndinApp {
             self.effect_menu = Some((anchor, at));
             return;
         }
-        // A ghost row's *Restore*, or an overridden row's ↺ — the main's item back
-        // by its id (`reset::reset_item`).
+        // A ghost row's *Restore* — the main's whole stack (§15 D994) — or an
+        // overridden row's ↺ — the main's item back by its id (`reset::reset_item`).
         //
         // ⚠️ **Written verbatim, not through `write_effects`**, which is the
         // multi-selection writer: `item::retarget` mints a fresh id for any item
@@ -10901,14 +10917,20 @@ impl OndinApp {
         // restore must not do. The source exists only for one subject, so there is
         // no selection to retarget across. Caught by
         // `an_effect_stack_restores_and_resets_item_by_item`.
-        let reset = acted
-            .filter(|_| out.reset)
-            .map(|i| effects[i].id)
-            .or(restore);
-        if let (Some(item), Some(src), [one]) = (reset, source.as_deref(), subjects) {
+        let reset = acted.filter(|_| out.reset).map(|i| effects[i].id);
+        // A ghost row's restore is the whole stack back as the main has it, the
+        // instance's own effects gone with it (§15 D994); a row's ↺ is that item.
+        let list = match (restore, reset, source.as_deref()) {
+            (Some(_), _, Some(src)) => Some(src.to_vec()),
+            (None, Some(item), Some(src)) => {
+                Some(ondin_core::reset::reset_item(src, &effects, item))
+            }
+            _ => None,
+        };
+        if let (Some(effects), [one]) = (list, subjects) {
             self.commit_edit(Transaction(vec![Operation::SetEffects {
                 id: *one,
-                effects: ondin_core::reset::reset_item(src, &effects, item),
+                effects,
             }]));
             return;
         }

@@ -267,12 +267,16 @@ fn reset_fields_writes_every_override_back_and_keeps_the_placement() {
     assert_eq!(root.opacity(), 1.0, "its opacity is not");
 }
 
-/// A list keeps its own items through a reset: the instance removed the main's
-/// second fill and added one of its own after the first. One unit (the removed
-/// item); the local item is `Local` and stays after its anchor. The ghost row is
-/// the removed item.
+/// **A list reset is the main's list, exactly** (§15 D994): the instance removed
+/// the main's second fill and added one of its own after the first. Two units —
+/// the removed item and the local one, which the reset takes away — and the reset
+/// leaves the main's two and nothing else. The ghost row is the removed item.
+///
+/// Flips, both run: the reset keeping the copy's own items — appended after the
+/// source's, near D981's rule before this entry — fails at *"the main's list and
+/// nothing else"*; `item_units` not counting them fails at *"two units"* with 1.
 #[test]
-fn a_list_reset_restores_the_mains_items_and_keeps_its_own() {
+fn a_list_reset_is_the_mains_list_and_drops_its_own() {
     let mut f = fixture();
     let main = fills(&f.doc, f.a);
     let local = Keyed::new(
@@ -294,17 +298,23 @@ fn a_list_reset_restores_the_mains_items_and_keeps_its_own() {
     assert_eq!(reset::removed_items(&main, &cur), vec![main[1].clone()]);
     let o = reset::overrides(&f.doc, f.ia);
     assert_eq!(o.len(), 1);
-    assert_eq!(o[0].units, 1, "the removed item, and not the local one");
+    assert_eq!(
+        o[0].units, 2,
+        "two units: the removed item and the local one"
+    );
 
     f.commit_all(reset::reset_fields(&f.doc, &[f.i]));
     assert_eq!(
         fills(&f.doc, f.ia),
-        vec![main[0].clone(), local, main[1].clone()]
+        main,
+        "the main's list and nothing else"
     );
 }
 
-/// One ghost row's *Restore*: the item lands at its anchor among what the instance
-/// has, and an overridden item's reset replaces it in place.
+/// `reset_item` putting one item back: it lands at its anchor among what the
+/// instance has, and an overridden item's reset replaces it in place. The first
+/// half was a ghost row's *Restore* until §15 D994, which restores the whole list;
+/// it has no caller in the app since, and this test is what keeps it honest.
 #[test]
 fn reset_item_restores_one_item_at_its_anchor() {
     let src = keyed_by_position([1u32, 2, 3]);
@@ -318,7 +328,8 @@ fn reset_item_restores_one_item_at_its_anchor() {
     let changed = vec![src[0].map(|_| 5), src[1], src[2]];
     assert_eq!(reset::reset_item(&src, &changed, src[0].id), src);
     // With no counterpart on either side, first — the list rule
-    // (`propagate::items`, `reset_items`), where the children's anchor falls back
+    // (`propagate::items`; `reset_items` followed it too until §15 D994 made it
+    // the source's list exactly), where the children's anchor falls back
     // to topmost. `arch-scribe` found the doc and the code disagreeing here.
     assert_eq!(
         reset::reset_item(&src, &[local], src[1].id),

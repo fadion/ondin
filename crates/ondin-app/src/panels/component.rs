@@ -2115,9 +2115,10 @@ mod tests {
 
     /// **A list reads item by item against the main's** (§15 D981, 4D). The main's
     /// rect has two fills; the instance recolours the first, removes the second and
-    /// adds one of its own. The removed one draws as a ghost row whose *Restore*
-    /// puts it back by its id; the own one shows `+`; and the recoloured one's
-    /// slot, under the pointer, is ↺, whose click takes the main's colour back.
+    /// adds one of its own. The removed one draws as a ghost row; the own one shows
+    /// `+`; the recoloured one's slot, under the pointer, is ↺, whose click takes
+    /// that item's colour back and nothing else; and the ghost row's restore puts
+    /// the whole list back as the main has it, the own fill gone (§15 D994).
     #[test]
     fn a_fill_list_marks_restores_and_resets_item_by_item() {
         use ondin_core::{Fill, Keyed, keyed_by_position};
@@ -2176,28 +2177,20 @@ mod tests {
             (ghost.left() - live.left()).abs() <= 1.0,
             "the hex's x: ghost {ghost:?}, live {live:?}"
         );
-        let restore = ghost_restore(&painted, &gone_hex).expect("the ghost row's restore");
+        let ghost_at = ghost_restore(&painted, &gone_hex).expect("the ghost row's restore");
         let eye = painted
             .iter()
             .find(|(t, r)| t == icon::EYE && (r.center().y - live.center().y).abs() < 4.0)
             .map(|(_, r)| r.center())
             .expect("the live row's eye");
         assert!(
-            (restore.x - eye.x).abs() <= 1.0,
-            "the eye's column: restore {restore:?}, eye {eye:?}"
+            (ghost_at.x - eye.x).abs() <= 1.0,
+            "the eye's column: restore {ghost_at:?}, eye {eye:?}"
         );
-        click(&mut f.app, restore);
-        let now = fills_of(&f.app, f.ir);
-        assert!(now.iter().any(|k| k.id == main[1].id), "restored by its id");
-        assert!(now.contains(&own), "the own fill stays");
-        // ↺ on the recoloured row.
+        // ↺ on the recoloured row first: that item alone, the ghost and the own
+        // fill left as they are.
         let changed_hex = crate::ui::hex_of(ondin_core::peniko::Color::from_rgb8(10, 9, 30));
-        let out = frame(&mut f.app, &ctx, Vec::new());
-        let row = texts(&out)
-            .into_iter()
-            .find(|(t, _)| *t == changed_hex)
-            .map(|(_, r)| r)
-            .expect("the recoloured row");
+        let row = rect_of(&changed_hex).expect("the recoloured row");
         frame(
             &mut f.app,
             &ctx,
@@ -2213,20 +2206,31 @@ mod tests {
             .expect("↺ in the hovered row's slot");
         click(&mut f.app, undo);
         let now = fills_of(&f.app, f.ir);
-        assert_eq!(now.iter().find(|k| k.id == main[0].id).unwrap(), &main[0]);
+        assert_eq!(now, vec![main[0].clone(), own.clone()], "that item alone");
+        // Then the ghost row's restore: **the whole list as the main has it**, the
+        // own fill gone with the rest (§15 D994). Flip, run: restoring the one
+        // item (`reset_item`, the rule before) fails *"the main's list"*.
+        let mut out = frame(&mut f.app, &ctx, Vec::new());
+        for _ in 0..2 {
+            out = frame(&mut f.app, &ctx, Vec::new());
+        }
+        let restore =
+            ghost_restore(&texts(&out), &gone_hex).expect("the ghost row's restore, still there");
+        click(&mut f.app, restore);
+        assert_eq!(fills_of(&f.app, f.ir), main, "the main's list");
     }
 
     /// The Effects card reads its stack the same way (§15 D981, 4D–4E's *Inner
     /// shadow ↺*): the instance hides the main's first effect and removes the
-    /// second; the second is a ghost row whose *Restore* brings it back, and the
-    /// first's ↺ under the pointer takes the main's back.
+    /// second; the first's ↺ under the pointer takes the main's back alone, and the
+    /// second is a ghost row whose restore brings the whole stack back (§15 D994).
     #[test]
     fn an_effect_stack_restores_and_resets_item_by_item() {
         use ondin_core::{Effect, EffectKind, keyed_by_position};
         let ctx = egui::Context::default();
         let mut f = fixture(&ctx);
         let r = f.app.session.doc.get(f.m).unwrap().children()[0];
-        let [a, b, ..] = EffectKind::all_defaults();
+        let [a, b, c, ..] = EffectKind::all_defaults();
         let main = keyed_by_position([Effect::new(a.clone()), Effect::new(b.clone())]);
         assert!(
             f.app
@@ -2238,12 +2242,16 @@ mod tests {
         );
         let mut hidden = main[0].clone();
         hidden.visible = false;
+        // An effect of the instance's own besides, or a restore of the one missing
+        // item would read as the whole stack and the test could not tell the two
+        // rules apart (`arch-scribe`'s find).
+        let own = ondin_core::Keyed::new(f.app.session.ids.mint_item(), Effect::new(c));
         assert!(
             f.app
                 .session
                 .commit(Transaction(vec![Operation::SetEffects {
                     id: f.ir,
-                    effects: vec![hidden],
+                    effects: vec![hidden, own.clone()],
                 }]))
         );
         f.app.collapsed_panels.remove("Effects");
@@ -2260,19 +2268,15 @@ mod tests {
             frame(app, &ctx, vec![press(true)]);
             frame(app, &ctx, vec![press(false)]);
         };
-        let mut out = frame(&mut f.app, &ctx, Vec::new());
-        for _ in 0..3 {
-            out = frame(&mut f.app, &ctx, Vec::new());
-        }
-        let restore = ghost_restore(&texts(&out), b.label())
-            .unwrap_or_else(|| panic!("no ghost row in {:?}", texts(&out)));
-        click(&mut f.app, restore);
-        assert!(
-            effects_of(&f.app).iter().any(|k| k.id == main[1].id),
-            "restored"
-        );
-        let out = frame(&mut f.app, &ctx, Vec::new());
-        let row = texts(&out)
+        let settle = |app: &mut OndinApp| {
+            let mut out = frame(app, &ctx, Vec::new());
+            for _ in 0..3 {
+                out = frame(app, &ctx, Vec::new());
+            }
+            texts(&out)
+        };
+        // The hidden effect's ↺ first: that item alone, the ghost row still there.
+        let row = settle(&mut f.app)
             .into_iter()
             .find(|(t, _)| t == a.label())
             .map(|(_, r)| r)
@@ -2292,12 +2296,17 @@ mod tests {
             .expect("↺ in the hovered effect row");
         click(&mut f.app, undo);
         assert_eq!(
-            effects_of(&f.app)
-                .iter()
-                .find(|k| k.id == main[0].id)
-                .unwrap(),
-            &main[0]
+            effects_of(&f.app),
+            vec![main[0].clone(), own],
+            "that item alone"
         );
+        // Then the ghost row's restore: the whole stack as the main has it (§15
+        // D994).
+        let painted = settle(&mut f.app);
+        let restore = ghost_restore(&painted, b.label())
+            .unwrap_or_else(|| panic!("no ghost row in {painted:?}"));
+        click(&mut f.app, restore);
+        assert_eq!(effects_of(&f.app), main, "the main's stack");
     }
 
     /// The main's rect pinned top-right and the instance's copy moved along x

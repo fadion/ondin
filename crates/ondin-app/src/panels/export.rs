@@ -476,6 +476,7 @@ impl OndinApp {
                 .as_ref()
                 .map(|s| ondin_core::reset::item_states(s, &specs));
             let mut reset = None;
+            let mut restore = false;
             // **The rows are their own zero-spacing region**, because the gap
             // between two exports is *smaller* than the card's own row gap and a
             // scope cannot subtract: the card places its children 9 apart, so 6 can
@@ -506,7 +507,7 @@ impl OndinApp {
                 {
                     let label = format!("{} {}", gone.scale.label(), gone.format.label());
                     if super::component::ghost_row(ui, super::component::GhostLead::Plain, &label) {
-                        reset = Some(gone.id);
+                        restore = true;
                     }
                 }
             });
@@ -514,12 +515,18 @@ impl OndinApp {
             // item the anchor does not hold, and a restored export is the main's by
             // its id or it is a local addition that looks like one (the Effects
             // card's restore, which went the same way first).
-            // The rows' own edits stand down that frame, so nothing writes twice.
-            if let (Some(item), Some(src), Some(id)) = (reset, source.as_deref(), sizing) {
-                app.commit_edit(Transaction(vec![Operation::SetExports {
-                    id,
-                    exports: ondin_core::reset::reset_item(src, &specs, item),
-                }]));
+            // The rows' own edits stand down that frame, so nothing writes twice. A
+            // ghost row's restore is the whole list back as the main has it (§15
+            // D994); a row's ↺ is that item.
+            let list = match (restore, reset, source.as_deref()) {
+                (true, _, Some(src)) => Some(src.to_vec()),
+                (false, Some(item), Some(src)) => {
+                    Some(ondin_core::reset::reset_item(src, &specs, item))
+                }
+                _ => None,
+            };
+            if let (Some(exports), Some(id)) = (list, sizing) {
+                app.commit_edit(Transaction(vec![Operation::SetExports { id, exports }]));
                 (removed, changed) = (None, false);
             }
             if let Some(i) = removed {

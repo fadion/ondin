@@ -118,10 +118,13 @@ pub(crate) struct PropDrift {
 pub(crate) fn prop_drift(doc: &ondin_core::Document, root: NodeId) -> PropDrift {
     use ondin_core::variant::{self, PropKind};
     let defined = !variant::instance_properties(doc, root).is_empty();
+    // The instance's own properties, then the shown rows of the nested instances
+    // its card shows (§15 D988, 4N: *"it counts as a property"*).
     let props = variant::instance_properties(doc, root)
         .iter()
         .filter(|p| variant::property_state(doc, root, p).is_some_and(|(_, o)| o))
-        .count();
+        .count()
+        + variant::shown_rows_overridden(doc, root);
     let units = variant::property_fields(doc, root)
         .into_iter()
         .filter(|(c, kind)| {
@@ -131,6 +134,7 @@ pub(crate) fn prop_drift(doc: &ondin_core::Document, root: NodeId) -> PropDrift 
                     PropKind::Boolean => matches!(o.reset, Operation::SetVisible { .. }),
                     PropKind::Text => matches!(o.reset, Operation::SetText { .. }),
                     PropKind::Swap => matches!(o.reset, Operation::SetSwap { .. }),
+                    PropKind::Nested => false,
                 })
         })
         .count();
@@ -566,7 +570,13 @@ impl OndinApp {
                         let link = Some((*main, main_name.as_str()));
                         heading(ui, false, "Instance of", link, None, &summary, &mut act);
                         let roots = app.session.selection.ids().to_vec();
+                        if let Some(&root) = roots.first() {
+                            app.chosen_by_note(ui, root);
+                        }
                         app.instance_rows(ui, &roots);
+                        if let Some(&root) = roots.first() {
+                            app.show_switch(ui, root);
+                        }
                         reset_row(ui, *drift, *props, true, &mut act);
                     }
                     Face::Instances {
@@ -636,13 +646,10 @@ impl OndinApp {
                         .into_iter()
                         .filter(|id| component::instance_root(doc, *id) == Some(*id))
                         .collect();
+                // Shown rows included (§15 D988, 4N).
                 let ops: Vec<Operation> = roots
                     .iter()
-                    .flat_map(|r| {
-                        ondin_core::variant::instance_properties(doc, *r)
-                            .into_iter()
-                            .flat_map(|p| ondin_core::variant::reset_property(doc, &[*r], &p))
-                    })
+                    .flat_map(|r| ondin_core::variant::reset_all_properties(doc, *r))
                     .collect();
                 if !ops.is_empty() {
                     self.commit_reset(Transaction(ops));
@@ -2939,5 +2946,196 @@ mod tests {
         // The instance of the first main is an instance of a variant now, named as
         // it was.
         assert_eq!(f.app.session.doc.get(f.i).unwrap().link(), Some(f.m));
+    }
+
+    /// A **Badge** main with a text *Count* bound to a Text property, nested as
+    /// `slot` inside a **Button** main, and `b1` an instance of Button whose copy
+    /// of the slot is `r` (§15 D988's fixture).
+    struct N {
+        app: OndinApp,
+        button: NodeId,
+        slot: NodeId,
+        b1: NodeId,
+        r: NodeId,
+    }
+
+    fn nested_fixture(ctx: &egui::Context) -> N {
+        use ondin_core::variant::{PropKind, Property};
+        let mut app = OndinApp::headless(ctx);
+        let mut ids = IdSource::new(0xC7);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let [badge, count, button, label] = [(); 4].map(|_| ids.mint());
+        let create = |id, parent, index, kind, name: &str| Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind,
+            transform: None,
+            name: Some(name.into()),
+        };
+        let frame = |w| NodeKind::Artboard {
+            size: Size::new(w, 30.0),
+        };
+        let item = ids.mint_item();
+        doc.apply(&Transaction(vec![
+            create(badge, root, 0, frame(30.0), "Badge"),
+            create(count, badge, 0, text_kind("1"), "Count"),
+            create(button, root, 1, frame(120.0), "Button"),
+            create(
+                label,
+                button,
+                0,
+                NodeKind::Rect {
+                    size: Size::new(10.0, 10.0),
+                    corner_radii: Default::default(),
+                },
+                "Label",
+            ),
+            Operation::SetComponent {
+                id: badge,
+                component: true,
+            },
+            Operation::SetProperties {
+                id: badge,
+                props: vec![ondin_core::Keyed::new(
+                    item,
+                    Property {
+                        name: "Count".into(),
+                        kind: PropKind::Text,
+                        bound: vec![count],
+                        filter: String::new(),
+                    },
+                )],
+            },
+        ]))
+        .expect("a Badge main and a Button frame");
+        let place = |doc: &Document, ids: &mut IdSource, main, parent| {
+            let (tx, made) = ondin_core::insert_subtrees(
+                doc,
+                ids,
+                &[Placement {
+                    nodes: doc.capture_subtree(main).unwrap(),
+                    parent,
+                    index: None,
+                }],
+                Default::default(),
+            );
+            (tx, made[0])
+        };
+        let (tx, slot) = place(&doc, &mut ids, badge, button);
+        doc.apply(&tx).expect("a Badge inside the Button");
+        doc.apply(&Transaction(vec![Operation::SetComponent {
+            id: button,
+            component: true,
+        }]))
+        .expect("the Button a main");
+        let (tx, b1) = place(&doc, &mut ids, button, root);
+        doc.apply(&tx).expect("an instance of the Button");
+        let r = doc
+            .get(b1)
+            .unwrap()
+            .children()
+            .iter()
+            .copied()
+            .find(|c| doc.get(*c).and_then(|n| n.link()) == Some(slot))
+            .expect("b1's copy of the Badge");
+        app.session.adopt_document(doc, None);
+        N {
+            app,
+            button,
+            slot,
+            b1,
+            r,
+        }
+    }
+
+    /// **The opt-in, from the nested instance's own card, and the main's list**
+    /// (§15 D988, 4K, 4L). Selected inside the Button main, the Badge's card
+    /// draws the binding line — which an instance root inside a main never drew
+    /// before (§15 D989) — and *Show properties on instances*, captioned with
+    /// what it would show; a click on it shows the slot. The Button main's
+    /// Properties card then lists it under *Shown from nested*, with its *Count*.
+    /// Flips, both run: the switch's call taken out of the instance face fails
+    /// *"the switch is drawn"*; the binding line's condition made never true
+    /// fails *"the binding line"*.
+    #[test]
+    fn a_nested_instance_in_a_main_opts_in_from_its_card() {
+        let ctx = egui::Context::default();
+        let mut n = nested_fixture(&ctx);
+        n.app.session.selection.set_one(n.slot);
+        let mut out = frame(&mut n.app, &ctx, Vec::new());
+        for _ in 0..3 {
+            out = frame(&mut n.app, &ctx, Vec::new());
+        }
+        let painted = texts(&out);
+        let has = |s: &str| painted.iter().any(|(t, _)| t == s);
+        assert!(
+            has("Bind to a component property"),
+            "the binding line: {painted:?}"
+        );
+        let at = painted
+            .iter()
+            .find(|(t, _)| t == "Show properties on instances")
+            .map(|(_, r)| r.center())
+            .expect("the switch is drawn");
+        assert!(has("Count appears on every Button"), "{painted:?}");
+        click(&mut n.app, &ctx, at);
+        assert!(ondin_core::variant::slot_is_shown(
+            &n.app.session.doc,
+            n.slot
+        ));
+        n.app.session.selection.set_one(n.button);
+        let mut out = frame(&mut n.app, &ctx, Vec::new());
+        for _ in 0..3 {
+            out = frame(&mut n.app, &ctx, Vec::new());
+        }
+        let painted = texts(&out);
+        let has = |s: &str| painted.iter().any(|(t, _)| t == s);
+        assert!(has("SHOWN FROM NESTED"), "{painted:?}");
+        assert!(has("· Count"), "{painted:?}");
+    }
+
+    /// **A shown nested instance's rows on the outer instance's card** (§15
+    /// D988, 4M–4N): `b1`'s card draws the Badge's group — its name, the main it
+    /// shows, and its *Count* row — and the copy's count set to 3 reads as one
+    /// **property**, not an override. Flips, both run: `instance_rows` not
+    /// drawing the groups fails *"the group's row"*; `prop_drift` without the
+    /// shown rows fails *"1 property"* with **no summary at all** — not the
+    /// *1 override* first predicted, since `property_fields` still subtracts the
+    /// count's field from the overrides.
+    #[test]
+    fn a_shown_nested_instance_draws_its_rows_on_the_outer_card() {
+        use ondin_core::variant::{self, PropValue};
+        let ctx = egui::Context::default();
+        let mut n = nested_fixture(&ctx);
+        let tx = variant::set_shown(&n.app.session.doc, &mut n.app.session.ids, n.slot, true)
+            .expect("a showing");
+        assert!(n.app.session.commit(tx));
+        let p = variant::instance_properties(&n.app.session.doc, n.r)[0]
+            .value
+            .clone();
+        let ops =
+            variant::set_property(&n.app.session.doc, &[n.r], &p, &PropValue::Text("3".into()));
+        assert!(n.app.session.commit(Transaction(ops)));
+        n.app.session.selection.set_one(n.b1);
+        let mut out = frame(&mut n.app, &ctx, Vec::new());
+        for _ in 0..3 {
+            out = frame(&mut n.app, &ctx, Vec::new());
+        }
+        let painted: Vec<String> = texts(&out).into_iter().map(|(t, _)| t).collect();
+        assert!(
+            painted.contains(&"Count".to_string()),
+            "the group's row: {painted:?}"
+        );
+        assert!(
+            painted.contains(&"· Badge".to_string()),
+            "the group's main: {painted:?}"
+        );
+        assert!(painted.contains(&"1 property".to_string()), "{painted:?}");
+        assert!(
+            !painted.iter().any(|t| t.contains("override")),
+            "nothing counted as an override: {painted:?}"
+        );
     }
 }

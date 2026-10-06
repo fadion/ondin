@@ -539,8 +539,213 @@ impl OndinApp {
     /// The rows an instance — or several sharing one owner — gets between
     /// *Instance of* and *Reset all* (4A–4E): a dropdown per variant property,
     /// switching the instances (a missing combination greyed, with the reason),
-    /// then each component property, with its override mark.
+    /// then each component property, with its override mark — and then **the
+    /// nested instances it shows**, each under a sub-heading of its own with the
+    /// same rows over its copies (§15 D988, 4M–4S).
     pub(super) fn instance_rows(&mut self, ui: &mut egui::Ui, roots: &[NodeId]) {
+        self.own_rows(ui, roots, false);
+        self.shown_groups(ui, roots);
+    }
+
+    /// The groups of [`Self::instance_rows`] (4M–4S): one per nested instance the
+    /// roots' owner shows, flattened across levels and named by the › path of
+    /// the shown layers and the main the copy shows now (4P, 4Q). Over several
+    /// roots a group matches by slot — its layers' name path — and a slot that
+    /// shows different mains in them says so rather than guess which properties
+    /// apply (4S). A group the instance hides dims, its rows read-only, with the
+    /// property that hides it named (4R); its dot still shows, and *Reset all* and
+    /// ⋯ still reach it.
+    ///
+    /// **No Swap row inside a group** (4O): the copy's swap is an outer swap
+    /// property's row where one drives it, and otherwise is made from the copy's
+    /// own card (4G) — the group holds the copy's own properties alone, 4O's
+    /// *Badge · Count* drawn with *Count* and *Dot only* and nothing else. The
+    /// main is named as its set where it is a variant — *Icon · Arrow right*, not
+    /// the variant's derived *Regular* (4M).
+    fn shown_groups(&mut self, ui: &mut egui::Ui, roots: &[NodeId]) {
+        struct Group {
+            title: String,
+            main: Option<String>,
+            copies: Vec<NodeId>,
+            hidden: Option<String>,
+        }
+        if roots.is_empty() {
+            return;
+        }
+        let groups: Vec<Group> = {
+            let doc = &self.session.doc;
+            let per_root: Vec<Vec<variant::ShownNested>> = roots
+                .iter()
+                .map(|r| variant::shown_nested(doc, *r))
+                .collect();
+            let name_of = |id: NodeId| {
+                doc.get(id)
+                    .map(|n| n.name().to_string())
+                    .unwrap_or_default()
+            };
+            per_root[0]
+                .iter()
+                .filter_map(|g| {
+                    let matched: Vec<&variant::ShownNested> = per_root
+                        .iter()
+                        .map(|gs| gs.iter().find(|h| h.key == g.key))
+                        .collect::<Option<_>>()?;
+                    let copies: Vec<NodeId> = matched.iter().map(|h| h.copy).collect();
+                    let mains: Vec<Option<NodeId>> =
+                        copies.iter().map(|c| component::main_of(doc, *c)).collect();
+                    let same = mains.iter().all(|m| *m == mains[0]);
+                    let hidden = roots
+                        .iter()
+                        .zip(&matched)
+                        .find_map(|(r, h)| variant::hidden_by(doc, *r, h));
+                    // A variant reads as its set.
+                    let shown_as = |m: NodeId| name_of(variant::set_of(doc, m).unwrap_or(m));
+                    Some(Group {
+                        title: g
+                            .path
+                            .iter()
+                            .map(|c| name_of(*c))
+                            .collect::<Vec<_>>()
+                            .join(" › "),
+                        main: same.then(|| mains[0].map(shown_as)).flatten(),
+                        copies,
+                        hidden,
+                    })
+                })
+                .collect()
+        };
+        for g in groups {
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                ui.label(
+                    egui::RichText::new(&g.title)
+                        .size(12.0)
+                        .color(theme::text::STRONG),
+                );
+                ui.label(
+                    egui::RichText::new(format!("· {}", g.main.as_deref().unwrap_or("")))
+                        .size(12.0)
+                        .color(theme::text::DIM),
+                );
+            });
+            if g.main.is_none() {
+                note(ui, icon::STACK, "Different mains");
+                ui.label(
+                    egui::RichText::new("Select one to edit its properties")
+                        .size(11.5)
+                        .color(theme::text::DIM),
+                );
+                continue;
+            }
+            match &g.hidden {
+                None => self.own_rows(ui, &g.copies, true),
+                Some(by) => {
+                    let why = match by.is_empty() {
+                        true => "Hidden".to_string(),
+                        false => format!("Hidden by {by}"),
+                    };
+                    ui.label(egui::RichText::new(why).size(11.5).color(theme::text::DIM));
+                    ui.scope(|ui| {
+                        ui.disable();
+                        self.own_rows(ui, &g.copies, true);
+                    });
+                }
+            }
+        }
+    }
+
+    /// *Chosen by Icon* (4G, 4K): a nested instance whose main a swap property
+    /// sets says which, the main's own property inside a main, and *on Sign up*
+    /// after it for a copy inside an outer instance. Nothing for an instance no
+    /// swap property drives.
+    pub(super) fn chosen_by_note(&mut self, ui: &mut egui::Ui, root: NodeId) {
+        let doc = &self.session.doc;
+        let by_prop = |owner: NodeId, of: NodeId| {
+            variant::bound_to(doc, owner, of, PropKind::Swap).map(|p| p.name.clone())
+        };
+        let found = match variant::owner_above(doc, root) {
+            Some(owner) => by_prop(owner, root).map(|p| (p, None)),
+            None => doc
+                .get(root)
+                .and_then(|n| n.parent())
+                .and_then(|p| component::instance_root(doc, p))
+                .and_then(|outer| {
+                    variant::instance_properties(doc, outer)
+                        .into_iter()
+                        .find(|p| {
+                            p.kind == PropKind::Swap
+                                && variant::counterparts(doc, outer, p).contains(&root)
+                        })
+                        .map(|p| {
+                            let on = doc.get(outer).map(|o| o.name().to_string());
+                            (p.name.clone(), on)
+                        })
+                }),
+        };
+        let Some((prop, on)) = found else { return };
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            for (text, ink) in [
+                ("Chosen by".to_string(), theme::text::DIM),
+                (prop, theme::text::STRONG),
+            ]
+            .into_iter()
+            .chain(on.map(|o| (format!("on {o}"), theme::text::DIM)))
+            {
+                ui.label(egui::RichText::new(text).size(11.5).color(ink));
+            }
+        });
+    }
+
+    /// *Show properties on instances* (4K): on a nested instance inside a main,
+    /// the switch that shows its own properties on every instance of the main —
+    /// every variant's, in a set ([`variant::set_shown`]) — with a caption naming
+    /// them. Nothing for an instance that is not a slot inside a main.
+    pub(super) fn show_switch(&mut self, ui: &mut egui::Ui, root: NodeId) {
+        let doc = &self.session.doc;
+        let Some(owner) = variant::owner_above(doc, root) else {
+            return;
+        };
+        if !doc
+            .get(root)
+            .and_then(|n| n.link())
+            .and_then(|l| doc.get(l))
+            .is_some_and(|l| l.component())
+        {
+            return;
+        }
+        let on = variant::slot_is_shown(doc, root);
+        let names = shown_names(doc, root);
+        let owner_name = doc
+            .get(owner)
+            .map(|o| o.name().to_string())
+            .unwrap_or_default();
+        let caption = match names.len() {
+            0 => "Nothing to show yet: its main has no properties".to_string(),
+            1 => format!("{} appears on every {owner_name}", names[0]),
+            _ => format!("{} appear on every {owner_name}", names.join(", ")),
+        };
+        let resp = ui::switch_row(ui, "Show properties on instances", on, ui::CONTROL_H)
+            .on_hover_text(
+                "Show this instance's own properties on the card of every instance of its main",
+            );
+        ui.label(
+            egui::RichText::new(caption)
+                .size(11.0)
+                .color(theme::text::DIM),
+        );
+        if resp.clicked()
+            && let Some(tx) = variant::set_shown(doc, &mut self.session.ids, root, !on)
+        {
+            self.commit_edit(tx);
+        }
+    }
+
+    /// The rows of [`Self::instance_rows`] for `roots` themselves. `group` when
+    /// they are a shown group's copies, which draw no Swap row (4O, see
+    /// [`Self::shown_groups`]).
+    fn own_rows(&mut self, ui: &mut egui::Ui, roots: &[NodeId], group: bool) {
         let doc = &self.session.doc;
         let Some(&first) = roots.first() else { return };
         let Some(main) = component::main_of(doc, first) else {
@@ -559,7 +764,8 @@ impl OndinApp {
         // main of its kind, the session's: a swap property narrows this list for
         // an instance's users, and this row is the nested copy's own, with no
         // property to filter it. A swap is an override, marked and reset as one.
-        if roots.iter().all(|r| swap::can_swap(doc, *r)) {
+        // Not inside a shown group (4O).
+        if !group && roots.iter().all(|r| swap::can_swap(doc, *r)) {
             let shows: Vec<Option<NodeId>> =
                 roots.iter().map(|r| component::main_of(doc, *r)).collect();
             let mixed = shows.iter().any(|m| *m != shows[0]);
@@ -594,9 +800,10 @@ impl OndinApp {
                 if let Some(m) =
                     swap_picker(ui, ("swap-pick", first), w, &shown, current, options, None)
                 {
+                    // A shown copy carries its variant values by name (4Q).
                     let ops: Vec<ondin_core::Operation> = roots
                         .iter()
-                        .filter_map(|r| swap::swap(doc, *r, m))
+                        .filter_map(|r| variant::swap_carrying(doc, *r, m))
                         .flat_map(|tx| tx.0)
                         .collect();
                     out = Some(Transaction(ops));
@@ -654,9 +861,39 @@ impl OndinApp {
                             .position(|v| Some(v) == first_value.as_ref())
                     })
                     .flatten();
+                // **A nested copy's choice is a swap, so an override, and its
+                // dropdown draws the dot** (§15 D988, the mockup's departure,
+                // reversing D983's build — its answer to (6)'s unasked question,
+                // which drew none): against the slot's own main's value for
+                // the property of that name, reset within the set the copy shows
+                // now. A root linked straight to a main has none — *"a variant
+                // choice is never an override"* there (§15 D982).
+                let states: Vec<(String, bool)> = roots
+                    .iter()
+                    .filter_map(|r| variant::nested_variant_state(doc, *r, pi))
+                    .collect();
+                let mark = states.iter().any(|(_, d)| *d).then(|| {
+                    let source = states
+                        .iter()
+                        .find(|(_, d)| *d)
+                        .map(|(s, _)| s.clone())
+                        .unwrap_or_default();
+                    super::component::OverrideMark {
+                        tip: format!("Reset to main · {source}"),
+                        tx: Transaction(
+                            roots
+                                .iter()
+                                .filter_map(|r| variant::nested_variant_reset(doc, *r, pi))
+                                .flat_map(|t| t.0)
+                                .collect(),
+                        ),
+                    }
+                });
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
-                    row_label(ui, &p.name, None);
+                    if row_label(ui, &p.name, mark.as_ref()) {
+                        out = mark.as_ref().map(|m| m.tx.clone());
+                    }
                     let w = ui.available_width() - 8.0;
                     let refuse =
                         (!switchable).then_some("Only an instance or a nested copy switches");
@@ -687,11 +924,15 @@ impl OndinApp {
                 });
             }
         }
-        // Component properties, from the owner.
-        let props = doc
+        // Component properties, from the owner — not its showing, which is the
+        // groups after these rows (`shown_groups`).
+        let props: Vec<Keyed<Property>> = doc
             .get(owner)
             .map(|o| o.props().to_vec())
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|p| p.kind != PropKind::Nested)
+            .collect();
         for p in &props {
             let states: Vec<(PropValue, bool)> = roots
                 .iter()
@@ -709,6 +950,8 @@ impl OndinApp {
                 tx: Transaction(reset.clone()),
             });
             match p.kind {
+                // Filtered out above: a showing has no value to draw.
+                PropKind::Nested => {}
                 PropKind::Boolean => {
                     let on = matches!(value, PropValue::Boolean(true));
                     let resp = if mixed {
@@ -815,14 +1058,20 @@ impl OndinApp {
         if owner != id {
             return;
         }
-        let props = doc
+        // The showing is listed apart, under *Shown from nested* (4L).
+        let props: Vec<Keyed<Property>> = doc
             .get(owner)
             .map(|o| o.props().to_vec())
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|p| p.kind != PropKind::Nested)
+            .collect();
+        let slots = variant::nested_slots(doc, owner);
         let lone_main = doc.get(owner).is_some_and(|n| n.component());
         let mut out: Option<Transaction> = None;
         let mut combine = false;
         let mut refused = None;
+        let mut select = None;
         self.panel(ui, "Properties", None, |app, ui| {
             let doc = &app.session.doc;
             if props.is_empty() {
@@ -836,6 +1085,47 @@ impl OndinApp {
             }
             for p in &props {
                 property_row(ui, doc, owner, p, &mut out, &mut refused);
+            }
+            // **Shown from nested** (4L): each nested instance inside the main,
+            // the shown ones with what they show and a − to stop, the others
+            // listed too so they can be found — a click on a name selects it.
+            if !slots.is_empty() {
+                ui.add_space(4.0);
+                ui.label(ui::eyebrow("Shown from nested"));
+                for (slot, shown) in &slots {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        let name = doc.get(*slot).map(|n| n.name().to_string()).unwrap_or_default();
+                        let name_resp = ui
+                            .add(
+                                egui::Label::new(
+                                    egui::RichText::new(&name)
+                                        .size(12.0)
+                                        .color(theme::text::STRONG),
+                                )
+                                .sense(egui::Sense::click()),
+                            )
+                            .on_hover_text("Select it in the main");
+                        if name_resp.clicked() {
+                            select = Some(*slot);
+                        }
+                        let what = match shown {
+                            true => format!("· {}", shown_names(doc, *slot).join(", ")),
+                            false => "Not shown".to_string(),
+                        };
+                        ui.label(egui::RichText::new(what).size(12.0).color(theme::text::DIM));
+                        if *shown {
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui::field_button(ui, icon::MINUS, ui::CONTROL_H, 13.0, FieldButton::Off)
+                                    .on_hover_text("Stop showing its properties on instances")
+                                    .clicked()
+                                {
+                                    out = variant::set_shown(doc, &mut app.session.ids, *slot, false);
+                                }
+                            });
+                        }
+                    });
+                }
             }
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
@@ -851,6 +1141,8 @@ impl OndinApp {
                             PropKind::Text => "A property that sets the text of the layers bound to it",
                             // Made from a nested instance's binding line, never here.
                             PropKind::Swap => "A property that swaps the nested instances bound to it",
+                            // Made from a nested instance's own card, never here.
+                            PropKind::Nested => "",
                         })
                         .clicked()
                     {
@@ -876,6 +1168,9 @@ impl OndinApp {
         }
         if combine {
             self.combine_as_variants();
+        }
+        if let Some(s) = select {
+            self.session.selection.set_one(s);
         }
     }
 
@@ -985,7 +1280,7 @@ impl OndinApp {
                             &match kind {
                                 PropKind::Boolean => format!("Show {layer}"),
                                 PropKind::Text => format!("{layer} text"),
-                                PropKind::Swap => layer.clone(),
+                                PropKind::Swap | PropKind::Nested => layer.clone(),
                             },
                         );
                         let item = self.session.ids.mint_item();
@@ -997,7 +1292,9 @@ impl OndinApp {
                                 bound: vec![node],
                                 filter: match kind {
                                     PropKind::Swap => filter.clone(),
-                                    PropKind::Boolean | PropKind::Text => String::new(),
+                                    PropKind::Boolean | PropKind::Text | PropKind::Nested => {
+                                        String::new()
+                                    }
                                 },
                             },
                         ));
@@ -1016,6 +1313,25 @@ impl OndinApp {
     }
 }
 
+/// The properties a shown nested instance `slot` brings to the card (4K's
+/// caption, 4L's rows): its main's set's variant properties, then its own
+/// component properties — what [`OndinApp::instance_rows`] draws for it.
+fn shown_names(doc: &ondin_core::Document, slot: NodeId) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    if let Some(main) = component::main_of(doc, slot) {
+        if let Some(vs) = variant::set_of(doc, main).and_then(|s| doc.get(s)?.set().cloned()) {
+            names.extend(vs.props.into_iter().map(|p| p.name));
+        }
+        names.extend(
+            variant::instance_properties(doc, slot)
+                .into_iter()
+                .filter(|p| p.kind != PropKind::Nested)
+                .map(|p| p.value.name),
+        );
+    }
+    names
+}
+
 /// One row of the Properties card: the kind's glyph, the name (renamed in
 /// place), the default, the ×, and what it is bound to under it.
 fn property_row(
@@ -1032,6 +1348,8 @@ fn property_row(
             PropKind::Boolean => icon::EYE,
             PropKind::Text => icon::TEXT_T,
             PropKind::Swap => icon::SWAP,
+            // Never drawn as a row: `inspector_properties` lists it apart.
+            PropKind::Nested => icon::STACK,
         };
         ui.label(
             egui::RichText::new(glyph)
@@ -1077,6 +1395,7 @@ fn property_row(
                     PropKind::Boolean => "visibility",
                     PropKind::Text => "content",
                     PropKind::Swap => "instance",
+                    PropKind::Nested => "shown",
                 }
             )
         })

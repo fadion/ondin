@@ -43,7 +43,7 @@ which is this file's own §9.5 lesson: **check the section before believing the 
 | *Now · Text alignment* | **Nothing open as of 2026-09-22.** Side bearings / optical margin alignment moved to *Later · Parked decisions*, undecided — it had been filed `Later:` inside a `Now` section since the section was written, which is the prefix table broken from the inside — **and was built hours later the same day** (§15 D830): both edges, `ParagraphStyle::optical_margins`, off by default, one adjustment to the line's geometry that no arm of reads `align`. ⚠️ **The bullet's own example was backwards the whole time it stood** — it blamed `H` for having *almost no* left bearing, and `H` has the largest of the capitals measured. ⚠️ *This row said "Side bearings / optical margin alignment, marked **Later**" and was perfectly accurate for weeks — it described the bullet exactly, including the contradiction, and that is why nobody acted on it.* What is left in the section is one standing rule: don't use ink bounds for alignment — **which D830 does not break, and which now says it is about the *datum***. |
 | *Now · Distribution* | **Nothing open as of 2026-10-04** — both items closed the day they opened: the release job split so its build steps hold no write token (§15 D976), and the single-package rpm route's waiver narrowed to the file (§15 D977). *The text below is the row as it stood before.* **Two open as of 2026-10-04**, both left by §15 D974's hardening of the release review's findings: the release job is not yet split so that the build steps hold no write token (`[X3-L5-03]`'s last bullet), and the single-package rpm route's `dnf install --nogpgcheck` still waives checking for the whole transaction (`[X3-L5-04]`). And it has run: CI was green on all three legs at `e1f1842`, and v0.4.0's Release workflow built and published every platform; the tag's Pages publish was refused by the `github-pages` environment's `main`-only rule and published from `main`, and the environment admits `v*` tags since `430ed7e`. *The text below is the row as it stood before.* **Nothing open as of 2026-10-03.** Its one item, the package repositories' signing key, opened and closed that day (§15 D957): the maintainer generated the key, set `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE` and turned Pages on, and the fingerprint is in `install.sh` and `README.md`. ⚠️ **Nothing has run** — the first tagged Release is the first time `pages.yml` builds the site, and the first check that the secret's key is the one the fingerprint names. That is the release skill's to do, not an item. |
 | *Now · Core, rendering and export* | **Opened 2026-10-06**, each item a live *Fix* in §15 with no feature section here and never carried in this file: core's dependency gate still a denylist (§15 D427), a finite absurd blur accepted at the operation (D454), a descending ramp left descending on load (D455), three rules stated in more than one place (D458, D460, D473), and a sweep gradient's literal radius in SVG (D762). |
-| *Next · Nested component properties* | **One item, opened 2026-10-06**: exposing a nested instance's component properties on the instance that holds it — later by §15 D982, and waiting on its mockup. **The section it came from, *Next · Container layout*, closed into §15 the same day** (D867's amendment): its five steps — used geometry, absolute insets, flex, grid, components — are all built, §15 D867–D927 and D978–D985 their record and `architecture.md` §5.3c and §5.3d their design; the one other thing it held open, exact equality against the commit's arithmetic for a pass not yet written, is a question for that pass and lives in §5.3d and D979. |
+| *Next · Nested component properties* | **Built 2026-10-06** from the maintainer's mockup (§15 D988, with D989's binding line). **What is left**: the maintainer's look in the GUI, which nobody has had; a variant moved into a set after a showing exists not bound; a nested instance an instance's author added having no slot to show; the sub-heading's type. *The text below is the row as it stood that morning.* **One item, opened 2026-10-06**: exposing a nested instance's component properties on the instance that holds it — later by §15 D982, and waiting on its mockup. **The section it came from, *Next · Container layout*, closed into §15 the same day** (D867's amendment): its five steps — used geometry, absolute insets, flex, grid, components — are all built, §15 D867–D927 and D978–D985 their record and `architecture.md` §5.3c and §5.3d their design; the one other thing it held open, exact equality against the commit's arithmetic for a pass not yet written, is a question for that pass and lives in §5.3d and D979. |
 | *Next · The polishing pass over the accepted calls* | **One item, opened 2026-10-06**: the maintainer's review of every call accepted wholesale that day (§15's header). |
 | *Later* | Components and layout past the first build (pushing to a main, un-making a component, §5.3c's deferred properties — opened 2026-10-06); the command palette and cheatsheet; the parked decisions, which gained four on 2026-10-06 (components' unruled questions, the 32-row menu, `AltGr`, the chrome's keyboard traversal); post-v1 (MCP, which gained the snapshot's questions the same day, Command Mode, multiplayer). |
 
@@ -448,7 +448,7 @@ built as *Next · Container layout*** — CSS flexbox and CSS grid under CSS's n
 CSS absolute insets rather than a feature of their own (§15 D867, D871). **Components and overrides
 followed it**, as the last step of that section's build order (§15 D978–D985). Every step is built,
 and the section closed into §15 on 2026-10-06 (D867's amendment); what it left open is *Next · Nested
-component properties* below. ⚠️ ***Persistent* constraints in
+component properties* below, built the same day (§15 D988). ⚠️ ***Persistent* constraints in
 `architecture.md` §13's sense — a dependency graph between arbitrary properties — are a different
 feature and did not leave with them**; that document's §1 still defers them.
 
@@ -1552,16 +1552,22 @@ argument, which nothing here restates.
 
 ## Next · Nested component properties
 
-**Exposing a nested instance's component properties on the instance that holds it.** Components are
-built (`architecture.md` §5.3d, §15 D978–D985), and this is the first of what §5.3d's paragraph on
-later work names — left for later by §15 D982, *"Exposing nested properties is later, as the mockup
-has it"*. **It waits on a mockup**, which the maintainer is to commission (2026-10-06); nothing is
-designed, so this entry restates no ruling, and the design goes into §5.3d when it comes. ⚠️ **A `Next`
-section not yet designed** — one of two since 2026-10-06, the polishing pass below being the other —
-against this file's prefix table: it is here rather than under
-*Later* because it is the next work, not a parked one.
+**Built 2026-10-06** — the maintainer commissioned the mockup (`design/Variants.dc.html` 4K–4S) and
+handed it over the same day, and the session built it: §15 D988 is the design in words and the build,
+D989 the binding line a nested instance in a main had never drawn, `architecture.md` §5.3d the
+paragraph. What the build left open, and nothing else:
 
-*Opened 2026-10-06, when* Next · Container layout *closed into §15* (D867's amendment).
+- **The maintainer's look.** Nobody has seen nested properties in the GUI, and every call D988 marks
+  as the session's is open to that look.
+- **A variant that joins a set after a showing exists** is bound only through *Add variant*
+  (`add_variant` extends every set property's bindings, read, not run), not when a main is moved in.
+- **A nested instance an instance's author added**, inside the instance rather than in a main, has no
+  slot to show — a question for the maintainer as much as work: the mockup's opt-in is the main
+  author's.
+- **The group sub-heading** is plain labels, not the mockup's type.
+
+*Opened 2026-10-06, when* Next · Container layout *closed into §15* (D867's amendment); *built and
+edited down to this the same day.*
 
 ## Next · The polishing pass over the accepted calls
 
@@ -1579,8 +1585,8 @@ it is here because it is the next work the record names, as the section above is
 Each is named as later by the record and is undesigned; the pointer restates no ruling.
 
 - **Pushing an instance's changes to its main** — `architecture.md` §5.3d: *"Exposing nested
-  properties, and pushing an instance's changes to its main, come later"*. The first half is *Next ·
-  Nested component properties*.
+  properties, and pushing an instance's changes to its main, come later"*. The first half is built
+  (§15 D988).
 - **A verb that un-makes a component** — none exists, so `SetComponent { component: false }` on a main
   with instances is unreachable; one that is built owes a detach, as a delete does (§15 D979's step-2
   amendment, §5.3d's handoff).

@@ -638,7 +638,8 @@ pub struct Node {
                                // three fields from here are §5.3d step 7, §15 D982, each skipped
                                // when empty
     variant: Vec<String>,      // a variant's values, one per property of the set around it
-    props: Vec<Keyed<Property>>, // the component properties a main or a set defines
+    props: Vec<Keyed<Property>>, // the component properties a main or a set defines, and its one
+                               // showing of nested instances (§15 D988)
 }
 
 pub enum NodeKind {
@@ -1622,7 +1623,7 @@ first was, it saved only the track list.
 `track_lines` merges an edge with the last one only, the spans being laid in order — it searched every
 edge, quadratic in the track count.
 
-### 5.3d Components and overrides (designed 2026-10-04; steps 1–7 built; §15 D978–D985)
+### 5.3d Components and overrides (designed 2026-10-04; steps 1–7 built; §15 D978–D985, D988, D989)
 
 > **Design ahead of code, part of it** — decided with the maintainer on 2026-10-04 (session 47). **Build
 > steps 1–4 are built** the same day — the list items' ids (§15 D980, `a83adc8`), the component model,
@@ -1636,7 +1637,8 @@ edge, quadratic in the track count.
 > 2026-10-05), and its app half in the inspector and the context menu (`a313b2c`, the same day), then
 > a set's canvas tab and two layers marks (`0ff8f16`); and so is instance swap, with a nested copy's
 > switch (§15 D983, 2026-10-06); and so, the same day, is the rest of the canvas and layers chrome,
-> D981's and step 7's (§15 D985). It sits
+> D981's and step 7's (§15 D985); and so, the same day, are nested component properties, from a
+> third mockup (§15 D988, with D989's binding line). It sits
 > beside §5.3c
 > because what it changes is the node model. Every other passage of this document still describes `HEAD`; where one states a rule this
 > design will change, it carries a forward pointer here — §4's invariants 4 and 8, §5.11's bump rule
@@ -2285,8 +2287,9 @@ session's design under those rulings, ~~open to overturning~~ accepted in the bl
 a set.** `Node::set: Option<VariantSet>` holds the set's variant properties, each a `VariantProp { name,
 values }`; `Node::variant: Vec<String>` a variant's values, one per property in the set's order; and
 `Node::props: Vec<Keyed<Property>>` the **component properties** a main or a set defines,
-`Property { name, kind: PropKind::{Boolean, Text, Swap}, bound: Vec<NodeId>, filter: String }` — the
-third kind and the filter since instance swap, below. So `NestedMain` is unchanged,
+`Property { name, kind: PropKind::{Boolean, Text, Swap, Nested}, bound: Vec<NodeId>, filter: String }`
+— the third kind and the filter since instance swap, below, and the fourth, a **showing** rather than
+a value, since nested properties (§15 D988, below). So `NestedMain` is unchanged,
 and an instance of a variant is an instance of a main, which everything above holds for as it is.
 `SetVariantSet`, `SetVariant` and `SetProperties` write them, each inverting to the old value; they
 change no ink (§5.7), are no-ops in `absorb` (§6.2), `propagate::mode` skips them and `reset::state_ops`
@@ -2296,15 +2299,17 @@ makes an instance node goes through it. They save in v5, unbumped (§5.11). **`v
 first inside `component::check` as `LinkRule::Variant`, holds six rules — `SetKind` (a set only on an
 `Artboard`, never a main or linked, never inside a main, an instance or a set), `SetNames`, `Values` (a
 main in a set fits it; values on anything else are refused), `PropertyOwner` (a main not in a set, or a
-set), `PropertyName` (unique, non-empty, not a variant property's name) and `Binding` (a bound layer
-exists, strictly inside the owner's main — for a set, inside one of its variants, never a variant's
-root — text for a text property, bound once per field).
+set), `PropertyName` (unique, non-empty, not a variant property's name — the nameless showing exempt,
+and a second showing refused here) and `Binding` (a bound layer exists, strictly inside the owner's
+main — for a set, inside one of its variants, never a variant's root — text for a text property, a
+nested instance for a swap or a showing, bound once per field).
 
 **`variant::settle`**, a commit pass in `commit_inner` after `settle_links` and 🚨 **before
 `propagate`**, settles what any door leaves: a variant's values fitted to its set — kept where they fit,
 a property's first value where one does not, the first free combination when the count is wrong — values
 dropped off anything not a variant, **each variant's name derived from its values**, joined by `", "`, a
-variant's properties moved to its set, and stale bindings pruned. Before `propagate` because a renamed
+variant's properties moved to its set — merged by name and kind, a showing by kind alone — and stale
+bindings pruned. Before `propagate` because a renamed
 value renames its variants here and the propagation pass carries that name onto every instance still
 holding the old one; swapped, the instance keeps the old name (measured,
 `renaming_a_value_renames_its_variants_and_their_instances`). Gated, like `settle_links`, so an edit that
@@ -2379,7 +2384,8 @@ variants use it and are deleted with it. M instances will detach.* — and *Prop
 sit under them. **A variant** gets the Component card with *Variant in* and the set as a link, its
 derived, read-only name, a dropdown per property — a taken combination not refused but noted, *Another
 variant is also X* with *Select it* — then a main's count and verbs. **An instance's card** gains, between
-*Instance of* and *Reset all*, a dropdown per variant property with **no dot**, switching through
+*Instance of* and *Reset all*, a dropdown per variant property with **no dot** — on a nested copy, whose
+choice is a swap, the dot since §15 D988 — switching through
 `variant::switch` (several selected together, *Mixed* where they disagree, a missing combination greyed
 with *No Large, Disabled variant in Button*, the dropdown disabled where any selected root fails
 `can_switch`), then each component property — a boolean as a switch row, a text as a field — with its
@@ -2390,7 +2396,9 @@ fields alone; several instances' summary reads *K with changes*. **A lone main o
 *Properties* card under the Component card — each property's kind glyph, name and ×, its default and
 what it is bound to; *Boolean*, *Text*, and on a lone main *Variant*, which combines it alone into a set
 — and **a layer inside a main** one line, *Bind to a component property*: a *Visibility* dropdown and,
-for text, *Content* — *None*, each property of that kind, *New property…*. **The menu** gains
+for text, *Content* — *None*, each property of that kind, *New property…*; a nested instance inside a
+main is an instance root, so its card is the instance's, and the line is drawn under that card (§15
+D989 — until then it was never drawn for one, and a swap property could not be made). **The menu** gains
 `menu::Role::Set` (no *Create component* on a set, nor on any selection holding a main or a set —
 `menu::Context::holds_main`, `adc5f66`), *Combine as variants* on two or more mains outside any set
 under one parent, *Add variant* on a set or a variant, a set's *Select all instances*, and *Reset
@@ -2419,8 +2427,36 @@ first build showed the bottom side's resize over a disc a drag there no longer r
 the cursor needs a `Response`). **A variant's row named by its values** needed nothing: its
 name is derived from them (`variant::settle`), and a variant is a main, so it wears the filled hexagon.
 
-**Exposing nested properties, and pushing an instance's changes to its main, come later** — instance
-swap and a nested copy's switch, which this sentence named with them, are built (§15 D983, above). So does real-time collaboration, the one place §15 D978's cost (a) arrives: a non-goal for
+✅ **Nested component properties** (2026-10-06, §15 D988; `variant.rs`, `panels/variants.rs`). The
+design is a third mockup's, `design/Variants.dc.html` 4K–4S, commissioned and handed over by the
+maintainer, and D988 carries it in words; the build's calls are the session's. **A main's author shows a
+nested instance's own properties on every instance of the main** — its variant dropdowns, booleans,
+text and swaps, never its raw fields, which still mean selecting it. The opt-in is **once per nested
+instance**, *Show properties on instances* on its card inside the main (`show_switch`), and the main's
+Properties card lists what it shows under *Shown from nested*, − to stop, and the rest as *Not shown*
+(`nested_slots`). The model is `PropKind::Nested`, a **showing** rather than a value: at most one per
+owner, nameless, bound to the shown slots, driving no field, so the binding checks, the pruning on
+delete and a set's scope are the property machinery's; `set_shown` binds the slot at its name path in
+**every** variant of a set. **An instance's card** draws, after its own rows, one group per shown
+instance (`shown_nested`, in layers order, recursing so two levels flatten under a › path), headed by
+the layer and the main it shows now — a variant's set — so a group follows an outer swap, the opt-in
+being the slot's — drawing the same rows over the copies (`instance_rows` = `own_rows` + `shown_groups`)
+but **never a Swap row** (4O): a copy's swap is the outer swap property's row, else made from the copy's
+own card; several instances match groups by layer name path, each step a name and which same-named
+sibling it is, *Different mains* where the slot disagrees; a group an outer boolean hides dims, read-only, under *Hidden by
+<property>* (`hidden_by`). **A shown row counts as a property, never an override** — `property_fields`
+takes each shown copy's swap and its properties' fields, `shown_rows_overridden` counts a shown copy's
+swap once, and *Reset properties* writes `reset_all_properties`. 🚨 **A nested copy's variant dropdown
+draws the dot** — the mockup's one departure, reversing D983's build: the choice is a swap, so an
+override — compared with the slot's own main's value of the same-named property and **reset within the
+set the copy shows now**, so a reset of *Weight* after an outer *Icon → Check* keeps Check
+(`nested_variant_state`, `nested_variant_reset`). **Across a swap a shown copy's variant values carry by
+property name** (`carried_target`, through `set_property` and the copy's Swap row); booleans and text
+keep the rewrite's name-path carry, the session's call against the mockup's letter. ⚠️ **Not looked at
+in the GUI**; what is open is `roadmap.md`'s *Next · Nested component properties*.
+
+**Pushing an instance's changes to its main comes later** — instance swap and a nested copy's switch,
+and nested properties, which this sentence named with it, are built (§15 D983, D988, above). So does real-time collaboration, the one place §15 D978's cost (a) arrives: a non-goal for
 now and open for the future, in the maintainer's words, and D978's verdict is to revisit linked copies
 if it is built.
 
@@ -2454,7 +2490,8 @@ variants and component properties: the model, the rules, `variant::settle`, the 
 switch and properties as views, above — ✅ and its app half in the inspector and the menu the same
 day (`a313b2c`), then the set's tab and the layers panel's set count and `{}` (`0ff8f16`, `adc5f66`),
 then instance swap and a nested copy's switch (§15 D983, 2026-10-06), and the set's `+` and the
-variant rows with D981's canvas and layers chrome the same day (§15 D985).
+variant rows with D981's canvas and layers chrome the same day (§15 D985), and nested component
+properties the same day again (§15 D988, D989).
 ~~**Left**: the set's `+` edge control and value-named variant rows, beside D981's chrome.~~
 
 **Handoff, 2026-10-04 (session 47's close)** — what is built, next and owed, in one place. **Built**:
@@ -2494,8 +2531,9 @@ file's *Undecided*); ~~the flex instance's
 exact-equality path, measured for a held resize and unmeasured for the kept flow translations~~ —
 measured 2026-10-06 (D979's amendment); ~~a test
 for the Type resets' live-session restyle (§15 D981's amendment)~~ — written 2026-10-06 (that
-amendment); exposing nested properties, later
-by the mockup; and a verb that un-makes a component, which would owe a detach.
+amendment); ~~exposing nested properties, later
+by the mockup~~ — built 2026-10-06 from the mockup's 4K–4S (§15 D988), with the binding line a nested
+instance in a main had never drawn (§15 D989), unlooked-at in the GUI; and a verb that un-makes a component, which would owe a detach.
 
 ### 5.4 Text node
 
@@ -5338,7 +5376,8 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   complete (§5.3d). **The variant fields joined it unbumped** (`set`, `variant`, `props`; §15 D982,
   2026-10-05) on the same reasoning: no release carries v5's components, so no released v5 reader
   drops them. So did `swap` and a property's `filter` (§15 D983, 2026-10-06), as the maintainer ruled
-  — *"No need. Nothing's been released."*
+  — *"No need. Nothing's been released."* So did the fourth property kind, `PropKind::Nested` (§15
+  D988, the same day), on the caller's check that no tag contains `a83adc8`.
 - **Guides are verified too, but not against a tree** — there is none for one to corrupt. The loader
   rejects a malformed guide id, a duplicate one, and a non-finite position; a guide far off the side
   of the artwork is legal, because panning reaches it. Their ids come out of the same reservation

@@ -55,6 +55,13 @@ pub enum PropKind {
     /// The main they show — an **instance swap** (§15 D983), bound to nested
     /// instances inside the main; on an instance, the copies of those swap.
     Swap,
+    /// Not a value but a **showing** (§15 D988, `design/Variants.dc.html` 4K–4S):
+    /// the nested instances inside the main whose own properties an instance's
+    /// card shows under a sub-heading of their own, without selecting them. At
+    /// most one per owner, bound to every shown slot in every variant, and
+    /// **nameless** — the card lists it as *Shown from nested*, never by a name,
+    /// so the naming rules pass it by.
+    Nested,
 }
 
 /// A component property: a name, a kind, and the layers inside the owner it is
@@ -279,8 +286,15 @@ pub(crate) fn check(nodes: &FxHashMap<NodeId, Node>) -> Result<(), (NodeId, Vari
                 .iter()
                 .flat_map(|s| s.props.iter().map(|p| p.name.as_str()))
                 .collect();
-            if !names_ok(n.props.iter().map(|p| p.name.as_str()))
-                || n.props.iter().any(|p| reserved.contains(&p.name.as_str()))
+            // The showing is nameless and one (`PropKind::Nested`).
+            let named = || n.props.iter().filter(|p| p.kind != PropKind::Nested);
+            if !names_ok(named().map(|p| p.name.as_str()))
+                || named().any(|p| reserved.contains(&p.name.as_str()))
+                || n.props
+                    .iter()
+                    .filter(|p| p.kind == PropKind::Nested)
+                    .count()
+                    > 1
             {
                 return Err((n.id, VariantRule::PropertyName));
             }
@@ -315,13 +329,14 @@ fn is_text(n: &Node) -> bool {
 }
 
 /// Whether a property of `kind` can drive `bound`: a text property only a text
-/// layer; a swap only a **nested instance** inside the main — a layer linked
-/// straight to a main, whose copies in an instance are what swap (§15 D983).
+/// layer; a swap, and a showing, only a **nested instance** inside the main — a
+/// layer linked straight to a main, whose copies in an instance are what swap
+/// (§15 D983) and what an instance's card shows the properties of (§15 D988).
 fn kind_fits(nodes: &FxHashMap<NodeId, Node>, kind: PropKind, bound: &Node) -> bool {
     match kind {
         PropKind::Boolean => true,
         PropKind::Text => is_text(bound),
-        PropKind::Swap => bound
+        PropKind::Swap | PropKind::Nested => bound
             .link
             .and_then(|l| nodes.get(&l))
             .is_some_and(|l| l.component),
@@ -486,7 +501,7 @@ pub fn settle(doc: &Document, tx: &Transaction) -> Vec<Operation> {
             for p in moved {
                 match props
                     .iter_mut()
-                    .find(|q| q.name == p.name && q.kind == p.kind)
+                    .find(|q| q.kind == p.kind && (q.name == p.name || p.kind == PropKind::Nested))
                 {
                     Some(q) => q.bound.extend(p.bound.iter().copied()),
                     None => props.push(p),
@@ -525,6 +540,17 @@ pub fn settle(doc: &Document, tx: &Transaction) -> Vec<Operation> {
                     .is_some_and(|bn| binding_fits(nodes, id, bn) && kind_fits(nodes, kind, bn))
                     && fields.insert((*b, kind))
             });
+            // The showing is nameless and merges by kind alone: one per owner.
+            if kind == PropKind::Nested {
+                match next.iter_mut().find(|q| q.kind == PropKind::Nested) {
+                    Some(q) => q.bound.extend(p.bound.iter().copied()),
+                    None => {
+                        p.name = String::new();
+                        next.push(p);
+                    }
+                }
+                continue;
+            }
             // A merge can bring a name in twice, or onto a variant property's.
             let mut name = p.name.clone();
             let mut k = 2;
@@ -536,6 +562,10 @@ pub fn settle(doc: &Document, tx: &Transaction) -> Vec<Operation> {
             p.name = name;
             next.push(p);
         }
+        // A showing with nothing left to show goes, as `set_shown` takes it away
+        // with its last slot — or a main with no other property would keep a
+        // disabled *Reset properties* for it (§15 D988).
+        next.retain(|q| !(q.kind == PropKind::Nested && q.bound.is_empty()));
         if next != n.props {
             ops.push(Operation::SetProperties { id, props: next });
         }
@@ -1465,6 +1495,8 @@ pub fn field_value(doc: &Document, id: NodeId, kind: PropKind) -> Option<PropVal
             _ => None,
         },
         PropKind::Swap => crate::component::main_of(doc, id).map(PropValue::Swap),
+        // A showing drives no field.
+        PropKind::Nested => None,
     }
 }
 
@@ -1493,9 +1525,10 @@ pub fn set_property(
     for r in roots {
         for c in counterparts(doc, *r, p) {
             match value {
-                // The swap verb's own rule: the slot's main clears the swap.
+                // The swap verb's own rule: the slot's main clears the swap. A
+                // shown copy carries its variant values by name (4Q).
                 PropValue::Swap(main) => {
-                    if let Some(tx) = crate::swap::swap(doc, c, *main) {
+                    if let Some(tx) = swap_carrying(doc, c, *main) {
                         ops.extend(tx.0);
                     }
                 }
@@ -1548,6 +1581,7 @@ fn property_reset_ops(doc: &Document, c: NodeId, kind: PropKind) -> Vec<Operatio
             PropKind::Boolean => matches!(op, Operation::SetVisible { .. }),
             PropKind::Text => matches!(op, Operation::SetText { .. }),
             PropKind::Swap => matches!(op, Operation::SetSwap { .. }),
+            PropKind::Nested => false,
         })
         .collect()
 }
@@ -1562,16 +1596,457 @@ pub fn reset_property(doc: &Document, roots: &[NodeId], p: &Property) -> Vec<Ope
 }
 
 /// Every (layer, field) a property drives in the instance rooted at `root` — the
-/// fields the card counts as **properties** rather than overrides.
+/// fields the card counts as **properties** rather than overrides — and, for
+/// each nested instance the card shows ([`shown_nested`]), its swap and every
+/// field its own properties drive: *"a shown row counts as a property, never an
+/// override"* (§15 D988).
 pub fn property_fields(doc: &Document, root: NodeId) -> FxHashSet<(NodeId, PropKind)> {
+    let mut out = own_property_fields(doc, root);
+    for s in shown_nested(doc, root) {
+        out.insert((s.copy, PropKind::Swap));
+        out.extend(own_property_fields(doc, s.copy));
+    }
+    out
+}
+
+/// [`property_fields`] for `root`'s own properties alone.
+fn own_property_fields(doc: &Document, root: NodeId) -> FxHashSet<(NodeId, PropKind)> {
     instance_properties(doc, root)
         .iter()
+        .filter(|p| p.kind != PropKind::Nested)
         .flat_map(|p| {
             counterparts(doc, root, p)
                 .into_iter()
                 .map(move |c| (c, p.kind))
         })
         .collect()
+}
+
+// ── Nested properties (§15 D988, `design/Variants.dc.html` 4K–4S) ────────────
+
+/// A nested instance whose own properties an instance's card shows, under a
+/// sub-heading of its own.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShownNested {
+    /// The copy inside the instance.
+    pub copy: NodeId,
+    /// The shown copies from the outermost down to `copy`: one where the
+    /// instance's own main shows the slot, more where a shown copy's main shows
+    /// one in turn — 4P's *"opt-in carries through each level"*, flattened.
+    pub path: Vec<NodeId>,
+    /// What matches this group across several instances of one owner (4S): the
+    /// layers from below the instance root down to `copy`, each as its name and
+    /// which sibling of that name it is. A name path, because the slots of a
+    /// set's variants are different nodes — and the k-th sibling of a name, the
+    /// variant switch's own matching, because an instance takes its main's name
+    /// verbatim (§15 D982) and two instances of one main in a main share one
+    /// until renamed.
+    pub key: Vec<(String, usize)>,
+}
+
+/// The nested instances whose properties the card of the instance rooted at
+/// `root` shows (§15 D988): the copies of every slot its main's owner shows, in
+/// layers order, each followed by the ones its own main shows, and so on down.
+/// Empty for a node that is not an instance or shows nothing.
+pub fn shown_nested(doc: &Document, root: NodeId) -> Vec<ShownNested> {
+    let mut out = Vec::new();
+    shown_below(doc, root, root, &[], &mut out);
+    out
+}
+
+fn shown_below(
+    doc: &Document,
+    top: NodeId,
+    root: NodeId,
+    path: &[NodeId],
+    out: &mut Vec<ShownNested>,
+) {
+    // A showing that reached itself would recurse for ever; the depth of the
+    // tree bounds an honest one.
+    if path.len() > 32 {
+        return;
+    }
+    let Some(showing) = instance_properties(doc, root)
+        .into_iter()
+        .find(|p| p.kind == PropKind::Nested)
+    else {
+        return;
+    };
+    for copy in counterparts(doc, root, &showing) {
+        let mut at = path.to_vec();
+        at.push(copy);
+        out.push(ShownNested {
+            copy,
+            path: at.clone(),
+            key: name_path(doc, top, copy),
+        });
+        shown_below(doc, top, copy, &at, out);
+    }
+}
+
+/// The layers from below `top` down to `id`, `id`'s included, each as its name
+/// and which sibling of that name it is. Empty where `id` is not below `top`.
+fn name_path(doc: &Document, top: NodeId, id: NodeId) -> Vec<(String, usize)> {
+    let mut steps = Vec::new();
+    let mut at = Some(id);
+    while let Some(n) = at.and_then(|a| doc.get(a)) {
+        if n.id == top {
+            steps.reverse();
+            return steps;
+        }
+        let k = n
+            .parent
+            .and_then(|p| doc.get(p))
+            .map(|p| {
+                p.children
+                    .iter()
+                    .take_while(|c| **c != n.id)
+                    .filter(|c| doc.get(**c).is_some_and(|c| c.name == n.name))
+                    .count()
+            })
+            .unwrap_or(0);
+        steps.push((n.name.clone(), k));
+        at = n.parent;
+    }
+    Vec::new()
+}
+
+/// The layer below `top` at `path` — [`name_path`]'s inverse, the k-th sibling
+/// of each name.
+fn at_name_path(doc: &Document, top: NodeId, path: &[(String, usize)]) -> Option<NodeId> {
+    let mut at = top;
+    for (name, k) in path {
+        at = doc
+            .get(at)?
+            .children
+            .iter()
+            .copied()
+            .filter(|c| doc.get(*c).is_some_and(|c| c.name == *name))
+            .nth(*k)?;
+    }
+    Some(at)
+}
+
+/// Whether `copy` is a **shown** nested copy: some node on its chain of links is
+/// a slot its owner shows. What gates the carry by property name (4Q's *"limited
+/// to shown rows"*).
+pub fn is_shown(doc: &Document, copy: NodeId) -> bool {
+    let mut at = doc.get(copy).and_then(|n| n.link);
+    for _ in 0..64 {
+        let Some(s) = at else { return false };
+        if slot_is_shown(doc, s) {
+            return true;
+        }
+        at = doc.get(s).and_then(|n| n.link);
+    }
+    false
+}
+
+/// Whether `slot` — a nested instance inside a main — is one its owner shows.
+pub fn slot_is_shown(doc: &Document, slot: NodeId) -> bool {
+    owner_above(doc, slot)
+        .and_then(|o| doc.get(o))
+        .is_some_and(|o| {
+            o.props
+                .iter()
+                .any(|p| p.kind == PropKind::Nested && p.bound.contains(&slot))
+        })
+}
+
+/// The nested instances inside `owner`'s main — its first variant's, for a set —
+/// that a showing could take (4L): every layer linked straight to a main and not
+/// itself inside such a layer, in layers order, each with whether it is shown.
+pub fn nested_slots(doc: &Document, owner: NodeId) -> Vec<(NodeId, bool)> {
+    let main = match doc.get(owner) {
+        Some(o) if o.set.is_some() => match variants(doc, owner).first() {
+            Some(v) => *v,
+            None => return Vec::new(),
+        },
+        Some(_) => owner,
+        None => return Vec::new(),
+    };
+    let mut out = Vec::new();
+    let mut stack: Vec<NodeId> = doc
+        .get(main)
+        .map(|m| m.children.iter().rev().copied().collect())
+        .unwrap_or_default();
+    while let Some(id) = stack.pop() {
+        let Some(n) = doc.get(id) else { continue };
+        if n.link.and_then(|l| doc.get(l)).is_some_and(|l| l.component) {
+            out.push((id, slot_is_shown(doc, id)));
+            continue;
+        }
+        stack.extend(n.children.iter().rev().copied());
+    }
+    out
+}
+
+/// Show or stop showing the slot `slot` on its owner's instances (4K) — and, in
+/// a set, the slot at the same name path in **every** variant, so the switch
+/// means what 4K's caption says, *"appears on every Button"* (the session's: a
+/// showing per variant would make a set's instances disagree about a slot they
+/// all hold). The owner's one `PropKind::Nested` is made on the first showing
+/// and goes with the last. `None` for a slot outside a main or a change that
+/// changes nothing.
+pub fn set_shown(
+    doc: &Document,
+    ids: &mut IdSource,
+    slot: NodeId,
+    on: bool,
+) -> Option<Transaction> {
+    let owner = owner_above(doc, slot)?;
+    let o = doc.get(owner)?;
+    let slots: Vec<NodeId> = match o.set {
+        Some(_) => {
+            let variant_of = |id: NodeId| {
+                let mut at = Some(id);
+                while let Some(n) = at.and_then(|a| doc.get(a)) {
+                    if n.component {
+                        return Some(n.id);
+                    }
+                    at = n.parent;
+                }
+                None
+            };
+            let path = name_path(doc, variant_of(slot)?, slot);
+            variants(doc, owner)
+                .into_iter()
+                .filter_map(|v| at_name_path(doc, v, &path))
+                .filter(|s| {
+                    doc.get(*s)
+                        .and_then(|n| n.link)
+                        .and_then(|l| doc.get(l))
+                        .is_some_and(|l| l.component)
+                })
+                .collect()
+        }
+        None => vec![slot],
+    };
+    let mut props = o.props.clone();
+    let at = props.iter().position(|p| p.kind == PropKind::Nested);
+    match (at, on) {
+        (Some(i), true) => {
+            let bound = &mut props[i].value.bound;
+            let before = bound.len();
+            for s in slots {
+                if !bound.contains(&s) {
+                    bound.push(s);
+                }
+            }
+            if bound.len() == before {
+                return None;
+            }
+        }
+        (Some(i), false) => {
+            let bound = &mut props[i].value.bound;
+            let before = bound.len();
+            bound.retain(|b| !slots.contains(b));
+            if bound.len() == before {
+                return None;
+            }
+            if bound.is_empty() {
+                props.remove(i);
+            }
+        }
+        (None, true) => props.push(Keyed::new(
+            ids.mint_item(),
+            Property {
+                name: String::new(),
+                kind: PropKind::Nested,
+                bound: slots,
+                filter: String::new(),
+            },
+        )),
+        (None, false) => return None,
+    }
+    Some(Transaction(vec![Operation::SetProperties {
+        id: owner,
+        props,
+    }]))
+}
+
+/// The main a **shown** copy should swap to when `to` is picked for it (4Q): the
+/// variant of `to`'s set holding, for each variant property it shares **by
+/// name** with the set the copy shows now, the value the copy shows now — so
+/// *Icon → Check* keeps *Weight: Bold* — with `to`'s own value wherever a name
+/// is not shared, or the value is not one `to`'s set offers. `to` itself for a
+/// copy that is not shown, or a main in no set, or a combination the set lacks.
+pub fn carried_target(doc: &Document, copy: NodeId, to: NodeId) -> NodeId {
+    if !is_shown(doc, copy) {
+        return to;
+    }
+    let (Some(from), Some(to_set)) = (crate::component::main_of(doc, copy), set_of(doc, to)) else {
+        return to;
+    };
+    let Some(from_set) = set_of(doc, from) else {
+        return to;
+    };
+    if from_set == to_set {
+        return to;
+    }
+    let (Some(fs), Some(ts)) = (
+        doc.get(from_set).and_then(|s| s.set.clone()),
+        doc.get(to_set).and_then(|s| s.set.clone()),
+    ) else {
+        return to;
+    };
+    let from_values = doc.get(from).map(|n| n.variant.clone()).unwrap_or_default();
+    let Some(mut want) = doc.get(to).map(|n| n.variant.clone()) else {
+        return to;
+    };
+    for (ti, tp) in ts.props.iter().enumerate() {
+        let carried = fs
+            .props
+            .iter()
+            .position(|fp| fp.name == tp.name)
+            .and_then(|fi| from_values.get(fi))
+            .filter(|v| tp.values.contains(v));
+        if let (Some(v), Some(slot)) = (carried, want.get_mut(ti)) {
+            *slot = v.clone();
+        }
+    }
+    find_variant(doc, to_set, &want).unwrap_or(to)
+}
+
+/// [`crate::swap::swap`] with the carry by property name a shown copy takes
+/// ([`carried_target`]).
+pub fn swap_carrying(doc: &Document, copy: NodeId, to: NodeId) -> Option<Transaction> {
+    crate::swap::swap(doc, copy, carried_target(doc, copy, to))
+}
+
+/// A nested copy's variant property `prop` against its **slot's**: the value the
+/// slot's own main holds for the property of that name, and whether the copy
+/// shows another (§15 D988's departure, 4N: a nested copy's variant switch is a
+/// swap, so an override, and its dropdown draws the dot). `None` for a root that
+/// cannot swap — a root linked straight to a main switches by relinking, and
+/// *"a variant choice is never an override"* there (§15 D982) — or a slot whose
+/// main has no property of that name.
+pub fn nested_variant_state(doc: &Document, copy: NodeId, prop: usize) -> Option<(String, bool)> {
+    if !crate::swap::can_swap(doc, copy) {
+        return None;
+    }
+    let shown = crate::component::main_of(doc, copy)?;
+    let name = doc
+        .get(set_of(doc, shown)?)?
+        .set
+        .as_ref()?
+        .props
+        .get(prop)?
+        .name
+        .clone();
+    let current = doc.get(shown)?.variant.get(prop)?.clone();
+    let slot = crate::swap::slot_main(doc, copy)?;
+    let slot_set = doc.get(set_of(doc, slot)?)?.set.clone()?;
+    let at = slot_set.props.iter().position(|p| p.name == name)?;
+    let source = doc.get(slot)?.variant.get(at)?.clone();
+    let differs = current != source;
+    Some((source, differs))
+}
+
+/// The reset of [`nested_variant_state`]'s mark: the copy switched, **within the
+/// set it shows now**, to the slot's value for that property — the other values,
+/// and an outer swap to another set, kept. A swap back to the slot's own main
+/// clears the swap (`swap::swap`'s rule). `None` where there is nothing to reset
+/// or no such variant.
+pub fn nested_variant_reset(doc: &Document, copy: NodeId, prop: usize) -> Option<Transaction> {
+    let (source, differs) = nested_variant_state(doc, copy, prop)?;
+    if !differs {
+        return None;
+    }
+    let shown = crate::component::main_of(doc, copy)?;
+    let to = switch_target(doc, shown, prop, &source)?;
+    crate::swap::swap(doc, copy, to)
+}
+
+/// Whether the shown copy `s` is hidden in the instance rooted at `root`, and by
+/// what (4R): `None` while it and every layer above it, up to `root`, are
+/// visible; else the name of the first **Boolean** property — `root`'s, or a
+/// shown copy's on the way down — that drives the visibility of the layer that
+/// hides it, or an empty name where none does.
+pub fn hidden_by(doc: &Document, root: NodeId, s: &ShownNested) -> Option<String> {
+    let mut hider = None;
+    let mut at = Some(s.copy);
+    while let Some(n) = at.and_then(|a| doc.get(a)) {
+        if n.id == root {
+            break;
+        }
+        if !n.visible {
+            hider = Some(n.id);
+        }
+        at = n.parent;
+    }
+    let hider = hider?;
+    let roots = std::iter::once(root).chain(s.path.iter().copied());
+    for r in roots {
+        for p in instance_properties(doc, r) {
+            if p.kind == PropKind::Boolean && counterparts(doc, r, &p).contains(&hider) {
+                return Some(p.name.clone());
+            }
+        }
+    }
+    Some(String::new())
+}
+
+/// Every property reset of the instance rooted at `root` — its own properties'
+/// and each shown copy's, with each shown copy's swap (which carries its variant
+/// rows) — what *Reset properties* writes (4N: *"Reset properties includes
+/// it"*). Each op once.
+pub fn reset_all_properties(doc: &Document, root: NodeId) -> Vec<Operation> {
+    let mut ops: Vec<Operation> = Vec::new();
+    let push = |op: Operation, ops: &mut Vec<Operation>| {
+        if !ops.contains(&op) {
+            ops.push(op);
+        }
+    };
+    for p in instance_properties(doc, root) {
+        for op in reset_property(doc, &[root], &p) {
+            push(op, &mut ops);
+        }
+    }
+    for s in shown_nested(doc, root) {
+        if doc.get(s.copy).is_some_and(|n| n.swap.is_some()) {
+            push(
+                Operation::SetSwap {
+                    id: s.copy,
+                    swap: None,
+                },
+                &mut ops,
+            );
+        }
+        for p in instance_properties(doc, s.copy) {
+            for op in reset_property(doc, &[s.copy], &p) {
+                push(op, &mut ops);
+            }
+        }
+    }
+    ops
+}
+
+/// How many of the instance rooted at `root`'s **shown rows** differ from the
+/// main (4N's count): each shown copy's swap once — its swap row and its
+/// variant rows are one field — unless an outer swap property already counts
+/// it, and each of its own properties that differs.
+pub fn shown_rows_overridden(doc: &Document, root: NodeId) -> usize {
+    let shown = shown_nested(doc, root);
+    let mut bound_swaps: FxHashSet<NodeId> = FxHashSet::default();
+    for r in std::iter::once(root).chain(shown.iter().map(|s| s.copy)) {
+        for p in instance_properties(doc, r) {
+            if p.kind == PropKind::Swap {
+                bound_swaps.extend(counterparts(doc, r, &p));
+            }
+        }
+    }
+    let mut n = 0;
+    for s in &shown {
+        if !bound_swaps.contains(&s.copy) && doc.get(s.copy).is_some_and(|c| c.swap.is_some()) {
+            n += 1;
+        }
+        n += instance_properties(doc, s.copy)
+            .iter()
+            .filter(|p| property_state(doc, s.copy, p).is_some_and(|(_, o)| o))
+            .count();
+    }
+    n
 }
 
 // ── Defining properties on a main ────────────────────────────────────────────
@@ -1603,7 +2078,7 @@ pub fn define(
             .and_then(|m| doc.get(m))
             .map(|m| crate::swap::suggested_filter(&m.name))
             .unwrap_or_default(),
-        PropKind::Boolean | PropKind::Text => String::new(),
+        PropKind::Boolean | PropKind::Text | PropKind::Nested => String::new(),
     };
     let item = ids.mint_item();
     let mut props = o.props.clone();

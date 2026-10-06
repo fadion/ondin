@@ -1140,6 +1140,36 @@ pub(crate) fn rewrite(
         }
     }
 
+    // **What an override is measured against: the counterpart in the main `from`
+    // shows, not `from`'s own node** (§15 D991). For a variant
+    // switch the two are the same — `from` is a main. For a swap they are not:
+    // `from` is the slot, a copy inside the outer main, and an override made *on
+    // the slot* — a Button's label set to "Save" inside a Toolbar main — is a
+    // value the copy shares with the slot, so measured against the slot it read
+    // as no override at all and the new main's "Button" replaced it. Walked down
+    // the content sources only as far as that main and no further: a variant's
+    // own overrides on a nested instance inside it are the variant's design, not
+    // the instance's, and must still give way to the target's.
+    let shown = crate::swap::shown_main(doc.node_map(), from).unwrap_or(from);
+    let in_shown: FxHashSet<NodeId> = crate::build::subtree_nodes(doc, &[shown])
+        .into_iter()
+        .collect();
+    let base_of = |s: NodeId| {
+        let mut at = s;
+        // Bounded by the document, as `shown_main` is: the walk is as long as
+        // the slot's nesting, which the shown main's own size says nothing about.
+        for _ in 0..=doc.node_map().len() {
+            if in_shown.contains(&at) {
+                return at;
+            }
+            match crate::swap::content_source(doc, at) {
+                Some(next) => at = next,
+                None => break,
+            }
+        }
+        s
+    };
+
     let mut deletes: Vec<NodeId> = Vec::new();
     let mut cuts: Vec<NodeId> = Vec::new();
     let mut fields: Vec<Operation> = Vec::new();
@@ -1160,7 +1190,7 @@ pub(crate) fn rewrite(
                     (true, Rewrite::Relink) => Keep::Placement,
                     (true, Rewrite::Swap) => Keep::Slot,
                 };
-                fields.extend(carry(doc, *c, *s_old, *s_new, keep));
+                fields.extend(carry(doc, *c, base_of(*s_old), *s_new, keep));
             }
             None => {
                 // Only the topmost unmatched counterpart decides; below it, the
@@ -1359,7 +1389,9 @@ enum Keep {
 /// The field edits a switch makes to the counterpart `c`: every field of `s_new`
 /// where `c` still held `s_old`'s value — `propagate::follow`, the propagation
 /// pass's rule, applied as though `s_old` had become `s_new` — but what `keep`
-/// keeps.
+/// keeps. `s_old` is the node an override is measured against, which for a swap
+/// is the counterpart in the main the slot shows rather than the slot's own
+/// (`rewrite`'s `base_of`, §15 D991).
 fn carry(doc: &Document, c: NodeId, s_old: NodeId, s_new: NodeId, keep: Keep) -> Vec<Operation> {
     use crate::reset::{field_key, state_ops};
     let (Some(cn), Some(on), Some(nn)) = (doc.get(c), doc.get(s_old), doc.get(s_new)) else {

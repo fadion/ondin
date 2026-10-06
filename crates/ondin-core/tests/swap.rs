@@ -277,6 +277,106 @@ fn a_swap_carries_the_copys_overrides() {
     assert_eq!(f.fill(shape), red(77));
 }
 
+/// **An override made on the slot, inside the outer main, carries through a swap
+/// too** (§15 D991). The maintainer's case: a Toolbar main whose nested Button
+/// has its label set to "Save", and a Toolbar instance switching that Button to
+/// another variant — the label stayed "Save" on screen until the switch and then
+/// read "Button". The copy holds the slot's value, so measured against the slot
+/// it is untouched; measured against the main the slot shows it is an override,
+/// which is what it is. Here the slot's `Shape` is given fill 77 in the Button
+/// main, reaches `r` by propagation, and survives the swap to Heart (whose own is
+/// 200); swapped back, the slot's 77 is what `r` shows and no longer an override.
+///
+/// Flip, run: `carry` handed `s_old` again rather than `base_of(s_old)` fails at
+/// *"the slot's override survives"* with Heart's 200.
+#[test]
+fn a_swap_carries_an_override_made_on_the_slot() {
+    let mut f = fixture();
+    let slot_shape = f.kids(f.n)[0];
+    let shape = f.kids(f.r)[0];
+    f.commit(vec![Operation::SetFills {
+        id: slot_shape,
+        fills: fills(77),
+    }]);
+    assert_eq!(f.fill(shape), red(77), "the fixture: r follows its slot");
+    f.swap_to(f.r, f.heart);
+    assert_eq!(f.fill(shape), red(77), "the slot's override survives");
+    f.swap_to(f.r, f.star);
+    assert_eq!(f.node(f.r).swap(), None);
+    assert_eq!(f.fill(shape), red(77));
+    assert!(
+        reset::overrides(&f.doc, shape).is_empty(),
+        "back on the slot, 77 is the slot's own value rather than r's override"
+    );
+}
+
+/// **A variant's own override on a nested instance is not the instance's** — the
+/// boundary §15 D991's measure stops at. Two variants each hold a Star whose
+/// `Shape` they have recoloured, 30 and 60; an instance of the first switched to
+/// the second takes 60. Measured all the way down to Star's 10, the instance's 30
+/// would read as an override of its own and stay.
+///
+/// Flip, run: `base_of` walking the content sources to their end rather than
+/// stopping inside the main `from` shows fails at *"the second variant's own"*
+/// with 30.
+#[test]
+fn a_variant_switch_drops_the_old_variants_own_nested_override() {
+    let mut f = fixture();
+    let [set, v1, v2] = [(); 3].map(|_| f.ids.mint());
+    f.commit(vec![
+        create(set, f.root, 0, frame(300.0, 300.0), "Set"),
+        create(v1, set, 0, frame(40.0, 40.0), "A"),
+        create(v2, set, 1, frame(40.0, 40.0), "B"),
+    ]);
+    for v in [v1, v2] {
+        let (tx, _) = instance(&f.doc, &mut f.ids, f.star, v);
+        f.commit(tx.0);
+    }
+    let icon = |f: &F, v: NodeId| f.kids(f.kids(v)[0])[0];
+    let (s1, s2) = (icon(&f, v1), icon(&f, v2));
+    f.commit(vec![
+        Operation::SetFills {
+            id: s1,
+            fills: fills(30),
+        },
+        Operation::SetFills {
+            id: s2,
+            fills: fills(60),
+        },
+        Operation::SetComponent {
+            id: v1,
+            component: true,
+        },
+        Operation::SetComponent {
+            id: v2,
+            component: true,
+        },
+        Operation::SetVariantSet {
+            id: set,
+            set: Some(VariantSet {
+                props: vec![VariantProp {
+                    name: "V".into(),
+                    values: vec!["A".into(), "B".into()],
+                }],
+            }),
+        },
+        Operation::SetVariant {
+            id: v1,
+            values: vec!["A".into()],
+        },
+        Operation::SetVariant {
+            id: v2,
+            values: vec!["B".into()],
+        },
+    ]);
+    let (tx, i) = instance(&f.doc, &mut f.ids, v1, f.root);
+    f.commit(tx.0);
+    assert_eq!(f.fill(icon(&f, i)), red(30), "the fixture: A's own");
+    let tx = variant::switch(&f.doc, i, v2, &mut f.ids).expect("a switch to B");
+    f.commit(tx.0);
+    assert_eq!(f.fill(icon(&f, i)), red(60), "the second variant's own");
+}
+
 /// **The slot keeps placement, size and visibility; the swap brings the rest**
 /// (§15 D983 (3)). Moving the icon in Button and resizing it reach the swapped
 /// copy; Star's root fill does not, and Heart's does; Heart's size does not.

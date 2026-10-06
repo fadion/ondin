@@ -1623,7 +1623,7 @@ first was, it saved only the track list.
 `track_lines` merges an edge with the last one only, the spans being laid in order — it searched every
 edge, quadratic in the track count.
 
-### 5.3d Components and overrides (designed 2026-10-04; steps 1–7 built; §15 D978–D985, D988, D989)
+### 5.3d Components and overrides (designed 2026-10-04; steps 1–7 built; §15 D978–D985, D988, D989, D991)
 
 > **Design ahead of code, part of it** — decided with the maintainer on 2026-10-04 (session 47). **Build
 > steps 1–4 are built** the same day — the list items' ids (§15 D980, `a83adc8`), the component model,
@@ -2353,7 +2353,10 @@ swap; `linked_to_main` still reads `link`, or a swapped root would stop followin
 ⚠️ **The swap goes only to a main of the same kind** — the session's, departing from D983's *kind from
 the target*, and accepted by the maintainer on 2026-10-06: no operation turns a layer into another kind, and the copy's id has to survive for its own
 copies to follow it, so two frames keep the slot's size and two groups have none. **A swap is an
-override**, one unit, reset by `SetSwap { None }`; **overrides carry** across it as across a switch.
+override**, one unit, reset by `SetSwap { None }`; **overrides carry** across it as across a switch,
+measured against the counterpart in the main the slot shows and **not the slot** — so an override made
+on the slot inside the outer main carries too, while a variant's own overrides on a nested instance
+inside it still give way (`variant::rewrite`'s `base_of`, §15 D991; a reset still compares one link up).
 🚨 **`SetSwap` is all any door writes, and `swap::settle` makes the rewrite** — the first of the
 components passes in `EditorSession::commit_inner`, before `propagate_structure`, rewriting the copy in
 place through `variant::rewrite`'s swap mode, so the picker, a reset and a nested variant switch get

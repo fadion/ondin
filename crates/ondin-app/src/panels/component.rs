@@ -615,6 +615,16 @@ impl OndinApp {
                 });
             }
         }
+        // A nested instance inside a main is an instance root, so it takes the
+        // instance's face — and its binding line too, which is where a swap
+        // property is made (§15 D983 (iii)) and which that face had never drawn
+        // (§15 D989).
+        if let Face::Instance { .. } = &face
+            && let Some(root) = self.session.selection.single()
+            && ondin_core::variant::owner_above(&self.session.doc, root).is_some()
+        {
+            self.bind_line(ui, root);
+        }
         // A main's or a set's own properties, under its card (3G).
         self.inspector_properties(ui);
         match act {

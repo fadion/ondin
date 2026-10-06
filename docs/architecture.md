@@ -2124,14 +2124,29 @@ below — measured for one path, not settled in general.
   **both the transform and the insets exactly**. Why it holds there: the commit's passes write only what
   an edit touches, `keep_insets` never rewrites a resized frame's children — they re-place in used
   geometry — and a copy is compared with the values it was copied from. **Neither choice was needed for
-  that path.** ⚠️ **Unmeasured**: `keep_flex_sizes` and the kept flow translations on a flex instance,
-  and any other pass that recomputes a copy's stored value. ✅ **One flex case measured at step 6**
-  (`session::tests::a_mains_edit_reaches_its_copy_in_the_preview_as_the_commit_will_place_it`, §15
+  that path.** ⚠️ **Unmeasured**: ~~`keep_flex_sizes` and the kept flow translations on a flex
+  instance, and~~ any other pass that recomputes a copy's stored value. ✅ **One flex case measured
+  at step 6** (`session::tests::a_mains_edit_reaches_its_copy_in_the_preview_as_the_commit_will_place_it`, §15
   D979's amendment): a main's flex item resized and held by `keep_flex_sizes` — the copy lands at the
   held size, where the preview drew it, within 1e-9. ⚠️ It compares the copy's previewed box with its
-  committed one, not the copy's stored values with the main's. **One case, not the class**:
+  committed one, not the copy's stored values with the main's. ~~**One case, not the class**:
   `kept_flow_translations` on a flex instance is still unmeasured, no move inside a flex container
-  being among the test's three. ✅ **Measured for a *Reset all* of a pinned
+  being among the test's three.~~ True of that test's three cases and stale of the class from the day
+  it was written: the same session's `a_flex_copy_stays_in_its_slot_while_its_mains_item_is_dragged`
+  (D979's amendment) previews and commits a main's in-flow move and compares the copy's boxes — the
+  case the door drops whole, so nothing follows. ✅ **The kept flow translations measured on stored
+  values, exactly** (2026-10-06,
+  `session::tests::a_tool_write_on_a_mains_flex_item_follows_onto_its_copy_exactly`, D979's
+  amendment): three tool writes on a main's in-flow item through the real commit — a
+  `rotate_node` the door rewrites, the turn taken and the stored translation kept; a left-handle
+  `resize_layer` whose shift the door drops whole, so the size is what follows; a second
+  `rotate_node` — in an instance resized to 437.5 × 213, and after each the copy's transform
+  coefficients, geometry and layout item equal the main's, with `reset::overrides` empty. It holds
+  because `propagate` runs last in `commit_inner`, so a follow carries the door's value; ⚠️ **that
+  order is load-bearing** — handed the transaction as it arrived, the pass gave the copy the tool's
+  translation, the slot (37.51, −0.47), against the main's kept (20, 20). **Neither a tolerance nor a
+  value derived from the main's specified ones was needed there either.**
+  ✅ **Measured for a *Reset all* of a pinned
   child too** (step 5, the reset paragraph above), and held: `keep_insets` leaves alone a layer whose
   insets the transaction sets itself, and a reset always sets them. ✅ **And for the Transform card's
   field and header resets, measured and fixed** (`c292b50`, §15 D981's amendment): written without the
@@ -2172,8 +2187,9 @@ component*, *Select all instances*, *Go to main component*, *Reset all*, and *Re
 the count and the hairlines need want a cache keyed on `EditorSession::revision`, not the per-commit
 scan above. The six places the mockup met an older rule were all ruled by the maintainer on
 2026-10-04, as above; D981 has each. ✅ **Built with step 2** (`0ae3cd7`): the two chords, five of the
-rows — filed in Structure after *Frame selection* **provisionally**, `context-menus.md` §7 still to
-place them — and the two toasts. ✅ **The two *Reset* rows built with step 5** (`a18b0b5`, §15 D981's
+rows — filed in Structure after *Frame selection* ~~**provisionally**, `context-menus.md` §7 still to
+place them~~, which is where the accepted mockups draw them, recorded in `context-menus.md` §4 on
+2026-10-06 (§15 D981's amendment) — and the two toasts. ✅ **The two *Reset* rows built with step 5** (`a18b0b5`, §15 D981's
 amendment): *Reset all* on an instance and *Reset <name>* on a linked child, through
 `OndinApp::reset_selection`, **omitted** when `reset::Drift::any` is false (`d66044c`) — the second
 case of `context-menus.md` §3's exception for a row that only undoes a non-default state, *Reset
@@ -2426,7 +2442,8 @@ variant rows with D981's canvas and layers chrome the same day (§15 D985).
 ~~**Left**: the set's `+` edge control and value-named variant rows, beside D981's chrome.~~
 
 **Handoff, 2026-10-04 (session 47's close)** — what is built, next and owed, in one place. **Built**:
-steps 1–4 above, `Ctrl+Alt+K`/`Ctrl+Alt+B`, five menu rows filed provisionally, D981's two toasts;
+steps 1–4 above, `Ctrl+Alt+K`/`Ctrl+Alt+B`, five menu rows filed ~~provisionally~~ where the
+mockups draw them, D981's two toasts;
 then step 5's resets in core, the two *Reset* menu rows, the component card and the override look in
 part (`26c8434`, `7cf242e`, `7b5961e`, `a18b0b5`, `d66044c`, `5fcff6b`, `d2beb37`, `d39f7c1`,
 `6033571`, `a345b81`, `c292b50`, `6210953`); then, in session 49, the rest of that look — every other
@@ -2450,10 +2467,13 @@ an instance's group-style picking (§15 D981 (b)); the **filled hexagon**, which
 bundled Phosphor Regular (§15 D10's *"at two, ship the font"*)~~ — built 2026-10-06 (§15 D985), a group
 *instance*'s label still unruled; ~~D985's three *Fix* items — the `+`'s cursor, the double-click on a
 frame instance's own background, the Component card's outline hexagon~~ — fixed 2026-10-06
-(`f3ac348`, §15 D985); a test driving a real click or `Enter` through `normal_mode_input`, which
-none of D985's does; the menu rows' final place
-(`context-menus.md` §7) and the text menus' counts, which no test pins; the flex instance's
-exact-equality path, measured for a held resize and unmeasured for the kept flow translations; ~~a test
+(`f3ac348`, §15 D985); ~~a test driving a real click or `Enter` through `normal_mode_input`, which
+none of D985's does~~ — written 2026-10-06 (D985's amendment); ~~the menu rows' final place
+(`context-menus.md` §7) and the text menus' counts, which no test pins~~ — placed 2026-10-06 where
+the accepted mockups draw them, `context-menus.md` §4, and the plain text menu's 28 pinned, a
+railed one's 30 still not (§15 D981's amendment); ~~the flex instance's
+exact-equality path, measured for a held resize and unmeasured for the kept flow translations~~ —
+measured 2026-10-06 (D979's amendment); ~~a test
 for the Type resets' live-session restyle (§15 D981's amendment)~~ — written 2026-10-06 (that
 amendment); exposing nested properties, later
 by the mockup; and a verb that un-makes a component, which would owe a detach.

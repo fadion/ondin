@@ -19766,12 +19766,18 @@ mod component_verb_tests {
     }
 
     /// Deleting a main with an instance goes through and detaches it, rather than
-    /// being refused for the link it would leave. Flip: dropping
-    /// `relink_for_delete` from `delete_selection` leaves the main in place.
+    /// being refused for the link it would leave — **and keeps the instance's
+    /// layers** (§15 D984): through the real commit, the structural pass read the
+    /// deleted main as a parent that had lost its children and deleted every
+    /// untouched copy of them, and this test, asserting only the link, passed over
+    /// an empty frame. Flip: dropping `relink_for_delete` from `delete_selection`
+    /// leaves the main in place.
     #[test]
     fn deleting_a_main_detaches_its_instance() {
         let ctx = egui::Context::default();
         let (mut app, m, i) = main_and_instance(&ctx);
+        let kids = app.session.doc.get(i).unwrap().children().to_vec();
+        assert_eq!(kids.len(), 1, "the fixture: the instance's rect");
         app.session.selection.set_one(m);
         app.delete_selection();
         assert!(app.session.doc.get(m).is_none(), "the main is gone");
@@ -19779,6 +19785,11 @@ mod component_verb_tests {
             app.session.doc.get(i).unwrap().link(),
             None,
             "the instance detached"
+        );
+        assert_eq!(
+            app.session.doc.get(i).unwrap().children(),
+            kids.as_slice(),
+            "with its layers"
         );
     }
 

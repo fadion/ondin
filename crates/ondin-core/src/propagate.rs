@@ -309,13 +309,41 @@ pub fn propagate_structure(
     parents.sort();
 
     // Lost children: delete the untouched counterparts, recursively.
-    let mut lost: Vec<NodeId> = Vec::new();
-    for p in &parents {
+    //
+    // **A deleted parent loses its children only if it was itself lost from a
+    // parent that stays** (§15 D984) — an ungrouped group, a deleted child of a
+    // main, at any depth below one. A deleted *main* is lost from nothing: its
+    // instances detach and keep their look (§15 D979 (c)), so its children are
+    // not losses for them, and reading them so deleted every untouched layer of
+    // every instance of a main the user deleted.
+    let lost_from = |p: NodeId| -> Vec<NodeId> {
         let a: FxHashSet<NodeId> = after_nodes
-            .get(p)
+            .get(&p)
             .map(|n| n.children.iter().copied().collect())
             .unwrap_or_default();
-        lost.extend(before[p].children.iter().filter(|c| !a.contains(c)));
+        before[&p]
+            .children
+            .iter()
+            .copied()
+            .filter(|c| !a.contains(c))
+            .collect()
+    };
+    let mut lost: Vec<NodeId> = Vec::new();
+    let mut counted: FxHashSet<NodeId> = FxHashSet::default();
+    let mut pending: Vec<NodeId> = parents.clone();
+    loop {
+        let (now, later): (Vec<NodeId>, Vec<NodeId>) = pending
+            .into_iter()
+            .partition(|p| after_nodes.contains_key(p) || lost.contains(p));
+        if now.is_empty() {
+            break;
+        }
+        for p in now {
+            if counted.insert(p) {
+                lost.extend(lost_from(p));
+            }
+        }
+        pending = later;
     }
     // A child moved to another parent inside the same main is a **move**, not a
     // loss — judged on the tree the transaction leaves, so a parent made by the same

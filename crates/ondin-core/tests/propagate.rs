@@ -735,3 +735,24 @@ fn a_move_into_a_parent_the_instance_lacks_removes_the_counterpart() {
     );
     assert!(f.doc.get(ia).is_none(), "the untouched counterpart went");
 }
+
+/// **Deleting a main through the commit keeps its instances' layers** (§15 D984):
+/// the instance detaches and keeps its look (§15 D979 (c)). The structural pass
+/// read a deleted main as a parent that had lost every child, and deleted each
+/// untouched counterpart — so the instance came back an empty frame, while the
+/// app's own test asserted only that its link was cut.
+///
+/// Flip: counting a deleted parent's children as lost unconditionally (the first
+/// build) fails the child count at 0.
+#[test]
+fn deleting_a_main_through_the_commit_keeps_its_instances_layers() {
+    let mut f = fixture();
+    let (m, i, ia, it) = (f.m, f.i, f.ia, f.it);
+    let mut ops = ondin_core::component::relink_for_delete(&f.doc, &[m]);
+    ops.push(Operation::DeleteNode { id: m });
+    commit_all(&mut f, ops);
+    assert!(f.doc.get(m).is_none(), "the main is gone");
+    assert_eq!(link(&f.doc, i), None, "the instance detached");
+    assert_eq!(kids(&f.doc, i), vec![ia, it], "with every layer it had");
+    assert_eq!(link(&f.doc, ia), None);
+}

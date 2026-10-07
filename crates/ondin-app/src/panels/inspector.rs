@@ -7712,6 +7712,18 @@ impl OndinApp {
         if subjects.is_empty() {
             return;
         }
+        // **Not on a component** (§15 D1000, the maintainer's call): a main, a
+        // variant, an instance or a set is a part, never a page, so a card of page
+        // sizes was the tallest thing on its inspector and nobody's control. Any
+        // such frame in the selection hides it.
+        let doc = &self.session.doc;
+        if subjects.iter().any(|id| {
+            doc.get(*id)
+                .is_some_and(|n| n.component() || n.set().is_some())
+                || ondin_core::component::instance_root(doc, *id) == Some(*id)
+        }) {
+            return;
+        }
         let size = self.shared_frame_size(&subjects);
         let current = size.and_then(preset_named);
         let mut pick: Option<Size> = None;

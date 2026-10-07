@@ -9915,6 +9915,29 @@ impl OndinApp {
         (at.distance(screen) <= SET_PLUS_R + PICK_SLOP_PX).then_some(set)
     }
 
+    /// A selected set's `+` (§15 D982): a disc on the middle of its bottom edge,
+    /// the set's tab's ground and border, adding a variant on a click.
+    ///
+    /// **Drawn over the selection's outline and handles, not under them** (§15
+    /// D1000, the maintainer's look): it was part of the components chrome, which
+    /// sits under the selection, so the set's own blue edge ran through the
+    /// middle of the disc and cut the `+` in two.
+    fn draw_set_plus(&self, painter: &egui::Painter, rect: egui::Rect, ppp: f32) {
+        let Some((_, at)) = self.set_plus(rect, ppp) else {
+            return;
+        };
+        painter.circle(
+            at,
+            SET_PLUS_R,
+            theme::color::CARD,
+            egui::Stroke::new(1.0, theme::color::CARD_BORDER),
+        );
+        let s = egui::Stroke::new(1.5, theme::text::STRONG);
+        let arm = SET_PLUS_R * 0.5;
+        painter.line_segment([at - egui::vec2(arm, 0.0), at + egui::vec2(arm, 0.0)], s);
+        painter.line_segment([at - egui::vec2(0.0, arm), at + egui::vec2(0.0, arm)], s);
+    }
+
     /// The components chrome over the artwork (§15 D981) — neutral throughout,
     /// component-ness being carried by shape and never by the accent:
     /// - **a selected main's instances** each get a hairline round their box, so
@@ -9932,20 +9955,6 @@ impl OndinApp {
                 painter.line_segment([q[i], q[(i + 1) % 4]], hair);
             }
         };
-        // A selected set's `+` (§15 D982): a disc on the middle of its bottom
-        // edge, the set's tab's ground and border, adding a variant on a click.
-        if let Some((_, at)) = self.set_plus(rect, ppp) {
-            painter.circle(
-                at,
-                SET_PLUS_R,
-                theme::color::CARD,
-                egui::Stroke::new(1.0, theme::color::CARD_BORDER),
-            );
-            let s = egui::Stroke::new(1.5, theme::text::STRONG);
-            let arm = SET_PLUS_R * 0.5;
-            painter.line_segment([at - egui::vec2(arm, 0.0), at + egui::vec2(arm, 0.0)], s);
-            painter.line_segment([at - egui::vec2(0.0, arm), at + egui::vec2(0.0, arm)], s);
-        }
         for main in self.session.selection.ids() {
             if !doc.get(*main).is_some_and(|n| n.component()) {
                 continue;
@@ -11267,7 +11276,8 @@ impl OndinApp {
         // it happens to cover.
         //
         // Unless the chrome is suppressed — see [`Self::chrome_hidden`], which
-        // covers this and everything below it down to the size badge.
+        // covers this and everything below it down to the size badge, a set's
+        // `+` excepted (§15 D1000, at its call).
         let offset = self.alt_clone_offset(rect, ppp);
         let stroke = egui::Stroke::new(1.2, color::SELECT);
         let chrome = !self.chrome_hidden();
@@ -11384,6 +11394,13 @@ impl OndinApp {
         // trade: it is still obviously selected, and heavier than everything
         // beside it.
         self.draw_key_outline(painter, rect, ppp);
+
+        // A selected set's `+`, over its outline (§15 D1000). ⚠️ **Not under
+        // `chrome`**, the one mark in this span that is not: its hit route
+        // (`set_plus_at`) answers whether the chrome is hidden or not, so a `+`
+        // hidden with the rest would still add a variant on a click nobody could
+        // aim — it was drawn ungated inside the components chrome before, too.
+        self.draw_set_plus(painter, rect, ppp);
 
         // The transform origin, over the handles it can sit on top of.
         if self.mode == Mode::Normal && chrome {
@@ -20947,6 +20964,7 @@ mod frame_menu_door_tests {
                         app.draw_frame_labels(ui, ui.painter(), rect, 1.0);
                     } else {
                         app.draw_component_chrome(ui.painter(), rect, 1.0);
+                        app.draw_set_plus(ui.painter(), rect, 1.0);
                     }
                 },
             );

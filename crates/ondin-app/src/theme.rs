@@ -708,6 +708,10 @@ pub mod icon {
     pub const CROP: &str = "\u{e1d4}";
     /// Text direction — the two-way swap.
     pub const SWAP: &str = "\u{e83c}";
+    /// A swap property's filter on the Properties card (§15 D1000). Confirmed by
+    /// atlas dump, the wide mouth over a narrow stem — `U+E268` beside it is the
+    /// three-bar *funnel-simple*.
+    pub const FUNNEL: &str = "\u{e266}";
     /// A decoration's thickness — a single stroke, seen end on.
     pub const LINE_VERTICAL: &str = "\u{ed70}";
     /// Where a word may be broken.
@@ -1025,6 +1029,7 @@ pub mod icon {
         ("list-numbers", LIST_NUMBERS),
         ("crop", CROP),
         ("swap", SWAP),
+        ("funnel", FUNNEL),
         ("line-vertical", LINE_VERTICAL),
         ("scissors", SCISSORS),
         ("minus", MINUS),

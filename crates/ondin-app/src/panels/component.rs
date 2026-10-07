@@ -1371,6 +1371,19 @@ fn reset_row(ui: &mut egui::Ui, d: Drift, p: PropDrift, overflow: bool, act: &mu
 /// *Select all*, and *Duplicate*. The mockup's *Main component* caption over the
 /// name is gone (§15 D993): the filled hexagon already says it.
 fn main_body(ui: &mut egui::Ui, name: &str, instances: usize, act: &mut Option<Act>) {
+    name_line(ui, None, name);
+    // The count, *Select all* and *Duplicate* 4pt closer under the one-line face,
+    // the gap an instance's face leaves above its *Reset all* (§15 D995, the
+    // maintainer's look). Here and not in `main_tail`, which a variant's face
+    // shares under its property rows.
+    ui.add_space(-4.0);
+    main_tail(ui, instances, act);
+}
+
+/// A card's one-line face: the glyph in its slot and the name beside it — a
+/// main's, `None` for the filled hexagon, and a set's on the Variants card (§15
+/// D1000), one layout so the two names sit at one height.
+pub(super) fn name_line(ui: &mut egui::Ui, glyph: Option<&str>, name: &str) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 9.0;
         let slot = glyph_slot(ui);
@@ -1381,14 +1394,11 @@ fn main_body(ui: &mut egui::Ui, name: &str, instances: usize, act: &mut Option<A
                     .color(theme::text::STRONG),
             );
         });
-        paint_hexagon(ui, true, slot, block.response.rect);
+        match glyph {
+            None => paint_hexagon(ui, true, slot, block.response.rect),
+            Some(g) => paint_glyph(ui, g, slot, block.response.rect),
+        }
     });
-    // The count, *Select all* and *Duplicate* 4pt closer under the one-line face,
-    // the gap an instance's face leaves above its *Reset all* (§15 D995, the
-    // maintainer's look). Here and not in `main_tail`, which a variant's face
-    // shares under its property rows.
-    ui.add_space(-4.0);
-    main_tail(ui, instances, act);
 }
 
 /// A main's count with *Select all*, and *Duplicate* — 3A's lower half, which a
@@ -3174,10 +3184,8 @@ mod tests {
             out = frame(&mut v.app, &ctx, Vec::new());
         }
         let painted: Vec<String> = texts(&out).into_iter().map(|(t, _)| t).collect();
-        assert!(
-            painted.contains(&"Component set".to_string()),
-            "{painted:?}"
-        );
+        // The *Component set* caption went with §15 D1000; its absence is
+        // `the_set_card_is_one_line_the_clash_is_short_and_components_get_no_templates`'.
         assert!(
             painted.contains(&"2 variants · 1 instance".to_string()),
             "{painted:?}"
@@ -3791,5 +3799,148 @@ mod tests {
             "SmallXY",
             "the layer's name"
         );
+    }
+
+    /// **A nested instance no swap property drives is offered as one, and a swap
+    /// property's filter is a row of its own** (§15 D1000, the maintainer's look:
+    /// *"If I remove the icon property … I have no idea how to bring it back"*).
+    /// A Button main holding a Badge instance and no properties: its Properties
+    /// card offers the Badge with a `+`, and no *Shown from nested* heading while
+    /// nothing is shown; the `+` makes a swap property bound to the Badge, after
+    /// which the card draws its funnel row and the line under it, and offers the
+    /// Badge no more; showing the Badge's properties brings the heading.
+    ///
+    /// **Flip run**: the offered rows' filter keeping nothing fails *"the Badge is
+    /// offered"*, the predicted site.
+    #[test]
+    fn a_nested_instance_is_offered_as_a_swap_property_and_its_filter_is_a_row() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut n = nested_fixture(&ctx);
+        let words =
+            |out: &egui::FullOutput| texts(out).into_iter().map(|(t, _)| t).collect::<Vec<_>>();
+        let out = settled(&mut n.app, &ctx, n.button);
+        let painted = texts(&out);
+        let row = painted
+            .iter()
+            .find(|(t, _)| t == "· nested instance")
+            .unwrap_or_else(|| panic!("the Badge is offered: {:?}", words(&out)))
+            .1;
+        assert!(
+            !words(&out).iter().any(|t| t == "SHOWN FROM NESTED"),
+            "no heading while nothing is shown"
+        );
+        let plus = painted
+            .iter()
+            .find(|(t, r)| {
+                t == icon::PLUS
+                    && (r.center().y - row.center().y).abs() < 4.0
+                    && r.left() > row.right()
+            })
+            .expect("the row's +")
+            .1
+            .center();
+        click_at(&mut n.app, &ctx, plus);
+        let props = n.app.session.doc.get(n.button).unwrap().props().to_vec();
+        assert_eq!(props.len(), 1, "one property made");
+        assert_eq!(props[0].kind, ondin_core::variant::PropKind::Swap);
+        assert_eq!(props[0].bound, vec![n.slot]);
+        let out = settled(&mut n.app, &ctx, n.button);
+        let w = words(&out);
+        assert!(
+            w.iter().any(|t| t == icon::FUNNEL),
+            "the filter's funnel: {w:?}"
+        );
+        assert!(
+            w.iter().any(|t| t == "Filter displayed list by name"),
+            "{w:?}"
+        );
+        assert!(
+            !w.iter().any(|t| t == "· nested instance"),
+            "offered no more"
+        );
+        let tx = ondin_core::variant::set_shown(
+            &n.app.session.doc,
+            &mut n.app.session.ids,
+            n.slot,
+            true,
+        )
+        .expect("a showing");
+        assert!(n.app.session.commit(tx));
+        let out = settled(&mut n.app, &ctx, n.button);
+        assert!(
+            words(&out).iter().any(|t| t == "SHOWN FROM NESTED"),
+            "the heading once something is shown"
+        );
+    }
+
+    /// **The set's card, the clash and the templates** (§15 D1000, the
+    /// maintainer's look). The Variants card's face is the set's name on one line
+    /// — no *Component set* caption — at the height a main's name sits under its
+    /// card's eyebrow; a variant whose combination another has says *Variant
+    /// clash* and not the sentence that ran under *Select it*; and no component —
+    /// a set, a variant, an instance — gets the Frame templates card.
+    ///
+    /// **Flip run**: the templates' component guard removed fails *"not on a
+    /// set"* — at the set, the first selection asked, where the prediction had
+    /// been the variant. The caption's flip was not run; *"no caption"* asserts
+    /// its absence directly.
+    #[test]
+    fn the_set_card_is_one_line_the_clash_is_short_and_components_get_no_templates() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut v = variants_fixture(&ctx);
+        let under = |out: &egui::FullOutput, eyebrow: &str, name: &str| {
+            let painted = texts(out);
+            let top = painted
+                .iter()
+                .find(|(t, _)| t == eyebrow)
+                .unwrap()
+                .1
+                .bottom();
+            painted
+                .iter()
+                .filter(|(t, r)| t == name && r.top() > top)
+                .map(|(_, r)| r.top() - top)
+                .fold(f32::INFINITY, f32::min)
+        };
+        let out = settled(&mut v.app, &ctx, v.set);
+        let words: Vec<String> = texts(&out).into_iter().map(|(t, _)| t).collect();
+        assert!(
+            !words.iter().any(|t| t == "Component set"),
+            "no caption: {words:?}"
+        );
+        assert!(
+            !words.iter().any(|t| t == "FRAME TEMPLATES"),
+            "not on a set"
+        );
+        let set = under(&out, "VARIANTS", "Button");
+        let mut f = fixture(&ctx);
+        let main = under(&settled(&mut f.app, &ctx, f.m), "COMPONENT", "Button");
+        assert!(
+            (set - main).abs() <= 0.5,
+            "the set's name {set}, a main's {main}"
+        );
+
+        assert!(
+            v.app
+                .session
+                .commit(Transaction(vec![Operation::SetVariant {
+                    id: v.large,
+                    values: vec!["Small".into()],
+                }]))
+        );
+        for id in [v.small, v.i] {
+            let out = settled(&mut v.app, &ctx, id);
+            let words: Vec<String> = texts(&out).into_iter().map(|(t, _)| t).collect();
+            assert!(
+                !words.iter().any(|t| t == "FRAME TEMPLATES"),
+                "not on a component: {words:?}"
+            );
+            if id == v.small {
+                assert!(words.iter().any(|t| t == "Variant clash"), "{words:?}");
+                assert!(!words.iter().any(|t| t.starts_with("Another variant")));
+            }
+        }
     }
 }

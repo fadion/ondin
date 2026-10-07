@@ -325,27 +325,13 @@ impl OndinApp {
         let mut refused: Option<&str> = None;
         let mut confirm: Option<ValueDelete> = None;
 
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 9.0;
-            ui.label(
-                egui::RichText::new(icon::SQUARES_FOUR)
-                    .font(theme::icon_font(16.0))
-                    .color(theme::text::STRONG),
-            );
-            ui.vertical(|ui| {
-                ui.spacing_mut().item_spacing.y = 1.0;
-                ui.label(
-                    egui::RichText::new("Component set")
-                        .size(11.0)
-                        .color(theme::text::DIM),
-                );
-                ui.label(
-                    egui::RichText::new(&name)
-                        .size(13.0)
-                        .color(theme::text::STRONG),
-                );
-            });
-        });
+        // **One line, the set's name alone** (§15 D1000, the maintainer's look):
+        // the *Component set* caption over it went as a main's and an instance's
+        // did (§15 D993) — the glyph and the card's *Variants* title say it — and
+        // the line is a main's face, glyph slot and all, so the name sits at the
+        // height theirs do and the count comes 4pt closer under it.
+        super::component::name_line(ui, Some(icon::SQUARES_FOUR), &name);
+        ui.add_space(-4.0);
         ui.horizontal(|ui| {
             ui.label(
                 egui::RichText::new(format!(
@@ -661,11 +647,17 @@ impl OndinApp {
             .find(|c| *c != main && doc.get(*c).is_some_and(|n| n.variant() == values));
         if let Some(o) = other {
             ui.horizontal(|ui| {
-                note(
-                    ui,
-                    icon::WARNING,
-                    &format!("Another variant is also {}", variant::derived_name(&values)),
-                );
+                // **Two words, the sentence in the tooltip** (§15 D1000, the
+                // maintainer's look): *Another variant is also Large, Primary*
+                // ran under *Select it* and was cut. A scope's own response is
+                // never hovered, so the note's rect is sensed by hand.
+                let row = note(ui, icon::WARNING, "Variant clash");
+                ui.interact(row.rect, ui.id().with("clash-tip"), egui::Sense::hover())
+                    .on_hover_text(format!(
+                        "Another variant in this set is also {} — give each variant \
+                         a combination of its own",
+                        variant::derived_name(&values)
+                    ));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let label = "Select it";
                     let w = ui::action_button_w(ui.ctx(), label);
@@ -707,9 +699,9 @@ impl OndinApp {
     /// the shown layers and the main the copy shows now (4P, 4Q). Over several
     /// roots a group matches by slot — its layers' name path — and a slot that
     /// shows different mains in them says so rather than guess which properties
-    /// apply (4S). A group the instance hides dims, its rows read-only, with the
-    /// property that hides it named (4R); its dot still shows, and *Reset all* and
-    /// ⋯ still reach it.
+    /// apply (4S). A group the instance hides dims, its rows read-only (4R — the
+    /// line naming what hides it gone since §15 D1000); its dot still shows, and
+    /// *Reset all* and ⋯ still reach it.
     ///
     /// **No Swap row inside a group** (4O): the copy's swap is an outer swap
     /// property's row where one drives it, and otherwise is made from the copy's
@@ -795,12 +787,10 @@ impl OndinApp {
             }
             match &g.hidden {
                 None => self.own_rows(ui, &g.copies, true),
-                Some(by) => {
-                    let why = match by.is_empty() {
-                        true => "Hidden".to_string(),
-                        false => format!("Hidden by {by}"),
-                    };
-                    ui.label(egui::RichText::new(why).size(11.5).color(theme::text::DIM));
+                // **Dimmed and disabled, with no line saying so** (§15 D1000, the
+                // maintainer's look: the faded rows are affordance enough). 4R's
+                // *Hidden by …* caption went.
+                Some(_) => {
                     ui.scope(|ui| {
                         ui.disable();
                         self.own_rows(ui, &g.copies, true);
@@ -1241,16 +1231,50 @@ impl OndinApp {
                     .color(theme::text::DIM),
                 );
             }
-            for p in &props {
+            // **Three groups with a rule between each** (§15 D1000, the
+            // maintainer's look — the card read as one undivided list): the
+            // boolean and text properties; the swap properties, a rule between
+            // each, with every nested instance no swap property drives offered as
+            // one; and what is shown from nested instances.
+            let (swaps, plain): (Vec<&Keyed<Property>>, Vec<&Keyed<Property>>) =
+                props.iter().partition(|p| p.kind == PropKind::Swap);
+            for p in &plain {
                 property_row(ui, doc, owner, p, &mut out, &mut refused);
             }
-            // **Shown from nested** (4L): each nested instance inside the main,
-            // the shown ones with what they show and a − to stop, the others
-            // listed too so they can be found — a click on a name selects it.
-            if !slots.is_empty() {
-                ui.add_space(4.0);
+            // **A nested instance no swap property drives, offered as one** — the
+            // way back after a swap property is deleted, which had none on this
+            // card: the only door was the nested instance's own binding line,
+            // inside the main.
+            let dormant: Vec<NodeId> = slots
+                .iter()
+                .map(|(s, _)| *s)
+                .filter(|s| !swaps.iter().any(|p| p.bound.contains(s)))
+                .collect();
+            let mut first = plain.is_empty();
+            for p in &swaps {
+                if !std::mem::take(&mut first) {
+                    card_rule(ui);
+                }
+                property_row(ui, doc, owner, p, &mut out, &mut refused);
+            }
+            for slot in &dormant {
+                if !std::mem::take(&mut first) {
+                    card_rule(ui);
+                }
+                if dormant_swap_row(ui, doc, *slot) {
+                    out = new_swap_property(doc, &mut app.session.ids, owner, *slot);
+                }
+            }
+            // **Shown from nested** (4L): the nested instances whose properties
+            // the main's instances show, with what they show and a − to stop — a
+            // click on a name selects it. **Only those, and only when there are
+            // any** (§15 D1000): a heading over a list of *Not shown* rows read
+            // as something the card wanted done.
+            let shown: Vec<NodeId> = slots.iter().filter(|(_, s)| *s).map(|(s, _)| *s).collect();
+            if !shown.is_empty() {
+                card_rule(ui);
                 ui.label(ui::eyebrow("Shown from nested"));
-                for (slot, shown) in &slots {
+                for slot in &shown {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 4.0;
                         let name = doc
@@ -1270,35 +1294,28 @@ impl OndinApp {
                         if name_resp.clicked() {
                             select = Some(*slot);
                         }
-                        let what = match shown {
-                            true => format!("· {}", shown_names(doc, *slot).join(", ")),
-                            false => "Not shown".to_string(),
-                        };
-                        ui.label(egui::RichText::new(what).size(12.0).color(theme::text::DIM));
-                        if *shown {
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    if ui::field_button(
-                                        ui,
-                                        icon::MINUS,
-                                        ui::CONTROL_H,
-                                        13.0,
-                                        FieldButton::Off,
-                                    )
-                                    .on_hover_text("Stop showing its properties on instances")
-                                    .clicked()
-                                    {
-                                        out = variant::set_shown(
-                                            doc,
-                                            &mut app.session.ids,
-                                            *slot,
-                                            false,
-                                        );
-                                    }
-                                },
-                            );
-                        }
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "· {}",
+                                shown_names(doc, *slot).join(", ")
+                            ))
+                            .size(12.0)
+                            .color(theme::text::DIM),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui::field_button(
+                                ui,
+                                icon::MINUS,
+                                ui::CONTROL_H,
+                                13.0,
+                                FieldButton::Off,
+                            )
+                            .on_hover_text("Stop showing its properties on instances")
+                            .clicked()
+                            {
+                                out = variant::set_shown(doc, &mut app.session.ids, *slot, false);
+                            }
+                        });
                     });
                 }
             }
@@ -1608,11 +1625,19 @@ fn property_row(
     };
     ui.label(egui::RichText::new(line).size(11.0).color(theme::text::DIM));
     // A swap property's filter (§15 D983 (5)): the prefix of a main's name the
-    // picker offers, every main when empty. Edited here, on the main.
+    // picker offers, every main when empty. Edited here, on the main — **as a row
+    // of its own like the name's** (§15 D1000, the maintainer's look): the funnel
+    // where the kind's glyph is, the field to the card's edge, and a line under it
+    // saying what it does, where it was a *Filter* label in a column no other row
+    // of this card has.
     if p.kind == PropKind::Swap {
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 0.0;
-            row_label(ui, "Filter", None);
+            ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
+            ui.label(
+                egui::RichText::new(icon::FUNNEL)
+                    .font(theme::icon_font(14.0))
+                    .color(theme::text::MUTED),
+            );
             let w = ui.available_width();
             let id = ui.id().with(("prop-filter", owner, p.id));
             if let Some(f) = filter_field(ui, id, &p.filter, egui::vec2(w, ui::CONTROL_H)) {
@@ -1624,7 +1649,92 @@ fn property_row(
                 });
             }
         });
+        ui.label(
+            egui::RichText::new("Filter displayed list by name")
+                .size(11.0)
+                .color(theme::text::DIM),
+        );
     }
+}
+
+/// A hairline across the card between two groups of its rows (§15 D1000) — the
+/// card's own row gap above and below it, so a rule adds one gap and a line.
+fn card_rule(ui: &mut egui::Ui) {
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::empty());
+    let ppp = ui.ctx().pixels_per_point();
+    let y = ui::hairline_in_column(rect.center().y, ppp, 1.0);
+    ui.painter().line_segment(
+        [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
+        egui::Stroke::new(1.0, theme::color::text_a(26)),
+    );
+}
+
+/// A nested instance inside the main that no swap property drives, offered as
+/// one on the Properties card (§15 D1000): the swap glyph faint, its name, and a
+/// `+` that makes the property. Answers whether the `+` was clicked.
+fn dormant_swap_row(ui: &mut egui::Ui, doc: &ondin_core::Document, slot: NodeId) -> bool {
+    let name = doc
+        .get(slot)
+        .map(|n| n.name().to_string())
+        .unwrap_or_default();
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
+        ui.label(
+            egui::RichText::new(icon::SWAP)
+                .font(theme::icon_font(14.0))
+                .color(theme::text::FAINT),
+        );
+        ui.label(
+            egui::RichText::new(name)
+                .size(12.0)
+                .color(theme::text::MUTED),
+        );
+        ui.label(
+            egui::RichText::new("· nested instance")
+                .size(12.0)
+                .color(theme::text::DIM),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui::field_button(ui, icon::PLUS, ui::CONTROL_H, 13.0, FieldButton::Off)
+                .on_hover_text("Make a swap property for this nested instance")
+                .clicked()
+        })
+        .inner
+    })
+    .inner
+}
+
+/// A new swap property on `owner` bound to the nested instance `slot`, named for
+/// it and filtered by the main it shows — the binding line's *New property…*
+/// for an *Instance* (§15 D983 (5)), from the Properties card (§15 D1000).
+fn new_swap_property(
+    doc: &ondin_core::Document,
+    ids: &mut ondin_core::IdSource,
+    owner: NodeId,
+    slot: NodeId,
+) -> Option<Transaction> {
+    let n = doc.get(slot)?;
+    let filter = n
+        .link()
+        .and_then(|m| doc.get(m))
+        .map(|m| swap::suggested_filter(m.name()))
+        .unwrap_or_default();
+    let mut props = doc.get(owner)?.props().to_vec();
+    let name = fresh_name(&props, n.name());
+    props.push(Keyed::new(
+        ids.mint_item(),
+        Property {
+            name,
+            kind: PropKind::Swap,
+            bound: vec![slot],
+            filter,
+        },
+    ));
+    Some(Transaction(vec![ondin_core::Operation::SetProperties {
+        id: owner,
+        props,
+    }]))
 }
 
 /// [`name_field`] for a swap property's filter, which may be cleared — an empty

@@ -1119,7 +1119,8 @@ pub(crate) enum Rewrite {
 /// nested copy's own copies survive it:
 ///
 /// - layers are matched by **name path** below the two mains, the k-th sibling of
-///   a name matching the k-th, and only within one kind;
+///   a name matching the k-th, only within one kind, and only under a matched
+///   parent;
 /// - a matched counterpart is relinked, and each of its fields takes the new
 ///   main's value **where it still held the old main's** — the propagation pass's
 ///   own rule (`propagate::follow`), so every override carries and nothing else

@@ -488,7 +488,11 @@ pub fn detach(doc: &Document, root: NodeId) -> Option<Transaction> {
 /// - **every linked node still belongs to its instance**: an instance root above
 ///   it whose source contains its source, and no other node of that instance on
 ///   the same source. What fails is cut — a layer dragged out of its instance, the
-///   members of an instance whose root an ungroup dissolved. Asked top-down, so a
+///   members of an instance whose root an ungroup dissolved — except a nested copy
+///   whose outer instance lost its link in this edit, which climbs past its source
+///   as [`detach`] climbs it (`[X2-L2-03]`), though with `swap::land_ops` and not
+///   `land_ops_through`, so a swap on a node it passes is not carried (§15 D983's
+///   amendment building D1003 (3)–(5)). Asked top-down, so a
 ///   cut nested root cuts its members; and where two nodes of one instance share a
 ///   source, **the one the transaction did not touch keeps it**.
 ///
@@ -665,7 +669,9 @@ pub fn settle_links(doc: &Document, tx: &Transaction) -> Vec<Operation> {
     // instances of their own main — but on an ungroup the nested source survives
     // (lifted out), nothing climbed, and the membership cut them to plain layers.
     // Only where the copy's outer root is still around it and lost its link here:
-    // a nested copy the user moved out of its instance is still cut.
+    // a nested copy the user moved out of its instance is still cut. ⚠️ Unlike
+    // `detach`, this walk does not carry a swap on a node it passes (`land_ops`,
+    // not `swap::land_ops_through`) — read, not run, by the record (§15 D983).
     let detached: Vec<NodeId> = {
         let mut v: Vec<NodeId> = cut.iter().copied().collect();
         v.sort();

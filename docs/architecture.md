@@ -1900,7 +1900,10 @@ the rest were, it read every child as lost and emptied each instance that §15 D
 main*, below — says keeps its look, with every test green, until 2026-10-06. **A move into a parent the same edit made** — *Group
 selection* — is judged on the final tree: the new parent's copy is pruned of every node that already
 sat in **the same main** (`only_new`) and each existing counterpart **moves** into it, carried down the
-copy chain, so an instance's own changes survive grouping and ungrouping, still linked. **A layer that
+copy chain, so an instance's own changes survive grouping and ungrouping, still linked. The instance
+holding a copy is asked of the copy's **parent**: a nested instance's copy is an instance root itself,
+so asked of the copy it answered with the copy, and grouping a nested instance inside a main left every
+copy of it where it was (found 2026-10-07 writing a test for `[X2-L1-03]`). **A layer that
 comes in from outside the main** — dragged in from the canvas or from another main — is a gain and is
 copied whole, as the design bullet's *"a `Reparent` into the main"* says; the prune read *every node
 that existed before the edit* until 2026-10-07, so a layer dragged into a main never reached its
@@ -1997,9 +2000,15 @@ the main and the links. Nested chains relink one level up, above, so a nested in
 outer main's deletion as an instance of its own main. ⚠️ *Keeps its current look* is pinned through the
 real commit since 2026-10-06 (`deleting_a_main_through_the_commit_keeps_its_instances_layers`, §15
 D984): the structural pass had been deleting every untouched layer of the detached instance.
-⚠️ **A cut is ruled otherwise, not built — §15 D1003 (1)**: *Cut* then *Paste* of a main in the same
-document is a move, the paste restoring the main under its own id and relinking the instances the
-cut detached. Today the cut detaches as a delete does and the paste makes a new, unlinked main.
+✅ **A cut is a move** (§15 D1003 (1), built 2026-10-07, `6bc0e2a`): *Cut* then *Paste* of a main in the
+same document restores the main under its own ids and relinks the instances the cut detached, an edit
+made to one meanwhile reading as an override by (a). The cut detaches as a delete does — between the two
+the instances are plain layers — and keeps every link its delete took (`OndinApp::cut_move`); the first
+paste of that clipboard into that document, none of its ids back, inserts the subtrees **under their
+original ids** and gives back each link whose node is still unlinked (`paste_cut_move`). A second paste
+is an instance, (e) below; a refused move falls back to the ordinary paste. ⚠️ **Not given back**: a
+nested copy inside a cut main's instance climbed to its own main at the cut, so it is not unlinked and
+keeps that link — read, not run (§15 D979's amendment building D1003 (1)).
 
 ✅ **The verbs are built** (build step 2, `0ae3cd7`, §15 D979's amendment), on **one rule for every
 way a link's target goes**: `component::relink_past(doc, gone, among)` — a link into `gone` climbs to
@@ -2013,7 +2022,11 @@ moves, deletes or regroups layers has to know about components**: `component::se
 commit-time pass in `EditorSession::commit_inner` after `keep_flex_sizes` (`keep_insets`' shape;
 `66b48a5`, `f75dcc5`, §15 D979's amendment), applies the transaction to a scratch copy through
 `Document::apply_unchecked` and settles the tree it leaves — links into deleted nodes climb past them,
-so an ungrouped main is a deleted main; top-down, a linked node not linked straight to a main with no
+so an ungrouped main is a deleted main, and since 2026-10-07 for the nested copies in its instances too:
+an ungroup leaves their source standing, so nothing climbed and they were cut to plain layers, and a
+cut nested copy whose outer instance lost its link in the edit now climbs past its source as `detach`
+climbs it (`[X2-L2-03]`) — but not carrying a swap it passes, as `detach` does (§15 D983's amendment
+building D1003 (3)–(5)); top-down, a linked node not linked straight to a main with no
 instance root above it whose source contains its own is **cut**, so a layer dragged out of its
 instance, or the members of a group instance an ungroup dissolved, become plain layers; and where two
 nodes of one instance share a source, **the one the transaction did not touch keeps it**. It iterates
@@ -2047,8 +2060,13 @@ its instance root came along**, otherwise it becomes local — so a child duplic
 instance is local rather than refused. **A nested instance copied on its own** — its root linked to a
 nested copy inside some main, no outer instance coming with it — **climbs one level up**, `detach`'s
 rule: its root and members relink past that nested copy to the nested main's own nodes, and it lands as
-a plain instance of that main (`f75dcc5`). A layer *moved* out of its instance is cut by
-`settle_links`, above.
+a plain instance of that main (`f75dcc5`) — and since 2026-10-07 so does **every** nested instance in the
+copy with no instance root above it there, not only one at its root: a member group duplicated with a
+nested instance inside came out a cut frame over still-linked members (`[X2-L1-03]`). A swapped copy
+whose link is dropped lands by `swap::landed` at once — an instance of what it shows where that main is
+here, plain layers where it is not (`[X5-L1-04]`): the swap had been left for `settle_links`' tidy,
+which a paste into a document holding no link never reaches, and `check` refused the paste. A layer
+*moved* out of its instance is cut by `settle_links`, above.
 
 **`apply`'s post-conditions** (the session's; §15 D491's shape — after the last op, before
 `*self = working`, so a transaction may pass *through* a state that breaks one). ✅ **Built** —
@@ -2068,7 +2086,8 @@ a depth-first search over a graph from each main to the mains of the instance ro
 (`component::uses` — the mains they **show**, a swap counting where it sits on a chain); and
 **`Swap`**, a swap on anything but a nested copy inside an outer instance, or naming anything but a main
 of the copy's own kind — a dangling swap being `Dangling`, and a swapped root's source, for
-`Membership`, its swap (§15 D983). 🚨 **It
+`Membership`, its swap (§15 D983), or the slot for a copy of a layer the slot adds of its own, itself
+unlinked (§15 D1003 (3), `settle_links`' membership the same). 🚨 **It
 runs over the whole document, not over `dirty`**: a link breaks when its *target* goes, and a delete
 dirties the deleted node, not the instance pointing at it. **Free when nothing is a main or linked** —
 one scan, and one more for `variant::check`'s own exit when nothing is a set, a variant or an owner of
@@ -2423,7 +2442,11 @@ value renames its variants here and the propagation pass carries that name onto 
 holding the old one; swapped, the instance keeps the old name (measured,
 `renaming_a_value_renames_its_variants_and_their_instances`). Gated, like `settle_links`, so an edit that
 cannot break a variant rule pays no scratch clone — the reparent included in the gate, or a main dragged
-into a set is refused. **The verbs**: `combine` (*Combine as variants* — the mains framed with
+into a set is refused; a written link or swap too since 2026-10-07, or a detach of a bound or shown
+slot was refused (`[X6.1-L2-03]`); and a pasted subtree carrying a set, values or properties runs it
+whatever the document held before, or a variant pasted where no set is was refused (`[X6.1-L1-04]`).
+Over a set holding a property with no values it answers nothing and leaves the refusal to `apply`
+(`SetNames`), where it read the first value and panicked (`[R1-L2-03]`). **The verbs**: `combine` (*Combine as variants* — the mains framed with
 `SET_PAD`, 10, of air on every side and nothing moving on the page, §15 D998, one property named
 *Property 1*, each name a value, shared names clashing), `add_variant` (*Duplicate as component* of
 a variant, `VARIANT_GAP` below it, the set grown to `SET_PAD` past it — `VARIANT_GAP` until §15
@@ -2433,7 +2456,9 @@ set's renames, adds, moves and deletes — `delete_value` deleting the variants 
 
 **The variant switch is made in place** (`variant::switch`), so every matched id, the selection and a
 nested copy's own copies survive it. Layers below the two mains match by name path, the k-th same-named
-sibling to the k-th, within one kind; a matched counterpart is relinked and each field goes through
+sibling to the k-th, within one kind, **and only under a matched parent** — a Group *Box* and a Frame
+*Box* left the *Box/Shape* under them matched alone, and the switch was refused or doubled the Shape
+(`[X6.1-L1-01]`, until 2026-10-07); a matched counterpart is relinked and each field goes through
 `propagate::follow` as though the old main had become the new one, so **overrides carry and nothing else
 does**; a keyed list's items match by id, else by position; an unmatched counterpart goes where
 `propagate::untouched`, else stays as the instance's own; a new layer is copied in at its anchor; the
@@ -2448,6 +2473,8 @@ new. **An instance switches if it is linked straight to a main, or is a nested c
 instance** (`variant::can_switch`); the first relinks, the second swaps (`swap::swap`), and both rewrite
 through `variant::rewrite`, the switch's body. Until 2026-10-06 only the first could: the link model had
 no place for *"the counterpart of N in the outer main, but an instance of main B"* — §15 D982 has why.
+**An instance never switches to a main of another kind** (`variant::same_kind`, which `switch` and
+`switch_target` ask since 2026-10-07 — §15 D1003 (5)'s second defence).
 
 ✅ **Instance swap** (§15 D983 — ruled by the maintainer 2026-10-05, built 2026-10-06;
 `ondin-core/src/swap.rs`). **The link keeps the slot, the swap brings the contents.** `Node::swap` names
@@ -2468,17 +2495,25 @@ override**, one unit, reset by `SetSwap { None }`; **overrides carry** across it
 measured against the counterpart in the main the slot shows and **not the slot** — so an override made
 on the slot inside the outer main carries too, while a variant's own overrides on a nested instance
 inside it still give way (`variant::rewrite`'s `base_of`, §15 D991; a reset still compares one link up).
+**Layers are matched by that main's names too** (`paths_by` over each side's base, 2026-10-07): a name
+set on the slot is an override like any other, and matching by it left the layer unmatched — its
+override dropped, a stray layer kept beside the target's, a duplicate on the swap back (`[X5-L1-03]`).
 🚨 **`SetSwap` is all any door writes, and `swap::settle` makes the rewrite** — the first of the
 components passes in `EditorSession::commit_inner`, before `propagate_structure`, rewriting the copy in
 place through `variant::rewrite`'s swap mode, so the picker, a reset and a nested variant switch get
 one rewrite and undo replays it whole; and an unexpanded swap is refused by `check`'s `Membership`, read
-against the swap, so the pass and the check are two defences. **A copy of a swapped copy follows it one
+against the swap, so the pass and the check are two defences. Since 2026-10-07 it reads **every**
+swapped node whenever a transaction writes a swap or a link, clears one left naming what its slot shows
+(§15 D1003 (4)), and rewrites each node after everything it copies — its ancestors and its link chain's
+(`[X5-L1-02]`). **A copy of a swapped copy follows it one
 link up** with no swap of its own (`make_copy_of` clears it) and may override it. **Landing**
 (`swap::landed`): a swapped copy whose link would end at a main or at nothing — its outer instance
-detached, copied alone — becomes an instance of what it shows; deleting the swapped-to main clears the
-swap and leaves its layers the copy's own; detaching the copy, or dragging it out, leaves plain layers;
-`swap::tidy`, inside `settle_links`, clears a swap that no longer stands. **`component::main_of` answers
-the main a root shows**, through a swap, for the card's link to it, *Select all instances*, *Go to main* and the
+detached, copied alone — becomes an instance of what it shows, and one whose link climbs past a node
+carrying a swap takes that swap unless where it lands already shows it (`swap::land_ops_through`,
+`[X5-L1-01]`: it landed showing the slot's main with the swap's layers cut loose); deleting the
+swapped-to main clears the swap and leaves its layers the copy's own; detaching the copy, or dragging
+it out, leaves plain layers; `swap::tidy`, inside `settle_links`, clears a swap that no longer stands.
+**`component::main_of` answers the main a root shows**, through a swap, for the card's link to it, *Select all instances*, *Go to main* and the
 instance's properties. **What is offered**: a swap property (`PropKind::Swap`), bound only to a nested
 instance inside the main and made from that layer's binding line (*Instance*) — or, since §15 D1000,
 from the `+` the Properties card offers on each nested instance no swap property binds
@@ -2490,11 +2525,18 @@ gets a *Swap* row offering every main of its kind, unfiltered (the session's). T
 offered, never what is valid. *Preferred mains* is not built. ⚠️ **The app's swap UI is untested** — a
 `ComboBox` popup cannot be driven headlessly. D983's amendment has the seven decisions the build made,
 each the session's — the first, the same-kind swap, accepted by the maintainer on 2026-10-06.
-⚠️ **Three rulings here are not built — §15 D1003 (3)–(5).** A layer the outer main added to the
-slot carries across a swap, at its place among its siblings, where the rewrite deletes it today as an
-unmatched counterpart that is untouched; a swap left equal to what its slot shows is cleared on every
-route, where only `swap::swap` keeps one from being stored; and a set holds one kind — *Combine as
-variants* and a drag into a set refuse another, `variant::switch` refuses second, the loader never.
+✅ **§15 D1003 (3) and (4) are built, and (5)'s second defence** (2026-10-07, `0683f66`). **A layer the
+outer main added to the slot carries across a swap**, at its place among its siblings: `rewrite`'s swap
+mode leaves alone an unmatched counterpart whose source is no node of the main the slot shows, still
+linked to the slot's layer, which `check`'s `Membership` and `settle_links`' admit (`slot_own`, above);
+and a new-side layer some node of the instance already copies is not copied in again, so the swap back
+makes no duplicate. ⚠️ **Only for an addition that is itself unlinked** — read, not run: `slot_own`
+asks that the slot's layer link to nothing, so a copy of a nested *instance* the outer main put into the
+slot is no member of the swapped root; `settle_links` cuts it to plain layers where it runs, and `check`
+refuses the swap where it does not (§15 D983's amendment building D1003 (3)–(5)). **A swap left equal to what its slot shows
+is cleared** on every route, by `swap::settle`, above. **A set holds one kind**: `variant::switch`
+refuses a main of another kind, the second defence; *Combine as variants* and a drag into a set — the
+doors that refuse it first, with a message — are **not built**, and the loader never refuses one.
 
 ✅ **The app half, in the inspector and the context menu** (`a313b2c`; `panels/variants.rs`,
 `panels/component.rs`; §15 D982's amendment). **A set** gets its own card, *Variants*, in the Component

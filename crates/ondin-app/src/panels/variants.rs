@@ -410,7 +410,7 @@ pub(crate) fn clash_text(doc: &ondin_core::Document, set: NodeId) -> Option<Stri
 
 impl OndinApp {
     /// The **Variants** card's body for the set `set` (3A–3C): its name and
-    /// counts, a clash note, each property with its values as chips, and the
+    /// instance count, a clash note, each property with its values as chips, and the
     /// verbs that add to it.
     pub(super) fn set_body(&mut self, ui: &mut egui::Ui, set: NodeId) {
         let doc = &self.session.doc;
@@ -433,41 +433,14 @@ impl OndinApp {
         // the *Component set* caption over it went as a main's and an instance's
         // did (§15 D993) — the glyph and the card's *Variants* title say it — and
         // the line is a main's face, glyph slot and all, so the name sits at the
-        // height theirs do and the count comes 4pt closer under it.
-        super::component::name_line(ui, Some(icon::SQUARES_FOUR), &name);
-        ui.add_space(-4.0);
-        ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new(format!(
-                    "{} · {}",
-                    plural(variants.len(), "variant"),
-                    plural(instances, "instance")
-                ))
-                .size(12.0)
-                .color(theme::text::MUTED),
-            );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let label = "Select all";
-                let w = ui::action_button_w(ui.ctx(), label);
-                let state = match instances {
-                    0 => FieldButton::Disabled,
-                    _ => FieldButton::Off,
-                };
-                if ui::action_button(
-                    ui,
-                    icon::SELECTION_ALL,
-                    label,
-                    state,
-                    egui::vec2(w, ui::CONTROL_H),
-                )
-                .on_hover_text("Select all instances of every variant")
-                .clicked()
-                    && instances > 0
-                {
-                    select_all = true;
-                }
-            });
-        });
+        // height theirs do.
+        // **The count of every variant's instances after the name, selecting
+        // them** (§15 D1007, the maintainer's look): the *N variants · M
+        // instances* row under the name, with *Select all* beside it, made a
+        // stepped row; the variant count went to the card's title.
+        if super::component::name_line(ui, Some(icon::SQUARES_FOUR), &name, Some(instances)) {
+            select_all = true;
+        }
         if let Some(text) = &clash {
             note(ui, icon::WARNING, text);
         }
@@ -1431,7 +1404,7 @@ impl OndinApp {
         let empty = props.is_empty() && !slots.iter().any(|(_, shown)| *shown);
         self.sync_paint_collapse("Properties", empty, fresh);
         let action = ui::HeadAction::new(icon::PLUS, "Add a property");
-        let clicks = self.panel_head(ui, "Properties", Some(action), None, |app, ui| {
+        let clicks = self.panel_head(ui, "Properties", None, Some(action), None, |app, ui| {
             let doc = &app.session.doc;
             if props.is_empty() {
                 ui.label(

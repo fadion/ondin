@@ -2423,7 +2423,8 @@ filled hexagon sits a point above its glyph cell's centre, and its chip is a poi
 while the instance count is not showing.
 
 ✅ **The maintainer's second polish pass** (2026-10-07, §15 D995). A main's count, *Select all* and
-*Duplicate* sit 4pt closer under its name (`main_body`, not the variant face's shared `main_tail`). The
+*Duplicate* sit 4pt closer under its name (`main_body`, not the variant face's shared `main_tail`) —
+*Duplicate* alone since §15 D1007, below. The
 Properties card's buttons read *Bool*, *Text* and *Var*, the properties they make keeping *Boolean* and
 *Text* — ⚠️ the buttons gone since §15 D1005 for a `+` menu in the card's header, its rows the full words. A marked field's label strip shows the **plain arrow** while it is a reset and the scrub's
 `ResizeHorizontal` once dragged, its *Reset to main* tooltip unchanged. **The one-line rows are rows of
@@ -2433,6 +2434,17 @@ selection's line, and the binding line, a nested instance in a main's included �
 one call stood, the Component, Variants and Properties cards; no divider, the session's call. The
 binding line's heading has no `{}`, and a local layer's line leads with a link-break glyph rather than
 `+`, the linked line's hexagon a point higher.
+
+✅ **A face's instance count is on its name's line, and is the *Select all*** (2026-10-08, §15 D1007 —
+tried and accepted by the maintainer; the fallback had been the count as a row under the name). A main's
+face and a set's are `component::name_line(ui, glyph, name, instances)`: the name at 13pt, cut to
+leave the count its room, then *N instances* 6pt after it at the same size — `text::MUTED`,
+underlined, `text::STRONG` under the pointer, *Click to select all* — whose click selects every
+instance (a set's, every variant's); at zero plain `text::DIM` and dead. A variant's face keeps *Variant
+in* and the set's link over its derived name, the count after it the same way. No counts row and no
+*Select all* button on any face; `main_tail` is *Duplicate* alone. **The set's variant count is the
+Variants card's title**, *VARIANTS 4* (`OndinApp::panel_head`'s `size`), the bare title still the card's
+key.
 
 ✅ **The canvas and layers chrome** (2026-10-06, §15 D985). **An instance picks like a group**:
 `query::group_chain`'s trailing trim stops at an instance root as at a group, and `canvas::pick_leaf`
@@ -2635,8 +2647,9 @@ mixed set, and `component::check` has no arm for one.
 ✅ **The app half, in the inspector and the context menu** (`a313b2c`; `panels/variants.rs`,
 `panels/component.rs`; §15 D982's amendment). **A set** gets its own card, *Variants*, in the Component
 card's place (`OndinApp::set_body`): its name on one line beside the four-squares glyph — the main's
-face, `component::name_line`, with no *Component set* caption since §15 D1000 — *N variants · M instances* with
-*Select all* — every variant's instances — the clash note with a warning glyph, each variant property
+face, `component::name_line`, with no *Component set* caption since §15 D1000 — ~~*N variants · M instances* with
+*Select all*~~ its instances' count after the name as the link that selects them, and the variant count
+in the card's title, since §15 D1007 — every variant's instances — the clash note with a warning glyph, each variant property
 as a name field with a ×, disabled for the last, and its values as chips — a hairline
 (`variants::card_rule`) between one property and the next since §15 D1006, none above the first; a chip's popup renames, moves
 and deletes its value, a value variants hold confirming with exact counts in D979 (c)'s words — *N
@@ -2646,7 +2659,8 @@ cancelling, a value changed meanwhile deleting nothing), where it was a sentence
 row that did it — and *Property* and *Add variant* sit under them. **A variant** gets the Component card with *Variant in* and the set as a link, its
 derived, read-only name, a dropdown per property — a taken combination not refused but noted, *Variant
 clash* with *Select it*, the sentence (*Another variant in this set is also X …*) its tooltip since §15
-D1000 — then a main's count and verbs. **An instance's card** gains, between
+D1000 — then a main's count and verbs (the count on the derived name's line and *Duplicate* the one
+verb since §15 D1007). **An instance's card** gains, between
 its heading (*Instance of* and the main's name until §15 D993, the name alone since) and *Reset all*, a
 dropdown per variant property with **no dot** — on a nested copy, whose
 choice is a swap, the dot since §15 D988 — switching through

@@ -637,7 +637,12 @@ impl OndinApp {
             Face::Child { .. } | Face::Mixed { .. } | Face::InMain { .. } => {}
             Face::Set { set } => {
                 let set = *set;
-                self.panel(ui, "Variants", None, |app, ui| app.set_body(ui, set));
+                // The set's variant count in the card's title, *Variants 4* (§15
+                // D1007, the maintainer's look): its row under the name went.
+                let n = ondin_core::variant::variants(&self.session.doc, set).len();
+                self.panel_head(ui, "Variants", Some(n), None, None, |app, ui| {
+                    app.set_body(ui, set)
+                });
             }
             Face::Main { .. }
             | Face::Variant { .. }
@@ -646,7 +651,8 @@ impl OndinApp {
                 self.panel(ui, "Component", None, |app, ui| match &face {
                     Face::Main { name, instances } => main_body(ui, name, *instances, &mut act),
                     // 3D: *Variant in Button* over the derived, read-only name, a
-                    // dropdown per property, then the main's count and verbs.
+                    // dropdown per property, then *Duplicate*; the name carries
+                    // its instance count (§15 D1007).
                     Face::Variant {
                         main,
                         set,
@@ -661,13 +667,11 @@ impl OndinApp {
                             .unwrap_or_default();
                         let link = Some((*set, set_name.as_str()));
                         heading(ui, true, "Variant in", link, None, "", &mut act);
-                        ui.label(
-                            egui::RichText::new(name)
-                                .size(13.0)
-                                .color(theme::text::STRONG),
-                        );
+                        if name_and_count(ui, &name, Some(*instances)).clicked {
+                            act = Some(Act::SelectAllInstances);
+                        }
                         app.variant_rows(ui, *main);
-                        main_tail(ui, *instances, &mut act);
+                        main_tail(ui, &mut act);
                     }
                     Face::Instance {
                         root,
@@ -1352,9 +1356,12 @@ fn heading(
         // plain label in a horizontal row never wraps, and a main's name past
         // ~50 characters ran the row — and egui grows the parent to its widest
         // row, so every card below — off the screen, *Detach* half drawn and the
-        // summary not at all. A variant's derived name (`values.join(", ")`) gets
-        // long with three properties. Cut with `…`, the whole name in the
-        // tooltip, as the card's own label column already was (§15 D996).
+        // summary not at all. (A variant's derived name, `values.join(", ")`,
+        // long with three properties, is not drawn here: it was a plain label
+        // under this row, never cut, and is `name_and_count`'s since §15 D1007,
+        // cut there.) Cut with `…`, the whole
+        // name in the tooltip, as the card's own label column already was (§15
+        // D996).
         let summary_w = if summary.is_empty() {
             0.0
         } else {
@@ -1587,66 +1594,157 @@ fn reset_row(ui: &mut egui::Ui, d: Drift, p: PropDrift, overflow: bool, act: &mu
     });
 }
 
-/// 3A: the filled hexagon and the name on **one line**, the instance count with
-/// *Select all*, and *Duplicate*. The mockup's *Main component* caption over the
-/// name is gone (§15 D993): the filled hexagon already says it.
+/// 3A: the filled hexagon, the name and its instance count on **one line**, and
+/// *Duplicate*. The mockup's *Main component* caption over the name is gone (§15
+/// D993): the filled hexagon already says it.
 fn main_body(ui: &mut egui::Ui, name: &str, instances: usize, act: &mut Option<Act>) {
-    name_line(ui, None, name);
-    // The count, *Select all* and *Duplicate* 4pt closer under the one-line face,
-    // the gap an instance's face leaves above its *Reset all* (§15 D995, the
-    // maintainer's look). Here and not in `main_tail`, which a variant's face
-    // shares under its property rows.
+    if name_line(ui, None, name, Some(instances)) {
+        *act = Some(Act::SelectAllInstances);
+    }
+    // *Duplicate* 4pt closer under the one-line face, the gap an instance's face
+    // leaves above its *Reset all* (§15 D995, the maintainer's look). Here and not
+    // in `main_tail`, which a variant's face shares under its property rows.
     ui.add_space(-4.0);
-    main_tail(ui, instances, act);
+    main_tail(ui, act);
 }
 
-/// A card's one-line face: the glyph in its slot and the name beside it — a
-/// main's, `None` for the filled hexagon, and a set's on the Variants card (§15
-/// D1000), one layout so the two names sit at one height.
-pub(super) fn name_line(ui: &mut egui::Ui, glyph: Option<&str>, name: &str) {
+/// A card's one-line face: the glyph in its slot, the name beside it, and — with
+/// `instances` — the count after the name, which selects them ([`count_link`]).
+/// A main's face, `None` for the filled hexagon, and a set's on the Variants card
+/// (§15 D1000), one layout so the two names sit at one height. Answers whether
+/// the count was clicked.
+///
+/// **The count is on the name's line, not a row of its own** (§15 D1007, the
+/// maintainer's look): a muted line and a 28pt *Select all* beside it made a
+/// stepped row between the name and the card's content, and a second line under
+/// the name is what the faces had shed (D993). The name is cut first, with its
+/// whole text in a tooltip, so the count always shows.
+pub(super) fn name_line(
+    ui: &mut egui::Ui,
+    glyph: Option<&str>,
+    name: &str,
+    instances: Option<usize>,
+) -> bool {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 9.0;
         let slot = glyph_slot(ui);
-        let block = ui.vertical(|ui| {
-            ui.label(
-                egui::RichText::new(name)
-                    .size(13.0)
-                    .color(theme::text::STRONG),
-            );
-        });
+        // In a block, as the name alone was: a row's child placed straight into
+        // this horizontal is centred in its interact height, 12pt lower.
+        let block = ui.vertical(|ui| name_and_count(ui, name, instances)).inner;
         match glyph {
-            None => paint_hexagon(ui, true, slot, block.response.rect),
-            Some(g) => paint_glyph(ui, g, slot, block.response.rect),
+            None => paint_hexagon(ui, true, slot, block.rect),
+            Some(g) => paint_glyph(ui, g, slot, block.rect),
         }
-    });
+        block.clicked
+    })
+    .inner
 }
 
-/// A main's count with *Select all*, and *Duplicate* — 3A's lower half, which a
-/// variant's face shares (3D). The mockup's *Duplicate as component*, shortened on
-/// the card that already says what it is (§15 D993); the context menu keeps the
-/// long name, where nothing around it does.
-fn main_tail(ui: &mut egui::Ui, instances: usize, act: &mut Option<Act>) {
-    let h = ui::CONTROL_H;
-    ui.horizontal(|ui| {
+/// What [`name_and_count`] drew: the name's rect, which a leading glyph centres
+/// on, and whether the count was clicked.
+struct NameCount {
+    rect: egui::Rect,
+    clicked: bool,
+}
+
+/// A face's name at 13pt and, with `instances`, its count after it at the same
+/// size ([`count_link`]) — the name cut to leave the count its room. A variant's
+/// derived name on its face draws this bare (§15 D1007).
+fn name_and_count(ui: &mut egui::Ui, name: &str, instances: Option<usize>) -> NameCount {
+    // **No interact height**: a horizontal row opens `interact_size.y` tall and
+    // centres in it, which put the name 4pt below where a main's had sat — the
+    // heading's own fix (§15 D996). Scoped, or every row under a variant's name
+    // would lose it too.
+    ui.scope(|ui| {
+        ui.spacing_mut().interact_size.y = 0.0;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = COUNT_GAP;
+            let count_w = instances.map_or(0.0, |n| {
+                ui.painter()
+                    .layout_no_wrap(
+                        plural(n, "instance"),
+                        egui::FontId::proportional(NAME_PT),
+                        egui::Color32::WHITE,
+                    )
+                    .size()
+                    .x
+                    + COUNT_GAP
+            });
+            let room = (ui.available_width() - count_w).max(24.0);
+            let rect = ui
+                .scope(|ui| {
+                    ui.set_max_width(room);
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(name)
+                                .size(NAME_PT)
+                                .color(theme::text::STRONG),
+                        )
+                        .truncate(),
+                    )
+                    .rect
+                })
+                .inner;
+            let clicked = instances.is_some_and(|n| count_link(ui, n));
+            NameCount { rect, clicked }
+        })
+        .inner
+    })
+    .inner
+}
+
+/// A face's name size, and the count's after it.
+const NAME_PT: f32 = 13.0;
+/// The air between a face's name and its count.
+const COUNT_GAP: f32 = 6.0;
+
+/// *4 instances* after a face's name (§15 D1007, the maintainer's design): the
+/// name's size, dimmer, **underlined as a link**, brightening under the pointer,
+/// and a click selects them all — *Select all*, which it replaced, folded into the
+/// count it sat beside. At zero there is nothing to select: plain, dimmer still,
+/// no underline and no tooltip. Answers whether it was clicked.
+fn count_link(ui: &mut egui::Ui, instances: usize) -> bool {
+    let text = plural(instances, "instance");
+    if instances == 0 {
         ui.label(
-            egui::RichText::new(plural(instances, "instance"))
-                .size(12.0)
-                .color(theme::text::MUTED),
+            egui::RichText::new(text)
+                .size(NAME_PT)
+                .color(theme::text::DIM),
         );
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let label = "Select all";
-            let w = ui::action_button_w(ui.ctx(), label);
-            let state = match instances {
-                0 => FieldButton::Disabled,
-                _ => FieldButton::Off,
-            };
-            let resp = ui::action_button(ui, icon::SELECTION_ALL, label, state, egui::vec2(w, h))
-                .on_hover_text("Select all instances");
-            if instances > 0 && resp.clicked() {
-                *act = Some(Act::SelectAllInstances);
-            }
-        });
-    });
+        return false;
+    }
+    let font = egui::FontId::proportional(NAME_PT);
+    let size = ui
+        .painter()
+        .layout_no_wrap(text.clone(), font.clone(), egui::Color32::WHITE)
+        .size();
+    let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::click());
+    let color = if resp.hovered() {
+        theme::text::STRONG
+    } else {
+        theme::text::MUTED
+    };
+    let job = egui::text::LayoutJob::single_section(
+        text,
+        egui::TextFormat {
+            font_id: font,
+            color,
+            underline: egui::Stroke::new(1.0, color),
+            ..Default::default()
+        },
+    );
+    let galley = ui.painter().layout_job(job);
+    ui.painter().galley(rect.min, galley, color);
+    resp.on_hover_text("Click to select all").clicked()
+}
+
+/// *Duplicate* — 3A's lower half, which a variant's face shares (3D); the count
+/// and *Select all* that stood over it are the count after the name since §15
+/// D1007. The mockup's *Duplicate as component*, shortened on the card that
+/// already says what it is (§15 D993); the context menu keeps the long name, where
+/// nothing around it does.
+fn main_tail(ui: &mut egui::Ui, act: &mut Option<Act>) {
+    let h = ui::CONTROL_H;
     let w = ui.available_width();
     if ui::action_button(
         ui,
@@ -4235,10 +4333,10 @@ mod tests {
         let painted: Vec<String> = texts(&out).into_iter().map(|(t, _)| t).collect();
         // The *Component set* caption went with §15 D1000; its absence is
         // `the_set_card_is_one_line_the_clash_is_short_and_components_get_no_templates`'.
-        assert!(
-            painted.contains(&"2 variants · 1 instance".to_string()),
-            "{painted:?}"
-        );
+        // The counts are the title's and the name line's since §15 D1007.
+        for want in ["VARIANTS 2", "1 instance"] {
+            assert!(painted.contains(&want.to_string()), "{want}: {painted:?}");
+        }
         assert!(
             painted.contains(&"PROPERTIES".to_string()),
             "the set's own properties card"
@@ -4948,10 +5046,67 @@ mod tests {
         );
     }
 
+    /// **The instance count is on the name's line and selects them** (§15 D1007,
+    /// the maintainer's design). On a main and on a set: *1 instance* on the line
+    /// of the name it follows, no *Select all* anywhere, and a click on the count
+    /// selects the instances — the main's one, and every variant's on the set.
+    /// The set's variant count is its card's title, *VARIANTS 2*.
+    ///
+    /// **Flip run**: `count_link` answering `false` (its `.clicked()` dropped)
+    /// fails *"the main's count selects its instance"*.
+    #[test]
+    fn the_count_after_a_faces_name_selects_its_instances() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let on_one_line = |painted: &[(String, egui::Rect)], name: &str, eyebrow: &str| {
+            let top = painted
+                .iter()
+                .find(|(t, _)| t == eyebrow)
+                .unwrap()
+                .1
+                .bottom();
+            let name = painted
+                .iter()
+                .filter(|(t, r)| t == name && r.top() > top)
+                .min_by(|a, b| a.1.top().total_cmp(&b.1.top()))
+                .unwrap()
+                .1;
+            let count = painted.iter().find(|(t, _)| t == "1 instance").unwrap().1;
+            // Tops, not centres: the count's ink runs down to its underline.
+            assert!(
+                (count.top() - name.top()).abs() <= 1.0 && count.left() > name.right(),
+                "the count after the name, on its line: {count:?} against {name:?}"
+            );
+            assert!(
+                !painted.iter().any(|(t, _)| t == "Select all"),
+                "no Select all"
+            );
+            count.center()
+        };
+        let mut f = fixture(&ctx);
+        let painted = texts(&settled(&mut f.app, &ctx, f.m));
+        let count = on_one_line(&painted, "Button", "COMPONENT");
+        click(&mut f.app, &ctx, count);
+        assert_eq!(
+            f.app.session.selection.ids(),
+            &[f.i],
+            "the main's count selects its instance"
+        );
+        let mut v = variants_fixture(&ctx);
+        let painted = texts(&settled(&mut v.app, &ctx, v.set));
+        let count = on_one_line(&painted, "Button", "VARIANTS 2");
+        click(&mut v.app, &ctx, count);
+        assert_eq!(
+            v.app.session.selection.ids(),
+            &[v.i],
+            "the set's count selects every variant's instances"
+        );
+    }
+
     /// **The Variants card rules off one property from the next** (§15 D1006, the
     /// maintainer's look: which chips were whose took reading). A set with *Size*
     /// and *Style*: one `card_rule` hairline between *Size*'s name and *Style*'s,
-    /// and none between the counts line and *Size* — a rule *between* properties,
+    /// and none between the name line and *Size* — a rule *between* properties,
     /// not above each.
     ///
     /// **Flip run**: the rule drawn above every property (`pi > 0` dropped) fails
@@ -4988,7 +5143,9 @@ mod tests {
             walk(&s.shape, rule, &mut rules);
         }
         let (size, style) = (at("Size"), at("Style"));
-        let counts = at("2 variants · 1 instance");
+        // The name line's count, the last thing over the first property since
+        // §15 D1007 took the counts row away.
+        let counts = at("1 instance");
         let between = |a: f32, b: f32| rules.iter().filter(|y| **y > a && **y < b).count();
         assert_eq!(
             between(size.bottom(), style.top()),
@@ -5274,7 +5431,8 @@ mod tests {
             !words.iter().any(|t| t == "FRAME TEMPLATES"),
             "not on a set"
         );
-        let set = under(&out, "VARIANTS", "Button");
+        // The title carries the set's variant count since §15 D1007.
+        let set = under(&out, "VARIANTS 2", "Button");
         let mut f = fixture(&ctx);
         let main = under(&settled(&mut f.app, &ctx, f.m), "COMPONENT", "Button");
         assert!(

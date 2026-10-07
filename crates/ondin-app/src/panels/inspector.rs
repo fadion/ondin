@@ -12890,20 +12890,27 @@ impl OndinApp {
         badge: Option<&str>,
         body: impl FnOnce(&mut Self, &mut egui::Ui),
     ) -> bool {
-        self.panel_head(ui, title, action, badge, body).acted
+        self.panel_head(ui, title, None, action, badge, body).acted
     }
 
     /// [`Self::panel_badged`], answering with the whole of the header's clicks —
     /// for a header `+` that opens a menu at [`ui::HeadClicks::action_rect`]
-    /// (the Properties card's, §15 D1005).
+    /// (the Properties card's, §15 D1005) — and with `size`, a count after the
+    /// title in the title's own type: the Variants card's *Variants 4* (§15 D1007).
+    /// The title alone stays the card's key.
     pub(super) fn panel_head(
         &mut self,
         ui: &mut egui::Ui,
         title: &'static str,
+        size: Option<usize>,
         action: Option<ui::HeadAction>,
         badge: Option<&str>,
         body: impl FnOnce(&mut Self, &mut egui::Ui),
     ) -> ui::HeadClicks {
+        let shown = match size {
+            Some(n) => format!("{title} {n}"),
+            None => title.to_string(),
+        };
         let open = !self.collapsed_panels.contains(title);
         // The card's overrides (§15 D981) — its header's dot and count, and the
         // card-level reset — looked up by title, so no card has to pass them.
@@ -12932,7 +12939,7 @@ impl OndinApp {
             .push_id(title, |ui| {
                 ui::card_at(ui, |ui| {
                     let clicks =
-                        ui::section_head_full(ui, title, open, action, badge, overrides, open);
+                        ui::section_head_full(ui, &shown, open, action, badge, overrides, open);
                     if open {
                         body(self, ui);
                     }

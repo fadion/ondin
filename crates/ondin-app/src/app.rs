@@ -555,6 +555,11 @@ pub(crate) struct FrameIndex {
     tagged: Vec<NodeId>,
     /// Those of them with world bounds, paired with the bounds.
     pub(crate) boxes: Vec<(NodeId, Rect)>,
+    /// Whether the document has any main, linked layer or set — read in the same
+    /// walk, so a move's drop candidates ask `component::can_hold` only where a
+    /// component rule could refuse one (`[X2-L2-02]`), and an ordinary document
+    /// pays nothing on this per-frame path (§15 D616).
+    pub(crate) components: bool,
     /// How many times the document walk has actually run.
     ///
     /// **Test-facing, and it is the assertion the finding asked for**: *"one
@@ -4367,36 +4372,31 @@ impl OndinApp {
     ///
     /// The toast speaks only when wrapping happened (D981's ruling): the tree changed
     /// shape, and that deserves a line. Text-only, naming the key (its ruling (d)).
+    /// **The in-place arm is silent** (§15 D1003 (12), `[X11.2-L2-05]`) — the
+    /// violet chrome is the answer; it said *"Created a component"* until then.
     ///
-    /// ⚠️ **Not yet true of the in-place arm**, which says *"Created a component"*.
-    /// §15 D1003 (12) rules it silent, and an instance root — refused by
-    /// `can_be_main` for its link, and told today that it sits *inside* one — to be
-    /// told *"An instance can't become a component — detach it first
-    /// (Ctrl+Alt+B)"*. Not built.
+    /// **A refusal says which rule** ([`crate::menu::create_refusal`], `[X2-L2-01]`), asked of
+    /// `component::why_not_main` in place and `why_not_wrap` for the wrap — the
+    /// same two questions the menu row's dimming asks, so the row, the chord and the
+    /// commit agree. The wrap had no check at all: a rect inside a main, a local
+    /// layer inside an instance, two members of one instance, or a frame holding a
+    /// main all reached the commit and were refused there as a bare *"Edit
+    /// failed"*. An instance root is told how (D1003 (12)), not that it sits
+    /// *inside* one, which it does not.
     pub(crate) fn create_component(&mut self) {
+        use ondin_core::component::NotMain;
         let ids = build::outermost(&self.session.doc, self.session.selection.ids());
         let doc = &self.session.doc;
-        match ids.as_slice() {
-            [] => self.session.info("Select a layer to make a component"),
-            [one] if doc.get(*one).is_some_and(|n| n.component()) => {
-                self.session.info("Already a component")
-            }
-            [one] if ondin_core::component::can_be_main(doc, *one) => {
-                let tx = Transaction(vec![Operation::SetComponent {
-                    id: *one,
-                    component: true,
-                }]);
-                if self.session.commit(tx) {
-                    self.session.info("Created a component");
-                }
-            }
-            [one]
-                if doc.get(*one).is_some_and(|n| {
-                    matches!(n.kind(), NodeKind::Artboard { .. } | NodeKind::Group)
-                }) =>
-            {
+        match (ids.as_slice(), self.create_component_refusal()) {
+            ([], _) => self.session.info("Select a layer to make a component"),
+            (_, Some(NotMain::Already)) => self.session.info("Already a component"),
+            (_, Some(why)) => self.session.fail(crate::menu::create_refusal(why)),
+            ([one], None) if create_in_place(doc, *one) => {
                 self.session
-                    .fail("A component cannot sit inside a component or an instance")
+                    .commit(Transaction(vec![Operation::SetComponent {
+                        id: *one,
+                        component: true,
+                    }]));
             }
             _ => {
                 let wrapped = ids.len();
@@ -4423,6 +4423,20 @@ impl OndinApp {
                     Err(e) => self.session.fail(format!("Cannot make a component: {e}")),
                 }
             }
+        }
+    }
+
+    /// Why *Create component* would refuse the selection, or `None` when it would
+    /// commit — the one question [`Self::create_component`] and the menu row's
+    /// dimming both ask (`[X2-L2-01]`). In place for one frame or group
+    /// (`component::why_not_main`), else for the wrap (`why_not_wrap`).
+    pub(crate) fn create_component_refusal(&self) -> Option<ondin_core::component::NotMain> {
+        let doc = &self.session.doc;
+        let ids = build::outermost(doc, self.session.selection.ids());
+        match ids.as_slice() {
+            [] => None,
+            [one] if create_in_place(doc, *one) => ondin_core::component::why_not_main(doc, *one),
+            _ => ondin_core::component::why_not_wrap(doc, &ids),
         }
     }
 
@@ -4574,6 +4588,15 @@ impl OndinApp {
         ok.then(|| ids.to_vec())
     }
 
+    /// Why *Combine as variants* would refuse the mains [`Self::combinable_mains`]
+    /// offers it: a frame main and a group main cannot be one set (§15 D1003 (5),
+    /// `[X6.1-L1-02]`) — the menu row's dimmed reason, and the verb's message.
+    pub(crate) fn combine_refusal(&self) -> Option<&'static str> {
+        let mains = self.combinable_mains()?;
+        (!ondin_core::variant::one_kind(&self.session.doc, &mains))
+            .then_some(crate::menu::COMBINE_MIXED)
+    }
+
     /// *Combine as variants* (§15 D982): the selected mains wrapped in a set, one
     /// property whose values are their names. The toast speaks because the tree
     /// changed shape, D981's rule for *Create component*'s.
@@ -4589,6 +4612,12 @@ impl OndinApp {
             self.session.info("Select main components to combine");
             return;
         };
+        // One kind per set (§15 D1003 (5)), said before `variant::combine` refuses
+        // it as a bare `WrongKindForOp`.
+        if !ondin_core::variant::one_kind(&self.session.doc, &mains) {
+            self.session.fail(crate::menu::COMBINE_MIXED);
+            return;
+        }
         match ondin_core::variant::combine(
             &self.session.doc,
             &self.session.resolved,
@@ -4919,7 +4948,12 @@ impl OndinApp {
             // last match of two nested frames is the inner one, which is the one
             // the pointer is really in.
             let doc = &self.session.doc;
-            index.tagged = ondin_core::subtree_nodes(doc, &[doc.root()])
+            let all = ondin_core::subtree_nodes(doc, &[doc.root()]);
+            index.components = all
+                .iter()
+                .filter_map(|id| doc.get(*id))
+                .any(|n| n.component() || n.link().is_some() || n.set().is_some());
+            index.tagged = all
                 .into_iter()
                 .filter(|id| {
                     doc.get(*id).is_some_and(|n| match n.kind() {
@@ -5002,6 +5036,14 @@ impl OndinApp {
             })
             .unwrap_or_default()
     }
+}
+
+/// Whether *Create component* on the one layer `id` makes it the main where it
+/// stands — a frame or a group — rather than wrapping it in a new frame first
+/// (§15 D981).
+fn create_in_place(doc: &ondin_core::Document, id: NodeId) -> bool {
+    doc.get(id)
+        .is_some_and(|n| matches!(n.kind(), NodeKind::Artboard { .. } | NodeKind::Group))
 }
 
 // --- clipboard and structure ---------------------------------------------
@@ -6078,7 +6120,7 @@ impl OndinApp {
     /// [`CloneChain`] — because a fresh original has no movement to repeat, and
     /// silently offsetting the first copy would be the old behaviour this
     /// deliberately replaces.
-    fn duplicate_selection(&mut self) {
+    pub(crate) fn duplicate_selection(&mut self) {
         // Guides duplicate too, and take the paste path's placement rule rather
         // than a `CloneChain`: a guide has one number, so there is no "however far
         // you moved the last copy" to repeat that a fixed step does not already
@@ -20414,9 +20456,10 @@ mod component_verb_tests {
     /// parked once the history is undone past it, and the detach's commit means
     /// no redo can bring it back; the paste is an ordinary one.
     ///
-    /// Flip, run: `document_rewound` without the `cut_move` drop (as first
-    /// built) fails "the detach stands", `Some(m)`; so does `paste_cut_move`
-    /// not refusing a parked move.
+    /// Flip, run: `document_rewound` leaving the move live on an undo (as
+    /// `6bc0e2a` built it) fails "the detach stands", `Some(m)`; so does
+    /// `paste_cut_move` not refusing a parked move — the refusal is what holds
+    /// here, since no undo or redo follows the two commits to drop it.
     #[test]
     fn an_undone_cut_does_not_move_on_paste() {
         let ctx = egui::Context::default();
@@ -20454,8 +20497,8 @@ mod component_verb_tests {
     /// the main with nothing owed and the paste landed a new main under new ids,
     /// the instance left plain — the ruling's own defect, for that sequence.
     ///
-    /// Flip, run: `document_rewound` dropping the move on the undo, as first
-    /// built, fails "the main, under its own id".
+    /// Flip, run: `document_rewound` dropping the move on the undo, as
+    /// `b003b42` built it, fails "the main, under its own id".
     #[test]
     fn a_redone_cut_still_moves_on_paste() {
         let ctx = egui::Context::default();
@@ -20975,6 +21018,201 @@ mod component_verb_tests {
         assert!(
             !app.session.doc.get(rect).unwrap().component(),
             "a rect inside a main is refused, not made a main"
+        );
+    }
+
+    /// **Every selection the commit would refuse is refused by *Create component*
+    /// itself, saying which rule** (`[X2-L2-01]`, `[X11.2-L2-05]`), and an
+    /// in-place create is silent (§15 D1003 (12)).
+    ///
+    /// The wrap branch had no check: a rect inside a main, a local rect inside an
+    /// instance and two members of one instance were each wrapped in a frame and
+    /// pushed to the commit, refused there as *"Edit failed: … is a main component
+    /// inside a main component or an instance"*; a page frame holding a main passed
+    /// `can_be_main` — which read ancestors only — and was refused the same way;
+    /// and an instance root was told it sat *inside* one. Each case asserts the
+    /// sentence and that `create_component_refusal`, which the menu row dims by,
+    /// gives the same answer — so the row, the chord and the commit agree.
+    ///
+    /// **Flip run**, `why_not_wrap`'s parent test removed (the wrap unchecked, as
+    /// it was): fails at *"a rect inside a main"*, the predicted case — but on the
+    /// `create_component_refusal` assertion (`None` against `Some(Inside)`), which
+    /// comes before the sentence's, not on the *"Edit failed"* text predicted.
+    /// `why_not_main`'s subtree test removed fails at *"a frame holding a main"*
+    /// the same way; the `Created a component` info restored fails at *"in place,
+    /// silent"*.
+    #[test]
+    fn create_component_refuses_with_the_reason_the_commit_would_give() {
+        use ondin_core::component::NotMain;
+        let ctx = egui::Context::default();
+        let (mut app, m, i) = main_and_instance(&ctx);
+        let rect = |w| NodeKind::Rect {
+            size: Size::new(w, w),
+            corner_radii: Default::default(),
+        };
+        let create = |id, parent, kind| {
+            Transaction(vec![Operation::CreateNode {
+                id,
+                parent,
+                index: 0,
+                kind,
+                transform: None,
+                name: None,
+            }])
+        };
+        let count = |app: &OndinApp| {
+            let doc = &app.session.doc;
+            ondin_core::subtree_nodes(doc, &[doc.root()]).len()
+        };
+        let refused = |app: &mut OndinApp, sel: Vec<NodeId>, why: NotMain, case: &str| {
+            app.session.selection.set(sel);
+            assert_eq!(app.create_component_refusal(), Some(why), "{case}");
+            let before = count(app);
+            app.create_component();
+            assert_eq!(
+                app.session.status().text,
+                crate::menu::create_refusal(why),
+                "{case}"
+            );
+            assert_eq!(count(app), before, "{case}: nothing wrapped");
+        };
+
+        let in_main = app.session.doc.get(m).unwrap().children()[0];
+        refused(
+            &mut app,
+            vec![in_main],
+            NotMain::Inside,
+            "a rect inside a main",
+        );
+
+        // A second rect in the main, so the instance has two members.
+        let second = app.session.ids.mint();
+        assert!(app.session.commit(create(second, m, rect(8.0))));
+        let members = app.session.doc.get(i).unwrap().children().to_vec();
+        assert_eq!(members.len(), 2, "the fixture: two members");
+        refused(
+            &mut app,
+            members,
+            NotMain::Inside,
+            "two members of one instance",
+        );
+
+        let local = app.session.ids.mint();
+        assert!(app.session.commit(create(local, i, rect(6.0))));
+        assert_eq!(app.session.doc.get(local).unwrap().link(), None);
+        refused(&mut app, vec![local], NotMain::Inside, "a local rect");
+
+        refused(&mut app, vec![i], NotMain::Instance, "an instance root");
+        assert_eq!(
+            app.session.status().text,
+            "An instance can't become a component — detach it first (Ctrl+Alt+B).",
+            "§15 D1003 (12)'s sentence, word for word"
+        );
+
+        let root = app.session.doc.root();
+        let page = app.session.ids.mint();
+        let frame = NodeKind::Artboard {
+            size: Size::new(500.0, 500.0),
+        };
+        assert!(app.session.commit(create(page, root, frame.clone())));
+        assert!(app.session.commit(Transaction(vec![Operation::Reparent {
+            id: m,
+            new_parent: page,
+            index: 0,
+        }])));
+        refused(
+            &mut app,
+            vec![page],
+            NotMain::Holds,
+            "a frame holding a main",
+        );
+
+        let plain = app.session.ids.mint();
+        assert!(app.session.commit(create(plain, root, frame)));
+        app.session.selection.set_one(plain);
+        app.session.info("");
+        app.create_component();
+        assert!(
+            app.session.doc.get(plain).unwrap().component(),
+            "made a main"
+        );
+        assert_eq!(app.session.status().text, "", "in place, silent");
+    }
+
+    /// ***Combine as variants* refuses a frame main and a group main, saying why**
+    /// (§15 D1003 (5): one kind per set; `[X6.1-L1-02]`). It accepted any mains, and
+    /// a switch between the two then relinked a group instance to a frame main it
+    /// could never draw. `combine_refusal`, which dims the menu row, gives the same
+    /// sentence; two frame mains still combine.
+    ///
+    /// **Flip run**, the `one_kind` check deleted from `combine_as_variants`: fails
+    /// at *"said why"* with *"Cannot combine: …"* — `variant::combine`'s own
+    /// refusal, the second defence, still holding the tree — as predicted.
+    #[test]
+    fn combine_refuses_mains_of_two_kinds() {
+        let ctx = egui::Context::default();
+        let (mut app, m, _) = main_and_instance(&ctx);
+        let root = app.session.doc.root();
+        let (g, r, f) = (
+            app.session.ids.mint(),
+            app.session.ids.mint(),
+            app.session.ids.mint(),
+        );
+        let create = |id, parent, kind| Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind,
+            transform: None,
+            name: None,
+        };
+        assert!(app.session.commit(Transaction(vec![
+            create(g, root, NodeKind::Group),
+            create(
+                r,
+                g,
+                NodeKind::Rect {
+                    size: Size::new(10.0, 10.0),
+                    corner_radii: Default::default(),
+                },
+            ),
+            create(
+                f,
+                root,
+                NodeKind::Artboard {
+                    size: Size::new(50.0, 50.0),
+                },
+            ),
+            Operation::SetComponent {
+                id: g,
+                component: true,
+            },
+            Operation::SetComponent {
+                id: f,
+                component: true,
+            },
+        ])));
+        app.session.selection.set(vec![m, g]);
+        assert!(app.combinable_mains().is_some(), "the fixture: offered");
+        assert_eq!(app.combine_refusal(), Some(crate::menu::COMBINE_MIXED));
+        app.combine_as_variants();
+        assert_eq!(
+            app.session.status().text,
+            crate::menu::COMBINE_MIXED,
+            "said why"
+        );
+        assert_eq!(
+            ondin_core::variant::set_of(&app.session.doc, m),
+            None,
+            "no set made"
+        );
+
+        app.session.selection.set(vec![m, f]);
+        assert_eq!(app.combine_refusal(), None);
+        app.combine_as_variants();
+        assert!(
+            ondin_core::variant::set_of(&app.session.doc, m).is_some(),
+            "two frame mains combine"
         );
     }
 

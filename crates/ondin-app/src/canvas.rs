@@ -2495,7 +2495,14 @@ impl OndinApp {
                             }
                         }
                         None => {
-                            self.session.commit(built);
+                            // Asked before the commit moves anything: a main passed
+                            // over by a set of another kind is told why (§15 D1003
+                            // (5)) — the outline never lit the set, so nothing else
+                            // says so.
+                            let refused_set = self.drops_into_a_set_of_another_kind(delta);
+                            if self.session.commit(built) && refused_set {
+                                self.session.info(SET_OF_ANOTHER_KIND);
+                            }
                         }
                     }
                 }
@@ -2882,17 +2889,19 @@ impl OndinApp {
         // the page. Out of every frame in its group, it stays where it is rather
         // than landing on the root the group is not.
         if let Some(fence) = group_fence(doc, id) {
+            let moving = self.moving_with(id);
             let destination = self.with_frames(|i| {
-                // Never the moved layer or a frame inside it (§15 D997, see
-                // `frame_covering_except`).
+                // Never the moved layer, a layer moving with it, or a frame inside
+                // either (§15 D997, `[X11.1-L1-01]`, see `frame_covering_except`).
                 let inside: Vec<(NodeId, KRect)> = i
                     .boxes
                     .iter()
                     .filter(|(f, _)| ondin_core::is_within(doc, *f, fence))
-                    .filter(|(f, _)| !ondin_core::is_within(doc, *f, id))
+                    .filter(|(f, _)| !within_moving(doc, *f, &moving))
                     .copied()
                     .collect();
-                frame_covering(landed, &inside)
+                // And never one the component rules refuse it in (`[X2-L2-02]`).
+                self.covering_that_holds(landed, id, inside, i.components)
             })?;
             return (Some(destination) != parent).then_some(destination);
         }
@@ -3211,8 +3220,18 @@ impl OndinApp {
     /// canvas: a variant nudged a few points left its set on the first frame of
     /// the drag. A frame cannot land in itself or anything it holds, and the frame
     /// it sits in is still a candidate underneath.
+    ///
+    /// 🚨 **And not only `moved`: every layer moving with it** (`[X11.1-L1-01]`),
+    /// read off [`Self::moving_with`]. D997 excluded the one frame, so two
+    /// overlapping sibling frames dragged together each chose the other —
+    /// `Reparent A→B` and `Reparent B→A`, refused whole as `WouldCycle` after the
+    /// outline had lit both — or, a small one over a large one, the small went
+    /// into the large. A frame moving by the same delta keeps its place against
+    /// the moved one, so it is never what the moved one dropped into: D997's
+    /// principle, over the whole moving set.
     fn frame_covering_except(&self, bounds: KRect, moved: NodeId) -> Option<NodeId> {
         let doc = &self.session.doc;
+        let moving = self.moving_with(moved);
         // 🚨 **Through the memo, and this is the site the whole of §15 D616 is
         // about** (`[S12.2-L4-04]`). This built the pair list from scratch on every
         // call, and it is called *per selected node, per call* out of
@@ -3225,11 +3244,105 @@ impl OndinApp {
             let others: Vec<(NodeId, KRect)> = i
                 .boxes
                 .iter()
-                .filter(|(f, _)| !ondin_core::is_within(doc, *f, moved))
+                .filter(|(f, _)| !within_moving(doc, *f, &moving))
                 .copied()
                 .collect();
-            frame_covering(bounds, &others)
+            self.covering_that_holds(bounds, moved, others, i.components)
         })
+    }
+
+    /// [`frame_covering`] over `candidates`, **skipping a frame the component
+    /// rules would refuse `moved` in** (`[X2-L2-02]`): a main or a set dropped on
+    /// a main or an instance, an instance dropped into its own main, a main into a
+    /// set of another kind (§15 D1003 (5)) — `component::can_hold`. Each was lit by
+    /// the drop outline and then refused whole at the commit, every other layer of
+    /// a multi-selection drag losing its move with it. Skipped **before** the
+    /// topmost is taken, D997's order: the frame underneath is still a candidate.
+    ///
+    /// Asked only of a frame that actually covers the box, one at a time, and not
+    /// at all in a document with no components (`components`, read in
+    /// [`FrameIndex`]'s walk) — this is the per-frame path §15 D616 measured.
+    ///
+    /// [`FrameIndex`]: crate::app::FrameIndex
+    fn covering_that_holds(
+        &self,
+        bounds: KRect,
+        moved: NodeId,
+        mut candidates: Vec<(NodeId, KRect)>,
+        components: bool,
+    ) -> Option<NodeId> {
+        loop {
+            let f = frame_covering(bounds, &candidates)?;
+            if !components || ondin_core::component::can_hold(&self.session.doc, f, moved) {
+                return Some(f);
+            }
+            candidates.retain(|(g, _)| *g != f);
+        }
+    }
+
+    /// Whether a move of the selection by `delta` drops a main over a component
+    /// set of another kind, which [`Self::covering_that_holds`] passed over — the
+    /// one refusal the release explains (§15 D1003 (5): *"with a message saying
+    /// why"*). Read off the plain drop rule only: a layer in a group or a layout
+    /// does not reach a set by this route.
+    fn drops_into_a_set_of_another_kind(&self, delta: Vec2) -> bool {
+        let (doc, res) = (&self.session.doc, &self.session.resolved);
+        build::outermost(doc, self.session.selection.ids())
+            .into_iter()
+            .filter(|id| doc.get(*id).is_some_and(|n| n.component()))
+            .any(|id| {
+                let Some(landed) = res.world_bounds(id).map(|b| b + delta) else {
+                    return false;
+                };
+                let moving = self.moving_with(id);
+                let mut candidates: Vec<(NodeId, KRect)> = self.with_frames(|i| {
+                    i.boxes
+                        .iter()
+                        .filter(|(f, _)| !within_moving(doc, *f, &moving))
+                        .copied()
+                        .collect()
+                });
+                let kind = doc.get(id).expect("filtered on it").kind();
+                // The frames `covering_that_holds` passed over, topmost first — a
+                // variant lying over its set's box is one, before the set.
+                while let Some(f) = frame_covering(landed, &candidates) {
+                    if ondin_core::component::can_hold(doc, f, id) {
+                        return false;
+                    }
+                    if ondin_core::variant::is_set(doc, f)
+                        && !ondin_core::variant::fits_set(doc, f, kind, Some(id))
+                    {
+                        return true;
+                    }
+                    candidates.retain(|(g, _)| *g != f);
+                }
+                false
+            })
+    }
+
+    /// The layers that move **with** `id` in a move of it — so none of them, nor
+    /// anything inside them, can be the frame it lands in (§15 D997,
+    /// `[X11.1-L1-01]`).
+    ///
+    /// `id` and the selection's outermost roots for a plain move; `id` alone for
+    /// an Alt-drag, whose originals stay where they are while the copies travel —
+    /// a copy dropped over another selected original is dropped over a frame that
+    /// is still there. The selection is read rather than passed in so every caller
+    /// of [`Self::move_destination`] — the commit, the preview, the outline —
+    /// asks the same set.
+    ///
+    /// A set, asked by [`within_moving`] with one walk up from each candidate
+    /// frame rather than an `is_within` per moving root — this runs per selected
+    /// layer per frame of a drag (§15 D616).
+    fn moving_with(&self, id: NodeId) -> std::collections::HashSet<NodeId> {
+        let mut moving = std::collections::HashSet::from([id]);
+        if self.alt_clone.is_none() {
+            moving.extend(build::outermost(
+                &self.session.doc,
+                self.session.selection.ids(),
+            ));
+        }
+        moving
     }
 
     /// The snapped pointer position for a resize, and the lines explaining it.
@@ -13504,6 +13617,23 @@ fn group_fence(doc: &ondin_core::Document, id: NodeId) -> Option<NodeId> {
     }
     None
 }
+
+/// Whether frame `f` is one of `moving`, or inside one — the frames a move can
+/// never land in (`OndinApp::moving_with`, §15 D997, `[X11.1-L1-01]`).
+fn within_moving(
+    doc: &ondin_core::Document,
+    f: NodeId,
+    moving: &std::collections::HashSet<NodeId>,
+) -> bool {
+    std::iter::successors(Some(f), |a| doc.get(*a).and_then(|n| n.parent()))
+        .any(|a| moving.contains(&a))
+}
+
+/// What a move says when a main dropped over a component set of another kind was
+/// kept out of it (§15 D1003 (5): one kind per set, refused with a message saying
+/// why).
+const SET_OF_ANOTHER_KIND: &str =
+    "Not added to the set — a component set holds one kind of layer, and its variants are another";
 
 /// Which of `frames` owns a layer whose world bounds are `bounds`: the topmost
 /// one covering more than half of it, or `None` for "no frame — the canvas".
@@ -25007,6 +25137,231 @@ mod group_fence_tests {
             Some(other),
             "onto another frame, into it"
         );
+    }
+
+    /// **Two overlapping sibling frames dragged together both stay on the
+    /// canvas** (`[X11.1-L1-01]`, §15 D997's principle over the whole moving set)
+    /// — A 100×100 at (0, 0) over B at the same box, then a small A over a large
+    /// B (300×300 at (−100, −100)), both selected and moved 4 points right.
+    ///
+    /// D997 excluded the moved frame before the topmost was chosen, and only that
+    /// frame: every *other* selected frame stayed a candidate at its committed box
+    /// while moving by the same delta. So in the first case A's destination was B
+    /// and B's was A, `move_tx` wrote `Reparent A→B` and `Reparent B→A`, and the
+    /// commit refused the whole move as `WouldCycle` — the drop outline having
+    /// lit both moving frames throughout. In the second the move committed and A
+    /// went *into* B, a selection dragged together coming apart. A frame moving
+    /// with the selection keeps its place against every other selected frame, so
+    /// it is never the frame one of them dropped into.
+    ///
+    /// An Alt-drag keeps the narrow exclusion: its originals do not move, so a
+    /// copy dropped over another selected original is dropped over a frame that
+    /// is still there.
+    ///
+    /// **Flip run**, the moving set narrowed back to `[id]` in
+    /// `moving_with`: fails at *"stacked: A stays on the canvas"* with
+    /// `Some(b)`, the predicted site.
+    #[test]
+    fn overlapping_frames_dragged_together_stay_on_the_canvas() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0xFA5F);
+        let root = ids.mint();
+        let (a, b) = (ids.mint(), ids.mint());
+        let create = |id, w, at: (f64, f64)| Operation::CreateNode {
+            id,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(w, w),
+            },
+            transform: Some(Affine::translate(at)),
+            name: None,
+        };
+        let delta = Vec2::new(4.0, 0.0);
+        for (case, b_side, b_at) in [
+            ("stacked", 100.0, (0.0, 0.0)),
+            ("small over large", 300.0, (-100.0, -100.0)),
+        ] {
+            let mut doc = Document::new(root);
+            // `index: 0` each, so A — created last — is on top.
+            doc.apply(&Transaction(vec![
+                create(b, b_side, b_at),
+                create(a, 100.0, (0.0, 0.0)),
+            ]))
+            .expect("the tree");
+            app.session.adopt_document(doc, None);
+            app.session.selection.set(vec![a, b]);
+            assert_eq!(
+                app.move_destination(a, delta),
+                None,
+                "{case}: A stays on the canvas"
+            );
+            assert_eq!(
+                app.move_destination(b, delta),
+                None,
+                "{case}: B stays on the canvas"
+            );
+            let tx = app.move_tx(delta);
+            app.session.try_commit(tx).expect("the move commits");
+            for id in [a, b] {
+                assert_eq!(
+                    app.session.doc.get(id).and_then(|n| n.parent()),
+                    Some(root),
+                    "{case}: both frames are still on the canvas"
+                );
+            }
+        }
+    }
+
+    /// **No drop destination is a frame the component rules refuse** (`[X2-L2-02]`,
+    /// §15 D1003 (5)) — main `k` 200×200 at the origin, main `m` 100×100 at
+    /// (500, 0) with an instance `i` of it moved to (800, 0), a set holding one
+    /// frame variant at (0, 600), and a group main `g` at (900, 600).
+    ///
+    /// Before the repair `move_destination` asked kinds and the moved subtree
+    /// only: `m` dragged over `k` answered `k` (the outline lit it) and the commit
+    /// refused the whole move as `NestedMain`; `i` dragged into `m` answered `m`
+    /// and was refused as `ComponentCycle`; and `g` dragged over the set of frames
+    /// went in, making a set of two kinds. Each now passes over the refused frame
+    /// to the one beneath — the canvas here — and the move commits. A frame main
+    /// over the same set still goes in, so the set is not simply closed; and the
+    /// group's drop is the one the release explains.
+    ///
+    /// **Flip run**, `covering_that_holds` returning `frame_covering` unfiltered:
+    /// fails at *"a main over a main stays on the canvas"* with `Some(k)`, the
+    /// predicted site. The same assertion is what would catch `FrameIndex`'s
+    /// `components` flag left false, which skips the predicate the same way.
+    /// `can_hold`'s set-kind clause (D1003 (5)) disabled fails at *"a group main
+    /// over a set of frames stays on the canvas"* with `Some(set)`, as predicted;
+    /// its cycle clause disabled fails at *"an instance over its own main stays on
+    /// the canvas"* with `Some(m)`.
+    #[test]
+    fn a_drop_never_lands_where_the_component_rules_refuse_it() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0xFA60);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let [k, m, v, f, g, gr] = [(); 6].map(|_| ids.mint());
+        let node = |id, parent, kind, at: (f64, f64)| Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind,
+            transform: Some(Affine::translate(at)),
+            name: None,
+        };
+        let frame = |w| NodeKind::Artboard {
+            size: Size::new(w, w),
+        };
+        doc.apply(&Transaction(vec![
+            node(k, root, frame(200.0), (0.0, 0.0)),
+            node(m, root, frame(100.0), (500.0, 0.0)),
+            node(v, root, frame(100.0), (0.0, 600.0)),
+            node(f, root, frame(100.0), (300.0, 600.0)),
+            node(g, root, NodeKind::Group, (900.0, 600.0)),
+            node(
+                gr,
+                g,
+                NodeKind::Rect {
+                    size: Size::new(100.0, 100.0),
+                    corner_radii: Default::default(),
+                },
+                (0.0, 0.0),
+            ),
+        ]))
+        .expect("the tree");
+        app.session.adopt_document(doc, None);
+        for main in [k, m, v, f, g] {
+            assert!(
+                app.session
+                    .commit(Transaction(vec![Operation::SetComponent {
+                        id: main,
+                        component: true,
+                    }]))
+            );
+        }
+        app.session.selection.set_one(m);
+        app.duplicate_selection();
+        let i = app.session.selection.single().expect("the instance");
+        assert_eq!(app.session.doc.get(i).and_then(|n| n.link()), Some(m));
+        let at = |app: &OndinApp, id| app.session.resolved.world_bounds(id).unwrap();
+        let to =
+            Affine::translate((800.0, 0.0)) * Affine::translate(-at(&app, i).origin().to_vec2());
+        let placed = to * app.session.doc.get(i).unwrap().transform();
+        assert!(
+            app.session
+                .commit(Transaction(vec![Operation::SetTransform {
+                    id: i,
+                    transform: placed,
+                }]))
+        );
+        app.session.selection.set_one(v);
+        app.combine_as_variants();
+        let set = app.session.selection.single().expect("the set");
+        assert!(
+            ondin_core::variant::is_set(&app.session.doc, set),
+            "the fixture's set"
+        );
+
+        // Each drag, aimed by the moved layer's own box onto the target's.
+        let onto = |app: &OndinApp, id, target| {
+            let (from, to) = (at(app, id), at(app, target));
+            Vec2::new(to.x0 - from.x0 + 10.0, to.y0 - from.y0 + 10.0)
+        };
+        let drop = |app: &mut OndinApp, id, target, case: &str| {
+            app.session.selection.set_one(id);
+            let tx = app.move_tx(onto(app, id, target));
+            app.session
+                .try_commit(tx)
+                .unwrap_or_else(|e| panic!("{case}: the move commits: {e}"));
+        };
+
+        let d = onto(&app, m, k);
+        app.session.selection.set_one(m);
+        assert_eq!(
+            app.move_destination(m, d),
+            None,
+            "a main over a main stays on the canvas"
+        );
+
+        // Before `m` moves: once it sits over `k`, an instance dropped on it is
+        // over `k` too, which may hold it.
+        app.session.selection.set_one(i);
+        assert_eq!(
+            app.move_destination(i, onto(&app, i, m)),
+            None,
+            "an instance over its own main stays on the canvas"
+        );
+        drop(&mut app, i, m, "instance into its main");
+        assert_eq!(app.session.doc.get(i).unwrap().parent(), Some(root));
+
+        drop(&mut app, m, k, "main over main");
+        assert_eq!(app.session.doc.get(m).unwrap().parent(), Some(root));
+
+        app.session.selection.set_one(g);
+        let delta = onto(&app, g, set);
+        assert_eq!(
+            app.move_destination(g, delta),
+            None,
+            "a group main over a set of frames stays on the canvas"
+        );
+        assert!(
+            app.drops_into_a_set_of_another_kind(delta),
+            "and that drop is the one the release explains"
+        );
+        drop(&mut app, g, set, "group into a set of frames");
+        assert_eq!(app.session.doc.get(g).unwrap().parent(), Some(root));
+
+        app.session.selection.set_one(f);
+        let delta = onto(&app, f, set);
+        assert_eq!(
+            app.move_destination(f, delta),
+            Some(set),
+            "a frame main over the set goes in"
+        );
+        assert!(!app.drops_into_a_set_of_another_kind(delta));
     }
 
     /// **An occupied card in a row is a click target; an occupied page is not**

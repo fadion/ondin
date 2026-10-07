@@ -1433,6 +1433,14 @@ pub struct Context<'a> {
     pub in_set: bool,
     /// The selection holds a main or a set — what withholds *Create component*.
     pub holds_main: bool,
+    /// Why the commit would refuse *Create component* on this selection, when it
+    /// would (`component::why_not_main` / `why_not_wrap`, [`create_refusal`]) —
+    /// what dims the row with a reason rather than offering a verb that fails
+    /// (`[X2-L2-01]`).
+    pub create_refused: Option<&'static str>,
+    /// Why *Combine as variants* will not take these mains, when it will not —
+    /// [`COMBINE_MIXED`], §15 D1003 (5).
+    pub combine_refused: Option<&'static str>,
     /// The property the one selected linked layer drives, when its field differs
     /// from the main's — what offers *Reset Label text* (§15 D982).
     pub property_reset: Option<String>,
@@ -1455,6 +1463,32 @@ pub enum Role {
     /// A layer inside an instance that exists only there.
     Local,
 }
+
+/// The sentence for why *Create component* will not take the selection — the
+/// dimmed row's reason and the chord's failure message alike, so the two say the
+/// same thing (`[X2-L2-01]`, `[X11.2-L2-05]`).
+///
+/// The instance's is §15 D1003 (12)'s, word for word: it says how, since the
+/// detach chord is the way out.
+pub(crate) fn create_refusal(why: ondin_core::component::NotMain) -> &'static str {
+    use ondin_core::component::NotMain;
+    match why {
+        NotMain::Kind => "Only a frame or a group can become a component",
+        NotMain::Already => "Already a component",
+        NotMain::Inside => "A component cannot sit inside a component or an instance",
+        NotMain::Instance => "An instance can't become a component — detach it first (Ctrl+Alt+B).",
+        NotMain::Holds => "A component cannot hold another component or a component set",
+        NotMain::SetKind => {
+            "A component set holds one kind of layer — its variants are another kind"
+        }
+    }
+}
+
+/// Why *Combine as variants* will not make one set of the selected mains, the
+/// dimmed row's reason and the verb's message: **one kind per set** (§15 D1003
+/// (5)).
+pub(crate) const COMBINE_MIXED: &str =
+    "A component set holds one kind of layer — these mains mix frames and groups";
 
 /// The parts of the layer under the pointer that decide a row's label or its
 /// presence.
@@ -1823,16 +1857,35 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
     // variant* on a set or a variant, a set's *Select all instances* covering every
     // variant's, and a bound layer's reset named for its property. A set is a frame
     // that can never be a main, so it is not offered *Create component*.
+    // **Mains of two kinds are offered the row dimmed, with the reason** (§15
+    // D1003 (5): one kind per set) — not withheld as the other refusals are,
+    // because the ruling asks for a message saying why, and a missing row says
+    // nothing; this is §3's sentence for a refusal the user can fix.
     if cx.combinable {
-        rows.push(Row::new(Item::CombineAsVariants).dim_if(locked, why));
+        rows.push(
+            Row::new(Item::CombineAsVariants)
+                .dim_if(
+                    cx.combine_refused.is_some(),
+                    cx.combine_refused.unwrap_or(""),
+                )
+                .dim_if(locked, why),
+        );
     }
     match cx.role {
         // Not over a main or a set: wrapping one in a new main nests a main in a
         // main, which `component::check` refuses — so several mains are offered
         // *Combine as variants* and nothing else (`arch-scribe`'s reading, §15
         // D982's amendment).
+        // And dimmed, with the commit's own reason, where the commit would refuse
+        // it anyway (`[X2-L2-01]`): a layer inside a main, a local layer inside an
+        // instance, a frame holding a main — `holds_main` reads the selected
+        // layers only, and those cases are about what is around or below them.
         Role::Plain | Role::Local if !cx.holds_main => {
-            rows.push(Row::new(Item::CreateComponent).dim_if(locked, why));
+            rows.push(
+                Row::new(Item::CreateComponent)
+                    .dim_if(cx.create_refused.is_some(), cx.create_refused.unwrap_or(""))
+                    .dim_if(locked, why),
+            );
         }
         Role::Plain | Role::Local => {}
         Role::Set => {
@@ -2829,6 +2882,8 @@ impl OndinApp {
                 .map(|n| n.name().to_string())
                 .unwrap_or_default(),
             combinable: self.combinable_mains().is_some(),
+            combine_refused: self.combine_refusal(),
+            create_refused: self.create_component_refusal().map(create_refusal),
             in_set: self
                 .session
                 .selection
@@ -3389,6 +3444,9 @@ mod tests {
             combinable: false,
             in_set: false,
             holds_main: false,
+            // `None`, for `can_frame`'s reason.
+            create_refused: None,
+            combine_refused: None,
             property_reset: None,
             // **True**, for `can_frame`'s reason: the page menu's fixtures are not
             // about the export row, and a `false` default would leave it dim in all
@@ -4455,6 +4513,55 @@ mod tests {
         let mains = flat(&build(&cx));
         assert!(mains.contains(&Item::CombineAsVariants));
         assert!(!mains.contains(&Item::CreateComponent));
+    }
+
+    /// **A refusal the commit would make dims the row with its reason** —
+    /// *Create component* where `component::why_not_main` / `why_not_wrap`
+    /// answers (`[X2-L2-01]`), *Combine as variants* over mains of two kinds (§15
+    /// D1003 (5)). The app's side, that `create_refused` and `combine_refused`
+    /// are those answers, is `app::component_verb_tests`'.
+    ///
+    /// **Flip run**, the `create_refused` dim deleted from the row: fails at
+    /// *"dim inside a main"*, the predicted site; the `combine_refused` dim
+    /// deleted fails at *"dim over two kinds"*.
+    #[test]
+    fn a_component_row_the_commit_would_refuse_is_dim_with_the_reason() {
+        let sel = [id(1)];
+        let kinds = [Kind::Shape];
+        let target = Target::Layer {
+            id: id(1),
+            door: Door::Canvas,
+        };
+        let mut cx = open(target, &sel, &kinds);
+        let row = |cx: &Context, item: Item| {
+            build(cx)
+                .into_iter()
+                .flatten()
+                .find(|r| r.item == item)
+                .map(|r| (r.enabled, r.why))
+        };
+        assert_eq!(
+            row(&cx, Item::CreateComponent),
+            Some((true, None)),
+            "the fixture: offered and live"
+        );
+        let inside = create_refusal(ondin_core::component::NotMain::Inside);
+        cx.create_refused = Some(inside);
+        assert_eq!(
+            row(&cx, Item::CreateComponent),
+            Some((false, Some(inside))),
+            "dim inside a main"
+        );
+
+        cx.combinable = true;
+        cx.holds_main = true;
+        assert_eq!(row(&cx, Item::CombineAsVariants), Some((true, None)));
+        cx.combine_refused = Some(COMBINE_MIXED);
+        assert_eq!(
+            row(&cx, Item::CombineAsVariants),
+            Some((false, Some(COMBINE_MIXED))),
+            "dim over two kinds"
+        );
     }
 
     /// **A row whose only purpose is to undo a non-default state is omitted when

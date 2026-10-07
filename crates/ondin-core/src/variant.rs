@@ -652,7 +652,8 @@ pub const SET_PAD: f64 = 10.0;
 /// property, `Property 1`, takes each main's name as a value (§15 D982). Mains
 /// whose names repeat share a value and so clash, which the set then shows.
 /// Answers the transaction and the set's id; refused unless every member is a
-/// main not already in a set, and all share a parent (`build::frame`'s rule).
+/// main not already in a set, all of one kind ([`one_kind`], §15 D1003 (5)), and
+/// all share a parent (`build::frame`'s rule).
 pub fn combine(
     doc: &Document,
     res: &crate::resolve::Resolved,
@@ -664,6 +665,10 @@ pub fn combine(
         || mains
             .iter()
             .any(|m| !doc.get(*m).is_some_and(|n| n.component) || set_of(doc, *m).is_some())
+        // One kind per set (§15 D1003 (5)): a group main and a frame main made one
+        // set left a switch between them relinking a group to a frame
+        // (`[X6.1-L1-02]`). The app says why before it gets here.
+        || !one_kind(doc, mains)
     {
         return Err(OpError::WrongKindForOp);
     }
@@ -1104,6 +1109,30 @@ pub fn same_kind(doc: &Document, a: NodeId, b: NodeId) -> bool {
         return false;
     };
     std::mem::discriminant(&a.kind) == std::mem::discriminant(&b.kind)
+}
+
+/// Whether a main of `kind` fits `set`: every variant of it but `except` is a
+/// layer of that kind — **one kind per set** (§15 D1003 (5)). An empty set takes
+/// either. Asked by the doors that put a main in a set — *Combine as variants*,
+/// a drop into one, *Create component* inside one — and never by the loader,
+/// which the ruling keeps from refusing a document already made this way.
+pub fn fits_set(doc: &Document, set: NodeId, kind: &NodeKind, except: Option<NodeId>) -> bool {
+    variants(doc, set)
+        .into_iter()
+        .filter(|v| Some(*v) != except)
+        .filter_map(|v| doc.get(v))
+        .all(|v| std::mem::discriminant(&v.kind) == std::mem::discriminant(kind))
+}
+
+/// Whether `mains` are all layers of one kind — what *Combine as variants* asks
+/// before it makes them a set (§15 D1003 (5)).
+pub fn one_kind(doc: &Document, mains: &[NodeId]) -> bool {
+    let mut kinds = mains
+        .iter()
+        .filter_map(|m| doc.get(*m))
+        .map(|n| std::mem::discriminant(&n.kind));
+    let first = kinds.next();
+    kinds.all(|k| Some(k) == first)
 }
 
 /// Whether the instance rooted at `root` can switch variants here: an instance

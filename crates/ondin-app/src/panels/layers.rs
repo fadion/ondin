@@ -2593,8 +2593,13 @@ impl OndinApp {
         let doc = &self.session.doc;
         // The ancestor half (§15 D876) is the one a kind pair cannot see: a group
         // holding a card dropped into a boolean passes `can_parent` at every level.
+        // And the component half (`[X2-L2-02]`), which neither can see: a main or a
+        // set into a main or an instance, an instance into its own main, a main into
+        // a set of another kind (§15 D1003 (5)) — refused at the commit after the
+        // hint had offered the drop. The canvas asks the same predicate.
         build::can_parent(parent_node.kind(), node.kind())
             && (doc.frame_may_sit_under(parent) || !doc.holds_a_frame(dragged))
+            && ondin_core::component::can_hold(doc, parent, dragged)
     }
 
     /// Read the pointer against the rows the walk just drew: work out where the drag
@@ -4541,6 +4546,61 @@ mod drop_indent_tests {
             "a card's group into a mask"
         );
         assert!(!app.drop_is_legal(card, masked), "a card into a mask");
+    }
+
+    /// **A drop is refused where the component rules would refuse it**
+    /// (`[X2-L2-02]`, §15 D1003 (5)) — two mains `k` and `m`, frames at the root,
+    /// and a rect: a main into a main is `NestedMain` at the commit, so the panel
+    /// must not offer it, while the rect into the same main is ordinary. And a main
+    /// stays droppable in its own parent, whatever is around it — a reorder is
+    /// never refused.
+    ///
+    /// **Flip run**, the `component::can_hold` clause deleted: fails on *"a main
+    /// into a main"* at `true`, the predicted site.
+    #[test]
+    fn a_main_cannot_be_dropped_into_a_main() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0xD4B);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let (k, m, r) = (ids.mint(), ids.mint(), ids.mint());
+        let create = |id, kind| Operation::CreateNode {
+            id,
+            parent: root,
+            index: 0,
+            kind,
+            transform: None,
+            name: None,
+        };
+        let frame = || NodeKind::Artboard {
+            size: Size::new(40.0, 40.0),
+        };
+        doc.apply(&Transaction(vec![
+            create(k, frame()),
+            create(m, frame()),
+            create(
+                r,
+                NodeKind::Rect {
+                    size: Size::new(10.0, 10.0),
+                    corner_radii: Default::default(),
+                },
+            ),
+            Operation::SetComponent {
+                id: k,
+                component: true,
+            },
+            Operation::SetComponent {
+                id: m,
+                component: true,
+            },
+        ]))
+        .expect("the tree");
+        app.session.adopt_document(doc, None);
+
+        assert!(!app.drop_is_legal(m, k), "a main into a main");
+        assert!(app.drop_is_legal(r, k), "a rect into a main");
+        assert!(app.drop_is_legal(m, root), "a main in its own parent");
     }
 
     /// ⚠️ **Five passes**, for the same reason `tree_guide_tests::dashes` takes

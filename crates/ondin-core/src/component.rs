@@ -326,26 +326,207 @@ fn reaches_itself(
 
 // ── The verbs (§5.3d, build step 2) ────────────────────────────────────────────
 
-/// Whether `id` could be made a main component as it stands: a frame or a group,
-/// not linked, and with no main or linked node above it — [`check`]'s own rules,
-/// asked ahead so a menu row can say so rather than the commit refusing.
+/// Whether `id` could be made a main component as it stands — [`why_not_main`]
+/// with no answer.
 pub fn can_be_main(doc: &Document, id: NodeId) -> bool {
+    why_not_main(doc, id).is_none()
+}
+
+/// Why a layer cannot be made a main component — in place ([`why_not_main`]) or
+/// wrapped in a new frame first ([`why_not_wrap`]) — so a menu row and the chord
+/// can say *which* rule, rather than one sentence standing for all of them
+/// (`[X11.2-L2-05]`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NotMain {
+    /// The layer is missing, or is not a frame or a group (in place only — the
+    /// verb wraps anything else).
+    Kind,
+    /// It is a main already.
+    Already,
+    /// It sits inside a main or an instance — or, for a wrap, the parent the new
+    /// frame would be made in is one or sits in one: `LinkRule::NestedMain`.
+    Inside,
+    /// It is an instance root (§15 D1003 (12): detach it first).
+    Instance,
+    /// It is a set, or holds a main or a set: making it a main nests that main
+    /// (`LinkRule::NestedMain`) or that set (`VariantRule::SetKind`).
+    Holds,
+    /// It would be a variant of a set whose variants are another kind (§15 D1003
+    /// (5): one kind per set).
+    SetKind,
+}
+
+/// Why `id` could not be made a main component **in place**, or `None` when it
+/// can — [`check`]'s own rules, and `variant::check`'s, asked ahead so a menu row
+/// can say so rather than the commit refusing.
+///
+/// 🚨 **The subtree is asked too** (`[X2-L2-01]`). This read the node and its
+/// ancestors only, so a page frame holding a main — the common "Components"
+/// frame — passed, and *Create component* on it was refused at the commit as
+/// `NestedMain`; a frame holding a set the same way as `SetKind`. Its own doc
+/// promised the commit's rules, and the commit asks the whole tree.
+pub fn why_not_main(doc: &Document, id: NodeId) -> Option<NotMain> {
     let nodes = doc.node_map();
     let Some(n) = nodes.get(&id) else {
+        return Some(NotMain::Kind);
+    };
+    if !matches!(n.kind, NodeKind::Artboard { .. } | NodeKind::Group) {
+        return Some(NotMain::Kind);
+    }
+    if n.component {
+        return Some(NotMain::Already);
+    }
+    if n.parent.is_some_and(|p| main_or_instance_around(nodes, p)) {
+        return Some(NotMain::Inside);
+    }
+    if n.link.is_some() {
+        return Some(NotMain::Instance);
+    }
+    if holds_main_or_set(doc, id) {
+        return Some(NotMain::Holds);
+    }
+    if let Some(p) = n.parent
+        && crate::variant::is_set(doc, p)
+        && !crate::variant::fits_set(doc, p, &n.kind, Some(id))
+    {
+        return Some(NotMain::SetKind);
+    }
+    None
+}
+
+/// [`why_not_main`] for *Create component*'s **wrap**: `members` framed where
+/// they stand (`build::frame`) and the frame made the main. `None` when the
+/// commit will take it.
+///
+/// The new frame is made in the members' parent, so that parent — not a member —
+/// is what must not be or sit in a main or an instance (`[X2-L2-01]`: a rect
+/// inside a main, or a local layer inside an instance, was offered the row and
+/// refused at the commit; two members of one instance the same, X11.2's note),
+/// and no member may hold a main or a set. Members with no one parent answer
+/// `None` here and are `build::frame`'s to refuse, with its own error.
+pub fn why_not_wrap(doc: &Document, members: &[NodeId]) -> Option<NotMain> {
+    let nodes = doc.node_map();
+    let parent = members
+        .first()
+        .and_then(|m| nodes.get(m))
+        .and_then(|n| n.parent)?;
+    if members
+        .iter()
+        .any(|m| nodes.get(m).and_then(|n| n.parent) != Some(parent))
+    {
+        return None;
+    }
+    if main_or_instance_around(nodes, parent) {
+        return Some(NotMain::Inside);
+    }
+    if members.iter().any(|m| holds_main_or_set(doc, *m)) {
+        return Some(NotMain::Holds);
+    }
+    let frame = NodeKind::Artboard {
+        size: kurbo::Size::ZERO,
+    };
+    if crate::variant::is_set(doc, parent) && !crate::variant::fits_set(doc, parent, &frame, None) {
+        return Some(NotMain::SetKind);
+    }
+    None
+}
+
+/// Whether `id` or any node above it is a main or linked.
+fn main_or_instance_around(nodes: &FxHashMap<NodeId, Node>, id: NodeId) -> bool {
+    let mut at = Some(id);
+    while let Some(n) = at.and_then(|a| nodes.get(&a)) {
+        if n.component || n.link.is_some() {
+            return true;
+        }
+        at = n.parent;
+    }
+    false
+}
+
+/// Whether `id`'s subtree, `id` included, holds a main or a set.
+fn holds_main_or_set(doc: &Document, id: NodeId) -> bool {
+    crate::build::subtree_nodes(doc, &[id])
+        .iter()
+        .filter_map(|s| doc.get(*s))
+        .any(|s| s.component || s.set.is_some())
+}
+
+/// Whether `parent` can take `moved` as a child under the component and variant
+/// rules — the half of "can this land here" that `build::can_parent`, a question
+/// about two kinds, cannot see (`[X2-L2-02]`, §15 D876's *"every place that says
+/// in advance what `apply` will accept has to ask them too"*). False when:
+///
+/// - `moved` is or holds a main or a set and `parent` is or sits in a main or an
+///   instance — `LinkRule::NestedMain`, `VariantRule::SetKind`;
+/// - `moved` is or holds a set and `parent` is or sits in a set — `SetKind`;
+/// - `moved` is a main, `parent` a set, and the set's variants are another kind
+///   (§15 D1003 (5): one kind per set — refused at this door, never at the
+///   loader);
+/// - `moved` holds an instance whose shown main is the main `parent` sits in, or
+///   one that reaches it through instances — `LinkRule::ComponentCycle`.
+///
+/// Always true for `moved`'s own parent. Membership is not asked: a linked layer
+/// moved out of its instance is cut loose by [`settle_links`], which is the
+/// commit's answer rather than a refusal.
+pub fn can_hold(doc: &Document, parent: NodeId, moved: NodeId) -> bool {
+    let nodes = doc.node_map();
+    let Some(m) = nodes.get(&moved) else {
         return false;
     };
-    if n.component
-        || n.link.is_some()
-        || !matches!(n.kind, NodeKind::Artboard { .. } | NodeKind::Group)
+    // **Staying is never refused**: whatever a layer already in `parent` breaks,
+    // it already breaks — and a variant of a mixed set the loader admitted (D1003
+    // (5)) would otherwise leave its set on a nudge.
+    if m.parent == Some(parent) {
+        return true;
+    }
+    let sub = crate::build::subtree_nodes(doc, &[moved]);
+    let sub_nodes = || sub.iter().filter_map(|s| nodes.get(s));
+    let mut main_around = None;
+    let (mut in_instance, mut in_set) = (false, false);
+    let mut at = Some(parent);
+    while let Some(a) = at.and_then(|a| nodes.get(&a)) {
+        if a.component && main_around.is_none() {
+            main_around = Some(a.id);
+        }
+        in_instance |= a.link.is_some();
+        in_set |= a.set.is_some();
+        at = a.parent;
+    }
+    if (main_around.is_some() || in_instance) && sub_nodes().any(|s| s.component || s.set.is_some())
     {
         return false;
     }
-    let mut at = n.parent;
-    while let Some(p) = at.and_then(|p| nodes.get(&p)) {
-        if p.component || p.link.is_some() {
+    if in_set && sub_nodes().any(|s| s.set.is_some()) {
+        return false;
+    }
+    if m.component
+        && crate::variant::is_set(doc, parent)
+        && !crate::variant::fits_set(doc, parent, &m.kind, Some(moved))
+    {
+        return false;
+    }
+    let Some(host) = main_around else {
+        return true;
+    };
+    let shown: Vec<NodeId> = sub_nodes()
+        .filter(|s| is_instance_root(nodes, s))
+        .filter_map(|s| crate::swap::shown_main(nodes, s.id))
+        .collect();
+    if shown.is_empty() {
+        return true;
+    }
+    // `host` would contain an instance of each `shown` main: a cycle exactly when
+    // one of them is `host` or uses it, at some depth.
+    let uses = uses(nodes);
+    let mut seen: FxHashSet<NodeId> = FxHashSet::default();
+    let mut stack = shown;
+    while let Some(x) = stack.pop() {
+        if x == host {
             return false;
         }
-        at = p.parent;
+        if seen.insert(x) {
+            stack.extend(uses.get(&x).into_iter().flatten().copied());
+        }
     }
     true
 }

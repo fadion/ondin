@@ -2391,7 +2391,9 @@ tag** — occupied, it is that frame's one handle besides its edge (§15 D22, D8
 withheld it too and was narrowed for that reason. `canvas::draw_component_chrome` draws a
 `FAINT` hairline round each instance of a selected main and, round the entered instance, a dashed `DIM`
 boundary and *Editing inside instance · Esc to exit* — for `canvas::entered_instance`, the nearest
-instance root at or above `entered_group`, so they stay while the user steps into a group inside it.
+instance root at or above `entered_group`, so they stay while the user steps into a group inside it,
+and go once the selection leaves it by any door (`OndinApp::leave_a_scope_the_selection_left`, §15
+D985's amendment — until 2026-10-07 *Go to main* and a layers-panel pick left them standing).
 **The layers rows** wear the hexagon, `STRONG` when selected; a trailing mark at the row's edge
 is **+** for a local layer (an unlinked one inside an instance, or a local instance) and a **dot** for an
 override on the row, and on a collapsed row inside an instance, or a collapsed instance root, for any
@@ -2581,7 +2583,9 @@ the line, for both, is rows of the identity card, above the Component card, with
 `menu::Role::Set` (no *Create component* on a set, nor on any selection holding a main or a set —
 `menu::Context::holds_main`, `adc5f66`), *Combine as variants* on two or more mains outside any set
 under one parent, *Add variant* on a set or a variant, a set's *Select all instances*, and *Reset
-<property>* on a linked layer whose bound field differs; the toast *Combined N mains into set “Button” ·
+<property>* on a linked layer whose bound field differs — a nested copy bound to a swap or visibility
+property included, an instance root whose property is its outer instance's, which the menu's instance
+arm drew only from 2026-10-07 (§15 D983's amendment); the toast *Combined N mains into set “Button” ·
 Ctrl+Z to undo*; no new chords. **Four places depart from the mockup**, the session's and accepted by
 the maintainer on 2026-10-06 — values edited from a chip's popup rather than in place and dragged; binding from that one
 line rather than `{}` buttons on the layers row, Appearance and Type; the define popover as two buttons,
@@ -6153,10 +6157,29 @@ pub trait ScenePainter {
   same clamped box, the same outward rounding and the same scale taken from the composed device
   transform; `pop_layer` closes it into an `EffectJob` and puts a `draw_image` of a fresh atlas slot
   in the enclosing scene. After the walk, `VelloGpuRenderer::resolve_effects` rasterizes the jobs,
-  runs `fx_gpu`'s compute passes over each, and points its slot at the result with
+  runs `fx_gpu`'s compute passes over each — **one batch per vello pass** (`fx_gpu::run_batch`), every
+  layer the pass packed filtered through one encoder and one `queue.submit` into a result texture
+  packed as the source is — and points its slot at its rectangle of the result with
   `Renderer::override_image` — **deepest nesting level first**, since a frame is recorded as it pops,
   so a nested layer's texture is registered before the scene that draws it is rendered. The slots are
   unregistered at the end of the frame: they are keyed by blob id and every frame mints new ones.
+  ⚠️ **Not on a frame whose `resolve_effects` fails partway** — a vello `render_to_texture` error
+  returns before the slots already registered that frame are handed back, so they are never
+  unregistered (§15 D1003 (7)'s *Fix*, read and not run).
+  ⚠️ **The textures the passes use are pooled across frames** (`fx_gpu::FxPool`, §15 D1003 (7)).
+  Until 2026-10-07 every on-screen effect layer allocated five scratch textures, a result, a buffer
+  pair and a bind group per dispatch, and submitted on its own, every frame — about 0.13 ms of host
+  time a layer, so 726 shadowed cards cost ~90 ms a frame; pooled and batched, ~13 ms (RTX 4070 Ti).
+  A texture is taken by **size class** (`fx_gpu::size_class`, two steps an octave) and is usually
+  larger than asked, holding whatever its last user left in the margin — so **no pass may read past
+  `Params::size`**, which `a_pooled_texture_carries_nothing_from_the_frame_before` pins. A pass's
+  packed source and its five scratch slots go back once its submit is made; its **result is held to
+  `end_frame`**, after the page's render and the unregistering, because the consuming pass's atlas
+  copy reads it. Reuse after that is safe by queue order, with no fence and no `poll`. The pool is
+  trimmed to the largest working set of the last eight frames, and bind groups are cached by the three
+  textures they bind, so a steady frame makes neither a texture nor a bind group — counted, not timed,
+  by `a_steady_frame_makes_nothing_and_submits_once_per_pass`. It pools *textures*: the renderers
+  stay one per pass, D344's rule below is untouched, and D779's declined renderer pool stands.
   ⚠️ **On the renderer that will *draw* the slot, which for a nested layer is not the page's** (§15
   D404). A layer's result is drawn by the scene it popped back into — the page for a top-level layer,
   the **parent layer's own sub-scene** for anything deeper — and that sub-scene belongs to a
@@ -7535,9 +7558,10 @@ focus go, and its edit was dropped; only `Enter` kept it. So `inspector_panel` h
 drew while a widget on its own `Area` layer has egui's focus (`OndinApp::inspector_hold`), and while
 the live selection differs — and the held one's layers all exist — draws against the held one, swapped
 in and put back, until the field lets go and commits to the layer it was editing. A popover's field is
-another layer and holds nothing — ⚠️ and the one popover field that commits, a value chip's rename,
-still loses its edit to a canvas click: ruled to commit when its popup closes, not built (§15 D1003
-(11)). ⚠️ *Do not* read the frames until the blur, when the inspector shows
+another layer and holds nothing — but for the one popover field that commits, a value chip's rename,
+which **asks** the inspector to hold while it has focus (`variants::hold_inspector`), and whose edit,
+should its popup close before it is drawn again, commits on the close, `Escape` cancelling (§15 D1003
+(11), built 2026-10-07). ⚠️ *Do not* read the frames until the blur, when the inspector shows
 the old selection under a canvas showing the new, as a lag to remove: they are the commit.
 
 **Neither the layers tree nor the inspector column draws a scrollbar.** Both are
@@ -12935,7 +12959,11 @@ group**, exactly as double-clicking it does — reaching inside with a modifier 
 as stepping in, and without it the next plain click jumps back out to the whole group and leaves the
 one before it looking undone. While `OndinApp::entered_group` is set, `group_chain` stops there, so
 clicks pick its contents instead of re-selecting it; a click on anything outside it clears the scope
-in the same gesture that selects elsewhere, and so does a click on empty canvas (D22). Nothing about
+in the same gesture that selects elsewhere, and so does a click on empty canvas (D22). Every other
+door that moves the selection out of it clears it too since 2026-10-07 —
+`OndinApp::leave_a_scope_the_selection_left`, at the top of every editor frame and in `escape`, clears
+`entered_group` once something is selected and none of it is within the group, or the group is gone;
+an empty selection keeps it (§15 D985's amendment). Nothing about
 the document changes, which is why there is no affordance for it — what the click selects says
 plainly enough where you are. Load-bearing: `pick_for_click` opens the scope *after* asking
 `pick_preview` what to select, because the preview must still see the scope as it was — the modifier

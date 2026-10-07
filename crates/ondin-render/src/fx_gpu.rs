@@ -356,6 +356,11 @@ const O1: usize = 4;
 ///
 /// Returns `None` when there is nothing to do, so the caller can draw `src`
 /// directly rather than paying for a copy that changes nothing.
+///
+/// ⚠️ **Allocates its [`Scratch`] and submits its own encoder on every call** — once
+/// per on-screen effect layer per frame, about 0.11 ms of CPU each, measured. §15
+/// D1003 (7) rules the scratch pooled by size class across frames and the submits
+/// batched — not built.
 pub fn run(
     device: &Device,
     queue: &Queue,

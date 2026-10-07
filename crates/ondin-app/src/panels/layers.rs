@@ -76,6 +76,10 @@ const LOCK_INSET: f32 = 14.0;
 const MARK_SLOT: f32 = 9.0;
 
 /// A row's component mark (§15 D981).
+///
+/// ⚠️ An expanded instance marks a removed or reordered child on no row at all.
+/// §15 D1003 (9) rules the dot onto the parent row whose children differ, expanded
+/// or collapsed, with a tooltip and *Restore* — not built.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RowMark {
     /// An override — on the row, or, collapsed, anything inside it differing.

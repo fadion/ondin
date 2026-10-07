@@ -208,6 +208,10 @@ pub fn suggested_filter(name: &str) -> String {
 /// **Nothing else writes these rewrites**, so this is the only place one is made
 /// and a transaction holding a swap is expanded exactly once. Empty when the
 /// transaction holds no `SetSwap`.
+///
+/// ⚠️ **Ruled, not built** (§15 D1003 (3)): a layer the outer main added to the
+/// slot carries across a swap, at its place among its siblings. The rewrite
+/// deletes it today, an unmatched counterpart that is untouched.
 pub fn settle(doc: &Document, tx: &Transaction, ids: &mut IdSource) -> Vec<Operation> {
     let mut swapped: Vec<NodeId> =
         tx.0.iter()
@@ -291,6 +295,10 @@ pub(crate) fn land_ops(doc: &Document, n: &Node, to: Option<NodeId>) -> Vec<Oper
 /// - a swapped node no longer linked is cleared — it is no instance any more;
 /// - a swapped node now linked **straight to a main** becomes an instance of what
 ///   it shows ([`landed`]).
+///
+/// ⚠️ **Ruled, not built** (§15 D1003 (4)): a swap left equal to what its slot now
+/// shows ([`slot_main`]) is to be cleared too. Only [`swap()`] keeps one from being
+/// stored, and a later change to the slot leaves it here, uncleared.
 pub(crate) fn tidy(doc: &Document) -> Vec<Operation> {
     let nodes = doc.node_map();
     let mut out: Vec<(NodeId, Vec<Operation>)> = Vec::new();

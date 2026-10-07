@@ -4652,6 +4652,10 @@ impl OndinApp {
     /// source's value through the copy's own parent so it names the number the
     /// field will show. An instance root's placement is its own (`reset::
     /// placement_is_own`), so it gets no X, Y or rotation mark.
+    ///
+    /// ⚠️ **R's reset swaps the linear part and keeps the copy's translation**, so a
+    /// layer turned about its pivot moves when reset. §15 D1003 (8) rules it to
+    /// rotate back about the pivot instead — not built.
     fn transform_marks(&self, id: NodeId, world: [f64; 6], box_min: Point) -> TransformMarks {
         let doc = &self.session.doc;
         let (Some(copy), Some(src)) = (

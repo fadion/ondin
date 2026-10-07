@@ -164,6 +164,10 @@ pub fn values<T: Clone>(items: &[Keyed<T>]) -> Vec<T> {
 ///
 /// Callers pass lists that agree in value position by position; where they do not
 /// (a longer target), positions past the anchor's end are simply not reachable.
+///
+/// ⚠️ **Ruled otherwise for a main and its instance, not built** (§15 D1003 (6)): a
+/// row one edit adds to both takes one shared id, so the instance follows its main's
+/// new item. [`rekey_by_position`]'s past-the-end ids are the same case.
 pub fn retarget<T: Clone>(
     anchor: &[Keyed<T>],
     target: &[Keyed<T>],

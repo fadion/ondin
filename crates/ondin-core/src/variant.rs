@@ -1106,6 +1106,10 @@ pub(crate) enum Rewrite {
 /// rewrite this function makes for a root linked straight to a main
 /// (`swap::settle`) — so the two differ in what keeps the slot, never in how the
 /// layers are matched.
+///
+/// ⚠️ **Nothing here refuses `to` of another kind than `root`**, which a set of
+/// mixed kinds makes reachable. §15 D1003 (5) rules one kind per set, the set's
+/// doors refusing and this the second defence — not built.
 pub fn switch(doc: &Document, root: NodeId, to: NodeId, ids: &mut IdSource) -> Option<Transaction> {
     if !can_switch(doc, root) {
         return None;

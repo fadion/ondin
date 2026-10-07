@@ -54,6 +54,12 @@ pub(crate) struct ValueDelete {
 /// field gives its focus up with something new in it — `Escape` abandons, as every
 /// committed text field here does (`ui::defocus_commits`). The typed text lives in
 /// egui's memory under `id` while the field has focus, and nowhere after.
+///
+/// It trims, and refuses an empty result — rules for names (a layer name typed
+/// empty is discarded too, §15 D54). Two rulings here are not built (§15 D1003):
+/// (10) a Text property's content is to commit as typed, empty allowed, not through
+/// this; and (11) a rename typed in a value chip's menu is to commit when the popup
+/// closes, where a canvas click drops it today.
 fn name_field(
     ui: &mut egui::Ui,
     id: egui::Id,

@@ -302,6 +302,11 @@ pub fn propagate(doc: &Document, tx: &Transaction) -> Vec<Operation> {
 ///
 /// Mints ids for what it copies, so it runs where an `IdSource` is: before
 /// `settle_links`, which then settles any link these leave behind.
+///
+/// ⚠️ **An ungroup or *Release* in a main whose group an instance changed is ruled
+/// otherwise and not built** (§15 D1003 (2)): that instance keeps its copy as a
+/// local wrapper, its children still linked. Today the moves loop lifts them out
+/// whatever the copy holds, and the changed group is left empty.
 pub fn propagate_structure(
     doc: &Document,
     tx: &Transaction,

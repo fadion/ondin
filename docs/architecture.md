@@ -1820,7 +1820,10 @@ clear, an export preset or paste, the mixed grid override — keeps each target'
 its main's items rather than as every item deleted and new ones added. ⚠️ Not for an edit: deleting the
 first of two would hand the second the deleted one's id. (3) **One row changed in place over a
 selection** (`slot_transaction`'s Selection arm) edits row `i` on each target
-(`build::edit_fill_at_all`/`edit_stroke_at_all`), and no id moves.
+(`build::edit_fill_at_all`/`edit_stroke_at_all`), and no id moves. ⚠️ **Ruled otherwise for a main
+and its instance, not built — §15 D1003 (6)**: a row one edit adds to both takes one shared id. Minted
+per target, by (1) or past the end by (2), the instance's row is a local addition from the moment it
+is made, and no later edit of the main's new item reaches it.
 
 **The per-item rule is the structural rule one level down** — one algorithm at two levels, children
 and list items. Items match by id; within a matched item each field compares as above; an item the main
@@ -1883,7 +1886,11 @@ instance's own changes survive grouping and ungrouping, still linked. **A move w
 counterpart** is a removal there — delete if untouched, else cut. ⚠️ All three were wrong in the first
 build (`6ac7d0d`): Group selection re-copied the counterparts and doubled any the instance had changed,
 Ungroup was refused, and the missing-parent case left the link standing — fixed in `e38603d` (§15
-D979's amendment), the Ungroup case measured failing first.
+D979's amendment), the Ungroup case measured failing first. ⚠️ **Ungroup over a copy an instance
+changed is ruled otherwise, not built — §15 D1003 (2)**: the instance keeps its copy as a local
+wrapper, the children inside it still linked. Today the moves loop lifts them out with the main's
+baked transform and leaves the changed group empty and unlinked — which *"never destroys
+instance-side work"*, above, forbids.
 
 A **reset** family belongs to the design: reset a field; reset structure — re-insert the missing
 counterparts at their anchors, local additions left alone; and reset all — the fields, the missing
@@ -1956,6 +1963,9 @@ the main and the links. Nested chains relink one level up, above, so a nested in
 outer main's deletion as an instance of its own main. ⚠️ *Keeps its current look* is pinned through the
 real commit since 2026-10-06 (`deleting_a_main_through_the_commit_keeps_its_instances_layers`, §15
 D984): the structural pass had been deleting every untouched layer of the detached instance.
+⚠️ **A cut is ruled otherwise, not built — §15 D1003 (1)**: *Cut* then *Paste* of a main in the same
+document is a move, the paste restoring the main under its own id and relinking the instances the
+cut detached. Today the cut detaches as a delete does and the paste makes a new, unlinked main.
 
 ✅ **The verbs are built** (build step 2, `0ae3cd7`, §15 D979's amendment), on **one rule for every
 way a link's target goes**: `component::relink_past(doc, gone, among)` — a link into `gone` climbs to
@@ -2190,7 +2200,9 @@ every ordinary frame keeps. A double-click or `Enter` enters it (§15 D228's agr
 label, a context tag and a dashed neutral boundary. The layers panel keeps its icons neutral; expanded,
 a row carries a **dot** for its own override and **+** if it is local, and **a collapsed row's dot means
 it differs from its main in any way** — overrides, local layers and removed children alike, as the
-card's drift summary counts them, a removed child having no row of its own; 🚨 **a kept child shows as local** (the maintainer's ruling), since nothing records
+card's drift summary counts them, a removed child having no row of its own — ⚠️ ruled otherwise, not
+built, §15 D1003 (9): a removed or reordered child's dot goes on its parent's row, expanded or
+collapsed, with a tooltip and *Restore*; 🚨 **a kept child shows as local** (the maintainer's ruling), since nothing records
 provenance. The inspector gains a **component card** above Transform per selection state, its resets —
 *Reset all*, *Reset fields*, *Restore removed children*, *Reset order*, each with a count — disabled
 rather than hidden when there is nothing to do, and **no reset deletes a local addition** — ⚠️ a local
@@ -2436,6 +2448,11 @@ gets a *Swap* row offering every main of its kind, unfiltered (the session's). T
 offered, never what is valid. *Preferred mains* is not built. ⚠️ **The app's swap UI is untested** — a
 `ComboBox` popup cannot be driven headlessly. D983's amendment has the seven decisions the build made,
 each the session's — the first, the same-kind swap, accepted by the maintainer on 2026-10-06.
+⚠️ **Three rulings here are not built — §15 D1003 (3)–(5).** A layer the outer main added to the
+slot carries across a swap, at its place among its siblings, where the rewrite deletes it today as an
+unmatched counterpart that is untouched; a swap left equal to what its slot shows is cleared on every
+route, where only `swap::swap` keeps one from being stored; and a set holds one kind — *Combine as
+variants* and a drag into a set refuse another, `variant::switch` refuses second, the loader never.
 
 ✅ **The app half, in the inspector and the context menu** (`a313b2c`; `panels/variants.rs`,
 `panels/component.rs`; §15 D982's amendment). **A set** gets its own card, *Variants*, in the Component
@@ -4595,7 +4612,8 @@ write retargets from, never a list to write verbatim onto the others. Every writ
 its own ids and gives it the values shown, which is what keeps the reading believable: what was shown
 is then true of all of them. Three shapes (§5.3d): an edit of the shared list goes through
 `retarget_fills_all` / `retarget_strokes_all`, mapping each item through the anchor to the target's
-own and minting an added row per target; a wholesale replacement — *Paste properties*, the mixed row's
+own and minting an added row per target (one shared id for a main and its instance, ruled and not
+built — §15 D1003 (6)); a wholesale replacement — *Paste properties*, the mixed row's
 clear — through `set_fills_all` / `set_strokes_all`, which take values and keep each target's ids by
 position; and one row changed in place through `edit_fill_at_all` / `edit_stroke_at_all`. 🚨 **Until
 2026-10-04 the multi-selection write copied the first target's whole list onto every target**, which
@@ -7433,7 +7451,9 @@ focus go, and its edit was dropped; only `Enter` kept it. So `inspector_panel` h
 drew while a widget on its own `Area` layer has egui's focus (`OndinApp::inspector_hold`), and while
 the live selection differs — and the held one's layers all exist — draws against the held one, swapped
 in and put back, until the field lets go and commits to the layer it was editing. A popover's field is
-another layer and holds nothing. ⚠️ *Do not* read the frames until the blur, when the inspector shows
+another layer and holds nothing — ⚠️ and the one popover field that commits, a value chip's rename,
+still loses its edit to a canvas click: ruled to commit when its popup closes, not built (§15 D1003
+(11)). ⚠️ *Do not* read the frames until the blur, when the inspector shows
 the old selection under a canvas showing the new, as a lag to remove: they are the commit.
 
 **Neither the layers tree nor the inspector column draws a scrollbar.** Both are
@@ -10305,7 +10325,8 @@ D980: the item ids differ between layers given the same fill separately, so agre
 Adding from an empty panel gives every target that one fill. Writes for a shared list go through
 `build::retarget_fills_all` / `retarget_strokes_all` (`inspector::write_fill_list`, `write_strokes`),
 which give every target the edited values under **its own** item ids — the anchor's mapped through by
-position, an added row minted per target — so what the panel shows is true of all of them and no
+position, an added row minted per target (for a main and its instance ruled one shared id, not built —
+§15 D1003 (6)) — so what the panel shows is true of all of them and no
 layer takes another's ids (§5.3d's three write shapes). Both are hidden outright when nothing in scope can take paint
 (`build::any_paint_in`) — one question for both since a frame stopped answering it differently from
 the stroke side, which is what `any_strokeable_in` was for (§15 D400). Rows ride

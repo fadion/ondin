@@ -43,6 +43,7 @@ which is this file's own §9.5 lesson: **check the section before believing the 
 | *Now · Text alignment* | **Nothing open as of 2026-09-22.** Side bearings / optical margin alignment moved to *Later · Parked decisions*, undecided — it had been filed `Later:` inside a `Now` section since the section was written, which is the prefix table broken from the inside — **and was built hours later the same day** (§15 D830): both edges, `ParagraphStyle::optical_margins`, off by default, one adjustment to the line's geometry that no arm of reads `align`. ⚠️ **The bullet's own example was backwards the whole time it stood** — it blamed `H` for having *almost no* left bearing, and `H` has the largest of the capitals measured. ⚠️ *This row said "Side bearings / optical margin alignment, marked **Later**" and was perfectly accurate for weeks — it described the bullet exactly, including the contradiction, and that is why nobody acted on it.* What is left in the section is one standing rule: don't use ink bounds for alignment — **which D830 does not break, and which now says it is about the *datum***. |
 | *Now · Distribution* | **Nothing open as of 2026-10-04** — both items closed the day they opened: the release job split so its build steps hold no write token (§15 D976), and the single-package rpm route's waiver narrowed to the file (§15 D977). *The text below is the row as it stood before.* **Two open as of 2026-10-04**, both left by §15 D974's hardening of the release review's findings: the release job is not yet split so that the build steps hold no write token (`[X3-L5-03]`'s last bullet), and the single-package rpm route's `dnf install --nogpgcheck` still waives checking for the whole transaction (`[X3-L5-04]`). And it has run: CI was green on all three legs at `e1f1842`, and v0.4.0's Release workflow built and published every platform; the tag's Pages publish was refused by the `github-pages` environment's `main`-only rule and published from `main`, and the environment admits `v*` tags since `430ed7e`. *The text below is the row as it stood before.* **Nothing open as of 2026-10-03.** Its one item, the package repositories' signing key, opened and closed that day (§15 D957): the maintainer generated the key, set `GPG_PRIVATE_KEY` and `GPG_PASSPHRASE` and turned Pages on, and the fingerprint is in `install.sh` and `README.md`. ⚠️ **Nothing has run** — the first tagged Release is the first time `pages.yml` builds the site, and the first check that the secret's key is the one the fingerprint names. That is the release skill's to do, not an item. |
 | *Now · Core, rendering and export* | **Opened 2026-10-06**, each item a live *Fix* in §15 with no feature section here and never carried in this file: core's dependency gate still a denylist (§15 D427), a finite absurd blur accepted at the operation (D454), a descending ramp left descending on load (D455), three rules stated in more than one place (D458, D460, D473), and a sweep gradient's literal radius in SVG (D762). |
+| *Now · Components — the release review's fix phase* | **Opened 2026-10-07**: the `v0.4.1..7d0c666` release review's 86 findings, **five introduced Highs blocking the next tag**, and §15 D1003's twelve rulings to build; `review/release-v0.4.1/triage.md` is the status. |
 | *Next · Nested component properties* | **Built 2026-10-06** from the maintainer's mockup (§15 D988, with D989's binding line). **What is left**: the maintainer's look in the GUI, begun on 2026-10-07 (§15 D1000 ruled on the Properties card and a hidden group); a variant moved into a set after a showing exists not bound; a nested instance an instance's author added having no slot to show; the sub-heading's type. *The text below is the row as it stood that morning.* **One item, opened 2026-10-06**: exposing a nested instance's component properties on the instance that holds it — later by §15 D982, and waiting on its mockup. **The section it came from, *Next · Container layout*, closed into §15 the same day** (D867's amendment): its five steps — used geometry, absolute insets, flex, grid, components — are all built, §15 D867–D927 and D978–D985 their record and `architecture.md` §5.3c and §5.3d their design; the one other thing it held open, exact equality against the commit's arithmetic for a pass not yet written, is a question for that pass and lives in §5.3d and D979. |
 | *Next · The polishing pass over the accepted calls* | **One item, opened 2026-10-06**: the maintainer's review of every call accepted wholesale that day (§15's header). |
 | *Later* | Components and layout past the first build (pushing to a main, un-making a component, §5.3c's deferred properties — opened 2026-10-06); the command palette and cheatsheet; the parked decisions, which gained four on 2026-10-06 (components' unruled questions, the 32-row menu, `AltGr`, the chrome's keyboard traversal); post-v1 (MCP, which gained the snapshot's questions the same day, Command Mode, multiplayer). |
@@ -825,7 +826,8 @@ function it named.
   is the per-frame allocation of the fx textures (`fx_gpu::fx_texture` per chunk, and every filter
   pass's), measured at 5.7 GB allocated with frames in flight unpolled. A headless sweep of 16,529
   frames did not reproduce it, and the maintainer declined having the session drive the GUI, so it
-  waits on ordinary use. *Added 2026-10-06.*
+  waits on ordinary use. *Added 2026-10-06.* Pooling the fx scratch by size class across frames, the
+  release review's answer to that suspect, is ruled and not built (§15 D1003 (7), *Now · Components*).
 
 ---
 
@@ -1557,6 +1559,25 @@ argument, which nothing here restates.
 - **A sweep gradient whose transform will not invert exports `r="50"`** (§15 D762's *Not fixed here*).
   `svg::sweep_radius` answers `None` there and its caller writes `.unwrap_or(50.0)`, which is §15
   D647's fixed defect — a literal radius whatever the shape's size — back for that one input.
+
+## Now · Components — the release review's fix phase
+
+**Opened 2026-10-07.** The release review of `v0.4.1..7d0c666` lives in `review/release-v0.4.1/`,
+gitignored, and **`triage.md` is the status**: §7 the fix order, §6 the buckets, each finding's block
+in `passes/` its evidence and fix sketch. Nothing here restates a finding.
+
+- **Five introduced Highs block the next tag.** `[R1-L2-01]`: `Document::peek` panics on a loaded
+  value the op layer refuses (a gradient opacity of 5.0), on the commit and every preview frame.
+  `[X2-L1-01]`: a layer dragged into a main never reaches its instances. `[X3-L1-01]`: a layer dragged
+  out of a main is refused, or, where an instance had touched it, the kept copy is thrown 300 px.
+  `[R3-L5-01]`: ungroup inside a main strips the instances' overrides — fix per §15 D1003 (2).
+  `[X2-L5-01]`: *Cut* then *Paste* of a main detaches its instances for good — fix per D1003 (1).
+- **86 distinct findings in all** — 0 Critical, 5 High, 41 Medium, 40 Low after the ruling's re-rank,
+  one of them (`[X7-L4-01]`) older than the range.
+- **§15 D1003's twelve rulings, to build** — (1) and (2) are the two blockers above; the other ten
+  answer findings in `triage.md` §7's order.
+
+*Opened 2026-10-07, when the maintainer ruled the triage's twelve questions (§15 D1003).*
 
 ## Next · Nested component properties
 

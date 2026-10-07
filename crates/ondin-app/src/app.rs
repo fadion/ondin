@@ -4252,6 +4252,12 @@ impl OndinApp {
     ///
     /// The toast speaks only when wrapping happened (D981's ruling): the tree changed
     /// shape, and that deserves a line. Text-only, naming the key (its ruling (d)).
+    ///
+    /// ⚠️ **Not yet true of the in-place arm**, which says *"Created a component"*.
+    /// §15 D1003 (12) rules it silent, and an instance root — refused by
+    /// `can_be_main` for its link, and told today that it sits *inside* one — to be
+    /// told *"An instance can't become a component — detach it first
+    /// (Ctrl+Alt+B)"*. Not built.
     pub(crate) fn create_component(&mut self) {
         let ids = build::outermost(&self.session.doc, self.session.selection.ids());
         let doc = &self.session.doc;
@@ -5481,6 +5487,11 @@ impl OndinApp {
     /// returned while Ctrl+C worked — a gap the user can see, since the two keys
     /// sit beside each other and one of them silently doing nothing reads as
     /// broken rather than as unimplemented.
+    ///
+    /// ⚠️ **A main's cut is ruled a move and is not one yet** (§15 D1003 (1)): a
+    /// paste in this document is to restore the main under its own id and relink the
+    /// instances the delete detached, and the cut to say they will follow. Today the
+    /// paste makes a new, unlinked main, and the `info` below overwrites the detach.
     fn cut_selection(&mut self, ctx: &egui::Context) {
         let layers = !build::outermost(&self.session.doc, self.session.selection.ids()).is_empty();
         let guides = !self.session.selection.guides().is_empty();

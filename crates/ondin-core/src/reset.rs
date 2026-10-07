@@ -703,6 +703,24 @@ pub fn child_drift(doc: &Document, p: NodeId) -> ChildDrift {
     }
 }
 
+/// [`ChildDrift`] over **the whole subtree** at `p` — what a **collapsed**
+/// layers-panel row's tooltip counts and its *Restore children* restores (§15
+/// D1004 (2)): every removed child anywhere inside, as [`Drift::removed`] counts
+/// them, and whether any parent inside — `p` among them — has its linked children
+/// out of order. Never a field, and never a local layer: a collapsed row whose dot
+/// is lit by those alone answers nothing here. Empty for anything unlinked, as
+/// [`child_drift`].
+pub fn subtree_child_drift(doc: &Document, p: NodeId) -> ChildDrift {
+    if source_of(doc, p).is_none() {
+        return ChildDrift::default();
+    }
+    let nodes = scope_nodes(doc, p);
+    ChildDrift {
+        removed: missing(doc, &nodes).len(),
+        order: nodes.iter().any(|n| order_target(doc, *n).is_some()),
+    }
+}
+
 /// Each (copy, its source's child) where the child has no counterpart anywhere in
 /// the copy's instance — moved elsewhere in the instance is not missing. A child
 /// under a missing one is not asked about: restoring the outer one brings it.
@@ -831,7 +849,8 @@ pub fn restore_children(doc: &Document, scopes: &[NodeId], ids: &mut IdSource) -
     restore_missing(doc, pairs, ids)
 }
 
-/// *Restore* on a layers-panel row whose children differ (§15 D1003 (9)): exactly
+/// *Restore* on an **expanded** layers-panel row whose children differ (§15 D1003
+/// (9); a collapsed row's is [`restore_structure`], §15 D1004 (2)): exactly
 /// what [`child_drift`] counts for `p` and its row's tooltip names — `p`'s own
 /// removed children restored, then `p`'s linked children put back in its source's
 /// order — and nothing deeper or wider: no field, no grandchild, no sibling. Read
@@ -970,24 +989,31 @@ pub fn reset(doc: &Document, kind: Kind, scopes: &[NodeId], ids: &mut IdSource) 
     }
 }
 
-/// *Reset all*: the missing counterparts restored, then the order, then the
-/// fields — each read on the document the one before leaves, so a restored child
-/// is ordered with its siblings. One transaction's worth of operations.
-pub fn reset_all(doc: &Document, scopes: &[NodeId], ids: &mut IdSource) -> Vec<Operation> {
+/// The structure under each scope put back, **no field**: the missing
+/// counterparts restored at every depth, then every parent's order — the order
+/// read on the document the restore leaves, so a restored child is ordered with
+/// its siblings. [`reset_all`]'s first two steps, and a **collapsed** layers-panel
+/// row's *Restore children* (§15 D1004 (2)): what [`subtree_child_drift`] counts.
+pub fn restore_structure(doc: &Document, scopes: &[NodeId], ids: &mut IdSource) -> Vec<Operation> {
     let mut scratch = doc.clone();
     let mut out = restore_children(doc, scopes, ids);
     if scratch.apply_unchecked(&Transaction(out.clone())).is_err() {
         return out; // the commit will refuse it, with the reason
     }
-    let order = reset_order(&scratch, scopes);
-    if scratch
-        .apply_unchecked(&Transaction(order.clone()))
-        .is_err()
-    {
-        out.extend(order);
-        return out;
+    out.extend(reset_order(&scratch, scopes));
+    out
+}
+
+/// *Reset all*: the missing counterparts restored, then the order, then the
+/// fields — each read on the document the one before leaves, so a restored child
+/// is ordered with its siblings ([`restore_structure`], then the fields). One
+/// transaction's worth of operations.
+pub fn reset_all(doc: &Document, scopes: &[NodeId], ids: &mut IdSource) -> Vec<Operation> {
+    let mut out = restore_structure(doc, scopes, ids);
+    let mut scratch = doc.clone();
+    if scratch.apply_unchecked(&Transaction(out.clone())).is_err() {
+        return out; // the commit will refuse it, with the reason
     }
-    out.extend(order);
     out.extend(reset_fields(&scratch, scopes));
     out
 }

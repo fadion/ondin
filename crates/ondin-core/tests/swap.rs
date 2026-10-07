@@ -1064,6 +1064,82 @@ fn a_layer_the_slot_adds_carries_across_a_swap() {
     assert_eq!(copies, 1, "back, and no duplicate");
 }
 
+/// **A layer the slot adds never takes part in a swap's name matching** (§15
+/// D1004 (1)): the Button main puts a red-33 rect named `Shine` into its nested
+/// Star — the name and kind of Heart's `Shine` — and `r` is swapped to Heart. The
+/// slot's own `Shine` carries across as the slot's own, linked to the slot's
+/// layer, its fill its own and its place kept, and Heart's `Shine` arrives beside
+/// it as a new copy: the swapped copy shows both. It was paired with Heart's by
+/// name path, relinked as its copy and given Heart's fill — the slot's layer
+/// surviving, if at all, only as overrides a later reset wipes. The swap back to
+/// Star, Heart's `Shine` gone, must not pair Heart's copy with the slot's layer
+/// either (the same pool, the other side): one copy of it, no second.
+///
+/// Flip, run: `rewrite`'s old-side `skip` answering `false` (match it anyway,
+/// the old pool) fails "still the slot's own", linked to Heart's `Shine`; the
+/// new side's alone fails the swap back, "Star's Shape and the slot's Shine", 3
+/// against 2 — Heart's `Shine` copy relinked as a second copy of the slot's.
+#[test]
+fn a_layer_the_slot_adds_is_never_matched_by_name() {
+    let mut f = fixture();
+    let own = f.ids.mint();
+    let n = f.n;
+    f.commit(vec![
+        create(own, n, 1, rect(), "Shine"),
+        Operation::SetFills {
+            id: own,
+            fills: fills(33),
+        },
+    ]);
+    let mine = *f.kids(f.r).last().unwrap();
+    assert_eq!(
+        f.node(mine).link(),
+        Some(own),
+        "the fixture: r has its copy"
+    );
+    assert_eq!(f.fill(mine), red(33), "the fixture: and its fill");
+    let tx = swap::swap(&f.doc, f.r, f.heart).unwrap();
+    f.commit_undoable(tx.0);
+    let kids = f.kids(f.r);
+    assert_eq!(
+        f.node(mine).link(),
+        Some(own),
+        "still the slot's own, linked to the slot's layer"
+    );
+    assert_eq!(f.fill(mine), red(33), "its fill its own");
+    assert_eq!(
+        kids.len(),
+        3,
+        "Heart's Shape and Shine, and the slot's Shine"
+    );
+    assert_eq!(
+        kids.iter().position(|k| *k == mine),
+        Some(2),
+        "where it sat, above the Shape"
+    );
+    assert_eq!(f.node(kids[0]).link(), Some(f.hshape));
+    assert_eq!(
+        kids.iter()
+            .filter(|k| f.node(**k).link() == Some(f.hshine))
+            .count(),
+        1,
+        "Heart's Shine arrives beside it"
+    );
+    let tx = swap::swap(&f.doc, f.r, f.star).unwrap();
+    f.commit_undoable(tx.0);
+    let kids = f.kids(f.r);
+    assert_eq!(kids.len(), 2, "Star's Shape and the slot's Shine");
+    assert_eq!(
+        kids.iter()
+            .filter(|k| f.node(**k).link() == Some(own))
+            .count(),
+        1,
+        "back, one copy of the slot's layer"
+    );
+    assert!(kids.contains(&mine));
+    assert_eq!(f.fill(mine), red(33));
+}
+
 /// **A nested instance the slot adds carries across a swap too** (§15 D1003 (3),
 /// D983's amendment building it): the Button main puts an instance of Dot into
 /// its nested Star, bare and inside a group, and `r` — then `r'` in a second

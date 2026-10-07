@@ -1267,10 +1267,35 @@ pub(crate) fn rewrite(
     // its override dropped, a stray layer kept beside the new main's, and a
     // duplicate on the swap back. For a variant switch both ends are mains, and
     // each base is the node itself.
-    let paths_old = paths_by(doc, from, |id| old_base.of_node(doc, id));
-    let paths_new = paths_by(doc, to, |id| new_base.of_node(doc, id));
-    let by_path_new: FxHashMap<&Vec<(String, usize)>, NodeId> =
-        paths_new.iter().map(|(id, p)| (p, *id)).collect();
+    //
+    // **A layer the slot adds is out of the pool, on both sides** (§15 D1004
+    // (1)): one the outer main put into the slot copies nothing of the main the
+    // slot shows (`component::slot_adds`, D1003 (3)), so pairing it by name with
+    // a target layer of the same name and kind relinked it as that layer's copy —
+    // it stopped being the slot's own, its values surviving only as overrides a
+    // later reset wipes. Taken out before pairing, and out of the same-name
+    // counts so it shifts no shown layer's index, it is carried across below as
+    // the slot's own and a same-named target layer is copied in beside it. On
+    // the new side it is the swap back to the slot (`to` the slot itself), where
+    // pairing an old copy with it would have made a second copy of it.
+    let slot_added =
+        |base: &Base, id: NodeId| mode == Rewrite::Swap && !base.shows(base.of_node(doc, id));
+    let paths_old = paths_by(
+        doc,
+        from,
+        |id| old_base.of_node(doc, id),
+        |id| slot_added(&old_base, id),
+    );
+    let paths_new = paths_by(doc, to, |id| new_base.of_node(doc, id), |_| false);
+    let by_path_new: FxHashMap<Vec<(String, usize)>, NodeId> = paths_by(
+        doc,
+        to,
+        |id| new_base.of_node(doc, id),
+        |id| slot_added(&new_base, id),
+    )
+    .into_iter()
+    .map(|(id, p)| (p, id))
+    .collect();
     // Old source → new source. **A layer matches only under a matched parent**
     // (`[X6.1-L1-01]`): kinds are matched node by node, so a Group "Box" and a
     // Frame "Box" did not match while the "Box/Shape" under them did — and the
@@ -1353,7 +1378,8 @@ pub(crate) fn rewrite(
                 // the main the slot shows, so a swap — which replaces the linked
                 // content only — keeps it where it sits among its siblings, still
                 // following the slot (`component::check` admits that link). It was
-                // deleted as an untouched counterpart.
+                // deleted as an untouched counterpart. Out of the matching pool
+                // (D1004 (1), above), every such layer reaches this arm.
                 if mode == Rewrite::Swap && !old_base.shows(base_of(*s_old)) {
                     continue;
                 }
@@ -1513,11 +1539,14 @@ pub(crate) fn rewrite(
 /// Each layer below `main` with its **name path** — the names from just below
 /// `main` down to it, each with its index among same-named siblings — every
 /// layer listed after its parent. Each layer is named by the node `name_of`
-/// answers for it ([`rewrite`]'s bases).
+/// answers for it ([`rewrite`]'s bases). A layer `skip` answers true for is left
+/// out with everything under it, and counts toward no sibling's index (a layer
+/// the slot adds, §15 D1004 (1)).
 fn paths_by(
     doc: &Document,
     main: NodeId,
     name_of: impl Fn(NodeId) -> NodeId,
+    skip: impl Fn(NodeId) -> bool,
 ) -> Vec<(NodeId, Vec<(String, usize)>)> {
     let mut out = Vec::new();
     let mut stack: Vec<(NodeId, Vec<(String, usize)>)> = vec![(main, Vec::new())];
@@ -1525,6 +1554,9 @@ fn paths_by(
         let Some(n) = doc.get(id) else { continue };
         let mut seen: FxHashMap<String, usize> = FxHashMap::default();
         for c in &n.children {
+            if skip(*c) {
+                continue;
+            }
             let Some(cn) = doc.get(name_of(*c)).or_else(|| doc.get(*c)) else {
                 continue;
             };

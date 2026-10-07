@@ -322,9 +322,10 @@ pub enum Item {
     /// inside an instance: [`Self::ResetInstance`] scoped to that layer.
     ResetChild,
     /// *Restore children* (§15 D1003 (9)) — on an instance or a linked layer in one
-    /// whose own children differ from its source's (removed, reordered): exactly
-    /// what the layers panel's dot and tooltip name on that row
-    /// (`reset::restore_own_children`), no field and nothing deeper.
+    /// whose children differ from its source's (removed, reordered): exactly what
+    /// the layers panel's dot and tooltip name on that row, never a field — its own
+    /// children while the row is expanded (`reset::restore_own_children`), its whole
+    /// subtree while collapsed (`reset::restore_structure`, §15 D1004 (2)).
     RestoreChildren,
     /// *Reset* named for a component property — *Reset Label text* (§15 D982) —
     /// on a linked layer whose property-driven field differs from its main.
@@ -1441,9 +1442,11 @@ pub struct Context<'a> {
     /// (`reset::Drift::any`) — what offers *Reset all* and *Reset Label*, omitted
     /// at zero by §3's exception for a row that only undoes a non-default state.
     pub drifted: bool,
-    /// Whether that one layer's **own** children differ from its source's
+    /// Whether that one layer's children differ from its source's
     /// (`reset::ChildDrift::any`) — the layers panel's row dot (§15 D1003 (9)) —
-    /// what offers *Restore children*, omitted at zero by the same exception.
+    /// what offers *Restore children*, omitted at zero by the same exception. Its
+    /// own children while its row is expanded, its whole subtree while collapsed
+    /// (`OndinApp::child_drift_of`, §15 D1004 (2)); never a field.
     pub children_differ: bool,
     /// That one layer's name, which *Reset Label* is named for. Empty for several.
     pub layer_name: String,
@@ -1937,8 +1940,9 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
             if cx.drifted {
                 rows.push(Row::new(Item::ResetInstance).dim_if(locked, why));
             }
-            // After the reset it narrows, as the row's dot is narrower than the
-            // collapsed row's (§15 D1003 (9)).
+            // After the reset it narrows: never a field, and on an expanded row
+            // only its own children (§15 D1003 (9)); collapsed, every removal and
+            // order inside, as the bubbled dot covers them (§15 D1004 (2)).
             if cx.children_differ {
                 rows.push(Row::new(Item::RestoreChildren).dim_if(locked, why));
             }
@@ -2903,14 +2907,13 @@ impl OndinApp {
                     .unwrap_or_else(|| ondin_core::reset::drift(&self.session.doc, id))
                     .any()
             }),
-            // The layers panel's cache the same way — the row's dot fills it.
-            children_differ: self.session.selection.single().is_some_and(|id| {
-                (self.child_drift_cache.0 == self.session.revision())
-                    .then(|| self.child_drift_cache.1.get(&id).copied())
-                    .flatten()
-                    .unwrap_or_else(|| ondin_core::reset::child_drift(&self.session.doc, id))
-                    .any()
-            }),
+            // The layers panel's cache the same way — the row's dot fills it — on
+            // the row's fold, from either door (§15 D1004 (2), `row_folded`).
+            children_differ: self
+                .session
+                .selection
+                .single()
+                .is_some_and(|id| self.child_drift_read(id).any()),
             layer_name: self
                 .session
                 .selection
@@ -6030,15 +6033,18 @@ mod restore_children_tests {
     /// The labels of the menu a user opens on `id` from the layers panel, through
     /// `open_context_menu` → `open_menu_rows` — not a synthetic `Context`.
     fn labels_on(app: &mut OndinApp, ctx: &egui::Context, id: NodeId) -> Vec<String> {
+        labels_through(app, ctx, id, Door::Panel)
+    }
+
+    /// `labels_on` through either door.
+    fn labels_through(
+        app: &mut OndinApp,
+        ctx: &egui::Context,
+        id: NodeId,
+        door: Door,
+    ) -> Vec<String> {
         app.session.selection.set_one(id);
-        app.open_context_menu(
-            ctx,
-            Target::Layer {
-                id,
-                door: Door::Panel,
-            },
-            None,
-        );
+        app.open_context_menu(ctx, Target::Layer { id, door }, None);
         let labels = app
             .open_menu_rows()
             .iter()
@@ -6199,6 +6205,160 @@ mod restore_children_tests {
         assert!(
             !labels_on(&mut app, &ctx, i).contains(&"Restore children".to_string()),
             "and the instance's menu no longer offers it"
+        );
+    }
+
+    /// **A collapsed row's *Restore children* covers what its dot covers** (§15
+    /// D1004 (2)): main `M` holds a rect `A` and a frame `G` holding `X`, `Y`, `Z`;
+    /// in instance `i`, `G`'s copy of `X` is deleted, `G`'s copies reordered and
+    /// `A`'s copy renamed — so `i`'s **own** children are untouched and everything
+    /// that differs is a grandchild's, or a field.
+    ///
+    /// - Expanded, `i` is not offered the row (as built: its own children are its
+    ///   source's); `G`'s copy is.
+    /// - Collapsed — its dot bubbled up from inside — `i` is offered it through
+    ///   both doors (the canvas reads the row's fold too), and the tooltip counts
+    ///   the subtree: *"1 removed · order changed"*.
+    /// - Run on the collapsed `i`: `X` is back, linked, and `G`'s order is its
+    ///   source's — and `A`'s copy keeps its name (*Reset all* is the only verb
+    ///   that touches fields).
+    /// - Still collapsed, lit by the rename alone: *Reset all*, no *Restore
+    ///   children*, and no tooltip.
+    ///
+    /// **Flips run.** (1) `child_drift_scoped` ignoring `folded` (the as-built
+    /// own-children scope on a collapsed row): fails at *"collapsed: offered, its
+    /// dot bubbled from a grandchild"*, the predicted site. (2) The collapsed
+    /// restore as `reset::reset_all` (restoring fields with the structure): fails
+    /// at *"no field: A's copy keeps its name"*, the predicted site. (3) The
+    /// collapsed restore as `reset::restore_children` alone — the subtree-wide
+    /// reset that already existed, which restores removed children and no order:
+    /// fails at *"X is back, linked, and G's order is its source's"*, `[Z, X, Y]`.
+    #[test]
+    fn a_collapsed_rows_restore_children_covers_its_whole_subtree() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0xBCF);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let [m, a, g, x, y, z] = [(); 6].map(|_| ids.mint());
+        let create = |id, parent, index, kind, name: &str| Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind,
+            transform: None,
+            name: Some(name.into()),
+        };
+        let rect = || NodeKind::Rect {
+            size: Size::new(10.0, 10.0),
+            corner_radii: Default::default(),
+        };
+        let frame = |w: f64| NodeKind::Artboard {
+            size: Size::new(w, w),
+        };
+        doc.apply(&Transaction(vec![
+            create(m, root, 0, frame(100.0), "M"),
+            create(a, m, 0, rect(), "A"),
+            create(g, m, 1, frame(40.0), "G"),
+            create(x, g, 0, rect(), "X"),
+            create(y, g, 1, rect(), "Y"),
+            create(z, g, 2, rect(), "Z"),
+        ]))
+        .expect("a frame holding a rect and a frame of three");
+        app.session.adopt_document(doc, None);
+        app.session.selection.set_one(m);
+        app.create_component();
+        app.duplicate_selection();
+        let i = app.session.selection.single().expect("the instance");
+        let copy_in = |app: &OndinApp, p: NodeId, s: NodeId| {
+            app.session
+                .doc
+                .get(p)
+                .unwrap()
+                .children()
+                .iter()
+                .copied()
+                .find(|c| app.session.doc.get(*c).unwrap().link() == Some(s))
+        };
+        let ai = copy_in(&app, i, a).expect("A's copy");
+        let gi = copy_in(&app, i, g).expect("G's copy");
+        let (xi, yi) = (copy_in(&app, gi, x).unwrap(), copy_in(&app, gi, y).unwrap());
+        let own = app.session.doc.get(i).unwrap().children().to_vec();
+        assert!(app.session.commit(Transaction(vec![
+            Operation::DeleteNode { id: xi },
+            Operation::Reorder { id: yi, index: 1 },
+            Operation::SetName {
+                id: ai,
+                name: "Mine".into()
+            },
+        ])));
+        assert_eq!(
+            app.session.doc.get(i).unwrap().children(),
+            own.as_slice(),
+            "the fixture: i's own children untouched"
+        );
+        let srcs = |app: &OndinApp, p: NodeId| -> Vec<Option<NodeId>> {
+            app.session
+                .doc
+                .get(p)
+                .unwrap()
+                .children()
+                .iter()
+                .map(|c| app.session.doc.get(*c).unwrap().link())
+                .collect()
+        };
+        assert_eq!(
+            srcs(&app, gi),
+            vec![Some(z), Some(y)],
+            "the fixture: X gone, Y and Z swapped"
+        );
+        let restore = "Restore children".to_string();
+
+        assert!(
+            !labels_on(&mut app, &ctx, i).contains(&restore),
+            "expanded: its own children are its source's"
+        );
+        assert!(labels_on(&mut app, &ctx, gi).contains(&restore), "G's copy");
+
+        app.collapsed.insert(i);
+        for door in [Door::Panel, Door::Canvas] {
+            let on_i = labels_through(&mut app, &ctx, i, door);
+            assert!(
+                on_i.contains(&restore),
+                "collapsed: offered, its dot bubbled from a grandchild ({door:?}): {on_i:?}"
+            );
+        }
+        assert_eq!(
+            crate::panels::layers::child_drift_tip(app.child_drift_of(i)).as_deref(),
+            Some("1 removed · order changed"),
+            "the tooltip counts the subtree"
+        );
+
+        app.session.selection.set_one(i);
+        let target = Target::Layer {
+            id: i,
+            door: Door::Panel,
+        };
+        app.perform_menu_item(&ctx, Item::RestoreChildren, target, None);
+        assert_eq!(
+            srcs(&app, gi),
+            vec![Some(x), Some(y), Some(z)],
+            "X is back, linked, and G's order is its source's"
+        );
+        assert_eq!(
+            app.session.doc.get(ai).unwrap().name(),
+            "Mine",
+            "no field: A's copy keeps its name"
+        );
+
+        let on_i = labels_on(&mut app, &ctx, i);
+        assert!(
+            on_i.contains(&"Reset all".to_string()) && !on_i.contains(&restore),
+            "collapsed, lit by a field alone: Reset all only: {on_i:?}"
+        );
+        assert_eq!(
+            crate::panels::layers::child_drift_tip(app.child_drift_of(i)),
+            None
         );
     }
 }

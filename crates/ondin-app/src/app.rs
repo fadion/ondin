@@ -970,14 +970,17 @@ pub struct OndinApp {
         u64,
         std::collections::HashMap<NodeId, ondin_core::reset::Drift>,
     ),
-    /// What differs among each layers-panel row's own children
-    /// (`reset::child_drift`) — the parent row's dot and tooltip (§15 D1003 (9),
-    /// `[X11.1-L2-03]`) — on the same key as `drift_cache` and for its reason: the
-    /// tree asks it of every row inside an instance every frame, and each answer
-    /// walks the whole instance for the links it holds.
+    /// What differs among each layers-panel row's children
+    /// (`OndinApp::child_drift_of`) — the parent row's dot and tooltip (§15 D1003
+    /// (9), `[X11.1-L2-03]`) — on the same key as `drift_cache` and for its reason:
+    /// the tree asks it of every row inside an instance every frame, and each
+    /// answer walks the whole instance for the links it holds. Keyed by the row
+    /// **and whether it is folded** (§15 D1004 (2)): a collapsed row counts its
+    /// whole subtree, an expanded one its own children, and folding a row changes
+    /// no revision.
     pub(crate) child_drift_cache: (
         u64,
-        std::collections::HashMap<NodeId, ondin_core::reset::ChildDrift>,
+        std::collections::HashMap<(NodeId, bool), ondin_core::reset::ChildDrift>,
     ),
     /// The Component card's property readings, kept beside `drift_cache` on the
     /// same key (`panels::PropCache`, `[X8.1-L4-02]`).
@@ -4732,17 +4735,22 @@ impl OndinApp {
         self.session.commit(Transaction(ops));
     }
 
-    /// *Restore children* from the context menu (§15 D1003 (9)): the one selected
-    /// layer's own removed children back and its children in their source's
-    /// order — what its layers-panel row's dot and tooltip name
-    /// (`reset::restore_own_children`), nothing deeper and no field. One
-    /// transaction; no toast, D981's rule (the dot going out is the answer).
+    /// *Restore children* from the context menu (§15 D1003 (9)): what the one
+    /// selected layer's layers-panel row's dot and tooltip name, never a field.
+    /// **Scoped by the row's fold** (§15 D1004 (2), `row_folded`, from either door):
+    /// expanded, its own removed children back and its children in their source's
+    /// order (`reset::restore_own_children`), nothing deeper; collapsed, every
+    /// removed child and every order anywhere inside it (`reset::restore_structure`).
+    /// One transaction; no toast, D981's rule (the dot going out is the answer).
     pub(crate) fn restore_selected_children(&mut self) {
         let Some(p) = self.session.selection.single() else {
             return;
         };
-        let ops =
-            ondin_core::reset::restore_own_children(&self.session.doc, p, &mut self.session.ids);
+        let ops = if self.row_folded(p) {
+            ondin_core::reset::restore_structure(&self.session.doc, &[p], &mut self.session.ids)
+        } else {
+            ondin_core::reset::restore_own_children(&self.session.doc, p, &mut self.session.ids)
+        };
         if ops.is_empty() {
             self.session
                 .info("Nothing here differs from the main component");

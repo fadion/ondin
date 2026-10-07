@@ -82,9 +82,19 @@ const MARK_SLOT: f32 = 9.0;
 /// `[X11.1-L2-03]`; expanded, it had marked no row at all. The ruling's *Restore*
 /// in the row's context menu is *Restore children* (`menu::Item::RestoreChildren`),
 /// offered on exactly the rows this dot is on for their children
-/// (`menu::Context::children_differ`, the same `reset::child_drift`) and putting
-/// back exactly what the tooltip names (`reset::restore_own_children`) — narrower
-/// than *Reset ‹layer›* / *Reset all*, which reset the whole subtree's fields too.
+/// (`menu::Context::children_differ`, the same [`child_drift_scoped`]) and putting
+/// back exactly what the tooltip names — narrower than *Reset ‹layer›* / *Reset
+/// all*, the only verbs that touch fields.
+///
+/// **The scope is the row's fold** (§15 D1004 (2)). **Collapsed**, the dot
+/// bubbles up whatever differs inside, so the tooltip counts and *Restore
+/// children* restores every removed child and every changed order anywhere in the
+/// subtree (`reset::subtree_child_drift`, `reset::restore_structure`); a collapsed
+/// row lit by field overrides or local layers alone offers *Reset all* only.
+/// **Expanded**, the row's own children only (`reset::child_drift`,
+/// `reset::restore_own_children`) — deeper rows carry their own dots and rows.
+/// As first built (`5bce910`) a collapsed row whose only change was a removed
+/// grandchild wore the dot and was offered no *Restore children*.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RowMark {
     /// An override — on the row, or, collapsed, anything inside it differing; and
@@ -97,7 +107,7 @@ enum RowMark {
 /// The tooltip on a parent row whose children differ from its source's —
 /// *"1 removed · order changed"*, the ruling's own example (§15 D1003 (9)) — or
 /// `None` when they do not.
-fn child_drift_tip(d: ondin_core::reset::ChildDrift) -> Option<String> {
+pub(crate) fn child_drift_tip(d: ondin_core::reset::ChildDrift) -> Option<String> {
     let mut parts = Vec::new();
     if d.removed > 0 {
         parts.push(format!("{} removed", d.removed));
@@ -106,6 +116,22 @@ fn child_drift_tip(d: ondin_core::reset::ChildDrift) -> Option<String> {
         parts.push("order changed".to_string());
     }
     (!parts.is_empty()).then(|| parts.join(" · "))
+}
+
+/// What a row's tooltip counts and its *Restore children* restores, by its fold
+/// (§15 D1004 (2)): `folded`, every removed child and changed order anywhere in
+/// `id`'s subtree (`reset::subtree_child_drift`); else `id`'s own children
+/// (`reset::child_drift`). Never a field either way.
+pub(crate) fn child_drift_scoped(
+    doc: &ondin_core::Document,
+    id: NodeId,
+    folded: bool,
+) -> ondin_core::reset::ChildDrift {
+    if folded {
+        ondin_core::reset::subtree_child_drift(doc, id)
+    } else {
+        ondin_core::reset::child_drift(doc, id)
+    }
 }
 
 /// Whether a row whose layer is a picture shows the picture's thumbnail in its
@@ -2009,7 +2035,9 @@ impl OndinApp {
             // as collapsed, with a tooltip naming what (§15 D1003 (9),
             // `[X11.1-L2-03]`): a removed child has no row of its own, and
             // reordered children each have no field override, so an expanded
-            // instance asking `overrides` alone put the mark nowhere.
+            // instance asking `overrides` alone put the mark nowhere. Collapsed, the
+            // tooltip counts the whole subtree, as the bubbled dot covers it (§15
+            // D1004 (2), `child_drift_of`).
             let (mark, children_tip) = {
                 let doc = &self.session.doc;
                 let in_instance = doc
@@ -2680,19 +2708,64 @@ impl OndinApp {
         }
     }
 
-    /// `reset::child_drift` of the row `id`, from `child_drift_cache` while the
-    /// document is unchanged — the parent row's dot and tooltip (§15 D1003 (9)).
+    /// What differs among the row `id`'s children, from `child_drift_cache` while
+    /// the document is unchanged — the parent row's dot and tooltip (§15 D1003 (9))
+    /// and what its *Restore children* is offered for. **Its scope is the row's
+    /// fold** (§15 D1004 (2)): a [collapsed](Self::row_folded) row's whole subtree
+    /// (`reset::subtree_child_drift`), as its bubbled dot covers it; an expanded
+    /// row's own children (`reset::child_drift`), deeper rows carrying their own.
     pub(crate) fn child_drift_of(&mut self, id: NodeId) -> ondin_core::reset::ChildDrift {
+        let folded = self.row_folded(id);
+        if let Some(d) = self.child_drift_cached(id, folded) {
+            return d;
+        }
+        let d = child_drift_scoped(&self.session.doc, id, folded);
+        self.child_drift_cache.1.insert((id, folded), d);
+        d
+    }
+
+    /// [`Self::child_drift_of`] for a `&self` caller (the context menu), from the
+    /// cache when it is current, computed on a miss.
+    pub(crate) fn child_drift_read(&self, id: NodeId) -> ondin_core::reset::ChildDrift {
+        let folded = self.row_folded(id);
+        (self.child_drift_cache.0 == self.session.revision())
+            .then(|| self.child_drift_cache.1.get(&(id, folded)).copied())
+            .flatten()
+            .unwrap_or_else(|| child_drift_scoped(&self.session.doc, id, folded))
+    }
+
+    /// The cache's answer for `(id, folded)`, emptying it first if the document
+    /// has changed since it was filled.
+    fn child_drift_cached(
+        &mut self,
+        id: NodeId,
+        folded: bool,
+    ) -> Option<ondin_core::reset::ChildDrift> {
         let rev = self.session.revision();
         if self.child_drift_cache.0 != rev {
             self.child_drift_cache = (rev, Default::default());
         }
-        let doc = &self.session.doc;
-        *self
-            .child_drift_cache
-            .1
-            .entry(id)
-            .or_insert_with(|| ondin_core::reset::child_drift(doc, id))
+        self.child_drift_cache.1.get(&(id, folded)).copied()
+    }
+
+    /// Whether the row `id` is drawn **collapsed** — it has children, the user
+    /// folded it, and no search is open (a search forces every branch open, as the
+    /// drawing walk does). What scopes the row's tooltip and its *Restore
+    /// children* (§15 D1004 (2)), from either door: the context menu opened on the
+    /// canvas reads the same fold, so the verb always covers what the selected
+    /// layer's row in the panel shows a dot for.
+    pub(crate) fn row_folded(&self, id: NodeId) -> bool {
+        let searching = self
+            .layer_filter
+            .as_ref()
+            .is_some_and(|f| !f.trim().is_empty());
+        !searching
+            && self.collapsed.contains(&id)
+            && self
+                .session
+                .doc
+                .get(id)
+                .is_some_and(|n| !n.children().is_empty())
     }
 
     /// Walk `id`, which is at `depth`, up to the ancestor sitting at `want`. `id` itself

@@ -48,7 +48,14 @@ peniko = { version = "0.6.1", features = ["serde"] }
 rstar = "0.13.0"
 rustc-hash = "2.1.3"
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
+# `float_roundtrip` (`[R3-L5-02]`): the default parser reads some shortest-form
+# floats one ULP off — `29.101491260998422` came back as the next `f64` up — so a
+# save and reopen moved a coordinate, and an override one ULP off its main (an
+# override is a value that differs, §15 D979 (a)) was erased by the reload. The
+# exact parser costs some load time; `ondin-core`'s
+# `an_override_one_ulp_off_its_main_survives_a_reload` is the test. Feature
+# unification makes it workspace-wide whichever member names it.
+serde_json = { version = "1.0.151", features = ["float_roundtrip"] }
 thiserror = "2.0.19"
 # Text shaping/layout (CPU, headless). `system` feature OFF: core never scans
 # system fonts — layout uses only the bundled Inter fonts (deterministic, FS-free).

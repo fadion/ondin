@@ -199,8 +199,7 @@ pub fn check(nodes: &FxHashMap<NodeId, Node>) -> Result<(), (NodeId, LinkRule)> 
     let uses = uses(nodes);
     let mut done: FxHashSet<NodeId> = FxHashSet::default();
     for &start in uses.keys() {
-        let mut path: Vec<NodeId> = Vec::new();
-        if reaches_itself(start, &uses, &mut path, &mut done) {
+        if reaches_itself(start, &uses, &mut done) {
             return Err((start, LinkRule::ComponentCycle));
         }
     }
@@ -280,24 +279,49 @@ pub(crate) fn slot_adds(nodes: &FxHashMap<NodeId, Node>, slot: NodeId, src: Node
     false // a loop, which is `LinkRule::LinkCycle`'s to report
 }
 
+/// Whether a depth-first walk of `uses` from `start` comes back to a main still
+/// on its path — a component cycle. `done` is shared across starts: a main
+/// already walked from an earlier start, and not on this path, has nothing new
+/// below it.
+///
+/// **An explicit stack, not recursion** (`[R1-L2-04]`). This runs on every load
+/// and every `Document::apply`, and a crafted file can make the graph as long as
+/// it has mains while its tree stays two levels deep — under
+/// `io::MAX_TREE_DEPTH`, which bounds only the recursion the loader knew about.
+/// Recursing once per main overflowed the stack, and a stack overflow is an
+/// abort, not a panic: nothing catches it (§15 D416's rule, by a new axis). The
+/// path is a set for the same reason the walk is a loop — `path.contains` made
+/// the old search quadratic in the chain's length as well.
 fn reaches_itself(
-    at: NodeId,
+    start: NodeId,
     uses: &FxHashMap<NodeId, Vec<NodeId>>,
-    path: &mut Vec<NodeId>,
     done: &mut FxHashSet<NodeId>,
 ) -> bool {
-    if path.contains(&at) {
-        return true;
-    }
-    if !done.insert(at) {
+    if !done.insert(start) {
         return false;
     }
-    path.push(at);
-    let looped = uses
-        .get(&at)
-        .is_some_and(|next| next.iter().any(|m| reaches_itself(*m, uses, path, done)));
-    path.pop();
-    looped
+    let mut on_path: FxHashSet<NodeId> = FxHashSet::default();
+    on_path.insert(start);
+    // Each frame is a main and the index of the next of its uses to walk.
+    let mut stack: Vec<(NodeId, usize)> = vec![(start, 0)];
+    while let Some(&(at, next)) = stack.last() {
+        let Some(&m) = uses.get(&at).and_then(|ms| ms.get(next)) else {
+            on_path.remove(&at);
+            stack.pop();
+            continue;
+        };
+        if let Some(top) = stack.last_mut() {
+            top.1 += 1;
+        }
+        if on_path.contains(&m) {
+            return true;
+        }
+        if done.insert(m) {
+            on_path.insert(m);
+            stack.push((m, 0));
+        }
+    }
+    false
 }
 
 // ── The verbs (§5.3d, build step 2) ────────────────────────────────────────────

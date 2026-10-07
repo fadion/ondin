@@ -524,6 +524,17 @@ fn reset_items<T: Clone>(src: &[Keyed<T>]) -> Vec<Keyed<T>> {
 /// **A swapped copy in scope brings its own members** (§15 D983): they link into
 /// its swap's main, not into the instance's source, and resetting the instance
 /// resets them too — the swap with them.
+///
+/// ⚠️ **Only the members *under* it** (`[X4-L1-02]`). This grew one set with the
+/// whole of every swap it met, keyed on link targets, so a local instance of the
+/// main a slot is swapped to — placed anywhere after that slot — passed as a copy
+/// (its link, the main, was in the swap's subtree; its members' links too): the
+/// card read *0 local layers* and *Reset all* wrote its fields back to the main's,
+/// dropped its own list items (D994) and restored its removed children. So each
+/// node is read against the swapped copies **above it**, a layer linked to
+/// something out of scope takes its subtree out with it (a local instance's
+/// members are its own), and a link to a main admits only the scope's own root —
+/// an instance placed inside its instance is never one of its copies.
 pub fn scope_nodes(doc: &Document, scope: NodeId) -> Vec<NodeId> {
     let Some(root) = crate::component::instance_root(doc, scope) else {
         return Vec::new();
@@ -536,20 +547,49 @@ pub fn scope_nodes(doc: &Document, scope: NodeId) -> Vec<NodeId> {
             .filter(|r| r.swap.is_some())
             .and_then(|r| r.link),
     );
-    let mut within: FxHashSet<NodeId> = crate::build::subtree_nodes(doc, &sources)
+    let within: FxHashSet<NodeId> = crate::build::subtree_nodes(doc, &sources)
         .into_iter()
         .collect();
+    // Each swapped copy in scope → its swap's nodes, the main itself excluded.
+    let mut swaps: FxHashMap<NodeId, FxHashSet<NodeId>> = FxHashMap::default();
+    // Each node visited → the swapped copies in scope above its children, or
+    // `None` under a layer that is not one of the instance's copies but is linked
+    // (a local instance, or a member of one): nothing below it is in scope.
+    let mut reach: FxHashMap<NodeId, Option<Vec<NodeId>>> = FxHashMap::default();
     let mut out = Vec::new();
+    // Preorder, so a node's parent — and a swapped copy, before its members — is
+    // visited first.
     for id in crate::build::subtree_nodes(doc, &[scope]) {
         let Some(n) = doc.get(id) else { continue };
-        if !n.link.is_some_and(|l| within.contains(&l)) {
+        let above = if id == scope {
+            Some(Vec::new())
+        } else {
+            n.parent.and_then(|p| reach.get(&p).cloned().flatten())
+        };
+        let Some(mut above) = above else {
+            reach.insert(id, None);
+            continue;
+        };
+        let copy = n.link.is_some_and(|l| {
+            let to_main = doc.get(l).is_some_and(|s| s.component);
+            (!to_main || id == root)
+                && (within.contains(&l) || above.iter().any(|s| swaps[s].contains(&l)))
+        });
+        if !copy {
+            // A local layer: an unlinked one may still hold copies (members
+            // regrouped inside their instance); a linked one is someone else's.
+            reach.insert(id, n.link.is_none().then_some(above));
             continue;
         }
         out.push(id);
-        // Preorder, so a swapped copy's members come after it.
         if let Some(s) = n.swap {
-            within.extend(crate::build::subtree_nodes(doc, &[s]));
+            let mut nodes: FxHashSet<NodeId> =
+                crate::build::subtree_nodes(doc, &[s]).into_iter().collect();
+            nodes.remove(&s);
+            swaps.insert(id, nodes);
+            above.push(id);
         }
+        reach.insert(id, Some(above));
     }
     out
 }
@@ -651,9 +691,18 @@ fn missing(doc: &Document, nodes: &[NodeId]) -> Vec<(NodeId, NodeId)> {
 /// restored (`a_local_instances_removed_child_is_not_masked_by_its_host`, also
 /// `arch-scribe`'s). A member dragged out of a local instance is cut by
 /// `settle_links` anyway, so nothing past that root can hold its links.
+///
+/// ⚠️ **Nor out of a swapped copy** (`[X4-L1-03]`). Its members link into its
+/// swap (§15 D983), which the outer instance's source does not hold, so
+/// `settle_links` cuts one dragged out of it as it cuts a local instance's —
+/// and climbing past it let a **second** slot swapped to the same main mask the
+/// first's deleted child: `b1`'s `r2` holds a `Shine` linked to the same Heart
+/// node `r`'s was, and *Restore removed children* read 0
+/// (`two_slots_swapped_to_one_main_do_not_mask_a_removed_child`).
 fn outermost_root(doc: &Document, id: NodeId) -> Option<NodeId> {
     let mut root = crate::component::instance_root(doc, id)?;
     while !crate::propagate::linked_to_main(doc, root)
+        && doc.get(root).is_some_and(|n| n.swap.is_none())
         && let Some(outer) = doc
             .get(root)
             .and_then(|n| n.parent)

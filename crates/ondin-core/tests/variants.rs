@@ -312,20 +312,35 @@ fn the_variant_rules_are_held_after_the_last_op() {
 /// A main dragged into a set takes the first free combination and the name it
 /// derives; dragged out, it drops them. Flip: `settle` answering nothing refuses
 /// the drag-in (`Values`).
+///
+/// And it brings its properties (`[X6.2-L6-04]`): a main carrying one, dragged
+/// in, gives it to the set — every route into a set (*Combine as variants*
+/// too) goes through `settle`'s merge, and no fixture's main carried any.
+/// Flip, run: the merge's `if grew {` made `if false && grew {` — the variant's
+/// own list still emptied — fails the set's props, 0 for 1: the definition and
+/// its binding silently gone (and, since `[R1-L2-02]`'s fix,
+/// `combining_mains_whose_properties_share_an_id_keys_them_apart` with it, so
+/// *Combine*'s route is no longer bare). A second flip, the `SetName` arm dropped from
+/// `can_break`, fails the hand rename's assertion, `"Tiny"` for `"Small"`.
 #[test]
 fn a_main_moved_into_a_set_is_settled_as_a_variant() {
     let mut f = fixture();
     // A third value, so a free combination exists.
     let tx = variant::add_value(&f.doc, f.s, 0, "Huge").unwrap();
     f.commit(tx.0);
-    let m = f.ids.mint();
+    let [m, t] = [(); 2].map(|_| f.ids.mint());
     f.commit(vec![
         create(m, f.root, 1, frame(50.0, 50.0), "Loose"),
+        create(t, m, 0, text("Go"), "Label"),
         Operation::SetComponent {
             id: m,
             component: true,
         },
     ]);
+    // A property of its own, bound inside it (`[X6.2-L6-04]`).
+    let (tx, item) =
+        variant::define(&f.doc, &mut f.ids, m, "Label text", PropKind::Text, vec![t]).unwrap();
+    f.commit(tx.0);
     f.commit(vec![Operation::Reparent {
         id: m,
         new_parent: f.s,
@@ -333,6 +348,22 @@ fn a_main_moved_into_a_set_is_settled_as_a_variant() {
     }]);
     assert_eq!(f.doc.get(m).unwrap().variant(), strs(&["Huge"]));
     assert_eq!(f.name(m), "Huge");
+    // Its property is the set's now, binding and id with it; the variant holds
+    // none of its own.
+    let props = f.doc.get(f.s).unwrap().props();
+    assert_eq!(props.len(), 1, "{props:?}");
+    assert_eq!(
+        (props[0].id, props[0].name.as_str(), props[0].kind),
+        (item, "Label text", PropKind::Text)
+    );
+    assert_eq!(props[0].bound, vec![t]);
+    assert!(f.doc.get(m).unwrap().props().is_empty());
+    // A variant renamed by hand takes its derived name back.
+    f.commit(vec![Operation::SetName {
+        id: f.small,
+        name: "Tiny".into(),
+    }]);
+    assert_eq!(f.name(f.small), "Small");
     f.commit(vec![Operation::Reparent {
         id: m,
         new_parent: f.root,
@@ -346,6 +377,10 @@ fn a_main_moved_into_a_set_is_settled_as_a_variant() {
 /// verbatim — §5.3d's rule under D979 (e), held by D982). Flip, run: `settle`
 /// after `propagate` **in `propagate::owed`** — the order the app's commit runs,
 /// not a copy of it (`[X6.2-L6-05]`) — fails the instance's name, "Small".
+/// Flip, run: the remap closure an identity (`if false && v.get(prop) ==
+/// Some(&old)`) passes the value-0 half and fails at Large's values,
+/// `["Compact"]` for `["Big"]` — Large re-valued by the fallback to the first
+/// value, a clash with Small.
 #[test]
 fn renaming_a_value_renames_its_variants_and_their_instances() {
     let mut f = fixture();
@@ -359,17 +394,32 @@ fn renaming_a_value_renames_its_variants_and_their_instances() {
     assert_eq!(f.doc.get(f.small).unwrap().variant(), strs(&["Compact"]));
     assert_eq!(f.name(f.small), "Compact");
     assert_eq!(f.name(f.i), "Compact");
+    // And a value that is not the first (`[X6.2-L6-01]`): renaming value 0 is the
+    // one case `settle`'s first-value fallback answers the same as the remap, so
+    // a `rename_value` writing the set and leaving the variants alone passed.
+    let tx = variant::rename_value(&f.doc, f.s, 0, 1, "Big").unwrap();
+    f.commit(tx.0);
+    assert_eq!(f.doc.get(f.large).unwrap().variant(), strs(&["Big"]));
+    assert_eq!(f.name(f.large), "Big");
+    assert!(variant::clashes(&f.doc, f.s).is_empty());
 }
 
 /// Deleting a value deletes the variants holding it, and **their instances
-/// detach** (§15 D979 (c), held over the mockup's relink).
+/// detach** (§15 D979 (c), held over the mockup's relink) — and keep their
+/// layers (`[X6.2-L6-09]`): the check of the children was an `all()`, which an
+/// emptied instance satisfies. Flip, run: `propagate_structure`'s deleted-parent
+/// `partition` made `true || …` (the D984 defect, a deleted main's children read
+/// as losses) fails the `kids == before` assertion, `[]` for the two layers.
 #[test]
 fn deleting_a_value_deletes_its_variants_and_detaches_their_instances() {
     let mut f = fixture();
+    let before = f.kids(f.i);
+    assert_eq!(before.len(), 2);
     let tx = variant::delete_value(&f.doc, f.s, 0, 0).unwrap();
     f.commit(tx.0);
     assert!(f.doc.get(f.small).is_none());
     assert_eq!(f.link(f.i), None, "the instance is detached, not relinked");
+    assert_eq!(f.kids(f.i), before, "and keeps its look, every layer");
     assert!(f.kids(f.i).iter().all(|k| f.link(*k).is_none()));
     assert_eq!(
         f.doc.get(f.s).unwrap().set().unwrap().props[0].values,
@@ -377,6 +427,208 @@ fn deleting_a_value_deletes_its_variants_and_detaches_their_instances() {
     );
     // A property's last value cannot go.
     assert!(variant::delete_value(&f.doc, f.s, 0, 0).is_none());
+}
+
+/// The fixture's set given a second property, `State: Default, Hover`, with
+/// Large on Hover — the shape the set's property verbs are told apart on.
+fn two_properties(f: &mut F) {
+    let tx = variant::add_property(&f.doc, f.s, "State", "Default").unwrap();
+    f.commit(tx.0);
+    let tx = variant::add_value(&f.doc, f.s, 1, "Hover").unwrap();
+    f.commit(tx.0);
+    let tx = variant::set_values(&f.doc, f.large, strs(&["Large", "Hover"])).unwrap();
+    f.commit(tx.0);
+}
+
+/// *Add property* gives every variant its one value, renaming them and the
+/// instances that carry their names; a name a variant property or a component
+/// property already has is refused (`[R2-L6-01]`).
+///
+/// Flip, run: `add_property`'s remap inserting the value first
+/// (`v.insert(0, value)` for `v.push(value)`) passes Small — `settle` repairs
+/// its misfit `["Default", "Small"]` position by position to the first values,
+/// which are Small's — and fails at Large's, `["Small", "Default"]` for
+/// `["Large", "Default"]`: a clash, and Large renamed "Small, Default".
+#[test]
+fn adding_a_property_gives_every_variant_its_value() {
+    let mut f = fixture();
+    let tx = variant::add_property(&f.doc, f.s, "State", "Default").unwrap();
+    f.commit(tx.0);
+    let set = f.doc.get(f.s).unwrap().set().unwrap().clone();
+    assert_eq!(set.props[1].name, "State");
+    assert_eq!(set.props[1].values, strs(&["Default"]));
+    assert_eq!(
+        f.doc.get(f.small).unwrap().variant(),
+        strs(&["Small", "Default"])
+    );
+    assert_eq!(
+        f.doc.get(f.large).unwrap().variant(),
+        strs(&["Large", "Default"])
+    );
+    assert_eq!(f.name(f.small), "Small, Default");
+    assert_eq!(f.name(f.i), "Small, Default", "the instance follows");
+    assert!(variant::add_property(&f.doc, f.s, "Size", "X").is_none());
+    let (tx, _) = variant::define(
+        &f.doc,
+        &mut f.ids,
+        f.s,
+        "Label text",
+        PropKind::Text,
+        vec![f.label, f.llabel],
+    )
+    .unwrap();
+    f.commit(tx.0);
+    assert!(variant::add_property(&f.doc, f.s, "Label text", "X").is_none());
+}
+
+/// *Delete property* drops exactly that position from every variant, and is
+/// refused for the last property (`[R2-L6-01]`). Deleting the **second** one, so
+/// that dropping the wrong position shows.
+///
+/// Flip, run: `delete_property`'s remap `v.remove(0)` for `v.remove(prop)`
+/// passes Small (its `["Default"]` misfits and `settle` falls back to the first
+/// value, Small) and fails at Large's, `["Small"]` for `["Large"]`.
+#[test]
+fn deleting_a_property_drops_its_position_from_every_variant() {
+    let mut f = fixture();
+    two_properties(&mut f);
+    assert_eq!(f.name(f.large), "Large, Hover");
+    let tx = variant::delete_property(&f.doc, f.s, 1).unwrap();
+    f.commit(tx.0);
+    assert_eq!(f.doc.get(f.small).unwrap().variant(), strs(&["Small"]));
+    assert_eq!(f.doc.get(f.large).unwrap().variant(), strs(&["Large"]));
+    assert_eq!(f.name(f.large), "Large");
+    assert_eq!(f.name(f.i), "Small");
+    let set = f.doc.get(f.s).unwrap().set().unwrap().clone();
+    assert_eq!(set.props.len(), 1);
+    assert_eq!(set.props[0].name, "Size");
+    assert!(
+        variant::delete_property(&f.doc, f.s, 0).is_none(),
+        "the last"
+    );
+}
+
+/// *Rename property* renames it in the set and leaves every variant's values
+/// alone; a name another variant property or one of the set's component
+/// properties has is refused (`[R2-L6-01]`).
+///
+/// Flip, run: the component-property half of the clash test dropped (`|| false`
+/// for `|| s.props.iter().any(..)`) fails the last assertion — the rename to
+/// *Label text* is offered.
+#[test]
+fn renaming_a_property_refuses_a_name_taken_either_way() {
+    let mut f = fixture();
+    two_properties(&mut f);
+    let tx = variant::rename_property(&f.doc, f.s, 1, "Mode").unwrap();
+    f.commit(tx.0);
+    assert_eq!(f.doc.get(f.s).unwrap().set().unwrap().props[1].name, "Mode");
+    assert_eq!(
+        f.doc.get(f.large).unwrap().variant(),
+        strs(&["Large", "Hover"])
+    );
+    assert!(variant::rename_property(&f.doc, f.s, 1, "Size").is_none());
+    assert!(variant::rename_property(&f.doc, f.s, 1, "  ").is_none());
+    let (tx, _) = variant::define(
+        &f.doc,
+        &mut f.ids,
+        f.s,
+        "Label text",
+        PropKind::Text,
+        vec![f.label, f.llabel],
+    )
+    .unwrap();
+    f.commit(tx.0);
+    assert!(variant::rename_property(&f.doc, f.s, 1, "Label text").is_none());
+}
+
+/// *Move value* reorders the set's values and leaves the variants' alone
+/// (`[R2-L6-01]`). Three values, so a move is not a swap.
+///
+/// Flip, run: `p.values.swap(from, to)` for the remove-and-insert fails the
+/// set's order, `["Huge", "Large", "Small"]` for `["Huge", "Small", "Large"]`.
+#[test]
+fn moving_a_value_reorders_the_set_and_not_the_variants() {
+    let mut f = fixture();
+    let tx = variant::add_value(&f.doc, f.s, 0, "Huge").unwrap();
+    f.commit(tx.0);
+    let tx = variant::move_value(&f.doc, f.s, 0, 2, 0).unwrap();
+    f.commit(tx.0);
+    assert_eq!(
+        f.doc.get(f.s).unwrap().set().unwrap().props[0].values,
+        strs(&["Huge", "Small", "Large"])
+    );
+    assert_eq!(f.doc.get(f.small).unwrap().variant(), strs(&["Small"]));
+    assert_eq!(f.doc.get(f.large).unwrap().variant(), strs(&["Large"]));
+    assert_eq!(f.name(f.small), "Small");
+    assert!(
+        variant::move_value(&f.doc, f.s, 0, 1, 1).is_none(),
+        "no move"
+    );
+    assert!(
+        variant::move_value(&f.doc, f.s, 0, 0, 3).is_none(),
+        "past the end"
+    );
+}
+
+/// A variant card's dropdown: values the set has are written — a clash allowed,
+/// which the set shows — and a value it lacks, or a list of the wrong length,
+/// is refused (`[R2-L6-01]`).
+///
+/// Flip, run: the `p.values.contains(v)` test dropped from `set_values` fails
+/// the refusal of `Huge`.
+#[test]
+fn setting_a_variants_values_refuses_one_the_set_lacks() {
+    let mut f = fixture();
+    assert!(variant::set_values(&f.doc, f.small, strs(&["Huge"])).is_none());
+    assert!(variant::set_values(&f.doc, f.small, strs(&["Small", "Large"])).is_none());
+    let tx = variant::set_values(&f.doc, f.small, strs(&["Large"])).unwrap();
+    f.commit(tx.0);
+    assert_eq!(f.doc.get(f.small).unwrap().variant(), strs(&["Large"]));
+    assert_eq!(f.name(f.small), "Large");
+    assert!(!variant::clashes(&f.doc, f.s).is_empty(), "the clash shows");
+}
+
+/// `edit_property` rewrites, or with `None` removes, exactly the item it was
+/// given, by id (`[R2-L6-01]`). The second of two, so a position-0 removal
+/// shows.
+///
+/// Flip, run: `props.remove(0)` for `props.remove(at)` fails the last
+/// assertion, the survivor *Show bg* for *Caption*.
+#[test]
+fn editing_a_property_touches_only_its_item() {
+    let mut f = fixture();
+    let define = |f: &mut F, name: &str, kind, bound: Vec<NodeId>| {
+        let (tx, item) = variant::define(&f.doc, &mut f.ids, f.s, name, kind, bound).unwrap();
+        f.commit(tx.0);
+        item
+    };
+    let (texts, bgs) = (vec![f.label, f.llabel], vec![f.bg, f.lbg]);
+    let text_item = define(&mut f, "Label text", PropKind::Text, texts);
+    let bool_item = define(&mut f, "Show bg", PropKind::Boolean, bgs);
+    let tx = variant::edit_property(&f.doc, f.s, text_item, |p| {
+        Some(Property {
+            name: "Caption".into(),
+            ..p.clone()
+        })
+    })
+    .unwrap();
+    f.commit(tx.0);
+    let names = |f: &F| -> Vec<(ondin_core::ItemId, String)> {
+        f.doc
+            .get(f.s)
+            .unwrap()
+            .props()
+            .iter()
+            .map(|p| (p.id, p.name.clone()))
+            .collect()
+    };
+    assert_eq!(
+        names(&f),
+        vec![(text_item, "Caption".into()), (bool_item, "Show bg".into())]
+    );
+    let tx = variant::edit_property(&f.doc, f.s, bool_item, |_| None).unwrap();
+    f.commit(tx.0);
+    assert_eq!(names(&f), vec![(text_item, "Caption".into())]);
 }
 
 /// `Ctrl+D` on a variant makes an **instance** of it (§15 D979 (e), held over the
@@ -453,6 +705,96 @@ fn switching_a_variant_carries_overrides_and_keeps_ids() {
     );
 }
 
+/// **Variants made apart share no item ids**, and a switch matches their fills by
+/// position (`rekey_lists`, `[X6.2-L6-02]`). Every fixture keyed its fills
+/// `keyed_by_position`, so Small's and Large's `Bg` fill already shared one id
+/// and the rekeying was a no-op wherever a test reached it. Here each variant's
+/// fill is minted, as the inspector mints one: the instance's recoloured fill
+/// carries as its one fill, and an untouched instance takes Large's.
+///
+/// Flip, run: `rekey_lists` returning `(old, cur)` unchanged fails the
+/// one-fill assertion — Large's blue arrives as a second item beside the
+/// instance's own 77, a list override the user never made.
+#[test]
+fn a_switch_carries_a_fill_override_between_variants_made_apart() {
+    let mut f = fixture();
+    let minted = |ids: &mut IdSource, r: u8| {
+        vec![Keyed::new(
+            ids.mint_item(),
+            Fill {
+                brush: solid(r),
+                visible: true,
+            },
+        )]
+    };
+    let (small_fill, large_fill) = (minted(&mut f.ids, 10), minted(&mut f.ids, 200));
+    assert_ne!(small_fill[0].id, large_fill[0].id, "made apart");
+    f.commit(vec![
+        Operation::SetFills {
+            id: f.bg,
+            fills: small_fill.clone(),
+        },
+        Operation::SetFills {
+            id: f.lbg,
+            fills: large_fill,
+        },
+    ]);
+    let (tx, made) = ondin_core::insert_subtrees(
+        &f.doc,
+        &mut f.ids,
+        &[Placement {
+            nodes: f.doc.capture_subtree(f.small).unwrap(),
+            parent: f.root,
+            index: None,
+        }],
+        Default::default(),
+    );
+    f.commit(tx.0);
+    let untouched = made[0];
+    let ibg = f.kids(f.i)[0];
+    assert_eq!(
+        f.doc.get(ibg).unwrap().paint().fills[0].id,
+        small_fill[0].id,
+        "the copy follows the main's item"
+    );
+    // The instance's own colour, on the main's item.
+    f.commit(vec![Operation::SetFills {
+        id: ibg,
+        fills: vec![Keyed::new(
+            small_fill[0].id,
+            Fill {
+                brush: solid(77),
+                visible: true,
+            },
+        )],
+    }]);
+    for root in [f.i, untouched] {
+        let tx = variant::switch(&f.doc, root, f.large, &mut f.ids).unwrap();
+        f.commit(tx.0);
+    }
+    let fills_of = |f: &F, id: NodeId| -> Vec<Brush> {
+        f.doc
+            .get(id)
+            .unwrap()
+            .paint()
+            .fills
+            .iter()
+            .map(|k| k.value.brush.clone())
+            .collect()
+    };
+    assert_eq!(
+        fills_of(&f, ibg),
+        vec![solid(77)],
+        "the override carries, one fill"
+    );
+    let ubg = f.kids(untouched)[0];
+    assert_eq!(
+        fills_of(&f, ubg),
+        vec![solid(200)],
+        "an untouched one takes Large's"
+    );
+}
+
 /// A counterpart with no match in the new variant that the instance changed is
 /// kept as the instance's own layer, its edit with it — the design's 4I.
 #[test]
@@ -475,6 +817,12 @@ fn an_unmatched_layer_the_instance_changed_is_kept_as_its_own() {
 /// A boolean and a text property are views over fields: setting one on an
 /// instance is an override of the bound field, the main's value is the default,
 /// and resetting it puts the field back.
+///
+/// Both kinds (`[X6.2-L6-08]`): the body set and reset only the text one, so
+/// the `Boolean` arm of `property_reset_ops` could be emptied with everything
+/// green. Flip, run: that arm made `false && matches!(op, SetVisible { .. })`
+/// fails the boolean's `property_state` after it is set off — `(false, false)`
+/// for `(false, true)`, no override seen — before the reset is reached.
 #[test]
 fn a_property_is_a_view_over_its_bound_fields() {
     let mut f = fixture();
@@ -488,7 +836,7 @@ fn a_property_is_a_view_over_its_bound_fields() {
     )
     .unwrap();
     f.commit(tx.0);
-    let (tx, _) = variant::define(
+    let (tx, bool_item) = variant::define(
         &f.doc,
         &mut f.ids,
         f.s,
@@ -528,6 +876,35 @@ fn a_property_is_a_view_over_its_bound_fields() {
     assert_eq!(
         variant::property_state(&f.doc, f.i, &text_prop),
         Some((PropValue::Text("Go".into()), false))
+    );
+    // The boolean half (`[X6.2-L6-08]`): set off, it is an override of the bound
+    // layer's visibility — the dot — and its reset puts the layer back.
+    let bool_prop = variant::instance_properties(&f.doc, f.i)
+        .into_iter()
+        .find(|p| p.id == bool_item)
+        .unwrap()
+        .value;
+    let ibg = f.kids(f.i)[0];
+    assert_eq!(
+        variant::property_state(&f.doc, f.i, &bool_prop),
+        Some((PropValue::Boolean(true), false))
+    );
+    let ops = variant::set_property(&f.doc, &[f.i], &bool_prop, &PropValue::Boolean(false));
+    f.commit(ops);
+    assert!(!f.doc.get(ibg).unwrap().visible());
+    assert_eq!(
+        variant::property_state(&f.doc, f.i, &bool_prop),
+        Some((PropValue::Boolean(false), true))
+    );
+    let ops = variant::reset_property(&f.doc, &[f.i], &bool_prop);
+    f.commit(ops);
+    assert!(
+        f.doc.get(ibg).unwrap().visible(),
+        "the reset shows Bg again"
+    );
+    assert_eq!(
+        variant::property_state(&f.doc, f.i, &bool_prop),
+        Some((PropValue::Boolean(true), false))
     );
     // A bound layer deleted from the main is unbound by the settling.
     f.commit(vec![Operation::DeleteNode { id: f.label }]);

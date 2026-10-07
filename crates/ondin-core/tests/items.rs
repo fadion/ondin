@@ -188,6 +188,152 @@ fn a_v4_file_migrates_to_positional_item_ids() {
     assert_eq!(io::save(&loaded).unwrap(), io::save(&loaded).unwrap());
 }
 
+/// **All five lists** of a v4 file are numbered — strokes, effects, exports and
+/// layout grids as well as fills (X1's note beside `[R2-L6-02]`). The test above
+/// strips only fills, and the v0/v1/v3 chain tests rewind a v5 save that
+/// already carries ids, so four of `migrate_4_to_5`'s five calls ran on nothing.
+/// A frame holding two items in each list, every id stripped, loads with
+/// positional ids, the same values, and the same bytes saved twice.
+///
+/// Flip, run: dropping `number(node.get_mut("grids"))` from `migrate_4_to_5`
+/// fails the load — `missing field id`, the grid items arriving with none — at
+/// the `expect`, before any list is compared.
+#[test]
+fn a_v4_file_numbers_every_item_list() {
+    use ondin_core::{
+        Effect, EffectKind, ExportFormat, ExportScale, ExportSpec, GridAxis, LayoutGrid, Shadow,
+        Stroke,
+    };
+    let mut ids = IdSource::new(0xAB);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let frame = ids.mint();
+    let mut minted = |a, b| {
+        vec![
+            Keyed::new(ids.mint_item(), a),
+            Keyed::new(ids.mint_item(), b),
+        ]
+    };
+    let fills = minted(solid(1), solid(2));
+    let wide = Stroke {
+        width: 4.0,
+        ..Stroke::default()
+    };
+    let strokes = vec![
+        Keyed::new(ItemId::positional(7), Stroke::default()),
+        Keyed::new(ItemId::positional(9), wide),
+    ];
+    let shadow = |blur| {
+        Effect::new(EffectKind::DropShadow(Shadow {
+            blur,
+            ..Shadow::default()
+        }))
+    };
+    let effects = vec![
+        Keyed::new(ItemId::positional(11), shadow(2.0)),
+        Keyed::new(ItemId::positional(12), shadow(8.0)),
+    ];
+    let exports = vec![
+        Keyed::new(
+            ItemId::positional(21),
+            ExportSpec::new(ExportFormat::Png, ExportScale::Times(1.0)),
+        ),
+        Keyed::new(
+            ItemId::positional(22),
+            ExportSpec::new(ExportFormat::Png, ExportScale::Times(2.0)),
+        ),
+    ];
+    let grids = vec![
+        Keyed::new(ItemId::positional(31), LayoutGrid::new(GridAxis::Columns)),
+        Keyed::new(ItemId::positional(32), LayoutGrid::new(GridAxis::Rows)),
+    ];
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: frame,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(100.0, 100.0),
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::SetFills {
+            id: frame,
+            fills: fills.clone(),
+        },
+        Operation::SetStrokes {
+            id: frame,
+            strokes: strokes.clone(),
+        },
+        Operation::SetEffects {
+            id: frame,
+            effects: effects.clone(),
+        },
+        Operation::SetExports {
+            id: frame,
+            exports: exports.clone(),
+        },
+        Operation::SetLayoutGrids {
+            id: frame,
+            grids: grids.clone(),
+        },
+    ]))
+    .unwrap();
+
+    let mut v: serde_json::Value = serde_json::from_slice(&io::save(&doc).unwrap()).unwrap();
+    v["schema_version"] = 4.into();
+    let mut stripped = 0;
+    for node in v["nodes"].as_array_mut().unwrap() {
+        for at in [
+            "/paint/fills",
+            "/paint/strokes",
+            "/effects",
+            "/exports",
+            "/grids",
+        ] {
+            for item in node
+                .pointer_mut(at)
+                .and_then(|l| l.as_array_mut())
+                .into_iter()
+                .flatten()
+            {
+                stripped += item.as_object_mut().unwrap().remove("id").is_some() as usize;
+            }
+        }
+    }
+    assert_eq!(stripped, 10, "two ids out of each of five lists");
+    let loaded = io::load(serde_json::to_vec(&v).unwrap().as_slice())
+        .expect("a v4 file with no item ids loads");
+    let n = loaded.get(frame).unwrap();
+    let positional = vec![ItemId::positional(0), ItemId::positional(1)];
+    fn ids_of<T>(list: &[Keyed<T>]) -> Vec<ItemId> {
+        list.iter().map(|k| k.id).collect()
+    }
+    assert_eq!(ids_of(&n.paint().fills), positional);
+    assert_eq!(ids_of(&n.paint().strokes), positional);
+    assert_eq!(ids_of(n.effects()), positional);
+    assert_eq!(ids_of(n.exports()), positional);
+    assert_eq!(ids_of(n.grids()), positional);
+    assert_eq!(
+        ondin_core::item::values(&n.paint().strokes),
+        ondin_core::item::values(&strokes)
+    );
+    assert_eq!(
+        ondin_core::item::values(n.effects()),
+        ondin_core::item::values(&effects)
+    );
+    assert_eq!(
+        ondin_core::item::values(n.exports()),
+        ondin_core::item::values(&exports)
+    );
+    assert_eq!(
+        ondin_core::item::values(n.grids()),
+        ondin_core::item::values(&grids)
+    );
+    assert_eq!(io::save(&loaded).unwrap(), io::save(&loaded).unwrap());
+}
+
 /// A session whose actor matches an item id's starts minting past it — including
 /// actor 0, which a migration writes and a live session can (improbably) draw.
 /// Flip: dropping the item sweep from `reserve_existing_ids` mints `0:1` here,

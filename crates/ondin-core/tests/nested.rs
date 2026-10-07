@@ -290,6 +290,86 @@ fn a_shown_copy_carries_its_values_across_a_swap_by_name() {
     );
 }
 
+/// **By name, not by position** (`[X6.2-L6-06]`): every set in the fixture has
+/// one property, where the two coincide. Arrow is given a second, `Size: M`,
+/// after its `Weight`; a third set, **Tick**, holds the same two the other way
+/// round — `Size: M`, then `Weight: Regular, Bold`. `r` at Arrow · Bold, shown,
+/// swapped to Tick · Regular lands on Tick · **Bold**; and its nested `Weight`
+/// row — Tick's property 1 — reads the slot's value from Arrow's property 0.
+///
+/// Flip, run: `carried_target`'s `.position(|fp| fp.name == tp.name)` replaced
+/// by `Some(ti)` fails *"Weight carries by name"* — Arrow's `Bold` offered for
+/// Tick's `Size`, filtered out, and the swap lands on Tick · Regular. The
+/// second flip, `nested_variant_state`'s `position(|p| p.name == name)` made
+/// `Some(prop)`, fails the row's state, `("M", true)` for `("Regular", true)`.
+#[test]
+fn a_carry_and_a_nested_row_match_properties_by_name_not_position() {
+    let mut f = fixture();
+    let arrow = variant::set_of(&f.doc, f.a_reg).unwrap();
+    let tx = variant::add_property(&f.doc, arrow, "Size", "M").unwrap();
+    f.commit(tx.0);
+    let [tick, t_reg, t_reg_shape, t_bold, t_bold_shape] = [(); 5].map(|_| f.ids.mint());
+    let values = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    f.commit(vec![
+        create(tick, f.root, 3, frame(200.0, 100.0), "Tick"),
+        create(t_reg, tick, 0, frame(24.0, 24.0), "M, Regular"),
+        create(t_reg_shape, t_reg, 0, rect(), "Shape"),
+        create(t_bold, tick, 1, frame(24.0, 24.0), "M, Bold"),
+        create(t_bold_shape, t_bold, 0, rect(), "Shape"),
+        Operation::SetComponent {
+            id: t_reg,
+            component: true,
+        },
+        Operation::SetComponent {
+            id: t_bold,
+            component: true,
+        },
+        Operation::SetVariantSet {
+            id: tick,
+            set: Some(VariantSet {
+                props: vec![
+                    VariantProp {
+                        name: "Size".into(),
+                        values: values(&["M"]),
+                    },
+                    VariantProp {
+                        name: "Weight".into(),
+                        values: values(&["Regular", "Bold"]),
+                    },
+                ],
+            }),
+        },
+        Operation::SetVariant {
+            id: t_reg,
+            values: values(&["M", "Regular"]),
+        },
+        Operation::SetVariant {
+            id: t_bold,
+            values: values(&["M", "Bold"]),
+        },
+    ]);
+    f.weight("Bold");
+    f.show(f.icon, true);
+    assert_eq!(
+        variant::carried_target(&f.doc, f.r, t_reg),
+        t_bold,
+        "Weight carries by name"
+    );
+    let tx = variant::swap_carrying(&f.doc, f.r, t_reg).unwrap();
+    f.commit(tx.0);
+    assert_eq!(f.node(f.r).swap(), Some(t_bold));
+    assert_eq!(
+        variant::nested_variant_state(&f.doc, f.r, 1),
+        Some(("Regular".to_string(), true)),
+        "Tick's Weight against Arrow's"
+    );
+    assert_eq!(
+        variant::nested_variant_state(&f.doc, f.r, 0),
+        Some(("M".to_string(), false)),
+        "Tick's Size against Arrow's"
+    );
+}
+
 /// **A shown row counts and resets as a property** (4N). Before showing, `r`'s
 /// swap is an override and not a property field; shown, it is one, counted once
 /// by `shown_rows_overridden` and taken back by `reset_all_properties`. Flip:
@@ -436,6 +516,172 @@ fn two_same_named_nested_instances_are_two_groups() {
     assert_ne!(shown[0].key, shown[1].key, "two keys");
     let copies: Vec<NodeId> = shown.iter().map(|s| s.copy).collect();
     assert!(copies.contains(&f.r) && copies.contains(&r2));
+}
+
+/// **A main's component properties round-trip through a file** — all four
+/// kinds, a swap property's filter, and their item ids (`[R2-L6-02]`). The
+/// range's round trips ran before any property was defined, so `Property`'s
+/// serde shape — `bound` through `wire_ids`, the nameless `Nested`, `filter`
+/// skipped only when empty, the `Keyed` id — never went through a file. And the
+/// file is read as text too: `bound` is written as wire ids like every other id
+/// in the format, which a load alone cannot see, `NodeId`'s derived shape
+/// round-tripping just as well.
+///
+/// Flip, run: `with = "wire_ids"` dropped from `Property::bound` loads, equals
+/// and re-saves byte-identically — and fails the wire-id assertion, the bound
+/// written as `{"actor":…,"seq":…}` objects.
+#[test]
+fn a_mains_properties_round_trip_through_a_file() {
+    let mut f = fixture();
+    let caption = f.ids.mint();
+    f.commit(vec![create(
+        caption,
+        f.button,
+        1,
+        NodeKind::Text {
+            content: "Go".into(),
+            style: Box::new(ondin_core::TextStyle {
+                font_family: "Inter".into(),
+                font_size: 12.0,
+                ..Default::default()
+            }),
+            spans: Default::default(),
+            para_spans: Default::default(),
+            paragraph: Default::default(),
+            block: Default::default(),
+            sizing: ondin_core::TextSizing::Auto,
+            on_path: None,
+            on_path_flip: false,
+            on_path_offset: 0.0,
+        },
+        "Caption",
+    )]);
+    let label = f.node(f.button).children()[0];
+    for (name, kind, bound) in [
+        ("Show label", PropKind::Boolean, label),
+        ("Caption", PropKind::Text, caption),
+        ("Icon", PropKind::Swap, f.icon),
+    ] {
+        let (tx, _) =
+            variant::define(&f.doc, &mut f.ids, f.button, name, kind, vec![bound]).unwrap();
+        f.commit(tx.0);
+    }
+    let swap_item = f.node(f.button).props()[2].id;
+    let tx = variant::edit_property(&f.doc, f.button, swap_item, |p| {
+        Some(variant::Property {
+            filter: "Arr".into(),
+            ..p.clone()
+        })
+    })
+    .unwrap();
+    f.commit(tx.0);
+    f.show(f.icon, true);
+    let props = f.node(f.button).props().to_vec();
+    let kinds: Vec<PropKind> = props.iter().map(|p| p.kind).collect();
+    assert_eq!(
+        kinds,
+        vec![
+            PropKind::Boolean,
+            PropKind::Text,
+            PropKind::Swap,
+            PropKind::Nested
+        ]
+    );
+    assert_eq!(props[2].filter, "Arr");
+
+    let bytes = ondin_core::io::save(&f.doc).unwrap();
+    let loaded = ondin_core::io::load(&bytes).expect("a document with properties loads");
+    assert_eq!(loaded.get(f.button).unwrap().props(), props.as_slice());
+    assert_eq!(
+        ondin_core::io::save(&loaded).unwrap(),
+        bytes,
+        "re-saved alike"
+    );
+
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let node = json["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["id"] == f.button.to_wire().as_str())
+        .unwrap();
+    let swap_bound = node["props"][2]["bound"].clone();
+    assert_eq!(
+        swap_bound,
+        serde_json::json!([f.icon.to_wire()]),
+        "bound as wire ids"
+    );
+}
+
+/// **In a set, showing a slot shows the slot at the same name path in every
+/// variant** (§15 D988, *"appears on every Button"*; `[X6.2-L6-07]`). No nested
+/// fixture put the owner in a set. A set **Buttons** of Small and Large, each
+/// holding an Arrow instance named *Icon*: showing Small's binds Large's too, and
+/// an instance of Large lists its copy.
+///
+/// Flip, run: `set_shown`'s `match o.set` made
+/// `match o.set.as_ref().filter(|_| false)` (a set's owner taking only the slot
+/// clicked, as a plain main does) fails *"Large's Icon is shown too"*.
+#[test]
+fn showing_a_slot_in_a_set_shows_it_in_every_variant() {
+    let mut f = fixture();
+    let [set, small, large] = [(); 3].map(|_| f.ids.mint());
+    f.commit(vec![
+        create(set, f.root, 3, frame(300.0, 100.0), "Buttons"),
+        create(small, set, 0, frame(80.0, 30.0), "Small"),
+        create(large, set, 1, frame(120.0, 40.0), "Large"),
+    ]);
+    let mut icons = Vec::new();
+    for v in [small, large] {
+        let (tx, icon) = instance(&f.doc, &mut f.ids, f.a_reg, v);
+        f.commit(tx.0);
+        f.commit(vec![Operation::SetName {
+            id: icon,
+            name: "Icon".into(),
+        }]);
+        icons.push(icon);
+    }
+    let size = |v: &str| vec![v.to_string()];
+    f.commit(vec![
+        Operation::SetComponent {
+            id: small,
+            component: true,
+        },
+        Operation::SetComponent {
+            id: large,
+            component: true,
+        },
+        Operation::SetVariantSet {
+            id: set,
+            set: Some(VariantSet {
+                props: vec![VariantProp {
+                    name: "Size".into(),
+                    values: vec!["Small".into(), "Large".into()],
+                }],
+            }),
+        },
+        Operation::SetVariant {
+            id: small,
+            values: size("Small"),
+        },
+        Operation::SetVariant {
+            id: large,
+            values: size("Large"),
+        },
+    ]);
+    let (tx, l1) = instance(&f.doc, &mut f.ids, large, f.root);
+    f.commit(tx.0);
+    assert!(variant::shown_nested(&f.doc, l1).is_empty());
+    f.show(icons[0], true);
+    assert!(variant::slot_is_shown(&f.doc, icons[0]));
+    assert!(
+        variant::slot_is_shown(&f.doc, icons[1]),
+        "Large's Icon is shown too"
+    );
+    let copy = child_linked(&f.doc, l1, icons[1]).expect("l1's copy of Large's Icon");
+    let shown = variant::shown_nested(&f.doc, l1);
+    assert_eq!(shown.len(), 1, "{shown:?}");
+    assert_eq!(shown[0].copy, copy);
 }
 
 /// **The rules**: one showing per owner, and a showing binds only a nested

@@ -103,6 +103,47 @@ fn a_main_and_its_instance_round_trip_through_a_file() {
     assert_eq!(io::save(&loaded).unwrap(), io::save(&f.doc).unwrap());
 }
 
+/// An override one ULP off its main survives a save and a reopen, and the
+/// coordinate comes back bit-exact (`[R3-L5-02]`). An override *is* a value that
+/// differs from the main's (§15 D979 (a)), so the loader has to read back the
+/// `f64` the file wrote, not its neighbour: `serde_json`'s default float parser
+/// reads the shortest text of `0x403d19fb54ced16a` (`29.101491260998422`) as
+/// `…16b`, one ULP up — the copy's own value — so after a reload main and copy
+/// agreed, the copy counted no override and followed the main from then on. The
+/// workspace manifest turns on `float_roundtrip`, which parses exactly.
+///
+/// Flip, run: the feature dropped from the workspace `serde_json` line fails the
+/// first assertion, the main's x back as `…16b`; the override count is the second
+/// assertion and is not reached. (The fixture is asserted first: the two values
+/// are distinct and the copy counts one override before the save.)
+#[test]
+fn an_override_one_ulp_off_its_main_survives_a_reload() {
+    let mut f = fixture();
+    let main_x = f64::from_bits(0x403d_19fb_54ce_d16a);
+    let copy_x = f64::from_bits(0x403d_19fb_54ce_d16b);
+    let at = |x: f64| ondin_core::kurbo::Affine::translate((x, 0.0));
+    f.doc
+        .apply(&Transaction(vec![
+            Operation::SetTransform {
+                id: f.a,
+                transform: at(main_x),
+            },
+            Operation::SetTransform {
+                id: f.ia,
+                transform: at(copy_x),
+            },
+        ]))
+        .unwrap();
+    assert_ne!(main_x, copy_x);
+    let overridden = |doc: &Document| ondin_core::reset::overrides(doc, f.ia).len();
+    assert_eq!(overridden(&f.doc), 1);
+    let x_of = |doc: &Document, id: NodeId| doc.get(id).unwrap().transform().translation().x;
+    let loaded = io::load(&io::save(&f.doc).unwrap()).unwrap();
+    assert_eq!(x_of(&loaded, f.a).to_bits(), main_x.to_bits());
+    assert_eq!(x_of(&loaded, f.ia).to_bits(), copy_x.to_bits());
+    assert_eq!(overridden(&loaded), 1);
+}
+
 /// Deleting a main its instance still points at is refused — and accepted once
 /// the same transaction cuts the links, in **either** order, because the check is
 /// after the last op (the guide owners' rule, §15 D491). Flip: checking per op
@@ -236,6 +277,113 @@ fn a_main_cannot_contain_an_instance_of_itself() {
         ],
     );
     assert_eq!(rule, LinkRule::ComponentCycle);
+}
+
+/// `n` mains `M0…M(n-1)` under the root, each `Mk` holding one frame linked to
+/// `M(k+1)` — and, with `closed`, the last holding one linked back to `M0`. A
+/// valid chain is only two levels deep, so `io::MAX_TREE_DEPTH` never trips
+/// while the component graph is `n` long. Built in one transaction on a thread
+/// with a large stack, and saved: only the load is under test.
+fn chain_of_mains(n: usize, closed: bool) -> Vec<u8> {
+    std::thread::Builder::new()
+        .stack_size(256 << 20)
+        .spawn(move || {
+            let mut ids = IdSource::new(0xAC);
+            let root = ids.mint();
+            let mut doc = Document::new(root);
+            let mains: Vec<NodeId> = (0..n).map(|_| ids.mint()).collect();
+            let mut ops = Vec::new();
+            for (k, &m) in mains.iter().enumerate() {
+                ops.push(create(m, root, k, frame()));
+                ops.push(Operation::SetComponent {
+                    id: m,
+                    component: true,
+                });
+            }
+            let last = if closed { n } else { n - 1 };
+            for k in 0..last {
+                let inner = ids.mint();
+                ops.push(create(inner, mains[k], 0, frame()));
+                ops.push(Operation::SetLink {
+                    id: inner,
+                    link: Some(mains[(k + 1) % n]),
+                });
+            }
+            if closed {
+                // `apply` refuses the cycle, so the closed chain's file is
+                // written as the open one's with the last link added by hand.
+                return close_by_hand(&mut doc, ops);
+            }
+            doc.apply(&Transaction(ops)).expect("a chain of mains");
+            io::save(&doc).unwrap()
+        })
+        .unwrap()
+        .join()
+        .unwrap()
+}
+
+/// Apply `ops` but the last `SetLink` (the one closing the chain), save, and
+/// write that link into the file's JSON — the crafted file `apply` would refuse.
+fn close_by_hand(doc: &mut Document, mut ops: Vec<Operation>) -> Vec<u8> {
+    let Some(Operation::SetLink {
+        id,
+        link: Some(target),
+    }) = ops.pop()
+    else {
+        panic!("the closing link is the last op");
+    };
+    doc.apply(&Transaction(ops)).expect("the open chain");
+    let mut json: serde_json::Value = serde_json::from_slice(&io::save(doc).unwrap()).unwrap();
+    let wire = |id: NodeId| serde_json::Value::String(id.to_wire());
+    let node = json["nodes"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|n| n["id"] == wire(id))
+        .expect("the closing frame is in the file");
+    node["link"] = wire(target);
+    serde_json::to_vec(&json).unwrap()
+}
+
+/// Load `bytes` on a thread with a small stack: 256 KB in a debug build, 64 KB
+/// under `--release`. A debug load of even a short document needs more than
+/// 64 KB, and a release build's frames are small enough that the recursive
+/// search survived 2,000 mains on 256 KB — so each profile gets the size at which
+/// the flip below bites (measured both ways).
+fn load_on_a_small_stack(bytes: Vec<u8>) -> Result<Document, String> {
+    let stack = if cfg!(debug_assertions) { 256 } else { 64 } << 10;
+    std::thread::Builder::new()
+        .stack_size(stack)
+        .spawn(move || io::load(&bytes).map_err(|e| e.to_string()))
+        .unwrap()
+        .join()
+        .unwrap()
+}
+
+/// A crafted file holding a long chain of mains loads on a small stack, and the
+/// same chain closed into a loop is refused as a cycle rather than aborting the
+/// process (`[R1-L2-04]`). `component::check`'s cycle search runs on every load
+/// and every `Document::apply`, and it recursed once per main along the chain: a
+/// stack overflow is an abort, not a panic, so nothing caught it — the cover
+/// worker's `catch_unwind` included (the rule `io::MAX_TREE_DEPTH`'s doc states
+/// for §15 D416, arriving by a new axis). The search is an explicit stack now.
+///
+/// Flip, run: the recursive search put back aborts the test binary on the open
+/// chain's load (`thread '<unknown>' has overflowed its stack`, exit
+/// `STATUS_STACK_OVERFLOW`), in debug on 256 KB and in release on 64 KB. In debug
+/// the recursion loaded 200 mains on 256 KB and overflowed at 500; the fixed
+/// search loads 20,000 there (slowly — ~200 s debug, the load being
+/// super-linear in mains elsewhere, so the test keeps to 2,000).
+#[test]
+fn a_deep_chain_of_mains_loads_on_a_small_stack() {
+    const N: usize = 2_000;
+    let open = load_on_a_small_stack(chain_of_mains(N, false)).expect("a chain loads");
+    assert_eq!(open.get(open.root()).unwrap().children().len(), N);
+    let closed = load_on_a_small_stack(chain_of_mains(N, true)).expect_err("a loop is refused");
+    assert!(
+        closed.contains("contains an instance of itself"),
+        "{closed}"
+    );
 }
 
 /// The nested chain §5.3d describes: main `outer` holds an instance `n` of `m`;

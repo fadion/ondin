@@ -181,6 +181,24 @@ impl F {
             .expect("the edit and everything it owes");
     }
 
+    /// `F::commit` through a `History`, then held to what a reset owes the
+    /// document: the result reloads, and one undo restores exactly the document
+    /// before it. Leaves the committed document in place.
+    fn commit_undoable(&mut self, ops: Vec<Operation>) {
+        let before = self.doc.clone();
+        let mut tx = Transaction(ops);
+        ondin_core::propagate::owed(&self.doc, &mut tx, &mut self.ids);
+        let mut history = ondin_core::History::new();
+        history
+            .commit(&mut self.doc, tx)
+            .expect("the edit and everything it owes");
+        io::load(&io::save(&self.doc).unwrap()).expect("the committed document reloads");
+        let after = self.doc.clone();
+        history.undo(&mut self.doc).unwrap();
+        assert!(self.doc == before, "one undo restores the document");
+        self.doc = after;
+    }
+
     fn swap_to(&mut self, root: NodeId, main: NodeId) {
         let tx = swap::swap(&self.doc, root, main).expect("a swap this fixture allows");
         self.commit(tx.0);
@@ -502,6 +520,107 @@ fn a_swapped_copys_field_overrides_count_against_its_swap() {
     f.commit(ops);
     assert_eq!(f.node(f.r).swap(), None);
     assert_eq!(f.fill(shape), red(10), "back to Star's, through Heart's");
+}
+
+/// **A local instance of the main a slot is swapped to stays a local addition**
+/// (`[X4-L1-02]`; §15 D981 (1) as D994 amends it, *local layers survive every
+/// reset*). `l`, a Heart placed in `b1` after `r` with its own opacity and fill,
+/// is not in `b1`'s scope because `r` shows Heart too: `scope_nodes` had grown
+/// one set with the whole of every swap it met, keyed on link targets, so `l`
+/// (linked to Heart) and its `Shape` (linked to Heart's) passed — the card read
+/// *0 local layers* and *Reset all* put `l` back to Heart's look. Only when `l`
+/// came after `r` in preorder, which is the order here. The scope now reads a
+/// swap's members only under the swapped copy, and a link to a main only at the
+/// scope's own root.
+///
+/// Flip, run: `scope_nodes` back to the one shared set (every swap's subtree,
+/// its root included, admitting any node) fails the first assertion, `drift`
+/// reading `fields: 3, local: 0` for `fields: 1, local: 1`. Dropping only the
+/// rule that a link to a main admits the scope's root alone leaves `l` out (it
+/// is under no swapped copy) and fails on `inner`, a Heart placed inside `r`,
+/// under the reset scoped to `r` — whose source is Heart itself.
+#[test]
+fn a_local_instance_of_a_swaps_main_is_not_reset_with_the_slot() {
+    let mut f = fixture();
+    f.swap_to(f.r, f.heart);
+    let (tx, l) = instance(&f.doc, &mut f.ids, f.heart, f.b1);
+    f.commit(tx.0);
+    assert_eq!(f.kids(f.b1).last(), Some(&l), "placed after `r`");
+    let lshape = f.kids(l)[0];
+    f.commit(vec![
+        Operation::SetOpacity {
+            id: l,
+            opacity: 0.5,
+        },
+        Operation::SetFills {
+            id: lshape,
+            fills: fills(77),
+        },
+    ]);
+    let drift = reset::drift(&f.doc, f.b1);
+    assert_eq!(
+        (drift.fields, drift.local),
+        (1, 1),
+        "the swap; `l`: {drift:?}"
+    );
+    let scope = reset::scope_nodes(&f.doc, f.b1);
+    assert!(!scope.contains(&l) && !scope.contains(&lshape));
+    // And one placed inside `r` itself, read from a reset scoped to `r`, whose
+    // source — Heart — is the main `inner` is linked to.
+    let (tx, inner) = instance(&f.doc, &mut f.ids, f.heart, f.r);
+    f.commit(tx.0);
+    for scope in [f.b1, f.r] {
+        let nodes = reset::scope_nodes(&f.doc, scope);
+        assert!(!nodes.contains(&inner), "`inner` is local to {scope:?}");
+        assert!(!nodes.contains(&f.kids(inner)[0]));
+    }
+    let ops = reset::reset(&f.doc, Kind::All, &[f.b1], &mut f.ids);
+    f.commit_undoable(ops);
+    assert_eq!(f.node(f.r).swap(), None, "the slot's swap is reset");
+    assert_eq!(f.node(l).opacity(), 0.5, "`l` keeps its own opacity");
+    assert_eq!(f.fill(lshape), red(77), "and its own fill");
+}
+
+/// **Two slots swapped to one main do not mask each other's removed children**
+/// (`[X4-L1-03]`). `b1` holds `r` and `r2`, both swapped to Heart; `r`'s `Shine`
+/// is deleted. `reset::missing` looked for a counterpart under the *outermost*
+/// root — it climbed from `r` to `b1`, as it must for a member dragged out of a
+/// nested copy — and found `r2`'s `Shine`, linked to the same Heart node, so
+/// *Restore removed children* read 0 and restored nothing. A swapped copy's
+/// members link into its swap, which nothing outside the copy may claim for the
+/// outer instance (`settle_links` cuts a member dragged out of it), so the climb
+/// stops at a swapped root.
+///
+/// Flip, run: `outermost_root` climbing through a swapped root again fails the
+/// `removed` assertion, 0 for 1. (Asserted first: with `r2` unswapped the same
+/// deletion counts 1, so the fixture is the masking and not a lost deletion.)
+#[test]
+fn two_slots_swapped_to_one_main_do_not_mask_a_removed_child() {
+    let mut f = fixture();
+    let (tx, n2) = instance(&f.doc, &mut f.ids, f.star, f.button);
+    f.commit(tx.0);
+    let r2 = child_linked(&f.doc, f.b1, n2).expect("b1's copy of the second Star");
+    f.swap_to(f.r, f.heart);
+    let shine = child_linked(&f.doc, f.r, f.hshine).expect("r's Shine");
+    f.commit(vec![Operation::DeleteNode { id: shine }]);
+    assert_eq!(reset::drift(&f.doc, f.b1).removed, 1, "one slot swapped");
+    f.swap_to(r2, f.heart);
+    assert!(
+        child_linked(&f.doc, r2, f.hshine).is_some(),
+        "r2 holds a Shine"
+    );
+    assert_eq!(reset::drift(&f.doc, f.b1).removed, 1, "both swapped");
+    let ops = reset::reset(&f.doc, Kind::Children, &[f.b1], &mut f.ids);
+    assert!(
+        matches!(ops.as_slice(), [Operation::InsertSubtree { parent, .. }] if *parent == f.r),
+        "{ops:?}"
+    );
+    f.commit_undoable(ops);
+    assert!(
+        child_linked(&f.doc, f.r, f.hshine).is_some(),
+        "r's Shine back"
+    );
+    assert_eq!(reset::drift(&f.doc, f.b1).removed, 0);
 }
 
 /// The rules: a swap only on a nested copy inside an outer instance, only to a

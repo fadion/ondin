@@ -1809,8 +1809,9 @@ import. The wrapper puts *same item* (`id`) and *same look* (`value`) in differe
 for list comparisons had not matched.) `ItemId` is a newtype over `NodeId`, as `GuideId` is, written as
 the wire string and minted by the caller with `IdSource::mint_item` (invariant 3); unique **within its
 list** — `Node::check_item_ids`, run by `Document::apply` over the dirty nodes after the last op
-(`OpError::DuplicateItemId`) and by the loader's `schema::verify_integrity` — and deliberately not
-across nodes, since duplicating a node copies its item ids verbatim, and that is the match: a copy's
+(`OpError::DuplicateItemId`) and by the loader's `schema::verify_integrity`, over **six** lists since
+2026-10-07, the component properties (`Node::props`, step 7) being keyed too and missing from it until
+`[R1-L2-02]` (§15 D982's amendment of that date) — and deliberately not across nodes, since duplicating a node copies its item ids verbatim, and that is the match: a copy's
 fill matches its source's fill by id. Minted from the global stream rather than a per-list counter
 because an item added locally to an instance and one added later to its main must never collide, and
 two per-list counters would. ⚠️ **There is deliberately no `From<Vec<T>>`**: a site that clones the
@@ -1827,17 +1828,23 @@ counterpart. (1) **An edit of a list several layers share** is retargeted throug
 (`item::retarget`; `build::retarget_fills_all`/`retarget_strokes_all`; the inspector's
 `write_fill_list`, `write_strokes`, `write_effects` and `retarget_grids`; the export panel's
 `retarget_exports`): an edited item takes the target's id at the anchor's position, and a row the user
-added is minted **per target**. (2) **A wholesale replacement** — *Paste properties*, the mixed row's
-clear, an export preset or paste, the mixed grid override — keeps each target's ids **by position**
-(`item::rekey_by_position`; `set_fills_all`/`set_strokes_all` take values and the `IdSource`;
-`build::Properties` holds plain values), so a paste onto an instance's child will read as overrides of
-its main's items rather than as every item deleted and new ones added. ⚠️ Not for an edit: deleting the
-first of two would hand the second the deleted one's id. (3) **One row changed in place over a
-selection** (`slot_transaction`'s Selection arm) edits row `i` on each target
-(`build::edit_fill_at_all`/`edit_stroke_at_all`), and no id moves. ⚠️ **Ruled otherwise for a main
-and its instance, not built — §15 D1003 (6)**: a row one edit adds to both takes one shared id. Minted
-per target, by (1) or past the end by (2), the instance's row is a local addition from the moment it
-is made, and no later edit of the main's new item reaches it.
+added **keeps the id its caller minted, on every target** — minted afresh only on a target that
+already holds that id, where keeping it would repeat one in the list. (2) **A wholesale replacement** —
+*Paste properties*, the mixed row's clear, an export preset or paste, the mixed grid override — keeps
+each target's ids **by position** (`item::rekey_by_position`; `set_fills_all`/`set_strokes_all` take
+values and the `IdSource`; `build::Properties` holds plain values), so a paste onto an instance's child
+will read as overrides of its main's items rather than as every item deleted and new ones added; a
+position past a target's end takes **one id for the whole write**, shared by every target that reaches
+it (`item::PastTheEnd`, one per write, never one per target). ⚠️ Not for an edit: deleting the first of
+two would hand the second the deleted one's id. (3) **One row changed in place over a selection**
+(`slot_transaction`'s Selection arm) edits row `i` on each target
+(`build::edit_fill_at_all`/`edit_stroke_at_all`), and no id moves. The `+` of the two cards whose
+`+` appends rather than going through (1) — `inspector::append_grid`, `export::append_exports` — mints
+its row **once** for every subject too. **One id for an added row is §15 D1003 (6)**, built 2026-10-07:
+minted per target, as all four of these did until then, the row a main and its instance were given
+together was the instance's local addition from the moment it was made, with a ghost row for the
+main's, and no later edit of the main's new item reached it. Over unlinked layers the shared id costs
+nothing, an id being unique within one list only.
 
 **The per-item rule is the structural rule one level down** — one algorithm at two levels, children
 and list items. Items match by id; within a matched item each field compares as above; an item the main
@@ -2008,9 +2015,10 @@ paste of that clipboard into that document, none of its ids back, inserts the su
 original ids** and gives back each link whose node still holds exactly what the delete left it, link
 and swap (`paste_cut_move`, `TakenLink`) — not *"still unlinked"*, since a nested copy inside a cut
 main's instance is climbed to its own main at the cut rather than cut (`b003b42`). A second paste is an
-instance, (e) below; a refused move falls back to the ordinary paste; and an undo past the cut drops
-the move (`document_rewound`), which a redo does not bring back (§15 D979's amendment building
-D1003 (1)).
+instance, (e) below; a refused move falls back to the ordinary paste; and an undo past the cut
+**parks** the move (`document_rewound`) — a paste while it is parked is an ordinary one, a redo back to
+the cut with no commit between unparks it, and after a commit while it is parked nothing does, the
+history having branched (`90c476c`; §15 D979's amendment building D1003 (1)).
 
 ✅ **The verbs are built** (build step 2, `0ae3cd7`, §15 D979's amendment), on **one rule for every
 way a link's target goes**: `component::relink_past(doc, gone, among)` — a link into `gone` climbs to
@@ -2313,7 +2321,9 @@ insets on its axis**, or `keep_insets` re-pins it where it lands — except on a
 whose insets are its own placement and which writes its own back unchanged (`6210953`; the first fix
 gave it the main's and unpinned it); and the **trailing slot and ghost
 rows** on Fill, Stroke and Effects, an item reset written verbatim and never through a retargeting
-writer, which mints a fresh id and lands the restored item as a local one. ✅ **Then the rest of the
+writer, which minted a fresh id and landed the restored item as a local one — until `retarget` stopped
+minting for an un-anchored item (2026-10-07, §15 D1003 (6)'s ✅, which says what that leaves of the
+reason). ✅ **Then the rest of the
 cards and both remaining lists** (session 49, §15 D981's amendment): a **sub-field** — one inset, a
 gap, a grow, a text size — is marked by `OndinApp::sub_mark`, which reads the source's whole value out
 of the frame's field resets (`OndinApp::field_overrides`), so a field `reset::overrides` skips — an
@@ -2440,8 +2450,9 @@ nested instance for a swap or a showing, bound once per field).
 `propagate`**, settles what any door leaves: a variant's values fitted to its set — kept where they fit,
 a property's first value where one does not, the first free combination when the count is wrong — values
 dropped off anything not a variant, **each variant's name derived from its values**, joined by `", "`, a
-variant's properties moved to its set — merged by name and kind, a showing by kind alone — and stale
-bindings pruned. Before `propagate` because a renamed
+variant's properties moved to its set — merged by name and kind, a showing by kind alone, one pushed
+under an id the set already holds re-keyed from the commit's `IdSource` (`[R1-L2-02]`, §15 D982's
+amendment of 2026-10-07) — and stale bindings pruned. Before `propagate` because a renamed
 value renames its variants here and the propagation pass carries that name onto every instance still
 holding the old one; swapped, the instance keeps the old name (measured,
 `renaming_a_value_renames_its_variants_and_their_instances`). Gated, like `settle_links`, so an edit that
@@ -4704,9 +4715,8 @@ write retargets from, never a list to write verbatim onto the others. Every writ
 its own ids and gives it the values shown, which is what keeps the reading believable: what was shown
 is then true of all of them. Three shapes (§5.3d): an edit of the shared list goes through
 `retarget_fills_all` / `retarget_strokes_all`, mapping each item through the anchor to the target's
-own and minting an added row per target (one shared id for a main and its instance, ruled and not
-built — §15 D1003 (6)); a wholesale replacement — *Paste properties*, the mixed row's
-clear — through `set_fills_all` / `set_strokes_all`, which take values and keep each target's ids by
+own and giving an added row one id on every target (§15 D1003 (6)); a wholesale replacement —
+*Paste properties*, the mixed row's clear — through `set_fills_all` / `set_strokes_all`, which take values and keep each target's ids by
 position; and one row changed in place through `edit_fill_at_all` / `edit_stroke_at_all`. 🚨 **Until
 2026-10-04 the multi-selection write copied the first target's whole list onto every target**, which
 with item ids would have handed every layer the anchor's ids.
@@ -5384,7 +5394,11 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   parent/child pair obeys the same kind rules operations do; and **no frame sits anywhere under a
   boolean or a mask** (§5.3, §15 D876) — the ancestor rule the pairwise check cannot see, riding the
   reachability walk as a flag per stack entry, as the depth does — and **no item id twice in one of a
-  node's item lists** (`Node::check_item_ids`, the rule `apply` checks, §15 D980).
+  node's item lists** (`Node::check_item_ids`, the rule `apply` checks, §15 D980) — except that a
+  property id repeated in `props` is **re-keyed, never refused** (`item::rekey_repeats` in the DTO's
+  conversion, before this check): each repeat takes the lowest positional id the list lacks, a
+  function of the bytes (invariant 9), because a development build before `[R1-L2-02]`'s fix wrote such
+  files itself (§15 D982's amendment of 2026-10-07).
   Reachability and the duplicate check are what make cycles and orphan components impossible — without
   them a hand-edited file can satisfy parent/child consistency and hang the app.
 - ⚠️ **The depth bound is the one check that is about the *stack* rather than about the tree, and it
@@ -10440,9 +10454,8 @@ D980: the item ids differ between layers given the same fill separately, so agre
 Adding from an empty panel gives every target that one fill. Writes for a shared list go through
 `build::retarget_fills_all` / `retarget_strokes_all` (`inspector::write_fill_list`, `write_strokes`),
 which give every target the edited values under **its own** item ids — the anchor's mapped through by
-position, an added row minted per target (for a main and its instance ruled one shared id, not built —
-§15 D1003 (6)) — so what the panel shows is true of all of them and no
-layer takes another's ids (§5.3d's three write shapes). Both are hidden outright when nothing in scope can take paint
+position, an added row one id on every target (§15 D1003 (6)) — so what the panel shows is true of
+all of them and no layer takes another's ids (§5.3d's three write shapes). Both are hidden outright when nothing in scope can take paint
 (`build::any_paint_in`) — one question for both since a frame stopped answering it differently from
 the stroke side, which is what `any_strokeable_in` was for (§15 D400). Rows ride
 `PaintSlot::Selection(PaintTarget, usize)` — the index names one row of the shared list — node-less

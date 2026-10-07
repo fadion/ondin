@@ -829,6 +829,10 @@ pub struct HeadClicks {
     pub acted: bool,
     /// The card-level reset a header with overrides offers on hover (§15 D981).
     pub reset: bool,
+    /// The box the action icon paints — not its padded hit target — for a `+`
+    /// that opens a menu rather than acting at once: the Properties card's (§15
+    /// D1005).
+    pub action_rect: Option<egui::Rect>,
 }
 
 /// A card's overrides, for its header (§15 D981): a dot and `count` at rest, and on
@@ -1012,7 +1016,7 @@ pub fn section_head_full(
                             top: HEAD_ACTION_PAD as i8,
                             bottom: HEAD_ACTION_PAD as i8,
                         };
-                        clicks.acted = icon_button_padded(
+                        let resp = icon_button_padded(
                             ui,
                             a.glyph,
                             egui::Vec2::splat(HEAD_ACTION_W),
@@ -1021,9 +1025,11 @@ pub fn section_head_full(
                             a.enabled,
                             pad,
                         )
-                        .on_hover_text(a.tooltip)
-                        .clicked()
-                            && a.enabled;
+                        .on_hover_text(a.tooltip);
+                        clicks.acted = resp.clicked() && a.enabled;
+                        // The box it paints, not its padded hit target, so a menu
+                        // hung from it sits where the ⋯ button's does.
+                        clicks.action_rect = Some(resp.rect - pad);
                     }
                     if let Some(word) = badge {
                         head_badge(ui, word);

@@ -7751,7 +7751,8 @@ impl OndinApp {
     /// selection this fires once and the user's own toggle then wins, and *changing*
     /// the selection is what re-reads the room — because whether this layer has a
     /// fill is a fact about this layer, not a state to inherit from the last one.
-    /// `fresh` is [`OndinApp::paint_subject_changed`].
+    /// `fresh` is the panel's own [`OndinApp::subject_changed`] —
+    /// [`OndinApp::paint_subject_changed`] for Fill and Stroke.
     pub(super) fn sync_paint_collapse(&mut self, title: &'static str, empty: bool, fresh: bool) {
         sync_paint_collapse(
             &mut self.collapsed_panels,
@@ -7784,11 +7785,19 @@ impl OndinApp {
     /// **a panel that consumes the edge on its way past is a bug the next panel
     /// pays for**, and the only safe place to spend it once is above them all.
     fn paint_subject_changed(&mut self) -> bool {
+        self.subject_changed("Fill")
+    }
+
+    /// Whether the panel `key` names is looking at a different subject than the
+    /// last frame it asked, recording this one as its subject from now on — every
+    /// self-collapsing panel's edge, one entry each in
+    /// [`OndinApp::synced_selection`] (see there for why one each).
+    pub(super) fn subject_changed(&mut self, key: &'static str) -> bool {
         let now = self.session.selection.ids();
-        if self.paint_synced_selection == now {
+        if self.synced_selection.get(key).is_some_and(|s| s == now) {
             return false;
         }
-        self.paint_synced_selection = now.to_vec();
+        self.synced_selection.insert(key, now.to_vec());
         true
     }
     /// Open a paint panel because a `+` just put something in it. Whatever the
@@ -8837,20 +8846,15 @@ impl OndinApp {
     /// Whether the selection has moved since the Layout grid panel last read it —
     /// the edge `sync_paint_collapse` re-asserts the resting collapse state on.
     ///
-    /// The fourth of these, and separate for the reason the other three each carry:
-    /// `paint_subject_changed` **consumes** the edge, so a second caller in the
-    /// same frame gets `false` and one panel never learns the subject moved.
+    /// Its own entry for the reason [`OndinApp::synced_selection`] gives: asking
+    /// **consumes** the edge, so a second caller in the same frame gets `false`
+    /// and one panel never learns the subject moved.
     ///
     /// Keyed on the **selection**, not on `frame_subjects`, so that adding a
     /// non-frame to the selection still counts as a move. The two differ, and the
     /// selection is the one the user changed.
     fn grids_subject_changed(&mut self) -> bool {
-        let now = self.session.selection.ids();
-        if self.grids_synced_selection == now {
-            return false;
-        }
-        self.grids_synced_selection = now.to_vec();
-        true
+        self.subject_changed("Layout grid")
     }
 
     /// The grid list every subject agrees on, or `None` where they disagree.
@@ -11132,16 +11136,11 @@ impl OndinApp {
     /// Whether the Effects panel is looking at a different subject than the last
     /// frame that drew it — and record this one from now on.
     ///
-    /// [`Self::paint_subject_changed`]'s third twin, and a third field for the
-    /// second one's reason: that edge is *consumed*, so a second caller in the same
-    /// frame gets `false` and never learns the subject moved.
+    /// Its own entry in [`OndinApp::synced_selection`], for the reason given there:
+    /// the edge is *consumed*, so a second caller in the same frame gets `false`
+    /// and never learns the subject moved.
     fn effects_subject_changed(&mut self) -> bool {
-        let now = self.session.selection.ids();
-        if self.effects_synced_selection == now {
-            return false;
-        }
-        self.effects_synced_selection = now.to_vec();
-        true
+        self.subject_changed("Effects")
     }
     /// The stack every subject agrees on, or `None` where they disagree.
     ///
@@ -12891,6 +12890,20 @@ impl OndinApp {
         badge: Option<&str>,
         body: impl FnOnce(&mut Self, &mut egui::Ui),
     ) -> bool {
+        self.panel_head(ui, title, action, badge, body).acted
+    }
+
+    /// [`Self::panel_badged`], answering with the whole of the header's clicks —
+    /// for a header `+` that opens a menu at [`ui::HeadClicks::action_rect`]
+    /// (the Properties card's, §15 D1005).
+    pub(super) fn panel_head(
+        &mut self,
+        ui: &mut egui::Ui,
+        title: &'static str,
+        action: Option<ui::HeadAction>,
+        badge: Option<&str>,
+        body: impl FnOnce(&mut Self, &mut egui::Ui),
+    ) -> ui::HeadClicks {
         let open = !self.collapsed_panels.contains(title);
         // The card's overrides (§15 D981) — its header's dot and count, and the
         // card-level reset — looked up by title, so no card has to pass them.
@@ -12954,7 +12967,7 @@ impl OndinApp {
         if clicks.reset {
             self.commit_reset(Transaction(resets));
         }
-        clicks.acted
+        clicks
     }
     /// What `paint::with_fit` needs to seed a crop: the frame this picture is
     /// shown in, and the picture's intrinsic size.
@@ -20369,7 +20382,7 @@ mod effects_multi_tests {
         // A fresh subject is what re-reads the resting state, so the selection is
         // re-set rather than merely re-drawn.
         card.app.session.selection.set(ids.clone());
-        card.app.effects_synced_selection.clear();
+        card.app.synced_selection.remove("Effects");
         card.settle();
         assert!(
             card.app.collapsed_panels.contains("Effects"),

@@ -2425,7 +2425,7 @@ while the instance count is not showing.
 ✅ **The maintainer's second polish pass** (2026-10-07, §15 D995). A main's count, *Select all* and
 *Duplicate* sit 4pt closer under its name (`main_body`, not the variant face's shared `main_tail`). The
 Properties card's buttons read *Bool*, *Text* and *Var*, the properties they make keeping *Boolean* and
-*Text*. A marked field's label strip shows the **plain arrow** while it is a reset and the scrub's
+*Text* — ⚠️ the buttons gone since §15 D1005 for a `+` menu in the card's header, its rows the full words. A marked field's label strip shows the **plain arrow** while it is a reset and the scrub's
 `ResizeHorizontal` once dragged, its *Reset to main* tooltip unchanged. **The one-line rows are rows of
 the identity card**: `inspector_component` takes a `ComponentPart`, `Identity` drawn inside
 `identity_card` under the boolean row — a child's *In Card instance* or *Local to this instance*, a mixed
@@ -2586,8 +2586,8 @@ it out, leaves plain layers; `swap::tidy`, inside `settle_links`, clears a swap 
 **`component::main_of` answers the main a root shows**, through a swap, for the card's link to it, *Select all instances*, *Go to main* and the
 instance's properties. **What is offered**: a swap property (`PropKind::Swap`), bound only to a nested
 instance inside the main and made from that layer's binding line (*Instance*) — or, since §15 D1000,
-from the `+` the Properties card offers on each nested instance no swap property binds
-(`new_swap_property`) — carries a **filter** — a
+from the Properties card: since §15 D1005 an *Instance swap* row of its header's `+` menu for each
+nested instance no swap property binds (`new_swap_property`) — carries a **filter** — a
 prefix of a main's name, without case, every main when empty, prefilled by `swap::suggested_filter` with
 the shown main's name less its last segment, edited from a row of its own on the Properties card — and
 the picker searches within it; every nested copy also
@@ -2596,7 +2596,8 @@ offered, never what is valid. *Preferred mains* is not built. ⚠️ **The picke
 `ComboBox` popup, its search and the *Swap* row, since a `ComboBox` popup cannot be driven headlessly;
 so are a typed edit to the filter row and choosing *Instance* on the binding line. The rest runs:
 `panels/component.rs`'s `a_nested_instance_is_offered_as_a_swap_property_and_its_filter_is_a_row`
-clicks the `+` and finds the filter row, `a_nested_instance_in_a_main_opts_in_from_its_card` draws the
+chooses the `+` menu's *Instance swap* row and finds the filter row,
+`a_nested_instance_in_a_main_opts_in_from_its_card` draws the
 binding line on a nested instance in a main, and `app.rs`'s
 `the_menu_resets_a_swap_property_from_the_swapped_copy` resets a swap property from the menu
 (`[R2-L8-01]`). D983's amendment has the seven decisions the build made,
@@ -2660,12 +2661,21 @@ properties apart**, a property's field units subtracted from the overrides (`Pro
 1 override*), the overflow gains *Reset properties N*, and *Reset fields* leaves the property-driven
 fields alone; several instances' summary reads *K with changes*. **A lone main or a set** gets a
 *Properties* card under the Component card — each property's kind glyph, name and ×, its default and
-what it is bound to; *Boolean*, *Text*, and on a lone main *Variant*, which combines it alone into a set
-— labelled *Bool*, *Text* and *Var* since §15 D995. ⚠️ **Three groups since §15 D1000**, a hairline
-(`variants::card_rule`) between each: the boolean and text properties; the swap properties, a rule
-between each, a swap's filter a row of its own (the funnel, the field to the card's edge, *Filter
-displayed list by name* under it), and **each nested instance no swap property binds offered as one**,
-with a `+`; then *Shown from nested*, only when something is shown. **A layer inside a main** gets one line, *Bind to a
+what it is bound to — *default · Label · content*, a swap's field named *main* since §15 D1005; and
+**a `+` in its header** (§15 D1005, replacing §15 D995's *Bool*, *Text* and *Var* buttons) opening a
+menu (`ui::HeadClicks::action_rect`, `OndinApp::panel_head`) hung `ui::MENU_GAP` under the box the `+`
+paints, not its padded hit target, and fitted to its widest row as the ⋯ reset menu is (§15 D993),
+each row's kind in full and what it binds in the accelerator column: *Boolean · visibility*, *Text · text content*, **an *Instance swap* row
+naming each nested instance no swap property binds** (one dimmed row saying why where there is none),
+and on a lone main *Variant · makes a set*, which combines it alone into a set; adding expands a
+collapsed card. **The card rests collapsed while it is empty** — no property and nothing shown from
+nested — on Fill and Stroke's rule (`sync_paint_collapse`, its own *Properties* edge; §15 D1005's
+amendment, the maintainer's ask). ⚠️ **The edge is asked above the card's early returns**, so a
+property made from a child's binding line opens the card when the main is selected again — asked only
+where the card drew, the main read as the subject it already was. ⚠️ **Three groups since §15 D1000**, a hairline (`variants::card_rule`) between each:
+the boolean and text properties; the swap properties, a rule between each, a swap's filter a row of its
+own (the funnel, the field to the card's edge, *Filter displayed list by name* under it); then *Shown
+from nested*, only when something is shown, each row led by the instance hexagon. **A layer inside a main** gets one line, *Bind to a
 component property*: a *Visibility* dropdown and,
 for text, *Content* — *None*, each property of that kind, *New property…*; a nested instance inside a
 main is an instance root, so its card is the instance's, and the line is drawn under that card (§15
@@ -2681,7 +2691,8 @@ property included, an instance root whose property is its outer instance's, whic
 arm drew only from 2026-10-07 (§15 D983's amendment); the toast *Combined N mains into set “Button” ·
 Ctrl+Z to undo*; no new chords. **Four places depart from the mockup**, the session's and accepted by
 the maintainer on 2026-10-06 — values edited from a chip's popup rather than in place and dragged; binding from that one
-line rather than `{}` buttons on the layers row, Appearance and Type; the define popover as two buttons,
+line rather than `{}` buttons on the layers row, Appearance and Type; the define popover as two buttons
+(a header `+` menu since §15 D1005, which keeps the rest of this departure and the binding one),
 with no *Default* row and no *Preferred mains*; a set's property name as a field with a × — and D982 has
 each. *Reset properties* is drawn wherever the component defines a property, ~~at "—"~~ with no count
 since §15 D993, and disabled at zero like the card's other counted resets (`adc5f66`; the first cut hid it, D982's amendment).
@@ -7698,7 +7709,8 @@ would make expanding an empty panel by hand impossible, since the toggle would b
 drawn, and the click would read as broken rather than as overridden. So within one selection the rule
 fires once and the user's own toggle then wins; *changing* the selection is what re-reads the room,
 because whether this layer has a fill is a fact about this layer and not a state to inherit from the
-last one (§15 D64). `OndinApp::paint_synced_selection` is what notices the subject moved — nothing else
+last one (§15 D64). `OndinApp::synced_selection`'s *Fill* entry is what notices the subject moved — one
+map keyed by panel title since §15 D1005, each self-collapsing card its own key — nothing else
 tells the panels, the same gap `layers_synced_selection` fills for the tree — and it is read **once**
 per frame by `inspector_paint_panels`, which hands the answer to both panels, since a Fill that consumed
 the change on its way past would leave Stroke thinking nothing had happened.
@@ -10240,8 +10252,8 @@ frame that has none and *rows* to one that already has columns, which is the com
 and gives it the first colour in `layout::GRID_COLORS` the frame is not already using, on the same
 argument one step over: the reason to add a second grid is to read it against the first (§15 D388).
 **It also opens the card**, which rests closed while there is no grid to show and closes again when
-the last one is deleted (`sync_paint_collapse`, Fill and Stroke's rule and a fourth synced-selection
-field, since that edge is consumed by whoever asks first); a `+` that adds a row you cannot see is a
+the last one is deleted (`sync_paint_collapse`, Fill and Stroke's rule and its own synced-selection
+entry, a field until §15 D1005, since that edge is consumed by whoever asks first); a `+` that adds a row you cannot see is a
 button that does nothing, and an empty card whose whole body is the words *No layout grid* is chrome
 saying nothing (§15 D389).
 ⚠️ **A hidden grid's controls are `disable`d rather than merely faded**, which is a deliberate
@@ -10344,7 +10356,8 @@ make one side three times as sensitive as the other) and what makes it literally
 them and stated the difference, and this adopts the control without undoing that.
 
 **The card opens itself on a layer with effects and shuts on one without**, on Fill and Stroke's
-rule, through a third `*_synced_selection` field — `paint_subject_changed` consumes its edge, so a
+rule, through its own *Effects* entry in `OndinApp::synced_selection` (a third field until §15
+D1005) — `paint_subject_changed` consumes its edge, so a
 second caller in the same frame never learns the subject moved.
 
 **Over a multi-selection it takes the Export panel's shape, not Fill's** (§15 D340): one agreed stack
@@ -10394,7 +10407,8 @@ either distance (§15 D274). The line also zeroes
 a line of 13pt ink otherwise paints in a 24pt slot and adds five points to the gap at each end while
 both gaps stay correct in the source (§15 D274).
 **The card is closed on a layer that exports nothing and the header's `+` opens it**, which is Fill
-and Stroke's rule (`sync_paint_collapse`) — it needs a synced-selection field of its own, because
+and Stroke's rule (`sync_paint_collapse`) — it needs a synced-selection entry of its own
+(`OndinApp::synced_selection`, *Export*), because
 `paint_subject_changed` consumes the edge and two callers in one frame lose it for one of them.
 The settings are a **popover beside the panel**, the shell every other card here uses — 272 wide,
 `menu_frame`'s padding, `popover_anchor`'s lane, `ui::POPOVER_SECTION_GAP` (§15 D275), and

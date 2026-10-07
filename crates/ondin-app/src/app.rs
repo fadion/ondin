@@ -1069,14 +1069,23 @@ pub struct OndinApp {
     /// impossible, since the click would be undone before it was drawn. Acting only
     /// on the transition into empty leaves the user's own toggle the last word.
     pub(crate) paint_auto_collapsed: HashSet<&'static str>,
-    /// The selection the Fill and Stroke panels last set their open state from.
+    /// The selection each self-collapsing panel last set its open state from,
+    /// keyed by its title — Fill and Stroke share `"Fill"`.
     ///
     /// Whether a layer has a fill is a fact about *that layer*, so the panels are
     /// re-read from scratch whenever the subject moves rather than inheriting the
     /// last one's state. Nothing else tells them the selection changed — the same
     /// gap `layers_synced_selection` fills for the tree. See
-    /// `OndinApp::paint_subject_changed`.
-    pub(crate) paint_synced_selection: Vec<NodeId>,
+    /// `OndinApp::subject_changed`.
+    ///
+    /// **One entry per panel, because asking consumes the edge**: a second caller
+    /// in the same frame gets `false`, so two panels sharing an entry would leave
+    /// whichever is drawn second never learning the subject moved. Fill and Stroke
+    /// share one because one caller asks for both of them. **A map since the fifth
+    /// panel** (the Properties card, §15 D1005): Fill and Stroke's, Export's,
+    /// Effects' and Layout grid's were each a field of their own, and the fourth's
+    /// doc said to merge them the next time one was wanted (§15 D389).
+    pub(crate) synced_selection: std::collections::HashMap<&'static str, Vec<NodeId>>,
     /// The stroke whose options menu (dash, cap, join) is open, if any.
     ///
     /// Keyed by index into the list the Stroke panel is showing, and at most one
@@ -1148,31 +1157,6 @@ pub struct OndinApp {
     /// form whose openness and whose contents were two fields could be open with no
     /// contents, or hold an edit nobody can see.
     pub(crate) settings: Option<crate::settings::Settings>,
-    /// The selection the Export panel last read its resting collapse state for.
-    ///
-    /// **Its own field rather than [`Self::paint_synced_selection`]**, though the
-    /// two hold the same thing: `paint_subject_changed` *consumes* the edge, so a
-    /// second caller in the same frame gets `false` and one of the two panels
-    /// never learns the subject moved. Which of them lost would depend on the
-    /// order they happen to be drawn in.
-    pub(crate) export_synced_selection: Vec<NodeId>,
-    /// The selection the Effects panel last read its resting collapse state for.
-    ///
-    /// The third of these, and a third field for the second field's reason:
-    /// `paint_subject_changed` **consumes** the edge, so the panel that asks second
-    /// never learns the subject moved. Fill and Stroke share one answer because one
-    /// caller asks for both of them; Export and Effects are each drawn on their own.
-    pub(crate) effects_synced_selection: Vec<NodeId>,
-    /// The selection the Layout grid panel last read its resting collapse state
-    /// for.
-    ///
-    /// **The fourth of these, and the count is the finding rather than the field.**
-    /// Every panel that closes itself when empty needs one, because the edge is
-    /// consumed by whoever asks first — so the number of these grows with the
-    /// number of self-collapsing panels and always will. Worth merging into one
-    /// map keyed by panel title the next time a fifth is wanted; four is not yet
-    /// worth the indirection.
-    pub(crate) grids_synced_selection: Vec<NodeId>,
     /// The export spec whose settings block is showing, if any.
     ///
     /// An `Option` rather than the `Vec` [`Self::stroke_sides_open`] is: the block
@@ -2331,16 +2315,13 @@ impl OndinApp {
             paint_hex: None,
             scale_pct: 100.0,
             paint_auto_collapsed: HashSet::new(),
-            paint_synced_selection: Vec::new(),
+            synced_selection: Default::default(),
             stroke_menu: None,
             effect_menu: None,
             image_tab: ImageCard::default(),
             stroke_sides_open: Vec::new(),
             prefs,
             settings: None,
-            export_synced_selection: Vec::new(),
-            effects_synced_selection: Vec::new(),
-            grids_synced_selection: Vec::new(),
             export_row_open: None,
             export_menu: false,
             export_clipboard: None,
@@ -7320,11 +7301,12 @@ impl OndinApp {
         // the document it was captured from.
         //
         // ⚠️ **That rule governs more fields than this list clears, and the list is
-        // hand-maintained with nothing checking it.** Thirteen other fields on
-        // `OndinApp` hold `NodeId`s from the outgoing document — `entered_group`,
-        // `points`, `renaming_layer`, `clones`, `layers_range_anchor`,
-        // `effect_menu`, `pending_picker` and the five `*_synced_selection`
-        // vectors. Most are cleared elsewhere on the way through an open, and a
+        // hand-maintained with nothing checking it.** Other fields on `OndinApp`
+        // hold `NodeId`s from the outgoing document — `entered_group`, `points`,
+        // `renaming_layer`, `clones`, `layers_range_anchor`, `effect_menu`,
+        // `pending_picker`, `layers_synced_selection` and the `synced_selection`
+        // map (four panels' fields before §15 D1005). Most are cleared elsewhere
+        // on the way through an open, and a
         // stale one **dangles rather than collides** — `NodeId` is `(actor, seq)`
         // with a random per-session actor (`ondin_core::id`), so `doc.get(id)`
         // answers `None` and the state is inert rather than wrong. That is why no

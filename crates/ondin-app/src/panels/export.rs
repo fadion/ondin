@@ -269,15 +269,10 @@ impl OndinApp {
     /// Whether the selection has moved since the Export panel last read it — the
     /// edge `sync_paint_collapse` re-asserts the resting collapse state on.
     ///
-    /// `paint_subject_changed`'s twin, and separate for the reason its own field
-    /// carries: consuming one edge from two callers loses it for one of them.
+    /// Its own entry in `OndinApp::synced_selection`, for the reason given there:
+    /// consuming one edge from two callers loses it for one of them.
     fn export_subject_changed(&mut self) -> bool {
-        let now = self.session.selection.ids();
-        if self.export_synced_selection == now {
-            return false;
-        }
-        self.export_synced_selection = now.to_vec();
-        true
+        self.subject_changed("Export")
     }
 
     /// The list every subject agrees on, or `None` when they disagree.

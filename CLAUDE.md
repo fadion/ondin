@@ -67,9 +67,13 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1004 index rows, 1004 body headings, next free
-D1005** (measured at session 59's close, 2026-10-07) — but trust the procedure over any number
-written down here, including that one. ⚠️ **Session 59's last request reserved D1004–D1013 at
+anywhere cited either. **The live figures: 1005 index rows, 1005 body headings, next free
+D1006** (measured at session 60's close, 2026-10-07) — but trust the procedure over any number
+written down here, including that one. ⚠️ **Session 60 reserved D1005–D1014 at `11b462e` and spent
+one** — D1005, the Properties card's header `+` menu (the maintainer's ruling over Claude Design's
+seven-item list, every other item held out by an earlier ruling). The closing negative grep over
+**D1006–D1014 found zero sites** and they are released. Census **903**, one arrival (D1005), none
+unresolved. ⚠️ **Session 59's last request reserved D1004–D1013 at
 `d42bab7` and spent one** — D1004, the maintainer's two rulings on what the fix phase left parked
 (a slot-added layer never matched by a swap; *Restore children* covering what a collapsed row's dot
 covers), built in `ed88b26` and cited from six files. The closing negative grep over

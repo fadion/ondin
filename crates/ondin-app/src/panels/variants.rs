@@ -37,6 +37,24 @@ const CHIP_H: f32 = 22.0;
 /// The inner width of a value chip's menu — the top bar's View and Snap menus'
 /// 160 less their frame.
 const CHIP_MENU_W: f32 = 150.0;
+/// The widest the Properties card's `+` menu grows (§15 D1005) — it is fitted to
+/// its rows, and a nested instance with a long name would otherwise run it across
+/// the canvas; past this the row's label is cut, never what it binds.
+const ADD_MENU_MAX_W: f32 = 280.0;
+/// The air between a `+` menu row's label and what it binds, at its widest row
+/// — the ⋯ reset menu's between a label and its count.
+pub(super) const ADD_MENU_GAP: f32 = 24.0;
+
+/// What a row of the Properties card's `+` menu adds (§15 D1005).
+#[derive(Clone, Copy)]
+enum Add {
+    /// A property of this kind bound to nothing, named for it.
+    Kind(PropKind, &'static str),
+    /// A swap property bound to this nested instance.
+    Swap(NodeId),
+    /// The lone main combined into a set.
+    Variant,
+}
 
 /// A value the user asked to delete while variants use it, awaiting the
 /// confirmation modal ([`OndinApp::value_delete_confirmation`], §15 D996): which
@@ -1347,9 +1365,16 @@ impl OndinApp {
 
     /// The **Properties** card on a main or a set (3G, 3H): each property's kind,
     /// name and default, and what it is bound to; a row's name renames it and its ×
-    /// deletes it; *Boolean* and *Text* under the rows add one, and on a lone main
-    /// a third, *Variant*, wraps it in a set.
+    /// deletes it. **One is added from the header's `+`** (§15 D1005, 3H), a menu
+    /// of *Boolean*, *Text*, an *Instance swap* for each nested instance no swap
+    /// property drives, and on a lone main *Variant*, which wraps it in a set.
     pub(super) fn inspector_properties(&mut self, ui: &mut egui::Ui) {
+        // **Asked before the card decides whether to draw** (§15 D1005's
+        // 2026-10-08 amendment, `arch-scribe`'s find): a property is bound from a
+        // layer inside the main, a selection this card skips, and an edge that
+        // only moved when the card drew would read the main as the subject it
+        // already was — so the card stayed shut over the property just made.
+        let fresh = self.subject_changed("Properties");
         let Some(id) = self.session.selection.single() else {
             return;
         };
@@ -1371,18 +1396,42 @@ impl OndinApp {
             .collect();
         let slots = variant::nested_slots(doc, owner);
         let lone_main = doc.get(owner).is_some_and(|n| n.component());
+        // **A nested instance no swap property drives is offered as one**, in the
+        // `+` menu — the way back after a swap property is deleted (§15 D1000,
+        // where it was a row of its own with a `+` on the card; D1005 moved it).
+        let dormant: Vec<(NodeId, String)> = slots
+            .iter()
+            .map(|(s, _)| *s)
+            .filter(|s| {
+                !props
+                    .iter()
+                    .any(|p| p.kind == PropKind::Swap && p.bound.contains(s))
+            })
+            .map(|s| {
+                let name = doc.get(s).map(|n| n.name().to_string()).unwrap_or_default();
+                (s, name)
+            })
+            .collect();
+        let no_slots = slots.is_empty();
         let mut out: Option<Transaction> = None;
         let mut combine = false;
         let mut refused = None;
         let mut select = None;
-        self.panel(ui, "Properties", None, |app, ui| {
+        // **Collapsed while empty, opened by an add** — Fill's and Stroke's rule
+        // (`sync_paint_collapse`, the maintainer's ask, §15 D1005): an empty card
+        // was a header, a `+` and a line of grey text. Empty is no property and
+        // nothing shown from a nested instance, the card's two lists.
+        let empty = props.is_empty() && !slots.iter().any(|(_, shown)| *shown);
+        self.sync_paint_collapse("Properties", empty, fresh);
+        let action = ui::HeadAction::new(icon::PLUS, "Add a property");
+        let clicks = self.panel_head(ui, "Properties", Some(action), None, |app, ui| {
             let doc = &app.session.doc;
             if props.is_empty() {
                 ui.label(
                     egui::RichText::new(
                         // Short on purpose (§15 D993): the sentence it replaced
-                        // named all three kinds of binding, and the maintainer
-                        // cut it as *"no one will read it"*.
+                        // named all three kinds of binding, and ran too long to
+                        // be read in the card.
                         "Bind layers from their Component line",
                     )
                     .size(11.5)
@@ -1392,36 +1441,18 @@ impl OndinApp {
             // **Three groups with a rule between each** (§15 D1000, the
             // maintainer's look — the card read as one undivided list): the
             // boolean and text properties; the swap properties, a rule between
-            // each, with every nested instance no swap property drives offered as
-            // one; and what is shown from nested instances.
+            // each; and what is shown from nested instances.
             let (swaps, plain): (Vec<&Keyed<Property>>, Vec<&Keyed<Property>>) =
                 props.iter().partition(|p| p.kind == PropKind::Swap);
             for p in &plain {
                 property_row(ui, doc, owner, p, &mut out, &mut refused);
             }
-            // **A nested instance no swap property drives, offered as one** — the
-            // way back after a swap property is deleted, which had none on this
-            // card: the only door was the nested instance's own binding line,
-            // inside the main.
-            let dormant: Vec<NodeId> = slots
-                .iter()
-                .map(|(s, _)| *s)
-                .filter(|s| !swaps.iter().any(|p| p.bound.contains(s)))
-                .collect();
             let mut first = plain.is_empty();
             for p in &swaps {
                 if !std::mem::take(&mut first) {
                     card_rule(ui);
                 }
                 property_row(ui, doc, owner, p, &mut out, &mut refused);
-            }
-            for slot in &dormant {
-                if !std::mem::take(&mut first) {
-                    card_rule(ui);
-                }
-                if dormant_swap_row(ui, doc, *slot) {
-                    out = new_swap_property(doc, &mut app.session.ids, owner, *slot);
-                }
             }
             // **Shown from nested** (4L): the nested instances whose properties
             // the main's instances show, with what they show and a − to stop — a
@@ -1435,6 +1466,13 @@ impl OndinApp {
                 for slot in &shown {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 4.0;
+                        // The instance's own mark (§15 D1005, 4L): the swap glyph
+                        // is a swap property's, and this row is not one.
+                        ui.label(
+                            egui::RichText::new(icon::HEXAGON)
+                                .font(theme::icon_font(14.0))
+                                .color(theme::text::MUTED),
+                        );
                         let name = doc
                             .get(*slot)
                             .map(|n| n.name().to_string())
@@ -1477,65 +1515,130 @@ impl OndinApp {
                     });
                 }
             }
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
-                let n = if lone_main { 3.0 } else { 2.0 };
-                let w = (ui.available_width() - ui::CARD_COL_GAP * (n - 1.0)) / n;
-                // **Short words, because the card is never wider** (§15 D995): a
-                // third of the inspector leaves about 38pt beside the glyph, and
-                // *Boolean* measures 46 and *Variant* 40 at 12pt, so both were cut
-                // to *Bool…* and *Vari…* on every screen. The property they make
-                // keeps the long name (`name`).
-                for (glyph, label, name, kind) in [
-                    (icon::EYE, "Bool", "Boolean", PropKind::Boolean),
-                    (icon::TEXT_T, "Text", "Text", PropKind::Text),
-                ] {
-                    if ui::action_button(
-                        ui,
-                        glyph,
-                        label,
-                        FieldButton::Off,
-                        egui::vec2(w, ui::CONTROL_H),
-                    )
-                    .on_hover_text(match kind {
-                        PropKind::Boolean => {
-                            "A property that shows and hides the layers bound to it"
-                        }
-                        PropKind::Text => "A property that sets the text of the layers bound to it",
-                        // Made from a nested instance's binding line, never here.
-                        PropKind::Swap => "A property that swaps the nested instances bound to it",
-                        // Made from a nested instance's own card, never here.
-                        PropKind::Nested => "",
-                    })
-                    .clicked()
-                    {
-                        let name = fresh_name(&props, name);
-                        out = variant::define(
-                            doc,
-                            &mut app.session.ids,
-                            owner,
-                            &name,
-                            kind,
-                            Vec::new(),
+        });
+        // **The `+` menu** (§15 D1005, 3H), overturning D995's *Bool* / *Text* /
+        // *Var* buttons on the card — the maintainer's call, the mockup's way of
+        // adding. Each row's kind in full, and in the accelerator column what it
+        // binds: the row is wide enough for both, where a third of the card was not
+        // (D995's reason for the short words).
+        let mut add = None;
+        if let Some(anchor) = clicks.action_rect {
+            egui::Popup::new(
+                ui.id().with("props-add"),
+                ui.ctx().clone(),
+                anchor,
+                ui.layer_id(),
+            )
+            .kind(egui::PopupKind::Menu)
+            .layout(egui::Layout::top_down_justified(egui::Align::Min))
+            .style(egui::containers::menu::menu_style)
+            .open_memory(clicks.acted.then_some(egui::SetOpenCommand::Toggle))
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+            .align(egui::RectAlign::BOTTOM_END)
+            .gap(ui::MENU_GAP)
+            .show(|ui| {
+                ui::menu_rows(ui);
+                // **A width, not a minimum** (§15 D996), and **fitted to the widest
+                // row** as the ⋯ reset menu is (§15 D993): `menu_row`'s 8pt insets,
+                // its 24pt glyph column, the label at 11.5 and what it binds at
+                // 10.5. A fixed 200 left *Instance swap* and *nested instance*
+                // touching (the maintainer's look).
+                let ctx = ui.ctx().clone();
+                let w = |t: &str, size: f32| {
+                    ctx.fonts_mut(|f| {
+                        f.layout_no_wrap(
+                            t.to_string(),
+                            egui::FontId::proportional(size),
+                            egui::Color32::WHITE,
                         )
-                        .map(|(tx, _)| tx);
+                        .size()
+                        .x
+                    })
+                };
+                let swap_named: Vec<&str> = if dormant.is_empty() {
+                    vec!["nested instance"]
+                } else {
+                    dormant.iter().map(|(_, n)| n.as_str()).collect()
+                };
+                let widest = [("Boolean", "visibility"), ("Text", "text content")]
+                    .into_iter()
+                    .chain(lone_main.then_some(("Variant", "makes a set")))
+                    .chain(swap_named.into_iter().map(|n| ("Instance swap", n)))
+                    .map(|(label, what)| w(label, 11.5) + w(what, 10.5))
+                    .fold(0.0, f32::max);
+                ui.set_width(
+                    (8.0 + 24.0 + widest + ADD_MENU_GAP + 8.0)
+                        .ceil()
+                        .min(ADD_MENU_MAX_W),
+                );
+                let row = |ui: &mut egui::Ui, glyph: &str, label: &str, what: &str, ok: bool| {
+                    ui::menu_row(
+                        ui,
+                        ui::MenuRow::new(glyph, label).accel(Some(what)).enabled(ok),
+                        ui::MENU_ROW_H,
+                    )
+                };
+                if row(ui, icon::EYE, "Boolean", "visibility", true).clicked() {
+                    add = Some(Add::Kind(PropKind::Boolean, "Boolean"));
+                    ui.close();
+                }
+                if row(ui, icon::TEXT_T, "Text", "text content", true).clicked() {
+                    add = Some(Add::Kind(PropKind::Text, "Text"));
+                    ui.close();
+                }
+                // One row per nested instance it can bind, named in the
+                // accelerator column; one dimmed row saying why when there is none.
+                for (slot, name) in &dormant {
+                    if row(ui, icon::SWAP, "Instance swap", name, true).clicked() {
+                        add = Some(Add::Swap(*slot));
+                        ui.close();
                     }
                 }
-                if lone_main
-                    && ui::action_button(
-                        ui,
-                        icon::SQUARES_FOUR,
-                        "Var",
-                        FieldButton::Off,
-                        egui::vec2(w, ui::CONTROL_H),
-                    )
-                    .on_hover_text("Make a set — this main becomes its first variant")
-                    .clicked()
-                {
-                    combine = true;
+                if dormant.is_empty() {
+                    row(ui, icon::SWAP, "Instance swap", "nested instance", false).on_hover_text(
+                        if no_slots {
+                            "This main has no nested instance to swap"
+                        } else {
+                            "Every nested instance already has a swap property"
+                        },
+                    );
+                }
+                if lone_main {
+                    ui::menu_sep(ui);
+                    if row(ui, icon::SQUARES_FOUR, "Variant", "makes a set", true)
+                        .on_hover_text("Make a set — this main becomes its first variant")
+                        .clicked()
+                    {
+                        add = Some(Add::Variant);
+                        ui.close();
+                    }
                 }
             });
-        });
+        }
+        if let Some(add) = add {
+            // A `+` on a collapsed header is a legal press, and what it adds is
+            // shown (the Effects card's rule, `open_paint_panel`).
+            self.open_paint_panel("Properties");
+            let doc = &self.session.doc;
+            match add {
+                // The property keeps the kind's full name (§15 D995).
+                Add::Kind(kind, name) => {
+                    out = variant::define(
+                        doc,
+                        &mut self.session.ids,
+                        owner,
+                        &fresh_name(&props, name),
+                        kind,
+                        Vec::new(),
+                    )
+                    .map(|(tx, _)| tx);
+                }
+                Add::Swap(slot) => {
+                    out = new_swap_property(doc, &mut self.session.ids, owner, slot);
+                }
+                Add::Variant => combine = true,
+            }
+        }
         if let Some(why) = refused {
             self.session.info(why);
         }
@@ -1793,7 +1896,9 @@ fn property_row(
                 match p.kind {
                     PropKind::Boolean => "visibility",
                     PropKind::Text => "content",
-                    PropKind::Swap => "instance",
+                    // *main*, the field a swap sets (§15 D1005, 3G's
+                    // *Icon · main*), where it read *instance*.
+                    PropKind::Swap => "main",
                     PropKind::Nested => "shown",
                 }
             )
@@ -1856,44 +1961,10 @@ fn card_rule(ui: &mut egui::Ui) {
     );
 }
 
-/// A nested instance inside the main that no swap property drives, offered as
-/// one on the Properties card (§15 D1000): the swap glyph faint, its name, and a
-/// `+` that makes the property. Answers whether the `+` was clicked.
-fn dormant_swap_row(ui: &mut egui::Ui, doc: &ondin_core::Document, slot: NodeId) -> bool {
-    let name = doc
-        .get(slot)
-        .map(|n| n.name().to_string())
-        .unwrap_or_default();
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
-        ui.label(
-            egui::RichText::new(icon::SWAP)
-                .font(theme::icon_font(14.0))
-                .color(theme::text::FAINT),
-        );
-        ui.label(
-            egui::RichText::new(name)
-                .size(12.0)
-                .color(theme::text::MUTED),
-        );
-        ui.label(
-            egui::RichText::new("· nested instance")
-                .size(12.0)
-                .color(theme::text::DIM),
-        );
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui::field_button(ui, icon::PLUS, ui::CONTROL_H, 13.0, FieldButton::Off)
-                .on_hover_text("Make a swap property for this nested instance")
-                .clicked()
-        })
-        .inner
-    })
-    .inner
-}
-
 /// A new swap property on `owner` bound to the nested instance `slot`, named for
 /// it and filtered by the main it shows — the binding line's *New property…*
-/// for an *Instance* (§15 D983 (5)), from the Properties card (§15 D1000).
+/// for an *Instance* (§15 D983 (5)), from the Properties card's `+` menu (§15
+/// D1000, D1005).
 fn new_swap_property(
     doc: &ondin_core::Document,
     ids: &mut ondin_core::IdSource,

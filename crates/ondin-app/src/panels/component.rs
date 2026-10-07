@@ -4817,17 +4817,266 @@ mod tests {
         );
     }
 
-    /// **A nested instance no swap property drives is offered as one, and a swap
-    /// property's filter is a row of its own** (§15 D1000, the maintainer's look:
-    /// *"If I remove the icon property … I have no idea how to bring it back"*).
-    /// A Button main holding a Badge instance and no properties: its Properties
-    /// card offers the Badge with a `+`, and no *Shown from nested* heading while
-    /// nothing is shown; the `+` makes a swap property bound to the Badge, after
-    /// which the card draws its funnel row and the line under it, and offers the
-    /// Badge no more; showing the Badge's properties brings the heading.
+    /// `owner` selected and its Properties card's header `+` clicked (§15 D1005):
+    /// the text the next settled frame paints, the menu open in it.
+    fn open_props_menu(
+        app: &mut OndinApp,
+        ctx: &egui::Context,
+        owner: NodeId,
+    ) -> Vec<(String, egui::Rect)> {
+        let out = settled(app, ctx, owner);
+        let painted = texts(&out);
+        let head = painted
+            .iter()
+            .find(|(t, _)| t == "PROPERTIES")
+            .unwrap_or_else(|| panic!("the Properties card: {painted:?}"))
+            .1;
+        let plus = painted
+            .iter()
+            .find(|(t, r)| {
+                t == icon::PLUS
+                    && (r.center().y - head.center().y).abs() < 4.0
+                    && r.left() > head.right()
+            })
+            .expect("the header's +")
+            .1
+            .center();
+        click(app, ctx, plus);
+        texts(&settle(app, ctx))
+    }
+
+    /// The `+` menu's row labelled `label`, and the text on its line to its
+    /// right — what it binds, in the accelerator column.
     ///
-    /// **Flip run**: the offered rows' filter keeping nothing fails *"the Badge is
-    /// offered"*, the predicted site.
+    /// **Only what the menu paints**, which is the tail of the frame: its popup is
+    /// drawn last, from its first row's accelerator (`menu_row` paints a row's
+    /// accelerator before its label). Over a collapsed card the menu lies across
+    /// the cards below it, whose glyphs share a row's line.
+    fn menu_row_named(painted: &[(String, egui::Rect)], label: &str) -> (egui::Rect, Vec<String>) {
+        let start = painted
+            .iter()
+            .rposition(|(t, _)| t == "Boolean")
+            .unwrap_or_else(|| panic!("the menu's first row: {painted:?}"))
+            - 1;
+        let painted = &painted[start..];
+        let row = painted
+            .iter()
+            .find(|(t, _)| t == label)
+            .unwrap_or_else(|| panic!("the menu's {label}: {painted:?}"))
+            .1;
+        let named = painted
+            .iter()
+            .filter(|(_, r)| (r.center().y - row.center().y).abs() < 4.0 && r.left() > row.right())
+            .map(|(t, _)| t.clone())
+            .collect();
+        (row, named)
+    }
+
+    /// **Boolean, Text and Variant come from the header's `+` menu** (§15 D1005,
+    /// 3H), not from a row of buttons on the card (D995's *Bool* / *Text* /
+    /// *Var*). On the Button, a lone main: the card is collapsed while it has no
+    /// property (Fill's rule, `sync_paint_collapse`); the menu offers *Boolean ·
+    /// visibility*, *Text · text content* and *Variant · makes a set*, and
+    /// *Boolean* makes an unbound boolean property named in full and opens the
+    /// card. On a set, whose card it also is, there is no *Variant*.
+    ///
+    /// **Flips run**: the *Variant* row's `lone_main` guard dropped fails *"no
+    /// Variant on a set"*, the predicted site; the card's `sync_paint_collapse`
+    /// call removed fails *"collapsed while empty"*; and the add's
+    /// `open_paint_panel` removed fails *"opened by the add"*.
+    #[test]
+    fn the_properties_card_adds_from_its_header_menu() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut n = nested_fixture(&ctx);
+        let painted = open_props_menu(&mut n.app, &ctx, n.button);
+        assert!(
+            n.app.collapsed_panels.contains("Properties"),
+            "collapsed while empty"
+        );
+        assert_eq!(menu_row_named(&painted, "Boolean").1, ["visibility"]);
+        assert_eq!(menu_row_named(&painted, "Text").1, ["text content"]);
+        assert_eq!(menu_row_named(&painted, "Variant").1, ["makes a set"]);
+        click(
+            &mut n.app,
+            &ctx,
+            menu_row_named(&painted, "Boolean").0.center(),
+        );
+        let props = n.app.session.doc.get(n.button).unwrap().props().to_vec();
+        assert_eq!(props.len(), 1, "one property made");
+        assert_eq!(props[0].kind, ondin_core::variant::PropKind::Boolean);
+        assert_eq!(props[0].name, "Boolean");
+        assert!(props[0].bound.is_empty(), "bound to nothing");
+        settle(&mut n.app, &ctx);
+        assert!(
+            !n.app.collapsed_panels.contains("Properties"),
+            "opened by the add"
+        );
+        // Combined into a set, the card is the set's, and a set is no lone main.
+        n.app.session.selection.set_one(n.button);
+        n.app.combine_as_variants();
+        let set = ondin_core::variant::owner_of_main(&n.app.session.doc, n.button).unwrap();
+        assert_ne!(set, n.button, "a set was made");
+        let painted = open_props_menu(&mut n.app, &ctx, set);
+        assert!(
+            painted.iter().any(|(t, _)| t == "Boolean"),
+            "the set's menu: {painted:?}"
+        );
+        assert!(
+            !painted.iter().any(|(t, _)| t == "Variant"),
+            "no Variant on a set"
+        );
+    }
+
+    /// **A property bound from a layer inside the main opens the card when the main
+    /// is selected again** (§15 D1005's 2026-10-08 amendment, `arch-scribe`'s
+    /// find). The Button's card rests collapsed while empty; with the Badge inside
+    /// it selected — where the binding line is — a swap property is made; and back
+    /// on the Button the card is open. The card is not drawn for the Badge, so its
+    /// edge has to move on a selection it skips, or the Button reads as the same
+    /// subject it was and the card stays shut over the property just made.
+    ///
+    /// **Flip run**: `subject_changed("Properties")` asked below the early returns,
+    /// where it was, fails *"open over the property bound from inside"*.
+    #[test]
+    fn a_property_bound_from_inside_the_main_opens_its_card() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut n = nested_fixture(&ctx);
+        settled(&mut n.app, &ctx, n.button);
+        assert!(
+            n.app.collapsed_panels.contains("Properties"),
+            "collapsed while empty"
+        );
+        settled(&mut n.app, &ctx, n.slot);
+        let (tx, _) = ondin_core::variant::define(
+            &n.app.session.doc,
+            &mut n.app.session.ids,
+            n.button,
+            "Badge",
+            ondin_core::variant::PropKind::Swap,
+            vec![n.slot],
+        )
+        .expect("a swap property");
+        assert!(n.app.session.commit(tx));
+        settle(&mut n.app, &ctx);
+        settled(&mut n.app, &ctx, n.button);
+        assert!(
+            !n.app.collapsed_panels.contains("Properties"),
+            "open over the property bound from inside"
+        );
+    }
+
+    /// **The `+` menu hangs from the `+` as the ⋯ reset menu hangs from the ⋯, and
+    /// is wide enough for its rows** (§15 D1005, the maintainer's look: it sat too
+    /// far below its button, and *Instance swap* touched *nested instance*). The
+    /// menu's frame starts `MENU_GAP` under the box the `+` paints — not under its
+    /// padded hit target, 6pt lower and 14pt further right — and ends at its right
+    /// edge; and on every row the label and what it binds keep `ADD_MENU_GAP`
+    /// between them, within the 2pt the rounded width and the glyphs' ink allow.
+    ///
+    /// Measured before the change: the frame 12 below the box (its hit target's
+    /// 6pt pad added), its right edge 14 past it, and *Instance swap* to *nested
+    /// instance* 3pt apart in a 200pt menu.
+    ///
+    /// **Flips run**, each alone: `action_rect` back to the padded response rect
+    /// fails *"MENU_GAP under the + box"* at 12; the width back to a fixed 200
+    /// fails *"the label and what it binds apart"*.
+    #[test]
+    fn the_properties_menu_hangs_from_its_plus_and_fits_its_rows() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut n = nested_fixture(&ctx);
+        // No nested instance to offer, so *Instance swap* reads *nested
+        // instance* — the row the maintainer saw crowded.
+        let (tx, _) = ondin_core::variant::define(
+            &n.app.session.doc,
+            &mut n.app.session.ids,
+            n.button,
+            "Badge",
+            ondin_core::variant::PropKind::Swap,
+            vec![n.slot],
+        )
+        .expect("a swap property");
+        assert!(n.app.session.commit(tx));
+        open_props_menu(&mut n.app, &ctx, n.button);
+        let out = settle(&mut n.app, &ctx);
+        let painted = texts(&out);
+        let at = |s: &str| {
+            painted
+                .iter()
+                .find(|(t, _)| t == s)
+                .unwrap_or_else(|| panic!("{s} painted: {painted:?}"))
+                .1
+        };
+        let head = at("PROPERTIES");
+        let plus = painted
+            .iter()
+            .find(|(t, r)| {
+                t == icon::PLUS
+                    && (r.center().y - head.center().y).abs() < 4.0
+                    && r.left() > head.right()
+            })
+            .expect("the header's +")
+            .1
+            .center();
+        let rects: Vec<egui::Rect> = fills(&out).into_iter().map(|(r, _)| r).collect();
+        // The box the `+` paints: its hover ground, the pointer still on it.
+        let plus_box = *rects
+            .iter()
+            .find(|r| r.contains(plus) && r.size() == egui::Vec2::splat(ui::HEAD_ACTION_W))
+            .expect("the + box's hover ground");
+        // The smallest rect holding the first row and the last — the cards under
+        // the menu hold them too — and of the frame and its shadow, the same size,
+        // the higher: the shadow is offset down.
+        let (first, last) = (at("Boolean").center(), at("Variant").center());
+        let frame = *rects
+            .iter()
+            .filter(|r| r.contains(first) && r.contains(last))
+            .min_by(|a, b| {
+                a.area()
+                    .total_cmp(&b.area())
+                    .then(a.top().total_cmp(&b.top()))
+            })
+            .expect("the menu's frame");
+        assert_eq!(
+            frame.top() - plus_box.bottom(),
+            ui::MENU_GAP,
+            "MENU_GAP under the + box: {frame:?} against {plus_box:?}"
+        );
+        assert!(
+            (frame.right() - plus_box.right()).abs() <= 1.0,
+            "its right edge at the box's: {frame:?} against {plus_box:?}"
+        );
+        let gaps: Vec<f32> = [
+            ("Boolean", "visibility"),
+            ("Text", "text content"),
+            ("Instance swap", "nested instance"),
+            ("Variant", "makes a set"),
+        ]
+        .into_iter()
+        .map(|(label, what)| at(what).left() - at(label).right())
+        .collect();
+        assert!(
+            gaps.iter()
+                .all(|g| *g >= super::super::variants::ADD_MENU_GAP - 2.0),
+            "the label and what it binds apart: {gaps:?}"
+        );
+    }
+
+    /// **A nested instance no swap property drives is offered as one, from the
+    /// header's `+` menu, and a swap property's filter is a row of its own** (§15
+    /// D1000, the maintainer's look: *"If I remove the icon property … I have no
+    /// idea how to bring it back"*; §15 D1005 moved the offer into the menu). A
+    /// Button main holding a Badge instance and no properties: no *Shown from
+    /// nested* heading while nothing is shown, and the card's own `+` opens a menu
+    /// whose *Instance swap* row names the Badge; that row makes a swap property
+    /// bound to the Badge, after which the card draws its funnel row and the line
+    /// under it, and the menu's *Instance swap* names the Badge no more; showing the
+    /// Badge's properties brings the heading.
+    ///
+    /// **Flip run**: the menu's dormant list keeping nothing fails *"the Badge is
+    /// named on Instance swap"*, the predicted site.
     #[test]
     fn a_nested_instance_is_offered_as_a_swap_property_and_its_filter_is_a_row() {
         let ctx = egui::Context::default();
@@ -4835,28 +5084,20 @@ mod tests {
         let mut n = nested_fixture(&ctx);
         let words =
             |out: &egui::FullOutput| texts(out).into_iter().map(|(t, _)| t).collect::<Vec<_>>();
+        // The menu's *Instance swap* row, and what it names on its line.
+        let open_menu = |n: &mut N| {
+            let painted = open_props_menu(&mut n.app, &ctx, n.button);
+            let (row, named) = menu_row_named(&painted, "Instance swap");
+            (row.center(), named)
+        };
         let out = settled(&mut n.app, &ctx, n.button);
-        let painted = texts(&out);
-        let row = painted
-            .iter()
-            .find(|(t, _)| t == "· nested instance")
-            .unwrap_or_else(|| panic!("the Badge is offered: {:?}", words(&out)))
-            .1;
         assert!(
             !words(&out).iter().any(|t| t == "SHOWN FROM NESTED"),
             "no heading while nothing is shown"
         );
-        let plus = painted
-            .iter()
-            .find(|(t, r)| {
-                t == icon::PLUS
-                    && (r.center().y - row.center().y).abs() < 4.0
-                    && r.left() > row.right()
-            })
-            .expect("the row's +")
-            .1
-            .center();
-        click(&mut n.app, &ctx, plus);
+        let (row, named) = open_menu(&mut n);
+        assert_eq!(named, ["Badge"], "the Badge is named on Instance swap");
+        click(&mut n.app, &ctx, row);
         let props = n.app.session.doc.get(n.button).unwrap().props().to_vec();
         assert_eq!(props.len(), 1, "one property made");
         assert_eq!(props[0].kind, ondin_core::variant::PropKind::Swap);
@@ -4872,9 +5113,11 @@ mod tests {
             "{w:?}"
         );
         assert!(
-            !w.iter().any(|t| t == "· nested instance"),
-            "offered no more"
+            !w.iter().any(|t| t == "Instance swap"),
+            "the menu closed on its row"
         );
+        let (_, named) = open_menu(&mut n);
+        assert_eq!(named, ["nested instance"], "offered no more");
         let tx = ondin_core::variant::set_shown(
             &n.app.session.doc,
             &mut n.app.session.ids,

@@ -1580,7 +1580,8 @@ D989 the binding line a nested instance in a main had never drawn, `architecture
 paragraph. What the build left open, and nothing else:
 
 - **The maintainer's look.** Begun on 2026-10-07: the fourth polish list ruled on the Properties
-  card's *Shown from nested* and a hidden group's line (§15 D1000). Whether that was the look or the
+  card's *Shown from nested* and a hidden group's line (§15 D1000), and a second list the same day set
+  the card beside 4K and 4L, keeping D1000's reading (§15 D1005). Whether that was the look or the
   first part of it is not said, so every call D988 marks as the session's is still open to it.
 - **A variant that joins a set after a showing exists** is bound only through *Add variant*
   (`add_variant` extends every set property's bindings, read, not run), not when a main is moved in.

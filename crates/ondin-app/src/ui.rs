@@ -1029,13 +1029,11 @@ pub fn section_head_full(
         let hovered = sense && ui.rect_contains_pointer(over);
         let p = ui.painter();
         if hovered {
-            let target = ui
-                .interact(
-                    slot,
-                    ui.id().with(("section-reset", label)),
-                    egui::Sense::click(),
-                )
-                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            let target = ui.interact(
+                slot,
+                ui.id().with(("section-reset", label)),
+                egui::Sense::click(),
+            );
             // `button_face`'s grounds, so the chip is the same material as a button.
             let ground = if target.hovered() {
                 color::HOVER
@@ -1795,6 +1793,12 @@ pub const MENU_ROW_H: f32 = 22.0;
 /// the padding, and is correct — where a warning phrased about dropdowns in
 /// general scores it as the failure case.
 pub const MENU_ITEM_H: f32 = 24.0;
+
+/// The air between a button and the menu it opens — the top bar's View, Snap and
+/// zoom menus, and the inspector's popup menus that drop from a button (§15
+/// D996). `egui::Popup::menu` opens with none, so its menu touched the button;
+/// the maintainer named the top bar's as the one to match.
+pub const MENU_GAP: f32 = 6.0;
 
 /// Like [`egui::Ui::add_enabled_ui`], but idempotent under a parent that is
 /// already disabled.

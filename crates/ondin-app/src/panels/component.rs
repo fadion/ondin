@@ -1023,13 +1023,53 @@ pub(super) fn label_mark(
     ink: egui::Color32,
     mark: Option<&OverrideMark>,
 ) -> bool {
+    label_mark_in(ui, size, egui::Align::Center, text, pt, ink, mark)
+}
+
+/// The room a right-aligned [`label_mark_in`] keeps after its text for the dot,
+/// and for the ↺ that takes its place on hover — 12pt, so neither reaches the
+/// control beside it. The centred [`label_mark`] does not read it.
+pub(super) const MARK_ROOM: f32 = 12.0;
+
+/// [`label_mark`] with the text placed by `align` in its slot: centred, or —
+/// [`egui::Align::Max`] — **right-aligned against the control it labels**, with
+/// [`MARK_ROOM`] kept for the mark and a label too long for the slot cut with an
+/// ellipsis, its whole name in the tooltip. The Component card's label column
+/// (§15 D996): centred, a short label sat far from its field and a long one beside
+/// it, so *Size* read as further left than *Body text* in the column below it.
+pub(super) fn label_mark_in(
+    ui: &mut egui::Ui,
+    size: Option<egui::Vec2>,
+    align: egui::Align,
+    text: &str,
+    pt: f32,
+    ink: egui::Color32,
+    mark: Option<&OverrideMark>,
+) -> bool {
     let color = match mark {
         Some(_) => theme::text::STRONG,
         None => ink,
     };
-    let galley =
-        ui.painter()
-            .layout_no_wrap(text.to_owned(), egui::FontId::proportional(pt), color);
+    let right = align == egui::Align::Max && size.is_some();
+    let galley = match size.filter(|_| right) {
+        Some(slot) => {
+            let mut job = egui::text::LayoutJob::single_section(
+                text.to_owned(),
+                egui::TextFormat::simple(egui::FontId::proportional(pt), color),
+            );
+            job.wrap = egui::text::TextWrapping {
+                max_width: (slot.x - MARK_ROOM).max(0.0),
+                max_rows: 1,
+                break_anywhere: true,
+                overflow_character: Some('…'),
+            };
+            ui.painter().layout_job(job)
+        }
+        None => ui
+            .painter()
+            .layout_no_wrap(text.to_owned(), egui::FontId::proportional(pt), color),
+    };
+    let cut = galley.text() != text;
     let w = galley.size().x;
     // The dot's room beside the text, so a marked label's width does not move
     // what follows it.
@@ -1040,12 +1080,16 @@ pub(super) fn label_mark(
     };
     let (rect, resp) = ui.allocate_exact_size(want, sense);
     let left = match size {
+        Some(_) if right => rect.right() - MARK_ROOM - w,
         Some(_) => rect.center().x - w / 2.0,
         None => rect.left(),
     };
     let at = egui::pos2(left, rect.center().y - galley.size().y / 2.0);
     ui.painter().galley(at, galley, color);
     let Some(m) = mark else {
+        if cut {
+            resp.on_hover_text(text);
+        }
         return false;
     };
     if resp.hovered() {
@@ -1059,7 +1103,14 @@ pub(super) fn label_mark(
     } else {
         ui::override_dot(ui.painter(), at + egui::vec2(w + 1.5, 3.0));
     }
-    resp.on_hover_text(&m.tip).clicked()
+    // A cut label names itself in the tooltip too, over the mark's reset — or a
+    // long overridden name could not be read whole anywhere (`arch-scribe`'s
+    // find, §15 D996).
+    match cut {
+        true => resp.on_hover_text(format!("{text}\n{}", m.tip)),
+        false => resp.on_hover_text(&m.tip),
+    }
+    .clicked()
 }
 
 /// An overridden dropdown's dot, where it has no label to sit after: beside its
@@ -1145,6 +1196,12 @@ fn heading(
             }
             if let Some((main, name)) = link {
                 // The name, then the ↗ — one target, so a click on either goes.
+                // **As tall as the name, not as a control** (§15 D996): a
+                // horizontal row opens at `interact_size.y`, 24, and centred the
+                // name in it — so an instance's name and hexagon sat 4pt below a
+                // main's, whose name is a plain label in its block. The
+                // maintainer's look. Nothing in this block is a control.
+                ui.spacing_mut().interact_size.y = 0.0;
                 let resp = ui
                     .horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 4.0;
@@ -1168,7 +1225,6 @@ fn heading(
                         name | arrow
                     })
                     .inner
-                    .on_hover_cursor(egui::CursorIcon::PointingHand)
                     .on_hover_text("Go to main component");
                 if resp.clicked() {
                     *act = Some(Act::GoToMain(main));
@@ -1243,6 +1299,7 @@ fn reset_row(ui: &mut egui::Ui, d: Drift, p: PropDrift, overflow: bool, act: &mu
                 .on_hover_text("More resets");
             egui::Popup::menu(&more)
                 .align(egui::RectAlign::BOTTOM_END)
+                .gap(ui::MENU_GAP)
                 .show(|ui| {
                     ui::menu_rows(ui);
                     // **As wide as its longest row, not as the screen** (§15 D993):
@@ -3371,5 +3428,267 @@ mod tests {
             !painted.iter().any(|t| t.contains("override")),
             "nothing counted as an override: {painted:?}"
         );
+    }
+
+    /// Every filled rect the frame painted — the fields, the dropdowns' faces and
+    /// the switch's track.
+    fn fills(out: &egui::FullOutput) -> Vec<(egui::Rect, egui::Color32)> {
+        fn walk(s: &egui::Shape, o: &mut Vec<(egui::Rect, egui::Color32)>) {
+            match s {
+                egui::Shape::Rect(r) if r.fill.a() > 0 => o.push((r.rect, r.fill)),
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, o)),
+                _ => {}
+            }
+        }
+        let mut o = Vec::new();
+        for s in &out.shapes {
+            walk(&s.shape, &mut o);
+        }
+        o
+    }
+
+    /// The variants fixture with a boolean property, *Interesante*, bound to the
+    /// small variant's label — the maintainer's own name for the row in the look
+    /// that asked for this (§15 D996).
+    fn with_a_toggle(v: &mut V) {
+        use ondin_core::variant::{PropKind, Property};
+        let mut props = v.app.session.doc.get(v.set).unwrap().props().to_vec();
+        let item = v.app.session.ids.mint_item();
+        props.push(ondin_core::Keyed::new(
+            item,
+            Property {
+                name: "Interesante".into(),
+                kind: PropKind::Boolean,
+                bound: vec![v.label],
+                filter: String::new(),
+            },
+        ));
+        assert!(
+            v.app
+                .session
+                .commit(Transaction(vec![Operation::SetProperties {
+                    id: v.set,
+                    props,
+                }]))
+        );
+    }
+
+    /// The frame after a few settling passes with `id` selected.
+    fn settled(app: &mut OndinApp, ctx: &egui::Context, id: NodeId) -> egui::FullOutput {
+        app.session.selection.set_one(id);
+        let mut out = frame(app, ctx, Vec::new());
+        for _ in 0..3 {
+            out = frame(app, ctx, Vec::new());
+        }
+        out
+    }
+
+    /// **The Component card's rows are the other cards' rows** (§15 D996, the
+    /// maintainer's look: *"make things consistent in the inspector cards"*). On
+    /// an instance with a variant dropdown, a text property and a boolean one:
+    ///
+    /// - every field and dropdown in the label column is `CONTROL_H` tall and ends
+    ///   at the card's content edge — where the ⋯ button under them ends, as every
+    ///   other card's last control does;
+    /// - the labels *Size*, *Label text* and *Interesante* end at one x, right
+    ///   against their controls;
+    /// - the boolean's switch starts where the fields do;
+    /// - and the instance's name sits at the height a main's does in its card.
+    ///
+    /// Measured before the change: dropdowns 24 tall ending 8 short of the edge,
+    /// the labels centred (ending at 65, 81 and — the toggle's, at the content
+    /// edge in 11.5pt — 76), the switch against the right margin, and the
+    /// instance's name 4pt below the main's.
+    ///
+    /// **Flips run**, each alone: `control_height` not called fails *"28 tall"*
+    /// at 24; the `- 8.0` back on the variant dropdown fails *"at the content
+    /// edge"* at 257; `row_label` back on `label_mark` (centred) fails *"one right
+    /// edge"*; and the heading's `interact_size.y = 0.0` removed fails the name's
+    /// height at 4 off.
+    #[test]
+    fn the_component_cards_rows_line_up_with_the_other_cards() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut v = variants_fixture(&ctx);
+        with_a_toggle(&mut v);
+        let out = settled(&mut v.app, &ctx, v.i);
+        let painted = texts(&out);
+        let at = |s: &str| {
+            painted
+                .iter()
+                .find(|(t, _)| t == s)
+                .unwrap_or_else(|| panic!("{s} painted: {painted:?}"))
+                .1
+        };
+        let rects = fills(&out);
+        // The ⋯ under the rows: the last control of the card, at its content edge.
+        let more = at(icon::DOTS_THREE);
+        let edge = rects
+            .iter()
+            .map(|(r, _)| *r)
+            .find(|r| r.contains(more.center()) && r.height() == ui::CONTROL_H)
+            .expect("the ⋯ button's face")
+            .right();
+        let size = at("Size");
+        let column: Vec<egui::Rect> = rects
+            .iter()
+            .map(|(r, _)| *r)
+            .filter(|r| r.left() > size.right() && r.top() >= size.top() - 10.0)
+            .filter(|r| r.top() < at("Interesante").top() - 10.0 && r.width() > 100.0)
+            .collect();
+        assert_eq!(
+            column.len(),
+            2,
+            "the dropdown and the text field: {column:?}"
+        );
+        for r in &column {
+            assert_eq!(r.height(), ui::CONTROL_H, "28 tall: {r:?}");
+            assert_eq!(r.right(), edge, "at the content edge: {r:?}");
+        }
+        let rights = [
+            at("Size").right(),
+            at("Label text").right(),
+            at("Interesante").right(),
+        ];
+        assert!(
+            rights.iter().all(|r| (r - rights[0]).abs() <= 1.0),
+            "one right edge: {rights:?}"
+        );
+        let toggle = at("Interesante");
+        let switch = rects
+            .iter()
+            .map(|(r, _)| *r)
+            .find(|r| r.size() == ui::SWITCH_SIZE && (r.center().y - toggle.center().y).abs() < 4.0)
+            .expect("the switch's track");
+        assert_eq!(
+            switch.left(),
+            column[0].left(),
+            "the switch where the fields begin"
+        );
+        // The name's top, against a main's in its own card — each the nearest name
+        // under the COMPONENT eyebrow.
+        let name_top = |out: &egui::FullOutput, name: &str| {
+            let painted = texts(out);
+            let eyebrow = painted.iter().find(|(t, _)| t == "COMPONENT").unwrap().1;
+            painted
+                .iter()
+                .filter(|(t, r)| t == name && r.top() > eyebrow.bottom())
+                .map(|(_, r)| r.top() - eyebrow.bottom())
+                .fold(f32::INFINITY, f32::min)
+        };
+        let instance = name_top(&out, "Small");
+        let mut f = fixture(&ctx);
+        let main = name_top(&settled(&mut f.app, &ctx, f.m), "Button");
+        assert!(
+            (instance - main).abs() <= 0.5,
+            "the instance's name {instance} under its eyebrow, a main's {main}"
+        );
+    }
+
+    /// **Deleting a value variants use asks first, in a modal** (§15 D996, the
+    /// maintainer's look — it was a sentence inside the chip's menu over a row
+    /// that did it). With *Small* used by one variant that has one instance: the
+    /// chip's *Delete value* row deletes nothing and raises the modal, which
+    /// counts both; `Escape` cancels and keeps the value; a second ask answered
+    /// *Delete* deletes the value and its variant.
+    ///
+    /// **Flip run**: the row deleting straight away again (the `using.is_empty()`
+    /// arm taken for every value) fails *"nothing deleted yet"*, the predicted
+    /// site.
+    #[test]
+    fn deleting_a_used_value_asks_in_a_modal() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut v = variants_fixture(&ctx);
+        let values = |app: &OndinApp| {
+            app.session.doc.get(v.set).unwrap().set().unwrap().props[0]
+                .values
+                .clone()
+        };
+        let run = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1400.0, 2400.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            ctx.run_ui(input, |ui| {
+                ui.set_max_width(280.0);
+                app.inspector_ui(ui);
+                app.value_delete_confirmation(ui.ctx());
+            })
+        };
+        let out = settled(&mut v.app, &ctx, v.set);
+        let chip = texts(&out)
+            .into_iter()
+            .find(|(t, _)| t == "Small")
+            .filter(|(_, r)| r.top() > 100.0)
+            .expect("the Small chip")
+            .1
+            .center();
+        click_at(&mut v.app, &ctx, chip);
+        let out = run(&mut v.app, Vec::new());
+        let row = texts(&out)
+            .into_iter()
+            .find(|(t, _)| t == "Delete value")
+            .expect("the menu's row")
+            .1
+            .center();
+        click_at(&mut v.app, &ctx, row);
+        assert_eq!(values(&v.app), ["Small", "Large"], "nothing deleted yet");
+        assert!(v.app.modal_is_up(), "the modal is up");
+        // A new area is sized on its first pass and drawn from its second.
+        run(&mut v.app, Vec::new());
+        let out = run(&mut v.app, Vec::new());
+        let words: Vec<String> = texts(&out).into_iter().map(|(t, _)| t).collect();
+        assert!(
+            words
+                .iter()
+                .any(|t| t
+                    == "1 variant uses “Small”, and is deleted with it. 1 instance will detach."),
+            "{words:?}"
+        );
+        let key = |pressed| egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: Default::default(),
+        };
+        run(&mut v.app, vec![key(true)]);
+        run(&mut v.app, vec![key(false)]);
+        assert!(!v.app.modal_is_up(), "Escape cancelled");
+        assert_eq!(values(&v.app), ["Small", "Large"], "and kept the value");
+
+        v.app.deleting_value = Some(crate::panels::ValueDelete {
+            set: v.set,
+            prop: 0,
+            value: 0,
+            name: "Small".into(),
+            variants: 1,
+            instances: 1,
+        });
+        run(&mut v.app, Vec::new());
+        let out = run(&mut v.app, Vec::new());
+        let delete = texts(&out)
+            .into_iter()
+            .find(|(t, _)| t == "Delete")
+            .expect("the modal's Delete")
+            .1
+            .center();
+        let press = |pressed| egui::Event::PointerButton {
+            pos: delete,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        run(&mut v.app, vec![egui::Event::PointerMoved(delete)]);
+        run(&mut v.app, vec![press(true)]);
+        run(&mut v.app, vec![press(false)]);
+        assert_eq!(values(&v.app), ["Large"], "the value is gone");
+        assert!(v.app.session.doc.get(v.small).is_none(), "with its variant");
+        assert!(!v.app.modal_is_up());
     }
 }

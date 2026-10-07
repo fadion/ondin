@@ -34,6 +34,21 @@ use ondin_core::{Keyed, NodeId, Transaction, component, swap};
 const LABEL_W: f32 = 76.0;
 /// A value chip's height.
 const CHIP_H: f32 = 22.0;
+/// The inner width of a value chip's menu — the top bar's View and Snap menus'
+/// 160 less their frame.
+const CHIP_MENU_W: f32 = 150.0;
+
+/// A value the user asked to delete while variants use it, awaiting the
+/// confirmation modal ([`OndinApp::value_delete_confirmation`], §15 D996): which
+/// value, what it is called, and the counts the modal states.
+pub(crate) struct ValueDelete {
+    pub(super) set: NodeId,
+    pub(super) prop: usize,
+    pub(super) value: usize,
+    pub(super) name: String,
+    pub(super) variants: usize,
+    pub(super) instances: usize,
+}
 
 /// A text field that edits `current` and answers the new text once, when the
 /// field gives its focus up with something new in it — `Escape` abandons, as every
@@ -65,6 +80,14 @@ fn name_field(
     (done && buf.trim() != current && !buf.trim().is_empty()).then(|| buf.trim().to_string())
 }
 
+/// A closed dropdown's face at [`ui::CONTROL_H`], in the `Ui` it is about to be
+/// laid out in — the font family's two lines (`typography.rs`). The popup sets its
+/// own row heights (`ui::menu_rows`), so this reaches the face alone.
+fn control_height(ui: &mut egui::Ui) {
+    ui.spacing_mut().interact_size.y = ui::CONTROL_H;
+    ui.spacing_mut().button_padding.y = 0.0;
+}
+
 /// One option of a [`dropdown`]: its label, and why it is greyed when it is.
 struct Choice {
     label: String,
@@ -72,6 +95,11 @@ struct Choice {
 }
 
 /// A dropdown of `choices` showing `shown`, answering the index picked.
+///
+/// **[`ui::CONTROL_H`] tall, as every other card's dropdown** (§15 D996): a combo
+/// paints exactly `interact_size.y`, and left to the theme these came out 24 under
+/// the cards' 28 — the font family's case (§15 D85), measured again here. Set in
+/// the gate's own `Ui` so the height does not leak into the rows below.
 fn dropdown(
     ui: &mut egui::Ui,
     salt: impl std::hash::Hash + std::fmt::Debug,
@@ -83,6 +111,7 @@ fn dropdown(
 ) -> Option<usize> {
     let mut pick = None;
     ui::disable_unless(ui, enabled.is_none(), |ui| {
+        control_height(ui);
         let resp = egui::ComboBox::from_id_salt(salt)
             .icon(ui::combo_chevron)
             .width(width)
@@ -125,6 +154,7 @@ fn swap_picker(
     let mut pick = None;
     let search_id = egui::Id::new(("swap-search", salt));
     ui::disable_unless(ui, enabled.is_none(), |ui| {
+        control_height(ui);
         let resp = egui::ComboBox::from_id_salt(salt)
             .icon(ui::combo_chevron)
             .width(width)
@@ -177,16 +207,69 @@ fn swap_picker(
     pick
 }
 
-/// A row's label in the label column.
+/// A row's label in the label column, **right-aligned against its control**
+/// (§15 D996, `component::label_mark_in`) — every label in the column ending the
+/// same distance from the field it names, whatever its length.
 fn row_label(ui: &mut egui::Ui, text: &str, mark: Option<&super::component::OverrideMark>) -> bool {
-    super::component::label_mark(
+    super::component::label_mark_in(
         ui,
         Some(egui::vec2(LABEL_W, ui::CONTROL_H)),
+        egui::Align::Max,
         text,
         12.0,
         theme::text::MUTED,
         mark,
     )
+}
+
+/// A boolean property's row on an instance's card: the name in the label column
+/// as every other property row has it, and the switch where those rows' fields
+/// begin — `None` the word *Mixed* there (§15 D130). Answers the response of the
+/// switch's side of the row, whose click is the toggle, and whether the marked
+/// label's ↺ was clicked.
+///
+/// **Not [`ui::switch_row`]** (§15 D996, the maintainer's look): that is the
+/// toggle-list row of the OpenType features — its label at the content edge in
+/// 11.5pt, lit while on, the switch against the right margin — and among the
+/// card's labelled fields it read as a row from another panel: smaller, brighter,
+/// out of the label column, and its switch nowhere near the fields' edge.
+fn toggle_row(
+    ui: &mut egui::Ui,
+    name: &str,
+    on: Option<bool>,
+    mark: Option<&super::component::OverrideMark>,
+) -> (egui::Response, bool) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        let reset = row_label(ui, name, mark);
+        let (rect, resp) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width(), ui::CONTROL_H),
+            egui::Sense::click(),
+        );
+        let p = ui.painter();
+        match on {
+            Some(on) => ui::paint_switch(
+                p,
+                egui::Rect::from_min_size(
+                    egui::pos2(rect.left(), rect.center().y - ui::SWITCH_SIZE.y / 2.0),
+                    ui::SWITCH_SIZE,
+                ),
+                on,
+                resp.hovered(),
+            ),
+            None => {
+                p.text(
+                    egui::pos2(rect.left(), rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    ui::MIXED_WORD,
+                    egui::FontId::proportional(12.0),
+                    theme::text::FAINT,
+                );
+            }
+        }
+        (resp, reset)
+    })
+    .inner
 }
 
 /// A leading glyph and a line of text, the card's one-line notes (a clash).
@@ -240,6 +323,7 @@ impl OndinApp {
         let mut select_all = false;
         let mut add_variant = false;
         let mut refused: Option<&str> = None;
+        let mut confirm: Option<ValueDelete> = None;
 
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 9.0;
@@ -336,12 +420,18 @@ impl OndinApp {
                     );
                     egui::Popup::menu(&chip)
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                        .gap(ui::MENU_GAP)
                         .show(|ui| {
-                            ui.set_min_width(200.0);
+                            // **A width, not a minimum** (§15 D996): `menu_row`
+                            // takes the available width, which in a popup's `Area`
+                            // is however far the screen goes, so with only a
+                            // floor the menu ran most of the way across the
+                            // canvas — the ⋯ menu's case (§15 D993).
+                            ui.set_width(CHIP_MENU_W);
                             ui::menu_rows(ui);
                             let id = ui.id().with(("variant-value", set, pi, vi));
                             if let Some(n) =
-                                name_field(ui, id, v, egui::vec2(200.0, ui::CONTROL_H), 12.0)
+                                name_field(ui, id, v, egui::vec2(CHIP_MENU_W, ui::CONTROL_H), 12.0)
                             {
                                 match variant::rename_value(doc, set, pi, vi, &n) {
                                     Some(tx) => out = Some(tx),
@@ -367,38 +457,29 @@ impl OndinApp {
                             ui::menu_sep(ui);
                             // 3C: confirm only when variants use it, with exact
                             // counts — and the instances **detach** (§15 D982,
-                            // D979 (c)), where the mockup relinked them.
+                            // D979 (c)), where the mockup relinked them. **In a
+                            // modal, not in the menu** (§15 D996, the maintainer's
+                            // look): the warning was a sentence inside the menu
+                            // over a row that did it, so one click deleted
+                            // variants.
                             let using = variant::using_value(doc, set, pi, vi);
-                            let detach: usize = using
-                                .iter()
-                                .map(|u| component::instances_of(doc, *u).len())
-                                .sum();
-                            if n < 2 {
-                                row(ui, "Delete value", false);
-                            } else if using.is_empty() {
-                                if row(ui, "Delete value", true) {
+                            if row(ui, "Delete value", n >= 2) {
+                                if using.is_empty() {
                                     out = variant::delete_value(doc, set, pi, vi);
+                                } else {
+                                    confirm = Some(ValueDelete {
+                                        set,
+                                        prop: pi,
+                                        value: vi,
+                                        name: v.clone(),
+                                        variants: using.len(),
+                                        instances: using
+                                            .iter()
+                                            .map(|u| component::instances_of(doc, *u).len())
+                                            .sum(),
+                                    });
                                 }
-                            } else {
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "{} use{} it and {} deleted with it.{}",
-                                        plural(using.len(), "variant"),
-                                        if using.len() == 1 { "s" } else { "" },
-                                        if using.len() == 1 { "is" } else { "are" },
-                                        match detach {
-                                            0 => String::new(),
-                                            d => format!(" {} will detach.", plural(d, "instance")),
-                                        }
-                                    ))
-                                    .size(11.5)
-                                    .color(theme::text::MUTED),
-                                );
-                                let label =
-                                    format!("Delete value and {}", plural(using.len(), "variant"));
-                                if row(ui, &label, true) {
-                                    out = variant::delete_value(doc, set, pi, vi);
-                                }
+                                ui.close();
                             }
                         });
                 }
@@ -450,11 +531,84 @@ impl OndinApp {
         if let Some(tx) = out {
             self.commit_edit(tx);
         }
+        if confirm.is_some() {
+            self.deleting_value = confirm;
+        }
         if select_all {
             self.select_all_instances();
         }
         if add_variant {
             self.add_variant();
+        }
+    }
+
+    /// The confirmation for deleting a value variants use (§15 D996, replacing
+    /// 3C's warning inside the chip's menu): what goes and what detaches, then
+    /// *Cancel* and *Delete*. `Escape`, the backdrop and the ✕ cancel — the safe
+    /// arm, §15 D377's reading and the close confirmation's (§15 D525) — and a
+    /// value that is no longer there by the time *Delete* is pressed deletes
+    /// nothing.
+    pub(crate) fn value_delete_confirmation(&mut self, ctx: &egui::Context) {
+        let Some(pending) = &self.deleting_value else {
+            return;
+        };
+        let mut delete = false;
+        let mut cancel = false;
+        let detach = match pending.instances {
+            0 => String::new(),
+            n => format!(" {} will detach.", plural(n, "instance")),
+        };
+        let body = format!(
+            "{} {} “{}”, and {} deleted with it.{detach}",
+            plural(pending.variants, "variant"),
+            if pending.variants == 1 { "uses" } else { "use" },
+            pending.name,
+            if pending.variants == 1 { "is" } else { "are" },
+        );
+        let modal = crate::settings::card("confirm-value-delete", ctx, |ui| {
+            ui.set_width(ui::menu_inner_w(320.0, crate::settings::PAD));
+            if crate::settings::modal_title(ui, "Delete value") {
+                cancel = true;
+            }
+            ui.add_space(8.0);
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(body)
+                        .size(12.0)
+                        .color(theme::text::MUTED),
+                )
+                .wrap(),
+            );
+            ui.add_space(crate::settings::FOOTER_GAP);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                if crate::settings::text_button(ui, "Cancel", FieldButton::Off).clicked() {
+                    cancel = true;
+                }
+                if crate::settings::text_button(ui, "Delete", FieldButton::Danger).clicked() {
+                    delete = true;
+                }
+            });
+        });
+        if modal.should_close() {
+            cancel = true;
+        }
+        if delete && let Some(p) = self.deleting_value.take() {
+            let still = self
+                .session
+                .doc
+                .get(p.set)
+                .and_then(|s| s.set())
+                .and_then(|s| s.props.get(p.prop))
+                .and_then(|q| q.values.get(p.value))
+                .is_some_and(|v| *v == p.name);
+            if still
+                && let Some(tx) = variant::delete_value(&self.session.doc, p.set, p.prop, p.value)
+            {
+                self.commit_edit(tx);
+            }
+        } else if cancel {
+            self.deleting_value = None;
         }
     }
 
@@ -485,7 +639,7 @@ impl OndinApp {
                     })
                     .collect();
                 let current = p.values.iter().position(|v| Some(v) == values.get(pi));
-                let w = ui.available_width() - 8.0;
+                let w = ui.available_width();
                 let shown = values.get(pi).map(String::as_str).unwrap_or("");
                 if let Some(i) = dropdown(
                     ui,
@@ -790,7 +944,7 @@ impl OndinApp {
                 if row_label(ui, "Swap", mark.as_ref()) {
                     out = mark.as_ref().map(|m| m.tx.clone());
                 }
-                let w = ui.available_width() - 8.0;
+                let w = ui.available_width();
                 let current = (!mixed).then_some(shows[0]).flatten();
                 let options = |search: &str| {
                     swap::options(doc, first, "", search)
@@ -895,7 +1049,7 @@ impl OndinApp {
                     if row_label(ui, &p.name, mark.as_ref()) {
                         out = mark.as_ref().map(|m| m.tx.clone());
                     }
-                    let w = ui.available_width() - 8.0;
+                    let w = ui.available_width();
                     let refuse =
                         (!switchable).then_some("Only an instance or a nested copy switches");
                     if let Some(i) = dropdown(
@@ -955,11 +1109,11 @@ impl OndinApp {
                 PropKind::Nested => {}
                 PropKind::Boolean => {
                     let on = matches!(value, PropValue::Boolean(true));
-                    let resp = if mixed {
-                        ui::switch_row_mixed(ui, &p.name, ui::CONTROL_H)
-                    } else {
-                        ui::switch_row_marked(ui, &p.name, on, ui::CONTROL_H, overridden)
-                    };
+                    let (resp, reset_hit) =
+                        toggle_row(ui, &p.name, (!mixed).then_some(on), mark.as_ref());
+                    if reset_hit {
+                        out = Some(Transaction(reset.clone()));
+                    }
                     let resp = match &mark {
                         Some(m) => resp.on_hover_text(&m.tip),
                         None => resp,
@@ -985,7 +1139,7 @@ impl OndinApp {
                             (PropValue::Text(t), false) => t.clone(),
                             _ => String::new(),
                         };
-                        let w = ui.available_width() - 8.0;
+                        let w = ui.available_width();
                         let id = ui.id().with(("prop-text", first, p.name.as_str()));
                         if let Some(t) =
                             name_field(ui, id, &text, egui::vec2(w, ui::CONTROL_H), 12.0)
@@ -1017,7 +1171,7 @@ impl OndinApp {
                             _ => None,
                         };
                         let copy = variant::counterparts(doc, first, p).first().copied();
-                        let w = ui.available_width() - 8.0;
+                        let w = ui.available_width();
                         let options = |search: &str| {
                             copy.map(|c| swap::options(doc, c, &p.filter, search))
                                 .unwrap_or_default()
@@ -1288,7 +1442,7 @@ impl OndinApp {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
                     row_label(ui, label, None);
-                    let w = ui.available_width() - 8.0;
+                    let w = ui.available_width();
                     let current = Some(bound.map_or(0, |b| b + 1));
                     let Some(i) = dropdown(
                         ui,
@@ -1459,7 +1613,7 @@ fn property_row(
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
             row_label(ui, "Filter", None);
-            let w = ui.available_width() - 8.0;
+            let w = ui.available_width();
             let id = ui.id().with(("prop-filter", owner, p.id));
             if let Some(f) = filter_field(ui, id, &p.filter, egui::vec2(w, ui::CONTROL_H)) {
                 *out = variant::edit_property(doc, owner, p.id, |q| {

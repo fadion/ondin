@@ -1472,11 +1472,14 @@ impl OndinApp {
         // A selected set's `+` (§15 D982) is a button, and the press resolves it
         // ahead of the box handles (`begin_select_drag`) — so the cursor does too,
         // or it promised the bottom edge's resize over a disc that will not
-        // resize (`arch-scribe`'s find, §15 D985).
+        // resize (`arch-scribe`'s find, §15 D985). **The arrow**, not a hand: no
+        // control in the app shows the pointing hand (§9.2, the maintainer's
+        // ruling in §15 D996), and the bitmap a tool's rest state carries is not
+        // what a button wants either.
         if let Some(p) = resp.hover_pos()
             && self.set_plus_at(p, rect, ppp).is_some()
         {
-            return (egui::CursorIcon::PointingHand, None);
+            return (egui::CursorIcon::Default, None);
         }
 
         // A line's ends, before the box handles — which it does not have — and before

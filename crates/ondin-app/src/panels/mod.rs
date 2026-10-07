@@ -29,6 +29,8 @@ pub(crate) use layers::op_glyph;
 pub(crate) use paint::{CharSlot, PaintDrag, PaintSlot, map_image};
 pub(crate) use picker::Picker;
 pub(crate) use typography::TypeSubject;
+/// A value delete awaiting its confirmation (§15 D996).
+pub(crate) use variants::ValueDelete;
 /// A set's clash, as its card and its canvas tab both say it (§15 D982).
 pub(crate) use variants::clash_text;
 

@@ -844,6 +844,9 @@ pub struct OndinApp {
     pub(crate) layers_edge: EdgeDwell,
     /// Set when the window manager asked to close and there are unsaved edits.
     pub(crate) confirming_close: bool,
+    /// A set's value the user asked to delete while variants use it, until the
+    /// confirmation modal is answered (§15 D996).
+    pub(crate) deleting_value: Option<crate::panels::ValueDelete>,
     /// Canvas size in device pixels as of the last frame — zoom-to-fit needs it.
     pub(crate) canvas_px: (u32, u32),
     /// The display scale the canvas was last laid out at, `pixels_per_point`.
@@ -2189,6 +2192,7 @@ impl OndinApp {
             layer_drag: None,
             layers_edge: EdgeDwell::default(),
             confirming_close: false,
+            deleting_value: None,
             canvas_px: (1, 1),
             canvas_ppp: 1.0,
             canvas_rect: egui::Rect::NOTHING,
@@ -2382,6 +2386,7 @@ impl eframe::App for OndinApp {
         // on purpose and the sentence below now says which.
         self.handle_close_request(&ctx);
         self.close_confirmation(&ctx);
+        self.value_delete_confirmation(&ctx);
 
         // The window's resize edges, on a host whose window has none of its own
         // (§15 D952) — above the view branch, because both screens are the
@@ -8470,7 +8475,10 @@ impl OndinApp {
         }
 
         // Right-aligned under the readout, like the design's `right: 0`.
-        let anchor = egui::pos2(head.rect.right() - MENU_W, head.rect.bottom() + 6.0);
+        let anchor = egui::pos2(
+            head.rect.right() - MENU_W,
+            head.rect.bottom() + crate::ui::MENU_GAP,
+        );
         self.dropdown(&ctx, "zoom-menu", anchor, MENU_W, &head, |app, ui| {
             for (glyph, text, action) in [
                 (
@@ -8629,7 +8637,10 @@ impl OndinApp {
                 continue;
             }
             // Left-aligned under the icon, as the design's `left: -8px` is.
-            let anchor = egui::pos2(head.rect.left() - 8.0, head.rect.bottom() + 6.0);
+            let anchor = egui::pos2(
+                head.rect.left() - 8.0,
+                head.rect.bottom() + crate::ui::MENU_GAP,
+            );
             self.dropdown(
                 &ctx,
                 match which {
@@ -8663,7 +8674,8 @@ impl OndinApp {
     }
 
     /// Whether a modal card is up: the Settings form, the *Unsaved changes*
-    /// confirmation, or the recovery prompt (§15 D759).
+    /// confirmation, the recovery prompt (§15 D759), or the *Delete value*
+    /// confirmation (§15 D996).
     ///
     /// **One statement of the rule, because it had two and was about to have
     /// three.** §15 D464 wrote this condition inline in `update`'s keyboard arm
@@ -8676,13 +8688,16 @@ impl OndinApp {
     /// ⚠️ **`edited_image` is deliberately not here**, which is R4's distinction
     /// from `a_popover_is_open`: image editing is a *mode* the canvas is in, not a
     /// card drawn over it, and a drop while cropping is an ordinary drop. The
-    /// members are the three things that paint an `egui::Modal` with a backdrop.
+    /// members are the things that paint an `egui::Modal` with a backdrop.
     ///
     /// ⚠️ **It is not `ctx.egui_wants_keyboard_input()` and must not become it** —
     /// D464 measured that false for a modal holding three buttons and no text
     /// field, which is why that question was never a guard here.
     pub(crate) fn modal_is_up(&self) -> bool {
-        self.settings.is_some() || self.confirming_close || !self.recovery.pending.is_empty()
+        self.settings.is_some()
+            || self.confirming_close
+            || !self.recovery.pending.is_empty()
+            || self.deleting_value.is_some()
     }
 
     /// Read a workspace switch.

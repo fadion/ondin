@@ -2119,7 +2119,6 @@ impl OndinApp {
                                     )
                                     .sense(egui::Sense::click()),
                                 )
-                                .on_hover_cursor(egui::CursorIcon::PointingHand)
                                 .on_hover_text("Undo the resize — the flips are what made it hold")
                                 .clicked();
                         });

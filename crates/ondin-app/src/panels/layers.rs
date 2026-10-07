@@ -80,9 +80,11 @@ const MARK_SLOT: f32 = 9.0;
 /// A removed or reordered child marks **its parent's row**, expanded or collapsed,
 /// with a tooltip naming what ([`child_drift_tip`]) — §15 D1003 (9),
 /// `[X11.1-L2-03]`; expanded, it had marked no row at all. The ruling's *Restore*
-/// in the row's context menu is the existing *Reset ‹layer›* / *Reset all* row,
-/// which `reset::Drift::any` offers for a removal or an order alone; no row of its
-/// own is built.
+/// in the row's context menu is *Restore children* (`menu::Item::RestoreChildren`),
+/// offered on exactly the rows this dot is on for their children
+/// (`menu::Context::children_differ`, the same `reset::child_drift`) and putting
+/// back exactly what the tooltip names (`reset::restore_own_children`) — narrower
+/// than *Reset ‹layer›* / *Reset all*, which reset the whole subtree's fields too.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RowMark {
     /// An override — on the row, or, collapsed, anything inside it differing; and
@@ -6660,27 +6662,28 @@ mod row_mark_tests {
         (app, i, [kids[0], kids[1]])
     }
 
-    /// The panel's dots and `+`s, counted off three passes' shapes — a dot is a
-    /// 2pt circle, a `+` two 1.2pt strokes (the shapes
+    /// The panel's dots and `+`s, counted off three passes' shapes — a dot is the
+    /// shared detector's 2pt muted circle (`ui::painted_override_dots`; this copy
+    /// counted any 2pt circle, `[X8.2-L3-01]`), a `+` two 1.2pt strokes (the shapes
     /// `the_layers_panel_marks_overrides_and_local_layers` counts).
     fn marks(app: &mut OndinApp, ctx: &egui::Context) -> (usize, usize) {
         let mut out = None;
         for _ in 0..3 {
             out = Some(ctx.run_ui(Default::default(), |ui| app.layers_tree(ui)));
         }
-        fn walk(s: &egui::Shape, dots: &mut usize, strokes: &mut usize) {
+        let out = out.expect("drawn");
+        fn walk(s: &egui::Shape, strokes: &mut usize) {
             match s {
-                egui::Shape::Circle(c) if c.radius == 2.0 => *dots += 1,
                 egui::Shape::LineSegment { stroke, .. } if stroke.width == 1.2 => *strokes += 1,
-                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, dots, strokes)),
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, strokes)),
                 _ => {}
             }
         }
-        let (mut dots, mut strokes) = (0, 0);
-        for s in &out.expect("drawn").shapes {
-            walk(&s.shape, &mut dots, &mut strokes);
+        let mut strokes = 0;
+        for s in &out.shapes {
+            walk(&s.shape, &mut strokes);
         }
-        (dots, strokes / 2)
+        (crate::ui::painted_override_dots(&out).len(), strokes / 2)
     }
 
     /// **A parent whose children differ carries the dot, expanded or collapsed,

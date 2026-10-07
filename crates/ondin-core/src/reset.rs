@@ -824,60 +824,98 @@ pub fn reset_fields(doc: &Document, scopes: &[NodeId]) -> Vec<Operation> {
 /// else before the next one's, else topmost (§5.3d). A node of the removed
 /// subtree whose counterpart the instance moved elsewhere is not copied again.
 pub fn restore_children(doc: &Document, scopes: &[NodeId], ids: &mut IdSource) -> Vec<Operation> {
+    let pairs: Vec<(NodeId, NodeId)> = scopes
+        .iter()
+        .flat_map(|scope| missing(doc, &scope_nodes(doc, *scope)))
+        .collect();
+    restore_missing(doc, pairs, ids)
+}
+
+/// *Restore* on a layers-panel row whose children differ (§15 D1003 (9)): exactly
+/// what [`child_drift`] counts for `p` and its row's tooltip names — `p`'s own
+/// removed children restored, then `p`'s linked children put back in its source's
+/// order — and nothing deeper or wider: no field, no grandchild, no sibling. Read
+/// on the document the restore leaves, as [`reset_all`] reads its order, so a
+/// restored child is ordered with its siblings. Empty when nothing differs.
+pub fn restore_own_children(doc: &Document, p: NodeId, ids: &mut IdSource) -> Vec<Operation> {
+    if source_of(doc, p).is_none() {
+        return Vec::new();
+    }
+    let mut out = restore_missing(doc, missing(doc, &[p]), ids);
+    let mut scratch = doc.clone();
+    if scratch.apply_unchecked(&Transaction(out.clone())).is_err() {
+        return out; // the commit will refuse it, with the reason
+    }
+    if let Some(target) = order_target(&scratch, p) {
+        out.extend(
+            target
+                .into_iter()
+                .enumerate()
+                .map(|(index, id)| Operation::Reorder { id, index }),
+        );
+    }
+    out
+}
+
+/// Each `(parent, source child)` of `pairs` — [`missing`]'s answer — copied back
+/// in under its parent at its anchor; [`restore_children`]'s body, shared with
+/// [`restore_own_children`].
+fn restore_missing(
+    doc: &Document,
+    pairs: Vec<(NodeId, NodeId)>,
+    ids: &mut IdSource,
+) -> Vec<Operation> {
     let mut out = Vec::new();
     // Each parent's children as the inserts land, so two restored under one parent
     // are placed against each other.
     let mut sim: FxHashMap<NodeId, Vec<NodeId>> = FxHashMap::default();
     let mut new_links: FxHashMap<NodeId, NodeId> = FxHashMap::default();
-    for scope in scopes {
-        let nodes = scope_nodes(doc, *scope);
-        for (p, c) in missing(doc, &nodes) {
-            // `missing`'s owner, for its reason (`outermost_root`).
-            let Some(owner) = outermost_root(doc, p) else {
-                continue;
-            };
-            let Some(template) = doc.capture_subtree(c) else {
-                continue;
-            };
-            let held = links_under(doc, owner);
-            let template = crate::propagate::only_new(template, |t| held.contains(&t));
-            if template.is_empty() {
-                continue;
-            }
-            let Some((mut copy, _)) = crate::document::remap_subtree(&template, ids) else {
-                continue;
-            };
-            for (k, t) in copy.iter_mut().zip(&template) {
-                k.make_copy_of(t.id);
-            }
-            let Some(src_parent) = source_of(doc, p).and_then(|s| doc.get(s)) else {
-                continue;
-            };
-            let kids = sim
-                .get(&p)
-                .cloned()
-                .or_else(|| doc.get(p).map(|n| n.children.clone()))
-                .unwrap_or_default();
-            let link_of = |k: NodeId| {
-                new_links
-                    .get(&k)
-                    .copied()
-                    .or_else(|| doc.get(k).and_then(|n| n.link))
-            };
-            let index = crate::propagate::anchor(&src_parent.children, c, &kids, |s| {
-                kids.iter().copied().find(|k| link_of(*k) == Some(s))
-            });
-            let index = index.min(kids.len());
-            new_links.insert(copy[0].id, c);
-            let mut placed = kids;
-            placed.insert(index, copy[0].id);
-            sim.insert(p, placed);
-            out.push(Operation::InsertSubtree {
-                nodes: copy,
-                parent: p,
-                index,
-            });
+    for (p, c) in pairs {
+        // `missing`'s owner, for its reason (`outermost_root`).
+        let Some(owner) = outermost_root(doc, p) else {
+            continue;
+        };
+        let Some(template) = doc.capture_subtree(c) else {
+            continue;
+        };
+        let held = links_under(doc, owner);
+        let template = crate::propagate::only_new(template, |t| held.contains(&t));
+        if template.is_empty() {
+            continue;
         }
+        let Some((mut copy, _)) = crate::document::remap_subtree(&template, ids) else {
+            continue;
+        };
+        for (k, t) in copy.iter_mut().zip(&template) {
+            k.make_copy_of(t.id);
+        }
+        let Some(src_parent) = source_of(doc, p).and_then(|s| doc.get(s)) else {
+            continue;
+        };
+        let kids = sim
+            .get(&p)
+            .cloned()
+            .or_else(|| doc.get(p).map(|n| n.children.clone()))
+            .unwrap_or_default();
+        let link_of = |k: NodeId| {
+            new_links
+                .get(&k)
+                .copied()
+                .or_else(|| doc.get(k).and_then(|n| n.link))
+        };
+        let index = crate::propagate::anchor(&src_parent.children, c, &kids, |s| {
+            kids.iter().copied().find(|k| link_of(*k) == Some(s))
+        });
+        let index = index.min(kids.len());
+        new_links.insert(copy[0].id, c);
+        let mut placed = kids;
+        placed.insert(index, copy[0].id);
+        sim.insert(p, placed);
+        out.push(Operation::InsertSubtree {
+            nodes: copy,
+            parent: p,
+            index,
+        });
     }
     out
 }

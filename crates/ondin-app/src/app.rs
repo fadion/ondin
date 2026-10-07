@@ -4732,6 +4732,32 @@ impl OndinApp {
         self.session.commit(Transaction(ops));
     }
 
+    /// *Restore children* from the context menu (§15 D1003 (9)): the one selected
+    /// layer's own removed children back and its children in their source's
+    /// order — what its layers-panel row's dot and tooltip name
+    /// (`reset::restore_own_children`), nothing deeper and no field. One
+    /// transaction; no toast, D981's rule (the dot going out is the answer).
+    pub(crate) fn restore_selected_children(&mut self) {
+        let Some(p) = self.session.selection.single() else {
+            return;
+        };
+        let ops =
+            ondin_core::reset::restore_own_children(&self.session.doc, p, &mut self.session.ids);
+        if ops.is_empty() {
+            self.session
+                .info("Nothing here differs from the main component");
+            return;
+        }
+        // `reset_tx`'s two statements, for its reasons — both inert on an insert
+        // and a reorder today, kept so a restore can never be read as the hand's
+        // placement or resize at the commit door (`[X4-L1-01]`).
+        let tx = self.placement_stated(Transaction(ops));
+        let tx = self.items_stated(tx);
+        if let Err(e) = self.session.try_commit(tx) {
+            self.session.fail(format!("Cannot restore: {e}"));
+        }
+    }
+
     /// A reset of everything selected that sits in an instance (§5.3d's reset
     /// family, §15 D981) — each selected layer is the scope of its own reset, so
     /// an instance resets whole and a child resets itself (*Reset Label*). One

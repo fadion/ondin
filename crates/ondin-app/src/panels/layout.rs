@@ -1511,7 +1511,6 @@ impl OndinApp {
                     if is_column_gap { c } else { r }
                 };
                 let shown = shared(laid, get);
-                let live = is_first || second_live;
                 // An instance's overridden gap (§15 D981).
                 let mark = self.display_mark(
                     subjects,
@@ -1522,6 +1521,14 @@ impl OndinApp {
                     },
                     |v| super::component::mark_num(*v),
                 );
+                // **Live while it carries a mark**, inert or not: the ↺ is the
+                // prefix strip's own press (`ui::value_field_marked`), which a
+                // disabled field does not sense — so an instance's row gap
+                // overridden under a main that has since stopped wrapping showed a
+                // mark whose reset could not be clicked, only the card header's
+                // chip and *Reset all* reaching it. The field takes a typed value
+                // then too, which the model holds and a wrap later lays out.
+                let live = is_first || second_live || mark.is_some();
                 ui::disable_unless(ui, live, |ui| {
                     let mut v = shown.unwrap_or_else(|| get(first));
                     let start = v;
@@ -4316,8 +4323,10 @@ mod tests {
     ///
     /// **Flip run**, that put made `*(if is_column_gap { r } else { c }) = v`:
     /// fails at *"the column gap's ↺: the column gap back"*, 24 against 10, the
-    /// predicted site. The grid's rows and the Item card's marks are not driven
-    /// here.
+    /// predicted site. The grid's rows and the Item card's marks are driven by
+    /// `each_grid_container_marks_reset_writes_its_own_field`,
+    /// `each_flex_item_marks_reset_writes_its_own_field` and
+    /// `each_grid_item_marks_reset_writes_its_own_field`.
     #[test]
     fn each_container_marks_reset_writes_its_own_field() {
         let mut s = scene();
@@ -4393,6 +4402,365 @@ mod tests {
             [4.0, 8.0, 12.0, 20.0],
             "L's ↺: the left side alone"
         );
+    }
+
+    /// `s.frame` made a main and an instance of it placed at the root, as
+    /// `each_container_marks_reset_writes_its_own_field` builds it; the instance,
+    /// and its copies of `a` and `b` (each linked to its source).
+    fn instance_of_frame(s: &mut Scene) -> (NodeId, NodeId, NodeId) {
+        assert!(
+            s.app
+                .session
+                .commit(Transaction(vec![Operation::SetComponent {
+                    id: s.frame,
+                    component: true,
+                }]))
+        );
+        let doc = &s.app.session.doc;
+        let (tx, made) = ondin_core::insert_subtrees(
+            doc,
+            &mut s.app.session.ids,
+            &[ondin_core::Placement {
+                nodes: doc.capture_subtree(s.frame).unwrap(),
+                parent: doc.root(),
+                index: None,
+            }],
+            Default::default(),
+        );
+        assert!(s.app.session.commit(tx));
+        let inst = made[0];
+        let copy = |src| {
+            let doc = &s.app.session.doc;
+            doc.get(inst)
+                .unwrap()
+                .children()
+                .iter()
+                .copied()
+                .find(|c| doc.get(*c).unwrap().link() == Some(src))
+                .expect("a copy")
+        };
+        (inst, copy(s.a), copy(s.b))
+    }
+
+    impl Panel {
+        /// Settled, then where the first run whose text **begins** with `text`
+        /// is — a glyph combo's face (its label and value are one galley) or its
+        /// list's reset row (the ↺ glyph and the mark's tip).
+        fn run_starting(&mut self, text: &str) -> egui::Pos2 {
+            self.shapes()
+                .iter()
+                .find_map(|cs| match &cs.shape {
+                    egui::epaint::Shape::Text(t) if t.galley.text().starts_with(text) => {
+                        Some(t.galley.rect.translate(t.pos.to_vec2()).center())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("no run begins {text:?}"))
+        }
+
+        /// A glyph combo's mark reset: its face opened, then the list's first
+        /// row, `component::menu_reset_row`'s ↺ and *Reset to main · …*.
+        fn combo_reset(&mut self, face: &str) {
+            let at = self.run_starting(face);
+            self.click(at);
+            let reset = format!("{}Reset to main", icon::ARROW_COUNTER_CLOCKWISE);
+            let at = self.run_starting(&reset);
+            self.click(at);
+        }
+    }
+
+    /// **Each flex Item mark's ↺ resets its own field, through the production
+    /// closures** (`[X9.2-L6-04]`'s remainder, §15 D981) — `a`'s copy in an instance
+    /// of the scene's frame, its grow 2, shrink 3, basis 80px and `align-self:
+    /// center` where its main's are 0, 1, auto and auto; then a click on *Flex
+    /// grow*'s label, *Flex shrink*'s, *Flex basis*'s (each the prefix strip whose
+    /// click is the reset — `ui::value_field_marked`, `size_field`), and the reset
+    /// row of *Align self*'s list.
+    ///
+    /// **Flips run**, each the plausible swapped `put`: (1) `flex_item_rows`' grow
+    /// and shrink put made `if !is_grow` — fails at *"grow's ↺: grow back"*, 2
+    /// against 0, the predicted site. (2) *Flex basis*'s put made `i.min_width = d`
+    /// (`dimension_row`'s closure from its caller) — fails at *"basis's ↺: basis
+    /// back"*, `Px(80.0)` against `Auto`, the predicted site.
+    #[test]
+    fn each_flex_item_marks_reset_writes_its_own_field() {
+        let mut s = scene();
+        let (_, ai, _) = instance_of_frame(&mut s);
+        let main = *s.app.session.doc.get(s.a).unwrap().item();
+        assert_eq!(
+            (main.grow, main.shrink, main.basis, main.align_self),
+            (0.0, 1.0, Dimension::Auto, None),
+            "the fixture's main"
+        );
+        let own = LayoutItem {
+            grow: 2.0,
+            shrink: 3.0,
+            basis: Dimension::Px(80.0),
+            align_self: Some(AlignItems::Center),
+            ..main
+        };
+        assert!(
+            s.app
+                .session
+                .commit(Transaction(vec![Operation::SetLayoutItem {
+                    id: ai,
+                    item: own
+                }]))
+        );
+        let item = |app: &OndinApp| *app.session.doc.get(ai).unwrap().item();
+        assert_eq!(item(&s.app), own, "the fixture: the copy's own item");
+        let mut p = Panel::new(s.app, OndinApp::inspector_item);
+        p.app.session.selection.set(vec![ai]);
+
+        let at = p.run("Flex grow");
+        p.click(at);
+        assert_eq!(item(&p.app).grow, 0.0, "grow's ↺: grow back");
+        assert_eq!(
+            item(&p.app),
+            LayoutItem { grow: 0.0, ..own },
+            "and nothing else"
+        );
+
+        let at = p.run("Flex shrink");
+        p.click(at);
+        assert_eq!(
+            item(&p.app),
+            LayoutItem {
+                grow: 0.0,
+                shrink: 1.0,
+                ..own
+            },
+            "shrink's ↺: shrink back, and nothing else"
+        );
+
+        let at = p.run("Flex basis");
+        p.click(at);
+        assert_eq!(item(&p.app).basis, Dimension::Auto, "basis's ↺: basis back");
+        assert_eq!(
+            item(&p.app).align_self,
+            Some(AlignItems::Center),
+            "align-self untouched"
+        );
+
+        p.combo_reset("Align self");
+        assert_eq!(item(&p.app), main, "align-self's ↺: the copy is its main's");
+    }
+
+    /// **Each grid Container mark's ↺ resets its own field** (`[X9.2-L6-04]`'s
+    /// remainder, §15 D981): an instance of `grid_scene`'s grid — `100px 1fr`
+    /// columns, no rows, flow row, `justify-items: normal` — with its own flow
+    /// column, columns `1fr`, rows `40px` and `justify-items: center`; then a click
+    /// on the lit *Column* cell (a segmented control's reset, `ui::segmented_marked`),
+    /// on *Grid template columns*' label, on *Grid template rows*', and on the reset
+    /// row of *Justify items*' list. The gaps and padding are `gap_row` and
+    /// `padding_rows`, flex's, driven by
+    /// `each_container_marks_reset_writes_its_own_field`.
+    ///
+    /// **Flips run**, each the plausible swapped `put`: (1) `track_list`'s put made
+    /// `with_list(g, !rows, &l)` — fails at *"the columns' ↺: columns back"*, the
+    /// predicted site, the main's columns written into the rows. (2) *Justify
+    /// items*' put made `g.align_items = v` (the same type, the row two below):
+    /// predicted at *"justify-items' ↺"*, it failed earlier, at `combo_reset`'s
+    /// *"no run begins …Reset to main"* — the swapped put writes the main's `None`
+    /// over a copy whose `align-items` is already `None`, so `sub_mark` finds the
+    /// reset would write nothing and draws no mark at all.
+    #[test]
+    fn each_grid_container_marks_reset_writes_its_own_field() {
+        let mut s = grid_scene();
+        let (inst, ..) = instance_of_frame(&mut s);
+        let main = grid_of(&s.app, s.frame);
+        assert_eq!(
+            (
+                main.auto_flow,
+                tracks_css_of(&main.columns),
+                main.rows.len(),
+                main.justify_items
+            ),
+            (
+                ondin_core::container::GridAutoFlow::Row,
+                "100px 1fr".to_owned(),
+                0,
+                None
+            ),
+            "the fixture's main"
+        );
+        let own = Grid {
+            auto_flow: ondin_core::container::GridAutoFlow::Column,
+            columns: ondin_core::container::parse_tracks("1fr").unwrap(),
+            rows: ondin_core::container::parse_tracks("40px").unwrap(),
+            justify_items: Some(AlignItems::Center),
+            ..main.clone()
+        };
+        assert!(
+            s.app
+                .session
+                .commit(Transaction(vec![Operation::SetDisplay {
+                    id: inst,
+                    display: Some(Display::Grid(own.clone())),
+                }]))
+        );
+        assert_eq!(
+            grid_of(&s.app, inst),
+            own,
+            "the fixture: the copy's own grid"
+        );
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        p.app.session.selection.set(vec![inst]);
+
+        let at = p.run("Column");
+        p.click(at);
+        assert_eq!(
+            grid_of(&p.app, inst),
+            Grid {
+                auto_flow: main.auto_flow,
+                ..own.clone()
+            },
+            "the flow's ↺: the flow back, and nothing else"
+        );
+
+        let at = p.run("Grid template columns");
+        p.click(at);
+        let g = grid_of(&p.app, inst);
+        assert_eq!(
+            tracks_css_of(&g.columns),
+            "100px 1fr",
+            "the columns' ↺: columns back"
+        );
+        assert_eq!(tracks_css_of(&g.rows), "40px", "the rows untouched");
+
+        let at = p.run("Grid template rows");
+        p.click(at);
+        let g = grid_of(&p.app, inst);
+        assert!(g.rows.is_empty(), "the rows' ↺: rows back");
+        assert_eq!(
+            g.justify_items,
+            Some(AlignItems::Center),
+            "justify-items untouched"
+        );
+
+        p.combo_reset("Justify items");
+        assert_eq!(
+            grid_of(&p.app, inst),
+            main,
+            "justify-items' ↺: the copy is its main's"
+        );
+    }
+
+    /// **Each grid Item mark's ↺ resets its own field** (`[X9.2-L6-04]`'s remainder,
+    /// §15 D981): `a`'s copy in an instance of `grid_scene`'s grid, its own
+    /// `grid-column: 2 / auto`, `grid-row: 1 / span 2` and `justify-self: center`;
+    /// then a click on *Grid column*'s label, *Grid row*'s, and the reset row of
+    /// *Justify self*'s list.
+    ///
+    /// **Flip run**, the lines' put made `if !rows` (`grid_item_rows`' swapped
+    /// `put`): fails at *"grid-column's ↺: the column back"*, the predicted site —
+    /// the main's column written into the row.
+    #[test]
+    fn each_grid_item_marks_reset_writes_its_own_field() {
+        use ondin_core::container::{GridLines, GridPlacement};
+        let mut s = grid_scene();
+        let (_, ai, _) = instance_of_frame(&mut s);
+        let main = *s.app.session.doc.get(s.a).unwrap().item();
+        assert_eq!(
+            (main.grid_column, main.grid_row, main.justify_self),
+            (GridLines::default(), GridLines::default(), None),
+            "the fixture's main"
+        );
+        let own = LayoutItem {
+            grid_column: GridLines {
+                start: GridPlacement::Line(2),
+                end: GridPlacement::Auto,
+            },
+            grid_row: GridLines {
+                start: GridPlacement::Line(1),
+                end: GridPlacement::Span(2),
+            },
+            justify_self: Some(AlignItems::Center),
+            ..main
+        };
+        assert!(
+            s.app
+                .session
+                .commit(Transaction(vec![Operation::SetLayoutItem {
+                    id: ai,
+                    item: own
+                }]))
+        );
+        let item = |app: &OndinApp| *app.session.doc.get(ai).unwrap().item();
+        assert_eq!(item(&s.app), own, "the fixture: the copy's own item");
+        let mut p = Panel::new(s.app, OndinApp::inspector_item);
+        p.app.session.selection.set(vec![ai]);
+
+        let at = p.run("Grid column");
+        p.click(at);
+        assert_eq!(
+            item(&p.app).grid_column,
+            main.grid_column,
+            "grid-column's ↺: the column back"
+        );
+        assert_eq!(
+            item(&p.app),
+            LayoutItem {
+                grid_column: main.grid_column,
+                ..own
+            },
+            "and nothing else"
+        );
+
+        let at = p.run("Grid row");
+        p.click(at);
+        assert_eq!(item(&p.app).grid_row, main.grid_row, "grid-row's ↺");
+        assert_eq!(
+            item(&p.app).justify_self,
+            Some(AlignItems::Center),
+            "justify-self untouched"
+        );
+
+        p.combo_reset("Justify self");
+        assert_eq!(
+            item(&p.app),
+            main,
+            "justify-self's ↺: the copy is its main's"
+        );
+    }
+
+    /// **An overridden row gap's ↺ can be clicked on a row that does not wrap** —
+    /// an instance of the scene's frame (a row, `nowrap`) with its own row gap 30
+    /// against the main's 0. The row gap's field is disabled while the row does
+    /// not wrap, and its ↺ is the prefix strip's press, which a disabled field does
+    /// not sense: the mark showed and its click did nothing.
+    ///
+    /// **Flip run**, `gap_row`'s `live` without `|| mark.is_some()` (the code as it
+    /// was): fails at *"the row gap's ↺ on a row that does not wrap"*, 30 against
+    /// 0, the predicted site.
+    #[test]
+    fn an_inert_row_gaps_mark_still_resets() {
+        let mut s = scene();
+        let (inst, ..) = instance_of_frame(&mut s);
+        let tx = s.app.flex_tx(&[inst], |f| f.row_gap = 30.0);
+        assert!(s.app.session.commit(tx));
+        let flex = |app: &OndinApp| match app.session.doc.get(inst).unwrap().display() {
+            Some(Display::Flex(f)) => *f,
+            _ => panic!("the fixture lost its flex layout"),
+        };
+        assert_eq!(
+            (flex(&s.app).wrap, flex(&s.app).row_gap),
+            (FlexWrap::NoWrap, 30.0),
+            "the fixture: a row that does not wrap, its row gap its own"
+        );
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        p.app.session.selection.set(vec![inst]);
+        let at = p.run(icon::ARROWS_OUT_LINE_VERTICAL);
+        p.click(at);
+        assert_eq!(
+            flex(&p.app).row_gap,
+            0.0,
+            "the row gap's ↺ on a row that does not wrap"
+        );
+    }
+
+    fn tracks_css_of(l: &[ondin_core::container::Track]) -> String {
+        ondin_core::container::tracks_css(l)
     }
 
     /// **An *Align items* pick writes the value picked, and nothing else**

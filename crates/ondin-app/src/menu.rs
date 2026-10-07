@@ -321,6 +321,11 @@ pub enum Item {
     /// *Reset* named for the child — *Reset Label* (§15 D981) — on a linked layer
     /// inside an instance: [`Self::ResetInstance`] scoped to that layer.
     ResetChild,
+    /// *Restore children* (§15 D1003 (9)) — on an instance or a linked layer in one
+    /// whose own children differ from its source's (removed, reordered): exactly
+    /// what the layers panel's dot and tooltip name on that row
+    /// (`reset::restore_own_children`), no field and nothing deeper.
+    RestoreChildren,
     /// *Reset* named for a component property — *Reset Label text* (§15 D982) —
     /// on a linked layer whose property-driven field differs from its main.
     ResetProperty,
@@ -711,6 +716,7 @@ impl Item {
         Item::DetachInstance,
         Item::ResetInstance,
         Item::ResetChild,
+        Item::RestoreChildren,
         Item::ResetProperty,
         Item::CombineAsVariants,
         Item::AddVariant,
@@ -907,6 +913,17 @@ impl Item {
             // label `Item::ALL`'s table sees.
             Item::ResetChild => s(
                 "Reset",
+                icon::ARROW_COUNTER_CLOCKWISE,
+                None,
+                Group::Structure,
+            ),
+            // The ruling's *Restore* (§15 D1003 (9)), one row for both things the
+            // row's tooltip can name — *"1 removed · order changed"* — rather than
+            // the card's two (*Restore removed children*, *Reset order*): the row
+            // carries one dot for both, and one verb puts back what that one mark
+            // says, as *Reset all* answers the card's whole summary.
+            Item::RestoreChildren => s(
+                "Restore children",
                 icon::ARROW_COUNTER_CLOCKWISE,
                 None,
                 Group::Structure,
@@ -1424,6 +1441,10 @@ pub struct Context<'a> {
     /// (`reset::Drift::any`) — what offers *Reset all* and *Reset Label*, omitted
     /// at zero by §3's exception for a row that only undoes a non-default state.
     pub drifted: bool,
+    /// Whether that one layer's **own** children differ from its source's
+    /// (`reset::ChildDrift::any`) — the layers panel's row dot (§15 D1003 (9)) —
+    /// what offers *Restore children*, omitted at zero by the same exception.
+    pub children_differ: bool,
     /// That one layer's name, which *Reset Label* is named for. Empty for several.
     pub layer_name: String,
     /// The selection is two or more mains, none in a set, sharing a parent — what
@@ -1916,6 +1937,11 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
             if cx.drifted {
                 rows.push(Row::new(Item::ResetInstance).dim_if(locked, why));
             }
+            // After the reset it narrows, as the row's dot is narrower than the
+            // collapsed row's (§15 D1003 (9)).
+            if cx.children_differ {
+                rows.push(Row::new(Item::RestoreChildren).dim_if(locked, why));
+            }
             rows.push(Row::new(Item::DetachInstance).dim_if(locked, why));
         }
         Role::Member => {
@@ -1933,6 +1959,9 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
                         .label(format!("Reset {}", cx.layer_name))
                         .dim_if(locked, why),
                 );
+            }
+            if cx.children_differ {
+                rows.push(Row::new(Item::RestoreChildren).dim_if(locked, why));
             }
         }
     }
@@ -2874,6 +2903,14 @@ impl OndinApp {
                     .unwrap_or_else(|| ondin_core::reset::drift(&self.session.doc, id))
                     .any()
             }),
+            // The layers panel's cache the same way — the row's dot fills it.
+            children_differ: self.session.selection.single().is_some_and(|id| {
+                (self.child_drift_cache.0 == self.session.revision())
+                    .then(|| self.child_drift_cache.1.get(&id).copied())
+                    .flatten()
+                    .unwrap_or_else(|| ondin_core::reset::child_drift(&self.session.doc, id))
+                    .any()
+            }),
             layer_name: self
                 .session
                 .selection
@@ -3029,6 +3066,7 @@ impl OndinApp {
             Item::ResetInstance | Item::ResetChild => {
                 self.reset_selection(ondin_core::reset::Kind::All)
             }
+            Item::RestoreChildren => self.restore_selected_children(),
             Item::ResetProperty => self.reset_selected_property(),
             Item::CombineAsVariants => self.combine_as_variants(),
             Item::AddVariant => self.add_variant(),
@@ -3440,6 +3478,10 @@ mod tests {
             // **True**, for `can_frame`'s reason: a reset row dim by default would
             // make a test about its dimming pass by accident.
             drifted: true,
+            // **False**, unlike `drifted`: it *adds* a row, `on_a_rail`'s reason —
+            // a `true` default would put *Restore children* into every component
+            // fixture and change what the row-count assertions count.
+            children_differ: false,
             layer_name: String::new(),
             combinable: false,
             in_set: false,
@@ -5973,5 +6015,190 @@ mod label_fit_tests {
             assert!(!cut, "{item:?} fits whole");
             assert!(right <= row_right, "{item:?} inside the row");
         }
+    }
+}
+
+/// *Restore children* — the context-menu row the layers panel's child dot owes
+/// (§15 D1003 (9)).
+#[cfg(test)]
+mod restore_children_tests {
+    use super::*;
+    use crate::app::OndinApp;
+    use ondin_core::kurbo::Size;
+    use ondin_core::{Document, IdSource, NodeId, NodeKind, Operation, Transaction};
+
+    /// The labels of the menu a user opens on `id` from the layers panel, through
+    /// `open_context_menu` → `open_menu_rows` — not a synthetic `Context`.
+    fn labels_on(app: &mut OndinApp, ctx: &egui::Context, id: NodeId) -> Vec<String> {
+        app.session.selection.set_one(id);
+        app.open_context_menu(
+            ctx,
+            Target::Layer {
+                id,
+                door: Door::Panel,
+            },
+            None,
+        );
+        let labels = app
+            .open_menu_rows()
+            .iter()
+            .flatten()
+            .map(|r| r.label.to_string())
+            .collect();
+        app.context_menu = None;
+        labels
+    }
+
+    /// **The row is offered exactly where the row's dot is, and puts back exactly
+    /// what its tooltip names** (§15 D1003 (9): *"Restore in its context menu"*).
+    ///
+    /// Main `m` holds a rect `A` and a frame `G` holding a rect `X`; in instance
+    /// `i` the two top copies are swapped, `G`'s copy of `X` is deleted, and `A`'s
+    /// copy is renamed. So `i`'s own children differ in order, `G`'s copy in a
+    /// removal, and `A`'s copy in a field alone.
+    ///
+    /// - Untouched, nothing offers the row (§3's omitted-at-zero exception).
+    /// - `i` and `G`'s copy are offered it; `A`'s copy — drifted, childless — is
+    ///   offered *Reset A* and not this.
+    /// - Run through the row on `i`: the order comes back and nothing else — `G`'s
+    ///   copy is still empty and `A`'s copy keeps its name. On `G`'s copy: `X`
+    ///   comes back, linked. Then `i`'s menu no longer offers it, though `i` is
+    ///   still drifted (the rename).
+    ///
+    /// **Flips run.** (1) `restore_own_children` built from the subtree-wide resets
+    /// it sits beside — `restore_children(doc, &[p], ids)` then the order — the
+    /// plausible reuse: fails at *"nothing deeper: G's copy stays empty"* with 1,
+    /// the predicted site. (2) The member arm's row gated on `drifted` rather than
+    /// `children_differ`: fails at *"a childless member is not offered it"*, the
+    /// predicted site. (3) The instance arm's the same way: fails at the last
+    /// assertion, *"and the instance's menu no longer offers it"* — `A`'s rename
+    /// keeps `i` drifted after both restores.
+    #[test]
+    fn restore_children_is_offered_where_the_dot_is_and_restores_what_it_names() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0xBCE);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let [m, a, g, x] = [(); 4].map(|_| ids.mint());
+        let create = |id, parent, kind, name: &str| Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind,
+            transform: None,
+            name: Some(name.into()),
+        };
+        let rect = || NodeKind::Rect {
+            size: Size::new(10.0, 10.0),
+            corner_radii: Default::default(),
+        };
+        let frame = |w: f64| NodeKind::Artboard {
+            size: Size::new(w, w),
+        };
+        doc.apply(&Transaction(vec![
+            create(m, root, frame(100.0), "M"),
+            create(a, m, rect(), "A"),
+            create(g, m, frame(40.0), "G"),
+            create(x, g, rect(), "X"),
+        ]))
+        .expect("a frame holding a rect and a frame");
+        app.session.adopt_document(doc, None);
+        app.session.selection.set_one(m);
+        app.create_component();
+        app.duplicate_selection();
+        let i = app.session.selection.single().expect("the instance");
+        assert_eq!(app.session.doc.get(i).unwrap().link(), Some(m));
+        let copy_of = |app: &OndinApp, s: NodeId| {
+            app.session
+                .doc
+                .get(i)
+                .unwrap()
+                .children()
+                .iter()
+                .copied()
+                .find(|c| app.session.doc.get(*c).unwrap().link() == Some(s))
+                .expect("a copy")
+        };
+        let (ai, gi) = (copy_of(&app, a), copy_of(&app, g));
+        let xi = app.session.doc.get(gi).unwrap().children()[0];
+
+        for id in [i, gi, ai] {
+            assert!(
+                !labels_on(&mut app, &ctx, id).contains(&"Restore children".to_string()),
+                "untouched: omitted"
+            );
+        }
+
+        let order = app.session.doc.get(i).unwrap().children().to_vec();
+        assert!(app.session.commit(Transaction(vec![
+            Operation::Reorder {
+                id: order[0],
+                index: 1
+            },
+            Operation::DeleteNode { id: xi },
+            Operation::SetName {
+                id: ai,
+                name: "Mine".into()
+            },
+        ])));
+        assert_ne!(
+            app.session.doc.get(i).unwrap().children(),
+            order.as_slice(),
+            "the fixture: reordered"
+        );
+
+        let on_i = labels_on(&mut app, &ctx, i);
+        assert!(
+            on_i.contains(&"Restore children".to_string()),
+            "the instance, its order changed: {on_i:?}"
+        );
+        let on_gi = labels_on(&mut app, &ctx, gi);
+        assert!(
+            on_gi.contains(&"Restore children".to_string()),
+            "G's copy, a child removed: {on_gi:?}"
+        );
+        let on_ai = labels_on(&mut app, &ctx, ai);
+        assert!(
+            on_ai.contains(&"Reset Mine".to_string())
+                && !on_ai.contains(&"Restore children".to_string()),
+            "a childless member is not offered it: {on_ai:?}"
+        );
+
+        app.session.selection.set_one(i);
+        let target = Target::Layer {
+            id: i,
+            door: Door::Panel,
+        };
+        app.perform_menu_item(&ctx, Item::RestoreChildren, target, None);
+        assert_eq!(
+            app.session.doc.get(i).unwrap().children(),
+            order.as_slice(),
+            "the order is back"
+        );
+        assert_eq!(
+            app.session.doc.get(gi).unwrap().children().len(),
+            0,
+            "nothing deeper: G's copy stays empty"
+        );
+        assert_eq!(
+            app.session.doc.get(ai).unwrap().name(),
+            "Mine",
+            "no field: A's copy keeps its name"
+        );
+
+        app.session.selection.set_one(gi);
+        let target = Target::Layer {
+            id: gi,
+            door: Door::Panel,
+        };
+        app.perform_menu_item(&ctx, Item::RestoreChildren, target, None);
+        let back = app.session.doc.get(gi).unwrap().children().to_vec();
+        assert_eq!(back.len(), 1, "X is back");
+        assert_eq!(app.session.doc.get(back[0]).unwrap().link(), Some(x));
+        assert!(
+            !labels_on(&mut app, &ctx, i).contains(&"Restore children".to_string()),
+            "and the instance's menu no longer offers it"
+        );
     }
 }

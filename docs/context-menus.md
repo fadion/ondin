@@ -871,7 +871,7 @@ already answers "a selected segment means its two anchors" for every other reade
 | Delete points | `Del` | wiring | ✅ |
 | Delete segment | `Del` | wiring | ✅ — two verbs on one key today (§15 D120), and two rows here, which is where the distinction can finally be seen |
 | Make corner / Make smooth | — | cheap | ✅ **built 2026-08-20** (§15 D250), as **two** rows — unlike *Delete points* above, both can be live at once, since a point selection may hold a corner and a smooth point together. The scoring was half right: the builder is small, but `PenAnchor::smooth(at, out)` needs an `out` and a corner has none, so the tangent is derived from the chord `next − prev` and **both handles get one length** — an unequal pair is not `is_smooth()` here, so it would come apart on the next drag |
-| Reverse subpath | `Shift+D` | wiring | ✅ §15 D125. **Named *Reverse subpath direction* until 2026-08-20**, when it was found running *under* its own accelerator — the label and the accelerator are painted at fixed anchors, so a long label overlaps rather than clipping (§15 D262) |
+| Reverse subpath | `Shift+D` | wiring | ✅ §15 D125. **Named *Reverse subpath direction* until 2026-08-20**, when it was found running *under* its own accelerator — the label and the accelerator are painted at fixed anchors, so a long label overlaps rather than clipping (§15 D262; fitted and cut with `…` since 2026-10-07, §8) |
 | Join | — | cheap | ✅ **built 2026-08-20** (§15 D256). Joining existed only as a **pen gesture** — draw *into* an open endpoint — which cannot be aimed at two ends already where they belong, so this row did need an entry point of its own: `tools::joinable_ends` and `join_ends`, over the point selection rather than the pointer, sharing `join_runs` with the gesture. Two ends of one run close it, ends of two runs splice into the **lower** subpath index, and coincident ends are **not merged** |
 
 ### 6.6 A ruler — ~~reserved~~ struck
@@ -1007,11 +1007,18 @@ top bar's View, Snap and zoom menus moved with these — the constant used to be
 and is now one. And the **separator's air**: the export's `margin: 4px 0` is **3 since 2026-08-20**
 (§15 D263), asked for once the row change had been seen, so a separator costs 7 rather than 9. The
 rule itself is still the export's 1pt — the hairline is the thing being seen and the air is only what
-it costs. Between them a primitive's menu went 646 → 592. **And the label and the
+it costs. Between them a primitive's menu went 646 → 592. ~~**And the label and the
 accelerator are painted at fixed anchors with no layout between them**, so a label too long for its
 row does not clip or wrap, it overlaps the accelerator, silently and only on the row that is too long.
 That is why the registry is tested for it (`no_menu_label_runs_into_its_accelerator`) rather than
-guarded at the draw.
+guarded at the draw.~~ **And a label is fitted to its row since 2026-10-07** (`[X11.2-L1-04]`, §15
+D262's amendment): *Reset ‹layer›* and *Reset ‹property›* are built from the user's text, and a long
+name ran off the card, so `ui::menu_row` lays the label as one row, at most the row's width less the
+accelerator and `ui::MENU_ACCEL_GAP` (2pt), cut with `…` at its end and named whole in the row's
+tooltip when cut. Every fixed label in the registry still fits whole — asserted, and the reason the gap
+is 2 rather than 6, which cut *Create component*
+(`a_long_reset_label_is_cut_inside_the_row_and_fixed_labels_are_whole`); and
+`no_menu_label_runs_into_its_accelerator` is still the registry's own check.
 
 **What the export adds** — the same items this section already called missing, now with values
 instead of intentions:

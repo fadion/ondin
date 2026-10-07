@@ -2269,7 +2269,13 @@ below — measured for one path, not settled in general.
   field and header resets, measured and fixed** (`c292b50`, §15 D981's amendment): written without the
   main's insets they were re-pinned against the copy's own frame — `right 172` against the main's 12 —
   so each now carries its axis's insets. It shows only on an instance **wider than its main**; at the
-  main's own size the bare reset came back exact.
+  main's own size the bare reset came back exact. ✅ **And at every reset door since `5d8b412`**
+  (`[X4-L1-01]`, §15 D981's amendment): the context menu's and the Component card's resets
+  (`OndinApp::reset_tx`) had gone on sending the bare transform, re-pinning a pinned copy the same way,
+  and an in-flow item's *Reset all* committed nothing, `kept_flow_translations` dropping the write. One
+  helper, `placement_stated`, now states the insets beside every placing write of every reset — the
+  node's own where its placement is its own, else its **slot source**'s (`reset::slot_source_of`: a
+  swapped copy's link, §15 D983 (3)).
 - **Guides.** A guide scoped to a main frame (§5.5) is not copied into its instances — noted by the
   record, not ruled.
 
@@ -2297,9 +2303,10 @@ every ordinary frame keeps. A double-click or `Enter` enters it (§15 D228's agr
 label, a context tag and a dashed neutral boundary. The layers panel keeps its icons neutral; expanded,
 a row carries a **dot** for its own override and **+** if it is local, and **a collapsed row's dot means
 it differs from its main in any way** — overrides, local layers and removed children alike, as the
-card's drift summary counts them, a removed child having no row of its own — ⚠️ ruled otherwise, not
-built, §15 D1003 (9): a removed or reordered child's dot goes on its parent's row, expanded or
-collapsed, with a tooltip and *Restore*; 🚨 **a kept child shows as local** (the maintainer's ruling), since nothing records
+card's drift summary counts them, a removed child having no row of its own — ⚠️ and since 2026-10-07
+(`bae6dcf`, §15 D1003 (9)) a removed or reordered child's dot goes on **its parent's row**, expanded or
+collapsed, with a tooltip naming what (*1 removed · order changed*, `reset::child_drift`); the ruling's
+*Restore* in that row's context menu is not built yet; 🚨 **a kept child shows as local** (the maintainer's ruling), since nothing records
 provenance. The inspector gains a **component card** above Transform per selection state, its resets —
 *Reset all*, *Reset fields*, *Restore removed children*, *Reset order*, each with a count — disabled
 rather than hidden when there is nothing to do, and **no reset deletes a local addition** — ⚠️ a local
@@ -2595,9 +2602,14 @@ built since 2026-10-07 (`2a77404`) — *Combine as variants* over mains of two k
 the menu row dimmed and the verb failing with `menu::COMBINE_MIXED`, `variant::combine` refusing as
 `WrongKindForOp` behind it), a canvas drag into a set (`component::can_hold`, which asks
 `variant::fits_set`; the release saying `canvas::SET_OF_ANOTHER_KIND`) and the layers panel's drop
-(`drop_is_legal`, the same predicate). ⚠️ **Not built**: the panel's refusal says nothing, and a frame
-main and a group main moved together into an **empty** set each pass alone, an empty set fitting
-either. The loader never refuses a mixed set, and `component::check` has no arm for one.
+(`drop_is_legal`, the same predicate). **The panel says why on release too, and mains of two kinds
+moved together into an empty set are refused at both doors** (`bae6dcf`): `OndinApp::set_refusal`
+gives the panel the canvas's `SET_OF_ANOTHER_KIND`, or `SET_OF_MIXED_KINDS` for the pair, and
+`variant::takes_together` — the newcomer mains all of one kind, and that kind fitting the set — is
+asked by the panel's drop and the canvas's `holds`, where each passed `can_hold` alone, an empty set
+fitting either. ⚠️ The canvas asks it of the whole moving selection, so a newcomer main is refused
+whenever a main of another kind moves with it, wherever that one lands. The loader never refuses a
+mixed set, and `component::check` has no arm for one.
 
 ✅ **The app half, in the inspector and the context menu** (`a313b2c`; `panels/variants.rs`,
 `panels/component.rs`; §15 D982's amendment). **A set** gets its own card, *Variants*, in the Component
@@ -12877,7 +12889,9 @@ D1003 (5)): a main or a set into or under a main or an instance, a set under a s
 another kind, an instance into the main it shows or one that reaches it — skipped before the topmost is
 taken, so the frame beneath is still asked (`canvas::covering_that_holds`), and asked only where
 `FrameIndex::components` says the document has a main, a linked layer or a set. A main passed over by a
-set of another kind is told why on release (`canvas::SET_OF_ANOTHER_KIND`). **A layer
+set of another kind is told why on release (`canvas::SET_OF_ANOTHER_KIND`), and mains of two kinds
+moving together into an empty set are refused as one and told so (`variant::takes_together`,
+`canvas::SET_OF_MIXED_KINDS`). **A layer
 with a group above it hops only between the frames inside that group** (`canvas::group_fence`, §15
 D876): an icon on a card in a row may move to the next card, and dragged out of every card it stays
 where it is rather than falling out of the row onto the page. A loose layer may still drop into a

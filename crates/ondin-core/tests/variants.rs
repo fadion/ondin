@@ -573,6 +573,54 @@ fn combining_mains_makes_a_set_of_their_names() {
     assert_eq!(variant::set_of(&doc, a), Some(set));
 }
 
+/// **A new set leaves `SET_PAD` of air round its variants** (§15 D998): one 40×20
+/// main at (100, 50) becomes a 60×40 set at (90, 40), and the main stays where it
+/// was on the page — 10 in from each of the set's edges. The maintainer's report:
+/// a set that hugged its one main could not be picked on the canvas, its tag under
+/// the main's.
+///
+/// **Flip run**, the padding loop in `combine` deleted: fails at the set's size
+/// with 40×20, the predicted site.
+#[test]
+fn a_new_set_pads_its_variants_and_moves_nothing() {
+    let mut ids = IdSource::new(0xBC);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let a = ids.mint();
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: a,
+            parent: root,
+            index: 0,
+            kind: frame(40.0, 20.0),
+            transform: Some(Affine::translate((100.0, 50.0))),
+            name: Some("Card".into()),
+        },
+        Operation::SetComponent {
+            id: a,
+            component: true,
+        },
+    ]))
+    .unwrap();
+    let res = Resolved::rebuild(&doc);
+    let before = res.world_bounds(a).unwrap();
+    let (tx, set) = variant::combine(&doc, &res, &mut ids, &[a]).unwrap();
+    doc.apply(&tx).expect("a set");
+    let res = Resolved::rebuild(&doc);
+    let s = res.world_bounds(set).unwrap();
+    assert_eq!(
+        (s.width(), s.height()),
+        (40.0 + 2.0 * variant::SET_PAD, 20.0 + 2.0 * variant::SET_PAD),
+        "the set's size"
+    );
+    assert_eq!((s.x0, s.y0), (90.0, 40.0), "the set's place");
+    assert_eq!(
+        res.world_bounds(a).unwrap(),
+        before,
+        "the main did not move"
+    );
+}
+
 /// *Add variant* takes the first free combination and extends every binding to
 /// the copy.
 #[test]

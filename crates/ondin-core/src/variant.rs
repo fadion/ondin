@@ -608,6 +608,10 @@ pub fn first_free(set: &VariantSet, taken: &FxHashSet<Vec<String>>) -> Vec<Strin
 /// The space a variant is placed below the one it was copied from.
 pub const VARIANT_GAP: f64 = 24.0;
 
+/// The air a new set leaves around its variants on every side (§15 D998) — the
+/// maintainer's number, so the set's own frame can be seen and picked.
+pub const SET_PAD: f64 = 10.0;
+
 /// *Combine as variants*: wrap `mains` in a new frame and make it a set whose one
 /// property, `Property 1`, takes each main's name as a value (§15 D982). Mains
 /// whose names repeat share a value and so clash, which the set then shows.
@@ -643,6 +647,29 @@ pub fn combine(
         ordered = mains.to_vec();
     }
     let (mut tx, set) = crate::build::frame(doc, res, ids, &ordered)?;
+    // **`SET_PAD` of air on every side** (§15 D998, the maintainer's look):
+    // `build::frame` hugs its members, so a set made of one main was exactly the
+    // main's box — its canvas tag sat under the main's, and the set could be
+    // picked only from the layers panel. The frame grows outward and the mains
+    // move in by as much, so nothing moves on the page.
+    let pad = kurbo::Vec2::new(SET_PAD, SET_PAD);
+    for op in &mut tx.0 {
+        match op {
+            Operation::CreateNode {
+                id,
+                kind: NodeKind::Artboard { size },
+                transform: Some(t),
+                ..
+            } if *id == set => {
+                *size = kurbo::Size::new(size.width + 2.0 * SET_PAD, size.height + 2.0 * SET_PAD);
+                *t = kurbo::Affine::translate(-pad) * *t;
+            }
+            Operation::SetTransform { id, transform } if ordered.contains(id) => {
+                *transform = kurbo::Affine::translate(pad) * *transform;
+            }
+            _ => {}
+        }
+    }
     let names: Vec<String> = ordered
         .iter()
         .map(|m| doc.get(*m).map(|n| n.name.clone()).unwrap_or_default())

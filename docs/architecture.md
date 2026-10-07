@@ -2005,10 +2005,12 @@ same document restores the main under its own ids and relinks the instances the 
 made to one meanwhile reading as an override by (a). The cut detaches as a delete does — between the two
 the instances are plain layers — and keeps every link its delete took (`OndinApp::cut_move`); the first
 paste of that clipboard into that document, none of its ids back, inserts the subtrees **under their
-original ids** and gives back each link whose node is still unlinked (`paste_cut_move`). A second paste
-is an instance, (e) below; a refused move falls back to the ordinary paste. ⚠️ **Not given back**: a
-nested copy inside a cut main's instance climbed to its own main at the cut, so it is not unlinked and
-keeps that link — read, not run (§15 D979's amendment building D1003 (1)).
+original ids** and gives back each link whose node still holds exactly what the delete left it, link
+and swap (`paste_cut_move`, `TakenLink`) — not *"still unlinked"*, since a nested copy inside a cut
+main's instance is climbed to its own main at the cut rather than cut (`b003b42`). A second paste is an
+instance, (e) below; a refused move falls back to the ordinary paste; and an undo past the cut drops
+the move (`document_rewound`), which a redo does not bring back (§15 D979's amendment building
+D1003 (1)).
 
 ✅ **The verbs are built** (build step 2, `0ae3cd7`, §15 D979's amendment), on **one rule for every
 way a link's target goes**: `component::relink_past(doc, gone, among)` — a link into `gone` climbs to
@@ -2025,8 +2027,8 @@ commit-time pass in `EditorSession::commit_inner` after `keep_flex_sizes` (`keep
 so an ungrouped main is a deleted main, and since 2026-10-07 for the nested copies in its instances too:
 an ungroup leaves their source standing, so nothing climbed and they were cut to plain layers, and a
 cut nested copy whose outer instance lost its link in the edit now climbs past its source as `detach`
-climbs it (`[X2-L2-03]`) — but not carrying a swap it passes, as `detach` does (§15 D983's amendment
-building D1003 (3)–(5)); top-down, a linked node not linked straight to a main with no
+climbs it (`[X2-L2-03]`), carrying a swap it passes as `detach` does (`swap::climb`,
+`land_ops_through`; §15 D983's amendment building D1003 (3)–(5)); top-down, a linked node not linked straight to a main with no
 instance root above it whose source contains its own is **cut**, so a layer dragged out of its
 instance, or the members of a group instance an ungroup dissolved, become plain layers; and where two
 nodes of one instance share a source, **the one the transaction did not touch keeps it**. It iterates
@@ -2532,10 +2534,12 @@ outer main added to the slot carries across a swap**, at its place among its sib
 mode leaves alone an unmatched counterpart whose source is no node of the main the slot shows, still
 linked to the slot's layer, which `check`'s `Membership` and `settle_links`' admit (`slot_own`, above);
 and a new-side layer some node of the instance already copies is not copied in again, so the swap back
-makes no duplicate. ⚠️ **Only for an addition that is itself unlinked** — read, not run: `slot_own`
-asks that the slot's layer link to nothing, so a copy of a nested *instance* the outer main put into the
-slot is no member of the swapped root; `settle_links` cuts it to plain layers where it runs, and `check`
-refuses the swap where it does not (§15 D983's amendment building D1003 (3)–(5)). **A swap left equal to what its slot shows
+makes no duplicate. **A nested instance the outer main put into the slot carries too**, or a group
+holding one (`96eb959`): both admit a source through `component::slot_adds` — inside the slot, its chain
+of content sources (swap, else link) never landing in the main the slot shows, `rewrite`'s own test for
+what a swap keeps — where they had asked the slot's layer to link to nothing (§15 D983's amendment
+building D1003 (3)–(5)). ⚠️ A slot-own layer whose name path and kind meet a layer of the target is
+matched to it instead, and stops being the slot's own — read, not run, not ruled. **A swap left equal to what its slot shows
 is cleared** on every route, by `swap::settle`, above. **A set holds one kind**: `variant::switch`
 refuses a main of another kind, the second defence; *Combine as variants* and a drag into a set — the
 doors that refuse it first, with a message — are **not built**, and the loader never refuses one.

@@ -343,7 +343,16 @@ pub(crate) fn landed(
     n: &Node,
     to: Option<NodeId>,
 ) -> (Option<NodeId>, Option<NodeId>) {
-    match n.swap {
+    landed_with(doc, n.swap, to)
+}
+
+/// [`landed`] for a node carrying `swap`.
+fn landed_with(
+    doc: &Document,
+    swap: Option<NodeId>,
+    to: Option<NodeId>,
+) -> (Option<NodeId>, Option<NodeId>) {
+    match swap {
         Some(s)
             if doc.get(s).is_some_and(|s| s.component)
                 && to.is_none_or(|t| doc.get(t).is_some_and(|t| t.component)) =>
@@ -357,12 +366,54 @@ pub(crate) fn landed(
 /// [`landed`] as operations on `n`: its `SetLink`, and a `SetSwap` when that
 /// changes too.
 pub(crate) fn land_ops(doc: &Document, n: &Node, to: Option<NodeId>) -> Vec<Operation> {
-    let (link, swap) = landed(doc, n, to);
+    land_ops_through(doc, n, to, None)
+}
+
+/// [`land_ops`] for a climb that passed through a node carrying the swap `met`
+/// — a nested copy that **followed** a swap made one link up (`r3` copying
+/// `r2`, swapped to Heart inside the Card main). Its link climbs past that node,
+/// so the swap is the climber's to carry, or it lands showing the slot's main
+/// with the swap's layers cut loose (`[X5-L1-01]`): a node with no swap of its
+/// own takes `met`, unless where it lands already shows that main.
+pub(crate) fn land_ops_through(
+    doc: &Document,
+    n: &Node,
+    to: Option<NodeId>,
+    met: Option<NodeId>,
+) -> Vec<Operation> {
+    let inherited = met.filter(|s| {
+        n.swap.is_none()
+            && to.and_then(|t| shown_main(doc.node_map(), t)) != Some(*s)
+            && doc.get(*s).is_some_and(|m| m.component)
+    });
+    let (link, swap) = landed_with(doc, n.swap.or(inherited), to);
     let mut ops = vec![Operation::SetLink { id: n.id, link }];
     if swap != n.swap {
         ops.push(Operation::SetSwap { id: n.id, swap });
     }
     ops
+}
+
+/// A link climbed past every node `past` admits, up its chain: where it lands,
+/// and the first swap carried by a node it passed ([`land_ops_through`]).
+pub(crate) fn climb(
+    doc: &Document,
+    link: NodeId,
+    past: impl Fn(NodeId) -> bool,
+) -> (Option<NodeId>, Option<NodeId>) {
+    let mut to = Some(link);
+    let mut met = None;
+    for _ in 0..=doc.node_map().len() {
+        match to {
+            Some(s) if past(s) => {
+                let sn = doc.get(s);
+                met = met.or(sn.and_then(|n| n.swap));
+                to = sn.and_then(|n| n.link);
+            }
+            _ => break,
+        }
+    }
+    (to, met)
 }
 
 /// The swaps the tree `doc` holds that no longer stand, and the ops that settle

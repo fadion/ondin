@@ -980,3 +980,304 @@ fn a_swap_equal_to_its_slots_is_cleared() {
         "it follows"
     );
 }
+
+/// **A climb past a swapped node carries the swap** (`[X5-L1-01]`): `r3`
+/// follows `r2`'s swap to Heart one link up, and detaching `c1` — or deleting
+/// the Card main, which detaches it — climbs `r3` past `r2` to Star's slot. It
+/// landed showing Star with Heart's layers cut loose; it lands showing Heart.
+///
+/// Flip: `land_ops_through` ignoring `met` fails "still Heart" for both doors.
+#[test]
+fn detaching_an_outer_instance_keeps_a_swap_made_one_link_up() {
+    for delete in [false, true] {
+        let mut f = fixture();
+        let (card, c1, r2, r3) = card(&mut f);
+        f.swap_to(r2, f.heart);
+        let shape3 = f.kids(r3)[0];
+        if delete {
+            let mut ops = ondin_core::component::relink_for_delete(&f.doc, &[card]);
+            ops.push(Operation::DeleteNode { id: card });
+            f.commit(ops);
+        } else {
+            let tx = ondin_core::component::detach(&f.doc, c1).unwrap();
+            f.commit(tx.0);
+        }
+        assert_eq!(
+            ondin_core::component::main_of(&f.doc, r3),
+            Some(f.heart),
+            "still Heart ({delete})"
+        );
+        assert_eq!(
+            f.node(shape3).link(),
+            Some(f.hshape),
+            "Heart's, still linked"
+        );
+        // `b3` is an instance of Button now, and showing Heart at Star's slot is
+        // one override against Button — the swap, and nothing cut loose.
+        let b3 = f.node(r3).parent().unwrap();
+        let d = reset::drift(&f.doc, b3);
+        assert_eq!(
+            (d.fields, d.removed, d.local),
+            (1, 0, 0),
+            "the swap alone: {d:?}"
+        );
+    }
+}
+
+/// **A pasted instance holding a swapped copy commits in a document with no
+/// link** (`[X5-L1-04]`): `settle_copy` dropped the copy's link to the slot and
+/// left its swap for `settle_links`, which a link-free document never reaches,
+/// and `check` refused the paste. Into a fresh document the copy is plain
+/// layers; into one still holding Heart it is an instance of Heart.
+///
+/// Flip: `settle_copy` leaving the swap where it drops the link fails both
+/// pastes, `BadLink(_, Swap)`.
+#[test]
+fn a_pasted_swapped_copy_commits_where_its_slot_is_not() {
+    let mut f = fixture();
+    f.swap_to(f.r, f.heart);
+    let clip = f.doc.capture_subtree(f.b1).unwrap();
+    // (a) a fresh document.
+    let mut ids = IdSource::new(0x5B);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (mut tx, made) = ondin_core::insert_subtrees(
+        &doc,
+        &mut ids,
+        &[Placement {
+            nodes: clip.clone(),
+            parent: root,
+            index: None,
+        }],
+        Default::default(),
+    );
+    ondin_core::propagate::owed(&doc, &mut tx, &mut ids);
+    doc.apply(&tx).expect("a plain paste");
+    let copy = ondin_core::build::subtree_nodes(&doc, &[made[0]]);
+    assert!(copy.iter().all(|id| doc.get(*id).unwrap().swap().is_none()));
+    // (b) the same document, the Button and its instance gone.
+    let (b1, button) = (f.b1, f.button);
+    let mut ops = ondin_core::component::relink_for_delete(&f.doc, &[b1, button]);
+    ops.extend([
+        Operation::DeleteNode { id: b1 },
+        Operation::DeleteNode { id: button },
+    ]);
+    f.commit(ops);
+    let root = f.root;
+    let (tx, made) = ondin_core::insert_subtrees(
+        &f.doc,
+        &mut f.ids,
+        &[Placement {
+            nodes: clip,
+            parent: root,
+            index: None,
+        }],
+        Default::default(),
+    );
+    f.commit(tx.0);
+    let r = *f.kids(made[0]).last().unwrap();
+    assert_eq!(
+        f.node(r).link(),
+        Some(f.heart),
+        "an instance of what it shows"
+    );
+    assert_eq!(f.node(r).swap(), None);
+}
+
+/// **Detaching a nested instance bound to a swap property commits** — the
+/// binding goes (`[X6.1-L2-03]`). `variant::settle` ran only after an edit that
+/// moves a layer, and a detach writes links alone, so the binding a detached
+/// slot no longer fits was left for `check` to refuse.
+///
+/// Flip: `settle`'s gate without `SetLink` fails the detach's commit,
+/// `Variant(Binding)`.
+#[test]
+fn detaching_a_bound_slot_drops_its_binding() {
+    let mut f = fixture();
+    let (tx, _) = variant::define(
+        &f.doc,
+        &mut f.ids,
+        f.button,
+        "Icon",
+        PropKind::Swap,
+        vec![f.n],
+    )
+    .expect("a swap property");
+    f.commit(tx.0);
+    let tx = ondin_core::component::detach(&f.doc, f.n).unwrap();
+    f.commit(tx.0);
+    assert_eq!(f.node(f.n).link(), None, "detached");
+    let bound: Vec<NodeId> = f
+        .node(f.button)
+        .props()
+        .iter()
+        .flat_map(|p| p.bound.clone())
+        .collect();
+    assert!(bound.is_empty(), "unbound: {bound:?}");
+}
+
+/// **A nested instance inside a copied member climbs** (`[X2-L1-03]`): the
+/// Button main's Star wrapped in a group, and `b1`'s copy of that group
+/// duplicated — the copy's Star is an instance of Star, as the nested copy
+/// duplicated alone is. It came out a cut frame with members still linked.
+///
+/// Flip: the climb gated on the template's root again fails "an instance of
+/// Star".
+#[test]
+fn a_nested_instance_in_a_copied_member_climbs() {
+    let mut f = fixture();
+    let (g, button, n) = (f.ids.mint(), f.button, f.n);
+    f.commit(vec![
+        create(g, button, 1, NodeKind::Group, "Icon"),
+        Operation::Reparent {
+            id: n,
+            new_parent: g,
+            index: 0,
+        },
+    ]);
+    let gc = child_linked(&f.doc, f.b1, g).expect("b1's copy of the group");
+    // Grouping a nested instance in a main moves its copy into the group's copy —
+    // the moves loop asked the copy, a nested instance root, for the instance
+    // holding it, and left it where it was.
+    assert_eq!(
+        f.node(f.r).parent(),
+        Some(gc),
+        "r moved into the group's copy"
+    );
+    let b1 = f.b1;
+    let (tx, made) = ondin_core::insert_subtrees(
+        &f.doc,
+        &mut f.ids,
+        &[Placement {
+            nodes: f.doc.capture_subtree(gc).unwrap(),
+            parent: b1,
+            index: None,
+        }],
+        Default::default(),
+    );
+    f.commit(tx.0);
+    let star = f.kids(made[0])[0];
+    assert_eq!(f.node(star).link(), Some(f.star), "an instance of Star");
+    assert_eq!(f.node(f.kids(star)[0]).link(), Some(f.sshape));
+}
+
+/// **Ungrouping a group main leaves the nested instances in its instances
+/// instances of their own main**, as deleting it does (`[X2-L2-03]`): the
+/// nested source survives an ungroup, so nothing climbed, and the membership
+/// cut the copy to plain layers.
+///
+/// Flip: dropping `settle_links`' detached-owner climb fails "an instance of
+/// Star".
+#[test]
+fn ungrouping_a_group_main_keeps_its_instances_nested_instances() {
+    let mut f = fixture();
+    let (g, root) = (f.ids.mint(), f.root);
+    f.commit(vec![create(g, root, 5, NodeKind::Group, "Group main")]);
+    let (tx, n2) = instance(&f.doc, &mut f.ids, f.star, g);
+    f.commit(tx.0);
+    f.commit(vec![Operation::SetComponent {
+        id: g,
+        component: true,
+    }]);
+    let (tx, io) = instance(&f.doc, &mut f.ids, g, root);
+    f.commit(tx.0);
+    let cn = child_linked(&f.doc, io, n2).unwrap();
+    let res = ondin_core::Resolved::rebuild(&f.doc);
+    let tx = ondin_core::build::ungroup(&f.doc, &res, g).unwrap();
+    f.commit(tx.0);
+    assert_eq!(f.node(io).link(), None, "its instance detached");
+    assert_eq!(f.node(cn).link(), Some(f.star), "an instance of Star");
+    assert_eq!(f.node(f.kids(cn)[0]).link(), Some(f.sshape));
+}
+
+/// **`swap::tidy`, two of its arms** (`[X5-L6-01]` — every arm was untested,
+/// and the whole suite passed with it answering nothing): a swapped copy whose
+/// link a bare `SetLink` cuts is no instance and loses its swap; and a copy
+/// swapped to a group main that is ungrouped — no `relink_for_delete` on that
+/// door — loses its swap and keeps the look.
+///
+/// Flip: `tidy` answering nothing fails the first commit, `Swap` (the second is
+/// then never reached; the review's probe saw it refused `Dangling`).
+#[test]
+fn tidy_clears_a_swap_that_no_longer_stands() {
+    let mut f = fixture();
+    f.swap_to(f.r, f.heart);
+    let r = f.r;
+    f.commit(vec![Operation::SetLink { id: r, link: None }]);
+    assert_eq!(f.node(r).swap(), None, "no instance, no swap");
+
+    let mut f = fixture();
+    let [pin, flag, ps, fs, holder] = [(); 5].map(|_| f.ids.mint());
+    let root = f.root;
+    f.commit(vec![
+        create(pin, root, 5, NodeKind::Group, "Icons / Pin"),
+        create(ps, pin, 0, rect(), "Shape"),
+        create(flag, root, 6, NodeKind::Group, "Icons / Flag"),
+        create(fs, flag, 0, rect(), "Shape"),
+        create(holder, root, 7, frame(50.0, 50.0), "Holder"),
+        Operation::SetComponent {
+            id: pin,
+            component: true,
+        },
+        Operation::SetComponent {
+            id: flag,
+            component: true,
+        },
+    ]);
+    let (tx, np) = instance(&f.doc, &mut f.ids, pin, holder);
+    f.commit(tx.0);
+    f.commit(vec![Operation::SetComponent {
+        id: holder,
+        component: true,
+    }]);
+    let (tx, h1) = instance(&f.doc, &mut f.ids, holder, root);
+    f.commit(tx.0);
+    let rp = child_linked(&f.doc, h1, np).unwrap();
+    f.swap_to(rp, flag);
+    let shape = f.kids(rp)[0];
+    let res = ondin_core::Resolved::rebuild(&f.doc);
+    let tx = ondin_core::build::ungroup(&f.doc, &res, flag).unwrap();
+    f.commit(tx.0);
+    assert_eq!(f.node(rp).swap(), None, "the swap's main is gone");
+    assert!(f.doc.get(shape).is_some(), "the look kept");
+}
+
+/// **A swap target that contains the outer main is not offered** (`[X5-L6-02]`):
+/// `Wrap` holds an instance of `Panel`, which holds `r2` — showing Wrap at `r2`
+/// would put Panel inside itself. The only cycle test swapped to Panel itself,
+/// which the search's first step answers.
+///
+/// Flip: `would_cycle` not searching past the target fails "Wrap holds Panel".
+#[test]
+fn a_swap_to_a_main_holding_the_outer_main_is_not_offered() {
+    let mut f = fixture();
+    let [panel, wrap] = [(); 2].map(|_| f.ids.mint());
+    let root = f.root;
+    f.commit(vec![create(panel, root, 4, frame(200.0, 200.0), "Panel")]);
+    let (tx, b2) = instance(&f.doc, &mut f.ids, f.button, panel);
+    f.commit(tx.0);
+    f.commit(vec![Operation::SetComponent {
+        id: panel,
+        component: true,
+    }]);
+    let r2 = child_linked(&f.doc, b2, f.n).unwrap();
+    f.commit(vec![create(wrap, root, 5, frame(24.0, 24.0), "Wrap")]);
+    let (tx, _) = instance(&f.doc, &mut f.ids, panel, wrap);
+    f.commit(tx.0);
+    f.commit(vec![Operation::SetComponent {
+        id: wrap,
+        component: true,
+    }]);
+    assert!(!swap::can_swap_to(&f.doc, r2, wrap), "Wrap holds Panel");
+    assert!(!swap::options(&f.doc, r2, "", "").contains(&wrap));
+    let forced = Transaction(vec![Operation::SetSwap {
+        id: r2,
+        swap: Some(wrap),
+    }]);
+    let mut tx = forced;
+    ondin_core::propagate::owed(&f.doc, &mut tx, &mut f.ids);
+    assert!(matches!(
+        f.doc.clone().apply(&tx),
+        Err(OpError::BadLink(_, LinkRule::ComponentCycle))
+    ));
+}

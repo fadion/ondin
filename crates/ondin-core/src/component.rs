@@ -372,13 +372,7 @@ pub fn relink_past(
             }
             continue;
         };
-        let mut to = Some(link);
-        for _ in 0..=nodes.len() {
-            match to {
-                Some(s) if gone.contains(&s) => to = nodes.get(&s).and_then(|s| s.link),
-                _ => break,
-            }
-        }
+        let (to, met) = crate::swap::climb(doc, link, |s| gone.contains(&s));
         let mut ops = if n.swap.is_some_and(|s| gone.contains(&s)) {
             vec![
                 Operation::SetLink { id: n.id, link: to },
@@ -388,7 +382,9 @@ pub fn relink_past(
                 },
             ]
         } else {
-            crate::swap::land_ops(doc, n, to)
+            // A swap made on what it climbs past is its to carry (`[X5-L1-01]`),
+            // unless that main goes too.
+            crate::swap::land_ops_through(doc, n, to, met.filter(|s| !gone.contains(s)))
         };
         ops.dedup();
         by_node.push((n.id, ops));
@@ -464,23 +460,17 @@ pub fn detach(doc: &Document, root: NodeId) -> Option<Transaction> {
         if !past.contains(&link) {
             continue; // a local instance of some other main: not this instance's link
         }
-        let to = if owner(id) == Some(root) {
+        let (to, met) = if owner(id) == Some(root) {
             // The root and its own members: cut. Climbing would hand a member a
             // link with no instance root above it once the root is cut.
-            None
+            (None, None)
         } else {
             // A nested instance copied inside this one, and its members: climb
-            // past this instance's main to the nested main's own nodes.
-            let mut to = Some(link);
-            for _ in 0..=nodes.len() {
-                match to {
-                    Some(s) if past.contains(&s) => to = nodes.get(&s).and_then(|s| s.link),
-                    _ => break,
-                }
-            }
-            to
+            // past this instance's main to the nested main's own nodes — taking
+            // a swap made on what it climbs past (`swap::land_ops_through`).
+            crate::swap::climb(doc, link, |s| past.contains(&s))
         };
-        ops.extend(crate::swap::land_ops(doc, n, to));
+        ops.extend(crate::swap::land_ops_through(doc, n, to, met));
     }
     Some(Transaction(ops))
 }
@@ -550,14 +540,11 @@ pub fn settle_links(doc: &Document, tx: &Transaction) -> Vec<Operation> {
             .values()
             .filter_map(|n| {
                 let link = n.link.filter(|l| gone.contains(l))?;
-                let mut to = Some(link);
-                for _ in 0..=before.len() {
-                    match to {
-                        Some(s) if gone.contains(&s) => to = before.get(&s).and_then(|s| s.link),
-                        _ => break,
-                    }
-                }
-                Some((n.id, crate::swap::land_ops(&scratch, n, to)))
+                // Walked on the document before the edit, where the gone nodes
+                // still are; a swap one of them carried is the climber's.
+                let (to, met) = crate::swap::climb(doc, link, |s| gone.contains(&s));
+                let met = met.filter(|s| !gone.contains(s));
+                Some((n.id, crate::swap::land_ops_through(&scratch, n, to, met)))
             })
             .collect();
         climbs.sort_by_key(|(id, _)| *id);
@@ -672,6 +659,63 @@ pub fn settle_links(doc: &Document, tx: &Transaction) -> Vec<Operation> {
             break;
         }
     }
+    // **A nested copy whose outer instance this edit detached climbs, as
+    // `detach` climbs it** (`[X2-L2-03]`): an ungrouped main is a deleted main,
+    // and deleting one leaves the nested instances inside its instances
+    // instances of their own main — but on an ungroup the nested source survives
+    // (lifted out), nothing climbed, and the membership cut them to plain layers.
+    // Only where the copy's outer root is still around it and lost its link here:
+    // a nested copy the user moved out of its instance is still cut.
+    let detached: Vec<NodeId> = {
+        let mut v: Vec<NodeId> = cut.iter().copied().collect();
+        v.sort();
+        v
+    };
+    let mut climbed: Vec<(NodeId, Vec<Operation>)> = Vec::new();
+    for id in detached {
+        let Some(b) = before.get(&id) else { continue };
+        let Some(src) = b
+            .link
+            .filter(|s| before.get(s).is_some_and(|s| !s.component))
+        else {
+            continue;
+        };
+        if !is_instance_root(before, b) || !cut.contains(&id) {
+            continue;
+        }
+        let was_parent = |a: NodeId| before.get(&a).and_then(|n| n.parent);
+        let owner = std::iter::successors(was_parent(id), |a| was_parent(*a))
+            .find(|a| before.get(a).is_some_and(|n| is_instance_root(before, n)));
+        let Some(owner) = owner else { continue };
+        let detached_here = before[&owner].link.is_some()
+            && nodes.get(&owner).is_some_and(|o| o.link.is_none())
+            && inside(id, owner);
+        if !detached_here {
+            continue;
+        }
+        let past: FxHashSet<NodeId> = crate::build::subtree_nodes(doc, &[src])
+            .into_iter()
+            .collect();
+        for k in crate::build::subtree_nodes(&scratch, &[id]) {
+            let Some(kn) = nodes.get(&k) else { continue };
+            if !cut.contains(&k) {
+                continue;
+            }
+            let mut to = kn.link;
+            for _ in 0..=before.len() {
+                match to {
+                    Some(s) if past.contains(&s) => to = before.get(&s).and_then(|s| s.link),
+                    _ => break,
+                }
+            }
+            if to.is_some() && to != kn.link {
+                cut.remove(&k);
+                climbed.push((k, crate::swap::land_ops(&scratch, kn, to)));
+            }
+        }
+    }
+    climbed.sort_by_key(|(id, _)| *id);
+    ops.extend(climbed.into_iter().flat_map(|(_, o)| o));
     let mut cut: Vec<NodeId> = cut.into_iter().collect();
     cut.sort();
     for id in cut {
@@ -749,7 +793,16 @@ pub(crate) fn settle_copy(
         }
         let keep = nodes.contains_key(&link) && (is_instance_root(nodes, t) || root_above(t));
         if !keep {
-            c.link = None;
+            // **A dropped link takes the swap with it** (`[X5-L1-04]`): a swapped
+            // copy whose slot is not here lands as an instance of what it shows
+            // when that main is (`swap::landed`), and as plain layers when it is
+            // not. The swap was left for `settle_links`' tidy, which a document
+            // holding no link before the paste never reaches — and `check`
+            // refused a plain copy and paste.
+            (c.link, c.swap) = crate::swap::landed(doc, c, None);
+            if c.link.is_none() {
+                c.swap = None;
+            }
         }
     }
     // A **nested instance copied on its own** — its root linked to the nested copy
@@ -757,16 +810,43 @@ pub(crate) fn settle_copy(
     // instance where it lands, so it climbs one level up, `detach`'s rule for a
     // nested instance: its root and its members relink past that nested copy to
     // the nested main's own nodes, and it lands as a plain instance of that main.
-    if let Some(t) = root
-        && !root_above(t)
-        && is_instance_root(nodes, t)
-        && let Some(src) = t.link
-        && nodes.get(&src).is_some_and(|s| !s.component)
-    {
+    //
+    // **Every such nested instance in the copy, not only one at its root**
+    // (`[X2-L1-03]`): Ctrl+D of a member group holding a nested instance left the
+    // instance's frame cut and its children still linked members — a half-linked
+    // copy — while the same nested copy copied alone climbed.
+    let climbers: Vec<&Node> = template
+        .iter()
+        .filter(|t| {
+            !root_above(t)
+                && is_instance_root(nodes, t)
+                && t.link
+                    .and_then(|s| nodes.get(&s))
+                    .is_some_and(|s| !s.component)
+        })
+        .collect();
+    for t in climbers {
+        let src = t.link.expect("filtered to linked");
         let past: FxHashSet<NodeId> = crate::build::subtree_nodes(doc, &[src])
             .into_iter()
             .collect();
-        for c in copy.iter_mut() {
+        // The template nodes at or under `t`.
+        let mut under: FxHashSet<NodeId> = FxHashSet::default();
+        under.insert(t.id);
+        for n in template {
+            let mut at = n.parent;
+            while let Some(p) = at {
+                if p == t.id {
+                    under.insert(n.id);
+                    break;
+                }
+                at = in_template.get(&p).and_then(|a| a.parent);
+            }
+        }
+        for (c, n) in copy.iter_mut().zip(template) {
+            if !under.contains(&n.id) {
+                continue;
+            }
             let mut to = c.link;
             for _ in 0..=nodes.len() {
                 match to {

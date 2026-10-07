@@ -896,3 +896,56 @@ fn a_switch_refuses_a_main_of_another_kind() {
     ]);
     assert!(variant::switch(&f.doc, f.i, g, &mut f.ids).is_none());
 }
+
+/// **A variant pasted into a document with no set commits, a plain main**
+/// (`[X6.1-L1-04]`): `settle`'s gate read only the document before the paste,
+/// so with no set left the pass never ran and `check` refused the copy's
+/// values. Flip: the gate without its `inserts` test fails the paste's commit,
+/// `Variant(Values)`.
+#[test]
+fn a_variant_pasted_where_no_set_is_lands_a_plain_main() {
+    let mut f = fixture();
+    let clip = f.doc.capture_subtree(f.small).unwrap();
+    let (s, i) = (f.s, f.i);
+    let mut ops = ondin_core::component::relink_for_delete(&f.doc, &[s, i]);
+    ops.extend([
+        Operation::DeleteNode { id: s },
+        Operation::DeleteNode { id: i },
+    ]);
+    f.commit(ops);
+    let root = f.root;
+    let (tx, made) = ondin_core::insert_subtrees(
+        &f.doc,
+        &mut f.ids,
+        &[Placement {
+            nodes: clip,
+            parent: root,
+            index: None,
+        }],
+        Default::default(),
+    );
+    f.commit(tx.0);
+    let n = f.doc.get(made[0]).unwrap();
+    assert!(n.component(), "a main");
+    assert!(n.variant().is_empty(), "with no values");
+}
+
+/// **A set given a property of no values is refused, not a panic**
+/// (`[R1-L2-03]`, invariant 8): `settle` read the property's first value
+/// before `apply` could refuse. Flip: `settle` without its empty-values guard
+/// panics, *"index out of bounds: the len is 0"*.
+#[test]
+fn an_empty_property_is_refused_rather_than_panicking() {
+    let mut f = fixture();
+    let mut tx = Transaction(vec![Operation::SetVariantSet {
+        id: f.s,
+        set: Some(VariantSet {
+            props: vec![VariantProp {
+                name: "Size".into(),
+                values: Vec::new(),
+            }],
+        }),
+    }]);
+    ondin_core::propagate::owed(&f.doc, &mut tx, &mut f.ids);
+    assert!(f.doc.clone().apply(&tx).is_err());
+}

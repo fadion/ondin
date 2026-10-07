@@ -389,24 +389,47 @@ pub fn settle(doc: &Document, tx: &Transaction) -> Vec<Operation> {
     });
     // **Only an edit that can break a rule pays for the scratch copy** — the
     // clone is this pass's whole cost and the commit runs it on every edit: the
-    // tree changing shape, a main made or unmade, or a variant renamed by hand.
+    // tree changing shape, a main made or unmade, a variant renamed by hand — or
+    // a link moved, since a swap or nested binding fits only a node linked to a
+    // main (`kind_fits`): a detach of a bound or shown slot was refused at the
+    // commit (`[X6.1-L2-03]`).
     let can_break = makes
         || tx.0.iter().any(|op| match op {
             Operation::CreateNode { .. }
             | Operation::DeleteNode { .. }
             | Operation::InsertSubtree { .. }
             | Operation::Reparent { .. }
-            | Operation::SetComponent { .. } => true,
+            | Operation::SetComponent { .. }
+            | Operation::SetLink { .. }
+            | Operation::SetSwap { .. } => true,
             Operation::SetName { id, .. } => doc.get(*id).is_some_and(|n| !n.variant.is_empty()),
             _ => false,
         });
     let relevant = |n: &Node| n.set.is_some() || !n.variant.is_empty() || !n.props.is_empty();
-    if !can_break || (!makes && !doc.node_map().values().any(relevant)) {
+    // A pasted variant carries its values in its `InsertSubtree`: asked of the
+    // document before the paste alone, the gate skipped the pass in a document
+    // with no set, and `check` refused the paste (`[X6.1-L1-04]`).
+    let inserts = tx.0.iter().any(|op| match op {
+        Operation::InsertSubtree { nodes, .. } => nodes.iter().any(relevant),
+        _ => false,
+    });
+    if !can_break || (!makes && !inserts && !doc.node_map().values().any(relevant)) {
         return Vec::new();
     }
     let mut scratch = doc.clone();
     if scratch.apply_unchecked(tx).is_err() {
         return Vec::new(); // `apply` will refuse it with the reason
+    }
+    // **A set with a property of no values is `apply`'s to refuse** — read here,
+    // its first value panicked the commit before `apply` could answer
+    // (`[R1-L2-03]`, invariant 8).
+    if scratch
+        .node_map()
+        .values()
+        .filter_map(|n| n.set.as_ref())
+        .any(|s| s.props.iter().any(|p| p.values.is_empty()))
+    {
+        return Vec::new();
     }
     let mut ops = Vec::new();
     let mut ids: Vec<NodeId> = scratch.node_map().keys().copied().collect();

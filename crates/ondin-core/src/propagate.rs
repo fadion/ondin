@@ -653,10 +653,16 @@ pub fn propagate_structure(
             if !after_nodes.contains_key(&c) {
                 continue;
             }
-            let Some(root) = crate::component::instance_root(doc, c) else {
+            let Some(from) = before[&c].parent else {
                 continue;
             };
-            let Some(from) = before[&c].parent else {
+            // The instance that **holds** the copy — asked of its parent, since a
+            // nested instance's copy is an instance root itself, and asked of the
+            // copy that answered with the copy, under which neither its old nor
+            // its new parent's counterpart is: grouping a nested instance inside a
+            // main left every copy of it where it was (found writing the test for
+            // `[X2-L1-03]`).
+            let Some(root) = crate::component::instance_root(doc, from) else {
                 continue;
             };
             if Some(from) != counterpart(doc, root, old_parent) {

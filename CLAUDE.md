@@ -67,14 +67,27 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 995 index rows, 995 body headings, next free
-D996** (measured at session 54's close, 2026-10-07) — but trust the procedure over any number
+anywhere cited either. **The live figures: 1000 index rows, 1000 body headings, next free
+D1001** (measured at session 55's close, 2026-10-07) — but trust the procedure over any number
 written down here, including that one. **No block is reserved**: the next session reserves its own.
+⚠️ **Numbers are four digits now, and the census sieve was widened first**: `D[0-9]{1,4}\b`
+(below), measured against the three-digit sieve before D1000 was spent — both 896 over `crates/`,
+so the widening added no false positive. ⚠️ **A five-digit number is the same trap again at
+D10000.** Session 55 (2026-10-07) reserved twice, each as the first act of its request:
+**D996–D999** at `a0c9c33`, spending D996 (the third components polish pass, and the four pointing
+hands made arrows), D997 (a frame nudged inside its parent frame left it — the moved frame was its
+own topmost candidate, filtered out of the answer instead of the choice) and D998 (a new set's
+`SET_PAD`); then **D999–D1008** at `e0207c1`, spending D999 (an inspector field's typed edit dropped
+when a canvas or layers-panel click changed the selection — the inspector now holds the selection
+it drew until the field blurs) and D1000 (the fourth polish pass). The closing negative grep over
+**D1001–D1008 found zero sites** and they are released. Census **898**, two arrivals, none
+unresolved; §15.0 1000 rows, 1000 headings, in order.
 ⚠️ **Session 54's third request (the maintainer's second polish list) reserved D994–D999 at
 `4e1f458` and spent two** — D994 (a list reset is the main's list, the copy's own items gone,
 overturning D981 (1) for lists) and D995 (the component rows folded into the identity card, and
 polish). The closing negative grep over **D996–D999 found zero sites** and they are released —
-**and D1000 still needs the census regex widened before anyone spends it.** Census: **893**, two
+**and D1000 still needs the census regex widened before anyone spends it** (done in session 55,
+above). Census: **893**, two
 arrivals, none unresolved; §15.0 995 rows, 995 headings, in order. 🚨 **A `git apply --cached
 --unidiff-zero` split of zero-context hunks staged a `component.rs` that did not parse** — caught
 only because the staged tree was checked out (`git checkout-index -a --prefix=…`) and built with
@@ -378,7 +391,7 @@ nothing. Put the number on the doc of whatever a reader meets the question at.
 ### The citation census
 
 ```bash
-grep -rhoE 'D[0-9]{1,3}\b' crates/ --include=*.rs | sort -u
+grep -rhoE 'D[0-9]{1,4}\b' crates/ --include=*.rs | sort -u
 ```
 
 812 distinct numbers at the close of session 37 — **nine arrivals (D904–D912) and no departures**

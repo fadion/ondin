@@ -2350,7 +2350,8 @@ cannot break a variant rule pays no scratch clone — the reparent included in t
 into a set is refused. **The verbs**: `combine` (*Combine as variants* — the mains framed with
 `SET_PAD`, 10, of air on every side and nothing moving on the page, §15 D998, one property named
 *Property 1*, each name a value, shared names clashing), `add_variant` (*Duplicate as component* of
-a variant, `VARIANT_GAP` below it, the first free combination, the set's bindings extended), and the
+a variant, `VARIANT_GAP` below it, the set grown to `SET_PAD` past it — `VARIANT_GAP` until §15
+D1000 — the first free combination, the set's bindings extended), and the
 set's renames, adds, moves and deletes — `delete_value` deleting the variants holding it through
 `relink_for_delete`.
 
@@ -2403,9 +2404,12 @@ swap and leaves its layers the copy's own; detaching the copy, or dragging it ou
 `swap::tidy`, inside `settle_links`, clears a swap that no longer stands. **`component::main_of` answers
 the main a root shows**, through a swap, for the card's link to it, *Select all instances*, *Go to main* and the
 instance's properties. **What is offered**: a swap property (`PropKind::Swap`), bound only to a nested
-instance inside the main and made from that layer's binding line (*Instance*), carries a **filter** — a
+instance inside the main and made from that layer's binding line (*Instance*) — or, since §15 D1000,
+from the `+` the Properties card offers on each nested instance no swap property binds
+(`new_swap_property`) — carries a **filter** — a
 prefix of a main's name, without case, every main when empty, prefilled by `swap::suggested_filter` with
-the shown main's name less its last segment — and the picker searches within it; every nested copy also
+the shown main's name less its last segment, edited from a row of its own on the Properties card — and
+the picker searches within it; every nested copy also
 gets a *Swap* row offering every main of its kind, unfiltered (the session's). The filter scopes what is
 offered, never what is valid. *Preferred mains* is not built. ⚠️ **The app's swap UI is untested** — a
 `ComboBox` popup cannot be driven headlessly. D983's amendment has the seven decisions the build made,
@@ -2413,7 +2417,8 @@ each the session's — the first, the same-kind swap, accepted by the maintainer
 
 ✅ **The app half, in the inspector and the context menu** (`a313b2c`; `panels/variants.rs`,
 `panels/component.rs`; §15 D982's amendment). **A set** gets its own card, *Variants*, in the Component
-card's place (`OndinApp::set_body`): *Component set* and its name, *N variants · M instances* with
+card's place (`OndinApp::set_body`): its name on one line beside the four-squares glyph — the main's
+face, `component::name_line`, with no *Component set* caption since §15 D1000 — *N variants · M instances* with
 *Select all* — every variant's instances — the clash note with a warning glyph, each variant property
 as a name field with a ×, disabled for the last, and its values as chips; a chip's popup renames, moves
 and deletes its value, a value variants hold confirming with exact counts in D979 (c)'s words — *N
@@ -2421,8 +2426,9 @@ variants use it and are deleted with it. M instances will detach.* — ⚠️ in
 (`OndinApp::value_delete_confirmation`, *Cancel* and *Delete*, the ✕, `Escape` and the backdrop
 cancelling, a value changed meanwhile deleting nothing), where it was a sentence in the popup over the
 row that did it — and *Property* and *Add variant* sit under them. **A variant** gets the Component card with *Variant in* and the set as a link, its
-derived, read-only name, a dropdown per property — a taken combination not refused but noted, *Another
-variant is also X* with *Select it* — then a main's count and verbs. **An instance's card** gains, between
+derived, read-only name, a dropdown per property — a taken combination not refused but noted, *Variant
+clash* with *Select it*, the sentence (*Another variant in this set is also X …*) its tooltip since §15
+D1000 — then a main's count and verbs. **An instance's card** gains, between
 its heading (*Instance of* and the main's name until §15 D993, the name alone since) and *Reset all*, a
 dropdown per variant property with **no dot** — on a nested copy, whose
 choice is a swap, the dot since §15 D988 — switching through
@@ -2439,7 +2445,11 @@ properties apart**, a property's field units subtracted from the overrides (`Pro
 fields alone; several instances' summary reads *K with changes*. **A lone main or a set** gets a
 *Properties* card under the Component card — each property's kind glyph, name and ×, its default and
 what it is bound to; *Boolean*, *Text*, and on a lone main *Variant*, which combines it alone into a set
-— labelled *Bool*, *Text* and *Var* since §15 D995 — and **a layer inside a main** one line, *Bind to a
+— labelled *Bool*, *Text* and *Var* since §15 D995. ⚠️ **Three groups since §15 D1000**, a hairline
+(`variants::card_rule`) between each: the boolean and text properties; the swap properties, a rule
+between each, a swap's filter a row of its own (the funnel, the field to the card's edge, *Filter
+displayed list by name* under it), and **each nested instance no swap property binds offered as one**,
+with a `+`; then *Shown from nested*, only when something is shown. **A layer inside a main** gets one line, *Bind to a
 component property*: a *Visibility* dropdown and,
 for text, *Content* — *None*, each property of that kind, *New property…*; a nested instance inside a
 main is an instance root, so its card is the instance's, and the line is drawn under that card (§15
@@ -2470,7 +2480,10 @@ bottom edge** (2026-10-06, §15 D985): a disc at the edge's middle while the set
 calls `OndinApp::add_variant`, `chrome_claims` keeps guides off it, and `begin_select_drag` starts
 nothing on it; `select_cursor` asks it ahead of the handles too and shows ~~a pointing hand~~ the arrow
 (§15 D996, the hand being §9.2's forbidden cursor), where the first build showed the bottom side's
-resize over a disc a drag there no longer resizes (read, not run — the cursor needs a `Response`). **A variant's row named by its values** needed nothing: its
+resize over a disc a drag there no longer resizes (read, not run — the cursor needs a `Response`).
+⚠️ **Drawn over the selection's outline and handles** since §15 D1000 (`draw_set_plus`, after
+`draw_key_outline`), where as part of `draw_component_chrome`, under the selection, the set's edge ran
+through the disc. **A variant's row named by its values** needed nothing: its
 name is derived from them (`variant::settle`), and a variant is a main, so it wears the filled hexagon.
 
 ✅ **Nested component properties** (2026-10-06, §15 D988; `variant.rs`, `panels/variants.rs`). The
@@ -2479,7 +2492,8 @@ maintainer, and D988 carries it in words; the build's calls are the session's. *
 nested instance's own properties on every instance of the main** — its variant dropdowns, booleans,
 text and swaps, never its raw fields, which still mean selecting it. The opt-in is **once per nested
 instance**, *Show properties on instances* on its card inside the main (`show_switch`), and the main's
-Properties card lists what it shows under *Shown from nested*, − to stop, and the rest as *Not shown*
+Properties card lists what it shows under *Shown from nested*, − to stop — ~~and the rest as *Not
+shown*~~, the heading only when something is shown since §15 D1000, the maintainer's look
 (`nested_slots`). The model is `PropKind::Nested`, a **showing** rather than a value: at most one per
 owner, nameless, bound to the shown slots, driving no field, so the binding checks, the pruning on
 delete and a set's scope are the property machinery's; `set_shown` binds the slot at its name path in
@@ -2489,8 +2503,8 @@ the layer and the main it shows now — a variant's set — so a group follows a
 being the slot's — drawing the same rows over the copies (`instance_rows` = `own_rows` + `shown_groups`)
 but **never a Swap row** (4O): a copy's swap is the outer swap property's row, else made from the copy's
 own card; several instances match groups by layer name path, each step a name and which same-named
-sibling it is, *Different mains* where the slot disagrees; a group an outer boolean hides dims, read-only, under *Hidden by
-<property>* (`hidden_by`). **A shown row counts as a property, never an override** — `property_fields`
+sibling it is, *Different mains* where the slot disagrees; a group an outer boolean hides dims, read-only
+(`hidden_by`), ~~under *Hidden by <property>*~~ with no line saying so since §15 D1000. **A shown row counts as a property, never an override** — `property_fields`
 takes each shown copy's swap and its properties' fields, `shown_rows_overridden` counts a shown copy's
 swap once, and *Reset properties* writes `reset_all_properties`. 🚨 **A nested copy's variant dropdown
 draws the dot** — the mockup's one departure, reversing D983's build: the choice is a swap, so an
@@ -2498,8 +2512,9 @@ override — compared with the slot's own main's value of the same-named propert
 set the copy shows now**, so a reset of *Weight* after an outer *Icon → Check* keeps Check
 (`nested_variant_state`, `nested_variant_reset`). **Across a swap a shown copy's variant values carry by
 property name** (`carried_target`, through `set_property` and the copy's Swap row); booleans and text
-keep the rewrite's name-path carry, the session's call against the mockup's letter. ⚠️ **Not looked at
-in the GUI**; what is open is `roadmap.md`'s *Next · Nested component properties*.
+keep the rewrite's name-path carry, the session's call against the mockup's letter. ⚠️ ~~**Not looked
+at in the GUI**~~ **Looked at in part** — the maintainer's fourth polish list ruled on the Properties
+card and a hidden group (§15 D1000); what is open is `roadmap.md`'s *Next · Nested component properties*.
 
 **Pushing an instance's changes to its main comes later** — instance swap and a nested copy's switch,
 and nested properties, which this sentence named with it, are built (§15 D983, D988, above). So does real-time collaboration, the one place §15 D978's cost (a) arrives: a non-goal for
@@ -7389,6 +7404,15 @@ is deliberate, so aiming at a panel can never deselect. One trap, since it cost 
 gives its contents a `Ui` whose `max_rect` is *the area's own size last frame*, so nesting a
 `ScrollArea` (which fills what it is offered) inside one naively makes the pair converge on a tiny
 scrolling box. `inspector_panel` re-establishes the column rect explicitly instead of inheriting it.
+🚨 **And drawn after the canvas, a click there that changes the selection has the inspector draw the
+new selection's cards on that same frame** (§15 D999) — the layers panel, drawn before it too, the
+same. A field being typed in sat on the old selection's card, so it was never drawn again to see its
+focus go, and its edit was dropped; only `Enter` kept it. So `inspector_panel` holds the selection it
+drew while a widget on its own `Area` layer has egui's focus (`OndinApp::inspector_hold`), and while
+the live selection differs — and the held one's layers all exist — draws against the held one, swapped
+in and put back, until the field lets go and commits to the layer it was editing. A popover's field is
+another layer and holds nothing. ⚠️ *Do not* read the frames until the blur, when the inspector shows
+the old selection under a canvas showing the new, as a lag to remove: they are the commit.
 
 **Neither the layers tree nor the inspector column draws a scrollbar.** Both are
 `ScrollBarVisibility::AlwaysHidden`: the wheel, the trackpad, drag-to-scroll, the tree's own
@@ -8576,6 +8600,10 @@ input event (winit/egui)
   read a click through one as typing the empty list (§15 D941). 🚨 **The *write* is what is declined and never the
   block** — the buffer clear has to run on every way out, or a cancelled edit leaves its typed text in
   the field, which nothing asserts and no gate sees.
+  ⚠️ **And a field that is not drawn on the frame it loses focus commits nothing at all.** Until §15
+  D999 a click on the canvas or the layers panel that changed the selection dropped every such field's
+  typed edit, because the inspector, drawn after both, drew the new selection's cards that frame;
+  `inspector_panel`'s hold (§9.2) cures it for every field at once, so no field's commit rule changed.
   🚨 **And the gate above does not cover that class, which is a fact about its *name* rather than a
   defect in it** (§15 D841). It reports a `lost_focus()` only where `changed()` is within 160
   characters; at the picker's hex field the two are ~700 apart in two separate conditions, so a
@@ -9934,7 +9962,9 @@ below.
 **A frame gets two cards of its own, *Frame templates* and *Layout grid*, and the ordinary Fill and
 Stroke panels for its paint** (§5.3b, §15 D385, D387). *Frame templates* sits **second, above Align
 and Transform** — under the identity and mask cards, because it says what kind of page this is, and
-everything below it is about a layer among layers. ⚠️ ***Layout grid* sat third, beside it, until the
+everything below it is about a layer among layers. ⚠️ **Not on a component** since §15 D1000: where any
+selected frame is a main, a variant, a set or an instance root there is no *Frame templates* card — a
+part is not a page. ⚠️ ***Layout grid* sat third, beside it, until the
 layout cards** (§15 D878): it sits under *Container* now, the grid dividing what the container lays
 out.
 **There is no third card for its ground.** A frame is `PaintScope::Node` like any other layer and gets

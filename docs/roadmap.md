@@ -1626,9 +1626,8 @@ it is here because it is the next work the record names, as the section above is
 
 Each is named as later by the record and is undesigned; the pointer restates no ruling.
 
-- **Pushing an instance's changes to its main** — `architecture.md` §5.3d: *"Exposing nested
-  properties, and pushing an instance's changes to its main, come later"*. The first half is built
-  (§15 D988).
+- **Pushing an instance's changes to its main** — `architecture.md` §5.3d: *"Pushing an instance's
+  changes to its main comes later"*.
 - **A verb that un-makes a component** — none exists, so `SetComponent { component: false }` on a main
   with instances is unreachable; one that is built owes a detach, as a delete does (§15 D979's step-2
   amendment, §5.3d's handoff).

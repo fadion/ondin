@@ -1788,8 +1788,7 @@ move stopped at its outer instances — **fixed in `6ac7d0d`** with
 `every_field_follows_iff_it_held_the_old_value`, the spec as a property over 19,683 cases (§15 D979's
 amendments). (§15 D980 — per item the maintainer's ruling, the
 shape and the migration the session's). ✅ **Built 2026-10-04** (`a83adc8`), the first half of build
-step 1 below, in `ondin-core/src/item.rs` — **the one part of this section that is built**, and this
-paragraph describes it in the present tense. Five lists have ids: `Paint::fills`, `Paint::strokes`,
+step 1 below, in `ondin-core/src/item.rs`, and this paragraph describes it in the present tense. Five lists have ids: `Paint::fills`, `Paint::strokes`,
 `Node::effects`, `Node::exports` and `Node::grids` (§5.3b's layout grids). What stays one value,
 compared whole: a grid template's track list (a template is one value, as a path is), a gradient's
 stops inside its brush, a `Path`'s points, `corner_radii`, and text spans, coupled with their content
@@ -2570,8 +2569,14 @@ prefix of a main's name, without case, every main when empty, prefilled by `swap
 the shown main's name less its last segment, edited from a row of its own on the Properties card — and
 the picker searches within it; every nested copy also
 gets a *Swap* row offering every main of its kind, unfiltered (the session's). The filter scopes what is
-offered, never what is valid. *Preferred mains* is not built. ⚠️ **The app's swap UI is untested** — a
-`ComboBox` popup cannot be driven headlessly. D983's amendment has the seven decisions the build made,
+offered, never what is valid. *Preferred mains* is not built. ⚠️ **The picker is untested** — its
+`ComboBox` popup, its search and the *Swap* row, since a `ComboBox` popup cannot be driven headlessly;
+so are a typed edit to the filter row and choosing *Instance* on the binding line. The rest runs:
+`panels/component.rs`'s `a_nested_instance_is_offered_as_a_swap_property_and_its_filter_is_a_row`
+clicks the `+` and finds the filter row, `a_nested_instance_in_a_main_opts_in_from_its_card` draws the
+binding line on a nested instance in a main, and `app.rs`'s
+`the_menu_resets_a_swap_property_from_the_swapped_copy` resets a swap property from the menu
+(`[R2-L8-01]`). D983's amendment has the seven decisions the build made,
 each the session's — the first, the same-kind swap, accepted by the maintainer on 2026-10-06.
 ✅ **§15 D1003 (3) and (4) are built, and (5)'s second defence** (2026-10-07, `0683f66`). **A layer the
 outer main added to the slot carries across a swap**, at its place among its siblings: `rewrite`'s swap

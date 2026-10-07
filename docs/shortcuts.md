@@ -656,9 +656,10 @@ clipboard binding at all.**
 **These two carry both markers, and they say different things** — ➕ that the row is unbuilt,
 ⚠️ that its semantics are not the ones the chord implies elsewhere. They carried only the ⚠️
 until 2026-08-22, which made them the two unbuilt rows in the file that a search for ➕ does not
-find; the header's count is now the same **six** either way — three in §8, these two, and §12's
-`Enter`. ⚠️ It read *seven* from 2026-08-22, true then with five rows in §8, and went stale on 2026-08-28
-when `Ctrl+N` and `Ctrl+W` were bound; corrected 2026-10-04.
+find; the header's count is now the same **five** either way — three in §8 and these two (§12's
+`Enter`, counted here from 2026-10-04, was built 2026-10-06, §15 D985). ⚠️ It read *seven* from
+2026-08-22, true then with five rows in §8, and went stale on 2026-08-28 when `Ctrl+N` and `Ctrl+W`
+were bound; corrected 2026-10-04 to *six*, which D985 left standing until 2026-10-07 (`[R2-L8-02]`).
 
 **`Ctrl+B` and `Ctrl+I` are real work, not wiring.** Weight lives on the `wght` axis or in a
 named instance, and italic is *derived* — `text.rs` reads it from a named instance's `ital`

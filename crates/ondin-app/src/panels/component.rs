@@ -3691,4 +3691,105 @@ mod tests {
         assert!(v.app.session.doc.get(v.small).is_none(), "with its variant");
         assert!(!v.app.modal_is_up());
     }
+
+    /// **A typed edit commits when a click on the canvas takes the selection
+    /// away** (§15 D999, the maintainer's report: *"Here I have to press enter to
+    /// change the value. If I just blur it doesn't persist."*). The whole app,
+    /// through `eframe::App::ui`: an instance's text property typed into, then a
+    /// click on empty canvas, which deselects — the text is the property's; and
+    /// the same for the layer's name in the identity card, which had the same
+    /// fault. The selection the click made is the one left afterwards, so the
+    /// hold lets go.
+    ///
+    /// Before: `Go` stayed `Go` and `Small` stayed `Small`. A click inside the
+    /// inspector always committed — measured — because the field was still drawn;
+    /// the canvas runs before the inspector, and the click that deselected had the
+    /// inspector draw no field to report its blur.
+    ///
+    /// **Flip run**: `inspector_panel`'s hold never applied (`held` always
+    /// `None`) fails *"the property's text"* with `Go`, the predicted site.
+    #[test]
+    fn a_typed_edit_commits_when_a_canvas_click_takes_the_selection() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut v = variants_fixture(&ctx);
+        let mut wf = eframe::Frame::_new_kittest();
+        let mut pass = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1320.0, 820.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            ctx.run_ui(input, |ui| eframe::App::ui(app, ui, &mut wf))
+        };
+        let click = |app: &mut OndinApp,
+                     at: egui::Pos2,
+                     pass: &mut dyn FnMut(&mut OndinApp, Vec<egui::Event>) -> egui::FullOutput| {
+            let press = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            };
+            pass(app, vec![egui::Event::PointerMoved(at)]);
+            pass(app, vec![press(true)]);
+            pass(app, vec![press(false)]);
+        };
+        let end = egui::Event::Key {
+            key: egui::Key::End,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        };
+        // Empty canvas, left of the inspector and clear of the layers.
+        let canvas = egui::pos2(600.0, 700.0);
+        /// Where on the painted texts to click into the field.
+        type Pick<'a> = &'a dyn Fn(&[(String, egui::Rect)]) -> egui::Pos2;
+        let mut type_and_leave = |app: &mut OndinApp, pick: Pick<'_>| {
+            app.session.selection.set_one(v.i);
+            let mut out = pass(app, Vec::new());
+            for _ in 0..3 {
+                out = pass(app, Vec::new());
+            }
+            click(app, pick(&texts(&out)), &mut pass);
+            pass(app, vec![end.clone()]);
+            pass(app, vec![egui::Event::Text("XY".into())]);
+            pass(app, Vec::new());
+            click(app, canvas, &mut pass);
+            for _ in 0..3 {
+                pass(app, Vec::new());
+            }
+        };
+        type_and_leave(&mut v.app, &|t| {
+            t.iter()
+                .find(|(s, _)| s == "Go")
+                .expect("the field")
+                .1
+                .center()
+        });
+        assert_eq!(content(&v.app, v.ilabel), "GoXY", "the property's text");
+        assert!(
+            v.app.session.selection.ids().is_empty(),
+            "the click deselected"
+        );
+        assert!(v.app.inspector_hold.is_none(), "and the hold let go");
+        // The identity card's name: the topmost *Small* in the inspector's column.
+        type_and_leave(&mut v.app, &|t| {
+            t.iter()
+                .filter(|(s, r)| s == "Small" && r.left() > 900.0)
+                .min_by(|a, b| a.1.top().total_cmp(&b.1.top()))
+                .expect("the name")
+                .1
+                .center()
+        });
+        assert_eq!(
+            v.app.session.doc.get(v.i).unwrap().name(),
+            "SmallXY",
+            "the layer's name"
+        );
+    }
 }

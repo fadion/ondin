@@ -847,6 +847,10 @@ pub struct OndinApp {
     /// A set's value the user asked to delete while variants use it, until the
     /// confirmation modal is answered (§15 D996).
     pub(crate) deleting_value: Option<crate::panels::ValueDelete>,
+    /// The selection the inspector last drew while one of its fields held the
+    /// keyboard, kept until that field lets go so a click elsewhere commits what
+    /// was typed rather than dropping it (§15 D999, [`Self::inspector_panel`]).
+    pub(crate) inspector_hold: Option<crate::session::Selection>,
     /// Canvas size in device pixels as of the last frame — zoom-to-fit needs it.
     pub(crate) canvas_px: (u32, u32),
     /// The display scale the canvas was last laid out at, `pixels_per_point`.
@@ -2193,6 +2197,7 @@ impl OndinApp {
             layers_edge: EdgeDwell::default(),
             confirming_close: false,
             deleting_value: None,
+            inspector_hold: None,
             canvas_px: (1, 1),
             canvas_ppp: 1.0,
             canvas_rect: egui::Rect::NOTHING,
@@ -9532,7 +9537,27 @@ impl OndinApp {
         let screen = ctx.input(|i| i.content_rect());
         let column = Self::inspector_column(screen);
 
-        egui::Area::new(egui::Id::new("inspector"))
+        // 🚨 **A field being typed in keeps the selection it was showing until it
+        // lets go of focus** (§15 D999). The canvas — and the layers panel — run
+        // before the inspector, so a click there that changed the selection had
+        // the inspector draw the *new* selection's cards that same frame: the
+        // focused field was never drawn again, never saw its focus go, and its
+        // typed text — a property's value, a filter, a layer's name, a hex — went
+        // with it. Only `Enter` kept an edit, which nothing else in the app asks
+        // for. Drawn against the held selection for the frames it takes, the field
+        // blurs as a click inside the inspector would blur it and commits to the
+        // layer it was editing; the inspector then shows the new selection.
+        let held = self.inspector_hold.take().filter(|old| {
+            old.ids() != self.session.selection.ids()
+                && old
+                    .ids()
+                    .iter()
+                    .all(|id| self.session.doc.get(*id).is_some())
+        });
+        let shown = held.map(|old| std::mem::replace(&mut self.session.selection, old));
+
+        let area = egui::Id::new("inspector");
+        egui::Area::new(area)
             .order(egui::Order::Middle)
             .fixed_pos(column.min)
             .default_size(column.size())
@@ -9568,6 +9593,21 @@ impl OndinApp {
                         });
                 });
             });
+
+        // Hold what was drawn while a widget of the inspector's own layer keeps
+        // the focus — a popover's field is another layer and holds nothing — and
+        // give the selection the canvas made back once it does not.
+        let focused = ctx.memory(|m| m.focused());
+        let layer = egui::LayerId::new(egui::Order::Middle, area);
+        if focused
+            .and_then(|id| ctx.read_response(id))
+            .is_some_and(|r| r.layer_id == layer)
+        {
+            self.inspector_hold = Some(self.session.selection.clone());
+        }
+        if let Some(now) = shown {
+            self.session.selection = now;
+        }
     }
 
     /// Advance [`ChromeHold`] one frame: pick up whatever the last pass's value

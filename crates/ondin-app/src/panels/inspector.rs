@@ -226,6 +226,8 @@ struct TransformMarks {
     r: Option<Mark>,
     w: Option<Mark>,
     h: Option<Mark>,
+    /// A line's length (`L`, in W's slot, §15 D229).
+    l: Option<Mark>,
 }
 
 /// `resp` with the field's own hover text, unless an override mark gives it one —
@@ -4653,13 +4655,26 @@ impl OndinApp {
     /// field will show. An instance root's placement is its own (`reset::
     /// placement_is_own`), so it gets no X, Y or rotation mark.
     ///
-    /// ⚠️ **R's reset swaps the linear part and keeps the copy's translation**, so a
-    /// layer turned about its pivot moves when reset. §15 D1003 (8) rules it to
-    /// rotate back about the pivot instead — not built.
+    /// **R's reset rotates back about the pivot** (§15 D1003 (8)): the main's
+    /// basis, the translation rebuilt so the pivot stays put. It swapped the
+    /// linear part and kept the copy's translation until `[X9.1-L1-03]`, so a
+    /// layer turned about its pivot moved when reset.
+    ///
+    /// **A swapped copy's placement and size compare with its slot**
+    /// (`reset::slot_source_of`, `[X9.1-L1-01]`), and a text's box and a line's
+    /// length and direction are marked too (`[X9.1-L1-02]`) — on W, H, `L` and R.
     fn transform_marks(&self, id: NodeId, world: [f64; 6], box_min: Point) -> TransformMarks {
         let doc = &self.session.doc;
-        let (Some(copy), Some(src)) = (
+        // **Placement and size from the slot** (`reset::slot_source_of`): a
+        // swapped copy keeps them from its link, and read from `source_of` — the
+        // swap target — X, Y, W and H were marked with the target's page position
+        // and size, and a ↺ moved the slot out of its button (`[X9.1-L1-01]`,
+        // §15 D983 (3)). A text's sizing and a line's end are not slot fields
+        // (`swap::is_slot_field`) and compare with `content`, as
+        // `reset::overrides` compares them.
+        let (Some(copy), Some(src), Some(content)) = (
             doc.get(id),
+            ondin_core::reset::slot_source_of(doc, id).and_then(|s| doc.get(s)),
             ondin_core::reset::source_of(doc, id).and_then(|s| doc.get(s)),
         ) else {
             return TransformMarks::default();
@@ -4754,15 +4769,37 @@ impl OndinApp {
                 }
             }
             if cur[..4] != theirs[..4] {
-                let c = [theirs[0], theirs[1], theirs[2], theirs[3], cur[4], cur[5]];
+                // **About the pivot** (§15 D1003 (8), `[X9.1-L1-03]`): the main's
+                // basis with the translation rebuilt so the layer's pivot — the
+                // point the field and the handle turn it about — stays where it
+                // is, so the ↺ undoes a turn in place. Keeping the copy's
+                // translation instead swung the layer about its local origin: a
+                // 20-px square turned 90° in the field came back 20 px off both
+                // its own place and the main's. A position moved apart from the
+                // turn stays marked on X and Y, as its own override.
+                let pv = self.session.preview_pivot(id).unwrap_or(Point::ZERO);
+                let held = Affine::new(cur) * pv;
+                let turned =
+                    Affine::new([theirs[0], theirs[1], theirs[2], theirs[3], 0.0, 0.0]) * pv;
+                let c = [
+                    theirs[0],
+                    theirs[1],
+                    theirs[2],
+                    theirs[3],
+                    held.x - turned.x,
+                    held.y - turned.y,
+                ];
                 let basis = parent * Affine::new(c);
                 let [a, b, cc, d, ..] = basis.as_coeffs();
                 let angle = build::Basis::of(Affine::new([a, b, cc, d, 0.0, 0.0]))
                     .orientation
                     .angle;
+                // The copy's own insets, both axes: a pin is a placement of its
+                // own (X's and Y's), and stated it keeps `keep_insets` off the
+                // rebuilt translation.
                 marks.r = Some(Mark {
                     tip: format!("Reset to main · {}°", num(shown_degrees(angle))),
-                    tx: set(c, true, true),
+                    tx: set(c, false, false),
                 });
             }
         }
@@ -4796,6 +4833,94 @@ impl OndinApp {
                 marks.h = Some(Mark {
                     tip: format!("Reset to main · {}", num(main.height)),
                     tx: resize(Size::new(mine.width, main.height), false),
+                });
+            }
+        }
+        // **A text's box is its sizing** (`[X9.1-L1-02]`, `[X9.2-L1-02]`): an
+        // auto-height width and a fixed box's two sides are what W and H show and
+        // write (`size_tx`), and nothing marked them — the Type header counted the
+        // `TextSizing` override and no field carried it. Marked here **only where
+        // the modes agree**: a mode that differs is the Sizing section's mark
+        // (`typography::sizing_mark`), whose reset writes the main's whole sizing,
+        // width with it — two marks for one difference otherwise. Each reset keeps
+        // the copy's mode and writes the main's one side. Compared with `content`,
+        // not the slot: a sizing is no slot field.
+        if let (NodeKind::Text { sizing: mine_s, .. }, NodeKind::Text { sizing: main_s, .. }) =
+            (copy.kind(), content.kind())
+        {
+            let resize = |s: TextSizing, horizontal: bool| {
+                Transaction(vec![
+                    Operation::SetGeometry {
+                        id,
+                        geometry: GeometryPatch::TextSizing(s),
+                    },
+                    insets(horizontal, !horizontal),
+                ])
+            };
+            let tip = |v: f64| format!("Reset to main · {}", num(v));
+            match (*mine_s, *main_s) {
+                (TextSizing::AutoHeight(w), TextSizing::AutoHeight(mw)) if w != mw => {
+                    marks.w = Some(Mark {
+                        tip: tip(mw),
+                        tx: resize(TextSizing::AutoHeight(mw), true),
+                    });
+                }
+                (TextSizing::Fixed(s), TextSizing::Fixed(ms)) => {
+                    if s.width != ms.width {
+                        marks.w = Some(Mark {
+                            tip: tip(ms.width),
+                            tx: resize(TextSizing::Fixed(Size::new(ms.width, s.height)), true),
+                        });
+                    }
+                    if s.height != ms.height {
+                        marks.h = Some(Mark {
+                            tip: tip(ms.height),
+                            tx: resize(TextSizing::Fixed(Size::new(s.width, ms.height)), false),
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+        // **A line's end is its length and its angle** (`[X9.1-L1-02]`): `L` is
+        // marked where the end's length differs, its reset the main's length along
+        // the copy's own direction; a direction that differs marks R (a line's R
+        // reads the start-to-end angle), its reset the main's direction at the
+        // copy's own length — so the two ↺ together write the main's end. Both
+        // with the copy's own insets, stated so `keep_insets` leaves the write.
+        if let (NodeKind::Line { end: mine_e }, NodeKind::Line { end: main_e }) =
+            (copy.kind(), content.kind())
+            && mine_e != main_e
+        {
+            let (len, main_len) = (mine_e.to_vec2().hypot(), main_e.to_vec2().hypot());
+            let reend = |p: Point| {
+                Transaction(vec![
+                    Operation::SetGeometry {
+                        id,
+                        geometry: GeometryPatch::LineEnd(p),
+                    },
+                    insets(false, false),
+                ])
+            };
+            if len != main_len && len > 1e-9 {
+                marks.l = Some(Mark {
+                    tip: format!("Reset to main · {}", num(main_len)),
+                    tx: reend((mine_e.to_vec2() * (main_len / len)).to_point()),
+                });
+            }
+            let (dir, main_dir) = (mine_e.y.atan2(mine_e.x), main_e.y.atan2(main_e.x));
+            // Where the basis differs as well, R is the basis's mark and the
+            // direction's shows once that is reset — one ↺, one write.
+            if dir != main_dir && main_len > 1e-9 && marks.r.is_none() {
+                let shown = parent * copy.transform() * Point::ZERO;
+                let to =
+                    parent * copy.transform() * (main_e.to_vec2() * (len / main_len)).to_point();
+                marks.r = Some(Mark {
+                    tip: format!(
+                        "Reset to main · {}°",
+                        num(shown_degrees((to.y - shown.y).atan2(to.x - shown.x)))
+                    ),
+                    tx: reend((main_e.to_vec2() * (len / main_len)).to_point()),
                 });
             }
         }
@@ -5261,15 +5386,21 @@ impl OndinApp {
                 let wide = egui::vec2(fw, 28.0);
                 ui.horizontal(|ui| {
                     let mut len = (b - a).hypot();
-                    let rl = value_field(
+                    let (rl, reset_l) = ui::value_field_marked(
                         ui,
                         wide,
                         // `L`, matching W and H — one letter, and the only sensible one.
                         Prefix::Text("L"),
+                        marks.l.as_ref().map(Mark::field),
                         &mut len,
                         Scrub::whole(0.5).range(0.01..=f64::MAX),
                         |d| d.custom_formatter(ui::number(2)),
                     );
+                    // An instance's overridden length, put back (§15 D981,
+                    // `[X9.1-L1-02]`).
+                    if let (true, Some(m)) = (reset_l, &marks.l) {
+                        app.commit_reset(m.tx.clone());
+                    }
                     // **Written through `move_line_end`, the same verb the endpoint
                     // handle drags through.** A second way to say where a line's end is
                     // would be a second definition of what a line is — the rule W/H

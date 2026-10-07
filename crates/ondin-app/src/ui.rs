@@ -1083,6 +1083,29 @@ pub fn override_dot(p: &egui::Painter, at: egui::Pos2) {
     p.circle_filled(at, 2.0, theme::text::MUTED);
 }
 
+/// The centre of every override dot a frame painted — `override_dot`'s 2-pt
+/// muted circle, and the layers panel's row dot, which is the same circle. The
+/// tests' one detector (`[X8.2-L3-01]`): it was written three times, and one copy
+/// had drifted to counting any 2-pt circle. Plain backticks: this item is
+/// `cfg(test)`, which the doc gate cannot see (§15 D319).
+#[cfg(test)]
+pub(crate) fn painted_override_dots(out: &egui::FullOutput) -> Vec<egui::Pos2> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<egui::Pos2>) {
+        match shape {
+            egui::Shape::Circle(c) if c.radius == 2.0 && c.fill == theme::text::MUTED => {
+                out.push(c.center);
+            }
+            egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+            _ => {}
+        }
+    }
+    let mut v = Vec::new();
+    for s in &out.shapes {
+        walk(&s.shape, &mut v);
+    }
+    v
+}
+
 /// A [`section_head_badged`] badge: an 18-pt accent chip, the mockup's — accent
 /// 18% under 10-pt accent-100 text, 6 pt either side, a 4-pt corner.
 fn head_badge(ui: &mut egui::Ui, word: &str) {

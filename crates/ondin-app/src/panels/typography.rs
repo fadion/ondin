@@ -810,10 +810,13 @@ impl OndinApp {
 
     /// The Sizing section's override mark on text `id` (§15 D981): compared on
     /// the **mode** — auto width, auto height, fixed — and reset to the main's
-    /// whole sizing, its width with it. The width an auto-height box carries is
-    /// the Transform card's W, marked there; comparing it here as well would mark
-    /// one difference twice. An instance root's sizing is its own size, and
-    /// `sub_mark` never marks it.
+    /// whole sizing, its width with it. The width an auto-height box carries, and
+    /// a fixed box's two sides, are the Transform card's W and H, marked there
+    /// where the modes agree (`OndinApp::transform_marks`, since `[X9.1-L1-02]` —
+    /// before it no field marked them); comparing them here as well would mark
+    /// one difference twice. An instance root's sizing is compared as any copy's
+    /// — a size is no placement (`propagate::is_placement`) — so its mode is
+    /// marked here too.
     fn sizing_mark(&self, id: NodeId) -> Option<OverrideMark> {
         // The sizing as the mark compares it: equal when the modes are.
         #[derive(Clone)]
@@ -12308,34 +12311,28 @@ mod instance_mark_tests {
     }
 
     /// Every painted text with its rect and colour, and every override dot's
-    /// centre (`ui::override_dot`'s 2-pt muted circle).
+    /// centre — the dots through the tests' one detector,
+    /// `ui::painted_override_dots` (`[X8.2-L3-01]`).
     #[allow(clippy::type_complexity)]
     fn painted(
         out: &egui::FullOutput,
     ) -> (Vec<(String, egui::Rect, egui::Color32)>, Vec<egui::Pos2>) {
-        fn walk(
-            shape: &egui::Shape,
-            texts: &mut Vec<(String, egui::Rect, egui::Color32)>,
-            dots: &mut Vec<egui::Pos2>,
-        ) {
+        fn walk(shape: &egui::Shape, texts: &mut Vec<(String, egui::Rect, egui::Color32)>) {
             match shape {
                 egui::Shape::Text(t) => texts.push((
                     t.galley.text().to_string(),
                     t.visual_bounding_rect(),
                     t.fallback_color,
                 )),
-                egui::Shape::Circle(c) if c.radius == 2.0 && c.fill == theme::text::MUTED => {
-                    dots.push(c.center)
-                }
-                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, texts, dots)),
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, texts)),
                 _ => {}
             }
         }
-        let (mut texts, mut dots) = (Vec::new(), Vec::new());
+        let mut texts = Vec::new();
         for s in &out.shapes {
-            walk(&s.shape, &mut texts, &mut dots);
+            walk(&s.shape, &mut texts);
         }
-        (texts, dots)
+        (texts, crate::ui::painted_override_dots(out))
     }
 
     /// The pointer moved to `at`, then a press and a release there, each a frame.

@@ -4758,8 +4758,12 @@ impl OndinApp {
                 .info("Nothing here differs from the main component");
             return None;
         }
-        // A reset is not a resize (`OndinApp::commit_reset`'s first point).
-        Some(self.items_stated(Transaction(ops)))
+        // A reset is not a resize (`OndinApp::commit_reset`'s first point), nor
+        // the hand placing a pinned or laid-out layer: its insets are stated
+        // beside it, or the commit door re-pinned a pinned copy 160 px off and
+        // dropped an in-flow item's reset whole (`[X4-L1-01]`).
+        let ops = self.placement_stated(Transaction(ops));
+        Some(self.items_stated(ops))
     }
 
     /// Select a freshly made group, and leave it **shut** in the layers tree.

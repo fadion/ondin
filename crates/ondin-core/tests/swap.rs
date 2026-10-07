@@ -448,6 +448,30 @@ fn the_slot_keeps_placement_size_and_visibility() {
     assert_eq!(f.fill(f.r), red(2), "Heart's root fill is");
 }
 
+/// **`reset::slot_source_of` answers the slot for a swapped copy** — the source
+/// its placement and size compare against — where `reset::source_of` answers the
+/// swap; for anything not swapped the two agree (`[X9.1-L1-01]`: the Transform
+/// card read both from `source_of` and marked a swapped slot at Heart's page
+/// position and size). Flip, run: `slot_source_of` answering `source_of` for a
+/// swapped copy fails *"the slot"*.
+#[test]
+fn a_swapped_copys_slot_fields_compare_with_its_link() {
+    let mut f = fixture();
+    assert_eq!(reset::slot_source_of(&f.doc, f.r), Some(f.n));
+    assert_eq!(reset::source_of(&f.doc, f.r), Some(f.n));
+    f.swap_to(f.r, f.heart);
+    assert_eq!(reset::slot_source_of(&f.doc, f.r), Some(f.n), "the slot");
+    assert_eq!(reset::source_of(&f.doc, f.r), Some(f.heart), "the swap");
+    let shape = f.kids(f.r)[0];
+    assert_eq!(
+        reset::slot_source_of(&f.doc, shape),
+        reset::source_of(&f.doc, shape),
+        "a member of the swapped copy compares with Heart's, slot fields and all"
+    );
+    assert_eq!(reset::slot_source_of(&f.doc, f.n), Some(f.star));
+    assert_eq!(reset::slot_source_of(&f.doc, f.heart), None, "a main");
+}
+
 /// **Heart's edits reach the swapped copy and Star's do not** — a field, and a
 /// child gained.
 #[test]

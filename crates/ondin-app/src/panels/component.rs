@@ -12,7 +12,8 @@
 //! **Counts tell you what each reset will do; a reset with nothing to do is
 //! disabled, not hidden** (D981). The counts are `reset::Drift`, cached per
 //! session revision (`OndinApp::drift_cache`), since the card is read every frame
-//! and a drift is a walk of the instance.
+//! and a drift is a walk of the instance — and the property readings beside them
+//! on the same key ([`PropCache`], `OndinApp::prop_cache`, `[X8.1-L4-02]`).
 //!
 //! ⚠️ **The drift summary counts every difference a *Reset all* would undo** —
 //! fields, removed children and order — where the mockup's *3 overrides* sat over a
@@ -313,33 +314,10 @@ impl OndinApp {
         // root the main's and unpinned a pinned instance
         // (`a_transform_reset_keeps_an_instance_roots_own_pin`, `arch-scribe`'s).
         // And only a node whose ops **place** it: a pivot alone moves nothing.
+        // The append is `placement_stated`'s, which the context menu's and the
+        // Component card's resets take too (`[X4-L1-01]`).
         if let Some((_, _, ops)) = cards.iter_mut().find(|(t, ..)| *t == "Transform") {
-            let mut placed: Vec<NodeId> = ops
-                .iter()
-                .filter(|op| {
-                    matches!(
-                        op,
-                        Operation::SetTransform { .. } | Operation::SetGeometry { .. }
-                    )
-                })
-                .filter_map(Operation::overwrites)
-                .collect();
-            placed.sort();
-            placed.dedup();
-            for id in placed {
-                let own = ondin_core::reset::placement_is_own(doc, id);
-                let from = if own {
-                    Some(id)
-                } else {
-                    ondin_core::reset::source_of(doc, id)
-                };
-                if let Some(n) = from.and_then(|s| doc.get(s)) {
-                    ops.push(Operation::SetInsets {
-                        id,
-                        insets: *n.insets(),
-                    });
-                }
-            }
+            *ops = placement_stated(doc, Transaction(std::mem::take(ops))).0;
         }
         self.card_overrides = cards;
         self.field_overrides = fields;
@@ -379,6 +357,14 @@ impl OndinApp {
         }
         tx.0.extend(stated);
         tx
+    }
+
+    /// `tx`, a reset, with every placed copy's insets stated beside it — the
+    /// module's `placement_stated`, which says why. The context menu's and the
+    /// Component card's resets take it (`OndinApp::reset_tx`, `[X4-L1-01]`), as
+    /// the Transform header's does.
+    pub(crate) fn placement_stated(&self, tx: Transaction) -> Transaction {
+        placement_stated(&self.session.doc, tx)
     }
 
     /// Commit an instance's reset from the inspector (§15 D981) — a field's ↺, a
@@ -1022,6 +1008,64 @@ fn rounded_outline(r: egui::Rect, radius: f32) -> Vec<egui::Pos2> {
     pts
 }
 
+/// `tx`, a reset, with the **placement stated** beside every write that places a
+/// copy — a `SetTransform`, or a `SetGeometry` that resizes — and has no
+/// `SetInsets` of its own in `tx`: the insets of its **slot source**
+/// (`reset::slot_source_of`), or its own where its placement is its own
+/// (`reset::placement_is_own`, an instance root).
+///
+/// **Both of the commit door's tool-intent rewrites read a bare placement as the
+/// hand's**, and a reset is not the hand. `keep_insets` reads a transform on a
+/// pinned layer as *"draw it here"* and re-pins it where it lands — in an
+/// instance wider than its main, the main's stored point is another inset
+/// (`c292b50`'s defect, measured as `right 172` against `12`); and
+/// `kept_flow_translations` keeps an in-flow layout item's stored translation and
+/// drops the write as changing nothing, so an item's *Reset all* committed
+/// nothing at all. A `SetInsets` for the node stands both down. Where `tx` writes
+/// no insets the node's equal its source's — `reset::overrides` would have reset
+/// them otherwise — so this states the value the node already has, except on the
+/// Transform header's reset, which takes the card's ops alone and so resets the
+/// insets with it (counted under Position).
+///
+/// ⚠️ **The slot, not `source_of`, for a swapped copy** (§15 D983 (3)): its
+/// placement is its link's, and the swap target's insets unpinned the slot
+/// (`[X9.1-L1-01]`). ⚠️ **One helper for every reset door** (`[X4-L1-01]`):
+/// `c292b50` wrote this append in `OndinApp::gather_card_overrides` alone, and
+/// the context menu's and the Component card's resets (`OndinApp::reset_tx`) went
+/// on sending the bare transform. A field's own reset (`OndinApp::transform_marks`)
+/// states its insets per axis, and is left to them.
+fn placement_stated(doc: &ondin_core::Document, mut tx: Transaction) -> Transaction {
+    let mut placed: Vec<NodeId> =
+        tx.0.iter()
+            .filter_map(|op| match op {
+                Operation::SetTransform { id, .. } => Some(*id),
+                Operation::SetGeometry { id, geometry } if geometry.resizes() => Some(*id),
+                _ => None,
+            })
+            .filter(|id| {
+                !tx.0
+                    .iter()
+                    .any(|op| matches!(op, Operation::SetInsets { id: i, .. } if i == id))
+            })
+            .collect();
+    placed.sort();
+    placed.dedup();
+    for id in placed {
+        let from = if ondin_core::reset::placement_is_own(doc, id) {
+            Some(id)
+        } else {
+            ondin_core::reset::slot_source_of(doc, id)
+        };
+        if let Some(n) = from.and_then(|s| doc.get(s)) {
+            tx.0.push(Operation::SetInsets {
+                id,
+                insets: *n.insets(),
+            });
+        }
+    }
+    tx
+}
+
 /// The inspector card that shows the field `op` writes — its title, as `panel`
 /// takes it — or `None` for a field no card header owns: the name and visibility
 /// (the identity card), a path's or a boolean's shape, the text's content and its
@@ -1284,6 +1328,34 @@ fn heading(
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 9.0;
         let slot = glyph_slot(ui);
+        // **The name is cut to the room the row leaves it** (`[X8.1-L1-01]`): a
+        // plain label in a horizontal row never wraps, and a main's name past
+        // ~50 characters ran the row — and egui grows the parent to its widest
+        // row, so every card below — off the screen, *Detach* half drawn and the
+        // summary not at all. A variant's derived name (`values.join(", ")`) gets
+        // long with three properties. Cut with `…`, the whole name in the
+        // tooltip, as the card's own label column already was (§15 D996).
+        let summary_w = if summary.is_empty() {
+            0.0
+        } else {
+            let font = egui::FontId::proportional(11.0);
+            ui.painter()
+                .layout_no_wrap(summary.to_owned(), font, theme::text::DIM)
+                .size()
+                .x
+                + 9.0
+        };
+        let arrow_w = ui
+            .painter()
+            .layout_no_wrap(
+                icon::ARROW_UP_RIGHT.to_owned(),
+                theme::icon_font(12.0),
+                theme::text::DIM,
+            )
+            .size()
+            .x
+            + 4.0;
+        let room = (ui.available_width() - summary_w).max(24.0);
         let block = ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 1.0;
             if !caption.is_empty() {
@@ -1301,18 +1373,38 @@ fn heading(
                 // main's, whose name is a plain label in its block. The
                 // maintainer's look. Nothing in this block is a control.
                 ui.spacing_mut().interact_size.y = 0.0;
+                let name_room = (room - arrow_w).max(12.0);
+                let cut = ui
+                    .painter()
+                    .layout_no_wrap(
+                        name.to_owned(),
+                        egui::FontId::proportional(13.0),
+                        theme::text::STRONG,
+                    )
+                    .size()
+                    .x
+                    > name_room;
                 let resp = ui
                     .horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 4.0;
-                        let name = ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(name)
-                                    .size(13.0)
-                                    .underline()
-                                    .color(theme::text::STRONG),
-                            )
-                            .sense(egui::Sense::click()),
-                        );
+                        let name = ui
+                            .scope(|ui| {
+                                ui.set_max_width(name_room);
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(name)
+                                            .size(13.0)
+                                            .underline()
+                                            .color(theme::text::STRONG),
+                                    )
+                                    .truncate()
+                                    // Named in the row's own tooltip below, one
+                                    // tooltip rather than two stacked.
+                                    .show_tooltip_when_elided(false)
+                                    .sense(egui::Sense::click()),
+                                )
+                            })
+                            .inner;
                         let arrow = ui.add(
                             egui::Label::new(
                                 egui::RichText::new(icon::ARROW_UP_RIGHT)
@@ -1324,17 +1416,26 @@ fn heading(
                         name | arrow
                     })
                     .inner
-                    .on_hover_text("Go to main component");
+                    .on_hover_text(match cut {
+                        true => format!("{name}\nGo to main component"),
+                        false => "Go to main component".to_owned(),
+                    });
                 if resp.clicked() {
                     *act = Some(Act::GoToMain(main));
                 }
             }
             if let Some(title) = title {
-                ui.label(
-                    egui::RichText::new(title)
-                        .size(13.0)
-                        .color(theme::text::STRONG),
-                );
+                ui.scope(|ui| {
+                    ui.set_max_width(room);
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(title)
+                                .size(13.0)
+                                .color(theme::text::STRONG),
+                        )
+                        .truncate(),
+                    );
+                });
             }
         });
         paint_hexagon(ui, main, slot, block.response.rect);
@@ -1557,11 +1658,28 @@ fn child_line(ui: &mut egui::Ui, main_name: &str, linked: bool, act: &mut Option
     let row = ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 9.0;
         slot = glyph_slot(ui);
-        ui.label(
-            egui::RichText::new(text)
-                .size(12.0)
-                .color(theme::text::STRONG),
-        );
+        // **Cut to what *Go to main* leaves** (`[X8.1-L1-01]`): measured, a
+        // 16-character main name already ran under the button and a 53-character
+        // one pushed it — and every card below, egui growing the parent to the
+        // row — off the screen. The whole line in the tooltip when cut (the
+        // label's own, `show_tooltip_when_elided`).
+        let button = if linked {
+            ui::action_button_w(ui.ctx(), "Go to main") + ui.spacing().item_spacing.x
+        } else {
+            0.0
+        };
+        let room = (ui.available_width() - button).max(24.0);
+        ui.scope(|ui| {
+            ui.set_max_width(room);
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(text)
+                        .size(12.0)
+                        .color(theme::text::STRONG),
+                )
+                .truncate(),
+            );
+        });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if linked {
                 let label = "Go to main";
@@ -1728,7 +1846,11 @@ mod tests {
                 parent: root,
                 index: None,
             }],
-            Default::default(),
+            // **Off its main** (`[X8.2-L6-01]`): placed over the main, world and
+            // local readings agree for every node here, and a Transform mark
+            // compared on the card's world numbers — the one implementation
+            // `OndinApp::transform_marks`' doc forbids — passed every test.
+            ondin_core::kurbo::Vec2::new(200.0, 40.0),
         );
         doc.apply(&tx).expect("an instance");
         let i = made[0];
@@ -1953,6 +2075,13 @@ mod tests {
     /// writes the main's x back and leaves y alone. Flip: comparing the whole
     /// transform rather than one coefficient in `transform_marks` fails *"Y
     /// follows"* — Y painted bright.
+    ///
+    /// ⚠️ **The world-reading flip bites only because `fixture` places the
+    /// instance off its main** (`[X8.2-L6-01]`). Over its main, world and local
+    /// agreed for every node, and X/Y compared as `world[axis]` against the main's
+    /// `world_transform` left the whole suite green. Flip, run, with the instance
+    /// at (200, 40): that comparison fails *"Y follows"* here and *"an unmarked
+    /// label still scrubs"* in `a_marked_fields_reset_shows_an_arrow_and_a_tooltip`.
     #[test]
     fn an_overridden_field_is_bright_and_its_label_resets_it() {
         let ctx = egui::Context::default();
@@ -2056,8 +2185,21 @@ mod tests {
     /// and the radius field marked — the whole radius differs — while each corner
     /// is marked alone: the top left and no other, its reset writing that corner
     /// and leaving the other three as the copy holds them. A click on opacity's
-    /// glyph puts the main's 100% back. Flip: dropping `sub_mark`'s equality skip
-    /// marks every corner and fails *"the top right follows"*.
+    /// glyph puts the main's 100% back.
+    ///
+    /// ⚠️ **The corner is held by two guards in `sub_mark`, and either alone keeps
+    /// it unmarked**: the equality skip (`get(&cur) == want`), and *"a reset that
+    /// would write nothing marks nothing"* (`cur == before`), since for an
+    /// untouched corner `put` writes the value it already holds. Flips, run
+    /// (`[X8.2-L6-05]`, re-run 2026-10-07): the equality skip dropped leaves this
+    /// test green, and is caught where `put` is lossy — by
+    /// `layout::tests::an_instance_marks_its_own_layout_fields_and_no_others`
+    /// (*"the mode follows"*), `typography::instance_mark_tests::the_sizing_mark_compares_the_mode_and_not_the_width`
+    /// (*"the width is W's"*) and, since its copy carries a vertical pin of its
+    /// own, `a_centre_button_marks_a_centring_the_main_does_not_share` (*"one
+    /// dot"*, two). The write-nothing guard dropped alone fails only the layout
+    /// test (*"no layout, no gap to reset"*). Both dropped fail here at *"the top
+    /// right follows"*.
     #[test]
     fn appearance_marks_each_field_and_each_corner() {
         let ctx = egui::Context::default();
@@ -2100,23 +2242,10 @@ mod tests {
         assert_eq!(f.app.session.doc.get(f.ir).unwrap().opacity(), 1.0);
     }
 
-    /// The centre of every override dot the frame painted (`ui::override_dot`'s
-    /// 2-pt muted circle).
+    /// The centre of every override dot the frame painted — the tests' one
+    /// detector, `ui::painted_override_dots` (`[X8.2-L3-01]`).
     fn dots(out: &egui::FullOutput) -> Vec<egui::Pos2> {
-        fn walk(shape: &egui::Shape, out: &mut Vec<egui::Pos2>) {
-            match shape {
-                egui::Shape::Circle(c) if c.radius == 2.0 && c.fill == theme::text::MUTED => {
-                    out.push(c.center);
-                }
-                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
-                _ => {}
-            }
-        }
-        let mut v = Vec::new();
-        for s in &out.shapes {
-            walk(&s.shape, &mut v);
-        }
-        v
+        ui::painted_override_dots(out)
     }
 
     /// The inspector drawn, then three more frames for it to settle — a widget's
@@ -2153,7 +2282,10 @@ mod tests {
     /// reset: the main's whole horizontal axis comes back — both insets and the
     /// auto margins — and the vertical axis is not written. Flip: `centred`
     /// reading the margins of the wrong axis (top and bottom) leaves the
-    /// horizontal button unmarked and fails *"one dot"* with none.
+    /// horizontal button unmarked and fails *"one dot"* with none. Flip, run:
+    /// `centre_mark`'s `put` copying the main's whole insets (`*i = from`) fails
+    /// *"the vertical axis untouched"* — the copy's own `top 20` gone — which it
+    /// passed while the copy's vertical axis was the main's (`[X8.2-L6-06]`).
     #[test]
     fn a_centre_button_marks_a_centring_the_main_does_not_share() {
         use ondin_core::container::AutoMargins;
@@ -2180,8 +2312,13 @@ mod tests {
             centred,
             "the fixture's copy follows its main"
         );
+        // And pinned top 20 of its own, against the main's unset top: the
+        // vertical axis has to *differ* for "untouched" to say anything — with
+        // both `None`, a reset writing the main's whole insets left the same pair
+        // (`[X8.2-L6-06]`).
         let pinned = Insets {
             left: Some(LengthPct::Px(5.0)),
+            top: Some(LengthPct::Px(20.0)),
             ..Default::default()
         };
         assert!(f.app.session.commit(Transaction(vec![Operation::SetInsets {
@@ -2220,7 +2357,7 @@ mod tests {
         );
         assert_eq!(
             (now.top, now.bottom),
-            (None, None),
+            (Some(LengthPct::Px(20.0)), None),
             "the vertical axis untouched"
         );
     }
@@ -2822,8 +2959,49 @@ mod tests {
         assert_eq!(ondin_core::reset::overrides(doc, f.ir), Vec::new());
     }
 
+    /// **X's reset writes the horizontal insets and keeps the copy's own
+    /// vertical ones** (`[X8.2-L6-06]`). `pinned_and_moved`'s copy keeps the
+    /// main's `top 8`, so a reset copying the main's whole insets passed
+    /// `an_x_reset_on_a_pinned_layer_leaves_no_drift` too; here the copy is pinned
+    /// `top 20` of its own first, and X's ↺ must leave it — a vertical pin is an
+    /// override of its own, not X's. Flip, run: `transform_marks`' X and Y resets
+    /// built with `insets(true, true)` fails *"the copy's own top stays"* with
+    /// `top 8`.
+    #[test]
+    fn an_x_reset_keeps_the_copys_own_vertical_pin() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let pin = pinned_and_moved(&mut f);
+        let mut own = *f.app.session.doc.get(f.ir).unwrap().insets();
+        own.top = Some(ondin_core::LengthPct::Px(20.0));
+        assert!(f.app.session.commit(Transaction(vec![Operation::SetInsets {
+            id: f.ir,
+            insets: own,
+        }])));
+        f.app.session.selection.set_one(f.ir);
+        let out = settle(&mut f.app, &ctx);
+        let at = inks(&out)
+            .into_iter()
+            .find(|(t, _, c)| t == "X" && *c == theme::text::STRONG)
+            .map(|(_, r, _)| r.center())
+            .expect("a marked X");
+        click(&mut f.app, &ctx, at);
+        let now = *f.app.session.doc.get(f.ir).unwrap().insets();
+        assert_eq!(
+            (now.left, now.right),
+            (pin.left, pin.right),
+            "the main's horizontal pin is back"
+        );
+        assert_eq!(
+            now.top,
+            Some(ondin_core::LengthPct::Px(20.0)),
+            "the copy's own top stays"
+        );
+    }
+
     /// **And the Transform card's header reset**, which `gather_card_overrides`
-    /// gives the main's insets for the same reason. Flip: dropping that append
+    /// gives the main's insets for the same reason (through `placement_stated`,
+    /// since `[X4-L1-01]` the reset doors' one helper). Flip: dropping that append
     /// fails *"the insets came back"* with `right 172` — the main's point, pinned
     /// against the wider instance.
     #[test]
@@ -2925,6 +3103,522 @@ mod tests {
             "the main's size is back"
         );
         assert_eq!(node.insets(), &pin, "and the instance's own pin stays");
+        // **And through W's own ↺** (`[X8.2-L6-07]`): `6210953` fixed the root's
+        // insets at the header and in `transform_marks` both, and only the header
+        // was driven. Widened again, as above, and W's bright label clicked. Flip,
+        // run: `transform_marks`' `main_in` read from the source for a root too
+        // fails *"W keeps the instance's own pin"* — `right: None`, the instance
+        // unpinned, the shipped defect.
+        assert!(f.app.session.commit(Transaction(vec![
+            Operation::SetInsets {
+                id: f.i,
+                insets: pin
+            },
+            Operation::SetTransform {
+                id: f.i,
+                transform: ondin_core::kurbo::Affine::translate((395.0, 5.0)),
+            },
+            Operation::SetGeometry {
+                id: f.i,
+                geometry: ondin_core::GeometryPatch::Size(Size::new(260.0, 100.0)),
+            },
+        ])));
+        let out = settle(&mut f.app, &ctx);
+        let w = inks(&out)
+            .into_iter()
+            .find(|(t, _, c)| t == "W" && *c == theme::text::STRONG)
+            .map(|(_, r, _)| r.center())
+            .expect("a marked W");
+        click(&mut f.app, &ctx, w);
+        let node = f.app.session.doc.get(f.i).unwrap();
+        assert!(
+            matches!(node.kind(), NodeKind::Artboard { size } if *size == Size::new(100.0, 100.0)),
+            "W's reset puts the main's width back"
+        );
+        assert_eq!(node.insets(), &pin, "W keeps the instance's own pin");
+    }
+
+    /// **The menu's and the card's *Reset all* state the placement too**
+    /// (`[X4-L1-01]`). The main's rect pinned `right 12` alone, stored at (78, 8)
+    /// as the app's pin writes it; the instance 260 wide, so the copy draws at
+    /// x 238; the copy moved straight down 20 from where it is drawn — its insets
+    /// still the main's, its stored transform (238, 28), one override: the
+    /// transform. `reset_tx` sent that `SetTransform` bare, and `keep_insets` read
+    /// it as *"draw it here"*: measured, the copy came back `right 172` — 160 px
+    /// left of where it was, with an insets override it never had. Through
+    /// `reset_selection` (*Reset ‹Label›*, the menu's door) and then through the
+    /// Component card's *Reset all* on the instance (`Act::Reset(Kind::All)`), the
+    /// two doors `reset_tx` serves. Flip, run: `reset_tx` without
+    /// `placement_stated` fails *"the menu's reset keeps the pin"* with
+    /// `right: Some(Px(172.0))`.
+    #[test]
+    fn a_reset_all_on_a_pinned_copy_keeps_its_pin() {
+        use ondin_core::reset::Kind;
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let main_rect = f.app.session.doc.get(f.m).unwrap().children()[0];
+        let pin = ondin_core::Insets {
+            right: Some(ondin_core::LengthPct::Px(12.0)),
+            ..Default::default()
+        };
+        assert!(f.app.session.commit(Transaction(vec![
+            Operation::SetInsets {
+                id: main_rect,
+                insets: pin
+            },
+            Operation::SetTransform {
+                id: main_rect,
+                transform: ondin_core::kurbo::Affine::translate((78.0, 8.0)),
+            },
+        ])));
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![Operation::SetGeometry {
+                    id: f.i,
+                    geometry: ondin_core::GeometryPatch::Size(Size::new(260.0, 100.0)),
+                }]))
+        );
+        let move_down = |f: &mut F| {
+            let placed = f
+                .app
+                .session
+                .resolved
+                .used_local_of(f.app.session.doc.get(f.ir).unwrap());
+            assert!(
+                f.app
+                    .session
+                    .commit(Transaction(vec![Operation::SetTransform {
+                        id: f.ir,
+                        transform: ondin_core::kurbo::Affine::translate((0.0, 20.0)) * placed,
+                    }]))
+            );
+            let doc = &f.app.session.doc;
+            assert_eq!(doc.get(f.ir).unwrap().insets(), &pin, "the fixture");
+            assert_eq!(
+                ondin_core::reset::overrides(doc, f.ir).len(),
+                1,
+                "the fixture: the transform alone differs"
+            );
+        };
+        let drawn_x = |f: &F| {
+            f.app
+                .session
+                .resolved
+                .used_local_of(f.app.session.doc.get(f.ir).unwrap())
+                .translation()
+                .x
+        };
+        move_down(&mut f);
+        f.app.session.selection.set_one(f.ir);
+        f.app.reset_selection(Kind::All);
+        let doc = &f.app.session.doc;
+        assert_eq!(
+            doc.get(f.ir).unwrap().insets(),
+            &pin,
+            "the menu's reset keeps the pin"
+        );
+        assert_eq!(drawn_x(&f), 238.0, "drawn where it was, across");
+        assert_eq!(ondin_core::reset::overrides(doc, f.ir), Vec::new());
+        move_down(&mut f);
+        f.app.session.selection.set_one(f.i);
+        f.app.component_act(Some(Act::Reset(Kind::All)));
+        let doc = &f.app.session.doc;
+        assert_eq!(
+            doc.get(f.ir).unwrap().insets(),
+            &pin,
+            "the card's reset keeps the pin"
+        );
+        // The instance's own width is reset with it — the root's size is no
+        // placement — so the copy, still `right 12`, draws where the main's does.
+        assert_eq!(drawn_x(&f), 78.0, "pinned in the main's width");
+        assert_eq!(ondin_core::reset::overrides(doc, f.ir), Vec::new());
+    }
+
+    /// **An in-flow flex item's *Reset all* lands** (`[X4-L1-01]`'s second
+    /// case). The main laid out as a flex row; the copy pinned (`left 40, top
+    /// 30`, out of the flow), placed there, then unpinned — back in the flow with
+    /// the main's insets and a stored translation of (40, 30) where the main's
+    /// rect stores (0, 0). One override, and *Reset all* offered for it; but
+    /// `kept_flow_translations` keeps an in-flow item's stored translation and
+    /// dropped the write as changing nothing, so the commit was empty — measured:
+    /// nothing committed, the override and the enabled reset there for good.
+    /// With the insets stated beside the transform the door leaves the write to
+    /// the transaction. Flip, run: `reset_tx` without `placement_stated` fails
+    /// *"the override is gone"*.
+    #[test]
+    fn a_reset_all_on_an_in_flow_item_commits() {
+        use ondin_core::container::{Display, Flex};
+        use ondin_core::reset::Kind;
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![Operation::SetDisplay {
+                    id: f.m,
+                    display: Some(Display::Flex(Flex::default())),
+                }]))
+        );
+        assert!(ondin_core::build::is_flex_item(&f.app.session.doc, f.ir));
+        let out_of_flow = ondin_core::Insets {
+            left: Some(ondin_core::LengthPct::Px(40.0)),
+            top: Some(ondin_core::LengthPct::Px(30.0)),
+            ..Default::default()
+        };
+        assert!(f.app.session.commit(Transaction(vec![
+            Operation::SetInsets {
+                id: f.ir,
+                insets: out_of_flow,
+            },
+            Operation::SetTransform {
+                id: f.ir,
+                transform: ondin_core::kurbo::Affine::translate((40.0, 30.0)),
+            },
+        ])));
+        assert!(f.app.session.commit(Transaction(vec![Operation::SetInsets {
+            id: f.ir,
+            insets: Default::default(),
+        }])));
+        let doc = &f.app.session.doc;
+        assert!(
+            ondin_core::build::is_flex_item(doc, f.ir),
+            "back in the flow"
+        );
+        assert_eq!(
+            ondin_core::reset::overrides(doc, f.ir).len(),
+            1,
+            "the fixture: the stored translation alone differs"
+        );
+        f.app.session.selection.set_one(f.i);
+        f.app.component_act(Some(Act::Reset(Kind::All)));
+        let doc = &f.app.session.doc;
+        assert_eq!(
+            ondin_core::reset::overrides(doc, f.ir),
+            Vec::new(),
+            "the override is gone"
+        );
+        assert!(
+            ondin_core::build::is_flex_item(doc, f.ir),
+            "still in the flow"
+        );
+    }
+
+    /// `n`'s copy of the slot swapped to a **Tag** main, 40 × 30 at (300, 40) on
+    /// the page — another size and another place than the slot's 30 × 30 at the
+    /// Button's origin — with the slot pinned `right 8` in the Button main first.
+    /// Answers the Tag main.
+    fn swapped_to_a_tag(n: &mut N) -> NodeId {
+        let [tag, dot] = [(); 2].map(|_| n.app.session.ids.mint());
+        let root = n.app.session.doc.root();
+        assert!(n.app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: tag,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(40.0, 30.0),
+                },
+                transform: Some(ondin_core::kurbo::Affine::translate((300.0, 40.0))),
+                name: Some("Tag".into()),
+            },
+            Operation::CreateNode {
+                id: dot,
+                parent: tag,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(6.0, 6.0),
+                    corner_radii: Default::default(),
+                },
+                transform: None,
+                name: Some("Dot".into()),
+            },
+            Operation::SetComponent {
+                id: tag,
+                component: true,
+            },
+        ])));
+        assert!(n.app.session.commit(Transaction(vec![
+            Operation::SetInsets {
+                id: n.slot,
+                insets: ondin_core::Insets {
+                    right: Some(ondin_core::LengthPct::Px(8.0)),
+                    ..Default::default()
+                },
+            },
+            Operation::SetTransform {
+                id: n.slot,
+                transform: ondin_core::kurbo::Affine::translate((82.0, 0.0)),
+            },
+        ])));
+        let tx = ondin_core::swap::swap(&n.app.session.doc, n.r, tag).expect("a swap");
+        assert!(n.app.session.commit(tx));
+        let doc = &n.app.session.doc;
+        assert_eq!(doc.get(n.r).unwrap().swap(), Some(tag), "the fixture");
+        assert_eq!(
+            ondin_core::reset::overrides(doc, n.r).len(),
+            1,
+            "the fixture: the swap alone differs"
+        );
+        tag
+    }
+
+    /// **A swapped slot's Transform marks compare with the slot, not the swap**
+    /// (`[X9.1-L1-01]`, §15 D983 (3)). The slot keeps its placement and size, so
+    /// nothing in Transform differs and X, Y, W and H are drawn dim. Read from
+    /// `reset::source_of` — the Tag — all four were marked, their tips naming the
+    /// Tag's page position and size, and X's ↺ moved the slot out of its button.
+    /// Then the copy is resized to 40 × 40, pin kept: *Reset transform* puts the
+    /// slot's 30 × 30 back and keeps its `right 8` — with the Tag's insets stated
+    /// beside it, the reset unpinned the slot, measured. Flips, run:
+    /// `transform_marks` reading its source from `source_of` again fails *"X
+    /// follows the slot"*; `placement_stated` reading `source_of` fails *"the
+    /// slot's pin stays"* with `right: None`.
+    #[test]
+    fn a_swapped_slots_transform_compares_with_the_slot() {
+        let ctx = egui::Context::default();
+        let mut n = nested_fixture(&ctx);
+        swapped_to_a_tag(&mut n);
+        n.app.session.selection.set_one(n.r);
+        let out = settle(&mut n.app, &ctx);
+        let painted = inks(&out);
+        for (label, says) in [
+            ("X", "X follows the slot"),
+            ("Y", "Y follows the slot"),
+            ("W", "W follows the slot"),
+            ("H", "H follows the slot"),
+        ] {
+            let ink = painted
+                .iter()
+                .find(|(t, ..)| t == label)
+                .map(|(.., c)| *c)
+                .unwrap_or_else(|| panic!("no {label} in {painted:?}"));
+            assert_eq!(ink, theme::text::FAINT, "{says}");
+        }
+        let pin = ondin_core::Insets {
+            right: Some(ondin_core::LengthPct::Px(8.0)),
+            ..Default::default()
+        };
+        assert!(n.app.session.commit(Transaction(vec![
+            Operation::SetInsets {
+                id: n.r,
+                insets: pin
+            },
+            Operation::SetTransform {
+                id: n.r,
+                transform: ondin_core::kurbo::Affine::translate((72.0, 0.0)),
+            },
+            Operation::SetGeometry {
+                id: n.r,
+                geometry: ondin_core::GeometryPatch::Size(Size::new(40.0, 40.0)),
+            },
+        ])));
+        let out = settle(&mut n.app, &ctx);
+        let head = texts(&out)
+            .into_iter()
+            .find(|(t, _)| t == "TRANSFORM")
+            .map(|(_, r)| r.center())
+            .expect("the Transform header");
+        frame(&mut n.app, &ctx, vec![egui::Event::PointerMoved(head)]);
+        let out = frame(&mut n.app, &ctx, Vec::new());
+        let chip = texts(&out)
+            .into_iter()
+            .find(|(t, _)| t == "Reset transform")
+            .map(|(_, r)| r.center())
+            .expect("the size override offers the reset");
+        click(&mut n.app, &ctx, chip);
+        let node = n.app.session.doc.get(n.r).unwrap();
+        assert!(
+            matches!(node.kind(), NodeKind::Artboard { size } if *size == Size::new(30.0, 30.0)),
+            "the slot's size is back: {:?}",
+            node.kind()
+        );
+        assert_eq!(node.insets(), &pin, "the slot's pin stays");
+        assert!(node.swap().is_some(), "and the swap with it");
+    }
+
+    /// A layer of `kind` added to `fixture`'s main, and the instance's copy of
+    /// it that the commit's structural pass makes: `(in the main, the copy)`.
+    fn added_to_main(f: &mut F, kind: NodeKind) -> (NodeId, NodeId) {
+        let id = f.app.session.ids.mint();
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![Operation::CreateNode {
+                    id,
+                    parent: f.m,
+                    index: 0,
+                    kind,
+                    transform: None,
+                    name: Some("Added".into()),
+                }]))
+        );
+        let doc = &f.app.session.doc;
+        let copy = doc
+            .get(f.i)
+            .unwrap()
+            .children()
+            .iter()
+            .copied()
+            .find(|c| doc.get(*c).and_then(|n| n.link()) == Some(id))
+            .expect("the instance's copy");
+        (id, copy)
+    }
+
+    /// The painted text `label`'s centre and its ink.
+    fn ink_of(out: &egui::FullOutput, label: &str) -> (egui::Pos2, egui::Color32) {
+        inks(out)
+            .into_iter()
+            .find(|(t, ..)| t == label)
+            .map(|(_, r, c)| (r.center(), c))
+            .unwrap_or_else(|| panic!("no {label} painted"))
+    }
+
+    /// **A text's box width is marked on W** (`[X9.1-L1-02]`, `[X9.2-L1-02]`).
+    /// The main's text wraps at 100 and the copy's at 180, both auto-height: the
+    /// Type header counted one override and no field showed it — the Sizing mark
+    /// compares the mode, which agrees, and `transform_marks` had no text arm. W is
+    /// bright now, H dim, and W's ↺ writes `AutoHeight(100)`, the copy's mode kept.
+    /// Flip, run: the text arm's `AutoHeight` case removed fails *"W is
+    /// overridden"*.
+    #[test]
+    fn a_text_boxs_width_is_marked_on_w() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let mut text = text_kind("Go");
+        if let NodeKind::Text { sizing, .. } = &mut text {
+            *sizing = ondin_core::TextSizing::AutoHeight(100.0);
+        }
+        let (_, copy) = added_to_main(&mut f, text);
+        let width = |s| Operation::SetGeometry {
+            id: copy,
+            geometry: ondin_core::GeometryPatch::TextSizing(s),
+        };
+        assert!(f.app.session.commit(Transaction(vec![width(
+            ondin_core::TextSizing::AutoHeight(180.0)
+        )])));
+        f.app.session.selection.set_one(copy);
+        let out = settle(&mut f.app, &ctx);
+        let (w, w_ink) = ink_of(&out, "W");
+        assert_eq!(w_ink, theme::text::STRONG, "W is overridden");
+        assert_eq!(ink_of(&out, "H").1, theme::text::FAINT, "H follows");
+        click(&mut f.app, &ctx, w);
+        assert!(
+            matches!(
+                f.app.session.doc.get(copy).unwrap().kind(),
+                NodeKind::Text { sizing: ondin_core::TextSizing::AutoHeight(w), .. } if *w == 100.0
+            ),
+            "the main's width, the mode kept"
+        );
+    }
+
+    /// **A line's length is marked on `L`, and its direction on R**
+    /// (`[X9.1-L1-02]`). The main's line ends at (50, 0). The copy's at (30, 0):
+    /// `L` is bright and its ↺ writes (50, 0). Then the copy's at (0, 50), the
+    /// same length turned: `L` dim, R bright, and R's ↺ writes (50, 0). Before,
+    /// the Transform header counted the `LineEnd` override and neither field was
+    /// marked. Flips, run: `L` drawn through the unmarked `value_field` again
+    /// fails *"L is overridden"*; the direction's mark removed fails *"R is
+    /// overridden"*.
+    #[test]
+    fn a_lines_length_and_direction_are_marked() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let (_, copy) = added_to_main(
+            &mut f,
+            NodeKind::Line {
+                end: ondin_core::kurbo::Point::new(50.0, 0.0),
+            },
+        );
+        let end_at = |f: &mut F, x, y| {
+            assert!(
+                f.app
+                    .session
+                    .commit(Transaction(vec![Operation::SetGeometry {
+                        id: copy,
+                        geometry: ondin_core::GeometryPatch::LineEnd(
+                            ondin_core::kurbo::Point::new(x, y)
+                        ),
+                    }]))
+            );
+        };
+        let end_of = |f: &F| match f.app.session.doc.get(copy).unwrap().kind() {
+            NodeKind::Line { end } => *end,
+            _ => panic!("a line"),
+        };
+        // The rotation field's glyph — the first one in X's column; the quarter
+        // turn buttons below draw arrows too.
+        let rotation = |out: &egui::FullOutput| {
+            let x = ink_of(out, "X").0;
+            inks(out)
+                .into_iter()
+                .find(|(t, r, _)| t == icon::ARROW_CLOCKWISE && (r.center().x - x.x).abs() < 8.0)
+                .map(|(_, r, c)| (r.center(), c))
+                .expect("the rotation field's glyph")
+        };
+        end_at(&mut f, 30.0, 0.0);
+        f.app.session.selection.set_one(copy);
+        let out = settle(&mut f.app, &ctx);
+        let (l, l_ink) = ink_of(&out, "L");
+        assert_eq!(l_ink, theme::text::STRONG, "L is overridden");
+        assert_eq!(rotation(&out).1, theme::text::FAINT, "R follows");
+        click(&mut f.app, &ctx, l);
+        assert_eq!(end_of(&f), ondin_core::kurbo::Point::new(50.0, 0.0));
+        end_at(&mut f, 0.0, 50.0);
+        let out = settle(&mut f.app, &ctx);
+        assert_eq!(ink_of(&out, "L").1, theme::text::FAINT, "L follows");
+        let (r, r_ink) = rotation(&out);
+        assert_eq!(r_ink, theme::text::STRONG, "R is overridden");
+        click(&mut f.app, &ctx, r);
+        let end = end_of(&f);
+        assert!(
+            (end.x - 50.0).abs() < 1e-9 && end.y.abs() < 1e-9,
+            "the main's direction: {end:?}"
+        );
+    }
+
+    /// **Rotation's ↺ turns back about the pivot** (§15 D1003 (8),
+    /// `[X9.1-L1-03]`). The copy's 10 × 10 rect turned 90° about its centre, as
+    /// the field and the handle turn it — stored translation (10, 0), its box
+    /// where it was. R's ↺ writes the main's basis with the centre held, so the
+    /// rect is back exactly as the main has it, X and Y following. Keeping the
+    /// copy's translation instead left it at (10, 0) — 10 px off its own place and
+    /// the main's. Flip, run: R's reset built with `cur[4], cur[5]` fails *"back
+    /// in place"*.
+    #[test]
+    fn rotations_reset_turns_back_about_the_pivot() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let main_rect = f.app.session.doc.get(f.m).unwrap().children()[0];
+        let turned = ondin_core::kurbo::Affine::rotate_about(
+            std::f64::consts::FRAC_PI_2,
+            ondin_core::kurbo::Point::new(5.0, 5.0),
+        );
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![Operation::SetTransform {
+                    id: f.ir,
+                    transform: turned,
+                }]))
+        );
+        f.app.session.selection.set_one(f.ir);
+        let out = settle(&mut f.app, &ctx);
+        let x = ink_of(&out, "X").0;
+        let (r, r_ink) = inks(&out)
+            .into_iter()
+            .find(|(t, rr, _)| t == icon::ARROW_CLOCKWISE && (rr.center().x - x.x).abs() < 8.0)
+            .map(|(_, rr, c)| (rr.center(), c))
+            .expect("the rotation field's glyph");
+        assert_eq!(r_ink, theme::text::STRONG, "R is overridden");
+        click(&mut f.app, &ctx, r);
+        let doc = &f.app.session.doc;
+        let got = doc.get(f.ir).unwrap().transform().as_coeffs();
+        let want = doc.get(main_rect).unwrap().transform().as_coeffs();
+        assert!(
+            got.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-9),
+            "back in place: {got:?} against {want:?}"
+        );
     }
 
     /// **A collapsed card keeps its count and offers no chip.** A collapsed card is
@@ -3213,6 +3907,139 @@ mod tests {
         );
     }
 
+    /// *Label text* set to "Sign up" on the instance — a property value, not an
+    /// override.
+    fn signed_up(v: &mut V) {
+        let p = ondin_core::variant::instance_properties(&v.app.session.doc, v.i)[0]
+            .value
+            .clone();
+        let ops = ondin_core::variant::set_property(
+            &v.app.session.doc,
+            &[v.i],
+            &p,
+            &ondin_core::variant::PropValue::Text("Sign up".into()),
+        );
+        assert!(v.app.session.commit(Transaction(ops)));
+        assert_eq!(content(&v.app, v.ilabel), "Sign up");
+    }
+
+    /// ***Reset fields* leaves a property's value alone, *Reset properties* takes
+    /// it back** (4C: *"properties and fields count, and reset, separately"*;
+    /// `[X8.2-L6-03]`). The label's text is set through *Label text* and its
+    /// opacity overridden. The card's *Reset fields* puts the opacity back and
+    /// keeps "Sign up"; *Reset properties* puts "Go" back. The filter is the app's
+    /// alone — no core test reaches it. Flips, run: the filter made `true || …`
+    /// (nothing kept out) fails *"the property's value stays"* with "Go";
+    /// `Act::ResetProperties` made a no-op fails *"the main's text"*.
+    #[test]
+    fn reset_fields_spares_a_property_and_reset_properties_takes_it() {
+        use ondin_core::reset::Kind;
+        let ctx = egui::Context::default();
+        let mut v = variants_fixture(&ctx);
+        signed_up(&mut v);
+        assert!(
+            v.app
+                .session
+                .commit(Transaction(vec![Operation::SetOpacity {
+                    id: v.ilabel,
+                    opacity: 0.5,
+                }]))
+        );
+        v.app.session.selection.set_one(v.i);
+        v.app.component_act(Some(Act::Reset(Kind::Fields)));
+        let doc = &v.app.session.doc;
+        assert_eq!(doc.get(v.ilabel).unwrap().opacity(), 1.0, "the field reset");
+        assert_eq!(
+            content(&v.app, v.ilabel),
+            "Sign up",
+            "the property's value stays"
+        );
+        v.app.component_act(Some(Act::ResetProperties));
+        assert_eq!(content(&v.app, v.ilabel), "Go", "the main's text");
+    }
+
+    /// ***Reset fields* with only a property differing says so** rather than
+    /// doing nothing silently (`1e77a22`): the filtered transaction is empty, so
+    /// nothing commits and the status line reads *"Only component properties
+    /// differ here"*. Flip, run: the `kept.is_empty()` arm removed (the empty
+    /// transaction committed through `commit_reset`) fails *"says why"* with an
+    /// empty status — *"nothing committed"* holding under it too, an empty
+    /// commit changing nothing, so the words are the whole of what it adds.
+    #[test]
+    fn reset_fields_with_only_a_property_says_so() {
+        use ondin_core::reset::Kind;
+        let ctx = egui::Context::default();
+        let mut v = variants_fixture(&ctx);
+        signed_up(&mut v);
+        v.app.session.selection.set_one(v.i);
+        let before = v.app.session.doc.clone();
+        v.app.component_act(Some(Act::Reset(Kind::Fields)));
+        assert!(v.app.session.doc == before, "nothing committed");
+        assert_eq!(
+            v.app.session.status().text,
+            "Only component properties differ here",
+            "says why"
+        );
+    }
+
+    /// **A long main name is cut, and the card keeps its width** (`[X8.1-L1-01]`).
+    /// Measured in the inspector's layout: with a child selected, *In … instance*
+    /// ran under *Go to main* from ~16 characters, and at 53 pushed the button —
+    /// and every card below, egui growing the parent to its widest row — off the
+    /// screen; with the instance selected, the heading's name cut *Detach* in half
+    /// and hid the summary. Here the main is renamed to 53 characters and each
+    /// control is where it is with the short name: *Go to main*, the Transform
+    /// header's title, *Detach* and the drift summary. Flips, run: the child
+    /// line's label without `.truncate()` fails *"Go to main stays put"*; the
+    /// heading's name without it fails *"Detach stays put"*.
+    #[test]
+    fn a_long_main_name_is_cut_and_the_card_keeps_its_width() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        assert!(f.app.session.commit(Transaction(vec![Operation::SetName {
+            id: f.ir,
+            name: "Mine".into(),
+        }])));
+        let at = |f: &mut F, select: NodeId, s: &str| {
+            f.app.session.selection.set_one(select);
+            let out = settle(&mut f.app, &ctx);
+            texts(&out)
+                .into_iter()
+                .find(|(t, _)| t == s)
+                .map(|(_, r)| r)
+                .unwrap_or_else(|| panic!("{s} painted"))
+        };
+        let (i, ir) = (f.i, f.ir);
+        let short = [
+            at(&mut f, ir, "Go to main"),
+            at(&mut f, ir, "TRANSFORM"),
+            at(&mut f, i, "Detach"),
+            at(&mut f, i, "1 override"),
+        ];
+        let long = "Large, Secondary, Hover, Disabled, With icon, Dense";
+        assert!(long.len() > 50);
+        assert!(f.app.session.commit(Transaction(vec![Operation::SetName {
+            id: f.m,
+            name: long.into(),
+        }])));
+        assert_eq!(
+            at(&mut f, ir, "Go to main"),
+            short[0],
+            "Go to main stays put"
+        );
+        assert_eq!(
+            at(&mut f, ir, "TRANSFORM"),
+            short[1],
+            "the cards below keep the column"
+        );
+        assert_eq!(at(&mut f, i, "Detach"), short[2], "Detach stays put");
+        assert_eq!(
+            at(&mut f, i, "1 override"),
+            short[3],
+            "the summary is drawn where it was"
+        );
+    }
+
     /// The layers panel's two marks (§15 D982, 2A and 2C): a collapsed set's row
     /// carries its variant count where a frame's carries its size, and a layer
     /// bound to a property carries `{}`. Flip, run: answering `false` for `bound`
@@ -3319,24 +4146,26 @@ mod tests {
     fn the_layers_panel_marks_overrides_and_local_layers() {
         let ctx = egui::Context::default();
         let mut v = variants_fixture(&ctx);
-        // Each mark's shapes: a dot is a 2pt circle, a `+` two 1.2pt strokes.
+        // Each mark's shapes: a dot is the override dot (the tests' one detector,
+        // `ui::painted_override_dots` — this copy counted any 2pt circle,
+        // `[X8.2-L3-01]`), a `+` two 1.2pt strokes.
         let marks = |app: &mut OndinApp| {
             let mut out = None;
             for _ in 0..3 {
                 out = Some(ctx.run_ui(Default::default(), |ui| app.layers_tree(ui)));
             }
             let out = out.expect("drawn");
-            fn walk(s: &egui::Shape, dots: &mut usize, strokes: &mut usize) {
+            fn walk(s: &egui::Shape, strokes: &mut usize) {
                 match s {
-                    egui::Shape::Circle(c) if c.radius == 2.0 => *dots += 1,
                     egui::Shape::LineSegment { stroke, .. } if stroke.width == 1.2 => *strokes += 1,
-                    egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, dots, strokes)),
+                    egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, strokes)),
                     _ => {}
                 }
             }
-            let (mut dots, mut strokes) = (0, 0);
+            let dots = dots(&out).len();
+            let mut strokes = 0;
             for s in &out.shapes {
-                walk(&s.shape, &mut dots, &mut strokes);
+                walk(&s.shape, &mut strokes);
             }
             let hexagons = texts(&out)
                 .into_iter()

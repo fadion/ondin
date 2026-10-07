@@ -229,6 +229,21 @@ pub fn source_of(doc: &Document, id: NodeId) -> Option<NodeId> {
     crate::swap::content_source(doc, id).filter(|l| doc.get(*l).is_some())
 }
 
+/// The node `id`'s **slot fields** — placement, size, visibility
+/// ([`crate::swap::is_slot_field`]) — are compared with: [`source_of`], except
+/// for a swapped copy, whose slot keeps them from its **link** (§15 D983 (3)) —
+/// the half [`overrides`] already splits. A placement reset reads its insets and
+/// a Transform mark its X, Y, W and H from here; read from [`source_of`] they
+/// named the swap target's page position and size, and a reset moved the slot
+/// out of its button or unpinned it (`[X9.1-L1-01]`).
+pub fn slot_source_of(doc: &Document, id: NodeId) -> Option<NodeId> {
+    let n = doc.get(id)?;
+    match n.swap {
+        Some(_) => n.link.filter(|l| doc.get(*l).is_some()),
+        None => source_of(doc, id),
+    }
+}
+
 /// Whether `id`'s **placement is its own** — an instance linked straight to a
 /// main, whose transform, insets, layout item and visibility never compare with
 /// the main's (§5.3d). A nested copy inside an outer main is not: its place is the

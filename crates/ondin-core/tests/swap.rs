@@ -921,6 +921,78 @@ fn a_layer_the_slot_adds_carries_across_a_swap() {
     assert_eq!(copies, 1, "back, and no duplicate");
 }
 
+/// **A nested instance the slot adds carries across a swap too** (§15 D1003 (3),
+/// D983's amendment building it): the Button main puts an instance of Dot into
+/// its nested Star, bare and inside a group, and `r` — then `r'` in a second
+/// instance, with a swap already in the document — is swapped to Heart. Each
+/// copy of Dot stays where it sat, linked to the slot's and an instance of Dot.
+/// `slot_own` asked that the slot's layer link to nothing, so the first swap
+/// was refused `Membership` by `check` (no `settle_links` without a swap before
+/// it), and the second, where `settle_links` runs, cut both copies to plain
+/// layers.
+///
+/// Flip, run: `component::slot_adds` back to `slot_own`'s unlinked-source test
+/// (`nodes[&src].link.is_none()`) in both `check` and `settle_links` fails the
+/// first swap's commit, "the swap commits: BadLink(_, Membership)"; in
+/// `settle_links` alone it fails the second, "an instance of Dot, kept (r')",
+/// cut to `None`.
+#[test]
+fn a_nested_instance_the_slot_adds_carries_across_a_swap() {
+    let mut f = fixture();
+    let (n, dot, root) = (f.n, f.dot, f.root);
+    let (tx, x) = instance(&f.doc, &mut f.ids, dot, n);
+    f.commit(tx.0);
+    let g = f.ids.mint();
+    f.commit(vec![create(g, n, 2, NodeKind::Group, "Holder")]);
+    let (tx, y) = instance(&f.doc, &mut f.ids, dot, g);
+    f.commit(tx.0);
+    let (tx, b2) = instance(&f.doc, &mut f.ids, f.button, root);
+    f.commit(tx.0);
+    let r2 = child_linked(&f.doc, b2, n).unwrap();
+    // `Square` matches Star layer for layer, so its swap writes no structural op
+    // and nothing but `check` reads the membership; Heart's brings its Shine in.
+    let [square, qshape] = [(); 2].map(|_| f.ids.mint());
+    f.commit(vec![
+        create(square, root, 6, frame(24.0, 24.0), "Icons / Square"),
+        create(qshape, square, 0, rect(), "Shape"),
+        Operation::SetComponent {
+            id: square,
+            component: true,
+        },
+    ]);
+    for (r, to, which) in [(f.r, square, "r"), (r2, f.heart, "r'")] {
+        let xr = child_linked(&f.doc, r, x).expect("the fixture: r's copy of x");
+        let gr = child_linked(&f.doc, r, g).expect("the fixture: r's copy of g");
+        let yr = child_linked(&f.doc, gr, y).expect("the fixture: and of y");
+        let before = f.doc.clone();
+        let mut tx = swap::swap(&f.doc, r, to).unwrap();
+        ondin_core::propagate::owed(&f.doc, &mut tx, &mut f.ids);
+        let undo = f.doc.apply(&tx).expect("the swap commits");
+        assert_eq!(f.node(r).swap(), Some(to), "swapped ({which})");
+        for (c, s) in [(xr, x), (yr, y)] {
+            assert_eq!(
+                f.node(c).link(),
+                Some(s),
+                "an instance of Dot, kept ({which})"
+            );
+            assert_eq!(ondin_core::component::main_of(&f.doc, c), Some(dot));
+        }
+        assert_eq!(f.node(xr).parent(), Some(r), "where it sat ({which})");
+        assert_eq!(f.node(gr).link(), Some(g), "the group too ({which})");
+        let bytes = io::save(&f.doc).unwrap();
+        let loaded = io::load(&bytes).expect("it reloads");
+        assert_eq!(io::save(&loaded).unwrap(), bytes);
+        let after = f.doc.clone();
+        f.doc.apply(&undo.inverse).expect("one undo");
+        assert_eq!(
+            io::save(&f.doc).unwrap(),
+            io::save(&before).unwrap(),
+            "restores it ({which})"
+        );
+        f.doc = after;
+    }
+}
+
 /// **A copy and its copy swapped in one transaction** — *Select all instances*,
 /// then the swap property (`[X5-L1-02]`). `r3` was rewritten against `r2`'s new
 /// contents while measured from its old, and came out with a cut Shine, a
@@ -1188,6 +1260,71 @@ fn ungrouping_a_group_main_keeps_its_instances_nested_instances() {
     assert_eq!(f.node(io).link(), None, "its instance detached");
     assert_eq!(f.node(cn).link(), Some(f.star), "an instance of Star");
     assert_eq!(f.node(f.kids(cn)[0]).link(), Some(f.sshape));
+}
+
+/// **The ungroup's climb carries a swap it passes** (`[X2-L2-03]`, D983's
+/// amendment building D1003 (3)–(5)): a group main holding `b2`, an instance of
+/// Button whose nested copy `r2` is swapped to Heart, and `io`, an instance of the
+/// group — so `r3`, `io`'s copy of `r2`, follows the swap one link up. Ungrouping
+/// the main climbs `b3` to Button and `r3` past `r2` to Star's slot; it must take
+/// `r2`'s swap with it, as `detach` and `relink_past` do, or it lands showing Star
+/// while its layers, climbing on past `r2`'s, link to Heart's. The climb landed
+/// with `land_ops` and `check` refused the ungroup, `Membership` — before
+/// `c84a940` every copy was cut and the ungroup committed.
+///
+/// Flip, run: the climb's `met` dropped — `land_ops_through(&scratch, kn, to,
+/// None)`, which is `c84a940`'s `land_ops` — fails the ungroup's commit, "the
+/// ungroup commits: BadLink(_, Membership)".
+#[test]
+fn ungrouping_a_group_main_keeps_a_swap_one_link_up() {
+    let mut f = fixture();
+    let (g, root) = (f.ids.mint(), f.root);
+    f.commit(vec![create(g, root, 5, NodeKind::Group, "Group main")]);
+    let (tx, b2) = instance(&f.doc, &mut f.ids, f.button, g);
+    f.commit(tx.0);
+    f.commit(vec![Operation::SetComponent {
+        id: g,
+        component: true,
+    }]);
+    let r2 = child_linked(&f.doc, b2, f.n).unwrap();
+    f.swap_to(r2, f.heart);
+    let (tx, io) = instance(&f.doc, &mut f.ids, g, root);
+    f.commit(tx.0);
+    let b3 = child_linked(&f.doc, io, b2).unwrap();
+    let r3 = child_linked(&f.doc, b3, r2).unwrap();
+    assert_eq!(
+        ondin_core::component::main_of(&f.doc, r3),
+        Some(f.heart),
+        "the fixture: r3 follows r2's swap"
+    );
+    let shape3 = f.kids(r3)[0];
+    let res = ondin_core::Resolved::rebuild(&f.doc);
+    let mut tx = ondin_core::build::ungroup(&f.doc, &res, g).unwrap();
+    ondin_core::propagate::owed(&f.doc, &mut tx, &mut f.ids);
+    let before = f.doc.clone();
+    let undo = f.doc.apply(&tx).expect("the ungroup commits");
+    assert_eq!(f.node(io).link(), None, "its instance detached");
+    assert_eq!(f.node(b3).link(), Some(f.button), "an instance of Button");
+    assert_eq!(
+        ondin_core::component::main_of(&f.doc, r3),
+        Some(f.heart),
+        "still Heart"
+    );
+    assert_eq!(f.node(r3).link(), Some(f.n), "at Star's slot");
+    assert_eq!(
+        f.node(shape3).link(),
+        Some(f.hshape),
+        "Heart's, still linked"
+    );
+    let bytes = io::save(&f.doc).unwrap();
+    let loaded = io::load(&bytes).expect("it reloads");
+    assert_eq!(loaded.get(r3).unwrap().swap(), Some(f.heart));
+    f.doc.apply(&undo.inverse).expect("one undo");
+    assert_eq!(
+        io::save(&f.doc).unwrap(),
+        io::save(&before).unwrap(),
+        "restores it"
+    );
 }
 
 /// **`swap::tidy`, two of its arms** (`[X5-L6-01]` — every arm was untested,

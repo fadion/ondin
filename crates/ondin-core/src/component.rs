@@ -178,12 +178,10 @@ pub fn check(nodes: &FxHashMap<NodeId, Node>) -> Result<(), (NodeId, LinkRule)> 
             .ok_or((n.id, LinkRule::Membership))?;
         // A swapped root's members are copies of its swap's nodes (§15 D983) —
         // and of what its slot adds of its own: a layer the outer main put into
-        // the slot, linked to nothing itself, carries across a swap (§15 D1003
-        // (3)), still following the slot.
+        // the slot carries across a swap (§15 D1003 (3)), still following the
+        // slot — a nested instance among them ([`slot_adds`]).
         let root_src = root.swap.or(root.link).expect("an instance root is linked");
-        let slot_own = root.swap.is_some()
-            && root.link.is_some_and(|l| inside(src, l))
-            && nodes[&src].link.is_none();
+        let slot_own = root.swap.is_some() && root.link.is_some_and(|l| slot_adds(nodes, l, src));
         if !inside(src, root_src) && !slot_own {
             return Err((n.id, LinkRule::Membership));
         }
@@ -244,6 +242,42 @@ pub(crate) fn is_instance_root(nodes: &FxHashMap<NodeId, Node>, n: &Node) -> boo
         at = src;
     }
     false
+}
+
+/// Whether `src` — the source of a layer inside a **swapped** copy whose slot is
+/// `slot` — is a layer the slot adds of its own (§15 D1003 (3)): inside the
+/// slot, and copying nothing of the main the slot shows, its chain of content
+/// sources (`swap::content_source`) never landing there. That is
+/// `variant::rewrite`'s own test for what a swap keeps (`Base::of_node`), so
+/// [`check`] and [`settle_links`] admit exactly the layers the rewrite left.
+///
+/// **Not "linked to nothing"**, which is what this asked until a nested instance
+/// the outer main dropped into the slot — or a group holding one — came out of
+/// every swap refused `Membership` by `check` or, where `settle_links` ran, cut
+/// to plain layers: its source is an instance root, linked to its own main, and
+/// the rewrite had kept its copy (D983's amendment building D1003 (3)).
+pub(crate) fn slot_adds(nodes: &FxHashMap<NodeId, Node>, slot: NodeId, src: NodeId) -> bool {
+    let parent = |id: NodeId| nodes.get(&id).and_then(|n| n.parent);
+    let inside = |id: NodeId, outer: NodeId| {
+        std::iter::successors(parent(id), |a| parent(*a)).any(|a| a == outer)
+    };
+    if !inside(src, slot) {
+        return false;
+    }
+    let Some(shown) = crate::swap::shown_main(nodes, slot) else {
+        return true;
+    };
+    let mut at = src;
+    for _ in 0..=nodes.len() {
+        if at == shown || inside(at, shown) {
+            return false;
+        }
+        match nodes.get(&at).and_then(|n| n.swap.or(n.link)) {
+            Some(next) => at = next,
+            None => return true,
+        }
+    }
+    false // a loop, which is `LinkRule::LinkCycle`'s to report
 }
 
 fn reaches_itself(
@@ -490,11 +524,11 @@ pub fn detach(doc: &Document, root: NodeId) -> Option<Transaction> {
 ///   the same source. What fails is cut — a layer dragged out of its instance, the
 ///   members of an instance whose root an ungroup dissolved — except a nested copy
 ///   whose outer instance lost its link in this edit, which climbs past its source
-///   as [`detach`] climbs it (`[X2-L2-03]`), though with `swap::land_ops` and not
-///   `land_ops_through`, so a swap on a node it passes is not carried (§15 D983's
-///   amendment building D1003 (3)–(5)). Asked top-down, so a
-///   cut nested root cuts its members; and where two nodes of one instance share a
-///   source, **the one the transaction did not touch keeps it**.
+///   as [`detach`] climbs it (`[X2-L2-03]`), carrying a swap on a node it passes
+///   (`swap::land_ops_through`, §15 D983's amendment building D1003 (3)–(5)).
+///   Asked top-down, so a cut nested root cuts its members; and where two nodes
+///   of one instance share a source, **the one the transaction did not touch
+///   keeps it**.
 ///
 /// A link straight to a main is placed anywhere, as [`check`] allows. Empty for
 /// a document with no links or a transaction with no structural op.
@@ -638,9 +672,7 @@ pub fn settle_links(doc: &Document, tx: &Transaction) -> Vec<Operation> {
             // or of a layer its slot adds of its own (§15 D1003 (3), as `check`).
             let root_src = |r: NodeId| nodes[&r].swap.or(nodes[&r].link).expect("a root is linked");
             let slot_own = |r: NodeId| {
-                nodes[&r].swap.is_some()
-                    && nodes[&r].link.is_some_and(|l| inside(src, l))
-                    && nodes.get(&src).is_some_and(|s| s.link.is_none())
+                nodes[&r].swap.is_some() && nodes[&r].link.is_some_and(|l| slot_adds(nodes, l, src))
             };
             match root {
                 Some(r) if inside(src, root_src(r)) || slot_own(r) => {
@@ -669,9 +701,13 @@ pub fn settle_links(doc: &Document, tx: &Transaction) -> Vec<Operation> {
     // instances of their own main — but on an ungroup the nested source survives
     // (lifted out), nothing climbed, and the membership cut them to plain layers.
     // Only where the copy's outer root is still around it and lost its link here:
-    // a nested copy the user moved out of its instance is still cut. ⚠️ Unlike
-    // `detach`, this walk does not carry a swap on a node it passes (`land_ops`,
-    // not `swap::land_ops_through`) — read, not run, by the record (§15 D983).
+    // a nested copy the user moved out of its instance is still cut. **The walk
+    // is `detach`'s, swap and all** (`swap::climb`, `land_ops_through`): a copy
+    // following a swap made one link up — `r3` copying `r2`, swapped to Heart
+    // inside the group main — climbs past `r2` and takes its swap, or it lands
+    // showing Star while its layers, climbing on past `r2`'s, link to Heart's and
+    // `check` refuses the ungroup as `Membership`. It landed with `land_ops` in
+    // `c84a940` (§15 D983's amendment building D1003 (3)–(5)).
     let detached: Vec<NodeId> = {
         let mut v: Vec<NodeId> = cut.iter().copied().collect();
         v.sort();
@@ -707,16 +743,11 @@ pub fn settle_links(doc: &Document, tx: &Transaction) -> Vec<Operation> {
             if !cut.contains(&k) {
                 continue;
             }
-            let mut to = kn.link;
-            for _ in 0..=before.len() {
-                match to {
-                    Some(s) if past.contains(&s) => to = before.get(&s).and_then(|s| s.link),
-                    _ => break,
-                }
-            }
+            let Some(link) = kn.link else { continue };
+            let (to, met) = crate::swap::climb(doc, link, |s| past.contains(&s));
             if to.is_some() && to != kn.link {
                 cut.remove(&k);
-                climbed.push((k, crate::swap::land_ops(&scratch, kn, to)));
+                climbed.push((k, crate::swap::land_ops_through(&scratch, kn, to, met)));
             }
         }
     }

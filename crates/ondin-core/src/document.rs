@@ -485,10 +485,18 @@ impl Document {
     /// field any operation can write without a reader per field.
     ///
     /// **Applied to a scratch document holding the one node `op` names**, because
-    /// every operation `overwrites` names a node for writes that node alone and
-    /// reads nothing of the tree but `root` (measured over the handlers when this
-    /// was written; `op_set_fill_rule` is the one that asks for `root`). Two
-    /// things came of that, both found by the `v0.4.1..7d0c666` release review:
+    /// every operation `overwrites` names a node for writes that node alone. The
+    /// scratch carries `root`, `schema_version` and `restoring` across — the last
+    /// read by `op_set_display`'s and `op_set_layout_item`'s history exemption (§15
+    /// D937); no handler of these operations reads `root` (read 2026-10-07).
+    /// **One handler reads past its node, and its scratch holds the subtree**:
+    /// `op_set_mask` refuses to make a mask of a group holding a frame
+    /// (`holds_a_frame`, §15 D876), so with the node alone a peek of a mask turned
+    /// on over a copy whose group holds a frame of the instance's own answered
+    /// `Some`, `propagate` followed, and `apply` refused the whole edit — where the
+    /// copy should keep its value (`arch-scribe`'s reading of the first build). Two
+    /// things came of the one-node scratch, both found by the `v0.4.1..7d0c666`
+    /// release review:
     ///
     /// - **Nothing is restored**, so nothing can fail to be. This applied the op
     ///   to the document and then re-applied its inverse, asserting that the
@@ -502,6 +510,11 @@ impl Document {
         let id = op.overwrites()?;
         let mut nodes = FxHashMap::default();
         nodes.insert(id, self.nodes.get(&id)?.clone());
+        if matches!(op, Operation::SetMask { .. }) {
+            for d in self.subtree_ids(id) {
+                nodes.insert(d, self.nodes.get(&d)?.clone());
+            }
+        }
         let mut one = Document {
             schema_version: self.schema_version,
             nodes,

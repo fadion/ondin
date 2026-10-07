@@ -1089,3 +1089,121 @@ fn a_reorder_reaches_through_a_nested_instance() {
         .collect();
     assert_eq!(deep, vec![f.it, f.ia], "two levels");
 }
+
+/// `a` grouped in `g` inside the main, through the commit: the instance's copy
+/// of the group, holding `ia`, comes back.
+fn group_a(f: &mut F) -> (NodeId, NodeId) {
+    let (g, m, a) = (f.ids.mint(), f.m, f.a);
+    commit_all(
+        f,
+        vec![
+            Operation::CreateNode {
+                id: g,
+                parent: m,
+                index: 0,
+                kind: NodeKind::Group,
+                transform: Some(Affine::translate((10.0, 0.0))),
+                name: None,
+            },
+            Operation::Reparent {
+                id: a,
+                new_parent: g,
+                index: 0,
+            },
+        ],
+    );
+    let gc = f.doc.get(f.ia).unwrap().parent().unwrap();
+    assert_eq!(link(&f.doc, gc), Some(g), "the fixture: the group's copy");
+    (g, gc)
+}
+
+/// **The ungroup wrapper holds at every depth** (§15 D1003 (2)): an outer main's
+/// instance whose copy of the group — a copy of the nested instance's copy — it
+/// changed keeps it as a wrapper, while the nested instance's own untouched copy
+/// ungroups. The first build asked whether the old parent was gone in the tree
+/// the *transaction* leaves, and one level down the old parent is a copy this pass
+/// deletes, so the changed copy there was lifted out of and left empty
+/// (`arch-scribe`'s reading).
+///
+/// Flip: the moves' `goes` flag read off the transaction's tree again (`!
+/// after_nodes.contains_key(&old)` at every level) fails "still inside its group,
+/// two levels down".
+#[test]
+fn an_ungroup_keeps_a_changed_group_copy_two_levels_down() {
+    let mut f = fixture();
+    let (g, gc) = group_a(&mut f);
+    let nc = nest(&mut f);
+    let gc2 = kids(&f.doc, nc)
+        .into_iter()
+        .find(|k| link(&f.doc, *k) == Some(gc))
+        .expect("the outer instance's copy of the group");
+    let c2 = kids(&f.doc, gc2)[0];
+    assert_eq!(link(&f.doc, c2), Some(f.ia), "the fixture: two levels down");
+    f.doc
+        .apply(&Transaction(vec![Operation::SetOpacity {
+            id: gc2,
+            opacity: 0.5,
+        }]))
+        .unwrap();
+    let local = f.doc.get(c2).unwrap().transform();
+    let (a, m) = (f.a, f.m);
+    commit_all(
+        &mut f,
+        vec![
+            Operation::SetTransform {
+                id: a,
+                transform: Affine::translate((10.0, 0.0)),
+            },
+            Operation::Reparent {
+                id: a,
+                new_parent: m,
+                index: 0,
+            },
+            Operation::DeleteNode { id: g },
+        ],
+    );
+    assert!(f.doc.get(gc).is_none(), "the untouched copy ungrouped");
+    assert_eq!(f.doc.get(f.ia).unwrap().parent(), Some(f.i));
+    assert_eq!(
+        f.doc.get(c2).unwrap().parent(),
+        Some(gc2),
+        "still inside its group, two levels down"
+    );
+    assert_eq!(link(&f.doc, gc2), None, "a local wrapper");
+    assert_eq!(link(&f.doc, c2), Some(f.ia), "the child still linked");
+    assert_eq!(
+        f.doc.get(c2).unwrap().transform(),
+        local,
+        "and where it drew"
+    );
+}
+
+/// **A mask turned on in a main does not follow onto a copy whose group holds a
+/// frame of the instance's own** — the copy keeps its value, and the edit
+/// commits. `Document::peek` read off the node alone, where `op_set_mask`'s
+/// refusal (`holds_a_frame`, §15 D876) cannot see the frame, so the follow was
+/// written and `apply` refused the user's whole edit (`arch-scribe`'s reading).
+///
+/// Flip: `peek`'s scratch without the subtree for a `SetMask` fails the commit,
+/// `ArtboardPlacement`, the `expect` in `commit_all`.
+#[test]
+fn a_mask_does_not_follow_onto_a_copy_holding_a_frame_of_its_own() {
+    let mut f = fixture();
+    let (g, gc) = group_a(&mut f);
+    let frame = f.ids.mint();
+    f.doc
+        .apply(&Transaction(vec![Operation::CreateNode {
+            id: frame,
+            parent: gc,
+            index: 1,
+            kind: NodeKind::Artboard {
+                size: Size::new(5.0, 5.0),
+            },
+            transform: None,
+            name: None,
+        }]))
+        .expect("the instance's own frame in its copy of the group");
+    commit_all(&mut f, vec![Operation::SetMask { id: g, mask: true }]);
+    assert!(f.doc.get(g).unwrap().mask(), "the main's group masks");
+    assert!(!f.doc.get(gc).unwrap().mask(), "the copy keeps its value");
+}

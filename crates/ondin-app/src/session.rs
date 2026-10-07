@@ -442,9 +442,11 @@ pub struct EditorSession {
     /// Costs O(nodes the gesture touches). The earlier implementation cloned
     /// the whole document, applied the pending transaction and re-resolved it
     /// every frame — correct, but O(nodes) including re-shaping every text
-    /// node, on every mouse move. ⚠️ Except while a main component's layer is
-    /// edited: [`Self::preview_follows`] clones the document each frame then
-    /// (§5.3d's preview), and is one scan of the links otherwise
+    /// node, on every mouse move. While a main component's layer is edited,
+    /// [`Self::preview_follows`] reads each copy's old value off a one-node
+    /// scratch (`Document::peek`; it cloned the whole document each frame until
+    /// the `v0.4.1..7d0c666` release review), though `keep_insets` still clones
+    /// where a pinned layer is placed; otherwise it is one scan of the links
     /// (`propagate::touches_copied`).
     overrides: RenderOverrides,
     /// The live text-editing session's own transaction, kept for as long as the

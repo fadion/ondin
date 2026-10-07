@@ -23,9 +23,11 @@
 //!   id, each item's fields follow on their own, and additions, removals and a
 //!   reorder follow by the structural rule one level down.
 //!
-//! **Not here:** structure (a main gaining or losing a child — step 4), and
-//! anything about whether the values the commit's arithmetic writes compare
-//! exactly — the build's main open risk (§5.3d), to be measured against this pass.
+//! **Structure is here too** — a main gaining, losing, moving or reordering a
+//! child (step 4) — in [`propagate_structure`], and [`owed`] runs every
+//! component pass of a commit in its order. **Not here:** anything about whether
+//! the values the commit's arithmetic writes compare exactly — the build's main
+//! open risk (§5.3d), to be measured against this pass.
 
 use crate::document::Document;
 use crate::id::NodeId;
@@ -591,14 +593,13 @@ pub fn propagate_structure(
     };
     let mut cut: Vec<NodeId> = Vec::new();
     let mut moved_out: FxHashSet<NodeId> = FxHashSet::default();
-    let mut moves: Vec<(NodeId, NodeId, NodeId)> = moved_within
+    // (the node moved, its old parent, its new parent, whether the old parent
+    // goes — an ungroup — and the main's own layer the move started from).
+    let mut moves: Vec<(NodeId, NodeId, NodeId, bool, NodeId)> = moved_within
         .iter()
         .map(|(x, np)| {
-            (
-                *x,
-                before[x].parent.expect("a lost child had a parent"),
-                *np,
-            )
+            let old = before[x].parent.expect("a lost child had a parent");
+            (*x, old, *np, !after_nodes.contains_key(&old), *x)
         })
         .collect();
     moves.sort();
@@ -610,8 +611,27 @@ pub fn propagate_structure(
     // its children inside it still linked; an untouched copy ungroups as the main
     // did. Judged ignoring the children being lifted, whose own changes travel
     // with them.
-    let wrapper = |gc: NodeId, g: NodeId| -> bool {
-        if after_nodes.contains_key(&g) {
+    //
+    // **At every depth** (`arch-scribe`'s reading of the first build): "the old
+    // parent goes" was asked of the tree the transaction leaves, and one level
+    // down — an outer main's instance, holding a copy of the nested instance's
+    // copy of the group — the old parent is a copy this pass deletes and the
+    // transaction does not, so a changed copy there was lifted out of and left
+    // empty. The flag travels with the move instead: a copy lifted out of goes
+    // (it was untouched), so its own copies' old parent goes too.
+    let lifted_source = |s: NodeId| {
+        let mut at = Some(s);
+        for _ in 0..=before.len() {
+            let Some(a) = at else { return false };
+            if moved_within.contains_key(&a) {
+                return true;
+            }
+            at = before.get(&a).and_then(|n| n.link);
+        }
+        false
+    };
+    let wrapper = |gc: NodeId, g: NodeId, goes: bool| -> bool {
+        if !goes {
             return false; // not an ungroup: the old parent stays
         }
         let lifting: FxHashSet<NodeId> = before[&gc]
@@ -622,12 +642,12 @@ pub fn propagate_structure(
                 before
                     .get(k)
                     .and_then(|n| n.link)
-                    .is_some_and(|s| moved_within.contains_key(&s))
+                    .is_some_and(lifted_source)
             })
             .collect();
         !untouched(doc, gc, g, &lifting)
     };
-    while let Some((x, old_parent, new_parent)) = moves.pop() {
+    while let Some((x, old_parent, new_parent, goes, origin)) = moves.pop() {
         for &c in copies.get(&x).into_iter().flatten() {
             // A copy the edit itself deleted is owed nothing (`[X2-L1-02]`).
             if !after_nodes.contains_key(&c) {
@@ -642,14 +662,15 @@ pub fn propagate_structure(
             if Some(from) != counterpart(doc, root, old_parent) {
                 continue; // the instance moved it itself
             }
-            if wrapper(from, old_parent) {
-                // Where it is: pin what the edit wrote on `x` at the copy's own
-                // values, so the field pass carries none of it — an ungroup bakes
-                // the group's transform into each child, which is the main's group
-                // and not this copy's.
+            if wrapper(from, old_parent, goes) {
+                // Where it is: pin what the edit wrote on the main's layer at the
+                // copy's own values, so the field pass carries none of it — an
+                // ungroup bakes the group's transform into each child, which is the
+                // main's group and not this copy's. (At depth too: the field pass
+                // reaches this copy through the lifted copies above it.)
                 out.extend(
                     tx.0.iter()
-                        .filter(|op| op.overwrites() == Some(x))
+                        .filter(|op| op.overwrites() == Some(origin))
                         .filter_map(|op| doc.peek(&op.retargeted(c)?)),
                 );
                 continue;
@@ -694,6 +715,8 @@ pub fn propagate_structure(
                 c,
                 before[&c].parent.expect("a moved node had a parent"),
                 target,
+                goes,
+                origin,
             ));
         }
     }

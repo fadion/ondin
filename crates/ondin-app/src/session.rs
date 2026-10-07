@@ -536,9 +536,11 @@ pub struct EditorSession {
     /// cheap enough to do per edit.
     revision: u64,
     /// How many commits this session has seen — `revision` without undo and
-    /// redo. [`FlexReceipt`] is its only reader: a redo puts the receipt's step
-    /// back on top of the history, which moves the revision and must not end the
-    /// receipt (§15 D880, D928).
+    /// redo. [`FlexReceipt`] reads it: a redo puts the receipt's step back on top
+    /// of the history, which moves the revision and must not end the receipt
+    /// (§15 D880, D928). And a cut's move (`OndinApp::cut_move`) reads it through
+    /// [`Self::commits`], by the same argument: an undo and a redo with no commit
+    /// between them are the same history, and one commit between them is not.
     commits: u64,
     /// What the last commit's resize did to flex items' growth — see
     /// [`FlexReceipt`] and [`Self::flex_receipt`], which is the only reader.
@@ -619,6 +621,12 @@ impl EditorSession {
     /// How many times this session's document has changed — see the field.
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// How many commits this session has seen, undo and redo not counted — see
+    /// the field.
+    pub fn commits(&self) -> u64 {
+        self.commits
     }
 
     /// The last resize's [`FlexReceipt`], while its step is still the top of the

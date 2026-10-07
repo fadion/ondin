@@ -128,6 +128,11 @@ pub(crate) struct CutMove {
     /// The history's undo depth once the cut landed: an undo below it takes the
     /// cut back, and the move with it ([`OndinApp::document_rewound`]).
     depth: usize,
+    /// While an undo has taken the cut back: the session's commit count then
+    /// ([`EditorSession::commits`]). A redo back to `depth` with the count
+    /// unchanged is the cut again, and the move with it; a commit in between
+    /// branched the history, and the move is dropped.
+    parked: Option<u64>,
 }
 
 /// One link a layer delete took ([`Deleted::links`]): a node outside the
@@ -2870,11 +2875,12 @@ impl OndinApp {
     }
 
     /// **The document just moved under us.** Drop the app-side state that names
-    /// parts of it *by index* rather than by id (§15 D568).
+    /// parts of it *by index* rather than by id (§15 D568) — and park or drop a
+    /// cut's move, which is a claim about one point in the history (§15 D1003 (1)).
     ///
     /// `EditorSession::undo` already guards its own half — `Selection` is a set of
     /// `NodeId`s, so `retain_existing` is a truncation and a survivor still means
-    /// the same layer. The two fields here are not like that:
+    /// the same layer. The fields here are not like that:
     ///
     /// - [`PointSet`] holds `PointRef`s, which are `(subpath, anchor)` **indices**.
     ///   `PointSet::retain_valid`'s own doc states the rule — *"deleting an anchor
@@ -2887,6 +2893,10 @@ impl OndinApp {
     ///   carries a **snapshot** of every subpath the node had when the pen resumed,
     ///   and `finish_pen` writes the whole list back. An undo mid-run followed by
     ///   finishing the run therefore *resurrects* the geometry the undo took away.
+    /// - [`OndinApp::cut_move`] names nodes by id, but it is a claim about the
+    ///   links *one cut* took: undone below its `depth` they are back, so it is
+    ///   parked, and a paste that still made the move would relink what the user
+    ///   detached since. A redo with no commit between is the cut again.
     ///
     /// ⚠️ **`retain_valid` is not the fix here and truncation would hide it.** The
     /// measured failure keeps every index in range — delete the middle anchor of
@@ -2894,22 +2904,33 @@ impl OndinApp {
     /// set goes on naming a *different* anchor. Only clearing answers it, which is
     /// the argument `end_pen_gesture` already gives for the identical case.
     ///
-    /// Not on `EditorSession` because neither field is: both live on `OndinApp`,
+    /// Not on `EditorSession` because none of these fields is: all live on `OndinApp`,
     /// which is why the session structurally could not have done this itself.
     fn document_rewound(&mut self) {
         self.points.clear();
         self.pen = None;
         // **An undone cut owes its paste nothing** (§15 D1003 (1)): the move a cut
         // keeps is a claim about links *that cut* took, and once the history is
-        // undone past it they are back. Kept, it outlived the undo, and a later
-        // delete of the main — after the user had detached an instance by hand —
-        // had the paste relink what they detached. A redo of the cut does not
-        // bring the move back; its paste is an ordinary one.
-        if self
-            .cut_move
-            .as_ref()
-            .is_some_and(|c| self.session.history.undo_depth() < c.depth)
-        {
+        // undone past it they are back. Kept live, it outlived the undo, and a
+        // later delete of the main — after the user had detached an instance by
+        // hand — had the paste relink what they detached. **So an undo parks it
+        // and a redo of the cut brings it back**: dropped outright, a redo then
+        // deleted the main again with nothing owed, and its paste landed a new
+        // main under new ids with the instances left plain — D1003 (1)'s own
+        // defect, for that one sequence. Parked at the commit count, because a
+        // commit while it is parked branched the history (the detach above, made
+        // at the cut's depth), and the cut that redo would have replayed is gone.
+        let (depth, commits) = (self.session.history.undo_depth(), self.session.commits());
+        let mut branched = false;
+        if let Some(c) = self.cut_move.as_mut() {
+            match c.parked {
+                Some(at) if at != commits => branched = true,
+                Some(_) if depth >= c.depth => c.parked = None,
+                None if depth < c.depth => c.parked = Some(commits),
+                _ => {}
+            }
+        }
+        if branched {
             self.cut_move = None;
         }
     }
@@ -5617,6 +5638,7 @@ impl OndinApp {
                 links: d.links,
                 stamp: self.clipboard_stamp,
                 depth: self.session.history.undo_depth(),
+                parked: None,
             });
         }
         self.session.info(match (d.detached, d.name) {
@@ -6194,7 +6216,9 @@ impl OndinApp {
         images: &[(ondin_core::ImageId, ondin_core::ImageEntry)],
     ) -> bool {
         let doc = &self.session.doc;
-        let Some(cut) = self.cut_move.as_ref() else {
+        // A parked move is a cut the history has taken back (`document_rewound`):
+        // nothing is owed while it is, and a commit since means it never will be.
+        let Some(cut) = self.cut_move.as_ref().filter(|c| c.parked.is_none()) else {
             return false;
         };
         let roots: Vec<NodeId> = placements
@@ -20387,10 +20411,12 @@ mod component_verb_tests {
     /// *Detach instance* and a plain Delete of the main, the paste restored the
     /// main under its id and relinked the instance — overturning the detach,
     /// which the user made after the cut was taken back. The cut's move is
-    /// dropped once the history is undone past it; the paste is an ordinary one.
+    /// parked once the history is undone past it, and the detach's commit means
+    /// no redo can bring it back; the paste is an ordinary one.
     ///
-    /// Flip, run: `document_rewound` without the `cut_move` drop fails "the
-    /// detach stands", `Some(m)`.
+    /// Flip, run: `document_rewound` without the `cut_move` drop (as first
+    /// built) fails "the detach stands", `Some(m)`; so does `paste_cut_move`
+    /// not refusing a parked move.
     #[test]
     fn an_undone_cut_does_not_move_on_paste() {
         let ctx = egui::Context::default();
@@ -20419,6 +20445,36 @@ mod component_verb_tests {
         assert!(
             app.session.doc.get(m).is_none(),
             "an ordinary paste, under new ids"
+        );
+    }
+
+    /// **A redo of the cut is the cut again, and its paste a move** (§15 D1003
+    /// (1)): cut, undo, redo, paste restores the main under its own id and
+    /// relinks its instance. The undo had dropped the move, so the redo deleted
+    /// the main with nothing owed and the paste landed a new main under new ids,
+    /// the instance left plain — the ruling's own defect, for that sequence.
+    ///
+    /// Flip, run: `document_rewound` dropping the move on the undo, as first
+    /// built, fails "the main, under its own id".
+    #[test]
+    fn a_redone_cut_still_moves_on_paste() {
+        let ctx = egui::Context::default();
+        let (mut app, m, i) = main_and_instance(&ctx);
+        app.session.selection.set_one(m);
+        app.cut_selection(&ctx);
+        app.undo();
+        app.redo();
+        assert!(app.session.doc.get(m).is_none(), "the fixture: cut again");
+        assert_eq!(app.session.doc.get(i).unwrap().link(), None, "detached");
+        assert!(app.paste_clipboard());
+        assert!(
+            app.session.doc.get(m).is_some(),
+            "the main, under its own id"
+        );
+        assert_eq!(
+            app.session.doc.get(i).unwrap().link(),
+            Some(m),
+            "the instance follows it again"
         );
     }
 

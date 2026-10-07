@@ -733,7 +733,7 @@ pub enum DashStyle { Solid, Dotted, Dashed, Custom }  // presentation only: clas
   nowhere near (§9.4, §15 D25). **Frames now follow the same rule as shapes** in both directions —
   one drawn inside a frame becomes its child, one dragged into a frame joins it, and one dragged out
   lands at the root (§15 D62) — unless a group is above it, when it stays inside that group (§9.4,
-  §15 D876).
+  §15 D876). One nudged inside the frame holding it stays there, which until §15 D997 it did not.
 - **`clip` is node-level, not a field of `NodeKind::Artboard`.** It is a property of the *layer*,
   like `visible`/`locked`/`opacity`, and the one container that honours it today is not obviously
   the last one that will — a clipping group is the same switch. `NodeKind::clips_children()` is
@@ -2347,8 +2347,9 @@ value renames its variants here and the propagation pass carries that name onto 
 holding the old one; swapped, the instance keeps the old name (measured,
 `renaming_a_value_renames_its_variants_and_their_instances`). Gated, like `settle_links`, so an edit that
 cannot break a variant rule pays no scratch clone — the reparent included in the gate, or a main dragged
-into a set is refused. **The verbs**: `combine` (*Combine as variants* — the mains framed, one property
-named *Property 1*, each name a value, shared names clashing), `add_variant` (*Duplicate as component* of
+into a set is refused. **The verbs**: `combine` (*Combine as variants* — the mains framed with
+`SET_PAD`, 10, of air on every side and nothing moving on the page, §15 D998, one property named
+*Property 1*, each name a value, shared names clashing), `add_variant` (*Duplicate as component* of
 a variant, `VARIANT_GAP` below it, the first free combination, the set's bindings extended), and the
 set's renames, adds, moves and deletes — `delete_value` deleting the variants holding it through
 `relink_for_delete`.
@@ -2416,8 +2417,10 @@ card's place (`OndinApp::set_body`): *Component set* and its name, *N variants �
 *Select all* — every variant's instances — the clash note with a warning glyph, each variant property
 as a name field with a ×, disabled for the last, and its values as chips; a chip's popup renames, moves
 and deletes its value, a value variants hold confirming with exact counts in D979 (c)'s words — *N
-variants use it and are deleted with it. M instances will detach.* — and *Property* and *Add variant*
-sit under them. **A variant** gets the Component card with *Variant in* and the set as a link, its
+variants use it and are deleted with it. M instances will detach.* — ⚠️ in a modal since §15 D996
+(`OndinApp::value_delete_confirmation`, *Cancel* and *Delete*, the ✕, `Escape` and the backdrop
+cancelling, a value changed meanwhile deleting nothing), where it was a sentence in the popup over the
+row that did it — and *Property* and *Add variant* sit under them. **A variant** gets the Component card with *Variant in* and the set as a link, its
 derived, read-only name, a dropdown per property — a taken combination not refused but noted, *Another
 variant is also X* with *Select it* — then a main's count and verbs. **An instance's card** gains, between
 its heading (*Instance of* and the main's name until §15 D993, the name alone since) and *Reset all*, a
@@ -2426,7 +2429,11 @@ choice is a swap, the dot since §15 D988 — switching through
 `variant::switch` (several selected together, *Mixed* where they disagree, a missing combination greyed
 with *No Large, Disabled variant in Button*, the dropdown disabled where any selected root fails
 `can_switch`), then each component property — a boolean as a switch row, a text as a field — with its
-override mark; several instances get the rows when they share one owner. **The drift summary counts
+override mark; several instances get the rows when they share one owner. ⚠️ **The rows are the other
+cards' rows since §15 D996**: dropdowns `CONTROL_H` tall, every label-column control ending at the
+card's content edge, the labels right-aligned against their control (`component::label_mark_in`,
+`MARK_ROOM` kept for the mark, a long one cut with `…`), and a boolean's row `variants::toggle_row` —
+its name in the label column and the switch where the fields begin, not the features' toggle-list row. **The drift summary counts
 properties apart**, a property's field units subtracted from the overrides (`PropDrift`, *2 properties ·
 1 override*), the overflow gains *Reset properties N*, and *Reset fields* leaves the property-driven
 fields alone; several instances' summary reads *K with changes*. **A lone main or a set** gets a
@@ -2461,9 +2468,9 @@ slot, then the set count, then `{}`, then a frame's size or a subtract base. ✅
 bottom edge** (2026-10-06, §15 D985): a disc at the edge's middle while the set alone is selected, with
 **a hit route of its own** — the select tool's click arm asks `canvas::set_plus_at` before any pick and
 calls `OndinApp::add_variant`, `chrome_claims` keeps guides off it, and `begin_select_drag` starts
-nothing on it; `select_cursor` asks it ahead of the handles too and shows a pointing hand, where the
-first build showed the bottom side's resize over a disc a drag there no longer resizes (read, not run —
-the cursor needs a `Response`). **A variant's row named by its values** needed nothing: its
+nothing on it; `select_cursor` asks it ahead of the handles too and shows ~~a pointing hand~~ the arrow
+(§15 D996, the hand being §9.2's forbidden cursor), where the first build showed the bottom side's
+resize over a disc a drag there no longer resizes (read, not run — the cursor needs a `Response`). **A variant's row named by its values** needed nothing: its
 name is derived from them (`variant::settle`), and a variant is a main, so it wears the filled hexagon.
 
 ✅ **Nested component properties** (2026-10-06, §15 D988; `variant.rs`, `panels/variants.rs`). The
@@ -8171,13 +8178,15 @@ before being caught on screen (§15 D270). A control that wants to answer the po
 own ground. ⚠️ **The exception this paragraph used to name is gone, and so are three others** (§15
 D371): `panels/typography.rs`'s *Show all features* reveal, the editor's brand mark, the breadcrumb's
 project name and the dashboard's project card all set the hand until 2026-08-26 and none of them does
-now. ~~Re-running the census command above finds no `PointingHand` in production~~ — 🚨 **false as of
-2026-10-07, and the rule stands**: the census finds four, none ruled an exception — a card header's reset
-chip (`ui::section_head_full`), the Component card's link to the main (`component::heading`), the *Undo*
-on a layout card's *Resizing set …* receipt (`panels/layout.rs`), and on the canvas the selected set's
-`+` — and they are §15 D995's ***Fix***. Besides those, the one left in the crate is inside the reveal's
-own test, which keeps the declined alternative measured so the arrow reads as a decision rather than as
-an accident of egui.
+now. Re-running the census command above finds no `PointingHand` in production. ⚠️ **It found four on
+2026-10-07** — a card header's reset chip (`ui::section_head_full`), the Component card's link to the
+main (`component::heading`), the *Undo* on a layout card's *Resizing set …* receipt
+(`panels/layout.rs`), and on the canvas the selected set's `+` — none ruled an exception (§15 D995), and
+the maintainer's answer the same day was that none is one: *"No element should have a pointing hand
+cursor. They should all be arrows."* All four are arrows (§15 D996), the set's `+` answering
+`CursorIcon::Default` with no bitmap rather than the select tool's rest cursor. The one left in the
+crate is inside the reveal's own test, which keeps the declined alternative measured so the arrow reads
+as a decision rather than as an accident of egui.
 
 **Chrome does not show the I-beam either, and that is a style flag rather than a habit.** egui's
 labels are selectable by default, and `LabelSelectionState::on_label` claims `CursorIcon::Text` for
@@ -12593,7 +12602,12 @@ Siblings do it too: a long name on the left reaches over its neighbour's tag.
 **Frame membership follows the artwork.** Dragging a layer more than half out of its frame moves it
 onto the canvas, belonging to no frame; dragging it more than half into one attaches it. A frame is
 a glorified group, so this is the same rule read in both directions — see §15 D20 for the area
-test, the limits on which layers hop, and why it commits as one transaction with the move. **A layer
+test, the limits on which layers hop, and why it commits as one transaction with the move. 🚨 **A moved
+frame is never its own candidate** (`OndinApp::frame_covering_except`, §15 D997): over any drag short
+of about half its size it lies over most of its own moved box and, an inner frame coming later in paint
+order, is the topmost — so it and every
+frame inside it are left out **before** the topmost is chosen. Filtered out of the answer afterwards,
+as it was, it left no answer, and a frame nudged inside its parent went to the canvas. **A layer
 with a group above it hops only between the frames inside that group** (`canvas::group_fence`, §15
 D876): an icon on a card in a row may move to the next card, and dragged out of every card it stays
 where it is rather than falling out of the row onto the page. A loose layer may still drop into a
@@ -14318,19 +14332,20 @@ it two at a time, and ⚠️ a column that ends up holding only one runs full he
 reproduces all four of the layouts `design/Dashboard.dc.html` writes out by hand. The arithmetic is the
 free `mosaic_cells`, per §15 D269, which is what makes it assertable without a frame.
 
-**One form-in-a-modal card, and nine modals stand on it (§15 D368, D621).** `crate::settings` owns it —
+**One form-in-a-modal card, and ten modals stand on it (§15 D368, D621, D996).** `crate::settings` owns it —
 `card_modal` (ground, hairline, corner, shadow, `PAD`, backdrop), `modal_title`, `modal_footer`,
 `section`, `caption` and the card's measurements — and the editor's Settings card plus the dashboard's
 six (New project, Edit project, Delete project, Move to project, Delete file and the library's own
 Settings) are all
-drawn with it, and so are the launch's *Recover unsaved work?* (§15 D377) and the editor's *Unsaved
-changes* (§15 D621). Every one of them dismisses
+drawn with it, and so are the launch's *Recover unsaved work?* (§15 D377), the editor's *Unsaved
+changes* (§15 D621) and its *Delete value* (§15 D996). Every one of them dismisses
 through `egui::Modal::should_close()` and carries `modal_title`'s ✕, so Escape and a backdrop click mean
 the same thing everywhere and neither is hand-rolled per modal. ⚠️ **`modal_footer` is the one part of
-the card two of the nine do not use**: *New project* and *Edit project* each spell their own
+the card three of the ten do not use**: *New project* and *Edit project* each spell their own
 Cancel/commit pair, which is how the *"lit only when the draft differs from what is saved"* rule came
 to hold on the Settings cards and on neither of them (§15 D719, D368). *Edit project* asks the rule
 now — `EditProject::differs_from`, above — and folding both onto `modal_footer` is the remaining half.
+*Delete value* spells its own *Cancel* and *Delete* too; it has no draft, so that rule does not reach it.
 ⚠️ **What a dismissal *means* is still
 the card's own business**: on the recovery card the ✕, Escape and the backdrop are `Later` — stop asking
 this launch — and never *Discard*, since deleting a snapshot is not something a reflex may do.

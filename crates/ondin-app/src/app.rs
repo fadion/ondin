@@ -111,6 +111,35 @@ pub(crate) struct Clip {
     pub(crate) images: Vec<(ondin_core::ImageId, ondin_core::ImageEntry)>,
 }
 
+/// A cut that detached instances, kept so its paste can make it a **move**
+/// (§15 D1003 (1), [`OndinApp::cut_move`]): the paste restores the cut layers
+/// under their own ids and gives back every link the cut's delete took.
+#[derive(Clone, Debug)]
+pub(crate) struct CutMove {
+    /// The document's root at the cut, standing for "this document": a paste
+    /// into another one relinks nothing.
+    doc_root: NodeId,
+    /// The cut layers, in the clipboard's order — the roots of its subtrees.
+    roots: Vec<NodeId>,
+    /// Each link the delete took, as (node, the source it followed).
+    links: Vec<(NodeId, NodeId)>,
+    /// The clipboard's stamp at the cut; another copy since makes this stale.
+    stamp: Option<ClipStamp>,
+}
+
+/// What a layer delete did, for the message its door writes
+/// ([`OndinApp::delete_layers`]).
+pub(crate) struct Deleted {
+    count: usize,
+    guides: usize,
+    /// Instance roots the delete detached.
+    detached: usize,
+    /// The one layer's name, when one was deleted.
+    name: Option<String>,
+    /// Every link the delete took, as (node, its old source).
+    links: Vec<(NodeId, NodeId)>,
+}
+
 /// What the system clipboard turned out to be holding, when a paste asks
 /// (§15 D823).
 ///
@@ -551,6 +580,12 @@ pub struct OndinApp {
     /// pair that disagrees the moment the original is moved, which is the same bug
     /// one step milder.
     pub(crate) clipboard_from: Option<Rect>,
+    /// What a cut that detached instances owes its first paste (§15 D1003 (1)):
+    /// a cut main **moves**. Set by [`Self::cut_selection`] when its delete took
+    /// links, taken by the paste that restores them ([`Self::paste_cut_move`]),
+    /// and stale the moment the clipboard is replaced — its `stamp` is the
+    /// clipboard's at the cut.
+    pub(crate) cut_move: Option<CutMove>,
     /// A digest of the stand-in text the last in-app copy put on the **system**
     /// clipboard, kept as the receipt [`Self::owns_the_clipboard`] reads back to
     /// tell whether [`Self::clipboard`] and [`Self::guide_clipboard`] still
@@ -2174,6 +2209,7 @@ impl OndinApp {
             alt_clone: None,
             clipboard: None,
             clipboard_from: None,
+            cut_move: None,
             clipboard_stamp: None,
             name_edit: None,
             fonts,
@@ -5488,10 +5524,13 @@ impl OndinApp {
     /// sit beside each other and one of them silently doing nothing reads as
     /// broken rather than as unimplemented.
     ///
-    /// ⚠️ **A main's cut is ruled a move and is not one yet** (§15 D1003 (1)): a
-    /// paste in this document is to restore the main under its own id and relink the
-    /// instances the delete detached, and the cut to say they will follow. Today the
-    /// paste makes a new, unlinked main, and the `info` below overwrites the detach.
+    /// **A cut main moves** (§15 D1003 (1)): its delete detaches the instances as
+    /// any delete does, and the cut remembers each link it took
+    /// ([`Self::cut_move`]), so the first paste in this document restores the
+    /// main under its own ids and relinks them ([`Self::paste_cut_move`]). The
+    /// message says so — it said *"Cut"*, written over the delete's own *"3
+    /// instances detached"*, and said it too when the delete was refused
+    /// (`[X2-L5-01]`).
     fn cut_selection(&mut self, ctx: &egui::Context) {
         let layers = !build::outermost(&self.session.doc, self.session.selection.ids()).is_empty();
         let guides = !self.session.selection.guides().is_empty();
@@ -5499,8 +5538,39 @@ impl OndinApp {
             return;
         }
         self.copy_selection(ctx);
-        self.delete_selection();
-        self.session.info("Cut");
+        if guides {
+            self.remove_selected_guides();
+            self.session.info("Cut");
+            return;
+        }
+        self.cut_move = None;
+        let Some(d) = self.delete_layers() else {
+            return;
+        };
+        if !d.links.is_empty() {
+            self.cut_move = Some(CutMove {
+                doc_root: self.session.doc.root(),
+                roots: self
+                    .clipboard
+                    .iter()
+                    .flat_map(|c| &c.subtrees)
+                    .filter_map(|s| s.first().map(|n| n.id()))
+                    .collect(),
+                links: d.links,
+                stamp: self.clipboard_stamp,
+            });
+        }
+        self.session.info(match (d.detached, d.name) {
+            (0, _) => "Cut".to_string(),
+            (n, Some(name)) => format!(
+                "Cut “{name}” — {n} instance{} will follow it on paste",
+                if n == 1 { "" } else { "s" }
+            ),
+            (n, None) => format!(
+                "Cut {} layer(s) — {n} instance(s) will follow on paste",
+                d.count
+            ),
+        });
     }
 
     /// Put the selection on the system clipboard as an SVG document
@@ -6025,6 +6095,9 @@ impl OndinApp {
         if placements.is_empty() {
             return;
         }
+        if self.paste_cut_move(&placements, verb, offset, images) {
+            return;
+        }
         let (tx, created) = build::insert_subtrees(
             &self.session.doc,
             &mut self.session.ids,
@@ -6044,6 +6117,79 @@ impl OndinApp {
         }
     }
 
+    /// The paste that makes a cut a **move** (§15 D1003 (1)): when `placements`
+    /// are the clipboard a [`CutMove`] was taken for, in the document it was cut
+    /// from, and none of their ids is back in it, they go in **under their own
+    /// ids**, and every link the cut's delete took is given back — so the
+    /// instances of a cut main follow it again, whatever they were edited to
+    /// meanwhile (an edit is an override by value, D979 (a)). Taken once: a second
+    /// paste finds the main present and makes an instance (D979 (e)).
+    ///
+    /// `false` leaves the ordinary paste to run — for anything else, and for a
+    /// move the commit refuses (the move is dropped, never retried).
+    fn paste_cut_move(
+        &mut self,
+        placements: &[build::Placement],
+        verb: &str,
+        offset: Vec2,
+        images: &[(ondin_core::ImageId, ondin_core::ImageEntry)],
+    ) -> bool {
+        let doc = &self.session.doc;
+        let Some(cut) = self.cut_move.as_ref() else {
+            return false;
+        };
+        let roots: Vec<NodeId> = placements
+            .iter()
+            .filter_map(|p| p.nodes.first().map(|n| n.id()))
+            .collect();
+        if cut.stamp != self.clipboard_stamp
+            || cut.doc_root != doc.root()
+            || cut.roots != roots
+            || placements
+                .iter()
+                .flat_map(|p| &p.nodes)
+                .any(|n| doc.contains(n.id()))
+        {
+            return false;
+        }
+        let cut = self.cut_move.take().expect("read above");
+        let mut ops = build::missing_image_ops(doc, images);
+        let mut added: std::collections::HashMap<NodeId, usize> = Default::default();
+        for p in placements {
+            let root = p.nodes[0].id();
+            let at = p
+                .index
+                .unwrap_or_else(|| doc.get(p.parent).map(|n| n.children().len()).unwrap_or(0));
+            let shift = added.entry(p.parent).or_default();
+            ops.push(Operation::InsertSubtree {
+                nodes: p.nodes.clone(),
+                parent: p.parent,
+                index: at + *shift,
+            });
+            *shift += 1;
+            ops.push(Operation::SetTransform {
+                id: root,
+                transform: ondin_core::kurbo::Affine::translate(offset) * p.nodes[0].transform(),
+            });
+        }
+        ops.extend(
+            cut.links
+                .iter()
+                .filter(|(id, _)| doc.get(*id).is_some_and(|n| n.link().is_none()))
+                .map(|(id, src)| Operation::SetLink {
+                    id: *id,
+                    link: Some(*src),
+                }),
+        );
+        if !self.session.commit(Transaction(ops)) {
+            return false;
+        }
+        self.session
+            .info(format!("{verb} {} layer(s)", roots.len()));
+        self.session.selection.set(roots);
+        true
+    }
+
     pub(crate) fn delete_selection(&mut self) {
         // Guides are the other thing Delete can be aimed at. They are never
         // selected alongside layers (`Selection`), so this is an early return
@@ -6052,9 +6198,32 @@ impl OndinApp {
             self.remove_selected_guides();
             return;
         }
+        let Some(d) = self.delete_layers() else {
+            return;
+        };
+        self.session.info(match (d.guides, d.detached, d.name) {
+            // D981's wording, text-only (its ruling (d)).
+            (_, n @ 1.., Some(name)) => format!(
+                "Deleted “{name}” — {n} instance{} detached · Ctrl+Z to undo",
+                if n == 1 { "" } else { "s" }
+            ),
+            (_, n @ 1.., None) => format!(
+                "Deleted {} layer(s) — {n} instance(s) detached · Ctrl+Z to undo",
+                d.count
+            ),
+            (0, _, _) => format!("Deleted {} layer(s)", d.count),
+            (n, _, _) => format!("Deleted {} layer(s) and {n} guide(s)", d.count),
+        });
+    }
+
+    /// Delete the selected layers in one commit, and say what that did — `None`
+    /// when nothing was selected or the commit refused. The delete half of
+    /// [`Self::delete_selection`] and [`Self::cut_selection`], which word it
+    /// differently.
+    fn delete_layers(&mut self) -> Option<Deleted> {
         let ids = build::outermost(&self.session.doc, self.session.selection.ids());
         if ids.is_empty() {
-            return;
+            return None;
         }
         // **A frame's guides go with it**, in the same transaction, so deleting a
         // page does not leave lines scoped to something that is gone — and one
@@ -6086,22 +6255,32 @@ impl OndinApp {
             [one] => self.session.doc.get(*one).map(|n| n.name().to_string()),
             _ => None,
         };
-        if self.session.commit(Transaction(ops)) {
-            self.session.selection.clear();
-            self.session.info(match (guides, detached, name) {
-                // D981's wording, text-only (its ruling (d)).
-                (_, d @ 1.., Some(name)) => format!(
-                    "Deleted “{name}” — {d} instance{} detached · Ctrl+Z to undo",
-                    if d == 1 { "" } else { "s" }
-                ),
-                (_, d @ 1.., None) => format!(
-                    "Deleted {} layer(s) — {d} instance(s) detached · Ctrl+Z to undo",
-                    ids.len()
-                ),
-                (0, _, _) => format!("Deleted {} layer(s)", ids.len()),
-                (n, _, _) => format!("Deleted {} layer(s) and {n} guide(s)", ids.len()),
-            });
+        // Every link into what goes, read before the commit and kept where the
+        // commit changed it — `relink_for_delete`'s and whatever the commit's own
+        // settling adds — so a cut can give them back (§15 D1003 (1)).
+        let doc = &self.session.doc;
+        let going: HashSet<NodeId> = build::subtree_nodes(doc, &ids).into_iter().collect();
+        let held: Vec<(NodeId, NodeId)> = build::subtree_nodes(doc, &[doc.root()])
+            .into_iter()
+            .filter(|id| !going.contains(id))
+            .filter_map(|id| Some((id, doc.get(id)?.link()?)))
+            .filter(|(_, src)| going.contains(src))
+            .collect();
+        if !self.session.commit(Transaction(ops)) {
+            return None;
         }
+        self.session.selection.clear();
+        let links = held
+            .into_iter()
+            .filter(|(id, src)| self.session.doc.get(*id).and_then(|n| n.link()) != Some(*src))
+            .collect();
+        Some(Deleted {
+            count: ids.len(),
+            guides,
+            detached,
+            name,
+            links,
+        })
     }
 
     pub(crate) fn child_count(&self, parent: NodeId) -> usize {
@@ -19927,6 +20106,53 @@ mod component_verb_tests {
             kids.as_slice(),
             "with its layers"
         );
+    }
+
+    /// **A cut main moves** (§15 D1003 (1), `[X2-L5-01]`): the cut detaches the
+    /// instance as a delete does and says it will follow; the first paste puts the
+    /// main back under its own id and relinks it — with an edit made to the
+    /// instance meanwhile kept as an override; a second paste is an instance. The
+    /// cut said *"Cut"* over the delete's *"1 instance detached"*, and the paste
+    /// made a new, unlinked main.
+    ///
+    /// Flip: `paste_cut_move` answering `false` fails "the main, under its own
+    /// id" — the ordinary paste mints a new one.
+    #[test]
+    fn a_cut_main_pastes_back_as_a_move() {
+        let ctx = egui::Context::default();
+        let (mut app, m, i) = main_and_instance(&ctx);
+        app.session.selection.set_one(m);
+        app.cut_selection(&ctx);
+        assert!(app.session.doc.get(m).is_none(), "cut");
+        assert_eq!(app.session.doc.get(i).unwrap().link(), None, "detached");
+        let said = app.session.status().text.clone();
+        assert!(said.contains("will follow it on paste"), "{said}");
+        // An edit to the detached instance meanwhile.
+        assert!(app.session.commit(Transaction(vec![Operation::SetName {
+            id: i,
+            name: "mine".into(),
+        }])));
+        assert!(app.paste_clipboard());
+        assert!(
+            app.session.doc.get(m).is_some(),
+            "the main, under its own id"
+        );
+        assert_eq!(app.session.doc.get(i).unwrap().link(), Some(m), "relinked");
+        assert_eq!(
+            app.session.doc.get(i).unwrap().name(),
+            "mine",
+            "its edit kept"
+        );
+        assert!(app.cut_move.is_none(), "taken");
+        // A second paste is a copy of a main present — an instance (D979 (e)).
+        assert!(app.paste_clipboard());
+        let two = app
+            .session
+            .selection
+            .single()
+            .expect("the paste is selected");
+        assert_ne!(two, m);
+        assert_eq!(app.session.doc.get(two).unwrap().link(), Some(m));
     }
 
     /// **`Enter` steps into an instance** (§15 D981 (c)), as the double-click does

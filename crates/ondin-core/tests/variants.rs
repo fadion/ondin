@@ -619,6 +619,25 @@ fn a_new_set_pads_its_variants_and_moves_nothing() {
         before,
         "the main did not move"
     );
+
+    // **And a second variant keeps the same air under it** (§15 D1000): the copy
+    // goes `VARIANT_GAP` below the first, and the set grows to `SET_PAD` past it —
+    // not `VARIANT_GAP`, which read as the padding doubling. Flip run: the old
+    // `bottom + VARIANT_GAP` fails *"the air under the last variant"* with 24.
+    let (tx, new) = variant::add_variant(&doc, &res, &mut ids, set, Some(a)).unwrap();
+    doc.apply(&tx).expect("a second variant");
+    let res = Resolved::rebuild(&doc);
+    let s = res.world_bounds(set).unwrap();
+    let n = res.world_bounds(new).unwrap();
+    assert_eq!(
+        s.y1 - n.y1,
+        variant::SET_PAD,
+        "the air under the last variant"
+    );
+    assert_eq!(
+        s.height(),
+        20.0 * 2.0 + variant::VARIANT_GAP + 2.0 * variant::SET_PAD
+    );
 }
 
 /// *Add variant* takes the first free combination and extends every binding to

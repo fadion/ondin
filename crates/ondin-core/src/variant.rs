@@ -803,14 +803,20 @@ pub fn add_variant(
             .collect();
         tx.0.push(Operation::SetProperties { id: set, props });
     }
-    // Grow the set to hold the copy, where it is a frame with a size of its own.
+    // Grow the set to hold the copy, where it is a frame with a size of its own —
+    // **`SET_PAD` under it, the air `combine` leaves** (§15 D1000). It was
+    // `VARIANT_GAP` again, so a set of two variants had 24 under the last where a
+    // set of one had 10, which the maintainer read as the padding doubling.
     if let NodeKind::Artboard { size } = &s.kind {
         let src = doc.get(source)?;
         let local = crate::query::local_box(doc, res, source)?;
         let placed = crate::geometry::transform_rect(src.transform, local);
         let bottom = placed.y1 + height + VARIANT_GAP;
         let right = placed.x1;
-        let want = kurbo::Size::new(size.width.max(right), size.height.max(bottom + VARIANT_GAP));
+        let want = kurbo::Size::new(
+            size.width.max(right + SET_PAD),
+            size.height.max(bottom + SET_PAD),
+        );
         if want != *size {
             tx.0.push(Operation::SetGeometry {
                 id: set,

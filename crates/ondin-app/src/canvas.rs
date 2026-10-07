@@ -2500,8 +2500,10 @@ impl OndinApp {
                             // (5)) — the outline never lit the set, so nothing else
                             // says so.
                             let refused_set = self.drops_into_a_set_of_another_kind(delta);
-                            if self.session.commit(built) && refused_set {
-                                self.session.info(SET_OF_ANOTHER_KIND);
+                            if self.session.commit(built)
+                                && let Some(why) = refused_set
+                            {
+                                self.session.info(why);
                             }
                         }
                     }
@@ -3273,11 +3275,43 @@ impl OndinApp {
     ) -> Option<NodeId> {
         loop {
             let f = frame_covering(bounds, &candidates)?;
-            if !components || ondin_core::component::can_hold(&self.session.doc, f, moved) {
+            if !components || self.holds(f, moved) {
                 return Some(f);
             }
             candidates.retain(|(g, _)| *g != f);
         }
+    }
+
+    /// Whether frame `f` may hold `moved` dropped into it by this move:
+    /// `component::can_hold`, and — for a main newly entering a component set —
+    /// the set taking every main moving with it **together**
+    /// (`variant::takes_together`, §15 D1003 (5)). A frame main and a group main
+    /// dragged as one into an empty set each passed `can_hold` alone, an empty set
+    /// fitting either, and the move made a set of two kinds.
+    ///
+    /// A variant already in `f` is never refused here, whatever moves beside it:
+    /// staying is never refused (`can_hold`'s first rule), and the newcomer of
+    /// the other kind is refused on its own account.
+    fn holds(&self, f: NodeId, moved: NodeId) -> bool {
+        ondin_core::component::can_hold(&self.session.doc, f, moved)
+            && self.set_takes_moving(f, moved)
+    }
+
+    /// [`Self::holds`]'s second half: `true` unless `moved` is a main entering
+    /// the set `f` beside mains of another kind, or of a kind other than the set's.
+    /// The moving set is [`Self::moving_with`]'s, so an Alt-drag asks `moved`
+    /// alone — its copies are instances, not mains.
+    fn set_takes_moving(&self, f: NodeId, moved: NodeId) -> bool {
+        let doc = &self.session.doc;
+        if !ondin_core::variant::is_set(doc, f)
+            || !doc
+                .get(moved)
+                .is_some_and(|n| n.component() && n.parent() != Some(f))
+        {
+            return true;
+        }
+        let moving: Vec<NodeId> = self.moving_with(moved).into_iter().collect();
+        ondin_core::variant::takes_together(doc, f, &moving)
     }
 
     /// Whether a move of the selection by `delta` drops a main over a component
@@ -3285,15 +3319,17 @@ impl OndinApp {
     /// one refusal the release explains (§15 D1003 (5): *"with a message saying
     /// why"*). Read off the plain drop rule only: a layer in a group or a layout
     /// does not reach a set by this route.
-    fn drops_into_a_set_of_another_kind(&self, delta: Vec2) -> bool {
+    ///
+    /// Answers the message to say: [`SET_OF_ANOTHER_KIND`] for a main of a kind
+    /// the set's variants are not, [`SET_OF_MIXED_KINDS`] for mains of two kinds
+    /// moving into it together (an empty set fits either alone).
+    fn drops_into_a_set_of_another_kind(&self, delta: Vec2) -> Option<&'static str> {
         let (doc, res) = (&self.session.doc, &self.session.resolved);
         build::outermost(doc, self.session.selection.ids())
             .into_iter()
             .filter(|id| doc.get(*id).is_some_and(|n| n.component()))
-            .any(|id| {
-                let Some(landed) = res.world_bounds(id).map(|b| b + delta) else {
-                    return false;
-                };
+            .find_map(|id| {
+                let landed = res.world_bounds(id).map(|b| b + delta)?;
                 let moving = self.moving_with(id);
                 let mut candidates: Vec<(NodeId, KRect)> = self.with_frames(|i| {
                     i.boxes
@@ -3306,17 +3342,22 @@ impl OndinApp {
                 // The frames `covering_that_holds` passed over, topmost first — a
                 // variant lying over its set's box is one, before the set.
                 while let Some(f) = frame_covering(landed, &candidates) {
-                    if ondin_core::component::can_hold(doc, f, id) {
-                        return false;
+                    if self.holds(f, id) {
+                        return None;
                     }
-                    if ondin_core::variant::is_set(doc, f)
-                        && !ondin_core::variant::fits_set(doc, f, kind, Some(id))
-                    {
-                        return true;
+                    // Another kind than the set's, or than the mains moving
+                    // with it into an empty one.
+                    if ondin_core::variant::is_set(doc, f) {
+                        if !ondin_core::variant::fits_set(doc, f, kind, Some(id)) {
+                            return Some(SET_OF_ANOTHER_KIND);
+                        }
+                        if !self.set_takes_moving(f, id) {
+                            return Some(SET_OF_MIXED_KINDS);
+                        }
                     }
                     candidates.retain(|(g, _)| *g != f);
                 }
-                false
+                None
             })
     }
 
@@ -13631,9 +13672,15 @@ fn within_moving(
 
 /// What a move says when a main dropped over a component set of another kind was
 /// kept out of it (§15 D1003 (5): one kind per set, refused with a message saying
-/// why).
-const SET_OF_ANOTHER_KIND: &str =
+/// why). The layers panel's drop says the same (`[X2-L2-02]`'s K7 leftover).
+pub(crate) const SET_OF_ANOTHER_KIND: &str =
     "Not added to the set — a component set holds one kind of layer, and its variants are another";
+
+/// What a move says when mains of two kinds dropped together over a component
+/// set were kept out of it — an empty set fits either alone, and taking both
+/// would make it two kinds (§15 D1003 (5), `variant::takes_together`).
+pub(crate) const SET_OF_MIXED_KINDS: &str =
+    "Not added to the set — a component set holds one kind of layer, and these mains mix kinds";
 
 /// Which of `frames` owns a layer whose world bounds are `bounds`: the topmost
 /// one covering more than half of it, or `None` for "no frame — the canvas".
@@ -21151,6 +21198,84 @@ mod frame_menu_door_tests {
         assert_eq!(variants_in(&app, set), 2, "the click on the + adds one");
     }
 
+    /// **A press-drag on a selected set's `+` starts nothing, and the cursor over
+    /// it is the arrow** (`[X11.1-L6-05]`, §15 D982, D985, D996) — the pointer
+    /// moved onto the disc, pressed, dragged 40 points down in ten steps and let
+    /// go, through `normal_mode_input`.
+    ///
+    /// The disc sits exactly on the set's bottom-middle resize handle, and the
+    /// only thing keeping a press that slides off it from arming that handle is
+    /// `begin_select_drag`'s early return; the two tests beside this one ask
+    /// `chrome_claims` and drive a click with no motion, so neither reached it.
+    /// The cursor arm had no test either.
+    ///
+    /// **Flips run**: `begin_select_drag`'s guard made `if false && …` fails at
+    /// *"the set keeps its box"*, its bottom 290 against 250, the predicted site;
+    /// `select_cursor`'s arm made `&& false &&` fails at *"the arrow over the
+    /// disc"* with `ResizeVertical`.
+    #[test]
+    fn a_press_drag_on_a_sets_plus_starts_nothing_and_shows_the_arrow() {
+        const AREA: egui::Rect = egui::Rect {
+            min: egui::Pos2::ZERO,
+            max: egui::Pos2::new(800.0, 600.0),
+        };
+        let ctx = egui::Context::default();
+        let (mut app, set) = app_with_a_set(&ctx);
+        let frame = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(AREA),
+                events,
+                ..Default::default()
+            };
+            let mut cursor = egui::CursorIcon::Default;
+            let _ = ctx.run_ui(input, |ui| {
+                let resp = ui.interact(
+                    AREA,
+                    egui::Id::new("set-plus-drag-probe"),
+                    egui::Sense::click_and_drag(),
+                );
+                app.normal_mode_input(ui, &resp, AREA, 1.0);
+                cursor = app.select_cursor(&resp, AREA, 1.0).0;
+            });
+            cursor
+        };
+        app.session.selection.set_one(set);
+        let (_, at) = app.set_plus(AREA, 1.0).expect("the +");
+        let before = app
+            .session
+            .resolved
+            .world_bounds(set)
+            .expect("the set's box");
+        let variants = variants_in(&app, set);
+
+        frame(&mut app, vec![egui::Event::PointerMoved(at)]);
+        let cursor = frame(&mut app, vec![egui::Event::PointerMoved(at)]);
+        assert_eq!(cursor, egui::CursorIcon::Default, "the arrow over the disc");
+
+        let button = |pos, pressed| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        frame(&mut app, vec![button(at, true)]);
+        for step in 1..=10 {
+            let p = at + egui::vec2(0.0, 4.0 * step as f32);
+            frame(&mut app, vec![egui::Event::PointerMoved(p)]);
+        }
+        let end = at + egui::vec2(0.0, 40.0);
+        frame(&mut app, vec![button(end, false)]);
+        frame(&mut app, Vec::new());
+
+        assert_eq!(
+            app.session.resolved.world_bounds(set),
+            Some(before),
+            "the set keeps its box"
+        );
+        assert_eq!(variants_in(&app, set), variants, "and no variant was added");
+        assert!(matches!(app.drag, Drag::None), "nothing is in flight");
+    }
+
     /// **The components chrome paints what §15 D981, D982 and D985 say it
     /// does**, read off the frame's shapes:
     /// - a main's tag is a **chip** — a `COMPONENT` ground — with the **filled
@@ -25347,8 +25472,9 @@ mod group_fence_tests {
             None,
             "a group main over a set of frames stays on the canvas"
         );
-        assert!(
+        assert_eq!(
             app.drops_into_a_set_of_another_kind(delta),
+            Some(SET_OF_ANOTHER_KIND),
             "and that drop is the one the release explains"
         );
         drop(&mut app, g, set, "group into a set of frames");
@@ -25361,7 +25487,102 @@ mod group_fence_tests {
             Some(set),
             "a frame main over the set goes in"
         );
-        assert!(!app.drops_into_a_set_of_another_kind(delta));
+        assert_eq!(app.drops_into_a_set_of_another_kind(delta), None);
+    }
+
+    /// **Mains of two kinds dragged together into an empty set both stay out,
+    /// and the release says why** (`[X2-L2-02]`'s K7 leftover, §15 D1003 (5)) —
+    /// an empty set 300×300 at the origin, a frame main `f` and a group main `g`
+    /// (holding one rect) side by side at (500, 0), both selected and moved over
+    /// the set; then `f` alone, which goes in.
+    ///
+    /// `component::can_hold` asks `fits_set` of one main at a time, and an empty
+    /// set fits either kind, so before the repair each main's destination was the
+    /// set and the move made a set of a frame and a group — the switch between
+    /// them then relinking a group to a frame (`[X6.1-L1-02]`), the very thing
+    /// the ruling's one kind per set exists to stop. `holds` now asks
+    /// `variant::takes_together` over the whole moving set.
+    ///
+    /// **Flip run**, `set_takes_moving` answering `true` always: fails at
+    /// *"the frame main stays out of an empty set beside a group main"* with
+    /// `Some(set)`, the predicted site.
+    #[test]
+    fn mains_of_two_kinds_dragged_together_stay_out_of_an_empty_set() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0xFA61);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let [set, f, g, gr] = [(); 4].map(|_| ids.mint());
+        let node = |id, parent, kind, at: (f64, f64)| Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind,
+            transform: Some(Affine::translate(at)),
+            name: None,
+        };
+        let frame = |w| NodeKind::Artboard {
+            size: Size::new(w, w),
+        };
+        doc.apply(&Transaction(vec![
+            node(set, root, frame(300.0), (0.0, 0.0)),
+            node(f, root, frame(100.0), (500.0, 0.0)),
+            node(g, root, NodeKind::Group, (620.0, 0.0)),
+            node(
+                gr,
+                g,
+                NodeKind::Rect {
+                    size: Size::new(100.0, 100.0),
+                    corner_radii: Default::default(),
+                },
+                (0.0, 0.0),
+            ),
+            Operation::SetVariantSet {
+                id: set,
+                set: Some(Default::default()),
+            },
+            Operation::SetComponent {
+                id: f,
+                component: true,
+            },
+            Operation::SetComponent {
+                id: g,
+                component: true,
+            },
+        ]))
+        .expect("the tree");
+        app.session.adopt_document(doc, None);
+        assert!(ondin_core::variant::is_set(&app.session.doc, set));
+        assert!(ondin_core::variant::variants(&app.session.doc, set).is_empty());
+
+        // Both land inside the set's 300×300: `f` at (10, 10), `g` at (130, 10).
+        let delta = Vec2::new(-490.0, 10.0);
+        app.session.selection.set(vec![f, g]);
+        assert_eq!(
+            app.move_destination(f, delta),
+            None,
+            "the frame main stays out of an empty set beside a group main"
+        );
+        assert_eq!(
+            app.move_destination(g, delta),
+            None,
+            "the group main stays out of an empty set beside a frame main"
+        );
+        assert_eq!(
+            app.drops_into_a_set_of_another_kind(delta),
+            Some(SET_OF_MIXED_KINDS),
+            "and the release says why"
+        );
+        let tx = app.move_tx(delta);
+        app.session.try_commit(tx).expect("the move commits");
+        assert!(ondin_core::variant::variants(&app.session.doc, set).is_empty());
+
+        // One kind alone still goes in: `f`, now lying over the set, nudged.
+        let nudge = Vec2::new(1.0, 0.0);
+        app.session.selection.set_one(f);
+        assert_eq!(app.move_destination(f, nudge), Some(set));
+        assert_eq!(app.drops_into_a_set_of_another_kind(nudge), None);
     }
 
     /// **An occupied card in a row is a click target; an occupied page is not**

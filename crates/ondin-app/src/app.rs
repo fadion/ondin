@@ -970,6 +970,15 @@ pub struct OndinApp {
         u64,
         std::collections::HashMap<NodeId, ondin_core::reset::Drift>,
     ),
+    /// What differs among each layers-panel row's own children
+    /// (`reset::child_drift`) — the parent row's dot and tooltip (§15 D1003 (9),
+    /// `[X11.1-L2-03]`) — on the same key as `drift_cache` and for its reason: the
+    /// tree asks it of every row inside an instance every frame, and each answer
+    /// walks the whole instance for the links it holds.
+    pub(crate) child_drift_cache: (
+        u64,
+        std::collections::HashMap<NodeId, ondin_core::reset::ChildDrift>,
+    ),
     /// The Component card's property readings, kept beside `drift_cache` on the
     /// same key (`panels::PropCache`, `[X8.1-L4-02]`).
     pub(crate) prop_cache: crate::panels::PropCache,
@@ -2287,6 +2296,7 @@ impl OndinApp {
             collapsed_panels: HashSet::from(["Effects", "Preview"]),
             // `u64::MAX` is no revision a session has, so the first read fills it.
             drift_cache: (u64::MAX, Default::default()),
+            child_drift_cache: (u64::MAX, Default::default()),
             prop_cache: Default::default(),
             card_overrides: Vec::new(),
             field_overrides: Vec::new(),
@@ -6034,7 +6044,7 @@ impl OndinApp {
         // `insert_subtrees` advances a placement past the indices already inserted
         // at or below it (§15 D100), so several arrive in the order they are listed
         // instead of collapsing onto each other.
-        let placements = templates
+        let placements: Vec<build::Placement> = templates
             .iter()
             .map(|template| build::Placement {
                 nodes: template.clone(),
@@ -6042,10 +6052,51 @@ impl OndinApp {
                 index: Some(above),
             })
             .collect();
+        // And the same fallback where the component rules refuse the slot
+        // (`[X2-L2-02]`'s third case): beside a row inside main `m` with `m` on the
+        // clipboard, the copy settles as an instance of `m` inside `m` and the commit
+        // refused the whole paste as `ComponentCycle`; a main whose original is gone
+        // stays a main, `NestedMain` inside a main or an instance.
+        if !self.paste_is_held(&placements, &clip.images) {
+            return self.paste_clipboard_at(PASTE_OFFSET);
+        }
         // Offset like every other paste: a copy landing exactly on top of something
         // is invisible, and this door decided the *slot*, not the position.
         self.insert_all(placements, "Pasted", PASTE_OFFSET, &clip.images);
         true
+    }
+
+    /// Whether the document would take `placements` as an ordinary paste —
+    /// asked by [`Self::paste_clipboard_beside`], the one door whose slot is the
+    /// user's rather than the copied layer's own (`[X2-L2-02]`).
+    ///
+    /// **Only the component rules can refuse a paste**, and only under a main or an
+    /// instance: a copy is settled at the commit (`propagate::owed`, D979 (e)'s
+    /// copy-of-a-main-is-an-instance), so whether it is refused is a question about
+    /// what it *settles into*, which no reading of the templates answers. So the
+    /// paste is built and applied to a clone, with the settling the commit does —
+    /// one document clone, and only for a slot inside a main or an instance; every
+    /// other slot answers `true` without building anything. The trial spends ids
+    /// from the session's source, which leaves gaps and nothing else.
+    fn paste_is_held(
+        &mut self,
+        placements: &[build::Placement],
+        images: &[(ondin_core::ImageId, ondin_core::ImageEntry)],
+    ) -> bool {
+        let doc = &self.session.doc;
+        let under_a_component = placements.iter().any(|p| {
+            std::iter::successors(doc.get(p.parent), |n| n.parent().and_then(|a| doc.get(a)))
+                .any(|n| n.component() || n.link().is_some())
+        });
+        if !under_a_component {
+            return true;
+        }
+        let (tx, _) = build::insert_subtrees(doc, &mut self.session.ids, placements, PASTE_OFFSET);
+        let mut ops = build::missing_image_ops(doc, images);
+        ops.extend(tx.0);
+        let mut tx = Transaction(ops);
+        ondin_core::propagate::owed(doc, &mut tx, &mut self.session.ids);
+        doc.clone().apply(&tx).is_ok()
     }
 
     /// *Paste here*: the clipboard, centred on `world` (`docs/context-menus.md` §4).
@@ -20274,6 +20325,310 @@ mod component_verb_tests {
             app.session.doc.get(i).unwrap().children(),
             kids.as_slice(),
             "with its layers"
+        );
+    }
+
+    /// **A panel *Paste* beside a row inside a main, with that main on the
+    /// clipboard, falls back to the ordinary paste rather than failing**
+    /// (`[X2-L2-02]`'s third case) — main `m` holding rect `r`, `m` copied, then
+    /// *Paste* beside `r`.
+    ///
+    /// The copy of a main whose original is present settles as an instance of it
+    /// (D979 (e)), and an instance of `m` inside `m` is `ComponentCycle`: the commit
+    /// refused the whole paste with *"Edit failed: … contains an instance of
+    /// itself"*, and the menu row did nothing else. `paste_clipboard_beside` now
+    /// asks `paste_is_held` and, refused, takes the chord's rule — back beside the
+    /// original, at the root. A row outside any component still takes the slot it
+    /// names.
+    ///
+    /// **Flip run**, `paste_is_held` answering `true` always: fails at *"the paste
+    /// went through"* with the status *"Edit failed: …"*, the predicted site.
+    #[test]
+    fn pasting_a_main_beside_a_row_inside_it_falls_back_to_the_ordinary_rule() {
+        let ctx = egui::Context::default();
+        let (mut app, m, i) = main_and_instance(&ctx);
+        let r = app.session.doc.get(m).unwrap().children()[0];
+        let root = app.session.doc.root();
+        app.session.selection.set_one(m);
+        app.copy_selection(&ctx);
+        assert!(app.paste_clipboard_beside(r));
+        assert!(
+            !app.session.status().text.starts_with("Edit failed"),
+            "the paste went through: {}",
+            app.session.status().text
+        );
+        let pasted = app
+            .session
+            .selection
+            .single()
+            .expect("the paste is selected");
+        assert_eq!(
+            app.session.doc.get(pasted).unwrap().link(),
+            Some(m),
+            "an instance of m"
+        );
+        assert_eq!(
+            app.session.doc.get(pasted).unwrap().parent(),
+            Some(root),
+            "beside the original, not inside it"
+        );
+        assert_eq!(
+            app.session.doc.get(m).unwrap().children(),
+            &[r],
+            "m is untouched"
+        );
+
+        // A slot outside any component is the panel's own: beside the instance.
+        assert!(app.paste_clipboard_beside(i));
+        let pasted = app
+            .session
+            .selection
+            .single()
+            .expect("the paste is selected");
+        let siblings = app.session.doc.get(root).unwrap().children().to_vec();
+        let at = |id| siblings.iter().position(|c| *c == id).unwrap();
+        assert_eq!(at(pasted), at(i) + 1, "just above the row it was aimed at");
+    }
+
+    /// The labels of the context menu a user opens on `ids` — through
+    /// `open_context_menu` → `menu_context` → `build`, never a synthetic
+    /// `Context` (`[X11.2-L6-03]`) — the menu closed again after.
+    fn menu_on(app: &mut OndinApp, ctx: &egui::Context, ids: &[NodeId]) -> Vec<String> {
+        app.session.selection.set(ids.to_vec());
+        app.open_context_menu(
+            ctx,
+            crate::menu::Target::Layer {
+                id: ids[0],
+                door: crate::menu::Door::Canvas,
+            },
+            None,
+        );
+        let labels = app
+            .open_menu_rows()
+            .iter()
+            .flatten()
+            .map(|row| row.label.to_string())
+            .collect();
+        app.context_menu = None;
+        labels
+    }
+
+    /// **Each component role's rows, read off a real document** (`[X11.2-L6-03]`,
+    /// §15 D981) — main `m` holding rect `r`, its instance `i` (copy `c` of `r`),
+    /// a local rect `loc` inside `i`, a second main `m2`, and a Boolean property
+    /// *Show* bound to `r`, set off on `i`.
+    ///
+    /// Every menu test built a synthetic `Context`, setting `role`, `holds_main`,
+    /// `property_reset` and the rest itself, so `component_role` and
+    /// `menu_context` — the seam `[X11.2-L1-01]`'s defect sat in — were reached
+    /// from a document by nothing: the review's six flips together left the suite
+    /// green.
+    ///
+    /// **Flips run**, one at a time: `component_role`'s member arm answering
+    /// `Role::Local` fails at *"a member goes to its main"*; `combinable: false &&
+    /// …` in `menu_context` fails at *"two mains combine"*; `holds_main: false &&
+    /// …` fails at *"two mains are not wrapped"*; `property_reset`'s
+    /// `.filter(|_| false)` fails at *"the member resets its property"* — each the
+    /// predicted site.
+    #[test]
+    fn the_menu_a_user_opens_reads_each_role_off_the_document() {
+        use ondin_core::variant::{PropKind, PropValue};
+        let ctx = egui::Context::default();
+        let (mut app, m, i) = main_and_instance(&ctx);
+        let r = app.session.doc.get(m).unwrap().children()[0];
+        let c = app.session.doc.get(i).unwrap().children()[0];
+        let root = app.session.doc.root();
+        let [loc, m2] = [(); 2].map(|_| app.session.ids.mint());
+        assert!(app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: loc,
+                parent: i,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(4.0, 4.0),
+                    corner_radii: Default::default(),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::CreateNode {
+                id: m2,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(50.0, 50.0),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetComponent {
+                id: m2,
+                component: true,
+            },
+        ])));
+        let (tx, _) = ondin_core::variant::define(
+            &app.session.doc,
+            &mut app.session.ids,
+            m,
+            "Show",
+            PropKind::Boolean,
+            vec![r],
+        )
+        .expect("a boolean property");
+        assert!(app.session.commit(tx));
+        let p = ondin_core::variant::instance_properties(&app.session.doc, i)[0]
+            .value
+            .clone();
+        let ops = ondin_core::variant::set_property(
+            &app.session.doc,
+            &[i],
+            &p,
+            &PropValue::Boolean(false),
+        );
+        assert!(app.session.commit(Transaction(ops)));
+        assert!(
+            !app.session.doc.get(c).unwrap().visible(),
+            "the fixture: Show off"
+        );
+        let has = |labels: &[String], l: &str| labels.iter().any(|x| x == l);
+
+        let member = menu_on(&mut app, &ctx, &[c]);
+        assert!(
+            has(&member, "Go to main component"),
+            "a member goes to its main: {member:?}"
+        );
+        assert!(!has(&member, "Create component"), "{member:?}");
+        assert!(
+            has(&member, "Reset Show"),
+            "the member resets its property: {member:?}"
+        );
+
+        let local = menu_on(&mut app, &ctx, &[loc]);
+        assert!(has(&local, "Create component"), "{local:?}");
+        assert!(!has(&local, "Go to main component"), "{local:?}");
+
+        let instance = menu_on(&mut app, &ctx, &[i]);
+        for l in ["Go to main component", "Reset all", "Detach instance"] {
+            assert!(has(&instance, l), "the instance offers {l}: {instance:?}");
+        }
+
+        let main = menu_on(&mut app, &ctx, &[m]);
+        for l in ["Duplicate as component", "Select all instances"] {
+            assert!(has(&main, l), "the main offers {l}: {main:?}");
+        }
+        assert!(!has(&main, "Create component"), "{main:?}");
+
+        let both = menu_on(&mut app, &ctx, &[m, m2]);
+        assert!(
+            has(&both, "Combine as variants"),
+            "two mains combine: {both:?}"
+        );
+        assert!(
+            !has(&both, "Create component"),
+            "two mains are not wrapped: {both:?}"
+        );
+    }
+
+    /// ***Go to main*, *Select all instances* on a main and on a set, and the
+    /// delete's detach count** (`[X11.2-L6-03]`, §15 D981) — main `m`, instances
+    /// `i` and `i2`, `c` the copy of `m`'s rect in `i`.
+    ///
+    /// Nothing in the workspace called `go_to_main` or `select_all_instances`, and
+    /// `deleting_a_main_detaches_its_instance` never read the status text whose
+    /// count D981 specifies.
+    ///
+    /// **Flips run**: `select_all_instances`' `is_set` test made `false && …`
+    /// fails at *"a set selects its variants' instances"*, the selection left on
+    /// the set; `delete_selection`'s detached filter turned to `!=` fails at
+    /// *"the delete counts the two instances"* with *"4 instances detached"* —
+    /// and **did not bite** until `m` had a second child: with one, the four
+    /// members' count and the two instances' were both 2.
+    #[test]
+    fn go_to_main_select_all_instances_and_the_detach_count() {
+        let ctx = egui::Context::default();
+        let (mut app, m, i) = main_and_instance(&ctx);
+        let r = app.session.doc.get(m).unwrap().children()[0];
+        let c = app.session.doc.get(i).unwrap().children()[0];
+        app.session.selection.set_one(m);
+        app.duplicate_selection();
+        let i2 = app.session.selection.single().expect("a second instance");
+
+        app.session.selection.set_one(i);
+        app.go_to_main();
+        assert_eq!(
+            app.session.selection.ids(),
+            &[m],
+            "an instance goes to its main"
+        );
+        app.session.selection.set_one(c);
+        app.go_to_main();
+        assert_eq!(
+            app.session.selection.ids(),
+            &[r],
+            "a member goes to its source"
+        );
+
+        app.session.selection.set_one(m);
+        app.select_all_instances();
+        let mut got = app.session.selection.ids().to_vec();
+        got.sort();
+        let mut want = vec![i, i2];
+        want.sort();
+        assert_eq!(got, want, "a main selects its instances");
+
+        // A second main beside `m`, and the two made a set.
+        let m2 = app.session.ids.mint();
+        let root = app.session.doc.root();
+        assert!(app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: m2,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(50.0, 50.0),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetComponent {
+                id: m2,
+                component: true,
+            },
+        ])));
+        app.session.selection.set(vec![m, m2]);
+        app.combine_as_variants();
+        let set = app.session.selection.single().expect("the set");
+        assert!(ondin_core::variant::is_set(&app.session.doc, set));
+        app.select_all_instances();
+        let mut got = app.session.selection.ids().to_vec();
+        got.sort();
+        assert_eq!(got, want, "a set selects its variants' instances");
+
+        // A second child for `m`, which reaches both instances — so a count of
+        // the detached *members* (four) cannot pass for the two instances.
+        let r2 = app.session.ids.mint();
+        assert!(app.session.commit(Transaction(vec![Operation::CreateNode {
+            id: r2,
+            parent: m,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(4.0, 4.0),
+                corner_radii: Default::default(),
+            },
+            transform: None,
+            name: None,
+        }])));
+        assert_eq!(
+            app.session.doc.get(i2).unwrap().children().len(),
+            2,
+            "the fixture: the child reached the instances"
+        );
+        app.session.selection.set_one(m);
+        app.delete_selection();
+        let text = app.session.status().text.clone();
+        assert!(
+            text.contains("2 instances detached"),
+            "the delete counts the two instances: {text}"
         );
     }
 

@@ -336,24 +336,57 @@ pub fn menu_row(ui: &mut egui::Ui, row: MenuRow<'_>, height: f32) -> egui::Respo
         );
     }
     let label_x = if bare { 8.0 } else { 8.0 + 15.0 + 9.0 };
-    p.text(
-        egui::pos2(rect.left() + label_x, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        row.label,
-        egui::FontId::proportional(11.5),
+    let accel_w = match row.accel {
+        Some(accel) => {
+            let r = p.text(
+                egui::pos2(rect.right() - 8.0, rect.center().y),
+                egui::Align2::RIGHT_CENTER,
+                accel,
+                egui::FontId::proportional(10.5),
+                accel_col,
+            );
+            r.width() + MENU_ACCEL_GAP
+        }
+        None => 0.0,
+    };
+    // **Fitted to the row, cut with an ellipsis at its end** (`[X11.2-L1-04]`):
+    // *Reset ‹layer›* and *Reset ‹property›* are the first labels built from the
+    // user's text, and a long name ran past the row's edge and off the 210pt card
+    // over whatever lay beside it. Every other label is a `&'static str` sized by
+    // hand against the card and is never cut; the verb comes first, so the cut
+    // falls on the name, and the full label is the row's tooltip.
+    let mut job = egui::text::LayoutJob::single_section(
+        row.label.to_owned(),
+        egui::TextFormat::simple(egui::FontId::proportional(11.5), label_col),
+    );
+    job.wrap = egui::text::TextWrapping {
+        max_width: (rect.width() - label_x - 8.0 - accel_w).max(0.0),
+        max_rows: 1,
+        break_anywhere: true,
+        overflow_character: Some('…'),
+    };
+    let galley = p.layout_job(job);
+    let cut = galley.elided;
+    p.galley(
+        egui::pos2(
+            rect.left() + label_x,
+            rect.center().y - galley.size().y / 2.0,
+        ),
+        galley,
         label_col,
     );
-    if let Some(accel) = row.accel {
-        p.text(
-            egui::pos2(rect.right() - 8.0, rect.center().y),
-            egui::Align2::RIGHT_CENTER,
-            accel,
-            egui::FontId::proportional(10.5),
-            accel_col,
-        );
+    if cut {
+        return resp.on_hover_text(row.label);
     }
     resp
 }
+
+/// The air between a menu row's label and its accelerator, which a fitted label
+/// ([`menu_row`]) stops short of. **Small, and measured**: *Create component*'s
+/// label already sits under 6pt from its `Ctrl+Alt+K`, so 6 cut it — the
+/// registry's every fixed label is asserted whole at this value
+/// (`a_long_reset_label_is_cut_inside_the_row_and_fixed_labels_are_whole`).
+const MENU_ACCEL_GAP: f32 = 2.0;
 
 /// The total height one separator occupies — the rule plus its air, both sides.
 ///

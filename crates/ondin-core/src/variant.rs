@@ -1113,9 +1113,13 @@ pub fn same_kind(doc: &Document, a: NodeId, b: NodeId) -> bool {
 
 /// Whether a main of `kind` fits `set`: every variant of it but `except` is a
 /// layer of that kind — **one kind per set** (§15 D1003 (5)). An empty set takes
-/// either. Asked by the doors that put a main in a set — *Combine as variants*,
-/// a drop into one, *Create component* inside one — and never by the loader,
-/// which the ruling keeps from refusing a document already made this way.
+/// either. Asked of one main at a time by the doors that put a main in a set —
+/// a drop into one (`component::can_hold`, and the canvas's and the layers
+/// panel's messages for it), *Create component* inside one
+/// (`component::why_not_main`, `why_not_wrap`) — and by [`takes_together`] for
+/// several dropped at once; never by the loader, which the ruling keeps from
+/// refusing a document already made this way. *Combine as variants* makes a new
+/// set and asks [`one_kind`] instead.
 pub fn fits_set(doc: &Document, set: NodeId, kind: &NodeKind, except: Option<NodeId>) -> bool {
     variants(doc, set)
         .into_iter()
@@ -1133,6 +1137,35 @@ pub fn one_kind(doc: &Document, mains: &[NodeId]) -> bool {
         .map(|n| std::mem::discriminant(&n.kind));
     let first = kinds.next();
     kinds.all(|k| Some(k) == first)
+}
+
+/// Whether `set` takes `moving` **together**, one kind per set (§15 D1003 (5)):
+/// the mains among them that are not already its children are all of one kind,
+/// and that kind [`fits_set`]. Layers that are not mains, and variants moving
+/// inside their own set, are not asked — staying is never refused, the rule
+/// `component::can_hold` keeps.
+///
+/// 🚨 **The case `fits_set` cannot see** (`[X2-L2-02]`'s K7 leftover): a frame
+/// main and a group main dropped together into an **empty** set each fit it
+/// alone — an empty set takes either — and the drop made a set of two kinds.
+/// Asked by the doors that drop several layers at once, the canvas's move and
+/// the layers panel's. `true` for a parent that is not a set.
+pub fn takes_together(doc: &Document, set: NodeId, moving: &[NodeId]) -> bool {
+    if !is_set(doc, set) {
+        return true;
+    }
+    let newcomers: Vec<NodeId> = moving
+        .iter()
+        .copied()
+        .filter(|m| {
+            doc.get(*m)
+                .is_some_and(|n| n.component && n.parent != Some(set))
+        })
+        .collect();
+    let Some(first) = newcomers.first().and_then(|m| doc.get(*m)) else {
+        return true;
+    };
+    one_kind(doc, &newcomers) && fits_set(doc, set, &first.kind, None)
 }
 
 /// Whether the instance rooted at `root` can switch variants here: an instance

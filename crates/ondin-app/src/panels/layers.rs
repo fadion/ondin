@@ -77,16 +77,44 @@ const MARK_SLOT: f32 = 9.0;
 
 /// A row's component mark (§15 D981).
 ///
-/// ⚠️ An expanded instance marks a removed or reordered child on no row at all.
-/// §15 D1003 (9) rules the dot onto the parent row whose children differ, expanded
-/// or collapsed, with a tooltip and *Restore* — not built.
+/// A removed or reordered child marks **its parent's row**, expanded or collapsed,
+/// with a tooltip naming what ([`child_drift_tip`]) — §15 D1003 (9),
+/// `[X11.1-L2-03]`; expanded, it had marked no row at all. The ruling's *Restore*
+/// in the row's context menu is the existing *Reset ‹layer›* / *Reset all* row,
+/// which `reset::Drift::any` offers for a removal or an order alone; no row of its
+/// own is built.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RowMark {
-    /// An override — on the row, or, collapsed, anything inside it differing.
+    /// An override — on the row, or, collapsed, anything inside it differing; and
+    /// on a parent whose own children differ, either way.
     Override,
     /// A layer of the instance's own.
     Local,
 }
+
+/// The tooltip on a parent row whose children differ from its source's —
+/// *"1 removed · order changed"*, the ruling's own example (§15 D1003 (9)) — or
+/// `None` when they do not.
+fn child_drift_tip(d: ondin_core::reset::ChildDrift) -> Option<String> {
+    let mut parts = Vec::new();
+    if d.removed > 0 {
+        parts.push(format!("{} removed", d.removed));
+    }
+    if d.order {
+        parts.push("order changed".to_string());
+    }
+    (!parts.is_empty()).then(|| parts.join(" · "))
+}
+
+/// Whether a row whose layer is a picture shows the picture's thumbnail in its
+/// icon slot: not when the row wears the hexagon (`hexagon`, `Some` for a main or
+/// an instance root) — the hexagon is the row's one component mark (§15 D981,
+/// `[X11.1-L1-04]`). A free function because the thumbnail itself is a texture a
+/// headless app never decodes, so the row cannot be asked.
+fn wears_thumbnail(hexagon: Option<bool>) -> bool {
+    hexagon.is_none()
+}
+
 /// From the lock's centre to the eye's — the glyphs are 15pt, so the old 18pt
 /// pitch left them almost touching.
 const EYE_PITCH: f32 = 23.0;
@@ -357,6 +385,13 @@ pub struct LayerDrag {
     /// [`SPRING_SECS`] later the branch opens. `None` whenever the pointer is not on
     /// one, which is what makes the wait start again rather than accumulate.
     pub spring: Option<(NodeId, f64)>,
+    /// Why the drop under the pointer is refused, when the reason is one kind per
+    /// set (§15 D1003 (5), [`OndinApp::set_refusal`]) — said by the release, as the
+    /// canvas's move says it. Cleared every frame with [`target`], for the same
+    /// reason: a release off the tree says nothing.
+    ///
+    /// [`target`]: LayerDrag::target
+    pub refused: Option<&'static str>,
 }
 
 /// Where a dragged row would be inserted: a slot in one parent's child list, and
@@ -1405,6 +1440,7 @@ impl OndinApp {
         if let Some(drag) = self.layer_drag.as_mut() {
             drag.lit = drag.target.map(|t| t.parent);
             drag.target = None;
+            drag.refused = None;
             ui.ctx().request_repaint();
         }
         self.sync_tree_to_selection();
@@ -1965,7 +2001,14 @@ impl OndinApp {
             // and a dot for an override: on the row that holds it while expanded,
             // and on a **collapsed** row for *anything* inside differing from its
             // main, local layers and removed children included (ruling (e)).
-            let mark = {
+            //
+            // And the **parent row whose children differ** — a child removed, or
+            // the linked children out of order — carries the dot expanded as well
+            // as collapsed, with a tooltip naming what (§15 D1003 (9),
+            // `[X11.1-L2-03]`): a removed child has no row of its own, and
+            // reordered children each have no field override, so an expanded
+            // instance asking `overrides` alone put the mark nowhere.
+            let (mark, children_tip) = {
                 let doc = &self.session.doc;
                 let in_instance = doc
                     .get(id)
@@ -1977,21 +2020,34 @@ impl OndinApp {
                         n.link()
                             .is_none_or(|l| doc.get(l).is_some_and(|l| l.component()))
                     });
-                if local {
+                let copy = in_instance || hexagon == Some(false);
+                let children = if copy && !local {
+                    self.child_drift_of(id)
+                } else {
+                    Default::default()
+                };
+                let mark = if local {
                     Some(RowMark::Local)
-                } else if has_children && !expanded && (in_instance || hexagon == Some(false)) {
+                } else if has_children && !expanded && copy {
                     let d = self.drift_of(id);
                     (d.any() || d.local > 0).then_some(RowMark::Override)
                 } else {
-                    (!ondin_core::reset::overrides(&self.session.doc, id).is_empty())
-                        .then_some(RowMark::Override)
-                }
+                    (children.any()
+                        || !ondin_core::reset::overrides(&self.session.doc, id).is_empty())
+                    .then_some(RowMark::Override)
+                };
+                (mark, child_drift_tip(children))
             };
 
             let (rect, resp) = ui.allocate_exact_size(
                 egui::vec2(ui.available_width(), ROW_H),
                 egui::Sense::click_and_drag(),
             );
+            // The dot's words, on the row it sits on (§15 D1003 (9)).
+            let resp = match &children_tip {
+                Some(tip) => resp.on_hover_text(tip),
+                None => resp,
+            };
             let hovered = resp.hovered();
             let being_dragged = self
                 .layer_drag
@@ -2015,10 +2071,18 @@ impl OndinApp {
             // store cannot draw, or one the pass's budget deferred — and all
             // three fall back to the glyph, which for the second is the amber
             // one D179 already set above.
-            let thumb = picture.as_ref().and_then(|b| {
-                self.thumbs
-                    .texture(ui.ctx(), self.canvas.images(), &b.image, THUMB)
-            });
+            //
+            // ⚠️ **And never for a main or an instance**, whose hexagon is the
+            // row's one component mark (§15 D981, `[X11.1-L1-04]`): a frame main
+            // with a photo fill drew its thumbnail, the `match` below taking that
+            // arm first, and its row said nothing of being a component.
+            let thumb = picture
+                .as_ref()
+                .filter(|_| wears_thumbnail(hexagon))
+                .and_then(|b| {
+                    self.thumbs
+                        .texture(ui.ctx(), self.canvas.images(), &b.image, THUMB)
+                });
             let p = ui.painter();
             let r5 = egui::CornerRadius::same(5);
             if being_dragged {
@@ -2325,6 +2389,7 @@ impl OndinApp {
                     level: depth,
                     lit: None,
                     spring: None,
+                    refused: None,
                 });
             }
 
@@ -2505,6 +2570,38 @@ impl OndinApp {
         spot: DropSpot,
         dragged: &[NodeId],
     ) -> Option<DropTarget> {
+        let target = self.drop_slot(rows, spot)?;
+        // **The destination must not be inside what is being carried**, or the drop
+        // would make a node its own descendant. Asked of the *parent* rather than of
+        // the row under the pointer, which is the shape the indent gesture forces: the
+        // pointer sits on a dragged row's own child all the way through an outdent, and
+        // the levels that are actually illegal are only the ones at or below it.
+        if dragged
+            .iter()
+            .any(|d| *d == target.parent || self.is_ancestor_of(*d, target.parent))
+        {
+            return None;
+        }
+        // A frame never sits under a boolean or a mask, at any depth, and never in a
+        // shape (§5.3, §15 D876) — refuse rather than offer an invalid drop. Every
+        // carried row has to be welcome, since they all land in the same parent: a
+        // set holding a frame and a shape can only be dropped where both fit.
+        //
+        // And the set takes them **together** (`variant::takes_together`, §15 D1003
+        // (5)): a frame main and a group main each fit an empty set alone, so the
+        // per-row check above let both in and made a set of two kinds.
+        (dragged
+            .iter()
+            .all(|d| self.drop_is_legal(*d, target.parent))
+            && ondin_core::variant::takes_together(&self.session.doc, target.parent, dragged))
+        .then_some(target)
+    }
+
+    /// [`Self::resolve_drop`]'s geometry half: the parent and index `spot` names,
+    /// before anything asks whether the carried rows may go there — split out so
+    /// a refused drop can still say which parent refused it
+    /// ([`Self::set_refusal`]).
+    fn drop_slot(&self, rows: &[TreeRow], spot: DropSpot) -> Option<DropTarget> {
         let target = match spot {
             // Into the container, at the end of its list — which is the top of it on
             // screen as well as the top of its z-order, so a layer dropped onto a frame
@@ -2550,26 +2647,50 @@ impl OndinApp {
                 }
             }
         };
+        Some(target)
+    }
 
-        // **The destination must not be inside what is being carried**, or the drop
-        // would make a node its own descendant. Asked of the *parent* rather than of
-        // the row under the pointer, which is the shape the indent gesture forces: the
-        // pointer sits on a dragged row's own child all the way through an outdent, and
-        // the levels that are actually illegal are only the ones at or below it.
-        if dragged
-            .iter()
-            .any(|d| *d == target.parent || self.is_ancestor_of(*d, target.parent))
-        {
+    /// Why the layers in `dragged` may not go into `parent`, when the reason is
+    /// **one kind per set** (§15 D1003 (5)) — the message the release says, as the
+    /// canvas's move says it (`canvas::SET_OF_ANOTHER_KIND`,
+    /// `canvas::SET_OF_MIXED_KINDS`). `None` for any other refusal, which the
+    /// panel's missing hint already says.
+    ///
+    /// 🚨 **The panel refused this drop silently** (`[X2-L2-02]`'s K7 leftover):
+    /// `drop_is_legal` asked `component::can_hold`, the hint went dark, and the
+    /// release did nothing — while the canvas, refusing the same drop, said why.
+    fn set_refusal(&self, parent: NodeId, dragged: &[NodeId]) -> Option<&'static str> {
+        let doc = &self.session.doc;
+        if !ondin_core::variant::is_set(doc, parent) {
             return None;
         }
-        // A frame never sits under a boolean or a mask, at any depth, and never in a
-        // shape (§5.3, §15 D876) — refuse rather than offer an invalid drop. Every
-        // carried row has to be welcome, since they all land in the same parent: a
-        // set holding a frame and a shape can only be dropped where both fit.
-        dragged
-            .iter()
-            .all(|d| self.drop_is_legal(*d, target.parent))
-            .then_some(target)
+        let another = dragged.iter().filter_map(|d| doc.get(*d)).any(|n| {
+            n.component()
+                && n.parent() != Some(parent)
+                && !ondin_core::variant::fits_set(doc, parent, n.kind(), Some(n.id()))
+        });
+        if another {
+            Some(crate::canvas::SET_OF_ANOTHER_KIND)
+        } else if !ondin_core::variant::takes_together(doc, parent, dragged) {
+            Some(crate::canvas::SET_OF_MIXED_KINDS)
+        } else {
+            None
+        }
+    }
+
+    /// `reset::child_drift` of the row `id`, from `child_drift_cache` while the
+    /// document is unchanged — the parent row's dot and tooltip (§15 D1003 (9)).
+    pub(crate) fn child_drift_of(&mut self, id: NodeId) -> ondin_core::reset::ChildDrift {
+        let rev = self.session.revision();
+        if self.child_drift_cache.0 != rev {
+            self.child_drift_cache = (rev, Default::default());
+        }
+        let doc = &self.session.doc;
+        *self
+            .child_drift_cache
+            .1
+            .entry(id)
+            .or_insert_with(|| ondin_core::reset::child_drift(doc, id))
     }
 
     /// Walk `id`, which is at `depth`, up to the ancestor sitting at `want`. `id` itself
@@ -2698,6 +2819,12 @@ impl OndinApp {
             },
         );
         let Some(target) = self.resolve_drop(rows, spot, &dragged) else {
+            let why = self
+                .drop_slot(rows, spot)
+                .and_then(|t| self.set_refusal(t.parent, &dragged));
+            if let Some(d) = self.layer_drag.as_mut() {
+                d.refused = why;
+            }
             return;
         };
         if let Some(d) = self.layer_drag.as_mut() {
@@ -2776,7 +2903,15 @@ impl OndinApp {
         let Some(drag) = self.layer_drag.take() else {
             return;
         };
-        let Some(target) = drag.target else { return };
+        let Some(target) = drag.target else {
+            // A drop refused for one kind per set says why, as the canvas's does
+            // (§15 D1003 (5), `[X2-L2-02]`'s K7 leftover); any other refusal is
+            // the hint that never lit.
+            if let Some(why) = drag.refused {
+                self.session.info(why);
+            }
+            return;
+        };
 
         // Document order, so a set of rows keeps the arrangement the tree showed
         // rather than the order they happened to be clicked in.
@@ -4603,6 +4738,126 @@ mod drop_indent_tests {
         assert!(app.drop_is_legal(m, root), "a main in its own parent");
     }
 
+    /// **A set keeps to one kind through the panel too, and a refused drop says
+    /// why** (`[X2-L2-02]`'s K7 leftovers, §15 D1003 (5)) — an empty set `e`, a
+    /// set `s` holding one frame variant `v`, a frame main `f` and a group main
+    /// `g` (holding a rect), all at the root; one row each for the two sets.
+    ///
+    /// Two holes. `drop_is_legal` asks `component::can_hold` one row at a time,
+    /// and an empty set fits either kind, so `f` and `g` carried together onto
+    /// `e` resolved to a target and the release made a set of two kinds. And a
+    /// refused drop — `g` onto `s`, a set of frames — went dark in the hint and
+    /// did nothing at the release, while the canvas, refusing the same move,
+    /// says why. The release now carries the refusal's message
+    /// (`LayerDrag::refused`).
+    ///
+    /// **Flip run**, the `takes_together` clause deleted from `resolve_drop`:
+    /// fails at *"a frame main and a group main together into an empty set"*
+    /// with `Some(DropTarget { parent: e, .. })`, the predicted site. With the
+    /// `drag.refused` read deleted from `finish_layer_drag`: fails at *"the
+    /// release says why"* with an empty status, as predicted.
+    #[test]
+    fn a_set_keeps_to_one_kind_and_a_refused_drop_says_why() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0xD4C);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let [e, s, v, f, g, r] = [(); 6].map(|_| ids.mint());
+        let create = |id, parent, kind| Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind,
+            transform: None,
+            name: None,
+        };
+        let frame = || NodeKind::Artboard {
+            size: Size::new(40.0, 40.0),
+        };
+        let set = |id| Operation::SetVariantSet {
+            id,
+            set: Some(Default::default()),
+        };
+        let main = |id| Operation::SetComponent {
+            id,
+            component: true,
+        };
+        doc.apply(&Transaction(vec![
+            create(e, root, frame()),
+            create(s, root, frame()),
+            create(v, s, frame()),
+            create(f, root, frame()),
+            create(g, root, NodeKind::Group),
+            create(
+                r,
+                g,
+                NodeKind::Rect {
+                    size: Size::new(10.0, 10.0),
+                    corner_radii: Default::default(),
+                },
+            ),
+            set(e),
+            set(s),
+            main(v),
+            main(f),
+            main(g),
+        ]))
+        .expect("the tree");
+        app.session.adopt_document(doc, None);
+
+        let row = |id| TreeRow {
+            id,
+            rect: egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(288.0, 24.0)),
+            depth: 1,
+            lead: 0.0,
+            elbow: 12.0,
+            selected: false,
+            hovered: false,
+            container: true,
+            closed: true,
+        };
+        let into = DropSpot::Into(0);
+        assert_eq!(
+            app.resolve_drop(&[row(e)], into, &[f, g]),
+            None,
+            "a frame main and a group main together into an empty set"
+        );
+        assert_eq!(
+            app.set_refusal(e, &[f, g]),
+            Some(crate::canvas::SET_OF_MIXED_KINDS)
+        );
+        assert!(
+            app.resolve_drop(&[row(e)], into, &[f]).is_some(),
+            "one kind alone goes in"
+        );
+        assert_eq!(app.resolve_drop(&[row(s)], into, &[g]), None);
+        assert_eq!(
+            app.set_refusal(s, &[g]),
+            Some(crate::canvas::SET_OF_ANOTHER_KIND),
+            "a group main onto a set of frames"
+        );
+        assert_eq!(app.set_refusal(s, &[f]), None, "a frame main fits it");
+
+        // The release of a drop the panel refused for one kind per set.
+        app.layer_drag = Some(LayerDrag {
+            ids: vec![g],
+            target: None,
+            grab: (0.0, 1),
+            level: 1,
+            lit: None,
+            spring: None,
+            refused: app.set_refusal(s, &[g]),
+        });
+        app.finish_layer_drag();
+        assert_eq!(
+            app.session.status().text,
+            crate::canvas::SET_OF_ANOTHER_KIND,
+            "the release says why"
+        );
+        assert_eq!(app.session.doc.get(g).unwrap().parent(), Some(root));
+    }
+
     /// ⚠️ **Five passes**, for the same reason `tree_guide_tests::dashes` takes
     /// five: a widget's interaction state is last frame's, so one pass reports
     /// nothing hovered however the pointer is placed.
@@ -4791,6 +5046,7 @@ mod drop_indent_tests {
                 level: 3,
                 lit: None,
                 spring: None,
+                refused: None,
             });
             let input = |events: Vec<egui::Event>| egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -4863,6 +5119,7 @@ mod drop_indent_tests {
             level: grab.1,
             lit: None,
             spring: None,
+            refused: None,
         });
         let full = pump(&mut f.app, ctx, Some(to));
         let lines = full
@@ -5016,6 +5273,7 @@ mod drop_indent_tests {
             level: 2,
             lit: None,
             spring: None,
+            refused: None,
         });
         let full = pump(&mut f.app, &ctx, Some(egui::pos2(grab_x, centre)));
         f.app.layer_drag = None;
@@ -5272,6 +5530,7 @@ mod drop_indent_tests {
                 level: 1,
                 lit: None,
                 spring: None,
+                refused: None,
             });
         };
 
@@ -5387,6 +5646,7 @@ mod drop_indent_tests {
                 level: 3,
                 lit: None,
                 spring: None,
+                refused: None,
             });
             let full = pump(&mut f.app, &ctx, Some(at));
             f.app.layer_drag = None;
@@ -5662,6 +5922,7 @@ mod autoscroll_ownership_tests {
             level: 0,
             lit: None,
             spring: None,
+            refused: None,
         });
         app
     }
@@ -6342,5 +6603,220 @@ mod thumb_tint_tests {
             egui::Color32::WHITE,
             "and an enormous one is opaque rather than an overflowed tint"
         );
+    }
+}
+
+/// The rows' component marks for what a row's **children** differ in — a removed
+/// child, an order changed, a layer of the instance's own (§15 D981 (e), D1003
+/// (9)).
+#[cfg(test)]
+mod row_mark_tests {
+    use crate::app::OndinApp;
+    use ondin_core::kurbo::Size;
+    use ondin_core::{Document, IdSource, NodeId, NodeKind, Operation, Transaction};
+
+    /// Main frame `m` holding rects `a` and `b`, and an instance `i` of it, made
+    /// through the app's own *Create component* and *Duplicate*; and `i`'s two
+    /// copies, in its child order.
+    fn instance(ctx: &egui::Context) -> (OndinApp, NodeId, [NodeId; 2]) {
+        let mut app = OndinApp::headless(ctx);
+        let mut ids = IdSource::new(0xD4D);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let [m, a, b] = [(); 3].map(|_| ids.mint());
+        let create = |id, parent, kind| Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind,
+            transform: None,
+            name: None,
+        };
+        let rect = || NodeKind::Rect {
+            size: Size::new(10.0, 10.0),
+            corner_radii: Default::default(),
+        };
+        doc.apply(&Transaction(vec![
+            create(
+                m,
+                root,
+                NodeKind::Artboard {
+                    size: Size::new(100.0, 100.0),
+                },
+            ),
+            create(a, m, rect()),
+            create(b, m, rect()),
+        ]))
+        .expect("a frame holding two rects");
+        app.session.adopt_document(doc, None);
+        app.session.selection.set_one(m);
+        app.create_component();
+        app.duplicate_selection();
+        let i = app.session.selection.single().expect("the instance");
+        assert_eq!(app.session.doc.get(i).unwrap().link(), Some(m));
+        let kids = app.session.doc.get(i).unwrap().children().to_vec();
+        assert_eq!(kids.len(), 2, "the fixture: two copies");
+        app.session.selection.clear();
+        (app, i, [kids[0], kids[1]])
+    }
+
+    /// The panel's dots and `+`s, counted off three passes' shapes — a dot is a
+    /// 2pt circle, a `+` two 1.2pt strokes (the shapes
+    /// `the_layers_panel_marks_overrides_and_local_layers` counts).
+    fn marks(app: &mut OndinApp, ctx: &egui::Context) -> (usize, usize) {
+        let mut out = None;
+        for _ in 0..3 {
+            out = Some(ctx.run_ui(Default::default(), |ui| app.layers_tree(ui)));
+        }
+        fn walk(s: &egui::Shape, dots: &mut usize, strokes: &mut usize) {
+            match s {
+                egui::Shape::Circle(c) if c.radius == 2.0 => *dots += 1,
+                egui::Shape::LineSegment { stroke, .. } if stroke.width == 1.2 => *strokes += 1,
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, dots, strokes)),
+                _ => {}
+            }
+        }
+        let (mut dots, mut strokes) = (0, 0);
+        for s in &out.expect("drawn").shapes {
+            walk(&s.shape, &mut dots, &mut strokes);
+        }
+        (dots, strokes / 2)
+    }
+
+    /// **A parent whose children differ carries the dot, expanded or collapsed,
+    /// with a tooltip naming what** (`[X11.1-L2-03]`, ruled §15 D1003 (9)) —
+    /// instance `i` of a main holding two rects, one copy deleted; then, on a
+    /// fresh instance, its two copies swapped.
+    ///
+    /// Expanded, each row asked `reset::overrides`, fields only: a removed child
+    /// has no row and two reordered children have no field override each, so the
+    /// expanded instance showed **no** mark anywhere, and collapsing it showed one
+    /// (`drift`, bubbled). Now the parent row owns its children's removals and
+    /// order (`reset::child_drift`), and the tooltip says *"1 removed"* or *"order
+    /// changed"* — asserted on `child_drift_tip`, because a tooltip's ink never
+    /// arrives in a headless pass (CLAUDE.md, *Checking the chrome*).
+    ///
+    /// **Flip run**, `children.any()` dropped from the expanded arm of the row's
+    /// mark: fails at *"expanded: the parent of a removed child"* with 0, the
+    /// predicted site.
+    #[test]
+    fn a_parent_whose_children_differ_carries_the_dot_expanded_or_collapsed() {
+        let ctx = egui::Context::default();
+
+        let (mut app, i, [ca, _]) = instance(&ctx);
+        assert_eq!(marks(&mut app, &ctx), (0, 0), "an untouched instance");
+        assert!(
+            app.session
+                .commit(Transaction(vec![Operation::DeleteNode { id: ca }]))
+        );
+        assert_eq!(
+            marks(&mut app, &ctx).0,
+            1,
+            "expanded: the parent of a removed child"
+        );
+        assert_eq!(
+            super::child_drift_tip(app.child_drift_of(i)).as_deref(),
+            Some("1 removed")
+        );
+        app.collapsed.insert(i);
+        assert_eq!(marks(&mut app, &ctx).0, 1, "collapsed: the same dot");
+
+        let (mut app, i, [ca, cb]) = instance(&ctx);
+        assert!(app.session.commit(Transaction(vec![
+            Operation::Reorder { id: ca, index: 1 },
+            Operation::Reorder { id: cb, index: 0 },
+        ])));
+        assert_eq!(
+            app.session.doc.get(i).unwrap().children(),
+            &[cb, ca],
+            "the fixture: swapped"
+        );
+        assert_eq!(
+            marks(&mut app, &ctx).0,
+            1,
+            "expanded: the parent of reordered children"
+        );
+        assert_eq!(
+            super::child_drift_tip(app.child_drift_of(i)).as_deref(),
+            Some("order changed")
+        );
+        app.collapsed.insert(i);
+        assert_eq!(marks(&mut app, &ctx).0, 1, "collapsed: the same dot");
+    }
+
+    /// **A main's or an instance's row wears the hexagon, never its picture's
+    /// thumbnail** (`[X11.1-L1-04]`, §15 D981) — asked of `wears_thumbnail`, since
+    /// a headless app decodes no thumbnail texture and the row would draw the
+    /// hexagon either way here: the premise was read (the `match thumb` took the
+    /// texture arm first), not driven.
+    ///
+    /// **Flip run**, `wears_thumbnail` answering `true`: fails at *"a main"*.
+    #[test]
+    fn a_component_row_wears_the_hexagon_not_its_thumbnail() {
+        assert!(!super::wears_thumbnail(Some(true)), "a main");
+        assert!(!super::wears_thumbnail(Some(false)), "an instance");
+        assert!(super::wears_thumbnail(None), "a plain picture layer");
+    }
+
+    /// The tooltip's words, both at once: the ruling's own example.
+    #[test]
+    fn the_childrens_tooltip_names_both() {
+        let d = ondin_core::reset::ChildDrift {
+            removed: 1,
+            order: true,
+        };
+        assert_eq!(
+            super::child_drift_tip(d).as_deref(),
+            Some("1 removed · order changed")
+        );
+        assert_eq!(super::child_drift_tip(Default::default()), None);
+    }
+
+    /// **A collapsed instance's dot is for anything inside differing — a layer of
+    /// its own and a removed child included, not only a field override**
+    /// (`[X8.2-L6-09]`, ruling (e) of §15 D981) — each the instance's only
+    /// difference, collapsed.
+    ///
+    /// The one test of the collapsed arm collapsed the instance only while its
+    /// drift was a rename, so the condition narrowed to `d.fields > 0` left the
+    /// suite green.
+    ///
+    /// **Flip run**, the collapsed arm's condition narrowed to `d.fields > 0`:
+    /// fails at *"collapsed: a layer of the instance's own"* with `(0, 0)`, the
+    /// predicted site; it also fails the collapsed half of
+    /// `a_parent_whose_children_differ_carries_the_dot_expanded_or_collapsed`
+    /// (*"collapsed: the same dot"*, 0), the collapsed arm being an `else if` the
+    /// expanded arm's `child_drift` never reaches.
+    #[test]
+    fn a_collapsed_instance_marks_a_local_layer_and_a_removed_child() {
+        let ctx = egui::Context::default();
+
+        let (mut app, i, _) = instance(&ctx);
+        let extra = app.session.ids.mint();
+        assert!(app.session.commit(Transaction(vec![Operation::CreateNode {
+            id: extra,
+            parent: i,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(4.0, 4.0),
+                corner_radii: Default::default(),
+            },
+            transform: None,
+            name: None,
+        }])));
+        app.collapsed.insert(i);
+        assert_eq!(
+            marks(&mut app, &ctx),
+            (1, 0),
+            "collapsed: a layer of the instance's own"
+        );
+
+        let (mut app, i, [ca, _]) = instance(&ctx);
+        assert!(
+            app.session
+                .commit(Transaction(vec![Operation::DeleteNode { id: ca }]))
+        );
+        app.collapsed.insert(i);
+        assert_eq!(marks(&mut app, &ctx), (1, 0), "collapsed: a removed child");
     }
 }

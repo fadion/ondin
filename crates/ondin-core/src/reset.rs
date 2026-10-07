@@ -662,6 +662,46 @@ pub fn drift(doc: &Document, scope: NodeId) -> Drift {
     }
 }
 
+/// What differs among **one parent's own children** — the part of [`Drift`] a
+/// row in the layers panel owns (§15 D1003 (9)): the source's children with no
+/// counterpart anywhere in the instance, and whether the linked children are out
+/// of the source's order. A field override is the child's own row's.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ChildDrift {
+    /// The source's children of `p` missing from the instance, as [`Drift::removed`]
+    /// counts them.
+    pub removed: usize,
+    /// Whether `p`'s linked children are out of its source's order.
+    pub order: bool,
+}
+
+impl ChildDrift {
+    /// Whether anything about the children differs.
+    pub fn any(&self) -> bool {
+        self.removed > 0 || self.order
+    }
+}
+
+/// [`ChildDrift`] of the copy `p`. Empty for anything unlinked — a main, an
+/// ordinary layer, a local layer of an instance.
+///
+/// 🚨 **The case no row marked** (`[X11.1-L2-03]`): an **expanded** instance with
+/// a removed or reordered child showed no dot anywhere. Each row asked
+/// [`overrides`], fields only; a removed child has no row, and reordered children
+/// each have no field override, so the mark went nowhere — collapsing the
+/// instance showed it, the bubbled [`drift`] counting both. The maintainer's ruling
+/// (§15 D1003 (9)) puts the dot on the parent whose children differ, expanded or
+/// collapsed.
+pub fn child_drift(doc: &Document, p: NodeId) -> ChildDrift {
+    if source_of(doc, p).is_none() {
+        return ChildDrift::default();
+    }
+    ChildDrift {
+        removed: missing(doc, &[p]).len(),
+        order: order_target(doc, p).is_some(),
+    }
+}
+
 /// Each (copy, its source's child) where the child has no counterpart anywhere in
 /// the copy's instance — moved elsewhere in the instance is not missing. A child
 /// under a missing one is not asked about: restoring the outer one brings it.

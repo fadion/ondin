@@ -5899,3 +5899,79 @@ mod view_switch_registry_tests {
         assert_eq!(st.get(ViewSwitch::Layers), None);
     }
 }
+
+/// A context-menu row's label fitted to the 210pt card (`[X11.2-L1-04]`).
+#[cfg(test)]
+mod label_fit_tests {
+    use super::*;
+
+    /// The label galley one `ui::menu_row` paints at the context menu's content
+    /// width: whether it was cut (`Galley::elided` — its `text()` is the job's,
+    /// uncut) and its right edge, with the row's right edge.
+    fn painted(label: &str, accel: Option<&str>) -> (bool, f32, f32) {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let mut row_right = 0.0;
+        let out = ctx.run_ui(Default::default(), |ui| {
+            ui.set_width(crate::ui::menu_inner_w(MENU_W, MENU_PAD));
+            let row = crate::ui::MenuRow::new(icon::ARROW_COUNTER_CLOCKWISE, label).accel(accel);
+            row_right = crate::ui::menu_row(ui, row, crate::ui::MENU_ITEM_H)
+                .rect
+                .right();
+        });
+        // The label is the one 11.5pt galley; the glyph is the icon font and the
+        // accelerator 10.5pt.
+        let (cut, right) =
+            out.shapes
+                .iter()
+                .find_map(|c| match &c.shape {
+                    egui::Shape::Text(t)
+                        if t.galley.job.sections.first().is_some_and(|s| {
+                            s.format.font_id == egui::FontId::proportional(11.5)
+                        }) =>
+                    {
+                        Some((t.galley.elided, t.visual_bounding_rect().right()))
+                    }
+                    _ => None,
+                })
+                .expect("the label");
+        (cut, right, row_right)
+    }
+
+    /// **A *Reset ‹layer›* label built from a long name is cut with an ellipsis
+    /// inside the row, the verb kept; every fixed label in the registry still
+    /// fits whole** (`[X11.2-L1-04]`) — a 60-character layer name, *Reset Label*,
+    /// and each `Item::ALL` row with its chord.
+    ///
+    /// `menu_row` painted its label with `p.text` at a fixed x and no width, so
+    /// the review measured a 35-character name's label ending at x≈262.6 against
+    /// a row edge of 198 — past the card, over whatever lay beside the menu.
+    ///
+    /// **Flip run**, the label's `max_width` made `f32::INFINITY` (the uncut
+    /// `p.text` it replaced): fails at *"the long name stays inside the row"*
+    /// with 384 against 198, the predicted site. And the registry loop is what
+    /// set `ui::MENU_ACCEL_GAP`: at 6 it cut *Create component* beside its
+    /// `Ctrl+Alt+K`.
+    #[test]
+    fn a_long_reset_label_is_cut_inside_the_row_and_fixed_labels_are_whole() {
+        let name = "Card title — a long product name that goes on and on here";
+        let label = format!("Reset {name}");
+        let (cut, right, row_right) = painted(&label, None);
+        assert!(
+            right <= row_right - 8.0 + 0.5,
+            "the long name stays inside the row: {right} against {row_right}"
+        );
+        assert!(cut, "and the cut is an ellipsis");
+
+        let (cut, ..) = painted("Reset Label", None);
+        assert!(!cut, "a short one is whole");
+
+        for item in Item::ALL {
+            let spec = item.spec();
+            let (cut, right, row_right) = painted(spec.label, spec.accel);
+            assert!(!cut, "{item:?} fits whole");
+            assert!(right <= row_right, "{item:?} inside the row");
+        }
+    }
+}

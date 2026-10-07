@@ -4301,6 +4301,100 @@ mod tests {
         }
     }
 
+    /// **Each Container mark's ↺ resets its own field, through the production
+    /// closures** (`[X9.2-L6-04]`, §15 D981) — the scene's frame made a main and
+    /// an instance of it placed, the instance's column gap 24, row gap 30 and
+    /// padding 4, 8, 12, 16 where the main's — a wrapping row — are 10, 0 and 20
+    /// all round; then a
+    /// click on the Column gap's glyph, the Row gap's, and the *L* side's letter,
+    /// each the prefix strip whose click is the reset (`ui::value_field_marked`).
+    ///
+    /// `an_instance_marks_its_own_layout_fields_and_no_others` handed
+    /// `display_mark` closures it wrote itself, so no production `get`/`put` was
+    /// ever run: the review's flip of `gap_row`'s put — the column gap's ↺ writing
+    /// the main's value into the row gap — passed all fifty layout tests.
+    ///
+    /// **Flip run**, that put made `*(if is_column_gap { r } else { c }) = v`:
+    /// fails at *"the column gap's ↺: the column gap back"*, 24 against 10, the
+    /// predicted site. The grid's rows and the Item card's marks are not driven
+    /// here.
+    #[test]
+    fn each_container_marks_reset_writes_its_own_field() {
+        let mut s = scene();
+        // Wrapping, so the row gap's field is live — and its ↺ with it.
+        let tx = s.app.flex_tx(&[s.frame], |f| f.wrap = FlexWrap::Wrap);
+        assert!(s.app.session.commit(tx));
+        assert!(
+            s.app
+                .session
+                .commit(Transaction(vec![Operation::SetComponent {
+                    id: s.frame,
+                    component: true,
+                }]))
+        );
+        let inst = {
+            let doc = &s.app.session.doc;
+            let (tx, made) = ondin_core::insert_subtrees(
+                doc,
+                &mut s.app.session.ids,
+                &[ondin_core::Placement {
+                    nodes: doc.capture_subtree(s.frame).unwrap(),
+                    parent: doc.root(),
+                    index: None,
+                }],
+                Default::default(),
+            );
+            assert!(s.app.session.commit(tx));
+            made[0]
+        };
+        let tx = s.app.flex_tx(&[inst], |f| {
+            f.column_gap = 24.0;
+            f.row_gap = 30.0;
+            f.padding = [4.0, 8.0, 12.0, 16.0];
+        });
+        assert!(s.app.session.commit(tx));
+        let flex = |app: &OndinApp, id| match app.session.doc.get(id).unwrap().display() {
+            Some(Display::Flex(f)) => *f,
+            _ => panic!("the fixture lost its flex layout"),
+        };
+        let main = flex(&s.app, s.frame);
+        assert_eq!(
+            (main.column_gap, main.row_gap, main.padding),
+            (10.0, 0.0, [20.0; 4]),
+            "the fixture's main"
+        );
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        p.app.session.selection.set(vec![inst]);
+
+        let at = p.run(icon::ARROWS_OUT_LINE_HORIZONTAL);
+        p.click(at);
+        let f = flex(&p.app, inst);
+        assert_eq!(
+            f.column_gap, 10.0,
+            "the column gap's ↺: the column gap back"
+        );
+        assert_eq!(
+            (f.row_gap, f.padding),
+            (30.0, [4.0, 8.0, 12.0, 16.0]),
+            "and nothing else"
+        );
+
+        let at = p.run(icon::ARROWS_OUT_LINE_VERTICAL);
+        p.click(at);
+        let f = flex(&p.app, inst);
+        assert_eq!((f.column_gap, f.row_gap), (10.0, 0.0), "the row gap's ↺");
+        assert_eq!(f.padding, [4.0, 8.0, 12.0, 16.0], "the padding untouched");
+
+        // The side fields are open by themselves over uneven padding.
+        let at = p.run("L");
+        p.click(at);
+        assert_eq!(
+            flex(&p.app, inst).padding,
+            [4.0, 8.0, 12.0, 20.0],
+            "L's ↺: the left side alone"
+        );
+    }
+
     /// **An *Align items* pick writes the value picked, and nothing else**
     /// (`flex_rows`, `[X6.2-L6-01]`): the combo opened from its face and its
     /// *Center* row clicked — `align-items: center`, the rest of the layout as it

@@ -36,7 +36,10 @@ const TILE: u32 = 8;
 /// depend on: the layout is a contract with a shader in another language, and
 /// spelling the offsets here is the only place the two can be read against each
 /// other.
-const PARAMS_BYTES: usize = 144;
+///
+/// 160 since §15 D1003 (7): `dst_origin` and `k_off` were appended, which took the
+/// struct past 144 and onto WGSL's next 16-byte boundary.
+const PARAMS_BYTES: usize = 160;
 
 /// Which pass a dispatch runs. One per entry point in `fx.wgsl`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -109,6 +112,13 @@ struct Params {
     /// The domain being read where that is a different grid from the one being
     /// written — `(0, 0)` for every pass but `Coarsen` and `Upsample`.
     src_size: (u32, u32),
+    /// Where the layer's rectangle sits in the texture `Pass::Unpremul` writes —
+    /// the batch's destination, which is packed like its source. `(0, 0)` for
+    /// every other pass, which writes a scratch slot at its own origin.
+    dst_origin: (i32, i32),
+    /// Where this dispatch's kernel starts in the batch's one kernel buffer, in
+    /// `f32`s. Read by `Pass::Blur` alone.
+    k_off: u32,
 }
 
 impl Params {
@@ -140,6 +150,12 @@ impl Params {
         // offset 128: src_size: vec2<u32>
         put(128, self.src_size.0.to_le_bytes());
         put(132, self.src_size.1.to_le_bytes());
+        // offset 136: dst_origin: vec2<i32>
+        put(136, self.dst_origin.0.to_le_bytes());
+        put(140, self.dst_origin.1.to_le_bytes());
+        // offset 144: k_off: u32, then 12 bytes of padding to the struct's
+        // 16-byte alignment.
+        put(144, self.k_off.to_le_bytes());
         b
     }
 }
@@ -188,12 +204,15 @@ impl FxPipelines {
                         view_dimension: wgpu::TextureViewDimension::D2,
                     },
                 ),
+                // **A dynamic offset**, so one bind group serves every dispatch
+                // over the same three textures and each names its own `Params`
+                // in the batch's one uniform buffer (§15 D1003 (7)).
                 entry(
                     3,
                     wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                        has_dynamic_offset: true,
+                        min_binding_size: wgpu::BufferSize::new(PARAMS_BYTES as u64),
                     },
                 ),
                 entry(
@@ -258,7 +277,8 @@ pub fn fx_texture(device: &Device, w: u32, h: u32, label: &str) -> Texture {
             | wgpu::TextureUsages::TEXTURE_BINDING
             | wgpu::TextureUsages::RENDER_ATTACHMENT
             | wgpu::TextureUsages::COPY_SRC
-            // For `copy_out`, which lifts one layer out of a packed batch.
+            // For `run_batch`'s copy of a layer with nothing to filter into its
+            // rectangle of the batch's result.
             | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     })
@@ -276,75 +296,402 @@ pub struct Slice {
     pub size: (u32, u32),
 }
 
-/// Lift one layer's rectangle out of a packed batch into a texture of its own.
+/// The smallest side a pooled texture is given — a card's 70×44 buffer and its
+/// neighbour's 72×46 are one class, not two.
+const MIN_CLASS: u32 = 16;
+
+/// How many frames an idle pooled texture survives without being taken again.
 ///
-/// The one caller is the effect layer with nothing to filter — a stack whose
-/// entries are all hidden or neutral, which the walk should not have opened a
-/// layer for. It cannot be handed the packed texture, which holds every sibling,
-/// so it gets a copy of its own slot.
-pub fn copy_out(device: &Device, queue: &Queue, packed: &Texture, slice: Slice) -> Texture {
-    let Slice { at, size } = slice;
-    let out = fx_texture(device, size.0, size.1, "ondin-fx-slice");
-    let mut encoder = device.create_command_encoder(&Default::default());
-    encoder.copy_texture_to_texture(
-        wgpu::TexelCopyTextureInfo {
-            texture: packed,
-            mip_level: 0,
-            origin: wgpu::Origin3d {
-                x: at.0,
-                y: at.1,
-                z: 0,
-            },
-            aspect: wgpu::TextureAspect::All,
-        },
-        wgpu::TexelCopyTextureInfo {
-            texture: &out,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        wgpu::Extent3d {
-            width: size.0,
-            height: size.1,
-            depth_or_array_layers: 1,
-        },
-    );
-    queue.submit([encoder.finish()]);
-    out
+/// Also the window [`FxPool::end_frame`] reads its byte bound over: what the pool
+/// keeps is at most the largest working set — the bytes of the distinct textures
+/// one frame took — among the last this-many frames.
+const KEEP_FRAMES: u64 = 8;
+
+/// The side a pooled texture is allocated at for a request of `n` pixels: the
+/// next of 16, 24, 32, 48, 64, 96 … — a power of two or one and a half times
+/// one — capped at the device's `limit` but never below `n`.
+///
+/// **Two steps per octave rather than one**, because a pooled texture is held
+/// across frames and the rounding is paid in memory for as long as it is: a
+/// power of two alone rounds a side up by as much as 2× (1025 → 2048), 4× in
+/// area, and this by at most about 1.5× (1025 → 1536), 2.25× in area. A layer's
+/// size moves by a pixel or two as the view pans, which is why there are classes
+/// at all — an exact-size pool would miss on nearly every frame of a pan.
+pub fn size_class(n: u32, limit: u32) -> u32 {
+    let n = n.max(MIN_CLASS);
+    let pow = n.next_power_of_two();
+    let mid = pow / 4 * 3;
+    let class = if mid >= n { mid } else { pow };
+    class.min(limit).max(n)
 }
 
-/// The scratch a run needs, allocated once and ping-ponged.
+/// A texture taken from an [`FxPool`] — the handle, its whole-texture view, and
+/// the identity the pool caches bind groups under.
 ///
-/// Five buffers rather than one per step: `a`/`b` carry the layer through the
-/// appearance passes and then serve as the shadow's scratch, `graphic` holds the
-/// layer as the shadows see it, and `o0`/`o1` accumulate the result. At a
-/// viewport-sized layer that is five times 8 MB, which is why they are allocated
-/// only for a layer that actually has ink to filter (`effects::any_ink`).
-struct Scratch {
-    views: Vec<TextureView>,
-    textures: Vec<Texture>,
+/// **At least the size asked for, and usually larger** ([`size_class`]). Every
+/// pass bounds itself by `Params::size` rather than by the texture's dimensions,
+/// and vello's fine stage stops at `RenderParams::width`/`height`, so the margin
+/// is never read — and it holds whatever the texture's last user left there,
+/// which is why nothing may read it.
+#[derive(Clone)]
+pub struct Pooled {
+    id: u64,
+    pub texture: Texture,
+    pub view: TextureView,
 }
 
-impl Scratch {
-    fn new(device: &Device, w: u32, h: u32) -> Self {
-        let textures: Vec<Texture> = ["fx-a", "fx-b", "fx-graphic", "fx-o0", "fx-o1"]
-            .iter()
-            .map(|l| fx_texture(device, w, h, l))
-            .collect();
-        let views = textures
-            .iter()
-            .map(|t| t.create_view(&Default::default()))
-            .collect();
-        Self { views, textures }
+/// One texture the pool owns.
+struct Slot {
+    tex: Pooled,
+    class: (u32, u32),
+    /// The frame it was last given back in, for [`KEEP_FRAMES`].
+    last_used: u64,
+    /// The frame it was last taken in, so a texture taken twice in one frame —
+    /// released by one batch and taken by the next — counts once towards that
+    /// frame's working set.
+    taken_in: Option<u64>,
+}
+
+impl Slot {
+    fn bytes(&self) -> u64 {
+        u64::from(self.class.0) * u64::from(self.class.1) * 4
     }
 }
 
-/// Slots in [`Scratch`], named so the sequence below reads as the reference does.
+/// What the effect passes did in one frame — the counts `[X7-L4-01]` is about.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FxStats {
+    /// Textures the pool had to allocate because no idle one of the class was
+    /// there. **Zero on a steady frame** — the whole point of the pool.
+    pub textures_made: usize,
+    /// Bind groups made, because none for the same three textures was cached.
+    pub bind_groups_made: usize,
+    /// `queue.submit`s the passes made: one per [`run_batch`], which is one per
+    /// vello effect pass — not one per layer.
+    pub submits: usize,
+    /// Effect layers handed to [`run_batch`], with ink or without.
+    pub layers: usize,
+    /// Bytes the pool holds once the frame has given everything back and been
+    /// trimmed.
+    pub pooled_bytes: u64,
+}
+
+/// The effect passes' textures and buffers, **kept across layers and frames**
+/// (§15 D1003 (7), `[X7-L4-01]`).
+///
+/// 🚨 **Until 2026-10-07 every on-screen effect layer allocated five scratch
+/// textures, a result texture, two buffers and a bind group per dispatch, and
+/// submitted its own encoder, on every frame** — about 0.11 ms of host time per
+/// layer, linear in the count, so a component page of a few hundred shadowed cards
+/// drew at 12–24 fps with the GPU nearly idle. §15 D339 had called the
+/// allocation *"not worth pooling yet"* on single-layer figures taken before
+/// sibling batching; the release review measured the premise drifting and the
+/// maintainer overturned it. It was also the leading suspect for §15 D992's lost
+/// device: with frames in flight unpolled, the fresh textures of every frame
+/// reached 5.7 GB allocated.
+///
+/// **What it holds:**
+///
+/// - **Textures, keyed by size class** ([`size_class`]) — every texture the GPU
+///   effect path uses: a pass's packed source, its packed result, and the five
+///   scratch slots. Taken with [`Self::take`]; given back either mid-frame with
+///   [`Self::release`], once nothing *later in the frame* will read it, or all at
+///   once by [`Self::end_frame`].
+/// - **One uniform buffer and one kernel buffer**, grown and never shrunk, which
+///   a batch's `Params` and blur kernels are written into with one
+///   `queue.write_buffer` each; a dispatch names its `Params` by dynamic offset
+///   and its kernel by `Params::k_off`.
+/// - **Bind groups, keyed by the three textures they bind.** With the two
+///   buffers shared, a bind group is a function of its textures alone, and those
+///   persist — so a steady frame makes none.
+///
+/// **Why a texture can be reused at all, and the one lifetime that matters.** A
+/// result is read by vello's atlas copy in the *consuming* pass — the page's
+/// render, or a level-above effect pass — through the `override_image` slot
+/// `VelloGpuRenderer::resolve_effects` points at it, and `render` unregisters every
+/// slot after the page's render is submitted (§15 D344, D404). So a result is
+/// held to the end of the frame and given back by [`Self::end_frame`], which
+/// `render` calls after the unregistering. A packed source and the scratch are
+/// read only by their own batch's submit, so they go back as soon as it is
+/// submitted. Reuse after that is safe by **queue order**: every later write is in
+/// a later submission on the one queue, which wgpu orders after the reads before
+/// it. No fence, and no `poll`.
+///
+/// **How it is bounded.** [`Self::end_frame`] drops any idle texture not taken
+/// for [`KEEP_FRAMES`] frames, and then, oldest first, enough idle textures that
+/// the pool holds no more than the largest **working set** of the last
+/// [`KEEP_FRAMES`] frames — the bytes of the distinct textures one frame took.
+/// That is memory the frame needed anyway: without the pool it allocated at least
+/// as much, fresh, every frame. A pan through sizes that keep changing class
+/// therefore costs reallocation, never accumulation, and an app that has stopped
+/// drawing holds at most one recent frame's worth.
+///
+/// ⚠️ **The working set, not the most bytes taken at one moment.** The first cut
+/// bounded the pool by the latter, and a steady frame then allocated **one
+/// texture every frame**: a packed source given back mid-frame and not retaken
+/// (the next pass's source was another class) made the frame's distinct textures
+/// outnumber its peak, so the trim dropped one the next frame needed again.
+/// `a_steady_frame_makes_nothing_and_submits_once_per_pass` caught it.
+#[derive(Default)]
+pub struct FxPool {
+    idle: Vec<Slot>,
+    busy: Vec<Slot>,
+    next_id: u64,
+    frame: u64,
+    /// This frame's working set so far: the bytes of the distinct textures taken.
+    used: u64,
+    /// The last [`KEEP_FRAMES`] frames' `used`, newest last.
+    worked: std::collections::VecDeque<u64>,
+    /// The batch's `Params`, one per dispatch at `stride` bytes apart.
+    uniforms: Option<wgpu::Buffer>,
+    /// Every blur kernel a batch uses, end to end.
+    kernels: Option<wgpu::Buffer>,
+    /// `Params::bytes`' size rounded up to the device's uniform offset alignment.
+    stride: u64,
+    binds: rustc_hash::FxHashMap<(u64, u64, u64), wgpu::BindGroup>,
+    cur: FxStats,
+    last: FxStats,
+}
+
+impl FxPool {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// A texture of at least `w`×`h`, idle from an earlier layer or frame when one
+    /// of the class is there and allocated when not.
+    pub fn take(&mut self, device: &Device, w: u32, h: u32) -> Pooled {
+        let limit = device.limits().max_texture_dimension_2d;
+        let class = (size_class(w, limit), size_class(h, limit));
+        // **The oldest idle texture of the class, not the first found.** The
+        // bind groups are cached by which textures they bind, so a steady frame
+        // makes none only if its takes land on the same textures as the frame
+        // before — and `swap_remove` reorders `idle`, so "first found" put scratch
+        // slot `A` on a different texture every frame and made 14 bind groups a
+        // frame for a cache that never hit.
+        let found = self
+            .idle
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.class == class)
+            .min_by_key(|(_, s)| s.tex.id)
+            .map(|(i, _)| i);
+        let mut slot = match found {
+            Some(i) => self.idle.swap_remove(i),
+            None => {
+                self.cur.textures_made += 1;
+                let texture = fx_texture(device, class.0, class.1, "ondin-fx-pooled");
+                let view = texture.create_view(&Default::default());
+                self.next_id += 1;
+                Slot {
+                    tex: Pooled {
+                        id: self.next_id,
+                        texture,
+                        view,
+                    },
+                    class,
+                    last_used: self.frame,
+                    taken_in: None,
+                }
+            }
+        };
+        if slot.taken_in != Some(self.frame) {
+            slot.taken_in = Some(self.frame);
+            self.used += slot.bytes();
+        }
+        let tex = slot.tex.clone();
+        self.busy.push(slot);
+        tex
+    }
+
+    /// Give `t` back before the frame ends, for a later batch of the same frame
+    /// to take. **Only once every read of it has been submitted** — see the type's
+    /// doc for why queue order is then enough.
+    pub fn release(&mut self, t: &Pooled) {
+        if let Some(i) = self.busy.iter().position(|s| s.tex.id == t.id) {
+            let mut slot = self.busy.swap_remove(i);
+            slot.last_used = self.frame;
+            self.idle.push(slot);
+        }
+    }
+
+    /// The frame is over: every texture still taken is given back, the idle ones
+    /// are trimmed (see the type's doc), and the frame's counts become
+    /// [`Self::last_frame`].
+    ///
+    /// **Called by `VelloGpuRenderer::render` after it has unregistered the
+    /// frame's atlas slots**, on the error path as well as the ordinary one.
+    pub fn end_frame(&mut self) {
+        for mut slot in self.busy.drain(..) {
+            slot.last_used = self.frame;
+            self.idle.push(slot);
+        }
+        self.worked.push_back(self.used);
+        while self.worked.len() as u64 > KEEP_FRAMES {
+            self.worked.pop_front();
+        }
+        self.used = 0;
+        let frame = self.frame;
+        let mut gone: Vec<u64> = Vec::new();
+        self.idle.retain(|s| {
+            let keep = frame - s.last_used < KEEP_FRAMES;
+            if !keep {
+                gone.push(s.tex.id);
+            }
+            keep
+        });
+        let bound = self.worked.iter().copied().max().unwrap_or(0);
+        let mut held: u64 = self.idle.iter().map(Slot::bytes).sum();
+        if held > bound {
+            // Oldest first, and the larger of two equally old first.
+            self.idle
+                .sort_by_key(|s| (s.last_used, std::cmp::Reverse(s.bytes())));
+            while held > bound && !self.idle.is_empty() {
+                let s = self.idle.remove(0);
+                held -= s.bytes();
+                gone.push(s.tex.id);
+            }
+        }
+        if !gone.is_empty() {
+            self.binds.retain(|k, _| {
+                !gone.contains(&k.0) && !gone.contains(&k.1) && !gone.contains(&k.2)
+            });
+        }
+        self.frame += 1;
+        self.cur.pooled_bytes = held;
+        self.last = std::mem::take(&mut self.cur);
+    }
+
+    /// What the last finished frame did.
+    pub fn last_frame(&self) -> FxStats {
+        self.last
+    }
+
+    /// Wrap a texture the pool does not own, for [`run`]'s one-off batch. It gets
+    /// an identity for the bind-group cache and is never trimmed — which is fine
+    /// only because `run`'s pool is dropped when it returns.
+    fn adopt(&mut self, texture: &Texture) -> Pooled {
+        self.next_id += 1;
+        Pooled {
+            id: self.next_id,
+            texture: texture.clone(),
+            view: texture.create_view(&Default::default()),
+        }
+    }
+
+    /// Grow the two shared buffers to hold `steps` dispatches' `Params` and
+    /// `floats` kernel weights. A grown buffer is a new buffer, so every cached
+    /// bind group naming the old one goes with it.
+    fn reserve(&mut self, device: &Device, steps: usize, floats: usize) {
+        let align = u64::from(device.limits().min_uniform_buffer_offset_alignment);
+        self.stride = (PARAMS_BYTES as u64).div_ceil(align) * align;
+        let want_u = (steps as u64 * self.stride).max(self.stride);
+        let want_k = (floats as u64 * 4).max(256);
+        let grow =
+            |buf: &Option<wgpu::Buffer>, want: u64| buf.as_ref().is_none_or(|b| b.size() < want);
+        if grow(&self.uniforms, want_u) {
+            self.uniforms = Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("ondin-fx-params"),
+                size: want_u.next_power_of_two(),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+            self.binds.clear();
+        }
+        if grow(&self.kernels, want_k) {
+            self.kernels = Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("ondin-fx-kernel"),
+                size: want_k.next_power_of_two(),
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+            self.binds.clear();
+        }
+    }
+
+    /// The bind group for a dispatch reading `a` and `b` and writing `dst`, from
+    /// the cache when the three have been bound together before.
+    fn bind_group(
+        &mut self,
+        device: &Device,
+        fx: &FxPipelines,
+        a: &Pooled,
+        b: &Pooled,
+        dst: &Pooled,
+    ) -> wgpu::BindGroup {
+        let key = (a.id, b.id, dst.id);
+        if let Some(g) = self.binds.get(&key) {
+            return g.clone();
+        }
+        let (Some(uniforms), Some(kernels)) = (&self.uniforms, &self.kernels) else {
+            unreachable!("`reserve` runs before any dispatch is encoded");
+        };
+        let g = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("ondin-fx"),
+            layout: &fx.layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&a.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&b.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&dst.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: uniforms,
+                        offset: 0,
+                        size: wgpu::BufferSize::new(PARAMS_BYTES as u64),
+                    }),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: kernels.as_entire_binding(),
+                },
+            ],
+        });
+        self.cur.bind_groups_made += 1;
+        self.binds.insert(key, g.clone());
+        g
+    }
+}
+
+/// One effect layer of a batch: where it is read from, where its result goes,
+/// and what to run over it.
+#[derive(Clone, Copy)]
+pub struct Item<'a> {
+    /// Where the layer sits in the batch's source texture.
+    pub slice: Slice,
+    /// Where its result's top-left goes in the batch's destination. The canvas
+    /// passes `slice.at`, so the destination is packed exactly as the source is
+    /// and each atlas slot is pointed at its own rectangle of it.
+    pub dst_at: (u32, u32),
+    pub effects: &'a [ondin_core::Keyed<Effect>],
+    /// Device pixels per document unit along each axis — see [`run`].
+    pub scale: (f64, f64),
+}
+
+/// Slots in the scratch, named so the sequence below reads as the reference does.
+///
+/// Five rather than one per step: `a`/`b` carry the layer through the appearance
+/// passes and then serve as the shadow's scratch, `graphic` holds the layer as the
+/// shadows see it, and `o0`/`o1` accumulate the result. At a viewport-sized layer
+/// that is five times 8 MB, which is why they are taken only for a batch with ink
+/// to filter (`effects::any_ink`) — and since §15 D1003 (7) **once per batch, not
+/// per layer**: the layers of a batch run one after another through the same five,
+/// taken at the batch's largest size.
 const A: usize = 0;
 const B: usize = 1;
 const GRAPHIC: usize = 2;
 const O0: usize = 3;
 const O1: usize = 4;
+const SCRATCH: usize = 5;
 
 /// Run an effect stack over `src` and return the result, in **straight** alpha
 /// and ready for vello's atlas.
@@ -355,12 +702,15 @@ const O1: usize = 4;
 /// becomes pixels; it is the same pair the CPU backend takes.
 ///
 /// Returns `None` when there is nothing to do, so the caller can draw `src`
-/// directly rather than paying for a copy that changes nothing.
+/// directly rather than paying for a copy that changes nothing. The result sits
+/// at the top-left of a texture **at least** `slice.size` ([`size_class`]).
 ///
-/// ⚠️ **Allocates its [`Scratch`] and submits its own encoder on every call** — once
-/// per on-screen effect layer per frame, about 0.11 ms of CPU each, measured. §15
-/// D1003 (7) rules the scratch pooled by size class across frames and the submits
-/// batched — not built.
+/// **A one-off: [`run_batch`] over a pool of its own, dropped on return.** The
+/// canvas does not call this — `VelloGpuRenderer::resolve_effects` runs a whole
+/// pass's layers through [`run_batch`] against the renderer's [`FxPool`] (§15
+/// D1003 (7)). It stays for `tests/fx_gpu.rs`, which compares one stack's bytes
+/// against the CPU reference and so exercises exactly the dispatch sequence the
+/// canvas runs.
 pub fn run(
     device: &Device,
     queue: &Queue,
@@ -373,50 +723,200 @@ pub fn run(
     if !effects::any_ink(effects) {
         return None;
     }
-    let Slice { at, size } = slice;
-    let (w, h) = size;
-    let scratch = Scratch::new(device, w, h);
-    let src_view = src.create_view(&Default::default());
+    let mut pool = FxPool::new();
+    let src = pool.adopt(src);
+    let dst = pool.take(device, slice.size.0, slice.size.1);
+    let item = Item {
+        slice,
+        dst_at: (0, 0),
+        effects,
+        scale,
+    };
+    run_batch(device, queue, fx, &mut pool, &src, &dst, &[item]);
+    Some(dst.texture)
+}
+
+/// Filter every layer of one packed batch from `src` into `dst`, through **one
+/// encoder and one submit** (§15 D1003 (7), `[X7-L4-01]`).
+///
+/// A layer with ink runs its stack through the batch's five scratch slots, taken
+/// from `pool` at the batch's largest layer size and given back once the submit
+/// is made; its last pass writes straight into its rectangle of `dst`. A layer
+/// whose stack has nothing to draw — all hidden or neutral, which the walk should
+/// not have opened a layer for — is copied across unchanged.
+///
+/// **Planned, then encoded.** The dispatches are worked out first, on the host,
+/// so the batch's `Params` and kernels can be written into the pool's two shared
+/// buffers with one `queue.write_buffer` each before anything is encoded; a
+/// dispatch then names its own by dynamic offset and `Params::k_off`.
+///
+/// **One compute pass for the whole batch.** In WebGPU a compute pass's usage
+/// scope is per *dispatch*, so a texture written by one and read by the next is
+/// legal and ordered — which is what lets a ping-pong sequence run without a pass
+/// boundary between every step, and the next layer reuse the same slots after it.
+pub fn run_batch(
+    device: &Device,
+    queue: &Queue,
+    fx: &FxPipelines,
+    pool: &mut FxPool,
+    src: &Pooled,
+    dst: &Pooled,
+    items: &[Item<'_>],
+) {
+    pool.cur.layers += items.len();
+    let mut plan = Plan::default();
+    let mut copies: Vec<&Item<'_>> = Vec::new();
+    let mut largest = (0u32, 0u32);
+    for item in items {
+        if !effects::any_ink(item.effects) {
+            copies.push(item);
+            continue;
+        }
+        let (w, h) = item.slice.size;
+        largest = (largest.0.max(w), largest.1.max(h));
+        Runner {
+            plan: &mut plan,
+            w,
+            h,
+        }
+        .item(item);
+    }
+    if plan.steps.is_empty() && copies.is_empty() {
+        return;
+    }
+    let scratch: Vec<Pooled> = if plan.steps.is_empty() {
+        Vec::new()
+    } else {
+        (0..SCRATCH)
+            .map(|_| pool.take(device, largest.0, largest.1))
+            .collect()
+    };
+
+    pool.reserve(device, plan.steps.len(), plan.kernels.len());
+    let stride = pool.stride as usize;
+    if let (Some(uniforms), Some(kernels)) = (&pool.uniforms, &pool.kernels) {
+        let mut ub = vec![0u8; plan.steps.len() * stride];
+        for (i, s) in plan.steps.iter().enumerate() {
+            ub[i * stride..i * stride + PARAMS_BYTES]
+                .copy_from_slice(&s.params.bytes(s.dom.0, s.dom.1));
+        }
+        if !ub.is_empty() {
+            queue.write_buffer(uniforms, 0, &ub);
+        }
+        if !plan.kernels.is_empty() {
+            let kb: Vec<u8> = plan.kernels.iter().flat_map(|v| v.to_le_bytes()).collect();
+            queue.write_buffer(kernels, 0, &kb);
+        }
+    }
+
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("ondin-fx"),
     });
-    // **Outlives the compute pass on purpose.** wgpu refcounts a resource a bind
-    // group refers to, so dropping these handles early would probably be safe —
-    // "probably" being the whole reason they are held until after the submit
-    // instead.
-    let mut keep: Vec<wgpu::Buffer> = Vec::new();
-    // **One compute pass for the whole stack, and it yields the slot it ended in.**
-    // In WebGPU a compute pass's usage scope is per *dispatch*, so a texture
-    // written by one and read by the next is legal and ordered — which is what
-    // lets a ping-pong sequence run without a pass boundary between every step.
-    // The block's value is the answer to "which scratch slot holds the result",
-    // which is also what ends the borrow of `scratch` so the texture can be moved
-    // out of it below.
-    let result = {
+    for item in copies {
+        let Slice { at, size } = item.slice;
+        encoder.copy_texture_to_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &src.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d {
+                    x: at.0,
+                    y: at.1,
+                    z: 0,
+                },
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyTextureInfo {
+                texture: &dst.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d {
+                    x: item.dst_at.0,
+                    y: item.dst_at.1,
+                    z: 0,
+                },
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::Extent3d {
+                width: size.0,
+                height: size.1,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
+    if !plan.steps.is_empty() {
         let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("ondin-fx"),
             timestamp_writes: None,
         });
-        let mut run = Runner {
-            device,
-            fx,
-            cpass: &mut cpass,
-            scratch: &scratch,
-            w,
-            h,
-            keep: &mut keep,
+        let texture = |at: At| match at {
+            At::Scratch(i) => &scratch[i],
+            At::Src => src,
+            At::Dst => dst,
         };
+        for (i, s) in plan.steps.iter().enumerate() {
+            let bind = pool.bind_group(device, fx, texture(s.a), texture(s.b), texture(s.dst));
+            cpass.set_pipeline(fx.pipeline(s.pass));
+            cpass.set_bind_group(0, &bind, &[(i * stride) as u32]);
+            cpass.dispatch_workgroups(s.dom.0.div_ceil(TILE), s.dom.1.div_ceil(TILE), 1);
+        }
+    }
+    queue.submit([encoder.finish()]);
+    pool.cur.submits += 1;
+    for t in &scratch {
+        pool.release(t);
+    }
+}
+
+/// Where a planned dispatch reads or writes: a scratch slot, the batch's packed
+/// source, or its packed destination.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum At {
+    Scratch(usize),
+    Src,
+    Dst,
+}
+
+/// One dispatch, worked out on the host before anything is encoded.
+struct Step {
+    pass: Pass,
+    a: At,
+    b: At,
+    dst: At,
+    params: Params,
+    /// The grid the dispatch covers, which is also `Params::size`.
+    dom: (u32, u32),
+}
+
+/// A batch's dispatches in order, and every blur kernel they read, end to end.
+#[derive(Default)]
+struct Plan {
+    steps: Vec<Step>,
+    kernels: Vec<f32>,
+}
+
+impl Runner<'_> {
+    /// Plan one layer's stack: ingest from its rectangle of the source, the
+    /// reference's steps in the reference's order, and the last pass into its
+    /// rectangle of the destination.
+    fn item(&mut self, item: &Item<'_>) {
+        let Item {
+            slice: Slice { at, size: (w, h) },
+            dst_at,
+            effects,
+            scale,
+        } = *item;
+        let run = self;
 
         // --- the layer's own appearance, in list order -----------------------
-        run.dispatch(
+        run.step(
             Pass::Premul,
-            &src_view,
-            &src_view,
-            A,
+            At::Src,
+            At::Src,
+            At::Scratch(A),
             Params {
                 src_origin: (at.0 as i32, at.1 as i32),
                 ..Default::default()
             },
+            (w, h),
         );
         let mut cur = A;
         let mut alt = B;
@@ -568,42 +1068,35 @@ pub fn run(
             std::mem::swap(&mut out, &mut out_alt);
         }
 
-        // Back to straight alpha for vello's atlas.
-        run.slot(Pass::Unpremul, out, out, out_alt, Params::default());
-        out_alt
-    };
-    queue.submit([encoder.finish()]);
-    // The views borrow the textures, so they go first; then the result is moved
-    // out and the rest of the scratch is dropped.
-    let Scratch {
-        views,
-        mut textures,
-    } = scratch;
-    drop(views);
-    // `swap_remove` reorders what is left, which does not matter — nothing reads
-    // the scratch after this.
-    Some(textures.swap_remove(result))
+        // Back to straight alpha for vello's atlas, into this layer's rectangle
+        // of the batch's destination.
+        run.step(
+            Pass::Unpremul,
+            At::Scratch(out),
+            At::Scratch(out),
+            At::Dst,
+            Params {
+                dst_origin: (dst_at.0 as i32, dst_at.1 as i32),
+                ..Default::default()
+            },
+            (w, h),
+        );
+    }
 }
 
-/// Issues dispatches against one bind group layout.
-struct Runner<'a, 'b> {
-    device: &'a Device,
-    fx: &'a FxPipelines,
-    cpass: &'a mut wgpu::ComputePass<'b>,
-    scratch: &'a Scratch,
+/// Plans one layer's dispatches into a batch's [`Plan`].
+struct Runner<'a> {
+    plan: &'a mut Plan,
+    /// The layer's own buffer size — the grid most of its dispatches cover.
     w: u32,
     h: u32,
-    /// The uniform and kernel buffers each dispatch built, held by the caller so
-    /// they outlive the submit.
-    keep: &'a mut Vec<wgpu::Buffer>,
 }
 
-impl Runner<'_, '_> {
-    /// A dispatch whose sources are scratch slots.
+impl Runner<'_> {
+    /// A dispatch whose sources and destination are scratch slots.
     fn slot(&mut self, pass: Pass, a: usize, b: usize, dst: usize, p: Params) {
         let dom = (self.w, self.h);
-        let (va, vb) = (&self.scratch.views[a], &self.scratch.views[b]);
-        self.dispatch_into(pass, va, vb, dst, p, &[1.0], dom);
+        self.slot_in(pass, a, b, dst, p, dom);
     }
 
     /// [`Self::slot`] over a **smaller grid than the buffer** — the coarse region
@@ -611,14 +1104,26 @@ impl Runner<'_, '_> {
     /// top-left corner. Everything outside `dom` is left as it was, and nothing
     /// reads it.
     fn slot_in(&mut self, pass: Pass, a: usize, b: usize, dst: usize, p: Params, dom: (u32, u32)) {
-        let (va, vb) = (&self.scratch.views[a], &self.scratch.views[b]);
-        self.dispatch_into(pass, va, vb, dst, p, &[1.0], dom);
+        self.step(
+            pass,
+            At::Scratch(a),
+            At::Scratch(b),
+            At::Scratch(dst),
+            p,
+            dom,
+        );
     }
 
-    /// A dispatch reading a texture from outside the scratch.
-    fn dispatch(&mut self, pass: Pass, a: &TextureView, b: &TextureView, dst: usize, p: Params) {
-        let dom = (self.w, self.h);
-        self.dispatch_into(pass, a, b, dst, p, &[1.0], dom);
+    /// Any dispatch, over `dom`.
+    fn step(&mut self, pass: Pass, a: At, b: At, dst: At, params: Params, dom: (u32, u32)) {
+        self.plan.steps.push(Step {
+            pass,
+            a,
+            b,
+            dst,
+            params,
+            dom,
+        });
     }
 
     /// Both axes of a separable gaussian over the whole buffer.
@@ -699,99 +1204,67 @@ impl Runner<'_, '_> {
             // two implementations of the same formula.
             let k = effects::kernel(sigma);
             let radius = ((k.len() - 1) / 2) as i32;
-            let (va, vb) = (&self.scratch.views[*cur], &self.scratch.views[*cur]);
-            self.dispatch_into(
+            let k_off = self.plan.kernels.len() as u32;
+            self.plan.kernels.extend_from_slice(&k);
+            self.slot_in(
                 Pass::Blur,
-                va,
-                vb,
+                *cur,
+                *cur,
                 *alt,
                 Params {
                     radius,
                     horizontal,
+                    k_off,
                     ..Default::default()
                 },
-                &k,
                 dom,
             );
             std::mem::swap(cur, alt);
         }
     }
+}
 
-    #[allow(clippy::too_many_arguments)]
-    fn dispatch_into(
-        &mut self,
-        pass: Pass,
-        a: &TextureView,
-        b: &TextureView,
-        dst: usize,
-        p: Params,
-        kernel: &[f32],
-        dom: (u32, u32),
-    ) {
-        let params = self.buffer(
-            "ondin-fx-params",
-            wgpu::BufferUsages::UNIFORM,
-            &p.bytes(dom.0, dom.1),
-        );
-        let mut kb = Vec::with_capacity(kernel.len() * 4);
-        for v in kernel {
-            kb.extend_from_slice(&v.to_le_bytes());
-        }
-        let kbuf = self.buffer("ondin-fx-kernel", wgpu::BufferUsages::STORAGE, &kb);
-        let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(pass.entry()),
-            layout: &self.fx.layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(a),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(b),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&self.scratch.views[dst]),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: params.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: kbuf.as_entire_binding(),
-                },
-            ],
-        });
-        self.cpass.set_pipeline(self.fx.pipeline(pass));
-        self.cpass.set_bind_group(0, &bind, &[]);
-        self.cpass
-            .dispatch_workgroups(dom.0.div_ceil(TILE), dom.1.div_ceil(TILE), 1);
-        self.keep.push(params);
-        self.keep.push(kbuf);
-    }
+#[cfg(test)]
+mod tests {
+    use super::size_class;
 
-    /// A small mapped-at-creation buffer holding `data`.
+    /// The pool's size classes: two per octave, never below the request, and never
+    /// past the device limit unless the request itself is (§15 D1003 (7)).
     ///
-    /// Both callers hand over whole `f32`s, so the multiple-of-four a uniform and
-    /// a storage binding both require holds by construction — asserted rather than
-    /// rounded up, because a size that had to be padded would mean the layout and
-    /// the shader had already disagreed.
-    fn buffer(&self, label: &str, usage: wgpu::BufferUsages, data: &[u8]) -> wgpu::Buffer {
-        assert!(
-            !data.is_empty() && data.len().is_multiple_of(4),
-            "{label}: {} bytes is not a whole number of f32s",
-            data.len()
+    /// The cases are the ones the canvas meets: a card's buffer (70 → 96), a
+    /// 1080-pixel side (→ 1536, not 2048, which is the half-octave step paying
+    /// for itself — a power-of-two class would hold a third more memory there),
+    /// a 1920 side (→ 2048), and the floor. **Flip-checked**: `class` taken as
+    /// `pow` alone (powers of two only) fails at the first half-octave case, 17
+    /// (32 against 24) — the prediction named 70, which the loop never reaches.
+    /// Dropping the `.max(n)` leaves every case of the loop green, because
+    /// `pack` keeps every request inside the limit (§15 D744) and the floor can
+    /// only bite on a request past it; it fails at the last assertion (6000 for
+    /// a request of 7000), which is the one that pins it.
+    #[test]
+    fn a_size_class_is_two_steps_per_octave_and_never_smaller_than_asked() {
+        let limit = 8192;
+        for (n, class) in [
+            (1, 16),
+            (16, 16),
+            (17, 24),
+            (24, 24),
+            (25, 32),
+            (70, 96),
+            (96, 96),
+            (97, 128),
+            (1080, 1536),
+            (1920, 2048),
+            (6000, 6144),
+            (8192, 8192),
+        ] {
+            assert_eq!(size_class(n, limit), class, "the class for {n}");
+        }
+        assert_eq!(size_class(5000, 6000), 6000, "capped at the device limit");
+        assert_eq!(
+            size_class(7000, 6000),
+            7000,
+            "but never below the request, which the caller has already sized"
         );
-        let buf = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(label),
-            size: data.len() as u64,
-            usage,
-            mapped_at_creation: true,
-        });
-        buf.slice(..).get_mapped_range_mut().copy_from_slice(data);
-        buf.unmap();
-        buf
     }
 }

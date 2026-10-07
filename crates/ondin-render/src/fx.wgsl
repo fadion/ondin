@@ -43,6 +43,15 @@ struct Params {
     // inserting a field in the middle moves every one of them — a change that
     // compiles on both sides and draws nonsense.
     src_size: vec2<u32>,
+    // Where the layer's rectangle sits in the texture `unpremul` writes. A batch
+    // of sibling layers writes its results into **one** destination packed like
+    // its source (§15 D1003 (7), `fx_gpu::run_batch`), so the last pass stores at
+    // an offset; every other pass writes a scratch slot at its own origin and
+    // ignores this. Appended, for the reason on `src_size`.
+    dst_origin: vec2<i32>,
+    // Where this dispatch's kernel starts in `kernel`: one buffer holds every
+    // kernel a batch uses, so a blur names its own stretch of it.
+    k_off: u32,
 };
 
 @group(0) @binding(0) var src_a: texture_2d<f32>;
@@ -98,10 +107,10 @@ fn unpremul(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (s.a <= 0.0) {
         // Colour under a zero alpha is not a colour; dividing by it would make a
         // NaN that the clamp then turns into white.
-        textureStore(dst, c, vec4<f32>(0.0));
+        textureStore(dst, c + p.dst_origin, vec4<f32>(0.0));
         return;
     }
-    textureStore(dst, c, q(vec4<f32>(s.rgb / s.a, s.a)));
+    textureStore(dst, c + p.dst_origin, q(vec4<f32>(s.rgb / s.a, s.a)));
 }
 
 @compute @workgroup_size(8, 8)
@@ -150,7 +159,7 @@ fn blur(@builtin(global_invocation_id) gid: vec3<u32>) {
     var acc = vec4<f32>(0.0);
     let n = 2 * p.radius;
     for (var t = 0; t <= n; t = t + 1) {
-        acc = acc + load_a_edge(c + step * (t - p.radius)) * kernel[u32(t)];
+        acc = acc + load_a_edge(c + step * (t - p.radius)) * kernel[p.k_off + u32(t)];
     }
     textureStore(dst, c, q(acc));
 }

@@ -445,8 +445,9 @@ fn banner(effects: Vec<Effect>) -> (Document, Resolved) {
 ///
 /// ⚠️ **It asserts a render that completes and ink that lands, not a picture.**
 /// The layer is resampled at this size, so the exact pixels are `blur_coarse`'s
-/// business; what is pinned is that the frame *happens*. A panic in `Scratch::new`
-/// is not a wrong colour, it is no frame at all.
+/// business; what is pinned is that the frame *happens*. A panic allocating the
+/// scratch (`Scratch::new` then, `FxPool::take` since §15 D1003 (7)) is not a wrong
+/// colour, it is no frame at all.
 ///
 /// ⚠️ **Flipped by restoring `.min(u16::MAX as f64)` in `push_effect_layer`, and
 /// the failure does not look like a test failure** — the process aborts inside
@@ -1449,5 +1450,478 @@ fn a_vello_renderer_costs_about_six_milliseconds_to_build() {
         5,
         "the loop did not time five marginal builds, so the numbers above are \
          of nothing (§15 D777)"
+    );
+}
+
+/// An `n`×`n` grid of cards, each a group holding a 70×40 white rect, the group
+/// carrying one zero-blur drop shadow — and every third group a second, smaller
+/// rect with a shadow of its own, so a third of the cards are a nested effect
+/// layer. The shape of a component page since every instance copies its main's
+/// shadow (§15 D978), and `[X7-L4-01]`'s probe, rebuilt.
+///
+/// The pitch is 80×50, so a 30×30 grid overruns a 1920×1080 view on both axes and
+/// a 20×20 one does not.
+fn card_grid(n: usize) -> (Document, Resolved) {
+    let mut ids = IdSource::new(1);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let mut ops = Vec::new();
+    let mut layered = Vec::new();
+    let white = || {
+        keyed_by_position([Fill {
+            brush: Brush::Solid(Color::WHITE),
+            visible: true,
+        }])
+    };
+    for i in 0..n * n {
+        let (col, row) = ((i % n) as f64, (i / n) as f64);
+        let g = ids.mint();
+        ops.push(Operation::CreateNode {
+            id: g,
+            parent: root,
+            index: i,
+            kind: NodeKind::Group,
+            transform: None,
+            name: None,
+        });
+        let r = ids.mint();
+        ops.push(Operation::CreateNode {
+            id: r,
+            parent: g,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(70.0, 40.0),
+                corner_radii: Default::default(),
+            },
+            transform: Some(Affine::translate((col * 80.0, row * 50.0))),
+            name: None,
+        });
+        ops.push(Operation::SetFills {
+            id: r,
+            fills: white(),
+        });
+        layered.push(g);
+        if i % 3 == 0 {
+            let inner = ids.mint();
+            ops.push(Operation::CreateNode {
+                id: inner,
+                parent: g,
+                index: 1,
+                kind: NodeKind::Rect {
+                    size: Size::new(20.0, 10.0),
+                    corner_radii: Default::default(),
+                },
+                transform: Some(Affine::translate((col * 80.0 + 10.0, row * 50.0 + 10.0))),
+                name: None,
+            });
+            ops.push(Operation::SetFills {
+                id: inner,
+                fills: white(),
+            });
+            layered.push(inner);
+        }
+    }
+    doc.apply(&Transaction(ops)).expect("the grid applies");
+    let shadow = Effect::new(EffectKind::DropShadow(Shadow {
+        offset: Vec2::new(0.0, 2.0),
+        blur: 0.0,
+        spread: 0.0,
+        color: Color::from_rgba8(0, 0, 0, 64),
+    }));
+    let ops: Vec<Operation> = layered
+        .into_iter()
+        .map(|id| Operation::SetEffects {
+            id,
+            effects: keyed_by_position([shadow.clone()]),
+        })
+        .collect();
+    doc.apply(&Transaction(ops)).expect("the shadows apply");
+    let res = Resolved::rebuild(&doc);
+    (doc, res)
+}
+
+/// The median of `xs`, which it sorts.
+fn median(xs: &mut [f64]) -> f64 {
+    xs.sort_by(f64::total_cmp);
+    xs[xs.len() / 2]
+}
+
+/// The probes' page: 1920×1080, the size `[X7-L4-01]` measured at.
+const PAGE_W: u32 = 1920;
+const PAGE_H: u32 = 1080;
+
+/// A render target of `w`×`h` and its view.
+fn page_target(g: &Gpu, w: u32, h: u32) -> (wgpu::Texture, wgpu::TextureView) {
+    let target = g.device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("gpu-effects-page"),
+        size: wgpu::Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::STORAGE_BINDING
+            | wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = target.create_view(&Default::default());
+    (target, view)
+}
+
+/// The page viewport, scrolled to `x` along the top.
+fn page_at(x: f64) -> Viewport {
+    Viewport {
+        view: Rect::new(x, -20.0, x + PAGE_W as f64, -20.0 + PAGE_H as f64),
+        pixel_size: (PAGE_W, PAGE_H),
+    }
+}
+
+/// One frame into `view`, with no readback and no wait.
+fn draw(g: &mut Gpu, doc: &Document, res: &Resolved, vp: &Viewport, view: &wgpu::TextureView) {
+    g.renderer
+        .render(
+            &g.device,
+            &g.queue,
+            doc,
+            res,
+            vp,
+            &RenderOverrides::default(),
+            view,
+            Color::TRANSPARENT,
+            &ImageStore::default(),
+        )
+        .expect("render");
+}
+
+/// How many effect jobs the walk records for `doc` at `vp`.
+fn job_count(doc: &Document, res: &Resolved, vp: &Viewport) -> usize {
+    ondin_render::gpu::build_scene(
+        doc,
+        res,
+        vp,
+        &RenderOverrides::default(),
+        &ImageStore::default(),
+    )
+    .1
+    .len()
+}
+
+/// **What an on-screen effect layer costs per frame**, as `[X7-L4-01]` measured
+/// it: a card grid at 1920×1080, panned 3.7 px a frame for 60 frames, the median
+/// of the last 50 — once for the whole frame (`render` and a `poll(Wait)`), once
+/// for the time `render` takes to return, which is the host side. Release build,
+/// RTX 4070 Ti, this test alone:
+///
+/// | grid  | effect jobs | before: frame / `render` returned | after: frame / `render` returned | after: textures made, 50 panned frames / pool |
+/// |-------|-------------|-----------------------------------|----------------------------------|-----------------------------------------------|
+/// | 10×10 | 104         | 15.1–17.3 ms / 14.5–16.7 ms       | 2.7–3.1 ms / 1.9–2.2 ms          | 4 / 2.5 MB                                    |
+/// | 20×20 | 474         | 62.8–71.6 ms / 61.0–69.4 ms       | 9.1–9.8 ms / 6.2–6.8 ms          | 0 / 13.1 MB                                   |
+/// | 30×30 | 726         | 89.9–97.1 ms / 87.5–94.2 ms       | 12.8–13.9 ms / 8.9–9.7 ms        | 0 / 17.4 MB                                   |
+///
+/// *Before* is `fx_gpu::run` once per layer — five fresh scratch textures, a fresh
+/// result, a buffer pair and a bind group per dispatch, and a submit each — three
+/// runs; *after* is the pooled, batched path of §15 D1003 (7), five runs. About
+/// 0.13 ms of host time per layer became about 0.012, and the pass count is 2
+/// throughout, so none of this is D776/D779's renderer count. The four textures
+/// the small grid makes over the pan are a layer's size crossing a class
+/// boundary as the view moves; the larger grids already hold every class they
+/// cross.
+///
+/// ⚠️ **Wall-clock, so no bound is asserted** — a timing gate in a parallel
+/// harness is either too loose to catch anything or red on a busy machine (§15
+/// D777). The property is pinned by **counting** instead:
+/// `a_steady_frame_makes_nothing_and_submits_once_per_pass` below. The figures
+/// were measured with this test run alone; under the whole suite they are
+/// several times higher.
+///
+/// Plain backticks throughout: `crates/*/tests/` is a separate crate root and no
+/// gate reads a doc link there (D319, D622).
+#[test]
+#[ignore = "needs a GPU adapter"]
+fn what_an_on_screen_effect_layer_costs_per_frame() {
+    let Some(mut g) = gpu() else {
+        return;
+    };
+    let (_target, view) = page_target(&g, PAGE_W, PAGE_H);
+    for n in [10usize, 20, 30] {
+        let (doc, res) = card_grid(n);
+        let (mut frame, mut host) = (Vec::new(), Vec::new());
+        let (mut jobs, mut made) = (0, 0);
+        for f in 0..60 {
+            let vp = page_at(-20.0 + f as f64 * 3.7);
+            jobs = job_count(&doc, &res, &vp);
+            let t = std::time::Instant::now();
+            draw(&mut g, &doc, &res, &vp, &view);
+            let returned = t.elapsed().as_secs_f64() * 1000.0;
+            g.device
+                .poll(wgpu::PollType::Wait {
+                    submission_index: None,
+                    timeout: None,
+                })
+                .expect("poll");
+            let total = t.elapsed().as_secs_f64() * 1000.0;
+            if f >= 10 {
+                host.push(returned);
+                frame.push(total);
+                made += g.renderer.fx_stats().textures_made;
+            }
+        }
+        let stats = g.renderer.fx_stats();
+        println!(
+            "[X7-L4-01] {n}x{n}: {jobs} effect jobs, median frame {:.2} ms, \
+             render() returned {:.2} ms, passes {}, fx submits {}, textures made \
+             over the last 50 frames {made}, pool {:.1} MB",
+            median(&mut frame),
+            median(&mut host),
+            g.renderer.pass_high_water(),
+            stats.submits,
+            stats.pooled_bytes as f64 / 1e6,
+        );
+        assert_eq!(frame.len(), 50, "the loop timed fifty frames");
+    }
+}
+
+/// **A steady frame makes no texture and no bind group, and submits once per
+/// effect pass rather than once per layer** (§15 D1003 (7), `[X7-L4-01]`) — the
+/// countable form of the probe above, which is wall-clock and asserts nothing.
+///
+/// The same 20×20 card grid drawn three times at one viewport. The first frame
+/// fills the pool; the second must take no texture; the third must make nothing at
+/// all. ⚠️ **The second frame may still make bind groups, and that is not a
+/// leak**: the first frame starts with an empty pool, so its takes land on
+/// textures in a different order from any frame after it — a packed source given
+/// back by one pass is taken by the next as something else — while every later
+/// frame starts from the same idle set and takes the same textures in the same
+/// order. Measured: 14, then 7, then 0.
+///
+/// **Flip-checked, three ways, each against the version that was there or the one
+/// someone would write:**
+///
+/// - `FxPool::take` never reusing an idle texture (its lookup's `Option` made
+///   `None` by a trailing `.filter(|_| false)` — allocate on every take, the old
+///   behaviour) fails at `second.textures_made`, the predicted site: **14** made
+///   on every frame. It also fails `a_pooled_texture_carries_nothing_from_the_frame_before`'s
+///   fixture assertion, as that test's own guard should.
+/// - The bind-group cache never hit (`binds.get(&key).filter(|_| false)`) fails
+///   at `bind_groups_made`, the predicted site: **3,738** made, one per dispatch —
+///   seven dispatches for each of 534 layers.
+/// - `run_batch` called once per layer in `resolve_effects`, as `fx_gpu::run`
+///   was — `for item in &items { run_batch(…, std::slice::from_ref(item)) }` —
+///   fails at `submits`, the predicted site: **534** submits for 2 passes. It
+///   leaves `textures_made` and `bind_groups_made` at 0 — the pool absorbs
+///   per-layer batching, which is why the submit count needs its own assertion.
+///   ⚠️ **And every picture test in this file stays green under it**, which is
+///   a measurement of the queue-order argument `FxPool`'s doc rests on: the one
+///   uniform buffer was rewritten by `queue.write_buffer` between 534 submits a
+///   frame and no dispatch read another's `Params`.
+///
+/// ⚠️ **It found two defects in the pool before it passed.** The first cut bounded
+/// the pool by the most bytes taken at one moment rather than by the frame's
+/// working set, and a steady frame allocated one texture every frame; then idle
+/// textures were taken in whatever order `swap_remove` had left them, and a
+/// steady frame made 14 bind groups for a cache that never hit. `FxPool`'s doc and
+/// `FxPool::take` each say which.
+///
+/// Plain backticks throughout: `crates/*/tests/` is a separate crate root and no
+/// gate reads a doc link there (D319, D622).
+#[test]
+#[ignore = "needs a GPU adapter"]
+fn a_steady_frame_makes_nothing_and_submits_once_per_pass() {
+    let Some(mut g) = gpu() else {
+        return;
+    };
+    let (_target, view) = page_target(&g, PAGE_W, PAGE_H);
+    let (doc, res) = card_grid(20);
+    let vp = page_at(-20.0);
+    let jobs = job_count(&doc, &res, &vp);
+
+    draw(&mut g, &doc, &res, &vp, &view);
+    let first = g.renderer.fx_stats();
+    draw(&mut g, &doc, &res, &vp, &view);
+    let second = g.renderer.fx_stats();
+    draw(&mut g, &doc, &res, &vp, &view);
+    let steady = g.renderer.fx_stats();
+    println!(
+        "[X7-L4-01] first {first:?}\n[X7-L4-01] second {second:?}\n[X7-L4-01] steady {steady:?}"
+    );
+
+    // The fixture is in the state the test is about: a crowd of layers, more than
+    // one pass, and a first frame that really did have to allocate.
+    assert!(
+        jobs > 100,
+        "the grid records {jobs} effect jobs, not a crowd"
+    );
+    assert!(
+        first.textures_made > 0,
+        "the first frame had nothing to reuse"
+    );
+    assert_eq!(steady.layers, jobs, "every job reached the passes");
+
+    assert_eq!(
+        second.textures_made, 0,
+        "the second frame allocated textures the first had already made"
+    );
+    assert_eq!(
+        steady.textures_made, 0,
+        "a steady frame allocated textures, so the pool is not reusing them — \
+         every frame's fresh fx textures are §15 D992's leading suspect"
+    );
+    assert_eq!(
+        steady.bind_groups_made, 0,
+        "a steady frame made bind groups, so they are not cached by texture"
+    );
+    assert_eq!(
+        steady.submits,
+        g.renderer.pass_high_water(),
+        "the passes submitted {} times for {} layers in {} vello passes — one \
+         submit per layer is `[X7-L4-01]`'s cost",
+        steady.submits,
+        steady.layers,
+        g.renderer.pass_high_water()
+    );
+    assert_eq!(
+        steady.pooled_bytes, first.pooled_bytes,
+        "the pool grew across two identical frames"
+    );
+}
+
+/// **A texture back from the pool carries nothing of its last user into the
+/// picture** (§15 D1003 (7)).
+///
+/// The pool hands out textures larger than asked (`fx_gpu::size_class`) and never
+/// clears them, so what keeps the margin harmless is that no pass reads past
+/// `Params::size`. This sets that up to be visible: a first frame of the 40×40
+/// square with a shadow cast **upward** (a 40×46 buffer, class 48×48) leaves the
+/// square's ink in rows 40–46 of every texture it used; the second frame, an inner
+/// shadow offset up and left on the same square (40×40, the same class), runs
+/// through those very textures — and its silhouette reads six rows *below* each
+/// pixel, which along the bottom edge is exactly that margin. Correct, the margin
+/// reads as outside the buffer and the inner shadow lies along the bottom edge;
+/// read through, it finds the stale square and the band is gone.
+///
+/// ⚠️ **Flip-checked against the plausible wrong version** — `silhouette`'s
+/// bound taken from the texture (`all(s < vec2<i32>(textureDimensions(src_a)))`)
+/// rather than from `inside` — which fails at the CPU comparison, the predicted
+/// site, and only through reuse: the fresh renderer's control assertion stays
+/// green under the same flip, because a fresh texture's margin is zero.
+///
+/// Plain backticks throughout: `crates/*/tests/` is a separate crate root and no
+/// gate reads a doc link there (D319, D622).
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn a_pooled_texture_carries_nothing_from_the_frame_before() {
+    let Some(mut g) = gpu() else {
+        return;
+    };
+    let (before, before_res) = document(vec![red_shadow(-6.0, 0.0)], 1.0);
+    let (doc, res) = document(
+        vec![Effect::new(EffectKind::InnerShadow(Shadow {
+            offset: Vec2::new(-6.0, -6.0),
+            blur: 0.0,
+            spread: 0.0,
+            color: Color::from_rgba8(255, 0, 0, 255),
+        }))],
+        1.0,
+    );
+    let _ = render_gpu(&mut g, &before, &before_res);
+    let reused = render_gpu(&mut g, &doc, &res);
+    assert_eq!(
+        g.renderer.fx_stats().textures_made,
+        0,
+        "the second frame took fresh textures, so it never met the first \
+         frame's leftovers and this test is about nothing"
+    );
+
+    let mut fresh_gpu = gpu().expect("a second device on the same adapter");
+    let fresh = render_gpu(&mut fresh_gpu, &doc, &res);
+    let cpu = render_cpu(&doc, &res);
+    assert_eq!(
+        fresh, cpu,
+        "the control: a fresh renderer draws the reference"
+    );
+    assert_eq!(
+        at(&cpu, 40, 67),
+        (255, 0, 0, 255),
+        "the reference has its inner shadow along the bottom edge"
+    );
+    assert_eq!(
+        reused, cpu,
+        "a renderer whose pool held the frame before drew something else — a pass \
+         read a pooled texture past its own buffer"
+    );
+}
+
+/// **The pool lets go of what recent frames did not need** (§15 D1003 (7)) —
+/// the bound that keeps it from being §15 D992's 5.7 GB in another shape.
+///
+/// A 20×20 card grid fills the pool; then the plain square with one shadow is
+/// drawn, frame after frame. For `fx_gpu::KEEP_FRAMES` (8) frames the pool may keep the
+/// grid's textures — they are within the window of a frame that needed them —
+/// and after that it must hold exactly what the square alone needs, which a fresh
+/// renderer that has only ever drawn the square measures.
+///
+/// The bytes, measured: the grid's frame leaves 13,075,968 in the pool, the square
+/// alone 64,512; frame by frame after the grid the pool holds 6,849,024 for seven
+/// frames and 64,512 from the eighth.
+///
+/// ⚠️ **Flip-checked, and the trims are two defences.** `FxPool::end_frame` has
+/// two — idle textures older than `KEEP_FRAMES` dropped, and the pool held to the
+/// largest working set in that window — and over this fixture **each alone is
+/// enough for the final equality**: with the age `retain` made to keep everything
+/// the byte bound still lands on 64,512 at the eighth frame, and with the byte bound
+/// removed the age trim does (13,140,480 for seven frames, then 64,512). Both
+/// removed, it fails at the final equality, the predicted site, holding 13,140,480 —
+/// the grid's textures beside the square's — on every frame. **The first assertion
+/// is what pins the byte bound on its own**: without it the first square frame
+/// holds 13,140,480, more than the grid's 13,075,968. Nothing here pins the age trim
+/// on its own, because in every sequence tried it fires on the same frame the byte
+/// bound's window lets go — so either looks removable, and neither is.
+///
+/// Plain backticks throughout: `crates/*/tests/` is a separate crate root and no
+/// gate reads a doc link there (D319, D622).
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn the_pool_lets_go_of_what_recent_frames_did_not_need() {
+    let Some(mut g) = gpu() else {
+        return;
+    };
+    let (_target, view) = page_target(&g, PAGE_W, PAGE_H);
+    let (grid, grid_res) = card_grid(20);
+    let (square, square_res) = document(vec![red_shadow(6.0, 0.0)], 1.0);
+    let vp = page_at(-20.0);
+    draw(&mut g, &grid, &grid_res, &vp, &view);
+    let full = g.renderer.fx_stats().pooled_bytes;
+
+    let mut alone = gpu().expect("a second device on the same adapter");
+    let (_t, alone_view) = page_target(&alone, PAGE_W, PAGE_H);
+    draw(&mut alone, &square, &square_res, &vp, &alone_view);
+    let needed = alone.renderer.fx_stats().pooled_bytes;
+    assert!(
+        needed > 0 && needed < full,
+        "the square needs {needed} bytes of pool and the grid {full}, so the \
+         fixture cannot tell holding from letting go"
+    );
+
+    let mut held = Vec::new();
+    for _ in 0..12 {
+        draw(&mut g, &square, &square_res, &vp, &view);
+        held.push(g.renderer.fx_stats().pooled_bytes);
+    }
+    println!("[X7-L4-01] grid {full}, square alone {needed}, held frame by frame {held:?}");
+    assert!(
+        held[0] <= full,
+        "on the first frame of the square the pool held {} bytes, more than the \
+         {full} the busiest recent frame used — the byte bound is not trimming",
+        held[0]
+    );
+    assert_eq!(
+        *held.last().expect("twelve frames"),
+        needed,
+        "twelve frames after the grid the pool still holds more than the square \
+         needs — it is not letting go of textures no recent frame used"
     );
 }

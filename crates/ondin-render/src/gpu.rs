@@ -10,7 +10,7 @@
 //! on adapter availability (`headless.rs`).
 
 use crate::color;
-use crate::fx_gpu::{self, FxPipelines};
+use crate::fx_gpu::{self, FxPipelines, FxPool};
 use crate::images::ImageStore;
 use crate::renderer::{RenderOverrides, Viewport};
 use crate::scene::{self, ClipRule, ScenePainter, StrokePaint, TextRun};
@@ -666,6 +666,14 @@ pub struct VelloGpuRenderer {
     /// The effect passes' compute pipelines, built once — shader compilation is
     /// the expensive part and there is one device.
     fx: FxPipelines,
+    /// Every texture, buffer and bind group the effect path uses, **kept across
+    /// layers and frames** (§15 D1003 (7), `[X7-L4-01]`) — see [`FxPool`] for what
+    /// it holds, when each thing goes back, and how it is bounded.
+    ///
+    /// ⚠️ **Not D779's renderer pool**, which is ruled on and declined: this pools
+    /// the textures the passes allocate, and leaves one vello `Renderer` per pass
+    /// exactly as D344 requires.
+    pool: FxPool,
 }
 
 impl VelloGpuRenderer {
@@ -679,7 +687,17 @@ impl VelloGpuRenderer {
             layers: Vec::new(),
             pass_high_water: 0,
             fx,
+            pool: FxPool::new(),
         })
+    }
+
+    /// What the effect passes did in the last finished frame — textures and bind
+    /// groups made, submits, layers, and what the pool holds (§15 D1003 (7)).
+    ///
+    /// **A steady frame makes no texture and no bind group, and submits once per
+    /// pass rather than once per layer**; `tests/gpu_effects.rs` asserts all three.
+    pub fn fx_stats(&self) -> fx_gpu::FxStats {
+        self.pool.last_frame()
     }
 
     /// How many effect passes the busiest frame so far has demanded — the `K` in
@@ -837,8 +855,11 @@ impl VelloGpuRenderer {
             let jobs = &by_level[level];
             for chunk in chunks {
                 let (w, h) = chunk.size;
-                let packed = fx_gpu::fx_texture(device, w, h, "ondin-fx-batch");
-                let view = packed.create_view(&Default::default());
+                // **From the pool, and usually larger than the chunk**
+                // (`fx_gpu::size_class`). vello's fine stage writes only inside
+                // `RenderParams::width`/`height` and every slice lies inside that, so
+                // the margin — whatever an earlier frame left in it — is never read.
+                let packed = self.pool.take(device, w, h);
                 // Every sibling's sub-scene, each shifted to its own slot **and
                 // clipped to it**, as one recording.
                 //
@@ -874,7 +895,7 @@ impl VelloGpuRenderer {
                     device,
                     queue,
                     &batch,
-                    &view,
+                    &packed.view,
                     &RenderParams {
                         base_color: Color::TRANSPARENT,
                         width: w,
@@ -882,29 +903,61 @@ impl VelloGpuRenderer {
                         antialiasing_method: AaConfig::Area,
                     },
                 )?;
+                // **The whole chunk filtered in one encoder and one submit**, into a
+                // result texture packed exactly as the source is (§15 D1003 (7),
+                // `[X7-L4-01]`). This was one `fx_gpu::run` per layer — five fresh
+                // scratch textures, a fresh result, a buffer pair and a bind group
+                // per dispatch, and a submit each — and that was ~0.11 ms of host
+                // time per on-screen layer per frame.
+                //
+                // ⚠️ **The result is held to the end of the frame; the source is
+                // not.** The result is read by the *consuming* pass's atlas copy —
+                // the page's render, or a level-above pass — through the slot
+                // pointed at it below, so it goes back in `render`'s `end_frame`,
+                // after the slots are unregistered. The source is read only by
+                // this chunk's own submit, so it goes back now, for the next chunk
+                // to take; queue order makes that safe.
+                let result = self.pool.take(device, w, h);
+                let items: Vec<fx_gpu::Item<'_>> = chunk
+                    .items
+                    .iter()
+                    .map(|&(i, at)| fx_gpu::Item {
+                        slice: fx_gpu::Slice {
+                            at,
+                            size: jobs[i].size,
+                        },
+                        dst_at: at,
+                        effects: &jobs[i].effects,
+                        scale: jobs[i].scale,
+                    })
+                    .collect();
+                fx_gpu::run_batch(
+                    device,
+                    queue,
+                    &self.fx,
+                    &mut self.pool,
+                    &packed,
+                    &result,
+                    &items,
+                );
+                self.pool.release(&packed);
                 for &(i, at) in &chunk.items {
                     let job = &jobs[i];
-                    // `None` is a stack whose entries are all hidden or neutral,
-                    // which the walk should not have opened a layer for. It cannot
-                    // fall back to the packed texture — that holds every sibling —
-                    // so it copies this slot out on its own.
-                    let slice = fx_gpu::Slice { at, size: job.size };
-                    let filtered = fx_gpu::run(
-                        device,
-                        queue,
-                        &self.fx,
-                        &packed,
-                        slice,
-                        &job.effects,
-                        job.scale,
-                    )
-                    .unwrap_or_else(|| fx_gpu::copy_out(device, queue, &packed, slice));
+                    // **The slot is this layer's rectangle of the result**, named
+                    // by the copy's origin: vello copies `job.image`'s width ×
+                    // height from there into its atlas, so the siblings beside it
+                    // in the same texture are never read.
                     let at_texture = |t: &wgpu::Texture| wgpu::TexelCopyTextureInfoBase {
                         texture: t.clone(),
                         mip_level: 0,
-                        origin: wgpu::Origin3d::ZERO,
+                        origin: wgpu::Origin3d {
+                            x: at.0,
+                            y: at.1,
+                            z: 0,
+                        },
                         aspect: wgpu::TextureAspect::All,
                     };
+                    let filtered = result.texture.clone();
                     // Whoever draws this layer's result needs it in *their* atlas:
                     // the page for a top-level layer, and every pass of the level
                     // above for a nested one — which of those passes holds the
@@ -947,7 +1000,15 @@ impl VelloGpuRenderer {
         // (`pack`): a scene the size of the page, carrying at most the page's
         // paths, is a load this renderer is measured to survive.
         let budget = u64::from(vp.pixel_size.0) * u64::from(vp.pixel_size.1);
-        let registered = self.resolve_effects(device, queue, jobs, budget)?;
+        let registered = match self.resolve_effects(device, queue, jobs, budget) {
+            Ok(r) => r,
+            Err(e) => {
+                // Every texture this frame took goes back, or the pool would
+                // carry them as busy into the next frame and allocate beside them.
+                self.pool.end_frame();
+                return Err(e);
+            }
+        };
         let params = RenderParams {
             base_color,
             width: vp.pixel_size.0,
@@ -969,6 +1030,10 @@ impl VelloGpuRenderer {
                 Holder::Layer(p) => self.layers[p].unregister_texture(image),
             }
         }
+        // **Only now do the frame's results go back to the pool**: the page's
+        // render, the last thing to read one, has been submitted, and no slot
+        // still points at any of them (§15 D1003 (7)).
+        self.pool.end_frame();
         out
     }
 }

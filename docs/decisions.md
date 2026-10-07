@@ -813,7 +813,7 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D413** — **Moving a radial gradient's centre translates its focal point; it used to collapse onto it.** `paint::with_radial_centre` wrote the requested point into **both** `start_center` and `end_center`, destroying the offset between the focal circle (SVG's `fx`/`fy`, the point the ramp radiates *from*) and the outer one the control is named for — so an imported highlight snapped to dead centre the first time anyone nudged the chip handle or either CX/CY field. *(Fixed and tested 2026-09-03; Keep. The move is a **translation of the pair**, not an assignment to each: the focal offset is a property of the gradient's shape, exactly like the radius this function's summary line already promised to keep. ⚠️ **No gradient this app authors could ever have shown it** — `Gradient::new_radial` puts both centres on one point, so the offset is zero for everything `default_brush` makes, and `radial_centre_round_trips_as_a_fraction_of_the_box` **stays green through the flip that restores the bug**: *a test cannot see a field its fixture leaves at the default*. The fixture had to come from the other direction, which in practice means an import — **the fifth time in this run a rule needed a fixture chosen to reach it**, after D407's band at `y = 0`, D409's offset-free rail, D410's `Start`-aligned node and D412's off-centre squash. ⚠️ **Nothing in the workspace asserted the focal point anywhere**, a grep for `start_center` and `fx=` across every test coming back empty — D411's finding in a second place — so `a_radial_gradients_focal_point_round_trips_where_it_sits` went in with the fix. **The writer and reader were both already right** and the loss was in the panel alone; ⚠️ *`start_radius` is **consistently** unsupported rather than lost*, neither side handling SVG 2's `fr`. Two flips catching different mistakes: `start_center: centre` fails the panel test with `Vec2 { 0.0, 0.0 }` against `-10, -5`, and `fx`/`fy` emitted from `end_center` fails the round trip's offset assertion — ⚠️ *which its own `fx=`/`fy=` presence check cannot catch*, the attributes still being there with the wrong point. Both assert the offset **relative** to the centre, a coordinate passing a pair moved wrongly in the same direction and, in the round trip, failing spuriously on a world-bounds `viewBox`. **It matters more now than last week because of D412**: an imported ellipse used to be approximated anyway, so this was one distortion among two. ⚠️ *The focal point is carried but has no control* — one handle, on the outer centre, and no canvas gizmo — so only an import authors one. Revisit if a focal-point handle is added)*
 - **D414** — **`vello_cpu` `=0.0.9` → `=0.2.0`: the setting D304 warned about did not change its default, it changed struct — and every stroked pixel moved.** Taken off D411's `cargo search` pass, which is where the roadmap recorded 0.2.0 being out. **Safe to attempt because it does not cascade into the save format**, checked in the published manifests *before* the pin was touched: `vello_cpu` 0.2.0 → `vello_common` 0.2.0 → **`peniko` 0.6.1**, the version the model is built on, so this was not a document-format migration wearing a dependency bump's clothes. *(Bumped, measured and tested 2026-09-03; Keep. `render_to_pixmap(resources, pixmap)` → `render_with(target, resources, settings)`, arguments the other way round, four call sites in `cpu.rs`. ⚠️ **`RenderMode` moved out of `RenderSettings` into a new `RasterizerSettings`**, which is the shape D304's warning did not name — it recorded that field as a *default rather than a pin* and said the difference "only shows up at a version bump", and then the default held while the **struct** changed: `..Default::default()` went on compiling and went on meaning something different, because *a `..Default::default()` is a claim about a set of fields and nothing checks that the set is the one you meant*. `RasterizerSettings` also brought **three live knobs nobody had named** — `composite_mode`, `pixel_format`, `offset` — so `cpu::raster_settings()` now spells out all four at every call site: `OptimizeSpeed` (inert, D304's finding re-checked against 0.2.0's `dispatch::single_threaded` and still true), `Replace`, `Rgba8` (**load-bearing**, `color::straight_rgba8_from_premul` reading the buffer as premultiplied RGBA8 straight afterwards) and a zero `offset`. ⚠️ **All 31 suites and 1856 tests passed on the bump, which proves less than it looks**: every pixel assertion in the workspace is a threshold and **nothing byte-compares raster output at all**, so §11's `golden_document` was rendered under both versions to raw straight-alpha RGBA — **162 bytes of 2,284,800 differ over 78 pixels, worst channel delta 1, and the alpha channel does not move at all**. **Attributed rather than assumed**: hiding the fixture's one mitered outside stroke makes the two buffers byte-identical, so the four clusters are its joins and every other primitive is unmoved. **That is D304 by a second road** — the stroked path was the only *level*-variant primitive and is the only *version*-variant one, which makes it a fact about stroke expansion rather than about either variable. **A PNG golden therefore has a third axis**: per-architecture *and* per-`vello_cpu`. ⚠️ **The tree now carries two `vello_cpu`s and two `vello_common`s**, `epaint` 0.35 depending on 0.0.9; `fearless_simd` unified at one 0.4.1, which is what the pin test's doc rests on. **`goldens.rs`'s regeneration note carries the new axis**, written the same day, and ⚠️ *with the measurement as an acceptance criterion rather than a fact*: regenerate, check the residual is confined to strokes at a worst delta of 1, and **a residual anywhere else is the finding**. ⚠️ **The entry's own lesson happened while it was being written** — an older §15 claim naming `vello_cpu` 0.0.9 was left unrenumbered because nobody had re-measured it, then measured and found still true, while `RenderMode` needed a real correction: *nothing about either sentence said in advance which it would be*)*
 - **D415** — **Leaving the editor commits what was typed, and the window ✕ re-arms its own cancel.** Two exits, each losing work: a text session commits nothing until `finish_text_edit` (§9.3), so `go_to_dashboard`'s save wrote the document *without* the live sentence and the next line dropped the crash snapshot — the session itself surviving the walk and thrown away by the next `open_path`'s `reset_transient_state`, so nothing held the text and nothing said so. `choose_tool` has carried this guard since D294. And `handle_close_request`'s `&& !self.confirming_close` meant a **second** click on ✕ — the ordinary reflex when a dialog appears — emitted no `CancelClose`, which has exactly one emitter in the workspace, so eframe closed the window with the card unanswered. *(Fixed and tested 2026-09-06; Keep. ⚠️ **The canvas's click-away rule cannot cover the first** — `text_mode_input` ends a session on the *canvas's* `Response` and a top-bar click goes to the button. ⚠️ **The predicted failure site was wrong and the correction is the useful half**: the test asserted `text.is_none()` first and the flip bit there, reporting a mechanism rather than a loss, so the **file** is asserted first and the flip now fails `left: "hello" right: "TYPED"`. The close flip fails on the second frame while the clean-session control stays green, which is what says the term was the whole cause)*
-- **D416** — **The tree has a depth bound, at both doors, because a stack overflow is not a panic.** §5.11's checks bounded five *shapes* and never a depth, while the walks it delegates safety to are recursive and carry no visited set: a ~2,000-deep document of nested groups passed all five and killed the process inside `Resolved::rebuild` — 1,000 levels debug, 2,000 release. `catch_unwind` cannot see it, no `Cover::Failed` records it, and the session's unsaved work goes with the process. ⚠️ **Reached without a click** — `library::cover::rasterize` rebuilds every document the dashboard grid draws, and the dashboard is the landing screen. *(Fixed and tested 2026-09-06; Keep. `io::MAX_TREE_DEPTH = 256` is a **stack** bound, two orders under the abort and far past anything legitimate, which is the shape a refusal on the load path must have. Check (6) **rides on the reachability walk**, so it costs a `usize` per stack entry. `svg_in` carries its own **64**, far tighter, because its element recursion aborted at depth 200 *and* the document it builds must stay inside the loader's bound. 🚨 **64 cleared the walk and not the import** — the XML parser recurses first, and 1,500 nested `<g>` aborted the shipped build inside `roxmltree` before 64 was asked; `MAX_XML_DEPTH` (96) is refused before the parser since §15 **D851**. ⚠️ **The importer's flip does not fail — it takes the harness with it**, `0xc00000fd` with no assertion, which is the whole argument for the bound (its 200-level fixture is 90 since D851, and a `const` assertion now refuses the flip as written); the loader's interesting flip is **raising** the constant, which makes the refusal go away while the process survives, so that test proves the limit is *enforced*, not that it is *low enough*. The op layer does not enforce it and no measured route reaches it — **fix** if a builder or the MCP write surface ever nests without a click per level)*
+- **D416** — **The tree has a depth bound, at both doors, because a stack overflow is not a panic.** §5.11's checks bounded five *shapes* and never a depth, while the walks it delegates safety to are recursive and carry no visited set: a ~2,000-deep document of nested groups passed all five and killed the process inside `Resolved::rebuild` — 1,000 levels debug, 2,000 release. `catch_unwind` cannot see it, no `Cover::Failed` records it, and the session's unsaved work goes with the process. ⚠️ **Reached without a click** — `library::cover::rasterize` rebuilds every document the dashboard grid draws, and the dashboard is the landing screen. *(Fixed and tested 2026-09-06; Keep. `io::MAX_TREE_DEPTH = 256` is a **stack** bound, two orders under the abort and far past anything legitimate, which is the shape a refusal on the load path must have. Check (6) **rides on the reachability walk**, so it costs a `usize` per stack entry. `svg_in` carries its own **64**, far tighter, because its element recursion aborted at depth 200 *and* the document it builds must stay inside the loader's bound. 🚨 **64 cleared the walk and not the import** — the XML parser recurses first, and 1,500 nested `<g>` aborted the shipped build inside `roxmltree` before 64 was asked; `MAX_XML_DEPTH` (96) is refused before the parser since §15 **D851**. ⚠️ **The importer's flip does not fail — it takes the harness with it**, `0xc00000fd` with no assertion, which is the whole argument for the bound (its 200-level fixture is 90 since D851, and a `const` assertion now refuses the flip as written); the loader's interesting flip is **raising** the constant, which makes the refusal go away while the process survives, so that test proves the limit is *enforced*, not that it is *low enough*. 🚨 **The tree is not the only thing a file makes deep** — `component::check`'s cycle search recursed once per main, and a crafted chain of 500 mains two levels deep overflowed a debug load; an explicit stack since 2026-10-07 (`[R1-L2-04]`, the amendment). The op layer does not enforce it and no measured route reaches it — **fix** if a builder or the MCP write surface ever nests without a click per level)*
 - **D417** — **A hex colour is guarded by character, not by byte length.** `dashboard::swatch` asked `h.len() != 6` and then sliced `&h[0..2]`: `str::len` counts **bytes**, so `"#€abc"` is six bytes and four characters, passed the guard and panicked inside the `€` — on the **layout path of every frame of the library screen**, which `reopen_last` being off by default makes the screen the app opens on, with no door back. *(Fixed and tested 2026-09-06; Keep. ⚠️ **A two-byte character is harmless by luck** — `"éa0b1"` slices on the boundary and falls back as intended — which is exactly why the mistake read as correct: *the first non-ASCII value anyone tries is likely to behave.* Every byte is `is_ascii_hexdigit`ed and the parse is one `from_str_radix` over the whole string, so there is nothing left to slice; the unreachable `Err` arm is kept as the same fallback so a loosened guard cannot restore the panic. Falling back to the accent is the file's standing posture — `projects.json` is hand-editable and travels between machines)*
 - **D418** — **Three records refuse to be overwritten by the defaults a failed read produced — and say so.** `Library::projects_unreadable` had the latch; `prefs.json` and the per-machine `library.json` read an unparseable file as an empty one and wrote that emptiness back at the first ordinary write — every open, every star, every search — so one half-synced file cost every star on the machine at the first click after launch. *(Fixed and tested 2026-09-06; Keep. ⚠️ **`library.json`'s module head argued it needed no three-way read and was wrong about which fields it holds**: `load` said "the worst an overwrite costs is a Recent list that has forgotten" while `save_to`, fourteen lines below, said "a torn index silently loses the Recent list **and every star**" — *two sentences in one file disagreeing, with the pessimistic one right.* Reading as empty stays correct; the **write** is what declines, and the flag is `#[serde(skip)]`, a fact about this read. ⚠️ **A silent latch is worse than the loss it prevents**, all three states looking exactly like an ordinary empty one, so `report_unreadable_records` says it once into D426's status line and names `base_folder` in particular. `load_from`/`save_to` against an explicit path is what makes the failure testable at all — `path()` reads `dirs::cache_dir()` with no injection point, which is why D370 exists)*
 - **D419** — **A document's `meta.id` is 32 lowercase hex, checked at both readers.** The id is joined as a **path component** by the crash snapshot, the version pin and the cover cache, and nothing had checked its shape: `"id": "../my-cool-design"` makes `atomic::write` rename attacker-chosen bytes over the user's real document **every ten seconds, silently**, and on Windows an absolute id makes `Path::join` discard the base entirely. ⚠️ **The cover cache is the door that needs no click** — it renders every entry the dashboard's grid draws, so opening the library on a shared base folder is enough and delivery does not require opening the file. *(Fixed and tested 2026-09-06; Keep. `DocumentMeta::is_wellformed_id` is what `library::ids::mint` produces and the only shape anything has minted; the length is one number written twice because the **validation** must be in core, where loading happens, and the minting is the app's. `sanitized` **drops** a bad id rather than refusing the document — `None` is the ordinary state every pre-library file is in — where a refusal turns a repairable file into an unopenable one; `name` and `project` are deliberately untouched, neither being joined. ⚠️ **Two boundaries, and the second was found by grepping the field rather than by reading the load path**: `io::probe::meta_in_prefix` is the *scan's* reader, never loads the document, and feeds `library::cover::key` for every card on screen. The three app writers additionally ask `library::ids::is_minted` — core closes the class at the boundary, the app's predicate is what a fourth route meets)*
@@ -20451,7 +20451,8 @@ a patch's inverse being its old field, so each patch part compares alone — tex
 span ops, name, visibility, opacity, pivot, clip, mask, mask mode, fill rule), **fields** (text,
 paragraph and block style, insets, display, layout item: a JSON merge recursing only while old, new and
 current have the same keys, so two variants never mix; `f64` round-trips exactly through
-`serde_json`), **items** (D980) or **skip** (locks, which are editing state; the links; everything
+`serde_json` *(in memory; through a file only since `float_roundtrip`, the `[R3-L5-02]` amendment
+below)*), **items** (D980) or **skip** (locks, which are editing state; the links; everything
 structural, which is step 4). Rules: **an instance root's placement is its own** — `SetTransform`,
 `SetInsets`, `SetLayoutItem`, and `SetVisible`, since a main hidden on a components page must hide no
 instance; the user's own edit to a copy in the same transaction wins and stops the walk through it;
@@ -21045,6 +21046,20 @@ group's copy"*); no flip is recorded for that assertion. **And the climbs carry 
 building D1003 (3)–(5). *(**Keep.** D983 and D1003 amended; `architecture.md` §5.3d; `roadmap.md`
 *Now · Components*.)*
 
+⚠️ **Amended 2026-10-07: *"`f64` round-trips exactly through `serde_json`"*, in the field pass above,
+was true in memory and not through a file** (`e70d870`, `[R3-L5-02]` of the `v0.4.1..7d0c666` review;
+from the caller's brief, the workspace manifest and `tests/components.rs`). The loader parses **text**,
+and `serde_json`'s default float parser is not exact: it reads the shortest text of
+`0x403d19fb54ced16a` back as `…16b`, one ULP up. An override is a value that differs, (a), so a copy
+one ULP off its main lost its override at the first reopen — main and copy now agreed, the copy counted
+nothing and followed the main from then on — and an untouched document could re-save with different
+bytes. **The workspace manifest's `serde_json` line carries `features = ["float_roundtrip"]`**, its only
+declaration — every member takes it through `.workspace = true` — so every crate parses exactly. Test
+`an_override_one_ulp_off_its_main_survives_a_reload`: main `…16a`, copy `…16b`, both bit-exact after a
+reload and the override still counted; its flip, the feature dropped, fails at the main's x, back as
+`…16b`, before the override count is reached — the caller's, as the test's doc records it. The export
+goldens are unchanged, five of five, per the caller. *(Fixed 2026-10-07, `e70d870`. **Keep.**)*
+
 **D980 — The five item lists carry ids, in a wrapper beside each item rather than a field inside it,
 and an instance's items follow its main's item by item. *Decided 2026-10-04 by the maintainer — per
 item; the shape and the migration the session's; not built.*** When D979 was first written the record
@@ -21192,6 +21207,13 @@ mechanism. The rest of the three shapes, and *do not collapse them*, stand.
 of the second hit the first. Both now cover `props`; the loader re-keys a repeat rather than refusing it
 (D982's amendment of this date). *"Unique within its list"* is unchanged as a rule; what changed is the
 number of lists it was checked over.
+
+**`migrate_4_to_5` is tested over all five lists** (`e70d870`, the release review's X1 note beside
+`[R2-L6-02]`; test only). The v4 test stripped fills alone, and the older chain tests rewind a v5 save
+that already carries ids, so four of the migration's five calls ran on nothing.
+`tests/items.rs`' `a_v4_file_numbers_every_item_list` — a frame with two items in each list, every id
+stripped — loads with positional ids, the same values, and the same bytes saved twice; its flip, the
+grids' call dropped, fails the load itself (`missing field id`), as the caller reports it.
 
 **D981 — Components' chrome: component-ness is carried by shape and never by the accent, an
 override is a bright label and a dot, and the kept child reads as local. *Accepted 2026-10-04 by the
@@ -23326,6 +23348,34 @@ already covered it, and removing the `held` set left the test green; the item no
 the same flip re-keys it for no reason. *Keep the fixture's order.* *(Built 2026-10-07, `2077cac`, as the
 caller reports. **Keep.** D980 amended; `architecture.md` §5.3d and §5.11)*
 
+**Amended 2026-10-07: the set's verbs, the switch's list carry and `settle`'s merge have tests**
+(`e70d870`, test only; from the caller's brief and `tests/variants.rs` and `tests/nested.rs` at `HEAD`;
+the flips the caller's, each in its test's doc, not re-run by the record). Six of the verbs above had
+no test anywhere (`[R2-L6-01]`) and each has one now — `add_property`, `delete_property`,
+`rename_property`, `move_value`, `set_values` and `edit_property` — each fixture built so the plausible
+wrong edit fails rather than being repaired behind the test: deleting the **second** property, editing
+the second of two, three values so a move is not a swap, because `settle`'s fallback to a property's
+first value turns a remap aimed at position 0 back into the right answer. `rename_value` is asked of a
+value **that is not the first** (`[X6.2-L6-01]`), the one case where that fallback and the remap
+differ. `rekey_lists` is reached (`[X6.2-L6-02]`): every fixture had keyed its fills by position, so
+the variants already shared item ids, and `a_switch_carries_a_fill_override_between_variants_made_apart`
+mints each variant's fill — its flip, the rekey a no-op, brings Large's fill in as a second item beside
+the instance's own. `settle`'s property merge (`[X6.2-L6-04]`): a main carrying a Text property, dragged
+into the set, gives it to the set with its id and binding, and a variant renamed by hand takes its
+derived name back — the finding's *"or combined into one"* already outdated, *Combine*'s route covered
+by `combining_mains_whose_properties_share_an_id_keys_them_apart` (the amendment above). A **Boolean**
+property's mark and reset (`[X6.2-L6-08]`), where the test named for both kinds set and reset only the
+text one. And `deleting_a_value_deletes_its_variants_and_detaches_their_instances` compares the
+instance's children whole (`[X6.2-L6-09]`): its `all()` held over an emptied list, so D984's defect
+passed it. **A main's properties round-trip through a file** (`[R2-L6-02]`;
+`tests/nested.rs`' `a_mains_properties_round_trip_through_a_file`): all four kinds, a swap property's
+filter and the item ids, loaded equal and re-saved byte-identical. ⚠️ **The finding's premise was half
+false**: `with = "wire_ids"` dropped from `Property::bound` does **not** fail the load, `NodeId`'s
+derived serde round-tripping as well, so the test also reads the file as JSON and asserts `bound` is
+written as wire ids, which is where that flip fails. ⚠️ **Still untested**: `settle`'s merge of a
+`Nested` showing by kind alone (D988), and the merge's *"Name 2"* dedupe on its prune pass. *(Tests
+added 2026-10-07, `e70d870`, as the caller reports; no rule changed.)*
+
 **D983 — Instance swap: a `swap` field beside `link`, an override that takes everything from its target
 but the slot's placement and visibility, offered through a prefix filter on the slot — and a nested
 copy's variant switch is the same swap within one set. *Ruled 2026-10-05 by the maintainer, in two
@@ -23757,6 +23807,42 @@ runs `menu_context` and `build` as `context_menu_ui` does — asserting *Reset I
 instance arm's push deleted, fails there, as its comment records. *(Fixed 2026-10-07, `840a1f8`, as the
 caller reports. `context-menus.md` §3, §4 and §7)*
 
+⚠️ **Amended 2026-10-07: a reset's scope and its counterpart search both stop at a swap** (`e70d870`,
+`[X4-L1-02]` and `[X4-L1-03]` of the `v0.4.1..7d0c666` review; from the caller's brief and a read of
+`reset::scope_nodes`, `outermost_root` and the two tests in `tests/swap.rs`; the flips the caller's, as
+the tests' docs record them). The build paragraph's *"`scope_nodes` takes a swapped copy's members into
+scope"* was true, and wider than it said. **The scope** grew one set with every swap's whole subtree,
+the swap's main included, and admitted any node linked into it wherever the node sat. So a local
+instance of the main a slot is swapped to — a Heart placed in `b1` after `r`, which shows Heart — passed
+as a copy, it and its members: the card read *0 local layers*, and *Reset all* wrote its fields back to
+Heart's, dropped its own list items (D994) and restored its removed children. D981 (1)'s *local layers
+survive every reset*, as D994 keeps it for layers, did not hold in any instance holding a swapped slot.
+Now each node is read against the swapped copies **above it** — a swap's members admitted only under
+that copy, its main not among them; a layer linked to something out of scope takes its subtree out with
+it, a local instance's members being its own, while an unlinked one still passes its children on, since
+members can be regrouped under one; and a link to a main admits **only the scope's instance root**, so
+an instance of Heart placed inside `r` itself is local to `r` and to `b1` alike. Test
+`a_local_instance_of_a_swaps_main_is_not_reset_with_the_slot` — its flip, the one shared set back,
+fails at the drift, `fields: 3, local: 0` for `(1, 1)`. ⚠️ **Its second case exists because the first
+did not bite on the root rule**: dropping only that rule leaves `l` out anyway — it is under no swapped
+copy — and fails only on `inner`, the Heart inside `r`, read from a reset scoped to `r`, whose source is
+Heart itself. *Do not trim the test to its first half.*
+
+**The counterpart search.** `outermost_root`, where `missing` looks for what an instance still holds,
+climbs out of nested copies (D979 (vii), `7cf242e`) and stops at a root linked straight to a main (D979
+(x), `7b5961e`). **It stops at a swapped root too**, the third rule, and its doc carries the argument
+beside the other two: a swapped copy's members link into its swap, which the outer instance's source
+does not hold, so `settle_links` cuts a member dragged out of it as it cuts a local instance's, and
+nothing past that root can hold its links. Climbing past it let a second slot swapped to the same main
+mask the first's deleted child — `r2`'s `Shine` linked to the Heart node `r`'s was — and *Restore removed
+children* read 0 and restored nothing. Test `two_slots_swapped_to_one_main_do_not_mask_a_removed_child`,
+whose fixture first counts the deletion with one slot swapped, so it is about masking and not a lost
+deletion; its flip, the climb through a swapped root, fails `removed`, 0 for 1. Both tests commit their
+reset through `commit_undoable`, a new helper in `tests/swap.rs` that commits through a `History`, then
+asserts the result reloads and one undo restores the document before it. *(Fixed 2026-10-07, `e70d870`,
+as the caller reports. **Keep.** D979 (vii)/(x), D981 (1) and D994 hold for swapped slots now and are
+not edited; `architecture.md` §5.3d)*
+
 **D984 — A deleted parent's children are lost only where that parent was itself lost from a parent
 that stays — so deleting a main through the commit no longer empties its instances. *Found and fixed
 2026-10-06; a step-4 defect, never released.*** `propagate::propagate_structure` counts, among the
@@ -23978,6 +24064,21 @@ group is still dimmed and read-only, its dot and the resets still reaching it, w
 names the property, and the app reads only whether it answers. Whether this is the look the verdict's
 *open to the maintainer's look* waits for, or a first part of it, the maintainer has not said, so the
 build's calls are still open to it.
+
+**Amended 2026-10-07: two of the design's rules have tests that can tell them apart** (`e70d870`, test
+only; from the caller's brief and `tests/nested.rs` at `HEAD`; the flips the caller's, as the tests'
+docs record them). **By name, not by position** (`[X6.2-L6-06]`): every icon set in the fixture had one
+property, where the two coincide, so switching the carry and the nested dot to positional matching
+passed everything. `a_carry_and_a_nested_row_match_properties_by_name_not_position` gives Arrow a second
+property and a new set the same two in the other order; the carry lands on the right variant and the
+nested row reads the slot's value off the other set's position, and each `position(.. name ..)` made
+positional fails. **Showing in a set** (`[X6.2-L6-07]`): no fixture had put the owner in a set, so
+`set_shown` binding the slot clicked and no other passed everything;
+`showing_a_slot_in_a_set_shows_it_in_every_variant` shows Small's *Icon* and finds Large's shown and an
+instance of Large listing its copy. ⚠️ **That is not (a)'s set-shaped half**: each variant holds one
+*Icon*, so the sibling index in a set — *"the same code and has no set-shaped test"*, above — is still
+untested, as is (b). `[R2-L6-02]`'s round trip of a showing through a file is D982's amendment of this
+date; `settle`'s merge of a showing **by kind alone** is still untested.
 
 **D989 — A nested instance selected inside a main never drew the binding line, so the swap property
 D983 (iii) makes there could not be made from the UI. *Found and fixed 2026-10-06, building D988.***
@@ -58394,6 +58495,27 @@ D832 put there for its own reason — check (6)'s argument one door over — and
 unbounded and a document built one node at a time can still outrun what the loader will read back; no
 measured route reaches that one either. *Fix the same way if anything ever drives `CreateNode` in a
 loop without a click per level.*
+
+🚨 **Amended 2026-10-07: the tree is not the only thing a file can make deep** (`e70d870`, `[R1-L2-04]`
+of the `v0.4.1..7d0c666` review; from the caller's brief and a read of `component::reaches_itself` and
+`tests/components.rs`). `component::check`'s cycle search — run by the loader at the end of
+`verify_integrity` and by `Document::apply` on every commit — recursed once per main along the graph of
+mains (`component::uses`), and that graph is as long as a file has mains while its tree stays two levels
+deep, far inside `MAX_TREE_DEPTH`, which bounds only the tree recursion this entry knew about. Measured
+by the caller: on a 256 KB stack in debug a chain of 200 mains loaded and 500 and 2,000 overflowed
+(`STATUS_STACK_OVERFLOW`); on 64 KB in release 2,000 overflowed. This entry's failure exactly — an
+abort, which the cover worker's `catch_unwind` does not see either. **`reaches_itself` walks with an
+explicit stack and an on-path set now**, which also retires the old `path.contains`, quadratic in the
+chain. Test `a_deep_chain_of_mains_loads_on_a_small_stack`: 2,000 mains loaded on 256 KB in debug and
+64 KB under `--release` — the size per profile at which the flip bites — then the same chain closed
+into a loop by editing the JSON, refused as a cycle. Its flip, the recursion put back, aborts the test
+binary on the open chain's load in both profiles, as the caller reports it. ⚠️ **The lesson is the
+axis**: a depth bound on the tree says nothing about a graph the tree's links describe, and *"under
+`MAX_TREE_DEPTH`"* is no argument for a recursive walk over links. ⚠️ **Open, found measuring it**: the
+fixed search loads 20,000 mains, but in about 200 s in debug against about 2 s for 2,000 — super-linear
+somewhere else in the load, not in `reaches_itself`, and the cause is not found. A crafted file only,
+and a slow load rather than an abort. *Fix when the cause is found* (`roadmap.md` *Now · Core*).
+*(Fixed 2026-10-07, `e70d870`, as the caller reports. `architecture.md` §5.3d and §5.11)*
 
 **D851 — A 25 KB SVG aborted the process inside the XML parser, and the bound that stops it is set by
 the debug profile. *Fixed and tested 2026-09-23; Keep.***

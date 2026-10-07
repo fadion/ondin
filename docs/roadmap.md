@@ -1568,6 +1568,10 @@ argument, which nothing here restates.
   the slots earlier passes pointed with `override_image` are handed back, so `render` cannot unregister
   them, and each holds a texture for the renderer's life. Pre-existing, found while pooling the fx
   textures. *Added 2026-10-07.*
+- **Loading a long chain of mains is super-linear** (§15 D416's 2026-10-07 amendment). With the cycle
+  search an explicit stack, a crafted file of 20,000 mains loads in about 200 s in debug against about
+  2 s for 2,000 — not in `component::reaches_itself`, and the cause is not found. A slow load, not an
+  abort. *Added 2026-10-07.*
 
 ## Now · Components — the release review's fix phase
 

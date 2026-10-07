@@ -1967,7 +1967,11 @@ after its predecessor's counterpart, else before its successor's, else **first**
 ghost rows read. **Scope** (`scope_nodes`): the nodes at or under the scope whose link lies inside the source
 subtree of its instance root — a nested copy's members included, since they are the outer main's
 content, and **a local instance of another main placed inside excluded**, since it is a local
-addition. **`reset::Drift`** counts four things: field units; **removed** children — a source child with
+addition. A swapped copy's members link into its swap's main, so each node is read against the
+**swapped copies above it** — a swap's members are in scope only under that copy — a linked layer out of
+scope takes its subtree out with it, and a link to a main admits only the scope's instance root: a
+local instance of the very main a slot is swapped to stays local (§15 D983's `[X4-L1-02]` amendment,
+`a_local_instance_of_a_swaps_main_is_not_reset_with_the_slot`). **`reset::Drift`** counts four things: field units; **removed** children — a source child with
 no counterpart anywhere in the copy's instance, so one moved elsewhere is not missing, and a missing
 subtree counts once. ⚠️ *The copy's instance* is its **outermost** instance root
 (`reset::outermost_root`), not the nearest: a nested copy is an instance root itself, and a member
@@ -1976,7 +1980,10 @@ copy alone it was missing and was restored a second time (§15 D979's amendment,
 `a_member_dragged_out_of_a_nested_copy_is_not_restored_twice`). ⚠️ **But it climbs only out of nested
 copies**, stopping at a root linked straight to a main (`propagate::linked_to_main`): climbing past a
 local instance made its host the owner, and the host's counterparts masked the local instance's removed
-children (`a_local_instances_removed_child_is_not_masked_by_its_host`, `7b5961e`). Then parents whose
+children (`a_local_instances_removed_child_is_not_masked_by_its_host`, `7b5961e`). **Nor past a swapped
+root**: its members link into its swap, `settle_links` cuts one dragged out of it, and climbing past it
+let a second slot swapped to the same main mask the first's removed child
+(`two_slots_swapped_to_one_main_do_not_mask_a_removed_child`, §15 D983's amendment). Then parents whose
 linked children are out of their sources' **order**; and outermost
 **local** layers, which no reset touches. *Restore removed children* (`restore_children`) copies the
 missing child in with fresh ids, each node linked one level up, at `propagate::anchor`, **pruned by
@@ -2093,11 +2100,16 @@ of another main inside one instance are legal, while a nested copy's root is hel
 member (tightened with build step 2, §15 D979's amendment); **`LinkCycle`**, a chain of links that never reaches a main; and
 **`ComponentCycle`**, a main containing at some depth an instance whose chain ends at itself, found by
 a depth-first search over a graph from each main to the mains of the instance roots inside it
-(`component::uses` — the mains they **show**, a swap counting where it sits on a chain); and
+(`component::uses` — the mains they **show**, a swap counting where it sits on a chain) — ⚠️ **an
+explicit stack and an on-path set, never recursion** (`component::reaches_itself`): the graph is as
+long as a file has mains while its tree stays shallow, so `io::MAX_TREE_DEPTH` does not bound it, and
+recursing per main overflowed a crafted file's load (§15 D416's amendment, `[R1-L2-04]`); and
 **`Swap`**, a swap on anything but a nested copy inside an outer instance, or naming anything but a main
 of the copy's own kind — a dangling swap being `Dangling`, and a swapped root's source, for
-`Membership`, its swap (§15 D983), or the slot for a copy of a layer the slot adds of its own, itself
-unlinked (§15 D1003 (3), `settle_links`' membership the same). 🚨 **It
+`Membership`, its swap (§15 D983), or the slot for a copy of a layer the slot adds of its own — one
+whose chain of content sources never reaches the slot's shown main, a nested instance included
+(`component::slot_adds`, §15 D1003 (3) and D983's amendment of `96eb959`; `settle_links`' membership
+the same). 🚨 **It
 runs over the whole document, not over `dirty`**: a link breaks when its *target* goes, and a delete
 dirties the deleted node, not the instance pointing at it. **Free when nothing is a main or linked** —
 one scan, and one more for `variant::check`'s own exit when nothing is a set, a variant or an owner of
@@ -5418,7 +5430,11 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   2026-09-22** (§15 D832): D416 had left the operation layer unbounded on the argument that nothing in the app
   nests without a user click per level, and `io::clip` is the importer that does — 300 levels in one
   paste, saving cleanly and then failing this check for ever. `CreateNode` in a loop is still
-  unbounded and still has no measured route. ⚠️ **A depth bound is not a size bound, and for a fortnight nothing
+  unbounded and still has no measured route. ⚠️ **And the tree is not the only thing a file can make
+  deep** (§15 D416's 2026-10-07 amendment): `component::check`, which this verification ends with,
+  searched the graph of mains for a cycle by recursing once per main, and a file two levels deep
+  holding a chain of 500 mains overflowed a debug load on a 256 KB stack; the search is an explicit
+  stack now. ⚠️ **A depth bound is not a size bound, and for a fortnight nothing
   was** (§15 D446): `<use>` instancing branches, so 843 bytes of markup expanded to 16,384 shapes and
   the cap on `<use>` nesting admits 65,536 — three instantiations per level rather than two is an
   allocation failure, which is an abort. `MAX_SVG_NODES` (50,000) is asked at the top of

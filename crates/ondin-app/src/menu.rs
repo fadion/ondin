@@ -1813,7 +1813,7 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
     );
     // D981's rows, by what the layer is to the components machinery (§15 D981):
     // *Create component* on anything that is not already part of one, the main's
-    // two, the instance's two or three, a linked child's one or two. **A reset is
+    // two, the instance's two to four, a linked child's one or two. **A reset is
     // omitted when nothing differs**, by §3's one exception — a row whose only
     // purpose is to undo a non-default state, *Reset origin*'s rule — since a
     // fresh instance has no drift and a row dim on most opens reads as broken.
@@ -4021,7 +4021,8 @@ mod tests {
     /// the mockup gives: an ordinary layer's *Create component*; a main's
     /// *Duplicate as component* and *Select all instances*; a set's *Add
     /// variant* and *Select all instances*; an instance's *Go to main
-    /// component*, *Reset all* and *Detach instance*; a child's *Go to main
+    /// component*, *Reset <property>*, *Reset all* and *Detach instance*; a
+    /// child's *Go to main
     /// component*, *Reset <property>* and *Reset <layer>*; and several mains'
     /// *Combine as variants*.
     ///

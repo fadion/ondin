@@ -1005,6 +1005,8 @@ impl VelloGpuRenderer {
             Err(e) => {
                 // Every texture this frame took goes back, or the pool would
                 // carry them as busy into the next frame and allocate beside them.
+                // ⚠️ The slots earlier passes registered this frame are lost with
+                // the error and never unregistered — §15 D1003 (7)'s *Fix*.
                 self.pool.end_frame();
                 return Err(e);
             }
@@ -1023,7 +1025,9 @@ impl VelloGpuRenderer {
         // both the map entry and the texture it holds alive for the life of the
         // renderer, which for a viewport-sized layer is 8 MB a frame. **From the
         // renderer that holds each one** — a nested layer's slot lives in a layer
-        // renderer's atlas, not the page's (§15 D404).
+        // renderer's atlas, not the page's (§15 D404). ⚠️ This is the page's
+        // render; a failed *effect* pass returns before it, above, and its slots
+        // are never unregistered (§15 D1003 (7)'s *Fix*).
         for (holder, image) in registered {
             match holder {
                 Holder::Page => self.renderer.unregister_texture(image),

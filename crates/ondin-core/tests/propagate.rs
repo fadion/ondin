@@ -403,15 +403,10 @@ fn spans_follow_onto_the_same_content() {
 
 // ── Structure (build step 4) ───────────────────────────────────────────────────
 
-/// `ops` with everything `commit_inner` appends: structure, settled links, fields.
+/// `ops` with everything `commit_inner` appends (`propagate::owed`).
 fn commit_all(f: &mut F, ops: Vec<Operation>) {
     let mut tx = Transaction(ops);
-    let s = ondin_core::propagate::propagate_structure(&f.doc, &tx, &mut f.ids);
-    tx.0.extend(s);
-    let l = ondin_core::component::settle_links(&f.doc, &tx);
-    tx.0.extend(l);
-    let p = ondin_core::propagate::propagate(&f.doc, &tx);
-    tx.0.extend(p);
+    ondin_core::propagate::owed(&f.doc, &mut tx, &mut f.ids);
     f.doc.apply(&tx).expect("the edit and everything it owes");
 }
 
@@ -755,4 +750,342 @@ fn deleting_a_main_through_the_commit_keeps_its_instances_layers() {
     assert_eq!(link(&f.doc, i), None, "the instance detached");
     assert_eq!(kids(&f.doc, i), vec![ia, it], "with every layer it had");
     assert_eq!(link(&f.doc, ia), None);
+}
+
+// ── The release review's blockers (`v0.4.1..7d0c666`) ─────────────────────────
+
+/// The fixture's instance nested in an outer main, which gets an instance of its
+/// own: the nested copy there, holding copies of `i`'s children.
+fn nest(f: &mut F) -> NodeId {
+    let outer = f.ids.mint();
+    f.doc
+        .apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: outer,
+                parent: f.root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(300.0, 300.0),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::Reparent {
+                id: f.i,
+                new_parent: outer,
+                index: 0,
+            },
+            Operation::SetComponent {
+                id: outer,
+                component: true,
+            },
+        ]))
+        .unwrap();
+    let (tx, made) = ondin_core::insert_subtrees(
+        &f.doc,
+        &mut f.ids,
+        &[Placement {
+            nodes: f.doc.capture_subtree(outer).unwrap(),
+            parent: f.root,
+            index: None,
+        }],
+        Default::default(),
+    );
+    f.doc.apply(&tx).unwrap();
+    kids(&f.doc, made[0])[0]
+}
+
+/// **A value the loader admits and the operations refuse does not take the
+/// commit down** (`[R1-L2-01]`). A gradient's opacity of 5 loads — its reader
+/// clamps it, §15 D767 — and editing that fill on a main read the old value by
+/// applying the edit and re-applying its inverse, which `op_set_fills` refuses:
+/// `peek` asserted it took, and the commit panicked, as did every preview frame of
+/// a scrub on the same fill. `peek` reads off a one-node scratch now and restores
+/// nothing.
+///
+/// Flip: `peek` re-applying the inverse with the `expect` back panics here,
+/// *"an inverse applies to the state it was taken from: NonFinite"*.
+#[test]
+fn a_loaded_value_the_operations_refuse_does_not_panic_a_mains_edit() {
+    let mut f = fixture();
+    let gradient = |opacity| {
+        keyed_by_position([Fill {
+            brush: Brush::Gradient(ondin_core::GradientBrush {
+                gradient: ondin_core::peniko::Gradient::new_linear((0.0, 0.0), (1.0, 0.0)),
+                transform: Affine::IDENTITY,
+                opacity,
+            }),
+            visible: true,
+        }])
+    };
+    let a = f.a;
+    commit_all(
+        &mut f,
+        vec![Operation::SetFills {
+            id: a,
+            fills: gradient(0.25),
+        }],
+    );
+    let text = String::from_utf8(ondin_core::io::save(&f.doc).unwrap()).unwrap();
+    assert_eq!(text.matches("0.25").count(), 2, "the main's and the copy's");
+    f.doc = ondin_core::io::load(text.replace("0.25", "5.0").as_bytes()).expect("it loads");
+    let new = keyed_by_position([Fill {
+        brush: solid(90),
+        visible: true,
+    }]);
+    commit_all(
+        &mut f,
+        vec![Operation::SetFills {
+            id: a,
+            fills: new.clone(),
+        }],
+    );
+    assert_eq!(fills(&f.doc, f.a), new);
+    assert_eq!(
+        fills(&f.doc, f.ia),
+        new,
+        "and the copy, which shared it, follows"
+    );
+}
+
+/// **A layer dragged out of a main leaves its instances, and the drag commits**
+/// (`[X3-L1-01]`, §15 D979 (xiv)). The canvas writes the move as a `Reparent`
+/// and a `SetTransform`; the structural pass deletes the untouched counterpart,
+/// and the field pass — whose copy map is the document before the edit — then
+/// wrote the transform onto the deleted node, and `apply` refused the whole drag
+/// with `NoSuchNode`. A counterpart the instance had changed is kept and cut, and
+/// the field pass moved it 300 units out of its 100×100 instance.
+///
+/// Flip: dropping `propagate`'s `gone` check fails the first commit with
+/// `NoSuchNode`, the `expect` in `commit_all`.
+#[test]
+fn a_member_dragged_out_of_a_main_leaves_its_instances() {
+    let out = Affine::translate((300.0, 40.0));
+    let drag = |f: &F| {
+        vec![
+            Operation::Reparent {
+                id: f.a,
+                new_parent: f.root,
+                index: 0,
+            },
+            Operation::SetTransform {
+                id: f.a,
+                transform: out,
+            },
+        ]
+    };
+    // Untouched: the counterpart goes with it.
+    let mut f = fixture();
+    let ops = drag(&f);
+    commit_all(&mut f, ops);
+    assert_eq!(f.doc.get(f.a).unwrap().parent(), Some(f.root), "it left");
+    assert!(f.doc.get(f.ia).is_none(), "the untouched counterpart went");
+
+    // Touched: kept, cut, and where it was.
+    let mut f = fixture();
+    let was = f.doc.get(f.ia).unwrap().transform();
+    f.doc
+        .apply(&Transaction(vec![Operation::SetFills {
+            id: f.ia,
+            fills: keyed_by_position([Fill {
+                brush: solid(77),
+                visible: true,
+            }]),
+        }]))
+        .unwrap();
+    let ops = drag(&f);
+    commit_all(&mut f, ops);
+    let ia = f.doc.get(f.ia).expect("the changed counterpart is kept");
+    assert_eq!(ia.parent(), Some(f.i));
+    assert_eq!(ia.link(), None, "cut");
+    assert_eq!(
+        ia.transform(),
+        was,
+        "at its own place, not the main's new one"
+    );
+}
+
+/// **Deleting a main's child together with its counterpart, or with the whole
+/// instance, commits** (`[X2-L1-02]`). The structural pass read the counterpart
+/// as untouched in the document before the edit and deleted it a second time.
+///
+/// Flip: dropping the lost queue's `after_nodes` check fails both commits with
+/// `NoSuchNode`.
+#[test]
+fn deleting_a_child_with_its_counterpart_or_its_instance_commits() {
+    let mut f = fixture();
+    let (a, ia) = (f.a, f.ia);
+    commit_all(
+        &mut f,
+        vec![
+            Operation::DeleteNode { id: a },
+            Operation::DeleteNode { id: ia },
+        ],
+    );
+    assert!(f.doc.get(a).is_none() && f.doc.get(ia).is_none());
+
+    let mut f = fixture();
+    let (a, i) = (f.a, f.i);
+    commit_all(
+        &mut f,
+        vec![
+            Operation::DeleteNode { id: a },
+            Operation::DeleteNode { id: i },
+        ],
+    );
+    assert!(f.doc.get(a).is_none() && f.doc.get(i).is_none());
+}
+
+/// **A layer dragged into a main from outside it reaches the main's instances**
+/// (`[X2-L1-01]`, §5.3d build step 4: *"a `Reparent` into the main"*). The gained
+/// subtree was pruned to what the edit had *made*, so a layer that existed before
+/// — drawn on the canvas and then dragged in — was never copied, and each
+/// instance silently stopped matching its main.
+///
+/// Flip: `only_new` admitting every node that existed before (the old predicate)
+/// fails the child count, 2 against 3.
+#[test]
+fn a_layer_dragged_into_a_main_reaches_its_instances() {
+    let mut f = fixture();
+    let r = f.ids.mint();
+    f.doc
+        .apply(&Transaction(vec![Operation::CreateNode {
+            id: r,
+            parent: f.root,
+            index: 0,
+            kind: rect_kind(),
+            transform: None,
+            name: None,
+        }]))
+        .unwrap();
+    let m = f.m;
+    commit_all(
+        &mut f,
+        vec![Operation::Reparent {
+            id: r,
+            new_parent: m,
+            index: 2,
+        }],
+    );
+    assert_eq!(kids(&f.doc, f.i).len(), 3);
+    let copy = *kids(&f.doc, f.i).last().unwrap();
+    assert_eq!(link(&f.doc, copy), Some(r), "a copy linked to the layer");
+}
+
+/// **An ungroup inside a main keeps an instance's changed copy of the group as
+/// a local wrapper, its children inside it and still linked** (`[R3-L5-01]`,
+/// §15 D1003 (2)). The moves loop lifted the counterparts out whatever the copy
+/// held: they drew as the main did — 30 units left of where the instance had
+/// put them, at full opacity — and the moved, faded group stayed behind empty.
+/// The group's transform the ungroup bakes into the child is the main's, not this
+/// copy's, so the child keeps its own local transform too.
+///
+/// Flip: `wrapper` answering `false` fails "still inside its group", the copy's
+/// parent coming back as the instance. Pinning nothing for a kept child fails
+/// "and where it drew" at `(15, 5)`: the field pass carried the main's baked
+/// transform into the copy's group.
+#[test]
+fn an_ungroup_in_a_main_keeps_a_changed_group_copy_as_a_local_wrapper() {
+    let mut f = fixture();
+    let (g, m, a, i, ia) = (f.ids.mint(), f.m, f.a, f.i, f.ia);
+    let in_group = Affine::translate((5.0, 5.0));
+    commit_all(
+        &mut f,
+        vec![
+            Operation::CreateNode {
+                id: g,
+                parent: m,
+                index: 0,
+                kind: NodeKind::Group,
+                transform: Some(Affine::translate((10.0, 0.0))),
+                name: None,
+            },
+            Operation::Reparent {
+                id: a,
+                new_parent: g,
+                index: 0,
+            },
+            Operation::SetTransform {
+                id: a,
+                transform: in_group,
+            },
+        ],
+    );
+    let gc = f.doc.get(ia).unwrap().parent().unwrap();
+    assert_eq!(link(&f.doc, gc), Some(g), "the fixture: the group's copy");
+    // The instance moves and fades its copy of the group.
+    f.doc
+        .apply(&Transaction(vec![
+            Operation::SetTransform {
+                id: gc,
+                transform: Affine::translate((40.0, 0.0)),
+            },
+            Operation::SetOpacity {
+                id: gc,
+                opacity: 0.5,
+            },
+        ]))
+        .unwrap();
+    let local = f.doc.get(ia).unwrap().transform();
+    assert_eq!(
+        local, in_group,
+        "the fixture: the child followed into the group"
+    );
+    // Ungroup in the main, as `build::ungroup` writes it.
+    commit_all(
+        &mut f,
+        vec![
+            Operation::SetTransform {
+                id: a,
+                transform: Affine::translate((10.0, 0.0)) * in_group,
+            },
+            Operation::Reparent {
+                id: a,
+                new_parent: m,
+                index: 0,
+            },
+            Operation::DeleteNode { id: g },
+        ],
+    );
+    assert_eq!(
+        f.doc.get(a).unwrap().parent(),
+        Some(m),
+        "the main ungrouped"
+    );
+    let w = f.doc.get(gc).expect("the changed copy stays");
+    assert_eq!(
+        f.doc.get(ia).unwrap().parent(),
+        Some(gc),
+        "still inside its group"
+    );
+    assert_eq!(w.parent(), Some(i));
+    assert_eq!(w.link(), None, "a local wrapper");
+    assert_eq!(w.opacity(), 0.5, "with the instance's change");
+    assert_eq!(link(&f.doc, ia), Some(a), "the child still linked");
+    assert_eq!(
+        f.doc.get(ia).unwrap().transform(),
+        local,
+        "and where it drew"
+    );
+}
+
+/// **A reorder in a main reaches through a nested instance** (`[X3-L2-02]`,
+/// §5.3d *Linking*: transitive). The reorder arm handled one level, so the outer
+/// instance's nested copy kept the old order and refused every later reorder as
+/// one it had made itself.
+///
+/// Flip: dropping the `reorders.push` leaves the nested copy at `[a, t]`.
+#[test]
+fn a_reorder_reaches_through_a_nested_instance() {
+    let mut f = fixture();
+    let nc = nest(&mut f);
+    let (t, m) = (f.t, f.m);
+    commit_all(&mut f, vec![Operation::Reorder { id: t, index: 0 }]);
+    assert_eq!(kids(&f.doc, m), vec![f.t, f.a], "the fixture");
+    assert_eq!(kids(&f.doc, f.i), vec![f.it, f.ia], "one level");
+    let deep: Vec<_> = kids(&f.doc, nc)
+        .into_iter()
+        .map(|k| link(&f.doc, k).unwrap())
+        .collect();
+    assert_eq!(deep, vec![f.it, f.ia], "two levels");
 }

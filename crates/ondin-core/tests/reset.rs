@@ -142,15 +142,11 @@ fn instance(doc: &mut Document, ids: &mut IdSource, main: NodeId, parent: NodeId
 }
 
 impl F {
-    /// `ops` with everything `commit_inner` appends — what a reset goes through.
+    /// `ops` with everything `commit_inner` appends (`propagate::owed`) — what a
+    /// reset goes through.
     fn commit_all(&mut self, ops: Vec<Operation>) {
         let mut tx = Transaction(ops);
-        let s = ondin_core::propagate::propagate_structure(&self.doc, &tx, &mut self.ids);
-        tx.0.extend(s);
-        let l = ondin_core::component::settle_links(&self.doc, &tx);
-        tx.0.extend(l);
-        let p = ondin_core::propagate::propagate(&self.doc, &tx);
-        tx.0.extend(p);
+        ondin_core::propagate::owed(&self.doc, &mut tx, &mut self.ids);
         self.doc
             .apply(&tx)
             .expect("the edit and everything it owes");

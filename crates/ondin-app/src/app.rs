@@ -20088,10 +20088,10 @@ mod component_verb_tests {
 
     /// **The session's commit makes a swap's rewrite** (§15 D983): a `SetSwap`
     /// alone, committed, comes back with the nested copy's layer relinked to the
-    /// swapped-to main's — `EditorSession::commit_inner` runs `swap::settle` — and
-    /// one undo takes the swap and its rewrite back together. The core tests
-    /// rebuild the commit's passes by hand; this is the one that says the session
-    /// runs them. Flip: dropping `swap::settle` from `commit_inner` fails at
+    /// swapped-to main's — `EditorSession::commit_inner` runs `propagate::owed`,
+    /// whose first pass is `swap::settle` — and one undo takes the swap and its
+    /// rewrite back together. The core tests call `owed` too; this is the one that
+    /// says the session does. Flip: dropping `swap::settle` from `owed` fails at
     /// `relinked` — `component::check` refuses the unexpanded swap, the session
     /// reports it and commits nothing, and the copy is still the slot's.
     #[test]

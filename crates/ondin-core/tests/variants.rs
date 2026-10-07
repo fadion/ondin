@@ -171,17 +171,11 @@ fn fixture() -> F {
 }
 
 impl F {
-    /// `ops` with everything `EditorSession::commit_inner` appends, in its order.
+    /// `ops` with everything `EditorSession::commit_inner` appends
+    /// (`propagate::owed`, the one copy of its order).
     fn commit(&mut self, ops: Vec<Operation>) {
         let mut tx = Transaction(ops);
-        let s = ondin_core::propagate::propagate_structure(&self.doc, &tx, &mut self.ids);
-        tx.0.extend(s);
-        let l = ondin_core::component::settle_links(&self.doc, &tx);
-        tx.0.extend(l);
-        let v = variant::settle(&self.doc, &tx);
-        tx.0.extend(v);
-        let p = ondin_core::propagate::propagate(&self.doc, &tx);
-        tx.0.extend(p);
+        ondin_core::propagate::owed(&self.doc, &mut tx, &mut self.ids);
         self.doc
             .apply(&tx)
             .expect("the edit and everything it owes");
@@ -350,7 +344,8 @@ fn a_main_moved_into_a_set_is_settled_as_a_variant() {
 /// Renaming a value renames the variants holding it, and through the compare
 /// rule the instances still carrying the variant's name (names are copied
 /// verbatim — §5.3d's rule under D979 (e), held by D982). Flip, run: `settle`
-/// after `propagate` leaves the instance named "Small".
+/// after `propagate` **in `propagate::owed`** — the order the app's commit runs,
+/// not a copy of it (`[X6.2-L6-05]`) — fails the instance's name, "Small".
 #[test]
 fn renaming_a_value_renames_its_variants_and_their_instances() {
     let mut f = fixture();

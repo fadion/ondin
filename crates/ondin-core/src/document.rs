@@ -478,22 +478,41 @@ impl Document {
         Ok(())
     }
 
-    /// What `op` would replace — its inverse — leaving `self` as it was: the op is
-    /// applied and undone again. `None` when `op` would be refused. The propagation
-    /// pass's reader (`crate::propagate`): an operation's inverse carries the old
-    /// value of exactly the field it writes, so this reads any field any operation
-    /// can write without a reader per field.
-    pub(crate) fn peek(&mut self, op: &Operation) -> Option<Operation> {
-        let mut dirty = DirtySet::default();
-        let inverse = self.apply_one(op, &mut dirty).ok()?;
-        // Restored the way undo restores (`apply_restoring`): the old value may be
-        // one the CSS checks now refuse, carried in from a file, and it was valid
-        // enough to be there a moment ago.
-        let was = std::mem::replace(&mut self.restoring, true);
-        let restored = self.apply_one(&inverse, &mut dirty);
-        self.restoring = was;
-        restored.expect("an inverse applies to the state it was taken from");
-        Some(inverse)
+    /// What `op` would replace — its inverse — with `self` untouched. `None` when
+    /// `op` would be refused, or names no node ([`Operation::overwrites`]). The
+    /// propagation pass's reader (`crate::propagate`): an operation's inverse
+    /// carries the old value of exactly the field it writes, so this reads any
+    /// field any operation can write without a reader per field.
+    ///
+    /// **Applied to a scratch document holding the one node `op` names**, because
+    /// every operation `overwrites` names a node for writes that node alone and
+    /// reads nothing of the tree but `root` (measured over the handlers when this
+    /// was written; `op_set_fill_rule` is the one that asks for `root`). Two
+    /// things came of that, both found by the `v0.4.1..7d0c666` release review:
+    ///
+    /// - **Nothing is restored**, so nothing can fail to be. This applied the op
+    ///   to the document and then re-applied its inverse, asserting that the
+    ///   inverse took — and an old value the loader admits and an op refuses (a
+    ///   gradient's opacity of 5, §15 D767) panicked every commit and every
+    ///   preview frame of an edit to that field on a main (`[R1-L2-01]`).
+    /// - **The pass clones one node per read, not the document.** It cloned the
+    ///   whole document once per call, and the live preview calls it every frame:
+    ///   13.6 ms at 25,000 nodes with a single instance (`[X3-L4-03]`).
+    pub(crate) fn peek(&self, op: &Operation) -> Option<Operation> {
+        let id = op.overwrites()?;
+        let mut nodes = FxHashMap::default();
+        nodes.insert(id, self.nodes.get(&id)?.clone());
+        let mut one = Document {
+            schema_version: self.schema_version,
+            nodes,
+            root: self.root,
+            canvas_background: self.canvas_background,
+            guides: Vec::new(),
+            images: FxHashMap::default(),
+            meta: DocumentMeta::default(),
+            restoring: self.restoring,
+        };
+        one.apply_one(op, &mut DirtySet::default()).ok()
     }
 
     /// Apply a single op to `self` (already a working copy), returning the op

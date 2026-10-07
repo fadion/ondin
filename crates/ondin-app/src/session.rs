@@ -1218,38 +1218,10 @@ impl EditorSession {
         // an in-flow item its stored translation (§15 D877).
         let tx = ondin_core::build::keep_flex_sizes(&self.doc, &self.resolved, tx);
         let mut tx = tx;
-        // A swap's rewrite (§15 D983): a nested copy swapped to another main, or
-        // back, has its children and fields rewritten in place here — the one
-        // place they are — so the picker, a reset and a nested variant switch
-        // need write only the `SetSwap`. First, so what it brings in and takes
-        // away reaches the copy's own copies through the structural pass below.
-        let swaps = ondin_core::swap::settle(&self.doc, &tx, &mut self.ids);
-        tx.0.extend(swaps);
-        // A main's children gained, lost, moved or reordered reach its instances
-        // (§5.3d build step 4) — before the settling below, which tidies any link
-        // these leave behind.
-        let structure = ondin_core::propagate::propagate_structure(&self.doc, &tx, &mut self.ids);
-        tx.0.extend(structure);
-        // And the links a structural edit owes (§5.3d): a link into a deleted node
-        // climbs past it, a linked layer moved out of its instance becomes its own,
-        // and a swap that no longer stands is settled (§15 D983) — every door that
-        // moves, deletes or regroups comes through here, so none of them has to
-        // know `component::check` exists. (This sentence sat above the structural
-        // pass until 2026-10-06, two blocks from the line it describes — §15
-        // D790's shape, `arch-scribe`'s find.)
-        let cuts = ondin_core::component::settle_links(&self.doc, &tx);
-        tx.0.extend(cuts);
-        // And what the variant rules owe (§15 D982): a main moved into a set takes
-        // values, one moved out drops them, every variant is renamed from its
-        // values — before the propagation below, so an instance still carrying a
-        // variant's old name follows it — and a binding that no longer fits goes.
-        let settled = ondin_core::variant::settle(&self.doc, &tx);
-        tx.0.extend(settled);
-        // And last, what the edit owes the instances (§5.3d build step 3): a main's
-        // change written onto every copy that still holds the main's old value —
-        // after the passes above, so what they append to a main propagates too.
-        let follows = ondin_core::propagate::propagate(&self.doc, &tx);
-        tx.0.extend(follows);
+        // What the components owe the edit — a swap's rewrite, a main's structure
+        // and fields reaching its instances, the links and variant names settled —
+        // in the one order the core tests pin (`propagate::owed`'s doc).
+        ondin_core::propagate::owed(&self.doc, &mut tx, &mut self.ids);
         let held = self.growth_held(&tx, &asked);
         // And either can empty a transaction outright — `keep_insets` one pinned
         // layer written back where it already is, `keep_flex_sizes` a translation

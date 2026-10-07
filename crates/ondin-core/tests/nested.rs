@@ -91,19 +91,11 @@ fn child_linked(doc: &Document, parent: NodeId, src: NodeId) -> Option<NodeId> {
 }
 
 impl F {
-    /// `ops` with everything `EditorSession::commit_inner` appends, in its order.
+    /// `ops` with everything `EditorSession::commit_inner` appends
+    /// (`propagate::owed`, the one copy of its order).
     fn commit(&mut self, ops: Vec<Operation>) {
         let mut tx = Transaction(ops);
-        let w = swap::settle(&self.doc, &tx, &mut self.ids);
-        tx.0.extend(w);
-        let s = ondin_core::propagate::propagate_structure(&self.doc, &tx, &mut self.ids);
-        tx.0.extend(s);
-        let l = ondin_core::component::settle_links(&self.doc, &tx);
-        tx.0.extend(l);
-        let v = variant::settle(&self.doc, &tx);
-        tx.0.extend(v);
-        let p = ondin_core::propagate::propagate(&self.doc, &tx);
-        tx.0.extend(p);
+        ondin_core::propagate::owed(&self.doc, &mut tx, &mut self.ids);
         self.doc
             .apply(&tx)
             .expect("the edit and everything it owes");

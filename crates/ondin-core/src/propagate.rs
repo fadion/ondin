@@ -202,11 +202,20 @@ fn structural_copies(doc: &Document) -> FxHashMap<NodeId, Vec<NodeId>> {
 ///   old value.
 /// - Where one transaction edits the same field of a node twice, the last edit is
 ///   the one carried, compared against the value before the transaction.
+/// - **A copy the transaction deletes, or whose link it rewrites, takes nothing**
+///   ([`leaves_its_source`]): the copy map is read from the document before the
+///   edit, and the structural pass ahead of this one deletes or cuts the
+///   counterparts of a layer dragged out of its main. Following onto those wrote
+///   a `SetTransform` on a deleted node, and the whole drag was refused at the
+///   commit; or, for a counterpart kept because the instance had changed it, moved
+///   the instance's own layer to the main's new place, outside its instance
+///   (`[X3-L1-01]`).
 pub fn propagate(doc: &Document, tx: &Transaction) -> Vec<Operation> {
     let copies = followers(doc);
     if copies.is_empty() {
         return Vec::new();
     }
+    let gone = leaves_its_source(doc, tx);
     let user: FxHashSet<_> = tx.0.iter().filter_map(Operation::shape_key).collect();
     // The last edit of each (node, field), in the order those last edits came.
     let mut last: Vec<(usize, &Operation)> = Vec::new();
@@ -225,23 +234,22 @@ pub fn propagate(doc: &Document, tx: &Transaction) -> Vec<Operation> {
         last.push((i, op));
     }
     last.retain(|(i, op)| op.shape_key().and_then(|k| seen.get(&k)) == Some(i));
-    // **No edit to anything copied, no scratch document.** The clone below is the
-    // pass's whole cost, and the live preview runs this on every frame of every
-    // gesture (build step 6) — nearly all of which edit nothing a copy follows.
     if last.is_empty() {
         return Vec::new();
     }
 
-    let mut scratch = doc.clone();
     let mut out = Vec::new();
     for (_, op) in last {
         let Some(n) = op.overwrites() else { continue };
-        let Some(old) = scratch.peek(op) else {
+        let Some(old) = doc.peek(op) else {
             continue;
         };
         let mut queue = vec![(n, op.clone(), old)];
         while let Some((src, new, old)) = queue.pop() {
             for &(m, takes) in copies.get(&src).into_iter().flatten() {
+                if gone.contains(&m) {
+                    continue;
+                }
                 let Some(probe) = new.retargeted(m) else {
                     continue;
                 };
@@ -259,7 +267,7 @@ pub fn propagate(doc: &Document, tx: &Transaction) -> Vec<Operation> {
                 if writes_spans(op) && !same_content(doc, src, m) {
                     continue;
                 }
-                let Some(cur) = scratch.peek(&probe) else {
+                let Some(cur) = doc.peek(&probe) else {
                     continue; // a copy of another kind cannot take this edit
                 };
                 if let Some(follow) = follow(&new, &old, &cur, m) {
@@ -270,6 +278,71 @@ pub fn propagate(doc: &Document, tx: &Transaction) -> Vec<Operation> {
         }
     }
     out
+}
+
+/// Everything the components owe `tx`, appended to it in the order the passes
+/// must run: what `EditorSession::commit_inner` runs once its doors' rewrites
+/// (`build::keep_insets`, `build::keep_flex_sizes`) are done.
+///
+/// **One function so the order is one fact.** The core tests that pin it —
+/// *"settle after propagate leaves the instance named Small"* — ran it through
+/// a hand-written copy of this list, and reversing two passes in the app's own
+/// copy passed every test in the workspace (`[X6.2-L6-05]`, CLAUDE.md's gate
+/// hole 16: two lists a person keeps agree whatever either says). The tests call
+/// this now, so a flip here fails there.
+pub fn owed(doc: &Document, tx: &mut Transaction, ids: &mut crate::id::IdSource) {
+    // A swap's rewrite (§15 D983): a nested copy swapped to another main, or
+    // back, has its children and fields rewritten in place here — the one place
+    // they are — so the picker, a reset and a nested variant switch need write
+    // only the `SetSwap`. First, so what it brings in and takes away reaches the
+    // copy's own copies through the structural pass below.
+    let swaps = crate::swap::settle(doc, tx, ids);
+    tx.0.extend(swaps);
+    // A main's children gained, lost, moved or reordered reach its instances
+    // (§5.3d build step 4) — before the settling below, which tidies any link
+    // these leave behind.
+    let structure = propagate_structure(doc, tx, ids);
+    tx.0.extend(structure);
+    // And the links a structural edit owes (§5.3d): a link into a deleted node
+    // climbs past it, a linked layer moved out of its instance becomes its own,
+    // and a swap that no longer stands is settled (§15 D983) — every door that
+    // moves, deletes or regroups comes through here, so none of them has to know
+    // `component::check` exists.
+    let cuts = crate::component::settle_links(doc, tx);
+    tx.0.extend(cuts);
+    // And what the variant rules owe (§15 D982): a main moved into a set takes
+    // values, one moved out drops them, every variant is renamed from its values
+    // — before the propagation below, so an instance still carrying a variant's
+    // old name follows it — and a binding that no longer fits goes.
+    let settled = crate::variant::settle(doc, tx);
+    tx.0.extend(settled);
+    // And last, what the edit owes the instances (§5.3d build step 3): a main's
+    // change written onto every copy that still holds the main's old value —
+    // after the passes above, so what they append to a main propagates too.
+    let follows = propagate(doc, tx);
+    tx.0.extend(follows);
+}
+
+/// The nodes `tx` takes away from the source they follow: everything under a
+/// `DeleteNode`, at any depth, and every node a `SetLink` names — cut, climbed
+/// past a deleted node, or relinked, its old source is not the one it follows
+/// once the transaction lands. [`propagate`] writes nothing onto these.
+fn leaves_its_source(doc: &Document, tx: &Transaction) -> FxHashSet<NodeId> {
+    let deleted: Vec<NodeId> =
+        tx.0.iter()
+            .filter_map(|op| match op {
+                Operation::DeleteNode { id } => Some(*id),
+                _ => None,
+            })
+            .collect();
+    let mut gone: FxHashSet<NodeId> = crate::build::subtree_nodes(doc, &deleted)
+        .into_iter()
+        .collect();
+    gone.extend(tx.0.iter().filter_map(|op| match op {
+        Operation::SetLink { id, .. } => Some(*id),
+        _ => None,
+    }));
+    gone
 }
 
 /// The operations a transaction's **structural** edits to mains owe their
@@ -294,7 +367,14 @@ pub fn propagate(doc: &Document, tx: &Transaction) -> Vec<Operation> {
 ///   pass just made of a parent the same edit created**, so *Group selection*
 ///   inside a main moves each instance's own layers into a copy of the new group
 ///   rather than re-copying them. Where an instance has no counterpart of the new
-///   parent, the move is a removal there (delete if untouched, else cut).
+///   parent, the move is a removal there (delete if untouched, else cut). A layer
+///   moved into a main **from outside it** is a gain, copied whole.
+/// - **An ungroup or *Release*** lifts an instance's counterparts out of its copy
+///   of the group only where that copy is untouched, the children aside; a copy
+///   the instance changed stays as a local wrapper with its children inside it,
+///   still linked (§15 D1003 (2)).
+///
+/// A copy the transaction itself deletes is owed nothing by any arm.
 ///
 /// The ops go out as inserts, then moves, then deletes, then reorders, and the
 /// delete decisions are made after the moves: *Ungroup* lifts the children out of
@@ -302,11 +382,6 @@ pub fn propagate(doc: &Document, tx: &Transaction) -> Vec<Operation> {
 ///
 /// Mints ids for what it copies, so it runs where an `IdSource` is: before
 /// `settle_links`, which then settles any link these leave behind.
-///
-/// ⚠️ **An ungroup or *Release* in a main whose group an instance changed is ruled
-/// otherwise and not built** (§15 D1003 (2)): that instance keeps its copy as a
-/// local wrapper, its children still linked. Today the moves loop lifts them out
-/// whatever the copy holds, and the changed group is left empty.
 pub fn propagate_structure(
     doc: &Document,
     tx: &Transaction,
@@ -432,6 +507,7 @@ pub fn propagate_structure(
             continue; // deleted: it gained nothing
         };
         let b: FxHashSet<NodeId> = before[p].children.iter().copied().collect();
+        let main = main_of_node(&after, *p);
         let gained: Vec<NodeId> = after_p
             .children
             .iter()
@@ -442,10 +518,17 @@ pub fn propagate_structure(
             let Some(template) = after.capture_subtree(x) else {
                 continue;
             };
-            // Only what this edit **made**: a layer that already existed and was moved
-            // in (a group made around existing layers) is a move, handled below, and
-            // its counterpart moves rather than being copied again.
-            let template = only_new(template, |id| before.contains_key(&id));
+            // Only what is **new to this main**: a layer that already sat in it and
+            // was moved (a group made around existing layers) is a move, handled
+            // below, and its counterpart moves rather than being copied again. A
+            // layer that came in from outside the main — dragged in from the canvas
+            // or from another main — is copied whole, as a `CreateNode` is (§5.3d
+            // build step 4). The first form pruned every node that existed before
+            // the edit, and a layer dragged into a main never reached its instances
+            // (`[X2-L1-01]`).
+            let template = only_new(template, |id| {
+                before.contains_key(&id) && main_of_node(doc, id) == main
+            });
             if template.is_empty() {
                 continue;
             }
@@ -453,7 +536,8 @@ pub fn propagate_structure(
             let mut level = vec![(*p, template)];
             while let Some((src_parent, nodes)) = level.pop() {
                 for &pc in copies.get(&src_parent).into_iter().flatten() {
-                    if deleted.contains(&pc) {
+                    // A copy the edit itself deleted is owed nothing (`[X2-L1-02]`).
+                    if deleted.contains(&pc) || !after_nodes.contains_key(&pc) {
                         continue;
                     }
                     let Some((mut copy, _)) = crate::document::remap_subtree(&nodes, ids) else {
@@ -518,13 +602,57 @@ pub fn propagate_structure(
         })
         .collect();
     moves.sort();
+    // An ungroup (or a boolean's *Release*) deletes the parent it lifts out of. A
+    // copy of that parent the instance changed keeps its children: what they look
+    // like depends on it — a moved or faded group — and lifting them left an empty
+    // unlinked shell holding the change while they drew as the main did
+    // (`[R3-L5-01]`). §15 D1003 (2): the changed copy stays as a local wrapper,
+    // its children inside it still linked; an untouched copy ungroups as the main
+    // did. Judged ignoring the children being lifted, whose own changes travel
+    // with them.
+    let wrapper = |gc: NodeId, g: NodeId| -> bool {
+        if after_nodes.contains_key(&g) {
+            return false; // not an ungroup: the old parent stays
+        }
+        let lifting: FxHashSet<NodeId> = before[&gc]
+            .children
+            .iter()
+            .copied()
+            .filter(|k| {
+                before
+                    .get(k)
+                    .and_then(|n| n.link)
+                    .is_some_and(|s| moved_within.contains_key(&s))
+            })
+            .collect();
+        !untouched(doc, gc, g, &lifting)
+    };
     while let Some((x, old_parent, new_parent)) = moves.pop() {
         for &c in copies.get(&x).into_iter().flatten() {
+            // A copy the edit itself deleted is owed nothing (`[X2-L1-02]`).
+            if !after_nodes.contains_key(&c) {
+                continue;
+            }
             let Some(root) = crate::component::instance_root(doc, c) else {
                 continue;
             };
-            if before[&c].parent != counterpart(doc, root, old_parent) {
+            let Some(from) = before[&c].parent else {
+                continue;
+            };
+            if Some(from) != counterpart(doc, root, old_parent) {
                 continue; // the instance moved it itself
+            }
+            if wrapper(from, old_parent) {
+                // Where it is: pin what the edit wrote on `x` at the copy's own
+                // values, so the field pass carries none of it — an ungroup bakes
+                // the group's transform into each child, which is the main's group
+                // and not this copy's.
+                out.extend(
+                    tx.0.iter()
+                        .filter(|op| op.overwrites() == Some(x))
+                        .filter_map(|op| doc.peek(&op.retargeted(c)?)),
+                );
+                continue;
             }
             let Some(target) = target_of(root, new_parent) else {
                 if untouched(doc, c, x, &moved_out) {
@@ -581,7 +709,13 @@ pub fn propagate_structure(
         .collect();
     while let Some(gone) = queue.pop() {
         for &c in copies.get(&gone).into_iter().flatten() {
-            if deleted.contains(&c) || !untouched(doc, c, gone, &moved_out) {
+            // A counterpart the edit itself deleted — selected beside its source,
+            // or inside an instance deleted with it — is not deleted twice: that
+            // refused the whole transaction, `NoSuchNode` (`[X2-L1-02]`).
+            if deleted.contains(&c)
+                || !after_nodes.contains_key(&c)
+                || !untouched(doc, c, gone, &moved_out)
+            {
                 continue;
             }
             deleted.insert(c);
@@ -595,17 +729,28 @@ pub fn propagate_structure(
             .map(|id| Operation::SetLink { id, link: None }),
     );
 
-    // Reorders: a parent whose children are the same set in a new order.
-    for p in &parents {
-        let Some(after_p) = after_nodes.get(p) else {
-            continue;
-        };
-        let (b, a) = (&before[p].children, &after_p.children);
+    // Reorders: a parent whose children are the same set in a new order — carried
+    // down the copy chain as the other three arms are, a copy this reorders being
+    // a parent reordered in turn for its own copies. Single-level until the
+    // release review: a nested copy in an outer main's instance kept the old
+    // order, and from then on refused every later reorder as one the instance
+    // had made itself (`[X3-L2-02]`).
+    let mut reorders: Vec<(NodeId, Vec<NodeId>, Vec<NodeId>)> = parents
+        .iter()
+        .filter_map(|p| {
+            let a = &after_nodes.get(p)?.children;
+            Some((*p, before[p].children.clone(), a.clone()))
+        })
+        .collect();
+    while let Some((p, b, a)) = reorders.pop() {
         let bs: FxHashSet<_> = b.iter().collect();
         if b.len() != a.len() || !a.iter().all(|c| bs.contains(c)) {
             continue;
         }
-        for &pc in copies.get(p).into_iter().flatten() {
+        for &pc in copies.get(&p).into_iter().flatten() {
+            if !after_nodes.contains_key(&pc) {
+                continue;
+            }
             let kids = &before[&pc].children;
             let linked: Vec<NodeId> = kids
                 .iter()
@@ -642,6 +787,7 @@ pub fn propagate_structure(
             for (i, id) in target.iter().enumerate() {
                 out.push(Operation::Reorder { id: *id, index: i });
             }
+            reorders.push((pc, kids.clone(), target));
         }
     }
     out

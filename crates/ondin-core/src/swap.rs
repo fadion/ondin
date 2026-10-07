@@ -207,11 +207,26 @@ pub fn suggested_filter(name: &str) -> String {
 ///
 /// **Nothing else writes these rewrites**, so this is the only place one is made
 /// and a transaction holding a swap is expanded exactly once. Empty when the
-/// transaction holds no `SetSwap`.
+/// transaction holds no `SetSwap` and no `SetLink`.
 ///
-/// ⚠️ **Ruled, not built** (§15 D1003 (3)): a layer the outer main added to the
-/// slot carries across a swap, at its place among its siblings. The rewrite
-/// deletes it today, an unmatched counterpart that is untouched.
+/// **A swap left naming what its slot shows is cleared** (§15 D1003 (4)): an
+/// override is a difference (D979), so a copy whose slot came to show its swap's
+/// main — the slot swapped, or relinked by a variant switch in the outer main —
+/// follows its slot again, rather than counting an override that changes nothing
+/// and staying put through the slot's later swaps (`[X5-L2-01]`). Only
+/// [`swap()`] kept one from being stored.
+///
+/// **A copy is rewritten after the swaps of everything it copies** — its
+/// ancestors and its link chain's — not merely outermost first: swapping a
+/// nested copy and a copy of it in one transaction (*Select all instances*, then
+/// the swap property) rewrote the copy-of-copy against its slot's new contents
+/// while still measuring it from the old, and left it a cut layer, a "removed"
+/// child and a redundant swap (`[X5-L1-02]`). With the slot first, the copy's
+/// swap is found redundant and it follows the slot through the structural and
+/// field passes.
+///
+/// A layer the outer main added to the slot carries across a swap, at its place
+/// among its siblings (§15 D1003 (3), `variant::rewrite`).
 pub fn settle(doc: &Document, tx: &Transaction, ids: &mut IdSource) -> Vec<Operation> {
     let mut swapped: Vec<NodeId> =
         tx.0.iter()
@@ -220,6 +235,22 @@ pub fn settle(doc: &Document, tx: &Transaction, ids: &mut IdSource) -> Vec<Opera
                 _ => None,
             })
             .collect();
+    let relinks =
+        tx.0.iter()
+            .any(|op| matches!(op, Operation::SetLink { .. }));
+    if swapped.is_empty() && !relinks {
+        return Vec::new();
+    }
+    // Any swap may have become redundant when a slot changes, so every swapped
+    // node is a candidate — none in a document without swaps.
+    if !swapped.is_empty() || doc.node_map().values().any(|n| n.swap.is_some()) {
+        swapped.extend(
+            doc.node_map()
+                .values()
+                .filter(|n| n.swap.is_some())
+                .map(|n| n.id),
+        );
+    }
     if swapped.is_empty() {
         return Vec::new();
     }
@@ -227,13 +258,20 @@ pub fn settle(doc: &Document, tx: &Transaction, ids: &mut IdSource) -> Vec<Opera
     if scratch.apply_unchecked(tx).is_err() {
         return Vec::new(); // `apply` will refuse it with the reason
     }
-    let depth = |d: &Document, id: NodeId| {
-        std::iter::successors(Some(id), |a| d.get(*a).and_then(|n| n.parent)).count()
-    };
-    swapped.sort_by_key(|id| (depth(&scratch, *id), *id));
+    swapped.retain(|id| scratch.get(*id).is_some());
+    swapped.sort();
     swapped.dedup();
     let mut out = Vec::new();
-    for r in swapped {
+    for r in after_what_they_copy(&scratch, swapped) {
+        if let Some(s) = scratch.get(r).and_then(|n| n.swap)
+            && slot_main(&scratch, r) == Some(s)
+        {
+            let clear = Transaction(vec![Operation::SetSwap { id: r, swap: None }]);
+            if scratch.apply_unchecked(&clear).is_err() {
+                return out;
+            }
+            out.extend(clear.0);
+        }
         let from = content_source(doc, r);
         let to = content_source(&scratch, r);
         let (Some(from), Some(to)) = (from, to) else {
@@ -252,6 +290,45 @@ pub fn settle(doc: &Document, tx: &Transaction, ids: &mut IdSource) -> Vec<Opera
             return out;
         }
         out.extend(ops);
+    }
+    out
+}
+
+/// `nodes` ordered so each comes after every other one it copies from — an
+/// ancestor of it, or of any node on its link chain — ties by depth, then id.
+/// [`settle`]'s order; a cycle (which `component::check` refuses) falls back to
+/// the remaining order.
+fn after_what_they_copy(doc: &Document, nodes: Vec<NodeId>) -> Vec<NodeId> {
+    let parent = |id: NodeId| doc.get(id).and_then(|n| n.parent);
+    let depth = |id: NodeId| std::iter::successors(Some(id), |a| parent(*a)).count();
+    let set: FxHashSet<NodeId> = nodes.iter().copied().collect();
+    let deps = |r: NodeId| -> FxHashSet<NodeId> {
+        let mut out = FxHashSet::default();
+        let mut chain = Some(r);
+        for _ in 0..=doc.node_map().len() {
+            let Some(at) = chain else { break };
+            for a in std::iter::successors(Some(at), |a| parent(*a)) {
+                if a != r && set.contains(&a) {
+                    out.insert(a);
+                }
+            }
+            chain = doc.get(at).and_then(|n| n.link);
+        }
+        out
+    };
+    let mut pending: Vec<(NodeId, FxHashSet<NodeId>)> =
+        nodes.iter().map(|r| (*r, deps(*r))).collect();
+    pending.sort_by_key(|(id, _)| (depth(*id), *id));
+    let mut done: FxHashSet<NodeId> = FxHashSet::default();
+    let mut out = Vec::with_capacity(pending.len());
+    while !pending.is_empty() {
+        let at = pending
+            .iter()
+            .position(|(_, d)| d.iter().all(|x| done.contains(x)))
+            .unwrap_or(0);
+        let (r, _) = pending.remove(at);
+        done.insert(r);
+        out.push(r);
     }
     out
 }
@@ -296,9 +373,9 @@ pub(crate) fn land_ops(doc: &Document, n: &Node, to: Option<NodeId>) -> Vec<Oper
 /// - a swapped node now linked **straight to a main** becomes an instance of what
 ///   it shows ([`landed`]).
 ///
-/// ⚠️ **Ruled, not built** (§15 D1003 (4)): a swap left equal to what its slot now
-/// shows ([`slot_main`]) is to be cleared too. Only [`swap()`] keeps one from being
-/// stored, and a later change to the slot leaves it here, uncleared.
+/// A swap left equal to what its slot now shows is [`settle`]'s, which can
+/// rewrite the copy to follow its slot (§15 D1003 (4)); this one has no
+/// `IdSource`.
 pub(crate) fn tidy(doc: &Document) -> Vec<Operation> {
     let nodes = doc.node_map();
     let mut out: Vec<(NodeId, Vec<Operation>)> = Vec::new();

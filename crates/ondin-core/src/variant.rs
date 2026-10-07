@@ -1058,7 +1058,16 @@ pub fn switch_target(doc: &Document, main: NodeId, prop: usize, value: &str) -> 
     let set = set_of(doc, main)?;
     let mut values = doc.get(main)?.variant.clone();
     *values.get_mut(prop)? = value.to_string();
-    find_variant(doc, set, &values)
+    find_variant(doc, set, &values).filter(|v| same_kind(doc, main, *v))
+}
+
+/// Whether `a` and `b` are layers of one kind — a frame and a frame, a group and
+/// a group. What a switch and a swap need of their two ends (§15 D1003 (5)).
+pub fn same_kind(doc: &Document, a: NodeId, b: NodeId) -> bool {
+    let (Some(a), Some(b)) = (doc.get(a), doc.get(b)) else {
+        return false;
+    };
+    std::mem::discriminant(&a.kind) == std::mem::discriminant(&b.kind)
 }
 
 /// Whether the instance rooted at `root` can switch variants here: an instance
@@ -1107,11 +1116,14 @@ pub(crate) enum Rewrite {
 /// (`swap::settle`) — so the two differ in what keeps the slot, never in how the
 /// layers are matched.
 ///
-/// ⚠️ **Nothing here refuses `to` of another kind than `root`**, which a set of
-/// mixed kinds makes reachable. §15 D1003 (5) rules one kind per set, the set's
-/// doors refusing and this the second defence — not built.
+/// **Never to a main of another kind than `root`** (§15 D1003 (5)): no operation
+/// turns a layer into another kind, so a Group instance relinked to a Frame
+/// variant could never draw the frame's fill, size or clip (`[X6.1-L1-02]`). A
+/// set holds one kind — its doors refuse another — and this is the second
+/// defence, for a file made before that rule; a nested copy's swap already
+/// refused it (`swap::can_swap_to`).
 pub fn switch(doc: &Document, root: NodeId, to: NodeId, ids: &mut IdSource) -> Option<Transaction> {
-    if !can_switch(doc, root) {
+    if !can_switch(doc, root) || !same_kind(doc, root, to) {
         return None;
     }
     if !crate::propagate::linked_to_main(doc, root) {
@@ -1137,22 +1149,43 @@ pub(crate) fn rewrite(
     ids: &mut IdSource,
     mode: Rewrite,
 ) -> Option<Vec<Operation>> {
-    let paths_old = paths(doc, from);
-    let paths_new = paths(doc, to);
+    // **What an override is measured against: the counterpart in the main `from`
+    // shows, not `from`'s own node** (§15 D991). For a variant
+    // switch the two are the same — `from` is a main. For a swap they are not:
+    // `from` is the slot, a copy inside the outer main, and an override made *on
+    // the slot* — a Button's label set to "Save" inside a Toolbar main — is a
+    // value the copy shares with the slot, so measured against the slot it read
+    // as no override at all and the new main's "Button" replaced it. Walked down
+    // the content sources only as far as that main and no further: a variant's
+    // own overrides on a nested instance inside it are the variant's design, not
+    // the instance's, and must still give way to the target's.
+    let old_base = Base::of(doc, from);
+    let new_base = Base::of(doc, to);
+    let base_of = |s: NodeId| old_base.of_node(doc, s);
+    // **Matched by the shown mains' names, not the slot's** (`[X5-L1-03]`): a
+    // name set on the slot inside the outer main is an override like any other
+    // (D991's point, for names), and matching by it left the layer unmatched —
+    // its override dropped, a stray layer kept beside the new main's, and a
+    // duplicate on the swap back. For a variant switch both ends are mains, and
+    // each base is the node itself.
+    let paths_old = paths_by(doc, from, |id| old_base.of_node(doc, id));
+    let paths_new = paths_by(doc, to, |id| new_base.of_node(doc, id));
     let by_path_new: FxHashMap<&Vec<(String, usize)>, NodeId> =
         paths_new.iter().map(|(id, p)| (p, *id)).collect();
-    let same_kind = |a: NodeId, b: NodeId| {
-        let (Some(a), Some(b)) = (doc.get(a), doc.get(b)) else {
-            return false;
-        };
-        std::mem::discriminant(&a.kind) == std::mem::discriminant(&b.kind)
-    };
-    // Old source → new source.
+    // Old source → new source. **A layer matches only under a matched parent**
+    // (`[X6.1-L1-01]`): kinds are matched node by node, so a Group "Box" and a
+    // Frame "Box" did not match while the "Box/Shape" under them did — and the
+    // unmatched parent was deleted or cut with the matched child inside it,
+    // refusing the commit or leaving two Shapes. `paths_by` lists parents first.
     let mut matched: FxHashMap<NodeId, NodeId> = FxHashMap::default();
     matched.insert(from, to);
     for (id, p) in &paths_old {
+        let parent = doc.get(*id).and_then(|n| n.parent);
+        if !parent.is_some_and(|q| matched.contains_key(&q)) {
+            continue;
+        }
         if let Some(n) = by_path_new.get(p)
-            && same_kind(*id, *n)
+            && same_kind(doc, *id, *n)
         {
             matched.insert(*id, *n);
         }
@@ -1177,35 +1210,12 @@ pub(crate) fn rewrite(
         }
     }
 
-    // **What an override is measured against: the counterpart in the main `from`
-    // shows, not `from`'s own node** (§15 D991). For a variant
-    // switch the two are the same — `from` is a main. For a swap they are not:
-    // `from` is the slot, a copy inside the outer main, and an override made *on
-    // the slot* — a Button's label set to "Save" inside a Toolbar main — is a
-    // value the copy shares with the slot, so measured against the slot it read
-    // as no override at all and the new main's "Button" replaced it. Walked down
-    // the content sources only as far as that main and no further: a variant's
-    // own overrides on a nested instance inside it are the variant's design, not
-    // the instance's, and must still give way to the target's.
-    let shown = crate::swap::shown_main(doc.node_map(), from).unwrap_or(from);
-    let in_shown: FxHashSet<NodeId> = crate::build::subtree_nodes(doc, &[shown])
+    // Every layer something in this instance already copies: a layer of the new
+    // side one of these follows is not copied in a second time.
+    let copied_here: FxHashSet<NodeId> = crate::build::subtree_nodes(doc, &[root])
         .into_iter()
+        .filter_map(|id| doc.get(id).and_then(|n| n.link))
         .collect();
-    let base_of = |s: NodeId| {
-        let mut at = s;
-        // Bounded by the document, as `shown_main` is: the walk is as long as
-        // the slot's nesting, which the shown main's own size says nothing about.
-        for _ in 0..=doc.node_map().len() {
-            if in_shown.contains(&at) {
-                return at;
-            }
-            match crate::swap::content_source(doc, at) {
-                Some(next) => at = next,
-                None => break,
-            }
-        }
-        s
-    };
 
     let mut deletes: Vec<NodeId> = Vec::new();
     let mut cuts: Vec<NodeId> = Vec::new();
@@ -1239,6 +1249,15 @@ pub(crate) fn rewrite(
                 if parent_unmatched {
                     continue;
                 }
+                // **A layer the slot itself adds carries across a swap** (§15
+                // D1003 (3)): one the outer main put into the slot is no part of
+                // the main the slot shows, so a swap — which replaces the linked
+                // content only — keeps it where it sits among its siblings, still
+                // following the slot (`component::check` admits that link). It was
+                // deleted as an untouched counterpart.
+                if mode == Rewrite::Swap && !old_base.shows(base_of(*s_old)) {
+                    continue;
+                }
                 if crate::propagate::untouched(doc, *c, *s_old, &none) {
                     deletes.push(*c);
                 } else {
@@ -1267,7 +1286,7 @@ pub(crate) fn rewrite(
         .collect();
     let mut inserts: Vec<(NodeId, NodeId, Vec<Node>)> = Vec::new(); // (parent, source, nodes)
     for (s_new, _) in &paths_new {
-        if matched_new.contains(s_new) {
+        if matched_new.contains(s_new) || copied_here.contains(s_new) {
             continue;
         }
         let Some(parent) = doc.get(*s_new).and_then(|n| n.parent) else {
@@ -1393,16 +1412,24 @@ pub(crate) fn rewrite(
 }
 
 /// Each layer below `main` with its **name path** — the names from just below
-/// `main` down to it, each with its index among same-named siblings.
-fn paths(doc: &Document, main: NodeId) -> Vec<(NodeId, Vec<(String, usize)>)> {
+/// `main` down to it, each with its index among same-named siblings — every
+/// layer listed after its parent. Each layer is named by the node `name_of`
+/// answers for it ([`rewrite`]'s bases).
+fn paths_by(
+    doc: &Document,
+    main: NodeId,
+    name_of: impl Fn(NodeId) -> NodeId,
+) -> Vec<(NodeId, Vec<(String, usize)>)> {
     let mut out = Vec::new();
     let mut stack: Vec<(NodeId, Vec<(String, usize)>)> = vec![(main, Vec::new())];
     while let Some((id, path)) = stack.pop() {
         let Some(n) = doc.get(id) else { continue };
-        let mut seen: FxHashMap<&str, usize> = FxHashMap::default();
+        let mut seen: FxHashMap<String, usize> = FxHashMap::default();
         for c in &n.children {
-            let Some(cn) = doc.get(*c) else { continue };
-            let k = seen.entry(cn.name.as_str()).or_default();
+            let Some(cn) = doc.get(name_of(*c)).or_else(|| doc.get(*c)) else {
+                continue;
+            };
+            let k = seen.entry(cn.name.clone()).or_default();
             let mut p = path.clone();
             p.push((cn.name.clone(), *k));
             *k += 1;
@@ -1411,6 +1438,47 @@ fn paths(doc: &Document, main: NodeId) -> Vec<(NodeId, Vec<(String, usize)>)> {
         }
     }
     out
+}
+
+/// The main a source subtree shows, and how to read one of its nodes as that
+/// main's own ([`rewrite`]'s *base*, §15 D991): a node's content sources walked
+/// down until they land in the shown main. For a main the node itself.
+struct Base {
+    shown: FxHashSet<NodeId>,
+}
+
+impl Base {
+    fn of(doc: &Document, top: NodeId) -> Self {
+        let shown = crate::swap::shown_main(doc.node_map(), top).unwrap_or(top);
+        Self {
+            shown: crate::build::subtree_nodes(doc, &[shown])
+                .into_iter()
+                .collect(),
+        }
+    }
+
+    /// Whether `id` is a node of the shown main.
+    fn shows(&self, id: NodeId) -> bool {
+        self.shown.contains(&id)
+    }
+
+    /// The node of the shown main `s` copies, or `s` itself when its chain
+    /// never lands there — a layer the slot adds of its own.
+    fn of_node(&self, doc: &Document, s: NodeId) -> NodeId {
+        let mut at = s;
+        // Bounded by the document, as `shown_main` is: the walk is as long as
+        // the slot's nesting, which the shown main's own size says nothing about.
+        for _ in 0..=doc.node_map().len() {
+            if self.shown.contains(&at) {
+                return at;
+            }
+            match crate::swap::content_source(doc, at) {
+                Some(next) => at = next,
+                None => break,
+            }
+        }
+        s
+    }
 }
 
 /// What [`carry`] leaves alone on the node it rewrites.

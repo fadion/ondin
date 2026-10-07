@@ -176,9 +176,15 @@ pub fn check(nodes: &FxHashMap<NodeId, Node>) -> Result<(), (NodeId, LinkRule)> 
             .filter_map(|a| nodes.get(&a))
             .find(|a| is_root(a))
             .ok_or((n.id, LinkRule::Membership))?;
-        // A swapped root's members are copies of its swap's nodes (§15 D983).
+        // A swapped root's members are copies of its swap's nodes (§15 D983) —
+        // and of what its slot adds of its own: a layer the outer main put into
+        // the slot, linked to nothing itself, carries across a swap (§15 D1003
+        // (3)), still following the slot.
         let root_src = root.swap.or(root.link).expect("an instance root is linked");
-        if !inside(src, root_src) {
+        let slot_own = root.swap.is_some()
+            && root.link.is_some_and(|l| inside(src, l))
+            && nodes[&src].link.is_none();
+        if !inside(src, root_src) && !slot_own {
             return Err((n.id, LinkRule::Membership));
         }
         if !claimed.insert((root.id, src)) {
@@ -637,10 +643,16 @@ pub fn settle_links(doc: &Document, tx: &Transaction) -> Vec<Operation> {
             let src = nodes[&id].link.expect("filtered to linked nodes");
             let root =
                 std::iter::successors(parent_of(id), |a| parent_of(*a)).find(|a| is_root(*a, &cut));
-            // A swapped root's members are copies of its swap's nodes (§15 D983).
+            // A swapped root's members are copies of its swap's nodes (§15 D983),
+            // or of a layer its slot adds of its own (§15 D1003 (3), as `check`).
             let root_src = |r: NodeId| nodes[&r].swap.or(nodes[&r].link).expect("a root is linked");
+            let slot_own = |r: NodeId| {
+                nodes[&r].swap.is_some()
+                    && nodes[&r].link.is_some_and(|l| inside(src, l))
+                    && nodes.get(&src).is_some_and(|s| s.link.is_none())
+            };
             match root {
-                Some(r) if inside(src, root_src(r)) => {
+                Some(r) if inside(src, root_src(r)) || slot_own(r) => {
                     claims.entry((r, src)).or_default().push(id);
                 }
                 _ => {

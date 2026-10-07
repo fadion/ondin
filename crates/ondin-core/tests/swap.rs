@@ -677,9 +677,11 @@ fn a_copy_of_a_swapped_copy_follows_it() {
         "Star is not what its slot shows now"
     );
     assert_eq!(f.fill(shape3), red(10));
-    // Back on r2: r3 keeps its own.
+    // Back on r2: r3's swap now names what its slot shows, and is cleared
+    // (§15 D1003 (4)) — it shows Star either way.
     f.swap_to(r2, f.star);
     assert_eq!(f.node(r2).swap(), None);
+    assert_eq!(f.node(r3).swap(), None);
     assert_eq!(f.fill(shape3), red(10));
 }
 
@@ -812,4 +814,169 @@ fn the_fixture_is_what_it_says() {
     assert!(!swap::can_swap(&f.doc, f.n));
     assert!(!swap::can_swap(&f.doc, f.b1));
     let _ = f.hshape;
+}
+
+// ── The release review (`v0.4.1..7d0c666`) ─────────────────────────────────────
+
+/// The card fixture of `a_copy_of_a_swapped_copy_follows_it`: a `Card` main
+/// holding `b2`, an instance of Button, and `c1`, an instance of Card — so `r2`
+/// is the nested copy inside the Card main and `r3` its copy in `c1`.
+fn card(f: &mut F) -> (NodeId, NodeId, NodeId, NodeId) {
+    let card = f.ids.mint();
+    f.commit(vec![create(card, f.root, 4, frame(200.0, 200.0), "Card")]);
+    let (tx, b2) = instance(&f.doc, &mut f.ids, f.button, card);
+    f.commit(tx.0);
+    f.commit(vec![Operation::SetComponent {
+        id: card,
+        component: true,
+    }]);
+    let r2 = child_linked(&f.doc, b2, f.n).unwrap();
+    let (tx, c1) = instance(&f.doc, &mut f.ids, card, f.root);
+    f.commit(tx.0);
+    let b3 = child_linked(&f.doc, c1, b2).unwrap();
+    let r3 = child_linked(&f.doc, b3, r2).unwrap();
+    (card, c1, r2, r3)
+}
+
+/// **A swap matches layers by the shown main's names, not the slot's**
+/// (`[X5-L1-03]`): a name set on the slot inside the Button main is an override,
+/// and matching by it left `r`'s `Body` unmatched — its fill dropped, a stray
+/// layer beside Heart's `Shape`, and a second `Body` on the swap back.
+///
+/// Flip: `paths_by` naming each layer by its own name (the slot's) fails "one
+/// layer for Heart's Shape", three children against two.
+#[test]
+fn a_swap_matches_by_the_shown_mains_names() {
+    let mut f = fixture();
+    let ns = f.kids(f.n)[0];
+    f.commit(vec![Operation::SetName {
+        id: ns,
+        name: "Body".into(),
+    }]);
+    let body = f.kids(f.r)[0];
+    assert_eq!(f.node(body).name(), "Body", "the fixture: it followed");
+    f.doc
+        .apply(&Transaction(vec![Operation::SetFills {
+            id: body,
+            fills: fills(77),
+        }]))
+        .unwrap();
+    f.swap_to(f.r, f.heart);
+    assert_eq!(
+        f.kids(f.r).len(),
+        2,
+        "one layer for Heart's Shape, and Shine"
+    );
+    assert_eq!(f.kids(f.r)[0], body, "the same layer");
+    assert_eq!(f.node(body).link(), Some(f.hshape));
+    assert_eq!(f.fill(body), red(77), "its override carried");
+    f.swap_to(f.r, f.star);
+    assert_eq!(f.kids(f.r), vec![body], "back, and no second Body");
+    assert_eq!(f.node(body).link(), Some(ns));
+    assert_eq!(f.fill(body), red(77));
+}
+
+/// **A layer the slot adds of its own carries across a swap** (§15 D1003 (3)):
+/// one the Button main put into its nested Star stays in `r`, where it sat,
+/// still linked to the slot's — through the swap and back, with no duplicate.
+/// It was deleted as an untouched counterpart.
+///
+/// Flip: `rewrite`'s slot-own `continue` removed fails "kept, still linked to
+/// the slot's"; `component::check`'s `slot_own` dropped fails the swap's commit,
+/// `Membership`.
+#[test]
+fn a_layer_the_slot_adds_carries_across_a_swap() {
+    let mut f = fixture();
+    let badge = f.ids.mint();
+    let n = f.n;
+    f.commit(vec![create(badge, n, 1, rect(), "Badge")]);
+    let mine = *f.kids(f.r).last().unwrap();
+    assert_eq!(
+        f.node(mine).link(),
+        Some(badge),
+        "the fixture: r has its copy"
+    );
+    f.swap_to(f.r, f.heart);
+    let kids = f.kids(f.r);
+    assert!(kids.contains(&mine), "kept");
+    assert_eq!(
+        f.node(mine).link(),
+        Some(badge),
+        "still linked to the slot's"
+    );
+    assert_eq!(kids.len(), 3, "Heart's two and the slot's own");
+    // Above the Shape it sat above; Heart's Shine arrives at its own anchor.
+    assert_eq!(
+        kids.iter().position(|k| *k == mine),
+        Some(2),
+        "where it sat"
+    );
+    assert_eq!(f.node(kids[0]).link(), Some(f.hshape));
+    f.swap_to(f.r, f.star);
+    let copies = f
+        .kids(f.r)
+        .into_iter()
+        .filter(|k| f.node(*k).link() == Some(badge))
+        .count();
+    assert_eq!(copies, 1, "back, and no duplicate");
+}
+
+/// **A copy and its copy swapped in one transaction** — *Select all instances*,
+/// then the swap property (`[X5-L1-02]`). `r3` was rewritten against `r2`'s new
+/// contents while measured from its old, and came out with a cut Shine, a
+/// "removed" child and a redundant swap. Its swap is now found redundant — its
+/// slot shows Heart — and cleared, and it follows `r2`.
+///
+/// Flip: dropping `settle`'s redundant-swap clear fails "it follows its slot",
+/// `Some(Heart)`. ⚠️ **`settle`'s new order is not what this test pins**: put back
+/// to depth then id it stays green, because the clear reads the slot's `swap`
+/// field off the scratch whatever order the rewrites run in. The order is the
+/// second defence, for a copy whose rewrite reads its slot's children.
+#[test]
+fn a_copy_and_its_copy_swapped_together_follow_one_another() {
+    let mut f = fixture();
+    let (_, c1, r2, r3) = card(&mut f);
+    let ops: Vec<Operation> = [f.r, r2, r3]
+        .into_iter()
+        .map(|id| Operation::SetSwap {
+            id,
+            swap: Some(f.heart),
+        })
+        .collect();
+    f.commit(ops);
+    assert_eq!(f.node(r2).swap(), Some(f.heart));
+    assert_eq!(f.node(r3).swap(), None, "it follows its slot");
+    let shine2 = f.kids(r2)[1];
+    assert_eq!(
+        f.node(f.kids(r3)[1]).link(),
+        Some(shine2),
+        "Shine linked one link up"
+    );
+    let d = reset::drift(&f.doc, c1);
+    assert!(!d.any(), "nothing the user made: {d:?}");
+}
+
+/// **A swap left naming what its slot shows is cleared** (§15 D1003 (4),
+/// `[X5-L2-01]`): `r3` swapped to Star while its slot shows Heart is an
+/// override; once `r2` goes back to Star it names what its slot shows, counts
+/// nothing, and follows the slot's next swap.
+///
+/// Flip: `settle`'s redundant-swap clear dropped fails `r3`'s swap, `Some(Star)`.
+#[test]
+fn a_swap_equal_to_its_slots_is_cleared() {
+    let mut f = fixture();
+    let (_, c1, r2, r3) = card(&mut f);
+    f.swap_to(r2, f.heart);
+    f.swap_to(r3, f.star);
+    assert!(reset::drift(&f.doc, c1).any(), "the fixture: an override");
+    f.swap_to(r2, f.star);
+    assert_eq!(f.node(r3).swap(), None);
+    let d = reset::drift(&f.doc, c1);
+    assert!(!d.any(), "no override that changes nothing: {d:?}");
+    f.swap_to(r2, f.heart);
+    assert_eq!(
+        ondin_core::component::main_of(&f.doc, r3),
+        Some(f.heart),
+        "it follows"
+    );
 }

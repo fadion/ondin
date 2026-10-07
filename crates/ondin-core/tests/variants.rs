@@ -690,3 +690,209 @@ fn a_duplicated_set_is_a_new_set_of_new_variants() {
         assert!(!n.variant().is_empty(), "with its values");
     }
 }
+
+// ── The switch's matching rules (`[X6.2-L6-03]`, `[X6.1-L1-01]`) ───────────────
+
+impl F {
+    /// Commit `ops` creating layers in the two variants — the instance takes its
+    /// copies through the structural pass.
+    fn add(&mut self, layers: &[(NodeId, NodeId, NodeKind, &str)]) {
+        let mut added: std::collections::HashMap<NodeId, usize> = Default::default();
+        let ops = layers
+            .iter()
+            .map(|(id, parent, kind, name)| {
+                let n = added.entry(*parent).or_default();
+                let at = self.kids(*parent).len() + *n;
+                *n += 1;
+                create(*id, *parent, at, kind.clone(), name)
+            })
+            .collect();
+        self.commit(ops);
+    }
+
+    fn switch(&mut self, to: NodeId) {
+        let tx = variant::switch(&self.doc, self.i, to, &mut self.ids).expect("a switch");
+        self.commit(tx.0);
+    }
+
+    /// The instance's layers linked to `src`, anywhere below it.
+    fn copies_of(&self, src: NodeId) -> Vec<NodeId> {
+        ondin_core::build::subtree_nodes(&self.doc, &[self.i])
+            .into_iter()
+            .filter(|id| self.link(*id) == Some(src))
+            .collect()
+    }
+
+    /// The instance's child linked to `src`.
+    fn child_of(&self, src: NodeId) -> NodeId {
+        self.kids(self.i)
+            .into_iter()
+            .find(|k| self.link(*k) == Some(src))
+            .expect("a copy")
+    }
+}
+
+/// **A layer matches only under a matched parent** (`[X6.1-L1-01]`): Small's
+/// Group "Box" and Large's Frame "Box" are different kinds, so neither they nor
+/// the "Box/Shape" under them match. The child matched by itself, under a parent
+/// that did not, and the switch was refused (`NoSuchNode`, the Shape relinked
+/// after its untouched parent was deleted) — or, the parent changed, left the
+/// instance with both Boxes and a stale link.
+///
+/// Flip: the matching loop without its matched-parent test fails the first
+/// switch's commit, `NoSuchNode`.
+#[test]
+fn a_switch_matches_a_layer_only_under_a_matched_parent() {
+    for touched in [false, true] {
+        let mut f = fixture();
+        let [b1, s1, b2, s2] = [(); 4].map(|_| f.ids.mint());
+        let (small, large) = (f.small, f.large);
+        f.add(&[
+            (b1, small, NodeKind::Group, "Box"),
+            (b2, large, frame(20.0, 20.0), "Box"),
+        ]);
+        f.add(&[(s1, b1, rect(), "Shape"), (s2, b2, rect(), "Shape")]);
+        if touched {
+            let bc = f.child_of(b1);
+            f.doc
+                .apply(&Transaction(vec![Operation::SetOpacity {
+                    id: bc,
+                    opacity: 0.5,
+                }]))
+                .unwrap();
+        }
+        f.switch(large);
+        let shapes = f.copies_of(s2);
+        assert_eq!(shapes.len(), 1, "one Shape following Large's ({touched})");
+        let host = f.doc.get(shapes[0]).unwrap().parent().unwrap();
+        assert_eq!(f.link(host), Some(b2), "inside a copy of Large's Box");
+        let boxes = f
+            .kids(f.i)
+            .into_iter()
+            .filter(|k| f.name(*k) == "Box")
+            .count();
+        assert_eq!(boxes, if touched { 2 } else { 1 }, "the changed Box kept");
+    }
+}
+
+/// **The k-th sibling of a name matches the k-th** (`switch`'s doc): two Dots a
+/// side. Flip: `paths_by` numbering every sibling 0 fails the count, three
+/// children against two — the first Dot's slot matched twice, Large's second
+/// copied in again.
+#[test]
+fn a_switch_matches_the_kth_same_named_sibling_to_the_kth() {
+    let mut f = fixture();
+    let [d1, d2, e1, e2] = [(); 4].map(|_| f.ids.mint());
+    let (small, large) = (f.small, f.large);
+    f.add(&[
+        (d1, small, rect(), "Dot"),
+        (d2, small, rect(), "Dot"),
+        (e1, large, rect(), "Dot"),
+        (e2, large, rect(), "Dot"),
+    ]);
+    let (c1, c2) = (f.child_of(d1), f.child_of(d2));
+    f.switch(large);
+    let dots: Vec<NodeId> = f
+        .kids(f.i)
+        .into_iter()
+        .filter(|k| f.name(*k) == "Dot")
+        .collect();
+    assert_eq!(dots, vec![c1, c2], "two Dots, the same layers");
+    assert_eq!((f.link(c1), f.link(c2)), (Some(e1), Some(e2)));
+}
+
+/// **Only within one kind** (`switch`'s doc): a Rect "Mark" and a Text "Mark"
+/// do not match, so the rect goes and the text comes in. Flip: `same_kind`
+/// answering `true` keeps the rect, relinked to a text.
+#[test]
+fn a_switch_matches_only_within_one_kind() {
+    let mut f = fixture();
+    let [m1, m2] = [(); 2].map(|_| f.ids.mint());
+    let (small, large) = (f.small, f.large);
+    f.add(&[(m1, small, rect(), "Mark"), (m2, large, text("M"), "Mark")]);
+    let old = f.child_of(m1);
+    f.switch(large);
+    assert!(f.doc.get(old).is_none(), "the untouched rect went");
+    let new = f.child_of(m2);
+    assert!(matches!(
+        f.doc.get(new).unwrap().kind(),
+        NodeKind::Text { .. }
+    ));
+}
+
+/// **The order follows where the instance still had the old main's, and only
+/// there** (`switch`'s doc). Large puts Label under Bg; an instance in Small's
+/// order takes it, and one that reordered its own keeps it. Flips: the reorder
+/// guard always false fails the first ("Large's order"); always true fails the
+/// second ("its own order").
+#[test]
+fn a_switch_takes_the_new_order_only_where_the_instance_had_the_old() {
+    let mut f = fixture();
+    let (large, llabel) = (f.large, f.llabel);
+    f.commit(vec![Operation::Reorder {
+        id: llabel,
+        index: 0,
+    }]);
+    let (bg, label) = (f.child_of(f.bg), f.child_of(f.label));
+    f.switch(large);
+    let kids = f.kids(f.i);
+    let at = |k: NodeId| kids.iter().position(|x| *x == k).unwrap();
+    assert!(at(label) < at(bg), "Large's order");
+
+    let mut f = fixture();
+    let (large, llabel) = (f.large, f.llabel);
+    f.commit(vec![Operation::Reorder {
+        id: llabel,
+        index: 0,
+    }]);
+    let (bg, label) = (f.child_of(f.bg), f.child_of(f.label));
+    // The instance puts its Label under its Bg itself — and Large wants it
+    // under too, so give Large Small's order back to make the two disagree.
+    f.doc
+        .apply(&Transaction(vec![Operation::Reorder {
+            id: label,
+            index: 0,
+        }]))
+        .unwrap();
+    f.commit(vec![Operation::Reorder {
+        id: llabel,
+        index: 1,
+    }]);
+    f.switch(large);
+    let kids = f.kids(f.i);
+    let at = |k: NodeId| kids.iter().position(|x| *x == k).unwrap();
+    assert!(at(label) < at(bg), "its own order");
+}
+
+/// **One whose match the instance had removed stays removed** (`switch`'s
+/// doc). Flip: the insert guard reading `new_to_c` instead of `matched_new`
+/// copies Large's Label back in.
+#[test]
+fn a_switch_does_not_bring_back_a_layer_the_instance_removed() {
+    let mut f = fixture();
+    let label = f.child_of(f.label);
+    f.doc
+        .apply(&Transaction(vec![Operation::DeleteNode { id: label }]))
+        .unwrap();
+    let large = f.large;
+    f.switch(large);
+    assert!(f.copies_of(f.llabel).is_empty(), "still removed");
+}
+
+/// **No switch to a main of another kind** (§15 D1003 (5), `[X6.1-L1-02]`): a
+/// Frame instance relinked to a Group main could never draw as it. Flip: `switch`
+/// without its `same_kind` test answers `Some`.
+#[test]
+fn a_switch_refuses_a_main_of_another_kind() {
+    let mut f = fixture();
+    let g = f.ids.mint();
+    let root = f.root;
+    f.commit(vec![
+        create(g, root, 1, NodeKind::Group, "Group main"),
+        Operation::SetComponent {
+            id: g,
+            component: true,
+        },
+    ]);
+    assert!(variant::switch(&f.doc, f.i, g, &mut f.ids).is_none());
+}

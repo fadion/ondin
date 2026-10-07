@@ -1780,10 +1780,7 @@ mod tests {
             name: "Mine".into(),
         }])));
         f.app.session.selection.set_one(f.i);
-        let mut out = frame(&mut f.app, &ctx, Vec::new());
-        for _ in 0..3 {
-            out = frame(&mut f.app, &ctx, Vec::new());
-        }
+        let out = settle(&mut f.app, &ctx);
         let painted = texts(&out);
         let has = |s: &str| painted.iter().any(|(t, _)| t == s);
         assert!(!has("Instance of"), "the caption is gone: {painted:?}");
@@ -1820,15 +1817,7 @@ mod tests {
             .find(|(t, _)| t == "Reset all")
             .map(|(_, r)| r.center())
             .expect("the button's word is painted");
-        let press = |pressed| egui::Event::PointerButton {
-            pos: at,
-            button: egui::PointerButton::Primary,
-            pressed,
-            modifiers: Default::default(),
-        };
-        frame(&mut f.app, &ctx, vec![egui::Event::PointerMoved(at)]);
-        frame(&mut f.app, &ctx, vec![press(true)]);
-        frame(&mut f.app, &ctx, vec![press(false)]);
+        click(&mut f.app, &ctx, at);
         assert_eq!(f.app.session.doc.get(f.ir).unwrap().name(), "Label");
         let out = frame(&mut f.app, &ctx, Vec::new());
         assert!(
@@ -1880,10 +1869,7 @@ mod tests {
                 }]))
         );
         f.app.session.selection.set_one(f.ir);
-        let mut out = frame(&mut f.app, &ctx, Vec::new());
-        for _ in 0..3 {
-            out = frame(&mut f.app, &ctx, Vec::new());
-        }
+        let out = settle(&mut f.app, &ctx);
         let painted = inks(&out);
         let ink_of = |s: &str| {
             painted
@@ -1896,16 +1882,7 @@ mod tests {
         let (_, y_ink) = ink_of("Y");
         assert_eq!(x_ink, theme::text::STRONG, "X is overridden");
         assert_eq!(y_ink, theme::text::FAINT, "Y follows");
-        let at = x_at.center();
-        let press = |pressed| egui::Event::PointerButton {
-            pos: at,
-            button: egui::PointerButton::Primary,
-            pressed,
-            modifiers: Default::default(),
-        };
-        frame(&mut f.app, &ctx, vec![egui::Event::PointerMoved(at)]);
-        frame(&mut f.app, &ctx, vec![press(true)]);
-        frame(&mut f.app, &ctx, vec![press(false)]);
+        click(&mut f.app, &ctx, x_at.center());
         let doc = &f.app.session.doc;
         assert_eq!(
             doc.get(f.ir).unwrap().transform(),
@@ -1936,10 +1913,7 @@ mod tests {
                 }]))
         );
         f.app.session.selection.set_one(f.ir);
-        let mut out = frame(&mut f.app, &ctx, Vec::new());
-        for _ in 0..3 {
-            out = frame(&mut f.app, &ctx, Vec::new());
-        }
+        let out = settle(&mut f.app, &ctx);
         let painted = inks(&out);
         let at_of = |s: &str| {
             painted
@@ -2015,10 +1989,7 @@ mod tests {
             }]),
             "the corner's reset writes that corner alone"
         );
-        let mut out = frame(&mut f.app, &ctx, Vec::new());
-        for _ in 0..3 {
-            out = frame(&mut f.app, &ctx, Vec::new());
-        }
+        let out = settle(&mut f.app, &ctx);
         let painted = inks(&out);
         let (drop_at, drop_ink) = painted
             .iter()
@@ -2026,16 +1997,7 @@ mod tests {
             .map(|(_, r, c)| (*r, *c))
             .expect("the opacity field");
         assert_eq!(drop_ink, theme::text::STRONG, "opacity is overridden");
-        let at = drop_at.center();
-        let press = |pressed| egui::Event::PointerButton {
-            pos: at,
-            button: egui::PointerButton::Primary,
-            pressed,
-            modifiers: Default::default(),
-        };
-        frame(&mut f.app, &ctx, vec![egui::Event::PointerMoved(at)]);
-        frame(&mut f.app, &ctx, vec![press(true)]);
-        frame(&mut f.app, &ctx, vec![press(false)]);
+        click(&mut f.app, &ctx, drop_at.center());
         assert_eq!(f.app.session.doc.get(f.ir).unwrap().opacity(), 1.0);
     }
 
@@ -2058,8 +2020,20 @@ mod tests {
         v
     }
 
+    /// The inspector drawn, then three more frames for it to settle — a widget's
+    /// state is last frame's (CLAUDE.md, the egui measuring traps). The module's
+    /// one copy (`[X8.2-L3-01]`: it was written out twenty-five times).
+    fn settle(app: &mut OndinApp, ctx: &egui::Context) -> egui::FullOutput {
+        let mut out = frame(app, ctx, Vec::new());
+        for _ in 0..3 {
+            out = frame(app, ctx, Vec::new());
+        }
+        out
+    }
+
     /// Press and release the primary button at `at`, the pointer moved there
-    /// first.
+    /// first — the precondition a click here has (§15 D986), in one place
+    /// (`[X8.2-L3-01]`: it was written out nine times, twice as named helpers).
     fn click(app: &mut OndinApp, ctx: &egui::Context, at: egui::Pos2) {
         let press = |pressed| egui::Event::PointerButton {
             pos: at,
@@ -2116,10 +2090,7 @@ mod tests {
             insets: pinned,
         }])));
         f.app.session.selection.set_one(f.ir);
-        let mut out = frame(&mut f.app, &ctx, Vec::new());
-        for _ in 0..3 {
-            out = frame(&mut f.app, &ctx, Vec::new());
-        }
+        let out = settle(&mut f.app, &ctx);
         let painted = inks(&out);
         // The last of each: the align row above the Position card draws the same
         // two glyphs.
@@ -2178,10 +2149,7 @@ mod tests {
                 .commit(Transaction(vec![radius(f.ir), radius(f.plain)]))
         );
         f.app.session.selection.set(vec![f.i, f.plain]);
-        let mut out = frame(&mut f.app, &ctx, Vec::new());
-        for _ in 0..3 {
-            out = frame(&mut f.app, &ctx, Vec::new());
-        }
+        let out = settle(&mut f.app, &ctx);
         let (at, ink) = inks(&out)
             .into_iter()
             .find(|(t, ..)| t == icon::CORNERS_OUT)
@@ -2247,11 +2215,7 @@ mod tests {
         let gone_hex = crate::ui::hex_of(ondin_core::peniko::Color::from_rgb8(10, 2, 30));
         let gone_export = format!("{} {}", exports[0].scale.label(), exports[0].format.label());
         let restores = |app: &mut OndinApp| {
-            let mut out = frame(app, &ctx, Vec::new());
-            for _ in 0..3 {
-                out = frame(app, &ctx, Vec::new());
-            }
-            let painted = texts(&out);
+            let painted = texts(&settle(app, &ctx));
             [gone_hex.as_str(), gone_export.as_str()]
                 .iter()
                 .filter_map(|l| ghost_restore(&painted, l))
@@ -2259,17 +2223,7 @@ mod tests {
         };
         let found = restores(&mut f.app);
         assert_eq!(found.len(), 2, "two ghost rows");
-        let click = |app: &mut OndinApp, at: egui::Pos2| {
-            let press = |pressed| egui::Event::PointerButton {
-                pos: at,
-                button: egui::PointerButton::Primary,
-                pressed,
-                modifiers: Default::default(),
-            };
-            frame(app, &ctx, vec![egui::Event::PointerMoved(at)]);
-            frame(app, &ctx, vec![press(true)]);
-            frame(app, &ctx, vec![press(false)]);
-        };
+        let click = |app: &mut OndinApp, at: egui::Pos2| click(app, &ctx, at);
         click(&mut f.app, found[0]);
         let found = restores(&mut f.app);
         assert_eq!(found.len(), 1, "one restored, one left");
@@ -2311,10 +2265,7 @@ mod tests {
             fills: vec![main[0].map(|_| solid(9)), own.clone()],
         }])));
         f.app.session.selection.set_one(f.ir);
-        let mut out = frame(&mut f.app, &ctx, Vec::new());
-        for _ in 0..3 {
-            out = frame(&mut f.app, &ctx, Vec::new());
-        }
+        let out = settle(&mut f.app, &ctx);
         let painted = texts(&out);
         let gone_hex = crate::ui::hex_of(ondin_core::peniko::Color::from_rgb8(10, 2, 30));
         assert!(painted.iter().any(|(t, _)| *t == gone_hex), "a ghost row");
@@ -2324,17 +2275,7 @@ mod tests {
             "the header's + and the own fill's: {painted:?}"
         );
         // *Restore* on the ghost row.
-        let click = |app: &mut OndinApp, at: egui::Pos2| {
-            let press = |pressed| egui::Event::PointerButton {
-                pos: at,
-                button: egui::PointerButton::Primary,
-                pressed,
-                modifiers: Default::default(),
-            };
-            frame(app, &ctx, vec![egui::Event::PointerMoved(at)]);
-            frame(app, &ctx, vec![press(true)]);
-            frame(app, &ctx, vec![press(false)]);
-        };
+        let click = |app: &mut OndinApp, at: egui::Pos2| click(app, &ctx, at);
         // **The ghost row is laid out as the live one** (§15 D993): its hex
         // starts where a live row's hex does, and its restore stands in the eye's
         // column. Flips, both run: the label at the old lead (a 12pt chip at the
@@ -2427,24 +2368,8 @@ mod tests {
         f.app.collapsed_panels.remove("Effects");
         f.app.session.selection.set_one(f.ir);
         let effects_of = |app: &OndinApp| app.session.doc.get(f.ir).unwrap().effects().to_vec();
-        let click = |app: &mut OndinApp, at: egui::Pos2| {
-            let press = |pressed| egui::Event::PointerButton {
-                pos: at,
-                button: egui::PointerButton::Primary,
-                pressed,
-                modifiers: Default::default(),
-            };
-            frame(app, &ctx, vec![egui::Event::PointerMoved(at)]);
-            frame(app, &ctx, vec![press(true)]);
-            frame(app, &ctx, vec![press(false)]);
-        };
-        let settle = |app: &mut OndinApp| {
-            let mut out = frame(app, &ctx, Vec::new());
-            for _ in 0..3 {
-                out = frame(app, &ctx, Vec::new());
-            }
-            texts(&out)
-        };
+        let click = |app: &mut OndinApp, at: egui::Pos2| click(app, &ctx, at);
+        let settle = |app: &mut OndinApp| texts(&settle(app, &ctx));
         // The hidden effect's ↺ first: that item alone, the ghost row still there.
         let row = settle(&mut f.app)
             .into_iter()
@@ -2541,19 +2466,6 @@ mod tests {
         pin
     }
 
-    /// A press and release at `at`, the pointer arriving first.
-    fn click_at(app: &mut OndinApp, ctx: &egui::Context, at: egui::Pos2) {
-        let press = |pressed| egui::Event::PointerButton {
-            pos: at,
-            button: egui::PointerButton::Primary,
-            pressed,
-            modifiers: Default::default(),
-        };
-        frame(app, ctx, vec![egui::Event::PointerMoved(at)]);
-        frame(app, ctx, vec![press(true)]);
-        frame(app, ctx, vec![press(false)]);
-    }
-
     /// **A field reset on a pinned layer comes back exact** — the exact-equality
     /// risk asked of the field marks (§5.3d). X's reset writes the main's x **and
     /// the main's horizontal insets**, so `keep_insets` leaves the layer to it.
@@ -2574,16 +2486,13 @@ mod tests {
         let mut f = fixture(&ctx);
         let pin = pinned_and_moved(&mut f);
         f.app.session.selection.set_one(f.ir);
-        let mut out = frame(&mut f.app, &ctx, Vec::new());
-        for _ in 0..3 {
-            out = frame(&mut f.app, &ctx, Vec::new());
-        }
+        let out = settle(&mut f.app, &ctx);
         let at = inks(&out)
             .into_iter()
             .find(|(t, _, c)| t == "X" && *c == theme::text::STRONG)
             .map(|(_, r, _)| r.center())
             .expect("a marked X");
-        click_at(&mut f.app, &ctx, at);
+        click(&mut f.app, &ctx, at);
         let doc = &f.app.session.doc;
         assert_eq!(
             doc.get(f.ir).unwrap().insets(),
@@ -2604,10 +2513,7 @@ mod tests {
         let mut f = fixture(&ctx);
         let pin = pinned_and_moved(&mut f);
         f.app.session.selection.set_one(f.ir);
-        let mut out = frame(&mut f.app, &ctx, Vec::new());
-        for _ in 0..3 {
-            out = frame(&mut f.app, &ctx, Vec::new());
-        }
+        let out = settle(&mut f.app, &ctx);
         let head = texts(&out)
             .into_iter()
             .find(|(t, _)| t == "TRANSFORM")
@@ -2620,7 +2526,7 @@ mod tests {
             .find(|(t, _)| t == "Reset transform")
             .map(|(_, r)| r.center())
             .expect("the hovered header's chip");
-        click_at(&mut f.app, &ctx, chip);
+        click(&mut f.app, &ctx, chip);
         let doc = &f.app.session.doc;
         assert_eq!(
             doc.get(f.ir).unwrap().insets(),
@@ -2680,10 +2586,7 @@ mod tests {
             },
         ])));
         f.app.session.selection.set_one(f.i);
-        let mut out = frame(&mut f.app, &ctx, Vec::new());
-        for _ in 0..3 {
-            out = frame(&mut f.app, &ctx, Vec::new());
-        }
+        let out = settle(&mut f.app, &ctx);
         let head = texts(&out)
             .into_iter()
             .find(|(t, _)| t == "TRANSFORM")
@@ -2696,7 +2599,7 @@ mod tests {
             .find(|(t, _)| t == "Reset transform")
             .map(|(_, r)| r.center())
             .expect("the size override offers the reset");
-        click_at(&mut f.app, &ctx, chip);
+        click(&mut f.app, &ctx, chip);
         let node = f.app.session.doc.get(f.i).unwrap();
         assert!(
             matches!(node.kind(), NodeKind::Artboard { size } if *size == Size::new(100.0, 100.0)),
@@ -2724,10 +2627,7 @@ mod tests {
         );
         f.app.collapsed_panels.insert("Appearance");
         f.app.session.selection.set_one(f.ir);
-        let mut out = frame(&mut f.app, &ctx, Vec::new());
-        for _ in 0..3 {
-            out = frame(&mut f.app, &ctx, Vec::new());
-        }
+        let out = settle(&mut f.app, &ctx);
         let painted = texts(&out);
         let head = painted
             .iter()
@@ -2773,10 +2673,7 @@ mod tests {
                 }]))
         );
         f.app.session.selection.set_one(f.ir);
-        let mut out = frame(&mut f.app, &ctx, Vec::new());
-        for _ in 0..3 {
-            out = frame(&mut f.app, &ctx, Vec::new());
-        }
+        let out = settle(&mut f.app, &ctx);
         let painted = texts(&out);
         let head = painted
             .iter()
@@ -2791,15 +2688,7 @@ mod tests {
             .find(|(t, _)| t == "Reset appearance")
             .map(|(_, r)| r.center())
             .expect("the hovered header offers the reset");
-        let press = |pressed| egui::Event::PointerButton {
-            pos: at,
-            button: egui::PointerButton::Primary,
-            pressed,
-            modifiers: Default::default(),
-        };
-        frame(&mut f.app, &ctx, vec![egui::Event::PointerMoved(at)]);
-        frame(&mut f.app, &ctx, vec![press(true)]);
-        frame(&mut f.app, &ctx, vec![press(false)]);
+        click(&mut f.app, &ctx, at);
         assert_eq!(f.app.session.doc.get(f.ir).unwrap().opacity(), 1.0);
         assert!(
             !f.app.collapsed_panels.contains("Appearance"),
@@ -2977,10 +2866,7 @@ mod tests {
         assert!(v.app.session.commit(Transaction(ops)));
         assert_eq!(content(&v.app, v.ilabel), "Sign up");
         v.app.session.selection.set_one(v.i);
-        let mut out = frame(&mut v.app, &ctx, Vec::new());
-        for _ in 0..3 {
-            out = frame(&mut v.app, &ctx, Vec::new());
-        }
+        let out = settle(&mut v.app, &ctx);
         let painted: Vec<String> = texts(&out).into_iter().map(|(t, _)| t).collect();
         assert!(painted.contains(&"1 property".to_string()), "{painted:?}");
         assert!(
@@ -3000,9 +2886,7 @@ mod tests {
                     opacity: 0.5,
                 }]))
         );
-        for _ in 0..3 {
-            out = frame(&mut v.app, &ctx, Vec::new());
-        }
+        let out = settle(&mut v.app, &ctx);
         let painted: Vec<String> = texts(&out).into_iter().map(|(t, _)| t).collect();
         assert!(
             painted.contains(&"1 property · 1 override".to_string()),
@@ -3179,10 +3063,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut v = variants_fixture(&ctx);
         v.app.session.selection.set_one(v.set);
-        let mut out = frame(&mut v.app, &ctx, Vec::new());
-        for _ in 0..3 {
-            out = frame(&mut v.app, &ctx, Vec::new());
-        }
+        let out = settle(&mut v.app, &ctx);
         let painted: Vec<String> = texts(&out).into_iter().map(|(t, _)| t).collect();
         // The *Component set* caption went with §15 D1000; its absence is
         // `the_set_card_is_one_line_the_clash_is_short_and_components_get_no_templates`'.
@@ -3363,10 +3244,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut n = nested_fixture(&ctx);
         n.app.session.selection.set_one(n.slot);
-        let mut out = frame(&mut n.app, &ctx, Vec::new());
-        for _ in 0..3 {
-            out = frame(&mut n.app, &ctx, Vec::new());
-        }
+        let out = settle(&mut n.app, &ctx);
         let painted = texts(&out);
         let has = |s: &str| painted.iter().any(|(t, _)| t == s);
         assert!(
@@ -3385,10 +3263,7 @@ mod tests {
             n.slot
         ));
         n.app.session.selection.set_one(n.button);
-        let mut out = frame(&mut n.app, &ctx, Vec::new());
-        for _ in 0..3 {
-            out = frame(&mut n.app, &ctx, Vec::new());
-        }
+        let out = settle(&mut n.app, &ctx);
         let painted = texts(&out);
         let has = |s: &str| painted.iter().any(|(t, _)| t == s);
         assert!(has("SHOWN FROM NESTED"), "{painted:?}");
@@ -3418,10 +3293,7 @@ mod tests {
             variant::set_property(&n.app.session.doc, &[n.r], &p, &PropValue::Text("3".into()));
         assert!(n.app.session.commit(Transaction(ops)));
         n.app.session.selection.set_one(n.b1);
-        let mut out = frame(&mut n.app, &ctx, Vec::new());
-        for _ in 0..3 {
-            out = frame(&mut n.app, &ctx, Vec::new());
-        }
+        let out = settle(&mut n.app, &ctx);
         let painted: Vec<String> = texts(&out).into_iter().map(|(t, _)| t).collect();
         assert!(
             painted.contains(&"Count".to_string()),
@@ -3484,11 +3356,7 @@ mod tests {
     /// The frame after a few settling passes with `id` selected.
     fn settled(app: &mut OndinApp, ctx: &egui::Context, id: NodeId) -> egui::FullOutput {
         app.session.selection.set_one(id);
-        let mut out = frame(app, ctx, Vec::new());
-        for _ in 0..3 {
-            out = frame(app, ctx, Vec::new());
-        }
-        out
+        settle(app, ctx)
     }
 
     /// **The Component card's rows are the other cards' rows** (§15 D996, the
@@ -3636,7 +3504,7 @@ mod tests {
             .expect("the Small chip")
             .1
             .center();
-        click_at(&mut v.app, &ctx, chip);
+        click(&mut v.app, &ctx, chip);
         let out = run(&mut v.app, Vec::new());
         let row = texts(&out)
             .into_iter()
@@ -3644,7 +3512,7 @@ mod tests {
             .expect("the menu's row")
             .1
             .center();
-        click_at(&mut v.app, &ctx, row);
+        click(&mut v.app, &ctx, row);
         assert_eq!(values(&v.app), ["Small", "Large"], "nothing deleted yet");
         assert!(v.app.modal_is_up(), "the modal is up");
         // A new area is sized on its first pass and drawn from its second.
@@ -3840,7 +3708,7 @@ mod tests {
             .expect("the row's +")
             .1
             .center();
-        click_at(&mut n.app, &ctx, plus);
+        click(&mut n.app, &ctx, plus);
         let props = n.app.session.doc.get(n.button).unwrap().props().to_vec();
         assert_eq!(props.len(), 1, "one property made");
         assert_eq!(props[0].kind, ondin_core::variant::PropKind::Swap);
@@ -3942,5 +3810,310 @@ mod tests {
                 assert!(!words.iter().any(|t| t.starts_with("Another variant")));
             }
         }
+    }
+
+    // ── The variants panel's writes (`v0.4.1..7d0c666` release review) ─────────
+
+    /// A second instance of Small beside `v.i`, its label set to `text`.
+    fn second_instance(v: &mut V, text: &str) -> NodeId {
+        let doc = &v.app.session.doc;
+        let (tx, made) = ondin_core::insert_subtrees(
+            doc,
+            &mut v.app.session.ids,
+            &[Placement {
+                nodes: doc.capture_subtree(v.small).unwrap(),
+                parent: doc.root(),
+                index: None,
+            }],
+            Default::default(),
+        );
+        assert!(v.app.session.commit(tx));
+        let j = made[0];
+        let p = ondin_core::variant::instance_properties(&v.app.session.doc, j)
+            .into_iter()
+            .find(|p| p.value.name == "Label text")
+            .unwrap()
+            .value;
+        let tx = ondin_core::variant::set_property(
+            &v.app.session.doc,
+            &[j],
+            &p,
+            &ondin_core::variant::PropValue::Text(text.into()),
+        );
+        assert!(v.app.session.commit(Transaction(tx)));
+        j
+    }
+
+    fn key(key: egui::Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        }
+    }
+
+    /// **Typing over a mixed Text property writes what was typed** (`[X10-L1-01]`):
+    /// the field's buffer was seeded with the word *Mixed*, so typing *OK* wrote
+    /// "MixOKed" into every selected instance. *Mixed* is the hint now, and the
+    /// field starts empty.
+    ///
+    /// Flip, run: seeding the buffer from a literal "Mixed" again fails both
+    /// instances' text, `MixedOK`.
+    #[test]
+    fn typing_over_a_mixed_text_property_writes_what_was_typed() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut v = variants_fixture(&ctx);
+        let j = second_instance(&mut v, "Stop");
+        let jlabel = v.app.session.doc.get(j).unwrap().children()[0];
+        v.app.session.selection.set(vec![v.i, j]);
+        let out = settle(&mut v.app, &ctx);
+        let at = texts(&out)
+            .into_iter()
+            .find(|(t, _)| t == ui::MIXED_WORD)
+            .expect("the hint")
+            .1
+            .center();
+        click(&mut v.app, &ctx, at);
+        frame(&mut v.app, &ctx, vec![key(egui::Key::End)]);
+        frame(&mut v.app, &ctx, vec![egui::Event::Text("OK".into())]);
+        frame(&mut v.app, &ctx, vec![key(egui::Key::Enter)]);
+        assert_eq!(content(&v.app, v.ilabel), "OK");
+        assert_eq!(content(&v.app, jlabel), "OK");
+    }
+
+    /// **A Text property's content commits as typed** (§15 D1003 (10),
+    /// `[X10-L1-04]`): trailing spaces kept, and an emptied field empties the
+    /// label. Flip, run: content under name rules again fails "spaces kept", `Go!`.
+    #[test]
+    fn a_text_propertys_content_keeps_its_spaces_and_may_be_emptied() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut v = variants_fixture(&ctx);
+        let field = |app: &mut OndinApp| {
+            app.session.selection.set_one(v.i);
+            let out = settle(app, &ctx);
+            texts(&out)
+                .into_iter()
+                .find(|(t, _)| t.starts_with("Go"))
+                .expect("the field")
+                .1
+                .center()
+        };
+        let at = field(&mut v.app);
+        click(&mut v.app, &ctx, at);
+        frame(&mut v.app, &ctx, vec![key(egui::Key::End)]);
+        frame(&mut v.app, &ctx, vec![egui::Event::Text("!  ".into())]);
+        frame(&mut v.app, &ctx, vec![key(egui::Key::Enter)]);
+        assert_eq!(content(&v.app, v.ilabel), "Go!  ", "spaces kept");
+        let at = field(&mut v.app);
+        click(&mut v.app, &ctx, at);
+        frame(&mut v.app, &ctx, vec![key(egui::Key::End)]);
+        for _ in 0..5 {
+            frame(&mut v.app, &ctx, vec![key(egui::Key::Backspace)]);
+        }
+        frame(&mut v.app, &ctx, vec![key(egui::Key::Enter)]);
+        assert_eq!(content(&v.app, v.ilabel), "", "emptied");
+    }
+
+    /// **A *Mixed* boolean property turns on** (`[X10-L6-01]`): one click on the
+    /// toggle over two instances that differ sets both on, rather than flipping
+    /// each. Flip, run: the arm's `if mixed { true } else { !on }` made `!on`
+    /// fails "both on".
+    #[test]
+    fn a_mixed_boolean_property_turns_on() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut v = variants_fixture(&ctx);
+        with_a_toggle(&mut v);
+        let j = second_instance(&mut v, "Go");
+        let p = ondin_core::variant::instance_properties(&v.app.session.doc, j)
+            .into_iter()
+            .find(|p| p.value.name == "Interesante")
+            .unwrap()
+            .value;
+        let off = ondin_core::variant::set_property(
+            &v.app.session.doc,
+            &[j],
+            &p,
+            &ondin_core::variant::PropValue::Boolean(false),
+        );
+        assert!(v.app.session.commit(Transaction(off)));
+        v.app.session.selection.set(vec![v.i, j]);
+        let out = settle(&mut v.app, &ctx);
+        let label = texts(&out)
+            .into_iter()
+            .find(|(t, _)| t == "Interesante")
+            .expect("the toggle's row")
+            .1;
+        // The switch sits right of its label, at the field column.
+        let at = egui::pos2(label.right() + 40.0, label.center().y);
+        click(&mut v.app, &ctx, at);
+        let on = |id| {
+            matches!(
+                ondin_core::variant::property_state(&v.app.session.doc, id, &p),
+                Some((ondin_core::variant::PropValue::Boolean(true), _))
+            )
+        };
+        assert!(on(v.i) && on(j), "both on");
+    }
+
+    /// The set card's chip of `value`, after the card has settled.
+    fn chip(app: &mut OndinApp, ctx: &egui::Context, set: NodeId, value: &str) -> egui::Pos2 {
+        let out = settled(app, ctx, set);
+        texts(&out)
+            .into_iter()
+            .filter(|(t, r)| t == value && r.top() > 100.0)
+            .min_by(|a, b| a.1.top().total_cmp(&b.1.top()))
+            .expect("the chip")
+            .1
+            .center()
+    }
+
+    fn values(app: &OndinApp, set: NodeId) -> Vec<String> {
+        app.session.doc.get(set).unwrap().set().unwrap().props[0]
+            .values
+            .clone()
+    }
+
+    /// **A value chip's menu closes on a move** (`[X10-L1-02]`): it is keyed by
+    /// place, so left open after *Move later* it belonged to the neighbour — a
+    /// second *Move later* moved that one back, and *Delete* deleted it. And a
+    /// rename to a value the property has is refused, saying so (`[X10-L6-01]`).
+    ///
+    /// Flip, run: dropping the `ui.close()` beside *Move later* fails "the menu
+    /// closed".
+    #[test]
+    fn a_value_chips_menu_closes_on_a_move_and_refuses_a_taken_name() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut v = variants_fixture(&ctx);
+        let at = chip(&mut v.app, &ctx, v.set, "Small");
+        click(&mut v.app, &ctx, at);
+        let out = frame(&mut v.app, &ctx, Vec::new());
+        let row = texts(&out)
+            .into_iter()
+            .find(|(t, _)| t == "Move later")
+            .expect("the menu's row")
+            .1
+            .center();
+        click(&mut v.app, &ctx, row);
+        assert_eq!(values(&v.app, v.set), ["Large", "Small"]);
+        let out = settle(&mut v.app, &ctx);
+        assert!(
+            !texts(&out).iter().any(|(t, _)| t == "Move later"),
+            "the menu closed"
+        );
+        // Rename Small to Large through its menu.
+        let at = chip(&mut v.app, &ctx, v.set, "Small");
+        click(&mut v.app, &ctx, at);
+        let out = frame(&mut v.app, &ctx, Vec::new());
+        let field = texts(&out)
+            .into_iter()
+            .filter(|(t, _)| t == "Small")
+            .max_by(|a, b| a.1.top().total_cmp(&b.1.top()))
+            .expect("the menu's name field")
+            .1
+            .center();
+        click(&mut v.app, &ctx, field);
+        frame(&mut v.app, &ctx, vec![key(egui::Key::End)]);
+        for _ in 0..5 {
+            frame(&mut v.app, &ctx, vec![key(egui::Key::Backspace)]);
+        }
+        frame(&mut v.app, &ctx, vec![egui::Event::Text("Large".into())]);
+        frame(&mut v.app, &ctx, vec![key(egui::Key::Enter)]);
+        assert_eq!(values(&v.app, v.set), ["Large", "Small"], "unchanged");
+        assert_eq!(v.app.session.status().text, "That value is taken");
+    }
+
+    /// **A value renamed in its chip's menu and left by a canvas click commits**
+    /// (§15 D1003 (11), `[X10-L1-03]`) — D999's promise for a popover field that
+    /// commits. The click deselected the set, so the card — and the menu with it —
+    /// was not drawn again and its field never saw its focus go; the menu's field
+    /// now asks the inspector to hold. Through `eframe::App::ui`, as D999's own
+    /// test.
+    ///
+    /// Flips, run: no `hold_inspector` fails "renamed". ⚠️ **Dropping the closed
+    /// menu's `pending` commit stays green**: held, the field is drawn on the
+    /// click's own frame and commits by its blur. `pending` is the second defence,
+    /// for a menu that closes before its field is drawn.
+    #[test]
+    fn a_chip_rename_commits_when_a_canvas_click_closes_the_menu() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut v = variants_fixture(&ctx);
+        let mut wf = eframe::Frame::_new_kittest();
+        let mut pass = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1320.0, 820.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            ctx.run_ui(input, |ui| eframe::App::ui(app, ui, &mut wf))
+        };
+        fn click(
+            app: &mut OndinApp,
+            at: egui::Pos2,
+            pass: &mut dyn FnMut(&mut OndinApp, Vec<egui::Event>) -> egui::FullOutput,
+        ) -> egui::FullOutput {
+            let press = |pressed| egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            };
+            pass(app, vec![egui::Event::PointerMoved(at)]);
+            pass(app, vec![press(true)]);
+            pass(app, vec![press(false)])
+        }
+        fn settle(
+            app: &mut OndinApp,
+            pass: &mut dyn FnMut(&mut OndinApp, Vec<egui::Event>) -> egui::FullOutput,
+        ) -> egui::FullOutput {
+            let mut out = pass(app, Vec::new());
+            for _ in 0..3 {
+                out = pass(app, Vec::new());
+            }
+            out
+        }
+        v.app.session.selection.set_one(v.set);
+        let out = settle(&mut v.app, &mut pass);
+        let at = texts(&out)
+            .into_iter()
+            .filter(|(t, r)| t == "Small" && r.left() > 900.0)
+            .max_by(|a, b| a.1.top().total_cmp(&b.1.top()))
+            .expect("the chip")
+            .1
+            .center();
+        click(&mut v.app, at, &mut pass);
+        let out = settle(&mut v.app, &mut pass);
+        assert!(
+            texts(&out).iter().any(|(t, _)| t == "Move later"),
+            "the fixture: the menu is open"
+        );
+        let field = texts(&out)
+            .into_iter()
+            .filter(|(t, _)| t == "Small")
+            .max_by(|a, b| a.1.top().total_cmp(&b.1.top()))
+            .expect("the menu's name field")
+            .1
+            .center();
+        click(&mut v.app, field, &mut pass);
+        pass(&mut v.app, vec![key(egui::Key::End)]);
+        pass(&mut v.app, vec![egui::Event::Text("XY".into())]);
+        pass(&mut v.app, Vec::new());
+        click(&mut v.app, egui::pos2(600.0, 700.0), &mut pass);
+        settle(&mut v.app, &mut pass);
+        assert_eq!(values(&v.app, v.set), ["SmallXY", "Large"], "renamed");
+        assert!(
+            v.app.session.selection.ids().is_empty(),
+            "the click deselected"
+        );
+        assert!(v.app.inspector_hold.is_none(), "and the hold let go");
     }
 }

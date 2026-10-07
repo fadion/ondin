@@ -9785,13 +9785,19 @@ impl OndinApp {
             });
 
         // Hold what was drawn while a widget of the inspector's own layer keeps
-        // the focus — a popover's field is another layer and holds nothing — and
-        // give the selection the canvas made back once it does not.
+        // the focus — a popover's field is another layer and holds nothing,
+        // unless it commits and asked to (`variants::hold_inspector`, §15 D1003
+        // (11): a value chip's rename) — and give the selection the canvas made
+        // back once it does not.
         let focused = ctx.memory(|m| m.focused());
         let layer = egui::LayerId::new(egui::Order::Middle, area);
-        if focused
-            .and_then(|id| ctx.read_response(id))
-            .is_some_and(|r| r.layer_id == layer)
+        let popover = ctx
+            .data_mut(|d| d.remove_temp::<bool>(crate::panels::variants::hold_id()))
+            .is_some();
+        if popover
+            || focused
+                .and_then(|id| ctx.read_response(id))
+                .is_some_and(|r| r.layer_id == layer)
         {
             self.inspector_hold = Some(self.session.selection.clone());
         }

@@ -50,28 +50,68 @@ pub(crate) struct ValueDelete {
     pub(super) instances: usize,
 }
 
+/// What a [`committed_field`] holds its text to.
+#[derive(Clone, Copy)]
+struct Rules {
+    /// Shown greyed while the field is empty.
+    hint: &'static str,
+    /// Names are trimmed and never empty (a layer name typed empty is discarded
+    /// too, §15 D54); content is committed as typed, empty allowed (§15 D1003
+    /// (10): content is not a name, and ↺ is the way back to the main).
+    name: bool,
+    /// The selection's values differ: the field starts **empty**, the word
+    /// *Mixed* its hint, and only typing commits anything.
+    mixed: bool,
+}
+
+impl Rules {
+    const NAME: Self = Self {
+        hint: "",
+        name: true,
+        mixed: false,
+    };
+
+    fn commits(&self, buf: &str, current: &str) -> Option<String> {
+        let typed = if self.name { buf.trim() } else { buf };
+        if self.name && typed.is_empty() {
+            return None;
+        }
+        let seed = if self.mixed { "" } else { current };
+        (buf != seed && (self.mixed || typed != current)).then(|| typed.to_string())
+    }
+}
+
 /// A text field that edits `current` and answers the new text once, when the
 /// field gives its focus up with something new in it — `Escape` abandons, as every
 /// committed text field here does (`ui::defocus_commits`). The typed text lives in
-/// egui's memory under `id` while the field has focus, and nowhere after.
+/// egui's memory under `id` while the field has focus — and after, only when the
+/// field stopped being drawn with focus still on it ([`pending`]).
 ///
-/// It trims, and refuses an empty result — rules for names (a layer name typed
-/// empty is discarded too, §15 D54). Two rulings here are not built (§15 D1003):
-/// (10) a Text property's content is to commit as typed, empty allowed, not through
-/// this; and (11) a rename typed in a value chip's menu is to commit when the popup
-/// closes, where a canvas click drops it today.
-fn name_field(
+/// **One protocol for every field of these cards** (`[X10-L3-01]`): a property's
+/// name, a value's, a swap filter, and an instance's text content, each with its
+/// own [`Rules`]. The content row borrowed the name field's, which seeded its
+/// buffer with the word *Mixed* — so typing over a mixed selection wrote
+/// "MixOKed" to every instance (`[X10-L1-01]`) — and trimmed the content and
+/// refused it empty (`[X10-L1-04]`).
+fn committed_field(
     ui: &mut egui::Ui,
     id: egui::Id,
     current: &str,
     size: egui::Vec2,
     pt: f32,
-) -> Option<String> {
+    rules: Rules,
+) -> (egui::Response, Option<String>) {
+    let seed = if rules.mixed { "" } else { current };
     let mut buf = ui
         .data(|d| d.get_temp::<String>(id))
-        .unwrap_or_else(|| current.to_string());
+        .unwrap_or_else(|| seed.to_string());
+    let hint = if rules.mixed {
+        ui::MIXED_WORD
+    } else {
+        rules.hint
+    };
     let resp = ui
-        .push_id(id, |ui| ui::text_field(ui, size, &mut buf, "", pt))
+        .push_id(id, |ui| ui::text_field(ui, size, &mut buf, hint, pt))
         .inner;
     let focused = resp.has_focus();
     ui.data_mut(|d| {
@@ -83,7 +123,47 @@ fn name_field(
     });
     let done =
         ui::defocus_commits(&resp) || (focused && ui.input(|i| i.key_pressed(egui::Key::Enter)));
-    (done && buf.trim() != current && !buf.trim().is_empty()).then(|| buf.trim().to_string())
+    let out = if done {
+        rules.commits(&buf, current)
+    } else {
+        None
+    };
+    (resp, out)
+}
+
+/// Ask the inspector to hold the selection it drew this frame (§15 D999) for a
+/// field on a popover's own layer — which D999's layer test lets go of, so a
+/// popover can never pin the inspector — because this one commits (§15 D1003
+/// (11)). Read by `OndinApp::inspector_panel` at the end of the frame.
+pub(crate) fn hold_inspector(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.insert_temp(hold_id(), true));
+}
+
+/// Where [`hold_inspector`] leaves its field for the frame.
+pub(crate) fn hold_id() -> egui::Id {
+    egui::Id::new("inspector-popover-hold")
+}
+
+/// [`committed_field`] by name rules.
+fn name_field(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    current: &str,
+    size: egui::Vec2,
+    pt: f32,
+) -> Option<String> {
+    committed_field(ui, id, current, size, pt, Rules::NAME).1
+}
+
+/// What a [`committed_field`] was holding when it stopped being drawn with the
+/// focus still on it — a popover closed by a click elsewhere — taken, so it is
+/// answered once. `Escape` abandons it, as it abandons a field still drawn.
+fn pending(ui: &egui::Ui, id: egui::Id, current: &str, rules: Rules) -> Option<String> {
+    let buf = ui.data_mut(|d| d.remove_temp::<String>(id))?;
+    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        return None;
+    }
+    rules.commits(&buf, current)
 }
 
 /// A closed dropdown's face at [`ui::CONTROL_H`], in the `Ui` it is about to be
@@ -410,7 +490,12 @@ impl OndinApp {
                         egui::Button::new(egui::RichText::new(v).size(12.0))
                             .min_size(egui::vec2(0.0, CHIP_H)),
                     );
-                    egui::Popup::menu(&chip)
+                    // The rename field's id is the value's place, and the menu
+                    // closes on a move so a place never names another value
+                    // under an open menu (`[X10-L1-02]`: a second *Move later*
+                    // moved the neighbour back, and *Delete* deleted it).
+                    let field = egui::Id::new(("variant-value", set, pi, vi));
+                    let shown = egui::Popup::menu(&chip)
                         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
                         .gap(ui::MENU_GAP)
                         .show(|ui| {
@@ -421,10 +506,18 @@ impl OndinApp {
                             // canvas — the ⋯ menu's case (§15 D993).
                             ui.set_width(CHIP_MENU_W);
                             ui::menu_rows(ui);
-                            let id = ui.id().with(("variant-value", set, pi, vi));
-                            if let Some(n) =
-                                name_field(ui, id, v, egui::vec2(CHIP_MENU_W, ui::CONTROL_H), 12.0)
-                            {
+                            let (resp, renamed) = committed_field(
+                                ui,
+                                field,
+                                v,
+                                egui::vec2(CHIP_MENU_W, ui::CONTROL_H),
+                                12.0,
+                                Rules::NAME,
+                            );
+                            if resp.has_focus() {
+                                hold_inspector(ui.ctx());
+                            }
+                            if let Some(n) = renamed {
                                 match variant::rename_value(doc, set, pi, vi, &n) {
                                     Some(tx) => out = Some(tx),
                                     None => refused = Some("That value is taken"),
@@ -442,9 +535,11 @@ impl OndinApp {
                             };
                             if row(ui, "Move earlier", vi > 0) {
                                 out = variant::move_value(doc, set, pi, vi, vi - 1);
+                                ui.close();
                             }
                             if row(ui, "Move later", vi + 1 < n) {
                                 out = variant::move_value(doc, set, pi, vi, vi + 1);
+                                ui.close();
                             }
                             ui::menu_sep(ui);
                             // 3C: confirm only when variants use it, with exact
@@ -474,6 +569,20 @@ impl OndinApp {
                                 ui.close();
                             }
                         });
+                    // **A rename typed and left commits when the menu closes**
+                    // (§15 D1003 (11), `[X10-L1-03]`): a click on the canvas
+                    // closes the popup before its field can see its focus go,
+                    // and the inspector holds the set on screen for the frame
+                    // that takes (`hold_inspector`, D999's promise extended to a
+                    // popover field that commits).
+                    if shown.is_none()
+                        && let Some(n) = pending(ui, field, v, Rules::NAME)
+                    {
+                        match variant::rename_value(doc, set, pi, vi, &n) {
+                            Some(tx) => out = Some(tx),
+                            None => refused = Some("That value is taken"),
+                        }
+                    }
                 }
                 let add = ui.add(
                     egui::Button::new(
@@ -1130,16 +1239,28 @@ impl OndinApp {
                         if row_label(ui, &p.name, mark.as_ref()) {
                             out = Some(Transaction(reset.clone()));
                         }
-                        let text = match (&value, mixed) {
-                            (_, true) => "Mixed".to_string(),
-                            (PropValue::Text(t), false) => t.clone(),
+                        let text = match &value {
+                            PropValue::Text(t) => t.clone(),
                             _ => String::new(),
                         };
                         let w = ui.available_width();
                         let id = ui.id().with(("prop-text", first, p.name.as_str()));
-                        if let Some(t) =
-                            name_field(ui, id, &text, egui::vec2(w, ui::CONTROL_H), 12.0)
-                        {
+                        // Content, not a name: as typed, empty allowed (§15
+                        // D1003 (10)); over a mixed selection *Mixed* is the
+                        // hint and the field starts empty.
+                        let rules = Rules {
+                            hint: "",
+                            name: false,
+                            mixed,
+                        };
+                        if let (_, Some(t)) = committed_field(
+                            ui,
+                            id,
+                            &text,
+                            egui::vec2(w, ui::CONTROL_H),
+                            12.0,
+                            rules,
+                        ) {
                             out = Some(Transaction(variant::set_property(
                                 doc,
                                 roots,
@@ -1478,51 +1599,16 @@ impl OndinApp {
                     ) else {
                         return;
                     };
-                    // Off every property of this kind first, then onto the pick.
-                    let mut next: Vec<Keyed<Property>> = props.clone();
-                    for p in next.iter_mut().filter(|p| p.kind == *kind) {
-                        p.value.bound.retain(|b| *b != node);
-                    }
-                    if (1..=of_kind.len()).contains(&i) {
-                        let pick = of_kind[i - 1].id;
-                        if let Some(p) = next.iter_mut().find(|p| p.id == pick) {
-                            p.value.bound.push(node);
-                        }
-                    }
-                    let mut ops = vec![ondin_core::Operation::SetProperties {
+                    let pick = match i {
+                        0 => Bind::None,
+                        i if i == choices.len() - 1 => Bind::New(self.session.ids.mint_item()),
+                        i => Bind::To(of_kind[i - 1].id),
+                    };
+                    let next = rebind(&props, *kind, node, pick, &layer, &filter);
+                    out = Some(Transaction(vec![ondin_core::Operation::SetProperties {
                         id: owner,
-                        props: next.clone(),
-                    }];
-                    if i == choices.len() - 1 {
-                        let name = fresh_name(
-                            &next,
-                            &match kind {
-                                PropKind::Boolean => format!("Show {layer}"),
-                                PropKind::Text => format!("{layer} text"),
-                                PropKind::Swap | PropKind::Nested => layer.clone(),
-                            },
-                        );
-                        let item = self.session.ids.mint_item();
-                        next.push(Keyed::new(
-                            item,
-                            Property {
-                                name,
-                                kind: *kind,
-                                bound: vec![node],
-                                filter: match kind {
-                                    PropKind::Swap => filter.clone(),
-                                    PropKind::Boolean | PropKind::Text | PropKind::Nested => {
-                                        String::new()
-                                    }
-                                },
-                            },
-                        ));
-                        ops = vec![ondin_core::Operation::SetProperties {
-                            id: owner,
-                            props: next,
-                        }];
-                    }
-                    out = Some(Transaction(ops));
+                        props: next,
+                    }]));
                 });
             }
         });
@@ -1530,6 +1616,69 @@ impl OndinApp {
             self.commit_edit(tx);
         }
     }
+}
+
+/// What a binding dropdown was set to ([`rebind`]).
+#[derive(Clone, Copy, Debug)]
+enum Bind {
+    None,
+    /// The property with this item id.
+    To(ondin_core::ItemId),
+    /// *New property…*, made under this item id.
+    New(ondin_core::ItemId),
+}
+
+/// An owner's properties with `node` bound, for `kind`, as `pick` says — the
+/// decision [`OndinApp::bind_line`] commits, lifted out so a test can ask it
+/// (`[X10-L6-01]`: its flips left the whole suite green). The layer comes off
+/// **every** property of the kind first, so it is never bound twice for one
+/// field (which `variant::settle` would prune silently, losing the new
+/// binding); a new property is named for the layer — `Show {layer}`,
+/// `{layer} text`, the layer's name — made fresh among the others, and a swap
+/// property takes `filter`, the suggestion from the main the layer shows.
+fn rebind(
+    props: &[Keyed<Property>],
+    kind: PropKind,
+    node: NodeId,
+    pick: Bind,
+    layer: &str,
+    filter: &str,
+) -> Vec<Keyed<Property>> {
+    let mut next: Vec<Keyed<Property>> = props.to_vec();
+    for p in next.iter_mut().filter(|p| p.kind == kind) {
+        p.value.bound.retain(|b| *b != node);
+    }
+    match pick {
+        Bind::None => {}
+        Bind::To(id) => {
+            if let Some(p) = next.iter_mut().find(|p| p.id == id && p.kind == kind) {
+                p.value.bound.push(node);
+            }
+        }
+        Bind::New(item) => {
+            let name = fresh_name(
+                &next,
+                &match kind {
+                    PropKind::Boolean => format!("Show {layer}"),
+                    PropKind::Text => format!("{layer} text"),
+                    PropKind::Swap | PropKind::Nested => layer.to_string(),
+                },
+            );
+            next.push(Keyed::new(
+                item,
+                Property {
+                    name,
+                    kind,
+                    bound: vec![node],
+                    filter: match kind {
+                        PropKind::Swap => filter.to_string(),
+                        PropKind::Boolean | PropKind::Text | PropKind::Nested => String::new(),
+                    },
+                },
+            ));
+        }
+    }
+    next
 }
 
 /// The properties a shown nested instance `slot` brings to the card (4K's
@@ -1743,34 +1892,24 @@ fn new_swap_property(
     }]))
 }
 
-/// [`name_field`] for a swap property's filter, which may be cleared — an empty
-/// filter offers every main — and is hinted with what it does when it is.
+/// [`committed_field`] for a swap property's filter, trimmed like a name but
+/// which may be cleared — an empty filter offers every main — and is hinted with
+/// what it does when it is.
 fn filter_field(
     ui: &mut egui::Ui,
     id: egui::Id,
     current: &str,
     size: egui::Vec2,
 ) -> Option<String> {
-    let mut buf = ui
-        .data(|d| d.get_temp::<String>(id))
-        .unwrap_or_else(|| current.to_string());
-    let resp = ui
-        .push_id(id, |ui| {
-            ui::text_field(ui, size, &mut buf, "Every main", 12.0)
-        })
-        .inner
-        .on_hover_text("The picker offers the mains whose name starts with this");
-    let focused = resp.has_focus();
-    ui.data_mut(|d| {
-        if focused {
-            d.insert_temp(id, buf.clone());
-        } else {
-            d.remove::<String>(id);
-        }
-    });
-    let done =
-        ui::defocus_commits(&resp) || (focused && ui.input(|i| i.key_pressed(egui::Key::Enter)));
-    (done && buf.trim() != current).then(|| buf.trim().to_string())
+    // Trimmed like a name, but empty allowed: an empty filter offers every main.
+    let rules = Rules {
+        hint: "Every main",
+        name: false,
+        mixed: false,
+    };
+    let (resp, typed) = committed_field(ui, id, current, size, 12.0, rules);
+    resp.on_hover_text("The picker offers the mains whose name starts with this");
+    typed.map(|t| t.trim().to_string()).filter(|t| t != current)
 }
 
 /// A property's value as a row or a tooltip says it — a swap's by its main's name.
@@ -1813,5 +1952,96 @@ fn plural(n: usize, what: &str) -> String {
     match n {
         1 => format!("1 {what}"),
         n => format!("{n} {what}s"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ondin_core::IdSource;
+
+    /// **A binding dropdown's decision** (`[X10-L6-01]`): picking a property of
+    /// the kind moves the layer to it — off the other, never on both — *None*
+    /// takes it off, and *New property…* makes one named for the layer, fresh
+    /// among the others, a swap property with the suggested filter.
+    ///
+    /// Flips, run: never unbinding (`retain(|_| true)`) fails "off the first";
+    /// the new property's name not made fresh fails "made fresh".
+    #[test]
+    fn a_binding_moves_the_layer_and_a_new_property_is_named_for_it() {
+        let mut ids = IdSource::new(0xBB);
+        let (x, other) = (ids.mint(), ids.mint());
+        let (a, b, t) = (ids.mint_item(), ids.mint_item(), ids.mint_item());
+        let prop = |name: &str, kind, bound: Vec<NodeId>| Property {
+            name: name.into(),
+            kind,
+            bound,
+            filter: String::new(),
+        };
+        let props = vec![
+            Keyed::new(a, prop("Show icon", PropKind::Boolean, vec![x])),
+            Keyed::new(b, prop("Show Label", PropKind::Boolean, vec![other])),
+            Keyed::new(t, prop("Text", PropKind::Text, vec![x])),
+        ];
+        let bound_to =
+            |ps: &[Keyed<Property>], id| ps.iter().find(|p| p.id == id).unwrap().bound.clone();
+        let next = rebind(&props, PropKind::Boolean, x, Bind::To(b), "Label", "");
+        assert_eq!(bound_to(&next, a), Vec::<NodeId>::new(), "off the first");
+        assert_eq!(bound_to(&next, b), vec![other, x], "onto the pick");
+        assert_eq!(bound_to(&next, t), vec![x], "another kind untouched");
+
+        let next = rebind(&props, PropKind::Boolean, x, Bind::None, "Label", "");
+        assert!(bound_to(&next, a).is_empty() && bound_to(&next, b) == vec![other]);
+
+        let fresh = ids.mint_item();
+        let next = rebind(&props, PropKind::Boolean, x, Bind::New(fresh), "Label", "");
+        let made = next.iter().find(|p| p.id == fresh).unwrap();
+        assert_eq!(made.name, "Show Label 2", "made fresh");
+        assert_eq!(made.bound, vec![x]);
+        assert!(bound_to(&next, a).is_empty(), "and off the old one");
+
+        let swap = ids.mint_item();
+        let next = rebind(&props, PropKind::Swap, x, Bind::New(swap), "Icon", "Icons");
+        let made = next.iter().find(|p| p.id == swap).unwrap();
+        assert_eq!(
+            (made.name.as_str(), made.filter.as_str()),
+            ("Icon", "Icons")
+        );
+    }
+
+    /// **The text fields' rules** (`[X10-L1-01]`, `[X10-L1-04]`, §15 D1003
+    /// (10)): a name trims and is never empty; content keeps its spaces and may
+    /// be emptied; over a mixed selection the field starts empty and only typing
+    /// commits. Flip, run: content trimmed (`name: true`) fails "spaces kept".
+    #[test]
+    fn a_field_commits_by_its_rules() {
+        let content = Rules {
+            hint: "",
+            name: false,
+            mixed: false,
+        };
+        assert_eq!(
+            Rules::NAME.commits("  Large ", "Small"),
+            Some("Large".into())
+        );
+        assert_eq!(
+            Rules::NAME.commits("   ", "Small"),
+            None,
+            "a name is never empty"
+        );
+        assert_eq!(Rules::NAME.commits(" Small ", "Small"), None, "unchanged");
+        assert_eq!(
+            content.commits("Go  ", "Go"),
+            Some("Go  ".into()),
+            "spaces kept"
+        );
+        assert_eq!(content.commits("", "Go"), Some(String::new()), "emptied");
+        assert_eq!(content.commits("Go", "Go"), None);
+        let mixed = Rules {
+            mixed: true,
+            ..content
+        };
+        assert_eq!(mixed.commits("", ""), None, "untouched");
+        assert_eq!(mixed.commits("OK", "Go"), Some("OK".into()));
     }
 }

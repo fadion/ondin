@@ -2850,8 +2850,8 @@ impl OndinApp {
             // row. The session's ruling under the maintainer's delegation: over a
             // nested frame, into it, the rule every other layer drops by.
             if let Some(nested) = self
-                .frame_covering(landed)
-                .filter(|d| *d != p && !ondin_core::is_within(doc, *d, id))
+                .frame_covering_except(landed, id)
+                .filter(|d| *d != p)
                 .filter(|d| ondin_core::is_within(doc, *d, p))
             {
                 return Some(nested);
@@ -2880,10 +2880,13 @@ impl OndinApp {
         // than landing on the root the group is not.
         if let Some(fence) = group_fence(doc, id) {
             let destination = self.with_frames(|i| {
+                // Never the moved layer or a frame inside it (§15 D997, see
+                // `frame_covering_except`).
                 let inside: Vec<(NodeId, KRect)> = i
                     .boxes
                     .iter()
                     .filter(|(f, _)| ondin_core::is_within(doc, *f, fence))
+                    .filter(|(f, _)| !ondin_core::is_within(doc, *f, id))
                     .copied()
                     .collect();
                 frame_covering(landed, &inside)
@@ -2892,11 +2895,10 @@ impl OndinApp {
         }
         // A frame cannot land in itself or in anything it contains — a frame dragged
         // across its own box covers most of every frame inside it, and `Reparent`
-        // would bounce that as a cycle *after* the drop outline had promised it.
-        let destination = self
-            .frame_covering(landed)
-            .filter(|d| !ondin_core::is_within(doc, *d, id))
-            .unwrap_or(root);
+        // would bounce that as a cycle *after* the drop outline had promised it —
+        // and it is left out **before** the topmost frame is chosen, or the moved
+        // frame was the one chosen and the answer was the canvas (§15 D997).
+        let destination = self.frame_covering_except(landed, id).unwrap_or(root);
         (Some(destination) != parent).then_some(destination)
     }
 
@@ -3195,20 +3197,38 @@ impl OndinApp {
         Transaction(ops)
     }
 
-    /// The frame that owns `bounds`, out of the document's artboards.
-    fn frame_covering(&self, bounds: KRect) -> Option<NodeId> {
+    /// The frame that owns `bounds` for a move of `moved`, out of the document's
+    /// artboards **but `moved` and those inside it**.
+    ///
+    /// 🚨 **Excluded before the topmost is chosen, not filtered out of the answer
+    /// afterwards** (§15 D997). A moved frame is itself an artboard lying over its
+    /// own moved box, and the topmost such — so the old
+    /// `frame_covering(landed).filter(not within moved)` chose the frame being
+    /// moved, threw it away, and answered nothing, which every caller read as the
+    /// canvas: a variant nudged a few points left its set on the first frame of
+    /// the drag. A frame cannot land in itself or anything it holds, and the frame
+    /// it sits in is still a candidate underneath.
+    fn frame_covering_except(&self, bounds: KRect, moved: NodeId) -> Option<NodeId> {
+        let doc = &self.session.doc;
         // 🚨 **Through the memo, and this is the site the whole of §15 D616 is
         // about** (`[S12.2-L4-04]`). This built the pair list from scratch on every
         // call, and it is called *per selected node, per call* out of
         // `move_destination` — twice a frame during a move and three times with Alt
         // held. Measured in release at 16,000 nodes: a twenty-layer drag was
         // **6.07 ms/frame** and **9.11 with Alt**, of which essentially all was the
-        // document walk behind `artboards()`.
-        self.with_frames(|i| frame_covering(bounds, &i.boxes))
+        // document walk behind `artboards()`. The filter below walks the frames
+        // alone, not the document.
+        self.with_frames(|i| {
+            let others: Vec<(NodeId, KRect)> = i
+                .boxes
+                .iter()
+                .filter(|(f, _)| !ondin_core::is_within(doc, *f, moved))
+                .copied()
+                .collect();
+            frame_covering(bounds, &others)
+        })
     }
 
-    /// The resize transaction for whatever kind of node is being dragged: a
-    /// geometry edit on a shape, a recursive scale on a container.
     /// The snapped pointer position for a resize, and the lines explaining it.
     ///
     /// Snapping the *pointer* rather than the resulting box is what keeps the
@@ -3364,7 +3384,13 @@ impl OndinApp {
         Some((sx * sy).abs().sqrt() * 100.0)
     }
 
-    /// The resize transaction for whatever is being dragged.
+    /// The resize transaction for whatever kind of node is being dragged: a
+    /// geometry edit on a shape, a recursive scale on a container.
+    ///
+    /// ⚠️ **Those two lines sat at the head of [`Self::snapped_resize`]'s doc until
+    /// 2026-10-07**, above that function's own summary — a doc split from this one
+    /// when `snapped_resize` was inserted between, found by reading the run beside
+    /// `frame_covering_except` while adding it (§15 D997).
     ///
     /// `opts.keep_ratio` is [`Self::keep_ratio`], `opts.symmetric` is Alt — the box
     /// grows about its own centre rather than away from the opposite edge.
@@ -24568,6 +24594,63 @@ mod group_fence_tests {
             app.move_destination(loose, Vec2::new(-390.0, -590.0)),
             Some(b),
             "a loose shape goes into a card in a row"
+        );
+    }
+
+    /// **A frame nudged inside the frame that holds it stays there** (§15 D997) —
+    /// a 300×300 set frame holding a 100×100 variant frame at (10, 10), the
+    /// variant moved 4 points right. The maintainer's report: the variant left its
+    /// set on the first nudge, and the set was left empty.
+    ///
+    /// The cause was the order of two steps: `frame_covering` picked the
+    /// **topmost** frame covering the moved box — the variant itself, which is
+    /// a frame and lies over its own moved box — and only then was a frame inside
+    /// the moved one filtered out, leaving no answer and so the root. The moved
+    /// frame and its contents are now excluded before the topmost is taken.
+    ///
+    /// **Flip run**, the filter moved back after `frame_covering`: fails at
+    /// *"a nudge keeps it in its set"* with `Some(root)`, the predicted site. A
+    /// drag clear of the set still goes to the page, and onto a second frame
+    /// still goes in, so the repair does not pin a frame to its parent.
+    #[test]
+    fn a_frame_nudged_inside_its_parent_frame_stays_in_it() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0xFA5E);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let (set, variant, other) = (ids.mint(), ids.mint(), ids.mint());
+        let create = |id, parent, w, at: (f64, f64)| Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(w, w),
+            },
+            transform: Some(Affine::translate(at)),
+            name: None,
+        };
+        doc.apply(&Transaction(vec![
+            create(set, root, 300.0, (0.0, 0.0)),
+            create(variant, set, 100.0, (10.0, 10.0)),
+            create(other, root, 300.0, (1000.0, 0.0)),
+        ]))
+        .expect("the tree");
+        app.session.adopt_document(doc, None);
+        assert_eq!(
+            app.move_destination(variant, Vec2::new(4.0, 0.0)),
+            None,
+            "a nudge keeps it in its set"
+        );
+        assert_eq!(
+            app.move_destination(variant, Vec2::new(0.0, 600.0)),
+            Some(root),
+            "clear of the set, onto the page"
+        );
+        assert_eq!(
+            app.move_destination(variant, Vec2::new(1100.0, 0.0)),
+            Some(other),
+            "onto another frame, into it"
         );
     }
 

@@ -2514,6 +2514,7 @@ impl eframe::App for OndinApp {
         if ctx.input(|i| i.pointer.any_pressed()) {
             self.session.end_edit_run();
         }
+        self.leave_a_scope_the_selection_left();
 
         // Whether this frame's `Tab` was **ours** — the keymap was open and the
         // node tool had a path, or a text session was live — which is asked here and
@@ -3576,7 +3577,10 @@ impl OndinApp {
             // state that survives it. The pivots it was placing stay placed;
             // Escape puts the handle away, it does not undo the work.
             self.show_pivot = false;
-        } else if let Some(group) = self.entered_group.take() {
+        } else if let Some(group) = {
+            self.leave_a_scope_the_selection_left();
+            self.entered_group.take()
+        } {
             // Step back out of the group and select it, which is where the
             // double-click that entered it came from.
             self.session.selection.set_one(group);
@@ -3584,6 +3588,28 @@ impl OndinApp {
             self.choose_tool(Tool::Select);
         } else {
             self.session.selection.clear();
+        }
+    }
+
+    /// Clear [`Self::entered_group`] when the selection has left it — something is
+    /// selected and none of it is within the group. Run at the top of every
+    /// editor frame and by `Escape` before its rung.
+    ///
+    /// **One check for every door that moves the selection** (`[X11.1-L1-02]`,
+    /// `[X11.2-L1-02]`): the scope was cleared by a canvas click outside it, a
+    /// marquee and a few more, and not by *Go to main*, *Select all instances*,
+    /// a layers-panel pick, a detach or an undo — so after *Go to main* the
+    /// entered instance kept its dashed edge and *"Editing inside instance · Esc
+    /// to exit"* (§15 D985), and the advertised `Esc` yanked the selection back
+    /// to it. An empty selection keeps the scope: `Escape` steps out of it next.
+    pub(crate) fn leave_a_scope_the_selection_left(&mut self) {
+        let Some(g) = self.entered_group else { return };
+        let doc = &self.session.doc;
+        let ids = self.session.selection.ids();
+        if !doc.contains(g)
+            || (!ids.is_empty() && !ids.iter().any(|id| ondin_core::is_within(doc, *id, g)))
+        {
+            self.entered_group = None;
         }
     }
 
@@ -20161,6 +20187,33 @@ mod component_verb_tests {
         assert_eq!(app.session.doc.get(two).unwrap().link(), Some(m));
     }
 
+    /// **Leaving an entered instance by another door leaves its scope**
+    /// (`[X11.1-L1-02]`, `[X11.2-L1-02]`): after *Go to main* from inside the
+    /// instance the selection is the main's layer, and `Escape` — which the stale
+    /// banner advertised — clears it rather than yanking it back to the instance.
+    /// Flip, run: `leave_a_scope_the_selection_left` answering nothing fails "the
+    /// scope is left" (and, past it, `Escape` selects the instance again).
+    #[test]
+    fn going_to_the_main_leaves_the_entered_instance() {
+        let ctx = egui::Context::default();
+        let (mut app, m, i) = main_and_instance(&ctx);
+        app.session.selection.set_one(i);
+        app.enter_action();
+        assert_eq!(app.entered_group, Some(i), "the fixture: entered");
+        app.go_to_main();
+        let on_main = app.session.selection.single().expect("the main's layer");
+        assert!(ondin_core::is_within(&app.session.doc, on_main, m));
+        app.leave_a_scope_the_selection_left();
+        assert_eq!(app.entered_group, None, "the scope is left");
+        app.entered_group = Some(i);
+        app.escape(&ctx);
+        assert_ne!(
+            app.session.selection.single(),
+            Some(i),
+            "the main's layer stays selected"
+        );
+    }
+
     /// **`Enter` steps into an instance** (§15 D981 (c)), as the double-click does
     /// — D228's rule that the two agree — whatever its kind: a frame instance,
     /// which `Enter` never reached before, is entered and its topmost layer
@@ -20396,6 +20449,31 @@ mod component_verb_tests {
             app.overridden_property_of_selection().map(|p| p.name),
             Some("Icon".to_string())
         );
+        // **And the menu a user opens on it draws the row** (`[X11.2-L1-01]`): the
+        // copy is an instance root, so `layer_menu` takes its `Role::Instance` arm,
+        // which drew *Go to main* and *Reset instance* and never the property's
+        // row. Built through `open_context_menu` → `menu_context` → `build`, not a
+        // synthetic `Context`. Flip, run: the arm's `property_reset` push deleted
+        // fails here, "the instance arm offers Reset Icon".
+        app.open_context_menu(
+            &ctx,
+            crate::menu::Target::Layer {
+                id: r,
+                door: crate::menu::Door::Canvas,
+            },
+            None,
+        );
+        let labels: Vec<String> = app
+            .open_menu_rows()
+            .iter()
+            .flatten()
+            .map(|row| row.label.to_string())
+            .collect();
+        assert!(
+            labels.iter().any(|l| l == "Reset Icon"),
+            "the instance arm offers Reset Icon: {labels:?}"
+        );
+        app.context_menu = None;
         app.reset_selected_property();
         assert_eq!(app.session.doc.get(r).unwrap().swap(), None);
     }

@@ -1848,6 +1848,18 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
         }
         Role::Instance => {
             rows.push(Row::new(Item::GoToMain));
+            // A nested copy bound to a swap or visibility property is an instance
+            // root itself, and its property its outer instance's
+            // (`overridden_property_and_root`'s climb, §15 D983) — the row the
+            // record said was there and only the member arm drew
+            // (`[X11.2-L1-01]`).
+            if let Some(prop) = &cx.property_reset {
+                rows.push(
+                    Row::new(Item::ResetProperty)
+                        .label(format!("Reset {prop}"))
+                        .dim_if(locked, why),
+                );
+            }
             if cx.drifted {
                 rows.push(Row::new(Item::ResetInstance).dim_if(locked, why));
             }
@@ -2678,6 +2690,23 @@ impl OndinApp {
         } else if let Some(menu) = self.context_menu.as_mut() {
             menu.just_opened = false;
         }
+    }
+
+    /// The rows the open menu draws this frame — `context_menu_ui`'s own
+    /// `build(&self.menu_context(..))`, for a test that wants the menu a user sees
+    /// rather than a synthetic `Context` (`[X11.2-L6-03]`). Plain backticks: the
+    /// item is `cfg(test)`, which the doc gate cannot see (§15 D319).
+    #[cfg(test)]
+    pub(crate) fn open_menu_rows(&self) -> Vec<Vec<Row>> {
+        let menu = self.context_menu.as_ref().expect("a menu is open");
+        let kinds: Vec<Kind> = self
+            .session
+            .selection
+            .ids()
+            .iter()
+            .filter_map(|id| self.session.doc.get(*id).map(|n| Kind::of(n.kind())))
+            .collect();
+        build(&self.menu_context(menu, &kinds))
     }
 
     /// Everything the registry needs to know about the app, read once.
@@ -4022,11 +4051,19 @@ mod tests {
                 Role::Set,
                 &["Add variant", "Select all instances"],
             ),
+            // A nested copy bound to a property is an instance root whose property
+            // is its outer instance's, so the instance arm carries the property's
+            // row where the member arm does (`[X11.2-L1-01]`).
             (
                 "an instance",
                 Kind::Frame,
                 Role::Instance,
-                &["Go to main component", "Reset all", "Detach instance"],
+                &[
+                    "Go to main component",
+                    "Reset Label text",
+                    "Reset all",
+                    "Detach instance",
+                ],
             ),
             (
                 "a child in an instance",

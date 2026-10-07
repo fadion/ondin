@@ -1,7 +1,7 @@
 //! Resetting an instance to its main (§5.3d's reset family, build step 5,
 //! `ondin_core::reset`): overrides found by comparing a copy with its source, and
-//! each reset writing the source back without deleting anything of the instance's
-//! own.
+//! each reset writing the source back; a layer of the instance's own survives
+//! every reset, and a list item of its own goes with a list reset (§15 D994).
 
 use ondin_core::Brush;
 use ondin_core::kurbo::{Affine, RoundedRectRadii, Size};

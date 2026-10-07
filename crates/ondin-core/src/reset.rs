@@ -13,8 +13,9 @@
 //!   sources' order, and resetting it puts them back in the slots they occupy
 //!   ([`reset_order`]).
 //!
-//! **No reset deletes a local addition** (§15 D981 (1)): a layer of the instance's
-//! own keeps its place, a list item of its own its anchor.
+//! **No reset deletes a local layer** (§15 D981 (1)): a layer of the instance's
+//! own keeps its place. A list reset is the source's list, and the copy's own
+//! items go with it (§15 D994, `[X4-L2-01]`).
 //!
 //! **Reading a node as operations.** [`state_ops`] writes every field the
 //! propagation pass carries as the operation that would set it, so a copy and its
@@ -213,8 +214,8 @@ fn kind_ops(id: NodeId, kind: &NodeKind) -> Vec<Operation> {
 /// A plain value is one unit. A struct payload (a text style, insets, a layout
 /// item) counts each field that differs, at any depth, so a typography card with
 /// four overrides says four. A keyed list counts each of its source's items the
-/// copy changed or removed, and one more where it reordered them; the copy's own
-/// items are local additions, not overrides, and count nothing.
+/// copy changed or removed, one more where it reordered them, and each item of
+/// the copy's own as one too, since a list reset removes it (§15 D994).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Override {
     pub reset: Operation,
@@ -806,7 +807,8 @@ fn order_target(doc: &Document, p: NodeId) -> Option<Vec<NodeId>> {
 // ── The resets ─────────────────────────────────────────────────────────────────
 
 /// *Reset fields*: every overridden field at or under each scope, written back to
-/// its source's value. Local additions are untouched; a list keeps its own items.
+/// its source's value. Local layers are untouched; a list becomes its source's
+/// list, the copy's own items going with the rest (§15 D994).
 pub fn reset_fields(doc: &Document, scopes: &[NodeId]) -> Vec<Operation> {
     scopes
         .iter()

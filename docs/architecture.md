@@ -2336,7 +2336,9 @@ a main, an instance, several instances of one main or of several, instances amon
 child's one line — the child's line and the mixed selection's, with the binding line, rows inside the
 identity card since §15 D995 (`ComponentPart::Identity`). Its counts are `reset::Drift`, cached on `EditorSession::revision`
 (`OndinApp::drift_cache` — the cache the sentence above asks for, for drift alone, which the menu's
-rows read too), its resets commit through `commit_edit` as every ink-changing inspector edit does
+rows read too — and since `1e77a22` its property readings beside it on the same key,
+`OndinApp::prop_cache`, a property row's reset built only where the row is overridden; §15 D981's
+amendment), its resets commit through `commit_edit` as every ink-changing inspector edit does
 (`OndinApp::reset_tx`), and **its drift summary counts fields, removed children and order** —
 everything *Reset all* undoes — not fields alone (the session's, ~~open to overturning~~ accepted in
 the blanket ruling of 2026-10-06, §15's header). ✅ **The
@@ -2370,7 +2372,9 @@ lists them.~~ ✅ **The fields left unmarked were ruled on 2026-10-06** (the mai
 last amendment): **marked** since — Position's centre buttons, compared on the auto margins alone and
 reset as the main's whole axis; the bold and italic toggles, through `ui::field_button_marked`,
 ⚠️ where a click on a marked toggle is its reset and not the toggle, unlike a switch row's; the Type
-popup, one mark per section label comparing the fields that section writes (`section_marked`), the
+popup, one mark per section label comparing the fields that section writes (`section_marked`) —
+*Optical size*, *Axes* and the face each a disjoint part of `variations`, reset in the main's order
+(`axes_reset`), since `propagate` and the reset compare the list in order (§15 D981's amendment) — the
 *Sizing* mark on the mode alone, and word spacing, baseline shift and *Optical margins* marked per
 control — still on the node's own style, paragraph and block, never a run's; and the multi-selection
 radius over the selection's subtree. **Decided not to be**: the multi-selection Transform card, each

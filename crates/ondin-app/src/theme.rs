@@ -150,7 +150,8 @@ pub mod color {
     /// The **key layer** outline: the one member of a selection that align aligns
     /// to and that a boolean takes as its base.
     ///
-    /// **The one place a second chrome hue is right, and it has to be one.** §15
+    /// **The first place a second chrome hue was right, and it has to be one** —
+    /// `MEASURE` and `COMPONENT` have joined it since (§15 D13, D1001). §15
     /// D13 reserves [`SELECT`] for "the app is talking about the selection" and
     /// says to derive anything that wants it faded rather than paste a fourth
     /// literal — but a shade of `SELECT` cannot work here, because every other
@@ -165,6 +166,29 @@ pub mod color {
     /// too desaturated to hold its own beside the blue, and read as lost rather
     /// than as a second statement.
     pub const KEY: Color32 = Color32::from_rgb(0xd2, 0x64, 0xc8);
+
+    /// **A component's hue on the canvas** — the outline, the handles, the size
+    /// badge and the hover outline of a main or an instance, the main's chip and
+    /// the instance's tag (§15 D1001, the maintainer's look): a violet in
+    /// [`SELECT`]'s register, light for its reason, so *this is a component*
+    /// reads before the panel says it, and stands off the greys every design is
+    /// full of. A set keeps `SELECT` and its neutral tab, and a layer inside a
+    /// component keeps `SELECT`.
+    ///
+    /// ⚠️ **It overturns D981's "component-ness by shape, never by hue"** — what
+    /// stands of D981 is that a component's label does not change hue on
+    /// selection.
+    pub const COMPONENT: Color32 = Color32::from_rgb(0xa7, 0x8b, 0xfa);
+    /// [`COMPONENT`] at [`SELECT_DIM`]'s alpha, for a multi-selection's box and
+    /// the secondary words of an instance's tag.
+    pub const COMPONENT_DIM: Color32 =
+        Color32::from_rgba_unmultiplied_const(COMPONENT.r(), COMPONENT.g(), COMPONENT.b(), 0x8c);
+    /// Ink on a [`COMPONENT`] badge or chip, for [`BADGE_INK`]'s reason.
+    pub const COMPONENT_INK: Color32 = Color32::from_rgb(0x1e, 0x12, 0x3d);
+    /// [`COMPONENT_INK`] faded, for the secondary words on a main's chip — its
+    /// instance count.
+    pub const COMPONENT_INK_DIM: Color32 =
+        Color32::from_rgba_unmultiplied_const(0x1e, 0x12, 0x3d, 0xa6);
 
     /// [`SELECT`] at an alpha, premultiplied.
     ///

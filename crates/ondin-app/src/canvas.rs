@@ -8358,8 +8358,9 @@ impl OndinApp {
 
         // 3px, against the selection box's 1.2: the hover outline is a
         // transient answer to "what would this click take", so it has to be
-        // readable at a glance over artwork of any colour.
-        let stroke = egui::Stroke::new(3.0, color::SELECT);
+        // readable at a glance over artwork of any colour. A component's in its
+        // own hue (§15 D1001).
+        let stroke = egui::Stroke::new(3.0, chrome_hue(&self.session.doc, target));
         self.stroke_outlines(
             painter,
             target,
@@ -9747,6 +9748,14 @@ impl OndinApp {
         if !tagged {
             return None;
         }
+        // **No tag inside an instance, nor on an instance inside a main** (§15
+        // D1001, the maintainer's look) — see `tag_withheld`. A nested instance's
+        // corner sat 12 × zoom below its main's corner, so zooming out slid its
+        // tag under the main's chip and part of it showed through. A main keeps
+        // its chip wherever it is, being its only handle.
+        if !is_main && tag_withheld(&self.session.doc, id) {
+            return None;
+        }
         // A hidden frame has no name tag. The tag is the one piece of a frame that
         // is drawn *outside* it, so it was the one piece the renderer's own
         // visibility check never reached — switching a frame off emptied its box and
@@ -9798,11 +9807,11 @@ impl OndinApp {
                 words(&mut job, &count, 8.0, theme::text::DIM);
             }
         } else if is_main {
-            // A main (§15 D981): the **filled** hexagon on a neutral chip. The
-            // outline glyph is laid out unpainted to hold its cell, and
-            // `draw_frame_labels` fills it (`ui::paint_hexagon_filled`) — Phosphor
-            // Regular has no filled one (§15 D10, D985). A clash's warning first,
-            // and the instance count while the main is selected.
+            // A main (§15 D981): the **filled** hexagon on a violet chip (§15
+            // D1001). The outline glyph is laid out unpainted to hold its cell,
+            // and `draw_frame_labels` fills it (`ui::paint_hexagon_filled`) —
+            // Phosphor Regular has no filled one (§15 D10, D985). A clash's
+            // warning first, and the instance count while the main is selected.
             if clashing {
                 glyph(&mut job, icon::WARNING, egui::Color32::PLACEHOLDER);
             }
@@ -9814,12 +9823,21 @@ impl OndinApp {
                     1 => "1 instance".to_string(),
                     n => format!("{n} instances"),
                 };
-                words(&mut job, &count, 8.0, theme::text::DIM);
+                words(&mut job, &count, 8.0, color::COMPONENT_INK_DIM);
             }
         } else if ondin_core::component::instance_root(doc, id) == Some(id) {
-            // An instance (§15 D981): the outline hexagon and a bare label. Renamed,
-            // it trails its main's name in grey; entered, the label is a path to
-            // the layer selected inside it.
+            // An instance (§15 D981): the outline hexagon and a bare label, violet
+            // (§15 D1001). Renamed, it trails its main's name, dimmer; entered, the
+            // label is a path to the layer selected inside it.
+            //
+            // **Only while it is selected or entered** (§15 D1002, the
+            // maintainer's ruling) — where a frame's name and a main's chip always
+            // show. A page of instances each wearing its tag was clutter that
+            // made the design hard to read; and an instance picks like a group
+            // (§15 D981 (b)), so the tag was never its handle.
+            if !self.session.selection.contains(id) && self.entered_instance() != Some(id) {
+                return None;
+            }
             glyph(&mut job, icon::HEXAGON, egui::Color32::PLACEHOLDER);
             let main_name = ondin_core::component::main_of(doc, id)
                 .and_then(|m| doc.get(m))
@@ -9833,13 +9851,13 @@ impl OndinApp {
             match inside {
                 Some(child) => {
                     words(&mut job, node.name(), 4.0, egui::Color32::PLACEHOLDER);
-                    words(&mut job, "›", 5.0, theme::text::DIM);
+                    words(&mut job, "›", 5.0, color::COMPONENT_DIM);
                     words(&mut job, child.name(), 5.0, egui::Color32::PLACEHOLDER);
                 }
                 None => {
                     words(&mut job, node.name(), 4.0, egui::Color32::PLACEHOLDER);
                     if !main_name.is_empty() && main_name != node.name() {
-                        words(&mut job, &main_name, 6.0, theme::text::DIM);
+                        words(&mut job, &main_name, 6.0, color::COMPONENT_DIM);
                     }
                 }
             }
@@ -9896,6 +9914,22 @@ impl OndinApp {
             .and_then(|g| ondin_core::component::instance_root(&self.session.doc, g))
     }
 
+    /// The hue of the chrome that belongs to the whole selection — its handles
+    /// and its size badge (§15 D1001): `COMPONENT` when every selected layer is a
+    /// main or an instance, `SELECT` otherwise.
+    fn selection_hue(&self) -> egui::Color32 {
+        let ids = self.session.selection.ids();
+        if !ids.is_empty()
+            && ids
+                .iter()
+                .all(|id| chrome_hue(&self.session.doc, *id) == color::COMPONENT)
+        {
+            color::COMPONENT
+        } else {
+            color::SELECT
+        }
+    }
+
     /// Where the `+` of the one selected **component set** sits on screen (§15
     /// D982, the design's 1C) — the middle of its bottom edge — or `None` when
     /// the selection is not a single set on screen.
@@ -9938,8 +9972,9 @@ impl OndinApp {
         painter.line_segment([at - egui::vec2(0.0, arm), at + egui::vec2(0.0, arm)], s);
     }
 
-    /// The components chrome over the artwork (§15 D981) — neutral throughout,
-    /// component-ness being carried by shape and never by the accent:
+    /// The components chrome over the artwork (§15 D981) — neutral, though a
+    /// main's or an instance's outlines, chip and tag are violet since §15 D1001
+    /// (drawn with the selection, the hover and the labels, not here):
     /// - **a selected main's instances** each get a hairline round their box, so
     ///   *where is this used* is answered by looking;
     /// - **an entered instance** keeps a dashed boundary while it is entered, so it
@@ -10001,17 +10036,13 @@ impl OndinApp {
             let Some((label, galley)) = self.frame_label(ui, id, rect, ppp) else {
                 continue;
             };
-            // A main's chip and its filled hexagon (§15 D981), **never the
-            // selection's hue** — the maintainer's ruling for a component's label,
-            // as the set's tab below keeps it.
+            // A main's chip and its filled hexagon (§15 D981), **violet** (§15
+            // D1001, the maintainer's look: a neutral chip and a grey label were
+            // lost against the greys every design is full of) — and still **no
+            // change of hue on selection**, D981's ruling for a component's label,
+            // which the set's neutral tab below keeps too.
             if self.session.doc.get(id).is_some_and(|n| n.component()) {
-                painter.rect(
-                    label,
-                    3.0,
-                    theme::color::CARD,
-                    egui::Stroke::new(1.0, theme::color::CARD_BORDER),
-                    egui::StrokeKind::Inside,
-                );
+                painter.rect_filled(label, 3.0, color::COMPONENT);
                 let at = label.min + CHIP_PAD;
                 if let Some(cell) = galley.rows.first().and_then(|r| {
                     r.glyphs
@@ -10026,15 +10057,15 @@ impl OndinApp {
                         painter,
                         at + cell.center().to_vec2() - egui::vec2(0.0, 1.0),
                         LABEL_PT,
-                        theme::text::STRONG,
+                        color::COMPONENT_INK,
                     );
                 }
-                painter.galley(at, galley, theme::text::STRONG);
+                painter.galley(at, galley, color::COMPONENT_INK);
                 continue;
             }
-            // An instance's tag stays neutral selected or not (§15 D981).
+            // An instance's tag, violet selected or not (§15 D981, D1001).
             if ondin_core::component::instance_root(&self.session.doc, id) == Some(id) {
-                painter.galley(label.min, galley, theme::text::MUTED);
+                painter.galley(label.min, galley, color::COMPONENT);
                 continue;
             }
             let is_set = self.session.doc.get(id).is_some_and(|n| n.set().is_some());
@@ -11322,9 +11353,14 @@ impl OndinApp {
             None if chrome && !lone => {
                 for id in self.session.selection.ids() {
                     if let Some(quad) = self.selection_quad(*id, rect, ppp) {
+                        // Each box in its own layer's hue (§15 D1001).
+                        let hue = chrome_hue(&self.session.doc, *id);
                         painter.add(egui::Shape::closed_line(
                             quad.map(|p| p + offset).to_vec(),
-                            stroke,
+                            egui::Stroke {
+                                color: hue,
+                                ..stroke
+                            },
                         ));
                     }
                 }
@@ -11365,20 +11401,25 @@ impl OndinApp {
             // outlines on purpose: the box is derived chrome saying "these move
             // together", and it must not compete with the layers it is drawn
             // around — each of which still shows its own edge.
+            // The component hue only when every selected layer is a component
+            // (§15 D1001): the handles belong to the whole selection.
+            let hue = self.selection_hue();
             if h.target == Target::Selection {
                 // `corners` is in `Handle::CORNERS` order, which is clockwise, so
                 // it closes into the box without rearranging.
                 let quad: Vec<egui::Pos2> = h.corners.iter().map(|(_, p)| *p + offset).collect();
-                painter.add(egui::Shape::closed_line(
-                    quad,
-                    egui::Stroke::new(1.0, color::SELECT_DIM),
-                ));
+                let dim = if hue == color::COMPONENT {
+                    color::COMPONENT_DIM
+                } else {
+                    color::SELECT_DIM
+                };
+                painter.add(egui::Shape::closed_line(quad, egui::Stroke::new(1.0, dim)));
             }
             for (_, pos) in h.corners {
                 painter.rect_stroke(
                     egui::Rect::from_center_size(pos + offset, egui::Vec2::splat(HANDLE_PX)),
                     egui::CornerRadius::ZERO,
-                    egui::Stroke::new(HANDLE_STROKE_PX, color::SELECT),
+                    egui::Stroke::new(HANDLE_STROKE_PX, hue),
                     egui::StrokeKind::Middle,
                 );
             }
@@ -12254,7 +12295,7 @@ impl OndinApp {
             .iter()
             .any(|id| ondin_core::is_effectively_locked(&self.session.doc, *id));
 
-        paint_size_pill(painter, edge, label, locked);
+        paint_size_pill(painter, edge, label, locked, self.selection_hue());
         Some(())
     }
 
@@ -12321,7 +12362,7 @@ impl OndinApp {
             dir: egui::vec2(1.0, 0.0),
             out: egui::vec2(0.0, 1.0),
         };
-        paint_size_pill(painter, edge, label, false);
+        paint_size_pill(painter, edge, label, false, color::BADGE);
         Some(())
     }
 
@@ -12851,6 +12892,40 @@ pub(crate) fn sibling_slot_above(doc: &Document, id: NodeId) -> Option<(NodeId, 
     Some((parent, at + 1))
 }
 
+/// Whether `id`'s canvas tag is withheld because it sits inside a component
+/// (§15 D1001) — **strictly** inside, so a main or an instance root answers for
+/// its own position, never for itself:
+/// - **anything inside an instance** — below any layer that carries a link,
+///   which is every layer of one: the instance's tag is its label, and an inner
+///   tag would be a pick past its group-like picking (§15 D981 (b));
+/// - **an instance inside a main**, which picks like a group and so never needed
+///   the tag as a handle. A plain frame inside a main keeps its tag: occupied,
+///   it is the frame's one handle besides its edge (§15 D22, D816).
+fn tag_withheld(doc: &Document, id: NodeId) -> bool {
+    let instance = ondin_core::component::instance_root(doc, id) == Some(id);
+    let mut at = doc.get(id).and_then(|n| n.parent());
+    while let Some(n) = at.and_then(|a| doc.get(a)) {
+        if n.link().is_some() || (instance && n.component()) {
+            return true;
+        }
+        at = n.parent();
+    }
+    false
+}
+
+/// The colour a component's selection chrome takes (§15 D1001): `COMPONENT` for
+/// a main or an instance root, `SELECT` for everything else — a set and the
+/// layers inside a component included.
+fn chrome_hue(doc: &Document, id: NodeId) -> egui::Color32 {
+    let component = doc.get(id).is_some_and(|n| n.component())
+        || ondin_core::component::instance_root(doc, id) == Some(id);
+    if component {
+        color::COMPONENT
+    } else {
+        color::SELECT
+    }
+}
+
 /// The one selection that gets **endpoint handles instead of a transform box**: a
 /// lone `Line`, with the far end it carries.
 ///
@@ -13159,7 +13234,16 @@ fn size_label(box_: KRect) -> String {
 /// drag's readout becoming the selection's readout on release is the whole
 /// impression, and a pill that moved, resized or changed weight at that instant
 /// would read as a flicker at exactly the moment the eye is on it.
-fn paint_size_pill(painter: &egui::Painter, edge: BadgeEdge, label: String, locked: bool) {
+///
+/// `hue` is the pill's ground — `color::BADGE`, or `color::COMPONENT` under a
+/// component (§15 D1001) — and picks the ink that reads on it.
+fn paint_size_pill(
+    painter: &egui::Painter,
+    edge: BadgeEdge,
+    label: String,
+    locked: bool,
+    hue: egui::Color32,
+) {
     /// Gap below the box, padding inside the pill, and the gap between the lock
     /// and the text.
     ///
@@ -13173,7 +13257,12 @@ fn paint_size_pill(painter: &egui::Painter, edge: BadgeEdge, label: String, lock
     const LOCK_GAP: f32 = 5.0;
     const LOCK_PT: f32 = 10.0;
 
-    let galley = painter.layout_no_wrap(label, egui::FontId::proportional(9.5), color::BADGE_INK);
+    let ink = if hue == color::COMPONENT {
+        color::COMPONENT_INK
+    } else {
+        color::BADGE_INK
+    };
+    let galley = painter.layout_no_wrap(label, egui::FontId::proportional(9.5), ink);
     let lock_w = if locked { LOCK_PT + LOCK_GAP } else { 0.0 };
     let size = egui::vec2(
         galley.size().x + lock_w + PAD.x * 2.0,
@@ -13183,7 +13272,7 @@ fn paint_size_pill(painter: &egui::Painter, edge: BadgeEdge, label: String, lock
     let pill = badge_frame(edge, size, GAP);
     painter.add(egui::Shape::convex_polygon(
         pill.rounded_rect(size, 4.0),
-        color::BADGE,
+        hue,
         egui::Stroke::NONE,
     ));
 
@@ -13193,7 +13282,7 @@ fn paint_size_pill(painter: &egui::Painter, edge: BadgeEdge, label: String, lock
             painter,
             pill.to_screen(egui::pos2(x + LOCK_PT * 0.5, 0.0)),
             LOCK_PT,
-            color::BADGE_INK,
+            ink,
             pill.angle,
         );
         x += LOCK_PT + LOCK_GAP;
@@ -13202,7 +13291,7 @@ fn paint_size_pill(painter: &egui::Painter, edge: BadgeEdge, label: String, lock
         egui::epaint::TextShape::new(
             pill.to_screen(egui::pos2(x, -size.y * 0.5 + PAD.y)),
             galley,
-            color::BADGE_INK,
+            ink,
         )
         .with_angle(pill.angle),
     );
@@ -13982,6 +14071,7 @@ mod tests {
                 },
                 size_label(KRect::new(0.0, 0.0, 200.0, 120.0)),
                 false,
+                color::BADGE,
             );
         });
 
@@ -20933,9 +21023,10 @@ mod frame_menu_door_tests {
 
     /// **The components chrome paints what §15 D981, D982 and D985 say it
     /// does**, read off the frame's shapes:
-    /// - a main's tag is a **chip** — a `CARD` ground with a `CARD_BORDER` edge —
-    ///   with the **filled hexagon** drawn on it, and an instance's tag has
-    ///   neither;
+    /// - a main's tag is a **chip** — a `COMPONENT` ground — with the **filled
+    ///   hexagon** drawn on it in `COMPONENT_INK`, and an instance's tag has
+    ///   neither, its words in `COMPONENT` (§15 D1001: both were neutral, a
+    ///   `CARD` chip with a `CARD_BORDER` edge and a `MUTED` label);
     /// - a selected main's instance gets four **hairlines** in `text::FAINT`;
     /// - an entered instance's edge is **dashed** in `text::DIM`, with the quiet
     ///   *Esc to exit* tag under it;
@@ -20944,7 +21035,9 @@ mod frame_menu_door_tests {
     /// Flips, each run: `draw_frame_labels` without its `paint_hexagon_filled`
     /// call fails *"one filled hexagon"*, 0 for 1; the entered edge drawn as four
     /// solid segments fails *"dashed"*, counting 4 — **run alone**, since beside
-    /// the first flip the hexagon assertion fails first and hides it.
+    /// the first flip the hexagon assertion fails first and hides it; and the
+    /// instance's galley painted `text::MUTED` again fails at *"the chip's ink and
+    /// the instance's violet tag"*.
     #[test]
     fn the_components_chrome_paints_its_chip_hexagon_hairlines_dashes_and_disc() {
         let ctx = egui::Context::default();
@@ -20979,25 +21072,37 @@ mod frame_menu_door_tests {
                 .count()
         };
 
-        // The tags, nothing selected.
-        app.session.selection.clear();
+        // The tags, the instance selected — the only state its tag shows in
+        // outside of being entered (§15 D1002).
+        app.session.selection.set_one(inst);
         let tags = shapes(&app, true);
         let chips = tags
             .iter()
-            .filter(|s| {
-                matches!(s, egui::Shape::Rect(r)
-                    if r.fill == theme::color::CARD && r.stroke.color == theme::color::CARD_BORDER)
-            })
+            .filter(|s| matches!(s, egui::Shape::Rect(r) if r.fill == color::COMPONENT))
             .count();
         assert_eq!(chips, 1, "one chip — the main's, not the instance's");
         let hexagons = tags
             .iter()
             .filter(|s| {
                 matches!(s, egui::Shape::Path(p)
-                    if p.closed && p.points.len() == 6 && p.fill == theme::text::STRONG)
+                    if p.closed && p.points.len() == 6 && p.fill == color::COMPONENT_INK)
             })
             .count();
         assert_eq!(hexagons, 1, "one filled hexagon, on the main's chip");
+        let mut inks: Vec<_> = tags
+            .iter()
+            .filter_map(|s| match s {
+                egui::Shape::Text(t) => Some(t.fallback_color),
+                _ => None,
+            })
+            .collect();
+        inks.sort_by_key(|c| c.to_array());
+        let mut want = vec![color::COMPONENT_INK, color::COMPONENT];
+        want.sort_by_key(|c| c.to_array());
+        assert_eq!(
+            inks, want,
+            "the chip's ink and the instance's violet tag (§15 D1001)"
+        );
 
         // A selected main's instance hairlines.
         app.session.selection.set_one(main);
@@ -21069,8 +21174,11 @@ mod frame_menu_door_tests {
     /// main, and neither turns the accent when selected** (§15 D981, D985): the
     /// main's tag counts its instances while selected; a renamed instance's tag
     /// trails its main's name; entered, the instance's tag is a path to the layer
-    /// selected inside it; and a **selected** main's or instance's tag paints in
-    /// a neutral ink, where an ordinary frame's turns `color::SELECT`.
+    /// selected inside it; and a **selected** main's or instance's tag keeps its
+    /// own ink — `COMPONENT_INK` on the chip, `COMPONENT` for the instance, since
+    /// §15 D1001 — where an ordinary frame's turns `color::SELECT`. The instance
+    /// is selected wherever its tag is read, the only state outside of being
+    /// entered in which it has one (§15 D1002).
     ///
     /// Flip: `draw_frame_labels` without the two component arms paints the
     /// selected main's tag in `color::SELECT` and fails at the hue assertion.
@@ -21108,6 +21216,7 @@ mod frame_menu_door_tests {
         );
         app.session.selection.set_one(main);
         assert!(tag(&app, main).ends_with("1 instance"));
+        app.session.selection.set_one(inst);
         let text = tag(&app, inst);
         assert!(
             text.starts_with(icon::HEXAGON) && text.contains("Mine") && text.ends_with("Board"),
@@ -21144,6 +21253,231 @@ mod frame_menu_door_tests {
             !inks.contains(&color::SELECT),
             "a component's tag never takes the accent: {inks:?}"
         );
+    }
+
+    /// **No tag inside an instance, nor on an instance inside a main** (§15
+    /// D1001), while a plain frame inside a main keeps its tag — occupied, it is
+    /// that frame's handle (D22) — and the main's chip and the instance's tag
+    /// stay. The maintainer saw a nested instance's tag show through its main's
+    /// chip when zoomed out: its corner sat 12 × zoom below the main's corner, so
+    /// zooming out slid the tag under the chip.
+    ///
+    /// Flips: `frame_label` without its `tag_withheld` guard fails at *"an
+    /// instance inside the main"*; `tag_withheld` withholding below a main
+    /// whatever the layer (the session's first cut) fails at *"a plain frame
+    /// inside the main"*.
+    #[test]
+    fn no_tag_inside_an_instance_nor_on_an_instance_inside_a_main() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let (mut app, main) = app_with_an_occupied_frame(&ctx);
+        let (inner, icon) = (app.session.ids.mint(), app.session.ids.mint());
+        let root = app.session.doc.root();
+        let frame = |id, parent, index, name: &str| Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind: NodeKind::Artboard {
+                size: Size::new(30.0, 20.0),
+            },
+            transform: Some(Affine::translate((8.0, 8.0))),
+            name: Some(name.into()),
+        };
+        assert!(app.session.commit(Transaction(vec![
+            frame(inner, main, 1, "Inner"),
+            frame(icon, root, 1, "Icon"),
+        ])));
+        // `Icon` made a main, and an instance of it placed inside `main`.
+        app.session.selection.set_one(icon);
+        app.create_component();
+        let doc = &app.session.doc;
+        let (tx, made) = ondin_core::insert_subtrees(
+            doc,
+            &mut app.session.ids,
+            &[ondin_core::Placement {
+                nodes: doc.capture_subtree(icon).expect("the icon"),
+                parent: main,
+                index: None,
+            }],
+            ondin_core::kurbo::Vec2::ZERO,
+        );
+        assert!(app.session.commit(tx));
+        let nested = made[0];
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        // Each layer asked about **selected**, since an unselected instance has
+        // no tag anyway (§15 D1002) — without it the instance cases below would
+        // pass for that reason and say nothing about this rule.
+        let tagged = |app: &mut OndinApp, id| {
+            app.session.selection.set_one(id);
+            let mut out = false;
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(rect),
+                    ..Default::default()
+                },
+                |ui| out = app.frame_label(ui, id, rect, 1.0).is_some(),
+            );
+            out
+        };
+        assert!(
+            tagged(&mut app, nested),
+            "the control: inside a plain frame"
+        );
+
+        let inst = main_with_an_instance(&mut app, main);
+        let copy = |app: &OndinApp, name: &str| {
+            *app.session
+                .doc
+                .get(inst)
+                .unwrap()
+                .children()
+                .iter()
+                .find(|c| app.session.doc.get(**c).is_some_and(|n| n.name() == name))
+                .expect("the instance's copy")
+        };
+        let (inner_copy, icon_copy) = (copy(&app, "Inner"), copy(&app, "Icon"));
+        assert!(tagged(&mut app, main), "the main's chip");
+        assert!(tagged(&mut app, icon), "the other main's chip");
+        assert!(tagged(&mut app, inst), "the instance's tag");
+        assert!(tagged(&mut app, inner), "a plain frame inside the main");
+        assert!(!tagged(&mut app, nested), "an instance inside the main");
+        assert!(!tagged(&mut app, inner_copy), "a frame inside the instance");
+        assert!(
+            !tagged(&mut app, icon_copy),
+            "an instance inside the instance"
+        );
+    }
+
+    /// **An instance's tag shows only while it is selected or entered** (§15
+    /// D1002), where a frame's name and a main's chip always show — the controls,
+    /// asked unselected beside it. A selected *main* does not bring its
+    /// instances' tags with it.
+    ///
+    /// Flip: `frame_label` without its selected-or-entered return fails at
+    /// *"unselected, no tag"*.
+    #[test]
+    fn an_instances_tag_shows_only_while_it_is_selected_or_entered() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let (mut app, main) = app_with_an_occupied_frame(&ctx);
+        let plain = app.session.ids.mint();
+        let root = app.session.doc.root();
+        assert!(app.session.commit(Transaction(vec![Operation::CreateNode {
+            id: plain,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(50.0, 50.0),
+            },
+            transform: Some(Affine::translate((100.0, 400.0))),
+            name: Some("Plain".into()),
+        }])));
+        let inst = main_with_an_instance(&mut app, main);
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let tagged = |app: &OndinApp, id| {
+            let mut out = false;
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(rect),
+                    ..Default::default()
+                },
+                |ui| out = app.frame_label(ui, id, rect, 1.0).is_some(),
+            );
+            out
+        };
+
+        app.session.selection.clear();
+        assert!(
+            tagged(&app, plain),
+            "the control: a frame's name, unselected"
+        );
+        assert!(tagged(&app, main), "the control: a main's chip, unselected");
+        assert!(!tagged(&app, inst), "unselected, no tag");
+        app.session.selection.set_one(main);
+        assert!(!tagged(&app, inst), "nor with only its main selected");
+        app.session.selection.set_one(inst);
+        assert!(tagged(&app, inst), "selected, its tag");
+        let child = app.session.doc.get(inst).unwrap().children()[0];
+        app.entered_group = Some(inst);
+        app.session.selection.set_one(child);
+        assert!(tagged(&app, inst), "entered, its path");
+    }
+
+    /// **A component's selection chrome is violet** (§15 D1001): a selected
+    /// main's outline, handles and size badge take `COMPONENT`; a layer inside it
+    /// keeps `SELECT`; and a mixed selection keeps each outline's own hue while
+    /// the handles and the badge, which belong to the whole selection, go back
+    /// to `SELECT`. Read off whole canvas frames.
+    ///
+    /// Flip: `chrome_hue` answering `SELECT` always fails at *"the main's
+    /// outline"*.
+    #[test]
+    fn a_components_selection_chrome_takes_the_component_hue() {
+        use egui::epaint::ColorMode;
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let (mut app, main) = app_with_an_occupied_frame(&ctx);
+        let _inst = main_with_an_instance(&mut app, main);
+        let child = app.session.doc.get(main).unwrap().children()[0];
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let shapes = |app: &mut OndinApp| {
+            let mut shapes = Vec::new();
+            for _ in 0..2 {
+                shapes = ctx
+                    .run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(rect),
+                            ..Default::default()
+                        },
+                        |ui| app.canvas_ui(ui),
+                    )
+                    .shapes;
+            }
+            shapes.into_iter().map(|c| c.shape).collect::<Vec<_>>()
+        };
+        let outlines = |s: &[egui::Shape], hue| {
+            s.iter()
+                .filter(|s| {
+                    matches!(s, egui::Shape::Path(p)
+                        if p.closed && p.fill == egui::Color32::TRANSPARENT
+                            && p.stroke.color == ColorMode::Solid(hue))
+                })
+                .count()
+        };
+        let handles = |s: &[egui::Shape], hue| {
+            s.iter()
+                .filter(|s| matches!(s, egui::Shape::Rect(r) if r.stroke.color == hue))
+                .count()
+        };
+        let badge = |s: &[egui::Shape], hue| {
+            s.iter()
+                .any(|s| matches!(s, egui::Shape::Path(p) if p.closed && p.fill == hue))
+        };
+
+        app.session.selection.set_one(main);
+        let s = shapes(&mut app);
+        assert_eq!(outlines(&s, color::COMPONENT), 1, "the main's outline");
+        assert_eq!(handles(&s, color::COMPONENT), 4, "its four handles");
+        assert!(badge(&s, color::COMPONENT), "its size badge");
+
+        app.session.selection.set_one(child);
+        let s = shapes(&mut app);
+        assert_eq!(
+            outlines(&s, color::SELECT),
+            1,
+            "a layer inside keeps SELECT"
+        );
+        assert_eq!(outlines(&s, color::COMPONENT), 0);
+        assert!(badge(&s, color::BADGE));
+
+        app.session.selection.set(vec![main, child]);
+        let s = shapes(&mut app);
+        assert_eq!(outlines(&s, color::COMPONENT), 1, "mixed: the main's own");
+        assert_eq!(handles(&s, color::COMPONENT), 0, "mixed: SELECT handles");
+        assert!(badge(&s, color::BADGE), "mixed: the plain badge");
     }
 
     /// **A double-click on an instance's own background steps in**, as `Enter`

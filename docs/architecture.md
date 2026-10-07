@@ -1750,13 +1750,27 @@ Three rules the session adds to it:
   operations or their inverses.
 
 ✅ **Built 2026-10-04 — build step 3, fields** (`45730f6`, §15 D979's amendment): `propagate::propagate`,
-run **last** in `commit_inner`, after `keep_insets`, `keep_flex_sizes` and `settle_links` — and, since
-step 7, `variant::settle` — so what those append to a main propagates too. For each of the transaction's edits to a node that has copies — the
+run **last** in `commit_inner` — the last of `propagate::owed`'s passes since 2026-10-07 — after
+`keep_insets`, `keep_flex_sizes` and `settle_links` — and, since step 7, `variant::settle` — so what
+those append to a main propagates too. For each of the transaction's edits to a node that has copies — the
 last edit per `shape_key`, against the value before the transaction — it walks the copies at every
-depth through the reverse link map, each level compared with its own old value. **No reader per
-field**: an operation's inverse carries the old value of the field it writes, so `Document::peek`
-applies an op to a scratch clone, keeps the inverse and restores (as undo does) — one clone per commit,
-and only when the document has links. `propagate::mode`, wildcard-free, picks the comparison: **whole**
+depth through the reverse link map, each level compared with its own old value. **A copy the
+transaction deletes (anywhere under a `DeleteNode`) or names in a `SetLink` takes nothing**
+(`propagate::leaves_its_source`): the map is read from the document before the edit, and the passes
+ahead delete or cut the counterparts of a layer dragged out of a main — following onto them refused
+the drag with `NoSuchNode`, or moved a kept counterpart 300 px out of its instance, until 2026-10-07
+(`[X3-L1-01]`). **No reader per field**: an operation's inverse carries the old value of the field it writes, so `Document::peek`
+applies an op to a scratch document holding **only the node it names** — and, for a `SetMask`, its
+subtree — and keeps the inverse, restoring nothing. ⚠️ **Until 2026-10-07 it applied to a whole-document
+clone and re-applied the inverse, asserting it took** (§15 D979's amendment of that date): an old value
+the loader admits and an op refuses — a gradient opacity of 5, D767 — panicked every commit and preview
+frame of an edit to that field on a main (`[R1-L2-01]`), and the clone cost 13.6 ms a preview frame at
+25,000 nodes (`[X3-L4-03]`). The one-node scratch stands on every such op writing its node alone and
+reading nothing else. ⚠️ **`op_set_mask` is the exception, and why the subtree comes along**: it
+refuses a mask over a group holding a frame (`holds_a_frame`), and on a bare node a mask peeked onto a
+copy whose group holds a frame of its own read as accepted, so the commit refused the user's whole
+edit — found by the record reading the first cut, fixed the same day
+(`a_mask_does_not_follow_onto_a_copy_holding_a_frame_of_its_own`). `propagate::mode`, wildcard-free, picks the comparison: **whole**
 for transform, geometry (a patch's inverse is its old field), text with its spans, the two span ops,
 name, visibility, opacity, pivot, clip, mask, mask mode and fill rule; **fields** for text, paragraph
 and block style, insets, display and layout item — a JSON merge that recurses only while old, new and
@@ -1872,25 +1886,45 @@ its anchor, down the copy chain, each node linked one level up, against a child 
 parent as inserts land so two children gained at once keep their order; a lost child takes a
 counterpart only where it is `untouched` — every field but the locks equal, the same linked children in
 the same order, recursively, no local additions — and a deleted counterpart is a lost child for its own
-copies; a move within a main and a reorder follow as above. **Its ops go out inserts → moves → deletes →
-reorders**, delete decisions made after the moves, `untouched` ignoring the children the pass carries
+copies; a move within a main and a reorder follow as above, the reorder down the copy chain like the
+other three arms — it was one level deep until 2026-10-07, so a nested copy in an outer main's instance
+kept the old order and then refused every later reorder as its own (`[X3-L2-02]`). **No arm acts on a
+copy the edit itself deleted** — deleting a main's child together with its counterpart, or with the
+whole instance, deleted the counterpart twice and was refused (`[X2-L1-02]`, until 2026-10-07).
+**Its ops go out inserts → moves → deletes → reorders**, delete decisions made after the moves, `untouched` ignoring the children the pass carries
 out; a parent the edit deleted counts as changed, so the children lifted out of it are moves — which is
 what makes *Ungroup* inside a main work. 🚨 **But its children are lost only where it was itself lost
 from a parent that stays** — an ungrouped group, a deleted child of a main, at any depth, found as a
 fixed point over the changed parents (§15 D984). A deleted **main** is lost from nothing: counted as
 the rest were, it read every child as lost and emptied each instance that §15 D979 (c) — *deleting a
 main*, below — says keeps its look, with every test green, until 2026-10-06. **A move into a parent the same edit made** — *Group
-selection* — is judged on the final tree: the new parent's copy is pruned to what the edit made
-(`only_new`) and each existing counterpart **moves** into it, carried down the copy chain, so an
-instance's own changes survive grouping and ungrouping, still linked. **A move whose new parent has no
-counterpart** is a removal there — delete if untouched, else cut. ⚠️ All three were wrong in the first
+selection* — is judged on the final tree: the new parent's copy is pruned of every node that already
+sat in **the same main** (`only_new`) and each existing counterpart **moves** into it, carried down the
+copy chain, so an instance's own changes survive grouping and ungrouping, still linked. **A layer that
+comes in from outside the main** — dragged in from the canvas or from another main — is a gain and is
+copied whole, as the design bullet's *"a `Reparent` into the main"* says; the prune read *every node
+that existed before the edit* until 2026-10-07, so a layer dragged into a main never reached its
+instances (`[X2-L1-01]`). **A move whose new parent has no counterpart** is a removal there — delete if untouched, else cut. ⚠️ All three were wrong in the first
 build (`6ac7d0d`): Group selection re-copied the counterparts and doubled any the instance had changed,
 Ungroup was refused, and the missing-parent case left the link standing — fixed in `e38603d` (§15
-D979's amendment), the Ungroup case measured failing first. ⚠️ **Ungroup over a copy an instance
-changed is ruled otherwise, not built — §15 D1003 (2)**: the instance keeps its copy as a local
-wrapper, the children inside it still linked. Today the moves loop lifts them out with the main's
-baked transform and leaves the changed group empty and unlinked — which *"never destroys
-instance-side work"*, above, forbids.
+D979's amendment), the Ungroup case measured failing first. ✅ **Ungroup — or a boolean's *Release* —
+over a copy an instance changed keeps that copy as a local wrapper, the children inside it still
+linked** (§15 D1003 (2), built 2026-10-07; `[R3-L5-01]`). Until then the moves loop lifted them out
+with the main's baked transform and left the changed group empty and unlinked — which *"never destroys
+instance-side work"*, above, forbids. The copy is judged by `untouched`, ignoring the children being
+lifted, whose own changes travel with them; an untouched copy ungroups as the main did. A kept child
+has every field the edit wrote on its source **pinned at its own value** in the same transaction, so
+the field pass — which lets the user's own edit to a copy win — does not carry the transform the
+ungroup baked from the main's group into a child still under the copy's. `settle_links` cuts the
+wrapper's link, its source gone; `component::check` admits a local group holding linked members, which
+D1003 left for the build to confirm (`an_ungroup_in_a_main_keeps_a_changed_group_copy_as_a_local_wrapper`,
+through the commit). ⚠️ **At every depth, which the first cut was not**: it asked whether the old
+parent is gone of the tree the transaction leaves, so in an outer main's instance — where the old
+parent is a copy of a copy, deleted by this pass rather than by the edit — a changed copy of the group
+was still emptied. Each move now carries that answer (`goes`, inherited by every move pushed below it,
+a copy lifted out of being untouched and so deleted here) and the main's own layer it started from
+(`origin`, whose written fields are what a kept child pins) — found by the record, fixed the same day
+(`an_ungroup_keeps_a_changed_group_copy_two_levels_down`).
 
 A **reset** family belongs to the design: reset a field; reset structure — re-insert the missing
 counterparts at their anchors, local additions left alone; and reset all — the fields, the missing
@@ -2073,9 +2107,12 @@ by a scan of the document per commit in the first build — and, since build ste
 A maintained index is a later question for a
 measurement: as a `Document` field it owes §15 D301's question, `apply` cloning the document whole, and
 as a `Resolved` map it is a decision rather than an optimisation (§5.9, §15 D778). **The scan is not
-what costs**: `propagate::propagate` returns before its scratch `doc.clone()` when no operation touches
-a node anything is copied from — measured in release at 5,000 nodes, ~4.6 µs a call for such an edit
-against ~2.3 ms for an edit to a main's layer, which is the clone (§15 D979's step-6 amendment).
+what costs**: `propagate::propagate` returns early when no operation touches a node anything is copied
+from — measured in release at 5,000 nodes, ~4.6 µs a call for such an edit against ~2.3 ms for an edit
+to a main's layer, which was the whole-document clone it then made (§15 D979's step-6 amendment), and
+13.6 ms at 25,000 nodes (`[X3-L4-03]`). ⚠️ **That clone is gone since 2026-10-07**: `Document::peek`
+reads off a scratch holding one node — a `SetMask`'s holds its subtree — so the pass clones a node per
+read — not re-measured.
 
 **The preview** (the session's). The pass also runs over the pending transaction, so `RenderOverrides`
 shows the copies following a main-component drag live; operations that add nodes stay ghosts by the
@@ -2125,7 +2162,12 @@ stands in for one.
 **Where the pass runs among the commit's passes** (the session's): after `keep_insets` and
 `keep_flex_sizes` — `kept_flow_translations` included, which `keep_flex_sizes` runs first — so that
 what they append to a main node propagates. ✅ **As built it runs last**, after `settle_links` too
-(`45730f6`). Whether those passes must also run over the propagated operations is the resize question
+(`45730f6`). ✅ **The order is one function since 2026-10-07**: `propagate::owed` — `swap::settle`,
+`propagate_structure`, `settle_links`, `variant::settle`, `propagate` — called by `commit_inner` and by
+the core tests' fixtures, which had each carried a hand-written copy of the list; reversing two passes
+in the app's copy passed every test in the workspace (`[X6.2-L6-05]`, CLAUDE.md's gate hole 16).
+Reversing `variant::settle` and `propagate` in `owed` now fails
+`renaming_a_value_renames_its_variants_and_their_instances`. Whether those passes must also run over the propagated operations is the resize question
 below — measured for one path, not settled in general.
 
 **Open, and recorded as open:**
@@ -8462,10 +8504,13 @@ input event (winit/egui)
   table or fail it.
 - The preview step costs O(nodes the gesture touches), not O(document): `set_preview` projects the
   pending transaction into `RenderOverrides` rather than cloning and re-resolving. ⚠️ **Except while a
-  main component's layer is edited**: the propagation it runs then (§5.3d's preview) clones the
-  document — ~2.3 ms a call at 5,000 nodes in release for the pass alone as first built, against
-  ~4.6 µs for an edit touching nothing a copy follows — and since the fix also runs `keep_insets` and
-  `keep_flex_sizes` first, not re-measured; an edit to no main pays one scan of the links
+  main component's layer is edited**: the propagation it runs then (§5.3d's preview) cloned the
+  document until 2026-10-07 — ~2.3 ms a call at 5,000 nodes in release for the pass alone as first
+  built, 13.6 ms at 25,000 (`[X3-L4-03]`), against ~4.6 µs for an edit touching nothing a copy follows
+  — and clones one node per read since, a mask's subtree (`Document::peek`, §15 D979's amendment of
+  that date); it also
+  runs `keep_insets` and `keep_flex_sizes` first, `keep_insets` cloning the document where the edit
+  places a pinned layer, none of it re-measured; an edit to no main pays one scan of the links
   (`propagate::touches_copied`, §15 D979's amendment). **It composes over
   a live text session's transaction rather than replacing it** (§15 D609) — the session's operations
   first, the gesture's after, `RenderOverrides::absorb` being last-one-wins per field, so a field

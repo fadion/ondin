@@ -2121,6 +2121,21 @@ nothing to drift. *(Step 1 exempted every instance root from membership, looser 
 *"unless its source is a component root"*; step 2 tightened it to match — §15 D978's and D979's
 amendments.)*
 
+**The doors ask these rules ahead, so nothing offers what the commit refuses** (2026-10-07, `2a77404`,
+`[X2-L2-01]`, `[X2-L2-02]`; §15 D876's *"every place that says in advance what `apply` will accept has
+to ask them too"*, carried to the component rules). `component::why_not_main` answers why a layer
+cannot be made a main **in place** — `NotMain::Kind`, `Already`, `Inside` (it sits in a main or an
+instance), `Instance` (it is an instance root), `Holds` (its subtree, itself included, holds a main or
+a set) or `SetKind` (a variant of another kind than its set's) — and `can_be_main` is it with no answer;
+`why_not_wrap` answers the same for *Create component*'s wrap, where the **members' parent**, the place
+the new frame is made, is what must not be or sit in a main or an instance. `component::can_hold(doc,
+parent, moved)` is the half of "can this land here" `build::can_parent` cannot see: false for a main or
+a set into or under a main or an instance, a set under a set, a main into a set of another kind
+(`variant::fits_set`), and an instance whose shown main is the destination's main or reaches it through
+`uses`. ⚠️ **It is always true for `moved`'s own parent** — staying is never refused, or a variant of a
+mixed set the loader admitted would leave its set on a nudge. Membership is not asked: a linked layer
+moved out of its instance is cut loose by `settle_links`, the commit's answer rather than a refusal.
+
 **The save format is v5** (the session's), on two counts. **The item-id half is built** (§15 D980,
 `a83adc8`): `CURRENT_SCHEMA_VERSION` is 5, and it is §5.11's own case — a v4 list item has no id, so
 the five keyed lists change shape and an old file needs a real step. **`migrate_4_to_5` gives each
@@ -2302,7 +2317,9 @@ Rows and keys: *Create component* `Ctrl+Alt+K`, *Detach instance* `Ctrl+Alt+B`, 
 component*, *Select all instances*, *Go to main component*, *Reset all*, and *Reset* named for a child.
 **Toasts stay text-only** — `EditorSession::info` lines naming `Ctrl+Z`, no *Undo* button: *Deleted
 "Button" — 4 instances detached · Ctrl+Z to undo*, and, only when wrapping happened, *Created "Button"
-— 3 layers wrapped in a frame · Ctrl+Z to undo*. The per-frame *source → instances* lookups the dot,
+— 3 layers wrapped in a frame · Ctrl+Z to undo* — the in-place create silent since 2026-10-07, where it
+had said *"Created a component"* (§15 D1003 (12)), and `Ctrl+Alt+K` on an instance root saying *"An
+instance can't become a component — detach it first (Ctrl+Alt+B)."* The per-frame *source → instances* lookups the dot,
 the count and the hairlines need want a cache keyed on `EditorSession::revision`, not the per-commit
 scan above. The six places the mockup met an older rule were all ruled by the maintainer on
 2026-10-04, as above; D981 has each. ✅ **Built with step 2** (`0ae3cd7`): the two chords, five of the
@@ -2564,8 +2581,14 @@ what a swap keeps — where they had asked the slot's layer to link to nothing (
 building D1003 (3)–(5)). ⚠️ A slot-own layer whose name path and kind meet a layer of the target is
 matched to it instead, and stops being the slot's own — read, not run, not ruled. **A swap left equal to what its slot shows
 is cleared** on every route, by `swap::settle`, above. **A set holds one kind**: `variant::switch`
-refuses a main of another kind, the second defence; *Combine as variants* and a drag into a set — the
-doors that refuse it first, with a message — are **not built**, and the loader never refuses one.
+refuses a main of another kind, the second defence; the doors that refuse it first, with a message, are
+built since 2026-10-07 (`2a77404`) — *Combine as variants* over mains of two kinds (`variant::one_kind`;
+the menu row dimmed and the verb failing with `menu::COMBINE_MIXED`, `variant::combine` refusing as
+`WrongKindForOp` behind it), a canvas drag into a set (`component::can_hold`, which asks
+`variant::fits_set`; the release saying `canvas::SET_OF_ANOTHER_KIND`) and the layers panel's drop
+(`drop_is_legal`, the same predicate). ⚠️ **Not built**: the panel's refusal says nothing, and a frame
+main and a group main moved together into an **empty** set each pass alone, an empty set fitting
+either. The loader never refuses a mixed set, and `component::check` has no arm for one.
 
 ✅ **The app half, in the inspector and the context menu** (`a313b2c`; `panels/variants.rs`,
 `panels/component.rs`; §15 D982's amendment). **A set** gets its own card, *Variants*, in the Component
@@ -2608,8 +2631,10 @@ main is an instance root, so its card is the instance's, and the line is drawn u
 D989 — until then it was never drawn for one, and a swap property could not be made). ⚠️ Since §15 D995
 the line, for both, is rows of the identity card, above the Component card, with no `{}` glyph. **The menu** gains
 `menu::Role::Set` (no *Create component* on a set, nor on any selection holding a main or a set —
-`menu::Context::holds_main`, `adc5f66`), *Combine as variants* on two or more mains outside any set
-under one parent, *Add variant* on a set or a variant, a set's *Select all instances*, and *Reset
+`menu::Context::holds_main`, `adc5f66`; dimmed with the commit's own reason wherever the commit would
+refuse it, `menu::create_refusal`, since 2026-10-07), *Combine as variants* on two or more mains outside
+any set under one parent (dimmed with `menu::COMBINE_MIXED` over mains of two kinds since 2026-10-07,
+§15 D1003 (5)), *Add variant* on a set or a variant, a set's *Select all instances*, and *Reset
 <property>* on a linked layer whose bound field differs — a nested copy bound to a swap or visibility
 property included, an instance root whose property is its outer instance's, which the menu's instance
 arm drew only from 2026-10-07 (§15 D983's amendment); the toast *Combined N mains into set “Button” ·
@@ -12834,7 +12859,16 @@ frame is never its own candidate** (`OndinApp::frame_covering_except`, §15 D997
 of about half its size it lies over most of its own moved box and, an inner frame coming later in paint
 order, is the topmost — so it and every
 frame inside it are left out **before** the topmost is chosen. Filtered out of the answer afterwards,
-as it was, it left no answer, and a frame nudged inside its parent went to the canvas. **A layer
+as it was, it left no answer, and a frame nudged inside its parent went to the canvas. **Nor is any
+layer moving with it** (`OndinApp::moving_with`, §15 D997's amendment, `[X11.1-L1-01]`) — the
+selection's outermost roots, or the moved layer alone on an Alt-drag, whose originals stay put — or two
+overlapping frames dragged together each chose the other and the move was refused as `WouldCycle`.
+**Nor a frame the component rules refuse the layer in** (`component::can_hold`, `[X2-L2-02]`, §15
+D1003 (5)): a main or a set into or under a main or an instance, a set under a set, a main into a set of
+another kind, an instance into the main it shows or one that reaches it — skipped before the topmost is
+taken, so the frame beneath is still asked (`canvas::covering_that_holds`), and asked only where
+`FrameIndex::components` says the document has a main, a linked layer or a set. A main passed over by a
+set of another kind is told why on release (`canvas::SET_OF_ANOTHER_KIND`). **A layer
 with a group above it hops only between the frames inside that group** (`canvas::group_fence`, §15
 D876): an icon on a card in a row may move to the next card, and dragged out of every card it stays
 where it is rather than falling out of the row onto the page. A loose layer may still drop into a

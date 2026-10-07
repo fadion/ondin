@@ -1394,13 +1394,13 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D994** — **A list reset is the main's list, exactly, and a ghost row's restore is a list reset: the instance's own items go with it — overturning D981's clarification (1) for lists.** The maintainer, on `components.ondin`'s *Card — overridden*, whose fill was replaced: the ghost row's restore put the main's fill back at the bottom of the stack under the own one, so nothing on screen changed, and the header's *Reset fill* kept the own one too — *"reset the whole fill card to the original's … removing anything the user added"*. `reset_items` is `src.to_vec()`; a ghost row's restore writes the source's list whole on all five list cards, verbatim, D981's no-retargeting warning standing; an overridden row's ↺ still resets that item alone through `reset_item`, whose putting-back branch has no app caller now. `item_units` counts each own item, so a list differing only by an added item has an override. Local **layers** survive every reset as before. *(Ruled by the maintainer and built 2026-10-07, uncommitted when recorded. **Keep**; its reach into *Reset fields* and *Reset all* the session's reading of *"reset the whole panel the same way"*. Tests `a_list_reset_is_the_mains_list_and_drops_its_own`, `a_fill_list_marks_restores_and_resets_item_by_item` and `an_effect_stack_restores_and_resets_item_by_item`, flips as the caller reports them; ~~Stroke's and the grids' restores read, not run~~ Stroke's, the grids' and the exports' restores and ↺ driven through their cards since `2077cac` (`[X8.2-L6-02]`, `[X9.2-L6-06]`). D979 and D981 amended; `architecture.md` §5.3d)*
 - **D995** — **The maintainer's second polish pass over the components chrome: the main's face 4pt tighter, short words on the Properties card's buttons, the plain arrow over a marked field's reset, and the one-line rows moved into the identity card — overriding the accepted mockups.** The count and verbs under a main's name 4pt closer (`main_body`, not `main_tail`); *Bool*, *Text* and *Var*, measured against ~38pt beside the glyph, the properties keeping *Boolean* and *Text*; a marked field's strip `CursorIcon::Default` while it is a reset, §9.2's arrow — the first build's `PointingHand` a misreading of *"arrow"*, corrected before commit — its tooltip already there; the child's, mixed selection's and binding lines rows of the identity card (`ComponentPart`), `slim_row` deleted, no `{}` on the binding line, no divider (the session's); a local layer's line led by a link-break glyph, the linked one's hexagon a point higher. ⚠️ **Four pointing hands §9.2 and D371 forbid**, found beside it and ruled by no entry: a card header's reset chip, the Component card's main link, a layout receipt's *Undo*, and the canvas set's `+`. *(Ruled by the maintainer and built 2026-10-07, uncommitted when recorded. **Keep**; the four hands ~~***Fix***~~ fixed by D996, none an exception. Test `a_marked_fields_reset_shows_an_arrow_and_a_tooltip`; the rest untested. D981, D982 and D989 amended, D371 pointed; `architecture.md` §5.3d and §9.2)*
 - **D996** — **The maintainer's third polish pass over the components chrome: the Component card's rows made the other cards' rows, the arrow on all four pointing hands, and a used value's delete asked in a modal — overriding the accepted mockups.** *"Make things consistent in the inspector cards … basing these component cards to those."* The four hands D995 found are arrows — *"They're not an exception … They should all be arrows"* — the set's `+` `CursorIcon::Default` with no bitmap, still ahead of the handles; §9.2's census finds no `PointingHand` in production again. Dropdowns at `CONTROL_H` (`control_height`, D85's 24 again); label-column controls ending at the content edge, a `- 8.0` gone from seven widths; labels right-aligned against their control (`label_mark_in`, `Align::Max`, `MARK_ROOM` kept for the mark, a long label cut with `…` and named in its tooltip, over the mark's reset when marked); a boolean property a label-column row with the switch where the fields begin (`variants::toggle_row`), not the features' `switch_row_marked`; the instance face's name 4pt up to a main's, `heading` zeroing `interact_size.y`. `ui::MENU_GAP`, 6, under the ⋯ and a chip's menu, the top bar reading it too; a chip's menu `set_width` 150. *Delete value* on a used value asks in a modal (`deleting_value`, `value_delete_confirmation`) with D982's exact counts, ✕/`Escape`/backdrop cancelling, a value changed meanwhile deleting nothing, `modal_is_up` holding it. *(Ruled by the maintainer and built 2026-10-07, uncommitted when recorded. **Keep.** Tests `the_component_cards_rows_line_up_with_the_other_cards`, four flips, and `deleting_a_used_value_asks_in_a_modal`, flips as the caller reports them; the arrows, gap, menu width and toggle's click untested. D371, D982, D985 and D995 amended, D371's rule unchanged; `architecture.md` §5.3d, §9.2 and §9.5. **Amended the same day** (D1000): a swap property's filter no longer has a `row_label`)*
-- **D997** — **A frame moved inside the frame holding it left it for the canvas: the moved frame was its own topmost candidate, and was filtered out of the answer rather than out of the choice.** *"I simply nudged it a few px."* `move_destination` took `frame_covering(landed)`'s topmost frame, which for a nudged frame is itself, then dropped it as `is_within` itself, and `unwrap_or(root)` answered the canvas — any frame in a frame, not only a variant in its set. `OndinApp::frame_covering_except` excludes the moved frame and its contents **before** the choice; the flex nested-frame arm (D944) and the group fence (D876) had the same shape, answering *stays*, and exclude first too. 🚨 The order is the fix. How long it lived is not traceable — D62 wrote the filter and the last-match frame list; `.git` was reset. *(Reported by the maintainer and fixed 2026-10-07, uncommitted when recorded. **Resolved.** Test `a_frame_nudged_inside_its_parent_frame_stays_in_it`, its flip as the caller reports it; the two other arms read, not tested. D62, D876 and D944 amended; `architecture.md` §5.3 and §9.4)*
+- **D997** — **A frame moved inside the frame holding it left it for the canvas: the moved frame was its own topmost candidate, and was filtered out of the answer rather than out of the choice.** *"I simply nudged it a few px."* `move_destination` took `frame_covering(landed)`'s topmost frame, which for a nudged frame is itself, then dropped it as `is_within` itself, and `unwrap_or(root)` answered the canvas — any frame in a frame, not only a variant in its set. `OndinApp::frame_covering_except` excludes the moved frame and its contents **before** the choice; the flex nested-frame arm (D944) and the group fence (D876) had the same shape, answering *stays*, and exclude first too. 🚨 The order is the fix. How long it lived is not traceable — D62 wrote the filter and the last-match frame list; `.git` was reset. *(Reported by the maintainer and fixed 2026-10-07, uncommitted when recorded. **Resolved.** Test `a_frame_nudged_inside_its_parent_frame_stays_in_it`, its flip as the caller reports it; the two other arms read, not tested. D62, D876 and D944 amended; `architecture.md` §5.3 and §9.4. **Amended 2026-10-07** (`2a77404`, `[X11.1-L1-01]`): every layer moving with it is excluded too, `moving_with` — two overlapping frames dragged together had each chosen the other, refused as `WouldCycle`; the moved layer alone on an Alt-drag; test `overlapping_frames_dragged_together_stay_on_the_canvas`)*
 - **D998** — **A new set leaves `SET_PAD` of air round its variants, so a set of one main can be picked on the canvas.** `build::frame` hugs its members, so a one-main set was the main's box, its tag under the main's. The maintainer: *"add some padding (10px) all around automatically when creating the container"*. `variant::combine` grows the set by `SET_PAD` (10) on every side and moves the mains in by as much, nothing moving on the page — ⚠️ cancelling only because `build::frame`'s transform is a pure translation. `add_variant` ~~unchanged~~ grows the set to `SET_PAD` past its copy since D1000, where it grew it by `VARIANT_GAP`. *(Ruled by the maintainer and built 2026-10-07, uncommitted when recorded. **Keep.** Test `a_new_set_pads_its_variants_and_moves_nothing`, its flip as the caller reports it. D982 amended; `architecture.md` §5.3d. **Amended the same day** (D1000))*
 - **D999** — **A field being typed in lost its edit when a click on the canvas or the layers panel changed the selection: both draw before the inspector, so the inspector drew the new selection's cards that frame and the focused field was never drawn to see its focus go.** The maintainer, of a text property and then a swap property's filter: *"If I just blur it doesn't persist … Only persists if I press enter, which is not something that happens anywhere in the app."* A click inside the inspector always committed (measured); a click on empty canvas dropped the edit, and so, by construction, for every inspector field that commits on losing focus — the layer name measured, the dash list, the hex fields, the Export prefix and suffix and the grid fields read. Fixed in one place: `OndinApp::inspector_panel` keeps `inspector_hold`, the selection it drew while a widget on its own `Area` layer held focus, and while the live selection differs from it and its ids all exist draws against it — swapped in with `mem::replace`, restored after — so the field blurs as a click inside would and commits to the layer it was editing; a popover's field is another layer and holds nothing. ⚠️ For the frames until the blur the inspector shows the old selection; a commit made during a held draw that writes the selection is overwritten by the restore — read, not run. *(Reported by the maintainer and fixed 2026-10-07, uncommitted when recorded. **Resolved.** Test `a_typed_edit_commits_when_a_canvas_click_takes_the_selection`, its flip as the caller reports it. D808 and D841 the `Escape` half of the same family, unamended; `architecture.md` §9.2 and §9.3. **Amended 2026-10-07** (D1003 (11), ~~not built~~ built the same day, `2de4287`): a value chip's rename, the one popover field that commits, to commit when its popup closes — built by the field asking for the hold while it has focus (`variants::hold_inspector`), the close a second defence; the layer test unchanged)*
 - **D1000** — **The maintainer's fourth polish pass over the components chrome: the set's `+` over its outline, a set grown by `SET_PAD` and not `VARIANT_GAP`, one-line set face, a two-word clash, the Properties card in three groups with the nested instances offered as swap properties, a hidden nested group dimmed with no line, and no Frame templates on a component — overriding the accepted mockups.** The `+` drawn after `draw_key_outline` (`draw_set_plus`), its place unchanged — *"move the '+' button to the top"* read as draw order, the session's reading; `add_variant` growing the set to `SET_PAD` past its copy, the padding having read as doubling; `component::name_line` shared by a main's face and a set's, *Component set* gone; *Variant clash* with its sentence in a tooltip on a variant's card; the Properties card's plain properties, swap properties and *Shown from nested* split by `card_rule`, *Shown from nested* only when something is shown and listing only that, a swap property's filter a row of its own (`icon::FUNNEL`, *Filter displayed list by name*), and every nested instance no swap property binds offered with a `+` (`new_swap_property`), the way back after deleting one; *Hidden by …* gone from a hidden group; *Frame templates* hidden on a main, a variant, a set or an instance root, the set and variant the session's extension. *(Ruled by the maintainer and built 2026-10-07, uncommitted when recorded. **Keep.** Tests `a_new_set_pads_its_variants_and_moves_nothing` (extended), `a_nested_instance_is_offered_as_a_swap_property_and_its_filter_is_a_row` and `the_set_card_is_one_line_the_clash_is_short_and_components_get_no_templates`, flips as the caller reports them; the `+`'s order untested. D982, D983, D988, D996 and D998 amended; `architecture.md` §5.3d and §9.4; `roadmap.md` *Next · Nested component properties*)*
 - **D1001** — **The maintainer's fifth polish pass over the components chrome: no canvas tag inside an instance nor on an instance inside a main, and a main's or an instance's selection chrome and canvas label violet — overriding the accepted chrome, D981's governing rule.** Zoomed out, a nested *Icon* instance's tag — 12 × zoom below its main's corner, painted after it — slid under the main's chip and showed through; every instance repeated its inner frames' tags; and an inner tag picked past D981 (b). `frame_label` answers `None` where `tag_withheld` holds — a strict ancestor linked, or the layer an instance root with a main strictly above — unless the layer is itself a main; 🚨 a plain frame inside a main keeps its tag, its one handle besides its edge when occupied (D22, D816) — the first cut withheld every layer under a main and was narrowed before commit, the record's reading, the session's narrowing; ordinary nested frames keep their tags, D554 unchanged. `theme::color::COMPONENT` (`#A78BFA`, the session's), `COMPONENT_DIM` and `COMPONENT_INK`; `canvas::chrome_hue` answers it for a main or an instance root, `SELECT` for a set and every layer inside a component; each outline and the hover outline in its layer's hue, the handles, dim box and size badge through `selection_hue`, violet only when every selected layer is a component; a third further hue beside D13's two. Then, the same day, a second ruling — *"make the badges violet too … So they don't clash with the light/dark greys"*, prompted by a grey caption hiding a grey instance tag, no defect: a main's chip filled `COMPONENT` with no edge, its hexagon and name `COMPONENT_INK`, its count a new `COMPONENT_INK_DIM`; an instance's tag `COMPONENT`, its trailing name and path's › `COMPONENT_DIM`. Standing of D981: no hue change on selection, the set's tab neutral; the hairlines, the entered edge and every off-canvas mark still neutral. *(Ruled by the maintainer and built 2026-10-07, uncommitted when recorded. **Keep**; the narrowing and the hue's value the session's. Tests `no_tag_inside_an_instance_nor_on_an_instance_inside_a_main`, two flips — the guard off, and the first cut's predicate — `a_components_selection_chrome_takes_the_component_hue`, and D985's chrome test for the labels, flips as the caller reports them; the hover outline's hue, a components multi-selection's dim box, the chip's missing edge and the labels' secondary words untested. D13, D981 and D985 amended; `architecture.md` §5.3d and §9.4. **Amended the same day** (D1002): the tag test selects each layer it asks about, its guard flip re-run)*
 - **D1002** — **An instance's canvas tag shows only while the instance is selected or entered, where a frame's name and a main's chip always show.** The maintainer, knowing it departs from both: *"If every component instance shows it's badge, it clutters the design in a way that's hard to tell what's going on."* `frame_label`'s instance arm answers `None` unless the instance is selected or is `entered_instance()`, entered showing the path; a selected main does not bring its instances' tags; frames, mains and a set's tab unchanged; after D1001's `tag_withheld`, each rule withholding alone. Costs nothing in reach — an instance picks like a group (D981 (b)), so the tag was never its handle, and a hidden tag is no pick — but the canvas no longer says *instance of …* at rest. *(Ruled by the maintainer and built 2026-10-07, uncommitted when recorded. **Keep.** Test `an_instances_tag_shows_only_while_it_is_selected_or_entered`, its flip failing at *"unselected, no tag"*, as the caller reports it; three tests select the instance before reading its tag, D1001's so its own flip still bites. D981, D985 and D1001 amended; `architecture.md` §5.3d and §9.4)*
-- **D1003** — **Twelve rulings from the `v0.4.1..7d0c666` release review, each the review's recommendation; (1)–(4), (5)'s second defence, (6), (7), (10) and (11) built the same day, the rest not.** The maintainer: *"Agree with all."* (1) *Cut* then *Paste* of a main in one document is a move — the main restored under its id, the instances the cut detached relinked, their edits meanwhile overrides by value; a second paste an instance; nothing relinked across documents (`[X2-L5-01]`, raised to High); **built 2026-10-07** (`6bc0e2a`) — ~~but a nested copy in the cut main's instance, climbed at the cut, is not relinked (read, not run)~~ and its nested copies relinked since `b003b42`, the move ~~dropped~~ parked by an undo of the cut and brought back by a redo with no commit between (`90c476c`). (2) Ungroup or *Release* inside a main keeps an instance's changed copy as a local wrapper, its children still linked; an untouched copy ungroups as the main did — whether `check` admits it the fix's to confirm (`[R3-L5-01]`, High); **built 2026-10-07** (`757fa2a`), `check` admitting it — one level down only in that commit, a changed copy in an outer main's instance still emptied, and at every depth since the next (D979's amendment). (3) A layer the outer main added to a swap's slot carries across the swap, at its place (`[X5]`'s note); **built 2026-10-07** (`0683f66`) for an unlinked layer, ~~not for a nested instance added there (read, not run)~~ and for a nested instance added there since `96eb959`. (4) A swap left equal to what its slot shows is cleared, on every route (`[X5-L2-01]`); **built 2026-10-07** (`0683f66`). (5) One kind per set: *Combine as variants* and a drag into a set refuse, `switch` refuses second, the loader never (`[X6.1-L1-02]`); `switch`'s refusal **built 2026-10-07** (`0683f66`), the two doors not. (6) One shared id for an item one edit adds to a main and its instance (`[X1-L1-01]`); **built 2026-10-07** (`2077cac`) for every target of a write, linked or not — `retarget` keeping the caller's id, one `PastTheEnd` per wholesale write, and the two appending `+`s, which the finding did not name, minting once. (7) The fx scratch pooled by size class across frames and the submits batched, after the blockers — ~0.11 ms of CPU per on-screen effect layer per frame, measured; D339's *not yet* overturned, D779's renderer pool untouched, D992's leading suspect (`[X7-L4-01]`); **built 2026-10-07** (`c697b82`) — textures pooled by size class and trimmed to the last eight frames' largest working set, bind groups cached by their textures, one submit per vello pass; 726 shadowed layers ~90 ms → ~13 ms, a steady frame making no texture and no bind group, counted on device; ***Fix*** a failed effect pass leaves that frame's slots registered, pre-existing. (8) Rotation's ↺ rotates back about the pivot (`[X9.1-L1-03]`). (9) A removed or reordered child's dot on its parent's row, expanded or collapsed, with a tooltip and *Restore*, and no ghost rows (`[X11.1-L2-03]`). (10) A Text property's content committed as typed, empty allowed (`[X10-L1-04]`); **built 2026-10-07** (`2de4287`). (11) A value chip menu's rename committed when the popup closes, `Escape` cancelling (`[X10-L1-03]`); **built 2026-10-07** (`2de4287`) — by the field asking the inspector to hold while it has focus, the close a second defence that no flip pins. (12) An in-place *Create component* silent, and `Ctrl+Alt+K` on an instance saying to detach it first (`[X11.2-L2-05]`). Five introduced Highs block the next tag, of 86 findings — all five fixed the same day (`757fa2a`, and `6bc0e2a` for `[X2-L5-01]`; D979's amendments). *(Ruled 2026-10-07 by the maintainer. **Keep**; **not built** but for (1)–(4), (5)'s second defence, (6), (7), (10) and (11) — `roadmap.md` *Now · Components*, `review/release-v0.4.1/triage.md` §7 its order. Citations planted by hand. D339, D979, D980, D981, D983, D991 and D999 amended, and D982 with the build; D344 and D992 with (7)'s; `architecture.md` §5.3d, §6.3 and §9.2)*
+- **D1003** — **Twelve rulings from the `v0.4.1..7d0c666` release review, each the review's recommendation; (1)–(4), (5)'s second defence and doors, (6), (7) and (10)–(12) built the same day, the rest not.** The maintainer: *"Agree with all."* (1) *Cut* then *Paste* of a main in one document is a move — the main restored under its id, the instances the cut detached relinked, their edits meanwhile overrides by value; a second paste an instance; nothing relinked across documents (`[X2-L5-01]`, raised to High); **built 2026-10-07** (`6bc0e2a`) — ~~but a nested copy in the cut main's instance, climbed at the cut, is not relinked (read, not run)~~ and its nested copies relinked since `b003b42`, the move ~~dropped~~ parked by an undo of the cut and brought back by a redo with no commit between (`90c476c`). (2) Ungroup or *Release* inside a main keeps an instance's changed copy as a local wrapper, its children still linked; an untouched copy ungroups as the main did — whether `check` admits it the fix's to confirm (`[R3-L5-01]`, High); **built 2026-10-07** (`757fa2a`), `check` admitting it — one level down only in that commit, a changed copy in an outer main's instance still emptied, and at every depth since the next (D979's amendment). (3) A layer the outer main added to a swap's slot carries across the swap, at its place (`[X5]`'s note); **built 2026-10-07** (`0683f66`) for an unlinked layer, ~~not for a nested instance added there (read, not run)~~ and for a nested instance added there since `96eb959`. (4) A swap left equal to what its slot shows is cleared, on every route (`[X5-L2-01]`); **built 2026-10-07** (`0683f66`). (5) One kind per set: *Combine as variants* and a drag into a set refuse, `switch` refuses second, the loader never (`[X6.1-L1-02]`); `switch`'s refusal **built 2026-10-07** (`0683f66`), and the doors (`2a77404`) — *Combine* dimmed and failing with the reason (offered dimmed rather than withheld, the session's call), a canvas drop passing a set of another kind and saying why on release, the panel's drop refused — but for the panel's message and a frame main and a group main moved together into an empty set, in progress. (6) One shared id for an item one edit adds to a main and its instance (`[X1-L1-01]`); **built 2026-10-07** (`2077cac`) for every target of a write, linked or not — `retarget` keeping the caller's id, one `PastTheEnd` per wholesale write, and the two appending `+`s, which the finding did not name, minting once. (7) The fx scratch pooled by size class across frames and the submits batched, after the blockers — ~0.11 ms of CPU per on-screen effect layer per frame, measured; D339's *not yet* overturned, D779's renderer pool untouched, D992's leading suspect (`[X7-L4-01]`); **built 2026-10-07** (`c697b82`) — textures pooled by size class and trimmed to the last eight frames' largest working set, bind groups cached by their textures, one submit per vello pass; 726 shadowed layers ~90 ms → ~13 ms, a steady frame making no texture and no bind group, counted on device; ***Fix*** a failed effect pass leaves that frame's slots registered, pre-existing. (8) Rotation's ↺ rotates back about the pivot (`[X9.1-L1-03]`). (9) A removed or reordered child's dot on its parent's row, expanded or collapsed, with a tooltip and *Restore*, and no ghost rows (`[X11.1-L2-03]`). (10) A Text property's content committed as typed, empty allowed (`[X10-L1-04]`); **built 2026-10-07** (`2de4287`). (11) A value chip menu's rename committed when the popup closes, `Escape` cancelling (`[X10-L1-03]`); **built 2026-10-07** (`2de4287`) — by the field asking the inspector to hold while it has focus, the close a second defence that no flip pins. (12) An in-place *Create component* silent, and `Ctrl+Alt+K` on an instance saying to detach it first (`[X11.2-L2-05]`); **built 2026-10-07** (`2a77404`), with every *Create component* refusal named by the commit's rule (D979's amendment). Five introduced Highs block the next tag, of 86 findings — all five fixed the same day (`757fa2a`, and `6bc0e2a` for `[X2-L5-01]`; D979's amendments). *(Ruled 2026-10-07 by the maintainer. **Keep**; **not built** but for (1)–(4), (5)'s second defence and doors, (6), (7) and (10)–(12) — `roadmap.md` *Now · Components*, `review/release-v0.4.1/triage.md` §7 its order. Citations planted by hand. D339, D979, D980, D981, D983, D991 and D999 amended, and D982 with the build; D344 and D992 with (7)'s; `architecture.md` §5.3d, §6.3 and §9.2)*
 
 ---
 
@@ -21060,6 +21060,68 @@ reload and the override still counted; its flip, the feature dropped, fails at t
 `…16b`, before the override count is reached — the caller's, as the test's doc records it. The export
 goldens are unchanged, five of five, per the caller. *(Fixed 2026-10-07, `e70d870`. **Keep.**)*
 
+🚨 **Amended 2026-10-07: the doors that offer a main, a drop or a set ask the commit's component rules
+first** (`2a77404`; `[X2-L2-01]`, `[X2-L2-02]` and `[X11.2-L2-05]` of the `v0.4.1..7d0c666` review, and
+X11.2's two-members note; from the caller's brief and a read of `component.rs`' `why_not_main`,
+`why_not_wrap`, `NotMain`, `can_hold` and `can_be_main`, `app.rs`' `create_component` and
+`create_component_refusal`, `menu.rs`' `create_refusal` and structure rows, `canvas.rs`'
+`covering_that_holds` and `FrameIndex::components`, `layers.rs`' `drop_is_legal`, and the tests; the
+flips are the caller's, each as its test's doc records it). `check` was the only statement of these
+rules, and two kinds of door said in advance what it would take without asking it.
+
+***Create component*** was offered and ran where the commit refused. The wrap branch had no check at
+all, so a rect inside a main, a local rect inside an instance and two members of one instance were each
+framed and pushed to the commit, refused as a bare *"Edit failed: … a main component inside a main
+component or an instance"*; and `can_be_main`, whose doc promised *"check's own rules, asked ahead"*,
+read the node and its ancestors only, so a page frame holding a main — the everyday *Components* frame
+— passed and was refused as `NestedMain`, a frame holding a set the same way as `SetKind`. **One
+predicate family now answers for the row, the chord and the commit**: `why_not_main` in place,
+`why_not_wrap` for the wrap — whose subject is the **members' parent**, where the new frame is made, not
+a member — each naming a `NotMain` rule (`architecture.md` §5.3d has the six), and
+`OndinApp::create_component_refusal` choosing between them as `create_component` does. The row is
+**dimmed with the commit's reason** — `Inside`, `Holds`, `SetKind` — through `menu::create_refusal`,
+which is also the chord's failure message; `holds_main` still withholds it from a selection that *is* a
+main or a set, as D982's amendment had it. `can_be_main`'s doc is now true of the subtree. (12)'s
+silence and instance sentence are D1003's ✅. Test
+`app::component_verb_tests::create_component_refuses_with_the_reason_the_commit_would_give`, each case
+asserting the refusal, the sentence and that nothing was wrapped. **Its flips**: `why_not_wrap`'s parent
+check removed fails at *"a rect inside a main"* — ⚠️ on the `create_component_refusal` assertion, `None`
+against `Some(Inside)`, which runs before the sentence's, not on the *"Edit failed"* text predicted; the
+subtree check removed fails at *"a frame holding a main"* the same way; the in-place toast put back
+fails at *"in place, silent"*. The row's half is
+`menu::tests::a_component_row_the_commit_would_refuse_is_dim_with_the_reason`, at fixture level — it
+sets `Context::create_refused` itself, so that `menu_context` fills it from `create_component_refusal`
+is read, not tested, as D876's *Use as mask* row before it.
+
+**The drop outline promised what the commit refused.** `move_destination` asked kinds and the moved
+subtree only: a main dragged over a main lit it and the commit refused the whole move as `NestedMain`,
+every other layer of a multi-selection drag losing its move with it; an instance dragged into its own
+main was refused as `ComponentCycle`. `component::can_hold(doc, parent, moved)` is the component half
+`build::can_parent` cannot see (§5.3d), and it is **always true for `moved`'s own parent** — 🚨 *do not
+"tighten" that away*: a variant of a mixed set the loader admits (D1003 (5)) would otherwise leave its
+set on a nudge. The canvas asks it in `covering_that_holds`, which skips a refused frame and retries
+beneath — D997's exclude-before-choosing order — and only when `FrameIndex::components` says the
+document has a main, a linked layer or a set, read in the memo's existing walk, so D616's per-frame path
+pays nothing in a document without components. The layers panel's `drop_is_legal` asks it beside
+`can_parent` and the ancestor rule. This is D876's *"every place that says in advance what `apply` will
+accept has to ask them too"*, carried from the frame rules to the component rules. Tests
+`canvas::group_fence_tests::a_drop_never_lands_where_the_component_rules_refuse_it` — a main over a
+main, an instance over its own main and a group main over a set of frames each staying on the canvas
+and committing, a frame main over the set going in — whose three flips each fail at their own case:
+`covering_that_holds` unfiltered at *"a main over a main stays on the canvas"* with `Some(k)` (the
+assertion that would also catch `components` left false), the set-kind clause at *"a group main over a
+set of frames …"* with `Some(set)`, the cycle clause at *"an instance over its own main …"* with
+`Some(m)`; and `panels::layers::drop_indent_tests::a_main_cannot_be_dropped_into_a_main`, whose flip,
+the `can_hold` clause deleted, fails at *"a main into a main"*. `duplicate_selection` is `pub(crate)` for
+the canvas test's instance.
+
+⚠️ **Not closed by this, both read by the caller**: *Paste* beside a selection inside a main while the
+clipboard holds that main — `[X2-L2-02]`'s third case — is still refused at the commit (in progress
+when this was written); and `why_not_main`'s `SetKind` asks only a set that is the layer's **parent**, so
+*Create component* on a set's grandchild is not kind-checked — not a variant, so no set's kind is at
+stake. *(Fixed 2026-10-07, `2a77404`. **Keep.** D876, D981, D997 and D1003 amended; `architecture.md`
+§5.3d and §9.4; `context-menus.md` §4)*
+
 **D980 — The five item lists carry ids, in a wrapper beside each item rather than a field inside it,
 and an instance's items follow its main's item by item. *Decided 2026-10-04 by the maintainer — per
 item; the shape and the migration the session's; not built.*** When D979 was first written the record
@@ -21920,7 +21982,11 @@ naming what and *Restore* in that row's context menu — so (e)'s *"a removed ch
 instance root's bubbled dot"* no longer holds, and clarification (2), no ghost rows, stands. (12):
 *Feedback*'s rule holds against the code, whose in-place *Create component* speaks — ruled silent —
 and `Ctrl+Alt+K` on an instance says *"An instance can't become a component — detach it first
-(Ctrl+Alt+B)."* The passages above say what was accepted and built.
+(Ctrl+Alt+B)."* The passages above say what was accepted and built. *((12) built 2026-10-07 in
+`2a77404`: the in-place create is silent, *Feedback*'s rule now true of the code, and the chord's
+instance sentence is the ruling's. With it *Create component*'s row, which this entry offers on an
+ordinary layer, is dimmed with the commit's reason wherever the commit would refuse — D979's amendment
+of that date.)*
 
 **D993 — The maintainer's first polish pass over the components chrome: one-line card faces, an
 overflow as wide as its rows, ghost rows laid out as live ones, and a point each way on the canvas
@@ -24181,7 +24247,8 @@ adds to a main and its instance, and the fx scratch pooled — with six on the c
 maintainer 2026-10-07; (2) built the same day (`757fa2a`), and (1), (3), (4) and (5)'s second defence
 after it (`6bc0e2a`, `0683f66`), and (7), (10) and (11) after those (`c697b82`, `2de4287`), the gaps
 the record read in (1) and (3) closed after those (`b003b42`, `96eb959`), (6) after those
-(`2077cac`) and (1)'s redo (`90c476c`) — the rest not; Keep.*** The release review of `v0.4.1..7d0c666`
+(`2077cac`) and (1)'s redo (`90c476c`), (12) and (5)'s doors after those (`2a77404`) — the rest not;
+Keep.*** The release review of `v0.4.1..7d0c666`
 (`review/release-v0.4.1/`, gitignored — `triage.md` §5 holds the questions as asked and the rulings
 as made) left twelve questions only the maintainer could answer, seven from its core half and five
 from the app's. The maintainer asked for the better approach in usability terms rather than the
@@ -24189,8 +24256,8 @@ cheapest, was given a recommendation for each, and answered *"Agree with all."* 
 is the maintainer's, in the recommendation's terms, and each names the finding it answers — whose
 block in `review/release-v0.4.1/passes/` holds the evidence. 🚨 **Nothing here is built** *(true when
 written; (1)–(4), (5)'s second defence, (6), (7), (10) and (11) were built later the same day — each
-paragraph says how — and the rest of this sentence holds for (8), (9), (12) and (5)'s set
-doors)*. Each is a
+paragraph says how — and (12) and (5)'s doors after them, the panel's message and a mixed pair into an
+empty set excepted; the rest of this sentence holds for (8) and (9))*. Each is a
 rule the code does not yet follow, so the entries it amends carry a pointer saying so rather than a
 rewritten rule; the fix phase is `roadmap.md`'s *Now · Components — the release review's fix phase*,
 and `triage.md` §7 is its order.
@@ -24295,8 +24362,34 @@ target as a second defence; and **the loader never refuses** such a link, so a d
 holding one opens as before — which is why the rule is not a `component::check` arm, the alternative
 the review priced at refusing such documents on load. ✅ *The second defence built 2026-10-07*
 (`0683f66`): `variant::switch` and `switch_target` refuse a main of another kind (`variant::same_kind`).
-**The two doors are not built** — *Combine as variants* and a drag into a set still accept one — so
-`[X6.1-L1-02]` stays open.
+~~**The two doors are not built** — *Combine as variants* and a drag into a set still accept one — so
+`[X6.1-L1-02]` stays open.~~
+
+✅ **(5)'s doors built 2026-10-07** (`2a77404`; from the caller's brief and a read of `variant.rs`'
+`combine`, `fits_set` and `one_kind`, `component::can_hold`, `app.rs`' `combinable_mains`,
+`combine_refusal` and `combine_as_variants`, `menu.rs`' structure rows and `COMBINE_MIXED`, `canvas.rs`'
+`covering_that_holds`, `drops_into_a_set_of_another_kind` and the release arm, and `layers.rs`'
+`drop_is_legal`). ***Combine as variants*** over mains of more than one kind (`variant::one_kind`, a
+`NodeKind` discriminant compare) fails with `menu::COMBINE_MIXED`, *"A component set holds one kind of
+layer — these mains mix frames and groups"*; `variant::combine` refuses the same selection as
+`WrongKindForOp` behind it, the second defence. 🚨 **The menu row is offered dimmed with that sentence,
+not withheld** — the session's call under the maintainer's delegation, and unlike every other refusal
+`combinable_mains` makes, which withholds the row: the ruling asks for *"a message saying why"*, and a
+missing row says nothing. **A canvas drag** skips a set of another kind through
+`component::can_hold`'s `fits_set` clause (`[X2-L2-02]`, D997's amendment and `architecture.md` §9.4),
+so the outline never lights it and the frame beneath takes the drop; `drops_into_a_set_of_another_kind`,
+asked before the commit, posts `canvas::SET_OF_ANOTHER_KIND` once the move has committed, the release
+being the only place the refusal can be said. **The layers panel's drop** is refused by `drop_is_legal`
+asking the same `can_hold`. `component::check` is untouched and the loader still admits a mixed set, as
+ruled. Test `app::component_verb_tests::combine_refuses_mains_of_two_kinds` (a frame main and a group
+main refused and no set made, two frame mains combining); its flip, the `one_kind` check deleted from
+`combine_as_variants`, fails at *"said why"* with *"Cannot combine: …"* — the core's refusal still
+holding the tree — the caller's, as its doc records it. The canvas half is pinned by
+`a_drop_never_lands_where_the_component_rules_refuse_it` (D979's amendment of this date), whose flip of
+`can_hold`'s set-kind clause fails at *"a group main over a set of frames stays on the canvas"*.
+⚠️ **Not built when this was written, and in progress**: the panel's refusal says nothing on release,
+and a frame main and a group main moved **together** into an empty set each pass `can_hold` alone, an
+empty set fitting either. `[X6.1-L1-02]` stays open on those two.
 
 **(6) An item one edit adds to a main and its instance together gets one shared id**
 (`[X1-L1-01]`; overturns D980's *"an added row … minted per target"* for that case). Select a main
@@ -24498,6 +24591,15 @@ the chord reaches an instance root the menu withholds the row from (`menu::Role:
 inside a component or an instance"* of a layer that sits inside nothing. Ruled: *"An instance can't
 become a component — detach it first (Ctrl+Alt+B)."* Read, not run (`triage.md` §8).
 
+✅ **(12) built 2026-10-07** (`2a77404`; D979's amendment of that date has the predicates). The in-place
+arm of `OndinApp::create_component` commits and says nothing; the wrap still toasts. A refusal goes
+through `menu::create_refusal(component::NotMain)`, one sentence per rule, so the chord's failure and
+the dimmed menu row say the same thing; `NotMain::Instance`'s is the ruling's word for word, its
+`Ctrl+Alt+B` the binding `input.rs` and `shortcuts.md` give *Detach instance*. ⚠️ **The menu still
+withholds the row on an instance root** (`Role::Instance`), so the sentence is reached by the chord
+alone. Pinned by `app::component_verb_tests::create_component_refuses_with_the_reason_the_commit_would_give`,
+whose *"in place, silent"* fails with the `Created a component` info put back — the caller's flip.
+
 **What it changes of the release.** Rulings (1) and (2) leave **five introduced Highs**, every one
 blocking the next tag — `[R1-L2-01]`, `[X2-L1-01]`, `[X3-L1-01]`, `[R3-L5-01]` and `[X2-L5-01]` — of
 **86** distinct findings: 0 Critical, 5 High, 41 Medium, 40 Low (`triage.md` §1–§2, as the ruling
@@ -24516,8 +24618,9 @@ read of each site below at `7d0c666`. **Keep.** **Not built** — `roadmap.md` *
 same day** in `6bc0e2a` and `0683f66`, the citations on `cut_selection`, `swap::settle`, `tidy` and
 `variant::switch` rewritten to the built rules; **and (7), (10) and (11), built the same day** in
 `c697b82` and `2de4287`, `fx_gpu::run`'s citation rewritten — the canvas no longer calls it — and the
-content rule cited from `variants::Rules` where `name_field` carried the ruling; ***Fix*** the slots a
-failed effect pass leaves registered, (7)'s ✅. Citations planted by hand, each saying *ruled, not built*: `OndinApp::
+content rule cited from `variants::Rules` where `name_field` carried the ruling; **and (12) and (5)'s
+doors, built the same day** in `2a77404`, `create_component`'s citation rewritten to the built rule;
+***Fix*** the slots a failed effect pass leaves registered, (7)'s ✅. Citations planted by hand, each saying *ruled, not built*: `OndinApp::
 cut_selection` and `create_component`, `propagate::propagate_structure`, `swap::settle` and `tidy`,
 `variant::switch`, `item::retarget`, `fx_gpu::run`, `transform_marks`, `layers::RowMark` and
 `variants::name_field`. D339, D979, D980, D981, D983, D991 and D999 amended, and D982 with the build;
@@ -24752,6 +24855,12 @@ Recorded from the brief and a read of `menu.rs`' `Context::mask_refused`, the *U
 `menu_context`'s assignment and the test, and `inspector.rs`' `mask_refusal` and `mask_action` — not
 re-run; gates as reported by the caller. No number spent. `architecture.md` §9.4 and `context-menus.md`
 §4's row amended)*
+
+⚠️ **Amended 2026-10-07: the rule of (i)'s last sentence reaches the component rules** (`2a77404`,
+`[X2-L2-02]`). The canvas's drop and the layers panel's `drop_is_legal` asked this entry's frame rules
+beside `can_parent` and nothing of `component::check`'s, so a main dragged over a main was lit and then
+refused at the commit. Both ask `component::can_hold` now — D979's amendment of this date has it — and
+the group fence's candidates go through it too (`canvas::covering_that_holds`). *(**Keep.**)*
 
 **D871 — Constraints are `position: absolute` with insets, and a child with none stays where it is.
 *Decided 2026-09-23 by the maintainer; built and tested 2026-09-24 in frames (D874), the model and then its inspector card.*** **There is no separate constraints feature.** In
@@ -29159,6 +29268,26 @@ predicted site, as the caller reports it. *(Reported by the maintainer and fixed
 when recorded; from the caller's brief and a read of `move_destination`, `frame_covering_except`, the
 free `frame_covering`, `group_fence`, `FrameIndex` and `with_frames`, `query::is_within` and the test.
 **Resolved.** D62, D876 and D944 amended; `architecture.md` §5.3 and §9.4)*
+
+🚨 **Amended 2026-10-07: the principle covers every layer moving with it, not only the one**
+(`2a77404`, `[X11.1-L1-01]` of the `v0.4.1..7d0c666` review; from the caller's brief and a read of
+`canvas.rs`' `moving_with`, `within_moving`, `frame_covering_except`, `move_destination` and the test).
+This entry left out `moved` and its contents, and every **other** selected frame stayed a candidate at
+its committed box while moving by the same delta. So two overlapping sibling frames dragged together
+each chose the other — `Reparent A→B` and `Reparent B→A`, the whole move refused as `WouldCycle` after
+the outline had lit both — or, a small one over a large one, the small went into the large and a
+selection dragged together came apart. A frame moving by the same delta keeps its place against the
+moved one, so it is never what the moved one drops into. `OndinApp::moving_with(id)` is `id` and the
+selection's outermost roots, read off the selection so the commit, the preview and the outline ask the
+same set; `within_moving` asks it with one walk up from each candidate frame rather than an `is_within`
+per moving root, this being D616's per-frame path. **On an Alt-drag it is `id` alone**: the originals
+do not move, so a copy dropped over another selected original is dropped over a frame that is still
+there. `frame_covering_except` and the group fence's `inside` list both exclude the set before the
+choice — this entry's order, unchanged. Test
+`canvas::group_fence_tests::overlapping_frames_dragged_together_stay_on_the_canvas`, both cases moved
+4 right; its flip, `moving_with` narrowed back to `[id]`, fails at *"stacked: A stays on the canvas"*
+with `Some(b)` — the caller's, as the test's doc records it. ⚠️ **The Alt-drag narrowing is read, not
+tested.** *(Fixed 2026-10-07, `2a77404`. **Resolved.** `architecture.md` §9.4)*
 
 **D945 — A drag's landing outline is composed with its container where the preview draws it. *The
 release review's `[X4.2-L1-01]`. Fixed and tested 2026-10-03, committed as `6ba7575`.***

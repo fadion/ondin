@@ -305,7 +305,11 @@ impl OndinApp {
 
     /// A row **edit** of the list every subject shares, written onto each subject
     /// with its own item ids (`ondin_core::item::retarget`, §15 D980), as one step.
-    fn retarget_exports(
+    ///
+    /// `pub(super)` for `inspector::paint_write_tests`' table of the five list
+    /// writers (`[R2-L6-03]`), as are [`Self::exports_tx`] and
+    /// [`Self::append_exports`].
+    pub(super) fn retarget_exports(
         &mut self,
         subjects: &[NodeId],
         anchor: &[Keyed<ExportSpec>],
@@ -347,8 +351,10 @@ impl OndinApp {
         }
     }
 
-    fn exports_tx(&mut self, subjects: &[NodeId], specs: &[ExportSpec]) -> Transaction {
+    pub(super) fn exports_tx(&mut self, subjects: &[NodeId], specs: &[ExportSpec]) -> Transaction {
         let session = &mut self.session;
+        // One id per position past the end for the whole write (§15 D1003 (6)).
+        let mut fresh = ondin_core::item::PastTheEnd::default();
         Transaction(
             subjects
                 .iter()
@@ -359,6 +365,7 @@ impl OndinApp {
                         exports: ondin_core::item::rekey_by_position(
                             own,
                             specs.iter().cloned(),
+                            &mut fresh,
                             &mut session.ids,
                         ),
                     }
@@ -375,19 +382,22 @@ impl OndinApp {
     /// card cannot be edited out of (`export_mixed_row`). Each subject is read
     /// separately all the same, because "whatever each already has" is the honest
     /// spelling of an append and costs nothing when they match.
-    fn append_exports(&mut self, subjects: &[NodeId], specs: &[ExportSpec]) {
+    pub(super) fn append_exports(&mut self, subjects: &[NodeId], specs: &[ExportSpec]) {
         let session = &mut self.session;
+        // An item added to an existing list is minted (§15 D980) — **once, for
+        // every subject** (§15 D1003 (6), `[X1-L1-01]`): minted per subject, a main
+        // and its instance given an export together got two items, the instance's
+        // a local addition its main's later edits skipped.
+        let added: Vec<Keyed<ExportSpec>> = specs
+            .iter()
+            .map(|s| Keyed::new(session.ids.mint_item(), s.clone()))
+            .collect();
         let ops: Vec<Operation> = subjects
             .iter()
             .filter_map(|id| {
                 let node = session.doc.get(*id)?;
                 let mut next = node.exports().to_vec();
-                // An item added to an existing list is minted, per subject (§15 D980).
-                next.extend(
-                    specs
-                        .iter()
-                        .map(|s| Keyed::new(session.ids.mint_item(), s.clone())),
-                );
+                next.extend(added.iter().cloned());
                 Some(Operation::SetExports {
                     id: *id,
                     exports: next,
@@ -511,10 +521,11 @@ impl OndinApp {
                     }
                 }
             });
-            // **Written whole, not retargeted**: `item::retarget` mints an id for an
-            // item the anchor does not hold, and a restored export is the main's by
-            // its id or it is a local addition that looks like one (the Effects
-            // card's restore, which went the same way first).
+            // **Written whole, not retargeted**: a restored export is the main's by
+            // its id or it is a local addition that looks like one, and the source
+            // exists for one subject only, so there is nothing to retarget across
+            // (`item::retarget` minted for an item the anchor lacked until §15
+            // D1003 (6) — the Effects card's restore went that way first).
             // The rows' own edits stand down that frame, so nothing writes twice. A
             // ghost row's restore is the whole list back as the main has it (§15
             // D994); a row's ↺ is that item.

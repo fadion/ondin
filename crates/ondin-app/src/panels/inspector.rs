@@ -6074,7 +6074,8 @@ impl OndinApp {
             self.open_paint_panel("Fill");
             let mut next = fills.to_vec();
             // An item added to an existing list is minted (§15 D980); over a
-            // selection `write_fill_list` re-mints it per layer.
+            // selection `write_fill_list` gives every layer this one id (§15 D1003
+            // (6)), so a main and its instance added to together share the item.
             next.push(Keyed::new(
                 self.session.ids.mint_item(),
                 Fill {
@@ -7985,9 +7986,11 @@ impl OndinApp {
                     restore = true;
                 }
             }
-            // Written whole, not through `retarget_grids` — which mints an id for
-            // an item the anchor does not hold, and a restored grid is the main's
-            // by its id (the export card's restore says the same). A ghost row's
+            // Written whole, not through `retarget_grids`: a restored grid is the
+            // main's by its id, and the source exists for one frame only, so there
+            // is nothing to retarget across (the export card's restore says the
+            // same; `retarget` minted for an item the anchor lacked until §15 D1003
+            // (6), which is how the Effects card's restore first went). A ghost row's
             // restore is the whole list back as the main has it (§15 D994); a
             // row's ↺ is that item.
             let list = match (restore, reset, source.as_deref()) {
@@ -8775,6 +8778,8 @@ impl OndinApp {
     /// §15 D980); a row edit goes through [`Self::retarget_grids`].
     fn write_grids(&mut self, subjects: &[NodeId], grids: &[LayoutGrid]) {
         let session = &mut self.session;
+        // One id per position past the end for the whole write (§15 D1003 (6)).
+        let mut fresh = ondin_core::item::PastTheEnd::default();
         let tx = Transaction(
             subjects
                 .iter()
@@ -8785,6 +8790,7 @@ impl OndinApp {
                         grids: ondin_core::item::rekey_by_position(
                             own,
                             grids.iter().copied(),
+                            &mut fresh,
                             &mut session.ids,
                         ),
                     }
@@ -8805,13 +8811,17 @@ impl OndinApp {
     /// the same reasoning.
     fn append_grid(&mut self, subjects: &[NodeId], grid: LayoutGrid) {
         let session = &mut self.session;
+        // An item added to an existing list is minted (§15 D980) — **once, for
+        // every frame** (§15 D1003 (6), `[X1-L1-01]`): minted per frame, a main
+        // and its instance given a grid together got two items, the instance's a
+        // local addition its main's later edits skipped.
+        let added = Keyed::new(session.ids.mint_item(), grid);
         let ops: Vec<Operation> = subjects
             .iter()
             .filter_map(|id| {
                 let node = session.doc.get(*id)?;
                 let mut grids = node.grids().to_vec();
-                // An item added to an existing list is minted, per frame (§15 D980).
-                grids.push(Keyed::new(session.ids.mint_item(), grid));
+                grids.push(added);
                 Some(Operation::SetLayoutGrids { id: *id, grids })
             })
             .collect();
@@ -10934,12 +10944,14 @@ impl OndinApp {
         // overridden row's ↺ — the main's item back by its id (`reset::reset_item`).
         //
         // ⚠️ **Written verbatim, not through `write_effects`**, which is the
-        // multi-selection writer: `item::retarget` mints a fresh id for any item
-        // its anchor lacks, so a restored effect landed as a *new local item*
+        // multi-selection writer: `item::retarget` then minted a fresh id for any
+        // item its anchor lacked, so a restored effect landed as a *new local item*
         // carrying the main's value — cut from its counterpart, the one thing a
-        // restore must not do. The source exists only for one subject, so there is
-        // no selection to retarget across. Caught by
-        // `an_effect_stack_restores_and_resets_item_by_item`.
+        // restore must not do. Caught by
+        // `an_effect_stack_restores_and_resets_item_by_item`. `retarget` keeps an
+        // un-anchored item's own id since §15 D1003 (6), but the verbatim write
+        // stays the honest one: the source exists only for one subject, so there
+        // is no selection to retarget across.
         let reset = acted.filter(|_| out.reset).map(|i| effects[i].id);
         // A ghost row's restore is the whole stack back as the main has it, the
         // instance's own effects gone with it (§15 D994); a row's ↺ is that item.
@@ -11047,8 +11059,9 @@ impl OndinApp {
     /// it is retargeted onto each subject's own item ids from that list
     /// (`ondin_core::item::retarget`, §15 D980) rather than written verbatim, which
     /// would hand every layer the first one's ids. Over a mixed selection the edit
-    /// shares no id with the anchor and every subject gets fresh ones, which is the
-    /// `+`'s *replace them all with one* exactly.
+    /// shares no id with the anchor, so every subject gets the edit's own ids — one
+    /// item on all of them (§15 D1003 (6)) — which is the `+`'s *replace them all
+    /// with one* exactly.
     fn write_effects(&mut self, subjects: &[NodeId], effects: Vec<Keyed<Effect>>) {
         let anchor = subjects
             .first()
@@ -24894,6 +24907,260 @@ mod paint_write_tests {
         assert_eq!(
             b2[0].id, b[1].id,
             "the second rect keeps *its* survivor's id"
+        );
+    }
+
+    /// **The five list writers, as a table** (`[R2-L6-03]`, `[X1-L1-01]`; §15 D980,
+    /// D1003 (6)). A main frame, its instance and a plain frame are selected
+    /// together, each carrying the same two fills, strokes, effects, layout grids
+    /// and exports — the main's and the instance's under the main's ids, the plain
+    /// frame's under ids of its own. Through each card's own writer:
+    ///
+    /// 1. **Removing row 0** leaves every layer its *own* id on the survivor — the
+    ///    write `a_selection_fill_edit_keeps_each_layers_item_ids` pinned for Fill
+    ///    alone, now for all five (`write_fill_list`, `write_strokes`,
+    ///    `write_effects`, `retarget_grids`, `retarget_exports`).
+    /// 2. **The `+`** — a minted row pushed through the same writer for the three
+    ///    paint-shaped lists, `append_grid` and `append_exports` for the two whose
+    ///    `+` appends — gives the new row **one id on all three layers**, so the
+    ///    instance's is the main's item and the instance shows no drift.
+    /// 3. **A wholesale write** longer than the lists (`write_grids`,
+    ///    `exports_tx`, the mixed override's) keeps each layer's ids by position
+    ///    and gives the position past the end one id on all three.
+    ///
+    /// Flips, each run alone: every writer of step 1 handed the edited list
+    /// verbatim (`own` ignored, the anchor's ids written) fails *"the plain
+    /// frame's own survivor"* at its own row of the table — fills, strokes,
+    /// effects, grids, exports, one run each; `item::retarget` back to minting per
+    /// target fails step 2 at *"one id for the added fills"*; `append_grid`
+    /// minting inside its per-frame closure (the code before the ruling) fails
+    /// *"one id for the added grids"* — this table's first red run, before the fix
+    /// — and `append_exports` the same at *"… exports"*; a `PastTheEnd` made per
+    /// target in `write_grids` fails at *"the copy is the main's, grids"* — one
+    /// assertion earlier than the *"one id past the end"* this note first
+    /// predicted, the copy's third grid being the first thing to differ.
+    #[test]
+    fn every_list_writer_keeps_each_layers_ids_and_shares_an_added_one() {
+        use ondin_core::{ExportFormat, ExportScale, ExportSpec, ItemId, Placement};
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = ondin_core::IdSource::new(0x5A3);
+        let root = ids.mint();
+        let mut doc = ondin_core::Document::new(root);
+        let [m, p] = [(); 2].map(|_| ids.mint());
+        let frame = |id, index| Operation::CreateNode {
+            id,
+            parent: root,
+            index,
+            kind: NodeKind::Artboard {
+                size: Size::new(100.0, 100.0),
+            },
+            transform: None,
+            name: None,
+        };
+        doc.apply(&Transaction(vec![
+            frame(m, 0),
+            frame(p, 1),
+            Operation::SetComponent {
+                id: m,
+                component: true,
+            },
+        ]))
+        .expect("a main and a plain frame");
+        let (tx, made) = ondin_core::insert_subtrees(
+            &doc,
+            &mut ids,
+            &[Placement {
+                nodes: doc.capture_subtree(m).unwrap(),
+                parent: root,
+                index: None,
+            }],
+            Default::default(),
+        );
+        doc.apply(&tx).expect("an instance");
+        let i = made[0];
+        app.session.adopt_document(doc, None);
+
+        let fill = |g: u8| Fill {
+            brush: Brush::Solid(ondin_core::peniko::Color::from_rgb8(10, g, 30)),
+            visible: true,
+        };
+        let stroke = |width: f64| Stroke {
+            width,
+            ..Default::default()
+        };
+        let [ea, eb, ec, ..] = EffectKind::all_defaults();
+        let grid = |count| LayoutGrid {
+            count,
+            ..LayoutGrid::new(GridAxis::Columns)
+        };
+        let export = |s| ExportSpec::new(ExportFormat::Png, ExportScale::Times(s));
+        // The main's two items minted, the plain frame's positional: one look,
+        // other ids. Committed, so the instance takes the main's by propagation.
+        let s = &mut app.session.ids;
+        let two = |s: &mut ondin_core::IdSource| [s.mint_item(), s.mint_item()];
+        let [f0, f1] = two(s);
+        let [s0, s1] = two(s);
+        let [e0, e1] = two(s);
+        let [g0, g1] = two(s);
+        let [x0, x1] = two(s);
+        use ondin_core::keyed_by_position as pos;
+        assert!(app.session.commit(Transaction(vec![
+            Operation::SetFills {
+                id: m,
+                fills: vec![Keyed::new(f0, fill(1)), Keyed::new(f1, fill(2))],
+            },
+            Operation::SetStrokes {
+                id: m,
+                strokes: vec![Keyed::new(s0, stroke(1.0)), Keyed::new(s1, stroke(2.0))],
+            },
+            Operation::SetEffects {
+                id: m,
+                effects: vec![
+                    Keyed::new(e0, Effect::new(ea.clone())),
+                    Keyed::new(e1, Effect::new(eb.clone())),
+                ],
+            },
+            Operation::SetLayoutGrids {
+                id: m,
+                grids: vec![Keyed::new(g0, grid(4)), Keyed::new(g1, grid(6))],
+            },
+            Operation::SetExports {
+                id: m,
+                exports: vec![Keyed::new(x0, export(1.0)), Keyed::new(x1, export(2.0))],
+            },
+            Operation::SetFills {
+                id: p,
+                fills: pos([fill(1), fill(2)]),
+            },
+            Operation::SetStrokes {
+                id: p,
+                strokes: pos([stroke(1.0), stroke(2.0)]),
+            },
+            Operation::SetEffects {
+                id: p,
+                effects: pos([Effect::new(ea), Effect::new(eb)]),
+            },
+            Operation::SetLayoutGrids {
+                id: p,
+                grids: pos([grid(4), grid(6)]),
+            },
+            Operation::SetExports {
+                id: p,
+                exports: pos([export(1.0), export(2.0)]),
+            },
+        ])));
+        // The five lists' ids on one layer, in the table's order.
+        fn ids_of(n: &ondin_core::Node) -> [Vec<ItemId>; 5] {
+            fn of<T>(l: &[Keyed<T>]) -> Vec<ItemId> {
+                l.iter().map(|k| k.id).collect()
+            }
+            [
+                of(&n.paint().fills),
+                of(&n.paint().strokes),
+                of(n.effects()),
+                of(n.grids()),
+                of(n.exports()),
+            ]
+        }
+        let read = |app: &OndinApp, id| ids_of(app.session.doc.get(id).expect("node"));
+        let lists = ["fills", "strokes", "effects", "grids", "exports"];
+        assert_eq!(read(&app, i), read(&app, m), "the fixture: it propagated");
+        let plain = read(&app, p);
+        assert!(
+            plain.iter().all(|l| l.len() == 2 && !l.contains(&f1)),
+            "the fixture: the plain frame's own ids"
+        );
+        let subjects = [m, i, p];
+        app.session.selection.set(subjects.to_vec());
+
+        // 1. Row 0 removed through each card's writer.
+        let mut next = app.fills_in_scope(PaintScope::Selection);
+        assert_eq!(next.len(), 2, "the selection agrees on its fills");
+        next.remove(0);
+        app.write_fill_list(PaintScope::Selection, next);
+        let mut next = app.strokes_in_scope(PaintScope::Selection);
+        assert_eq!(next.len(), 2, "… and its strokes");
+        next.remove(0);
+        app.write_strokes(PaintScope::Selection, next);
+        let mut next = app.shared_effects(&subjects).expect("… and its effects");
+        next.remove(0);
+        app.write_effects(&subjects, next);
+        let anchor = app.shared_grids_keyed(&subjects).expect("… and its grids");
+        app.retarget_grids(&subjects, &anchor, &anchor[1..]);
+        let anchor = app.session.doc.get(m).unwrap().exports().to_vec();
+        app.retarget_exports(&subjects, &anchor, &anchor[1..]);
+        let main = [f1, s1, e1, g1, x1];
+        for (k, name) in lists.iter().enumerate() {
+            assert_eq!(
+                read(&app, m)[k],
+                vec![main[k]],
+                "the main's survivor, {name}"
+            );
+            assert_eq!(
+                read(&app, i)[k],
+                vec![main[k]],
+                "the copy's survivor, {name}"
+            );
+            assert_eq!(
+                read(&app, p)[k],
+                vec![plain[k][1]],
+                "the plain frame's own survivor, {name}"
+            );
+        }
+
+        // 2. The `+`, one row added to all three.
+        let mut next = app.fills_in_scope(PaintScope::Selection);
+        next.push(Keyed::new(app.session.ids.mint_item(), fill(3)));
+        app.write_fill_list(PaintScope::Selection, next);
+        let mut next = app.strokes_in_scope(PaintScope::Selection);
+        next.push(Keyed::new(app.session.ids.mint_item(), stroke(3.0)));
+        app.write_strokes(PaintScope::Selection, next);
+        let mut next = app.shared_effects(&subjects).expect("still agrees");
+        next.push(Keyed::new(app.session.ids.mint_item(), Effect::new(ec)));
+        app.write_effects(&subjects, next);
+        app.append_grid(&subjects, grid(8));
+        app.append_exports(&subjects, &[export(3.0)]);
+        for (k, name) in lists.iter().enumerate() {
+            let added = |id| read(&app, id)[k].get(1).copied();
+            assert!(added(m).is_some(), "the fixture: a {name} row landed");
+            assert_eq!(
+                (added(i), added(p)),
+                (added(m), added(m)),
+                "one id for the added {name}"
+            );
+        }
+        assert_eq!(
+            ondin_core::reset::drift(&app.session.doc, i),
+            Default::default(),
+            "an edit made to the main and its instance together is no override"
+        );
+
+        // 3. A wholesale write one longer than the lists.
+        let before = [read(&app, m), read(&app, p)];
+        app.write_grids(&subjects, &[grid(1), grid(2), grid(3)]);
+        let tx = app.exports_tx(&subjects, &[export(1.0), export(2.0), export(4.0)]);
+        app.commit_edit(tx);
+        for (k, name) in [(3, "grids"), (4, "exports")] {
+            let (now_m, now_p) = (&read(&app, m)[k], &read(&app, p)[k]);
+            assert_eq!(
+                now_m[..2],
+                before[0][k][..],
+                "the main keeps its {name} ids"
+            );
+            assert_eq!(
+                now_p[..2],
+                before[1][k][..],
+                "the plain frame keeps its own"
+            );
+            assert_eq!(read(&app, i)[k], *now_m, "the copy is the main's, {name}");
+            assert_eq!(now_p[2], now_m[2], "one id past the end of {name}");
+        }
+        assert_eq!(
+            ondin_core::reset::drift(&app.session.doc, i),
+            Default::default(),
+            "and still no override"
         );
     }
 

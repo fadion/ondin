@@ -949,3 +949,182 @@ fn an_empty_property_is_refused_rather_than_panicking() {
     ondin_core::propagate::owed(&f.doc, &mut tx, &mut f.ids);
     assert!(f.doc.clone().apply(&tx).is_err());
 }
+
+/// Two mains, *Button/Primary* and *Button/Ghost*, each with a text layer bound
+/// to a Text property — *Label* and *Title* — **under one item id**, the shape
+/// *Duplicate as component* leaves (D980's copy rule keeps a copied item's id)
+/// once the copy's property is renamed. Answers the mains, their text layers and
+/// the shared id.
+fn mains_sharing_a_property_id() -> (Document, IdSource, [NodeId; 4], ondin_core::ItemId) {
+    let mut ids = IdSource::new(0xBD);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let [a, b, la, lb] = [(); 4].map(|_| ids.mint());
+    let shared = ids.mint_item();
+    let prop = |name: &str, bound| {
+        vec![Keyed::new(
+            shared,
+            Property {
+                name: name.into(),
+                kind: PropKind::Text,
+                bound: vec![bound],
+                filter: String::new(),
+            },
+        )]
+    };
+    doc.apply(&Transaction(vec![
+        create(a, root, 0, frame(10.0, 10.0), "Button/Primary"),
+        create(b, root, 1, frame(10.0, 10.0), "Button/Ghost"),
+        create(la, a, 0, text("Go"), "Label"),
+        create(lb, b, 0, text("Go"), "Label"),
+        Operation::SetComponent {
+            id: a,
+            component: true,
+        },
+        Operation::SetComponent {
+            id: b,
+            component: true,
+        },
+        Operation::SetProperties {
+            id: a,
+            props: prop("Label", la),
+        },
+        Operation::SetProperties {
+            id: b,
+            props: prop("Title", lb),
+        },
+    ]))
+    .expect("two mains, one property id between them");
+    (doc, ids, [a, b, la, lb], shared)
+}
+
+/// **Combining mains whose properties share an item id keys them apart**
+/// (`[R1-L2-02]`; §15 D980's *unique within one list*, D982's merge). `settle`
+/// moves each variant's properties onto the set, merging by name and kind; the
+/// names differ, so both are pushed — and the set held `[(P, "Label"), (P,
+/// "Title")]`, every edit by id (`edit_property`, the Properties card's rename and
+/// delete) then hitting the *first*. The merge now re-keys a pushed property whose
+/// id the set already holds, and `apply` refuses a repeated property id as it does
+/// a repeated fill's.
+///
+/// Flips, run: the merge's re-key removed fails the commit itself — *"the set:
+/// DuplicateItemId"*, `apply`'s check now refusing the combine, the second
+/// defence; with `props` taken back out of `check_item_ids` as well, it fails at
+/// *"the set's properties, one id each"*, the defect as reported.
+#[test]
+fn combining_mains_whose_properties_share_an_id_keys_them_apart() {
+    let (mut doc, mut ids, [a, b, ..], shared) = mains_sharing_a_property_id();
+    let res = Resolved::rebuild(&doc);
+    let (mut tx, set) = variant::combine(&doc, &res, &mut ids, &[a, b]).unwrap();
+    ondin_core::propagate::owed(&doc, &mut tx, &mut ids);
+    doc.apply(&tx).expect("the set");
+    let props = doc.get(set).unwrap().props().to_vec();
+    let names: Vec<&str> = props.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["Label", "Title"], "both properties on the set");
+    assert_ne!(
+        props[0].id, props[1].id,
+        "the set's properties, one id each"
+    );
+    assert_eq!(props[0].id, shared, "the first keeps its id");
+    // And an edit by id now names the one it means: renaming *Title* leaves
+    // *Label* alone.
+    let tx = variant::edit_property(&doc, set, props[1].id, |p| {
+        Some(Property {
+            name: "Heading".into(),
+            ..p.clone()
+        })
+    })
+    .expect("the property is there");
+    doc.apply(&tx).expect("a rename");
+    let names: Vec<String> = doc
+        .get(set)
+        .unwrap()
+        .props()
+        .iter()
+        .map(|p| p.name.clone())
+        .collect();
+    assert_eq!(names, strs(&["Label", "Heading"]), "the rename hit *Title*");
+}
+
+/// `apply` refuses a property list repeating an item id — `check_item_ids`' sixth
+/// list (`[R1-L2-02]`, §15 D980). Flip, run: `props` left out of
+/// `check_item_ids` fails *"refused"* with `Ok`.
+#[test]
+fn apply_refuses_a_property_id_twice_in_one_list() {
+    let (mut doc, _, [a, ..], _) = mains_sharing_a_property_id();
+    let mut props = doc.get(a).unwrap().props().to_vec();
+    // Bound to nothing, or the check refusing it would be the binding rule's
+    // (one property per field) rather than this one.
+    props.push(props[0].map(|p| Property {
+        name: "Other".into(),
+        bound: Vec::new(),
+        ..p.clone()
+    }));
+    let err = doc.apply(&Transaction(vec![Operation::SetProperties {
+        id: a,
+        props,
+    }]));
+    assert!(
+        matches!(err, Err(OpError::DuplicateItemId(n, _)) if n == a),
+        "refused: {err:?}"
+    );
+}
+
+/// **A file repeating a property id loads, the repeat re-keyed** (`[R1-L2-02]`).
+/// A build before the fix saved such files — *Combine as variants* made them — so
+/// refusing one on load would lose the document over a defect the app itself
+/// wrote. The loader gives each repeat the lowest positional id the list does not
+/// hold (`item::rekey_repeats`), a function of the bytes alone, so loading the
+/// same bytes twice still gives one document (invariant 9), and the re-save is
+/// stable from then on.
+///
+/// Flip, run: the loader's re-key removed (`props: self.props`) fails the `load`
+/// itself, *"has item id … twice in one list"* — the check refusing it, which is
+/// the outcome this test exists to rule out. (A re-key by a minted id would not be
+/// a function of the bytes; `rekey_repeats` takes no `IdSource` to make that
+/// mistake with, so there is no flip for it.)
+#[test]
+fn a_file_repeating_a_property_id_loads_with_the_repeat_rekeyed() {
+    let (mut doc, mut ids, [a, ..], shared) = mains_sharing_a_property_id();
+    let other = ids.mint_item();
+    let mut props = doc.get(a).unwrap().props().to_vec();
+    props.push(Keyed::new(
+        other,
+        Property {
+            name: "Caption".into(),
+            kind: PropKind::Text,
+            bound: Vec::new(),
+            filter: String::new(),
+        },
+    ));
+    doc.apply(&Transaction(vec![Operation::SetProperties {
+        id: a,
+        props,
+    }]))
+    .expect("two properties, two ids");
+    let text = String::from_utf8(io::save(&doc).unwrap()).unwrap();
+    let (s, o) = (
+        format!("\"{}\"", shared.0.to_wire()),
+        format!("\"{}\"", other.0.to_wire()),
+    );
+    assert_eq!(
+        text.matches(&o).count(),
+        1,
+        "the fixture: the id is written once"
+    );
+    let broken = text.replace(&o, &s);
+    let loaded = io::load(broken.as_bytes()).expect("a repeated property id loads");
+    let got = loaded.get(a).unwrap().props().to_vec();
+    let names: Vec<&str> = got.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["Label", "Caption"], "both properties, in order");
+    assert_eq!(got[0].id, shared, "the first keeps its id");
+    assert_ne!(got[1].id, shared, "the repeat re-keyed");
+    let again = io::load(broken.as_bytes()).unwrap();
+    assert_eq!(again, loaded, "the same bytes, the same document");
+    let saved = io::save(&loaded).unwrap();
+    assert_eq!(
+        io::save(&io::load(&saved).unwrap()).unwrap(),
+        saved,
+        "and stable once re-saved"
+    );
+}

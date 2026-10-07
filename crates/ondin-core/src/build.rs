@@ -3081,7 +3081,10 @@ pub fn edit_strokes_all(doc: &Document, ids: &[NodeId], edit: impl Fn(&mut Strok
 /// **Values in, each target's own ids kept by position** (§15 D980,
 /// `item::rekey_by_position`): a replacement is not an edit of the list it lands
 /// on, so there is no anchor to say which item became which. An edit of a list the
-/// targets share goes through [`retarget_fills_all`] instead.
+/// targets share goes through [`retarget_fills_all`] instead. A fill past a
+/// target's end takes one id for the whole write, shared by every target that
+/// reaches it (§15 D1003 (6)): pasted onto a main and its instance together, it is
+/// one item on both.
 pub fn set_fills_all(
     doc: &Document,
     ids: &[NodeId],
@@ -3089,13 +3092,14 @@ pub fn set_fills_all(
     src: &mut IdSource,
 ) -> Transaction {
     let mut ops = Vec::new();
+    let mut fresh = crate::item::PastTheEnd::default();
     for id in paint_targets(doc, ids) {
         let Some(node) = doc.get(id) else { continue };
         let own = &node.paint().fills;
         if own.len() != fills.len() || own.iter().zip(fills).any(|(o, f)| o.value != *f) {
             ops.push(Operation::SetFills {
                 id,
-                fills: crate::item::rekey_by_position(own, fills.iter().cloned(), src),
+                fills: crate::item::rekey_by_position(own, fills.iter().cloned(), &mut fresh, src),
             });
         }
     }
@@ -3111,13 +3115,19 @@ pub fn set_strokes_all(
     src: &mut IdSource,
 ) -> Transaction {
     let mut ops = Vec::new();
+    let mut fresh = crate::item::PastTheEnd::default();
     for id in paint_targets(doc, ids) {
         let Some(node) = doc.get(id) else { continue };
         let own = &node.paint().strokes;
         if own.len() != strokes.len() || own.iter().zip(strokes).any(|(o, s)| o.value != *s) {
             ops.push(Operation::SetStrokes {
                 id,
-                strokes: crate::item::rekey_by_position(own, strokes.iter().cloned(), src),
+                strokes: crate::item::rekey_by_position(
+                    own,
+                    strokes.iter().cloned(),
+                    &mut fresh,
+                    src,
+                ),
             });
         }
     }
@@ -3179,7 +3189,9 @@ pub fn edit_stroke_at_all(
 /// verbatim would give every target the anchor's ids, which on an instance's child
 /// cuts each fill from its counterpart in the main; retargeting maps each edited
 /// item back through the anchor to the target's own item at the same position, and
-/// mints a fresh id per target for a row the user added.
+/// gives a row the user added **one id on every target** — the one its caller
+/// minted (§15 D1003 (6)), so a row added to a main and its instance together is
+/// one item on both.
 pub fn retarget_fills_all(
     doc: &Document,
     ids: &[NodeId],

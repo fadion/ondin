@@ -77,9 +77,11 @@ fn a_shared_fill_list_agrees_by_value_not_by_id() {
 }
 
 /// An edit of the shared list lands on each layer's **own** items: deleting the
-/// first row and adding one leaves each layer its own id for the survivor and a
-/// fresh, unshared id for the new row. Flip: writing `edited` verbatim (the
-/// anchor's ids) fails the second rect's survivor assertion.
+/// first row and adding one leaves each layer its own id for the survivor and
+/// **one shared id** for the new row — the one the caller minted (§15 D1003 (6),
+/// `[X1-L1-01]`; this asserted a fresh id per layer until the ruling). Flip:
+/// writing `edited` verbatim (the anchor's ids) fails the second rect's survivor
+/// assertion; minting per layer, the rule before, fails *"one id for the new row"*.
 #[test]
 fn an_edit_over_a_selection_keeps_each_layers_item_ids() {
     let (mut doc, mut src, ids) = rects(2);
@@ -87,7 +89,8 @@ fn an_edit_over_a_selection_keeps_each_layers_item_ids() {
     let (a, b) = (fills(&doc, ids[0]), fills(&doc, ids[1]));
     let mut edited = anchor.clone();
     edited.remove(0);
-    edited.push(Keyed::new(src.mint_item(), solid(30)));
+    let added = Keyed::new(src.mint_item(), solid(30));
+    edited.push(added.clone());
     let tx = ondin_core::retarget_fills_all(&doc, &ids, &anchor, &edited, &mut src);
     doc.apply(&tx).unwrap();
     let (a2, b2) = (fills(&doc, ids[0]), fills(&doc, ids[1]));
@@ -97,7 +100,11 @@ fn an_edit_over_a_selection_keeps_each_layers_item_ids() {
         b2[0].id, b[1].id,
         "the second rect's survivor keeps *its* id"
     );
-    assert_ne!(a2[1].id, b2[1].id, "a new row is minted per layer");
+    assert_eq!(
+        (a2[1].id, b2[1].id),
+        (added.id, added.id),
+        "one id for the new row"
+    );
     assert_eq!(a2[1].value, solid(30));
 }
 
@@ -211,4 +218,49 @@ fn reserving_ids_skips_past_item_ids() {
     let mut session = IdSource::new(0);
     reserve_existing_ids(&doc, &mut session);
     assert_eq!(session.mint_item(), ItemId::positional(3));
+}
+
+/// The component properties are swept too — the sixth keyed list, and the one the
+/// loader re-keys onto positional ids (`[R1-L2-02]`). A main holding five
+/// positionally keyed properties and three fills: a session of actor 0 starts at
+/// `0:5`. Flip, run: the `props` arm dropped from `reserve_existing_ids` mints
+/// `0:3`, which the property list already holds.
+#[test]
+fn reserving_ids_skips_past_property_ids() {
+    use ondin_core::variant::{PropKind, Property};
+    let mut ids = IdSource::new(0xAB);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let frame = ids.mint();
+    let props = keyed_by_position((0..5).map(|i| Property {
+        name: format!("Text {i}"),
+        kind: PropKind::Text,
+        bound: Vec::new(),
+        filter: String::new(),
+    }));
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: frame,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(10.0, 10.0),
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::SetFills {
+            id: frame,
+            fills: keyed_by_position([solid(1), solid(2), solid(3)]),
+        },
+        Operation::SetComponent {
+            id: frame,
+            component: true,
+        },
+        Operation::SetProperties { id: frame, props },
+    ]))
+    .unwrap();
+    let mut session = IdSource::new(0);
+    reserve_existing_ids(&doc, &mut session);
+    assert_eq!(session.mint_item(), ItemId::positional(5));
 }

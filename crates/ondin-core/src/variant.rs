@@ -378,7 +378,13 @@ fn binding_fits(nodes: &FxHashMap<NodeId, Node>, owner: NodeId, bound: &Node) ->
 ///
 /// Empty for a document with no set, variant or property and a transaction that
 /// makes none.
-pub fn settle(doc: &Document, tx: &Transaction) -> Vec<Operation> {
+///
+/// `src` is for the merge alone: a variant's property pushed onto its set under
+/// an id the set already holds is re-keyed (`[R1-L2-02]`). *Duplicate as
+/// component* copies a main's properties with their ids (D980's copy rule), so
+/// combining the two after the copy's property was renamed pushed both under one
+/// id, and every edit by id of the second then hit the first.
+pub fn settle(doc: &Document, tx: &Transaction, src: &mut IdSource) -> Vec<Operation> {
     let makes = tx.0.iter().any(|op| {
         matches!(
             op,
@@ -521,13 +527,20 @@ pub fn settle(doc: &Document, tx: &Transaction) -> Vec<Operation> {
                 id: v,
                 props: Vec::new(),
             });
-            for p in moved {
+            for mut p in moved {
                 match props
                     .iter_mut()
                     .find(|q| q.kind == p.kind && (q.name == p.name || p.kind == PropKind::Nested))
                 {
                     Some(q) => q.bound.extend(p.bound.iter().copied()),
-                    None => props.push(p),
+                    None => {
+                        // An id the set already holds — another variant's copy of
+                        // this property, renamed — is re-keyed (`[R1-L2-02]`).
+                        if props.iter().any(|q| q.id == p.id) {
+                            p.id = src.mint_item();
+                        }
+                        props.push(p);
+                    }
                 }
                 grew = true;
             }

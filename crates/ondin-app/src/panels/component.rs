@@ -2269,10 +2269,21 @@ mod tests {
         let painted = texts(&out);
         let gone_hex = crate::ui::hex_of(ondin_core::peniko::Color::from_rgb8(10, 2, 30));
         assert!(painted.iter().any(|(t, _)| *t == gone_hex), "a ghost row");
-        let pluses = painted.iter().filter(|(t, _)| t == icon::PLUS).count();
+        let own_hex = crate::ui::hex_of(ondin_core::peniko::Color::from_rgb8(10, 3, 30));
+        let rect_of = |s: &str| painted.iter().find(|(t, _)| t == s).map(|(_, r)| *r);
+        // **The own fill's `+` is on its own row** (`[X8.2-L6-08]`): this counted
+        // `+`s at two or more, which the Fill and Stroke headers' own `+`s already
+        // satisfy with no mark on the row at all. Flip, run: `item_slot`'s `Local`
+        // arm painting `""` for `icon::PLUS` fails *"a + on the own fill's row"*,
+        // and left the count green.
+        let own_row = rect_of(&own_hex).expect("the own fill's row");
         assert!(
-            pluses >= 2,
-            "the header's + and the own fill's: {painted:?}"
+            painted.iter().any(|(t, r)| {
+                t == icon::PLUS
+                    && (r.center().y - own_row.center().y).abs() < 4.0
+                    && r.left() > own_row.right()
+            }),
+            "a + on the own fill's row: {painted:?}"
         );
         // *Restore* on the ghost row.
         let click = |app: &mut OndinApp, at: egui::Pos2| click(app, &ctx, at);
@@ -2281,8 +2292,6 @@ mod tests {
         // column. Flips, both run: the label at the old lead (a 12pt chip at the
         // field's inset) fails *"the hex's x"*; the restore back inside the field
         // fails *"the eye's column"*.
-        let own_hex = crate::ui::hex_of(ondin_core::peniko::Color::from_rgb8(10, 3, 30));
-        let rect_of = |s: &str| painted.iter().find(|(t, _)| t == s).map(|(_, r)| *r);
         let (ghost, live) = (rect_of(&gone_hex).unwrap(), rect_of(&own_hex).unwrap());
         assert!(
             (ghost.left() - live.left()).abs() <= 1.0,
@@ -2402,6 +2411,217 @@ mod tests {
             .unwrap_or_else(|| panic!("no ghost row in {painted:?}"));
         click(&mut f.app, restore);
         assert_eq!(effects_of(&f.app), main, "the main's stack");
+    }
+
+    /// The rects of every `glyph` painted below the card header `header`, top to
+    /// bottom — a row found by the one control each of its rows carries once.
+    fn glyphs_below(
+        painted: &[(String, egui::Rect)],
+        header: &str,
+        glyph: &str,
+    ) -> Vec<egui::Rect> {
+        let Some(head) = painted.iter().find(|(t, _)| t == header).map(|(_, r)| *r) else {
+            return Vec::new();
+        };
+        let mut v: Vec<egui::Rect> = painted
+            .iter()
+            .filter(|(t, r)| t == glyph && r.top() > head.bottom())
+            .map(|(_, r)| *r)
+            .collect();
+        v.sort_by(|a, b| a.top().total_cmp(&b.top()));
+        v
+    }
+
+    /// The ↺ in the trailing slot of the row at `row`, with the pointer moved onto
+    /// it — an overridden item's slot shows its dot at rest and ↺ only while the
+    /// row is hot (`item_slot`).
+    fn row_reset(app: &mut OndinApp, ctx: &egui::Context, row: egui::Rect) -> Option<egui::Pos2> {
+        frame(app, ctx, vec![egui::Event::PointerMoved(row.center())]);
+        let out = frame(app, ctx, Vec::new());
+        texts(&out)
+            .into_iter()
+            .find(|(t, r)| {
+                t == icon::ARROW_COUNTER_CLOCKWISE && (r.center().y - row.center().y).abs() < 4.0
+            })
+            .map(|(_, r)| r.center())
+    }
+
+    /// **The Stroke card reads its list as the Fill card does** (`[X8.2-L6-02]`;
+    /// §15 D981, 4D; D994): the instance recolours the main's first stroke, removes
+    /// the second and adds one of its own. The recoloured row's ↺ takes that item
+    /// back alone; the ghost row's *Restore* puts the whole list back as the main
+    /// has it, the own stroke gone with it.
+    ///
+    /// Flips, run: the restore arm handed `reset_item(src, strokes, gone)` (the
+    /// rule before D994) fails *"the main's list"*; the ↺ arm writing nothing
+    /// fails *"that item alone"*. Both were green before this test.
+    #[test]
+    fn a_stroke_list_restores_and_resets_item_by_item() {
+        use ondin_core::{Keyed, Stroke, keyed_by_position};
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let r = f.app.session.doc.get(f.m).unwrap().children()[0];
+        let rgb = |g: u8| ondin_core::peniko::Color::from_rgb8(10, g, 30);
+        let stroke = |g: u8| Stroke {
+            brush: ondin_core::Brush::Solid(rgb(g)),
+            ..Default::default()
+        };
+        let strokes_of =
+            |app: &OndinApp| app.session.doc.get(f.ir).unwrap().paint().strokes.clone();
+        let main = keyed_by_position([stroke(1), stroke(2)]);
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![Operation::SetStrokes {
+                    id: r,
+                    strokes: main.clone(),
+                }]))
+        );
+        assert_eq!(strokes_of(&f.app), main, "the fixture: it propagated");
+        let own = Keyed::new(f.app.session.ids.mint_item(), stroke(3));
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![Operation::SetStrokes {
+                    id: f.ir,
+                    strokes: vec![main[0].map(|_| stroke(9)), own.clone()],
+                }]))
+        );
+        f.app.collapsed_panels.remove("Stroke");
+        f.app.session.selection.set_one(f.ir);
+        let click = |app: &mut OndinApp, at: egui::Pos2| click(app, &ctx, at);
+        let painted = texts(&settle(&mut f.app, &ctx));
+        let changed = crate::ui::hex_of(rgb(9));
+        let row = painted
+            .iter()
+            .find(|(t, _)| *t == changed)
+            .map(|(_, r)| *r)
+            .expect("the recoloured stroke's row");
+        let undo = row_reset(&mut f.app, &ctx, row).expect("↺ in the hovered row's slot");
+        click(&mut f.app, undo);
+        assert_eq!(
+            strokes_of(&f.app),
+            vec![main[0].clone(), own],
+            "that item alone"
+        );
+        let painted = texts(&settle(&mut f.app, &ctx));
+        let restore = ghost_restore(&painted, &crate::ui::hex_of(rgb(2)))
+            .unwrap_or_else(|| panic!("no ghost row in {painted:?}"));
+        click(&mut f.app, restore);
+        assert_eq!(strokes_of(&f.app), main, "the main's list");
+    }
+
+    /// **The Layout grid card, on an instance's root frame** (`[X8.2-L6-02]`; §15
+    /// D981, 4D; D994): the instance changes the main's first grid's count, removes
+    /// the second and adds one of its own. The changed grid's ↺ takes it back
+    /// alone; the ghost row's *Restore* puts the main's whole list back.
+    ///
+    /// Flips, run: the card's `list` match answering `None` for a restore fails
+    /// *"the main's list"*, and for a ↺ fails *"that item alone"*; the restore
+    /// handed `reset_item` (the rule before D994) fails *"the main's list"*. All
+    /// three were green before this test.
+    #[test]
+    fn a_layout_grid_list_restores_and_resets_item_by_item() {
+        use ondin_core::{GridAxis, Keyed, LayoutGrid, keyed_by_position};
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let grid = |count| LayoutGrid {
+            count,
+            ..LayoutGrid::new(GridAxis::Columns)
+        };
+        let grids_of = |app: &OndinApp| app.session.doc.get(f.i).unwrap().grids().to_vec();
+        let main = keyed_by_position([grid(4), grid(6)]);
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![Operation::SetLayoutGrids {
+                    id: f.m,
+                    grids: main.clone(),
+                }]))
+        );
+        assert_eq!(grids_of(&f.app), main, "the fixture: it propagated");
+        let own = Keyed::new(f.app.session.ids.mint_item(), grid(8));
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![Operation::SetLayoutGrids {
+                    id: f.i,
+                    grids: vec![main[0].map(|_| grid(5)), own],
+                }]))
+        );
+        f.app.collapsed_panels.remove("Layout grid");
+        f.app.session.selection.set_one(f.i);
+        let click = |app: &mut OndinApp, at: egui::Pos2| click(app, &ctx, at);
+        let painted = texts(&settle(&mut f.app, &ctx));
+        let rows = glyphs_below(&painted, "LAYOUT GRID", icon::EYE);
+        assert_eq!(rows.len(), 2, "two live grids: {painted:?}");
+        let undo = row_reset(&mut f.app, &ctx, rows[0]).expect("↺ on the changed grid's row");
+        click(&mut f.app, undo);
+        assert_eq!(grids_of(&f.app), vec![main[0], own], "that item alone");
+        let painted = texts(&settle(&mut f.app, &ctx));
+        let restore = ghost_restore(&painted, "Columns · 6")
+            .unwrap_or_else(|| panic!("no ghost row in {painted:?}"));
+        click(&mut f.app, restore);
+        assert_eq!(grids_of(&f.app), main, "the main's list");
+    }
+
+    /// **The Export card, on two items** (`[X8.2-L6-02]`, `[X9.2-L6-06]`; §15 D981,
+    /// D994): the instance turns the main's 2× PNG into 3× SVG, removes its 1× SVG
+    /// and adds one of its own. The changed row's ↺ takes the main's export back by
+    /// its id and value; the ghost row's *Restore* is the main's whole list, the own
+    /// export gone. `an_emptied_list_still_draws_its_ghost_rows` drives this
+    /// restore on a list of one, where the whole list and the one item are the same
+    /// write.
+    ///
+    /// Flips, run: the ↺ arm answering `None` fails *"that item alone"*; the
+    /// restore handed `reset_item(src, &specs, …)` (the rule before D994) fails
+    /// *"the main's list"*. Both were green before this test.
+    #[test]
+    fn an_export_list_restores_and_resets_item_by_item() {
+        use ondin_core::{ExportFormat, ExportScale, ExportSpec, Keyed, keyed_by_position};
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let r = f.app.session.doc.get(f.m).unwrap().children()[0];
+        let spec = |format, s| ExportSpec::new(format, ExportScale::Times(s));
+        let exports_of = |app: &OndinApp| app.session.doc.get(f.ir).unwrap().exports().to_vec();
+        let main = keyed_by_position([spec(ExportFormat::Png, 2.0), spec(ExportFormat::Svg, 1.0)]);
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![Operation::SetExports {
+                    id: r,
+                    exports: main.clone(),
+                }]))
+        );
+        assert_eq!(exports_of(&f.app), main, "the fixture: it propagated");
+        let own = Keyed::new(f.app.session.ids.mint_item(), spec(ExportFormat::Jpeg, 4.0));
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![Operation::SetExports {
+                    id: f.ir,
+                    exports: vec![main[0].map(|_| spec(ExportFormat::Svg, 3.0)), own.clone()],
+                }]))
+        );
+        f.app.collapsed_panels.remove("Export");
+        f.app.session.selection.set_one(f.ir);
+        let click = |app: &mut OndinApp, at: egui::Pos2| click(app, &ctx, at);
+        let painted = texts(&settle(&mut f.app, &ctx));
+        let rows = glyphs_below(&painted, "EXPORT", icon::SLIDERS_HORIZONTAL);
+        assert_eq!(rows.len(), 2, "two live exports: {painted:?}");
+        let undo = row_reset(&mut f.app, &ctx, rows[0]).expect("↺ on the changed export's row");
+        click(&mut f.app, undo);
+        assert_eq!(
+            exports_of(&f.app),
+            vec![main[0].clone(), own],
+            "that item alone"
+        );
+        let painted = texts(&settle(&mut f.app, &ctx));
+        let gone = format!("{} {}", main[1].scale.label(), main[1].format.label());
+        let restore =
+            ghost_restore(&painted, &gone).unwrap_or_else(|| panic!("no ghost row in {painted:?}"));
+        click(&mut f.app, restore);
+        assert_eq!(exports_of(&f.app), main, "the main's list");
     }
 
     /// The main's rect pinned top-right and the instance's copy moved along x

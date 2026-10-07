@@ -183,6 +183,93 @@ fn an_overridden_fill_is_kept_while_its_sibling_follows() {
     assert!(!got[1].visible, "the untouched fill follows");
 }
 
+/// **A fill one edit adds to a main and its instance together is one item on
+/// both** (§15 D1003 (6), `[X1-L1-01]`). The main's rect and the instance's copy
+/// selected together, a row added with the Fill card's `+` — the app's path,
+/// `shared_fills` for the anchor, a minted row pushed, `retarget_fills_all` —
+/// then committed with what it owes. The copy's new fill is the main's item, so
+/// the instance shows no drift, and the main's next edit to it reaches the copy.
+///
+/// Before the ruling the row was minted **per target**, so the copy's was a local
+/// addition with its own id: two override units and a ghost row for the main's
+/// "removed" fill straight after one edit the user made to both layers, and every
+/// later edit to the main's new fill skipped the copy — `propagate` stands down on
+/// a (node, field) the user's own transaction wrote. Flip, run: `item::retarget`
+/// back to minting for an item the anchor lacks fails *"one id for the added
+/// fill"*, the predicted site.
+#[test]
+fn a_fill_added_to_a_main_and_its_instance_together_is_one_item() {
+    let mut f = fixture();
+    let both = [f.a, f.ia];
+    let ondin_core::PaintShown::List(anchor) = ondin_core::shared_fills(&f.doc, &both) else {
+        panic!("the pair agrees, so the card shows one list");
+    };
+    let mut edited = anchor.clone();
+    edited.push(Keyed::new(
+        f.ids.mint_item(),
+        Fill {
+            brush: solid(30),
+            visible: true,
+        },
+    ));
+    let tx = ondin_core::retarget_fills_all(&f.doc, &both, &anchor, &edited, &mut f.ids);
+    commit(&mut f.doc, tx.0);
+    let (main, copy) = (fills(&f.doc, f.a), fills(&f.doc, f.ia));
+    assert_eq!(main.len(), 3, "the fixture: the row landed");
+    assert_eq!(copy[2].id, main[2].id, "one id for the added fill");
+    assert_eq!(
+        ondin_core::reset::drift(&f.doc, f.i),
+        Default::default(),
+        "an edit made to both is no override"
+    );
+    let mut next = main;
+    next[2].brush = solid(99);
+    commit(
+        &mut f.doc,
+        vec![Operation::SetFills {
+            id: f.a,
+            fills: next,
+        }],
+    );
+    assert_eq!(
+        fills(&f.doc, f.ia)[2].brush,
+        solid(99),
+        "the copy follows its main's new fill"
+    );
+}
+
+/// *Paste properties* onto a main and its instance together — the wholesale
+/// replacement, `item::rekey_by_position` — gives a fill **past the end** of both
+/// lists one id too (§15 D1003 (6), `[X1-L1-01]`), so the copy follows the main's
+/// later edit to it. Flip, run: `PastTheEnd::at` minting on every call
+/// (`insert` for `get_or_insert_with`, so each target mints its own, the rule
+/// before) fails *"one id past the end"*, and `item.rs`'s own test beside it.
+#[test]
+fn a_paste_onto_a_main_and_its_instance_gives_a_new_fill_one_id() {
+    let mut f = fixture();
+    let both = [f.a, f.ia];
+    let pasted = [10, 20, 30].map(|r| Fill {
+        brush: solid(r),
+        visible: true,
+    });
+    let tx = ondin_core::set_fills_all(&f.doc, &both, &pasted, &mut f.ids);
+    commit(&mut f.doc, tx.0);
+    let (main, copy) = (fills(&f.doc, f.a), fills(&f.doc, f.ia));
+    assert_eq!(main.len(), 3, "the fixture: the paste landed");
+    assert_eq!(copy[2].id, main[2].id, "one id past the end");
+    assert_eq!(copy[0].id, main[0].id, "the kept ids, by position");
+    let mut next = main;
+    next[2].brush = solid(99);
+    commit(
+        &mut f.doc,
+        vec![Operation::SetFills {
+            id: f.a,
+            fills: next,
+        }],
+    );
+    assert_eq!(fills(&f.doc, f.ia)[2].brush, solid(99), "the copy follows");
+}
+
 /// A text style follows field by field: the instance's own size stays when the
 /// main changes family.
 #[test]

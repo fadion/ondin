@@ -254,16 +254,24 @@ impl Node {
     pub fn props(&self) -> &[Keyed<crate::variant::Property>] {
         &self.props
     }
-    /// Refuse a node whose five item lists repeat an item id within one list
-    /// (§15 D980) — `Document::apply`'s post-condition and the loader's check.
-    /// Across lists and across nodes an id may repeat: duplication copies them.
+    /// Refuse a node whose keyed lists repeat an item id within one list (§15
+    /// D980) — `Document::apply`'s post-condition and the loader's check. Across
+    /// lists and across nodes an id may repeat: duplication copies them.
+    ///
+    /// **Six lists, not five**: the component properties (`props`, §15 D982) are
+    /// keyed too, and every edit of one finds it by id (`variant::edit_property`).
+    /// They were missing here, so *Combine as variants* could leave a set holding
+    /// one id twice — every rename or delete of the second property then hit the
+    /// first (`[R1-L2-02]`). Files a build before the fix saved that way are
+    /// re-keyed on load rather than refused (`io::schema`, `item::rekey_repeats`).
     pub(crate) fn check_item_ids(&self) -> Result<(), crate::op::OpError> {
         use crate::item::first_duplicate;
         let dup = first_duplicate(&self.paint.fills)
             .or_else(|| first_duplicate(&self.paint.strokes))
             .or_else(|| first_duplicate(&self.effects))
             .or_else(|| first_duplicate(&self.exports))
-            .or_else(|| first_duplicate(&self.grids));
+            .or_else(|| first_duplicate(&self.grids))
+            .or_else(|| first_duplicate(&self.props));
         match dup {
             Some(item) => Err(crate::op::OpError::DuplicateItemId(self.id, item)),
             None => Ok(()),

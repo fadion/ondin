@@ -2045,6 +2045,9 @@ pub fn reserve_existing_ids(doc: &Document, ids: &mut IdSource) {
             .chain(n.effects.iter().map(|k| k.id.0))
             .chain(n.exports.iter().map(|k| k.id.0))
             .chain(n.grids.iter().map(|k| k.id.0))
+            // The component properties' too — the sixth keyed list, minted from
+            // the same stream and missing here until `[R1-L2-02]`.
+            .chain(n.props.iter().map(|k| k.id.0))
     });
     let highest = doc
         .nodes

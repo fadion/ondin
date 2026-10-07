@@ -435,7 +435,12 @@ impl NodeDto {
             swap,
             set: self.set,
             variant: self.variant,
-            props: self.props,
+            // ⚠️ **Re-keyed rather than refused** (`[R1-L2-02]`): a build before
+            // `check_item_ids` learnt this list saved sets holding one property id
+            // twice (*Combine as variants* made them), and refusing the file would
+            // lose the artwork over a defect the app itself wrote. Deterministic —
+            // a function of the list — so the same bytes still give one document.
+            props: crate::item::rekey_repeats(self.props),
         })
     }
 }

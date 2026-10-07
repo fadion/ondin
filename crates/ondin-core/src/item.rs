@@ -159,15 +159,24 @@ pub fn values<T: Clone>(items: &[Keyed<T>]) -> Vec<T> {
 /// `edited` verbatim would give every layer the anchor's ids, and on an instance's
 /// child that cuts each item from its counterpart in the main. So an item of
 /// `edited` whose id is the anchor's item at position `p` takes the target's id at
-/// `p`; an item the anchor never had (a row the user added) is minted fresh **per
-/// target**, so two layers never share a newly added id.
+/// `p`; an item the anchor never had (a row the user added, which its caller
+/// minted) **keeps its own id on every target**, so one edit adding a row to
+/// several layers adds one item to all of them.
+///
+/// **One shared id, not one per target** (§15 D1003 (6), `[X1-L1-01]`). This
+/// minted per target until the ruling, and over a main and its instance selected
+/// together that cut the instance's new row from the main's at birth: a local
+/// addition with its own id, a ghost row for the main's, and every later edit of
+/// the main's row skipping the copy (`propagate` stands down on a field the
+/// user's own transaction wrote). An id shared across nodes is how D980 spells a
+/// match, and between unlinked layers it costs nothing, since an id is unique
+/// within one list only. The one place an un-anchored id is **not** kept is a
+/// target already holding it, where it is minted after all — keeping it there
+/// would repeat an id in that list, which `apply` refuses.
 ///
 /// Callers pass lists that agree in value position by position; where they do not
-/// (a longer target), positions past the anchor's end are simply not reachable.
-///
-/// ⚠️ **Ruled otherwise for a main and its instance, not built** (§15 D1003 (6)): a
-/// row one edit adds to both takes one shared id, so the instance follows its main's
-/// new item. [`rekey_by_position`]'s past-the-end ids are the same case.
+/// (a shorter target), an anchored item with no counterpart at its position keeps
+/// its id by the same rule as an added one.
 pub fn retarget<T: Clone>(
     anchor: &[Keyed<T>],
     target: &[Keyed<T>],
@@ -182,14 +191,22 @@ pub fn retarget<T: Clone>(
                 .position(|a| a.id == item.id)
                 .and_then(|p| target.get(p))
                 .map(|t| t.id)
-                .unwrap_or_else(|| ids.mint_item());
+                .unwrap_or_else(|| match target.iter().any(|t| t.id == item.id) {
+                    true => ids.mint_item(),
+                    false => item.id,
+                });
             Keyed::new(id, item.value.clone())
         })
         .collect()
 }
 
 /// `values` written over `own` **wholesale**, item `p` taking `own`'s id at `p` and
-/// anything past `own`'s end minted fresh.
+/// anything past `own`'s end the id `fresh` holds for `p` — minted the first time
+/// any target of the write reaches that position, and the same for every target
+/// after it (§15 D1003 (6), `[X1-L1-01]`: a paste onto a main and its instance
+/// together gives each pasted item past the end one id on both, so the copy
+/// follows the main's later edit of it). Pass one [`PastTheEnd`] per write, never
+/// one per target.
 ///
 /// For a replacement that is not an edit of the list it lands on — *Paste
 /// properties*, a panel clearing every fill — where there is no anchor to say which
@@ -201,16 +218,64 @@ pub fn retarget<T: Clone>(
 pub fn rekey_by_position<T>(
     own: &[Keyed<T>],
     values: impl IntoIterator<Item = T>,
+    fresh: &mut PastTheEnd,
     ids: &mut IdSource,
 ) -> Vec<Keyed<T>> {
     values
         .into_iter()
         .enumerate()
         .map(|(p, v)| {
-            let id = own.get(p).map(|k| k.id).unwrap_or_else(|| ids.mint_item());
+            let id = own.get(p).map(|k| k.id).unwrap_or_else(|| fresh.at(p, ids));
             Keyed::new(id, v)
         })
         .collect()
+}
+
+/// The ids one wholesale write ([`rekey_by_position`]) gives the positions past a
+/// target's end, **one per position for the whole write**, shared by every target
+/// that reaches it (§15 D1003 (6)).
+///
+/// Unique within each list all the same: a target keeps its own ids below its
+/// end and takes these only at and past it, and each of these was minted fresh,
+/// so it is in no list yet.
+#[derive(Debug, Default)]
+pub struct PastTheEnd(Vec<Option<ItemId>>);
+
+impl PastTheEnd {
+    /// The id for position `p`, minted the first time any target asks for it.
+    fn at(&mut self, p: usize, ids: &mut IdSource) -> ItemId {
+        if self.0.len() <= p {
+            self.0.resize(p + 1, None);
+        }
+        *self.0[p].get_or_insert_with(|| ids.mint_item())
+    }
+}
+
+/// `items` with every repeat of an id after its first given the lowest positional
+/// id ([`ItemId::positional`]) the list does not hold — the loader's repair for a
+/// property list a build before `[R1-L2-02]`'s fix saved with one id twice
+/// (*Combine as variants* made them). Refusing such a file would lose the
+/// document over a defect the app itself wrote.
+///
+/// **A function of the list alone**, never a minted id: the loader must give the
+/// same document for the same bytes (invariant 9; `io::schema`'s note on the
+/// document id it does not mint). A positional id is actor 0's, which
+/// [`crate::reserve_existing_ids`] sweeps past for any session that is.
+pub(crate) fn rekey_repeats<T>(mut items: Vec<Keyed<T>>) -> Vec<Keyed<T>> {
+    let held: rustc_hash::FxHashSet<ItemId> = items.iter().map(|k| k.id).collect();
+    let mut seen = rustc_hash::FxHashSet::default();
+    let mut next = 0;
+    for k in &mut items {
+        if seen.insert(k.id) {
+            continue;
+        }
+        while held.contains(&ItemId::positional(next)) || seen.contains(&ItemId::positional(next)) {
+            next += 1;
+        }
+        k.id = ItemId::positional(next);
+        seen.insert(k.id);
+    }
+    items
 }
 
 /// The first id that appears twice in `items`, if any — `apply`'s post-condition
@@ -259,10 +324,18 @@ mod tests {
     }
 
     /// The multi-selection write keeps each target's ids: an edited value lands on
-    /// the target's own item, a deleted one drops it, an added one is minted fresh.
-    /// Flip: writing `edited` verbatim (the anchor's ids) fails the first assertion.
+    /// the target's own item, a deleted one drops it, and an added one **keeps the
+    /// id its caller minted**, on this target as on every other (§15 D1003 (6),
+    /// `[X1-L1-01]` — it was minted fresh per target until the ruling, and this
+    /// test asserted that). A target that already holds the added id mints instead,
+    /// or its list would repeat one.
+    ///
+    /// Flips, run: writing `edited` verbatim (the anchor's ids) fails the first
+    /// assertion; minting for every un-anchored item (the rule before) fails *"an
+    /// added item keeps its id"*; keeping the id even where the target holds it
+    /// fails *"minted where the target holds it"*.
     #[test]
-    fn retarget_keeps_the_targets_ids_and_mints_for_an_added_item() {
+    fn retarget_keeps_the_targets_ids_and_an_added_items_own() {
         let anchor = keyed_by_position(['a', 'b', 'c']);
         let mut ids = IdSource::new(0xAB);
         let target: Vec<_> = ['a', 'b', 'c']
@@ -276,9 +349,71 @@ mod tests {
         assert_eq!(out[0].value, 'A');
         assert_eq!(out[1].id, target[2].id);
         assert_eq!(out.len(), 3);
+        assert_eq!(out[2].id, added.id, "an added item keeps its id");
+        // A target already holding that id — the added row given one of its own.
+        let holder = vec![target[0], target[1], Keyed::new(added.id, 'z')];
+        let out = retarget(&anchor, &holder, &edited, &mut ids);
         assert!(
-            target.iter().chain(&anchor).all(|t| t.id != out[2].id) && out[2].id != added.id,
-            "an added item is minted fresh for this target"
+            holder.iter().all(|t| t.id != out[2].id),
+            "minted where the target holds it"
+        );
+        assert_eq!(first_duplicate(&out), None);
+    }
+
+    /// A wholesale write gives the positions past each target's end **one id per
+    /// position across the write** (§15 D1003 (6)): a one-item and a two-item
+    /// target written three values share the id at position 2, and the one-item
+    /// target's position 1 is fresh, not the other's own item. Flip, run:
+    /// `PastTheEnd::at` minting on every call fails *"one id at position 2"*.
+    #[test]
+    fn a_wholesale_write_shares_the_ids_past_the_end() {
+        let mut ids = IdSource::new(0xAB);
+        let short: Vec<_> = ['a'].map(|v| Keyed::new(ids.mint_item(), v)).into();
+        let long: Vec<_> = ['a', 'b'].map(|v| Keyed::new(ids.mint_item(), v)).into();
+        let mut fresh = PastTheEnd::default();
+        let s = rekey_by_position(&short, ['x', 'y', 'z'], &mut fresh, &mut ids);
+        let l = rekey_by_position(&long, ['x', 'y', 'z'], &mut fresh, &mut ids);
+        assert_eq!(
+            (s[0].id, l[0].id, l[1].id),
+            (short[0].id, long[0].id, long[1].id)
+        );
+        assert_eq!(s[2].id, l[2].id, "one id at position 2");
+        assert_ne!(
+            s[1].id, long[1].id,
+            "the other target's own item is not shared"
+        );
+        assert_eq!((first_duplicate(&s), first_duplicate(&l)), (None, None));
+    }
+
+    /// The loader's repair (`[R1-L2-02]`): each repeat after the first takes the
+    /// lowest positional id the list does not already hold — **anywhere** in it,
+    /// so `0:0`, carried by an item *after* the repeats, is skipped and kept by
+    /// its own item. The first of the repeats keeps its id.
+    ///
+    /// Flip, run: the `held` test dropped hands the first repeat `0:0` and
+    /// re-keys the later item that owned it, *its* id changing for no reason —
+    /// the equality fails with `[a, 0:0, 0:1, 0:2]`. (A first version of this
+    /// test put the positional item *before* the repeats, where `seen` already
+    /// covers it, and the same flip stayed green.)
+    #[test]
+    fn rekey_repeats_takes_the_lowest_free_positional_id() {
+        let mut ids = IdSource::new(0xAB);
+        let a = ids.mint_item();
+        let list = vec![
+            Keyed::new(a, 1),
+            Keyed::new(a, 2),
+            Keyed::new(a, 3),
+            Keyed::new(ItemId::positional(0), 4),
+        ];
+        let got: Vec<ItemId> = rekey_repeats(list).iter().map(|k| k.id).collect();
+        assert_eq!(
+            got,
+            [
+                a,
+                ItemId::positional(1),
+                ItemId::positional(2),
+                ItemId::positional(0)
+            ]
         );
     }
 

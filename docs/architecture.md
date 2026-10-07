@@ -1991,12 +1991,17 @@ without the prune the commit is *not* refused, because `settle_links` cuts the d
 transaction touched, and an unlinked copy would land in silence
 (`a_child_moved_elsewhere_is_not_restored_twice`, flip run). *Reset order* re-slots the linked children
 into their sources' order and leaves local layers in their slots. *Reset all* is restore, then order,
-then fields, each computed on the document the one before leaves, in one transaction. *Restore
-children* (`reset::restore_own_children`, §15 D1003 (9), `5bce910`) is the row-scoped fifth: one
-parent's **own** removed children back through `restore_children`'s body (`restore_missing`, shared),
-then that parent's linked children in their source's order, read on the document the restore leaves as
-*Reset all* reads its order — exactly what `child_drift` counts for that parent, and no field, nothing
-deeper, no sibling. `reset::reset`
+then fields, each computed on the document the one before leaves, in one transaction — its first two
+steps are `reset::restore_structure`, the structure put back with no field (§15 D1004 (2)). *Restore
+children* (§15 D1003 (9), `5bce910`) is the row-scoped fifth, **scoped by the row's fold** (§15 D1004
+(2), `ed88b26`). On an **expanded** row it is `reset::restore_own_children`: one parent's **own**
+removed children back through `restore_children`'s body (`restore_missing`, shared), then that parent's
+linked children in their source's order, read on the document the restore leaves as *Reset all* reads
+its order — exactly what `child_drift` counts for that parent, and no field, nothing deeper, no
+sibling. On a **collapsed** row it is `restore_structure` — every removed child and every changed order
+anywhere in the subtree, what `reset::subtree_child_drift` counts — because the collapsed dot bubbles
+up everything inside; ⚠️ not `restore_children` alone, which is subtree-wide but has never touched
+order. Neither touches a field. `reset::reset`
 takes the **outermost** of its scopes (`build::outermost`), so an instance and a layer inside it reset
 together restore a missing child once (`overlapping_scopes_restore_a_child_once`). **Every reset is
 an ordinary commit**, so resetting a nested copy inside a main reaches that main's instances by
@@ -2312,8 +2317,12 @@ card's drift summary counts them, a removed child having no row of its own — �
 (`bae6dcf`, §15 D1003 (9)) a removed or reordered child's dot goes on **its parent's row**, expanded or
 collapsed, with a tooltip naming what (*1 removed · order changed*, `reset::child_drift`), and the
 ruling's *Restore* in that layer's context menu, at both doors, is ***Restore children*** (`5bce910`) —
-one row for both things the tooltip names, offered exactly where `child_drift` says anything and
-omitted at zero; 🚨 **a kept child shows as local** (the maintainer's ruling), since nothing records
+one row for both things the tooltip names, offered exactly where the tooltip says anything and
+omitted at zero. **Both are scoped by the row's fold** (§15 D1004 (2), `ed88b26`): expanded, the
+row's own children (`child_drift`); collapsed, its whole subtree (`reset::subtree_child_drift`), as
+its bubbled dot covers it — never a field, so a collapsed row lit by fields alone offers *Reset all*
+only. `OndinApp::row_folded` decides it — no layer search open, a search forcing branches open — and
+the canvas door reads the same row's fold; 🚨 **a kept child shows as local** (the maintainer's ruling), since nothing records
 provenance. The inspector gains a **component card** above Transform per selection state, its resets —
 *Reset all*, *Reset fields*, *Restore removed children*, *Reset order*, each with a count — disabled
 rather than hidden when there is nothing to do, and **no reset deletes a local addition** — ⚠️ a local
@@ -2601,8 +2610,12 @@ makes no duplicate. **A nested instance the outer main put into the slot carries
 holding one (`96eb959`): both admit a source through `component::slot_adds` — inside the slot, its chain
 of content sources (swap, else link) never landing in the main the slot shows, `rewrite`'s own test for
 what a swap keeps — where they had asked the slot's layer to link to nothing (§15 D983's amendment
-building D1003 (3)–(5)). ⚠️ A slot-own layer whose name path and kind meet a layer of the target is
-matched to it instead, and stops being the slot's own — read, not run, not ruled. **A swap left equal to what its slot shows
+building D1003 (3)–(5)). **A layer the slot adds never takes part in the name matching** (§15 D1004
+(1), `ed88b26`): `rewrite`'s swap mode skips it from both pools — the old side's, and the new side's
+for the swap back to the slot — with its subtree, counting toward no same-name sibling's index, so it
+shifts no shown layer's path; a target layer of the same name and kind is copied in beside it, and the
+copy shows both. Paired, it had been relinked as the target layer's copy and stopped being the slot's
+own. **A swap left equal to what its slot shows
 is cleared** on every route, by `swap::settle`, above. **A set holds one kind**: `variant::switch`
 refuses a main of another kind, the second defence; the doors that refuse it first, with a message, are
 built since 2026-10-07 (`2a77404`) — *Combine as variants* over mains of two kinds (`variant::one_kind`;

@@ -1896,18 +1896,13 @@ than an oversight. None blocks v1.
   (`clock::local_offset`) per row per frame. ⚠️ **The cover half of the finding is not open** — D862
   gated `Covers::get` on the card being on screen. **No trigger was ruled**; the measurement puts
   the drawing alone near a whole frame at about 3,000 documents.
-- **Components: seven questions the record noted and did not rule.** Each is stated where it was
+- **Components: five questions the record noted and did not rule.** Each is stated where it was
   found, and none is restated here. A group *instance*'s canvas label (`architecture.md` §5.3d's
   chrome paragraph, §15 D981, D985); a guide scoped to a main frame not copied into its instances
   (§5.3d, *Open, and recorded as open*); a linked node moved into a nested instance inside its own
   instance losing its link (§5.3d's instance-side edits); every instance root exempt from membership, looser
   than §5.3d (§15 D978's amendment); and a main's layer moved out of its frame previewed on its copies
-  as a follow the release then removes (§15 D979's step-6 amendment, (xiv)). *Added 2026-10-06.* And
-  two left by the `v0.4.1..7d0c666` release review's fix phase when it closed on 2026-10-07: a slot-own
-  layer whose name path and kind meet a layer of a swap's target matched to it by `variant::rewrite`,
-  so it stops being the slot's own (§5.3d's swap paragraph, read and not run); and a collapsed
-  instance whose only drift is a removed *grandchild* wearing the dot and offered no *Restore
-  children*, which is on the parent-row dot alone (§15 D1003 (9)'s ✅ for the row).
+  as a follow the release then removes (§15 D979's step-6 amendment, (xiv)). *Added 2026-10-06.*
 - **Whether a 32-row context menu is past the ceiling** — `context-menus.md` *Undecided*, item 7, the
   maintainer's to rule: §3's ceiling was argued from the boolean's 30, and two component menus measure
   32 (§15 D981's last amendment). *Added 2026-10-06.* ⚠️ **33 since 2026-10-07, by arithmetic**: a

@@ -67,10 +67,14 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1003 index rows, 1003 body headings, next free
-D1004** (measured at session 59's close, 2026-10-07) — but trust the procedure over any number
-written down here, including that one. ⚠️ **Session 59 (2026-10-07) reserved D1004–D1030 at
-`840a1f8` and spent none** — the whole release-review fix phase went into amendments, and each fix
+anywhere cited either. **The live figures: 1004 index rows, 1004 body headings, next free
+D1005** (measured at session 59's close, 2026-10-07) — but trust the procedure over any number
+written down here, including that one. ⚠️ **Session 59's last request reserved D1004–D1013 at
+`d42bab7` and spent one** — D1004, the maintainer's two rulings on what the fix phase left parked
+(a slot-added layer never matched by a swap; *Restore children* covering what a collapsed row's dot
+covers), built in `ed88b26` and cited from six files. The closing negative grep over
+**D1005–D1013 found zero sites** and they are released. Census **902**, one arrival (D1004), none
+unresolved. ⚠️ **Session 59 (2026-10-07) first reserved D1004–D1030 at `840a1f8` and spent none** — the whole release-review fix phase went into amendments, and each fix
 agent was handed one number of the block (D1004–D1009) to use only if an entry were truly needed;
 none was. The closing negative grep over **D1004–D1030 found zero sites** in `crates/`, `docs/`,
 `.github/`, `install.sh` or `Cargo.toml`, and they are released. Census **901**, no arrivals and no

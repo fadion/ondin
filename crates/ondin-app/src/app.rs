@@ -121,10 +121,29 @@ pub(crate) struct CutMove {
     doc_root: NodeId,
     /// The cut layers, in the clipboard's order — the roots of its subtrees.
     roots: Vec<NodeId>,
-    /// Each link the delete took, as (node, the source it followed).
-    links: Vec<(NodeId, NodeId)>,
+    /// Each link the delete took.
+    links: Vec<TakenLink>,
     /// The clipboard's stamp at the cut; another copy since makes this stale.
     stamp: Option<ClipStamp>,
+    /// The history's undo depth once the cut landed: an undo below it takes the
+    /// cut back, and the move with it ([`OndinApp::document_rewound`]).
+    depth: usize,
+}
+
+/// One link a layer delete took ([`Deleted::links`]): a node outside the
+/// deleted subtrees that followed a node inside them, and what the delete's
+/// commit left it at — cut, for an instance of a deleted main; **climbed**, for a
+/// nested copy inside one, which `component::relink_for_delete` relinks past the
+/// main's nested instance to that instance's own main (§15 D979 (c)), landing a
+/// swapped one an instance of what it shows. A cut's paste gives the link back
+/// only where the node still holds what the delete left (§15 D1003 (1)).
+#[derive(Clone, Debug)]
+pub(crate) struct TakenLink {
+    id: NodeId,
+    /// The source it followed and the swap it carried, before the delete.
+    was: (NodeId, Option<NodeId>),
+    /// Its link and swap as the delete's commit left them.
+    left: (Option<NodeId>, Option<NodeId>),
 }
 
 /// What a layer delete did, for the message its door writes
@@ -136,8 +155,8 @@ pub(crate) struct Deleted {
     detached: usize,
     /// The one layer's name, when one was deleted.
     name: Option<String>,
-    /// Every link the delete took, as (node, its old source).
-    links: Vec<(NodeId, NodeId)>,
+    /// Every link the delete took.
+    links: Vec<TakenLink>,
 }
 
 /// What the system clipboard turned out to be holding, when a paste asks
@@ -2880,6 +2899,19 @@ impl OndinApp {
     fn document_rewound(&mut self) {
         self.points.clear();
         self.pen = None;
+        // **An undone cut owes its paste nothing** (§15 D1003 (1)): the move a cut
+        // keeps is a claim about links *that cut* took, and once the history is
+        // undone past it they are back. Kept, it outlived the undo, and a later
+        // delete of the main — after the user had detached an instance by hand —
+        // had the paste relink what they detached. A redo of the cut does not
+        // bring the move back; its paste is an ordinary one.
+        if self
+            .cut_move
+            .as_ref()
+            .is_some_and(|c| self.session.history.undo_depth() < c.depth)
+        {
+            self.cut_move = None;
+        }
     }
 
     pub(crate) fn dispatch(&mut self, ctx: &egui::Context, action: Action) {
@@ -5584,6 +5616,7 @@ impl OndinApp {
                     .collect(),
                 links: d.links,
                 stamp: self.clipboard_stamp,
+                depth: self.session.history.undo_depth(),
             });
         }
         self.session.info(match (d.detached, d.name) {
@@ -6198,15 +6231,34 @@ impl OndinApp {
                 transform: ondin_core::kurbo::Affine::translate(offset) * p.nodes[0].transform(),
             });
         }
-        ops.extend(
-            cut.links
-                .iter()
-                .filter(|(id, _)| doc.get(*id).is_some_and(|n| n.link().is_none()))
-                .map(|(id, src)| Operation::SetLink {
-                    id: *id,
-                    link: Some(*src),
-                }),
-        );
+        // **Every link the delete took, where the node still holds what the
+        // delete left it** — not only the ones it left unlinked: a nested copy in
+        // an instance of the cut main was *climbed* to its own main (or landed an
+        // instance of the main its swap showed), so a filter on `link().is_none()`
+        // passed it over and it stayed a local instance, no longer following the
+        // main's nested instance (D979's amendment building D1003 (1)). A node
+        // relinked since keeps its new link; a swap whose main has gone since
+        // cannot come back, and that node is left as it is.
+        for t in &cut.links {
+            let Some(n) = doc.get(t.id) else { continue };
+            if (n.link(), n.swap()) != t.left
+                || t.was
+                    .1
+                    .is_some_and(|s| !doc.get(s).is_some_and(|s| s.component()))
+            {
+                continue;
+            }
+            ops.push(Operation::SetLink {
+                id: t.id,
+                link: Some(t.was.0),
+            });
+            if n.swap() != t.was.1 {
+                ops.push(Operation::SetSwap {
+                    id: t.id,
+                    swap: t.was.1,
+                });
+            }
+        }
         if !self.session.commit(Transaction(ops)) {
             return false;
         }
@@ -6283,14 +6335,18 @@ impl OndinApp {
         };
         // Every link into what goes, read before the commit and kept where the
         // commit changed it — `relink_for_delete`'s and whatever the commit's own
-        // settling adds — so a cut can give them back (§15 D1003 (1)).
+        // settling adds — with the link and swap it left, so a cut can give them
+        // back (§15 D1003 (1)).
         let doc = &self.session.doc;
         let going: HashSet<NodeId> = build::subtree_nodes(doc, &ids).into_iter().collect();
-        let held: Vec<(NodeId, NodeId)> = build::subtree_nodes(doc, &[doc.root()])
+        let held: Vec<(NodeId, NodeId, Option<NodeId>)> = build::subtree_nodes(doc, &[doc.root()])
             .into_iter()
             .filter(|id| !going.contains(id))
-            .filter_map(|id| Some((id, doc.get(id)?.link()?)))
-            .filter(|(_, src)| going.contains(src))
+            .filter_map(|id| {
+                let n = doc.get(id)?;
+                Some((id, n.link()?, n.swap()))
+            })
+            .filter(|(_, src, _)| going.contains(src))
             .collect();
         if !self.session.commit(Transaction(ops)) {
             return None;
@@ -6298,7 +6354,14 @@ impl OndinApp {
         self.session.selection.clear();
         let links = held
             .into_iter()
-            .filter(|(id, src)| self.session.doc.get(*id).and_then(|n| n.link()) != Some(*src))
+            .filter_map(|(id, src, swap)| {
+                let n = self.session.doc.get(id)?;
+                (n.link() != Some(src)).then(|| TakenLink {
+                    id,
+                    was: (src, swap),
+                    left: (n.link(), n.swap()),
+                })
+            })
             .collect();
         Some(Deleted {
             count: ids.len(),
@@ -20187,6 +20250,178 @@ mod component_verb_tests {
         assert_eq!(app.session.doc.get(two).unwrap().link(), Some(m));
     }
 
+    /// **A cut main's nested copies come back to it too** (§15 D1003 (1), D979's
+    /// amendment building it): `Card` holds two instances of `Star`, and its
+    /// instance `i` copies both — the second, `c2`, swapped to `Heart`. The cut
+    /// does not detach these: `relink_for_delete` climbs `c1` to Star and lands
+    /// `c2` an instance of Heart. The paste gave back only the links it found
+    /// unlinked, so `i` followed Card again while its nested copies stayed local
+    /// instances of Star and Heart, no longer following Card's nested Stars. The
+    /// cut now records what its commit left each link at, and the paste gives
+    /// back every one still holding it — link and swap.
+    ///
+    /// Flip, run: the give-back filtered on the node being unlinked again
+    /// (`n.link().is_some()` skipped) fails "c1 follows Card's nested Star
+    /// again", `Some(Star)`; giving back the link alone (the `SetSwap` dropped)
+    /// fails "still showing Heart", `None` — the paste still commits (what the
+    /// settling passes made of Heart's layer under the unswapped copy was not
+    /// read), so it is the swap assertion and not the commit that catches it.
+    #[test]
+    fn a_cut_main_gives_back_its_nested_copies() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut ids = IdSource::new(0x7C1);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let [star, ss, heart, hs, m] = [(); 5].map(|_| ids.mint());
+        let frame = |w: f64| NodeKind::Artboard {
+            size: Size::new(w, w),
+        };
+        let rect = || NodeKind::Rect {
+            size: Size::new(10.0, 10.0),
+            corner_radii: Default::default(),
+        };
+        let create = |id, parent, index, kind, name: &str| Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind,
+            transform: None,
+            name: Some(name.into()),
+        };
+        doc.apply(&Transaction(vec![
+            create(star, root, 0, frame(24.0), "Star"),
+            create(ss, star, 0, rect(), "Shape"),
+            create(heart, root, 1, frame(24.0), "Heart"),
+            create(hs, heart, 0, rect(), "Shape"),
+            create(m, root, 2, frame(100.0), "Card"),
+            Operation::SetComponent {
+                id: star,
+                component: true,
+            },
+            Operation::SetComponent {
+                id: heart,
+                component: true,
+            },
+        ]))
+        .expect("two icon mains and a card frame");
+        let place = |doc: &mut Document, ids: &mut IdSource, main: NodeId, parent: NodeId| {
+            let (tx, made) = ondin_core::insert_subtrees(
+                doc,
+                ids,
+                &[ondin_core::Placement {
+                    nodes: doc.capture_subtree(main).unwrap(),
+                    parent,
+                    index: None,
+                }],
+                Default::default(),
+            );
+            doc.apply(&tx).expect("an instance");
+            made[0]
+        };
+        let n1 = place(&mut doc, &mut ids, star, m);
+        let n2 = place(&mut doc, &mut ids, star, m);
+        doc.apply(&Transaction(vec![Operation::SetComponent {
+            id: m,
+            component: true,
+        }]))
+        .expect("the card a main");
+        let i = place(&mut doc, &mut ids, m, root);
+        app.session.adopt_document(doc, None);
+        let child = |app: &OndinApp, parent: NodeId, src: NodeId| {
+            let doc = &app.session.doc;
+            doc.get(parent)
+                .unwrap()
+                .children()
+                .iter()
+                .copied()
+                .find(|c| doc.get(*c).and_then(|k| k.link()) == Some(src))
+                .expect("a copy of it")
+        };
+        let (c1, c2) = (child(&app, i, n1), child(&app, i, n2));
+        let n1s = app.session.doc.get(n1).unwrap().children()[0];
+        let c1s = child(&app, c1, n1s);
+        let tx = ondin_core::swap::swap(&app.session.doc, c2, heart).unwrap();
+        assert!(app.session.commit(tx), "the fixture: c2 shows Heart");
+        let c2s = app.session.doc.get(c2).unwrap().children()[0];
+        let link = |app: &OndinApp, id: NodeId| app.session.doc.get(id).unwrap().link();
+
+        app.session.selection.set_one(m);
+        app.cut_selection(&ctx);
+        assert_eq!(link(&app, i), None, "the fixture: i detached");
+        assert_eq!(link(&app, c1), Some(star), "the fixture: c1 climbed");
+        assert_eq!(link(&app, c2), Some(heart), "the fixture: c2 landed");
+        let cut = ondin_core::io::save(&app.session.doc).unwrap();
+        assert!(app.paste_clipboard());
+        assert!(
+            app.session.doc.get(m).is_some(),
+            "the main, under its own id"
+        );
+        assert_eq!(link(&app, i), Some(m), "relinked");
+        assert_eq!(
+            link(&app, c1),
+            Some(n1),
+            "c1 follows Card's nested Star again"
+        );
+        assert_eq!(link(&app, c1s), Some(n1s), "and its layer");
+        assert_eq!(link(&app, c2), Some(n2), "c2 follows Card's other Star");
+        assert_eq!(
+            app.session.doc.get(c2).unwrap().swap(),
+            Some(heart),
+            "still showing Heart"
+        );
+        assert_eq!(link(&app, c2s), Some(hs), "Heart's layer");
+        let bytes = ondin_core::io::save(&app.session.doc).unwrap();
+        let loaded = ondin_core::io::load(&bytes).expect("it reloads");
+        assert_eq!(ondin_core::io::save(&loaded).unwrap(), bytes);
+        app.undo();
+        assert_eq!(
+            ondin_core::io::save(&app.session.doc).unwrap(),
+            cut,
+            "one undo takes the paste back"
+        );
+    }
+
+    /// **An undone cut owes its paste nothing** (§15 D1003 (1)): the move a cut
+    /// keeps outlived an undo of the cut, so after cut, undo, an explicit
+    /// *Detach instance* and a plain Delete of the main, the paste restored the
+    /// main under its id and relinked the instance — overturning the detach,
+    /// which the user made after the cut was taken back. The cut's move is
+    /// dropped once the history is undone past it; the paste is an ordinary one.
+    ///
+    /// Flip, run: `document_rewound` without the `cut_move` drop fails "the
+    /// detach stands", `Some(m)`.
+    #[test]
+    fn an_undone_cut_does_not_move_on_paste() {
+        let ctx = egui::Context::default();
+        let (mut app, m, i) = main_and_instance(&ctx);
+        app.session.selection.set_one(m);
+        app.cut_selection(&ctx);
+        assert!(app.cut_move.is_some(), "the fixture: a move owed");
+        app.undo();
+        assert_eq!(
+            app.session.doc.get(i).unwrap().link(),
+            Some(m),
+            "the cut taken back"
+        );
+        app.session.selection.set_one(i);
+        app.detach_instances();
+        assert_eq!(app.session.doc.get(i).unwrap().link(), None, "detached");
+        app.session.selection.set_one(m);
+        app.delete_selection();
+        assert!(app.session.doc.get(m).is_none(), "the main deleted");
+        assert!(app.paste_clipboard());
+        assert_eq!(
+            app.session.doc.get(i).unwrap().link(),
+            None,
+            "the detach stands"
+        );
+        assert!(
+            app.session.doc.get(m).is_none(),
+            "an ordinary paste, under new ids"
+        );
+    }
+
     /// **Leaving an entered instance by another door leaves its scope**
     /// (`[X11.1-L1-02]`, `[X11.2-L1-02]`): after *Go to main* from inside the
     /// instance the selection is the main's layer, and `Escape` — which the stale
@@ -20451,8 +20686,8 @@ mod component_verb_tests {
         );
         // **And the menu a user opens on it draws the row** (`[X11.2-L1-01]`): the
         // copy is an instance root, so `layer_menu` takes its `Role::Instance` arm,
-        // which drew *Go to main* and *Reset instance* and never the property's
-        // row. Built through `open_context_menu` → `menu_context` → `build`, not a
+        // which drew *Go to main component*, *Reset all* and *Detach instance* and
+        // never the property's row. Built through `open_context_menu` → `menu_context` → `build`, not a
         // synthetic `Context`. Flip, run: the arm's `property_reset` push deleted
         // fails here, "the instance arm offers Reset Icon".
         app.open_context_menu(

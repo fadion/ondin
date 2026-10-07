@@ -2637,7 +2637,8 @@ mixed set, and `component::check` has no arm for one.
 card's place (`OndinApp::set_body`): its name on one line beside the four-squares glyph — the main's
 face, `component::name_line`, with no *Component set* caption since §15 D1000 — *N variants · M instances* with
 *Select all* — every variant's instances — the clash note with a warning glyph, each variant property
-as a name field with a ×, disabled for the last, and its values as chips; a chip's popup renames, moves
+as a name field with a ×, disabled for the last, and its values as chips — a hairline
+(`variants::card_rule`) between one property and the next since §15 D1006, none above the first; a chip's popup renames, moves
 and deletes its value, a value variants hold confirming with exact counts in D979 (c)'s words — *N
 variants use it and are deleted with it. M instances will detach.* — ⚠️ in a modal since §15 D996
 (`OndinApp::value_delete_confirmation`, *Cancel* and *Delete*, the ✕, `Escape` and the backdrop
@@ -2655,7 +2656,9 @@ with *No Large, Disabled variant in Button*, the dropdown disabled where any sel
 override mark; several instances get the rows when they share one owner. ⚠️ **The rows are the other
 cards' rows since §15 D996**: dropdowns `CONTROL_H` tall, every label-column control ending at the
 card's content edge, the labels right-aligned against their control (`component::label_mark_in`,
-`MARK_ROOM` kept for the mark, a long one cut with `…`), and a boolean's row `variants::toggle_row` —
+`MARK_ROOM` kept for the mark, a long one cut with `…` and its whole name in a tooltip only when cut —
+asked of `Galley::elided` through `component::fitted_label`, the tooltip never attached until §15
+D1006), and a boolean's row `variants::toggle_row` —
 its name in the label column and the switch where the fields begin, not the features' toggle-list row. **The drift summary counts
 properties apart**, a property's field units subtracted from the overrides (`PropDrift`, *2 properties ·
 1 override*), the overflow gains *Reset properties N*, and *Reset fields* leaves the property-driven

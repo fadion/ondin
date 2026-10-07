@@ -67,9 +67,13 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1005 index rows, 1005 body headings, next free
-D1006** (measured at session 60's close, 2026-10-07) — but trust the procedure over any number
-written down here, including that one. ⚠️ **Session 60 reserved D1005–D1014 at `11b462e` and spent
+anywhere cited either. **The live figures: 1006 index rows, 1006 body headings, next free
+D1007** (measured 2026-10-08) — but trust the procedure over any number written down here,
+including that one. ⚠️ **Session 60's fourth request reserved D1006–D1015 at `ed2662a` and spent
+one** — D1006, a components polish round (a rule between the Variants card's properties; a cut
+label's tooltip, D996's promise dead since it was written because `Galley::text()` is the job's
+whole text — ask `Galley::elided`). The closing negative grep over **D1007–D1015 found zero
+sites** and they are released. Census **904**, one arrival (D1006), none unresolved. ⚠️ **Session 60 reserved D1005–D1014 at `11b462e` and spent
 one** — D1005, the Properties card's header `+` menu (the maintainer's ruling over Claude Design's
 seven-item list, every other item held out by an earlier ruling). The closing negative grep over
 **D1006–D1014 found zero sites** and they are released. Census **903**, one arrival (D1005), none

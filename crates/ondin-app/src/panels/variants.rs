@@ -472,6 +472,13 @@ impl OndinApp {
             note(ui, icon::WARNING, text);
         }
         for (pi, p) in vs.props.iter().enumerate() {
+            // **A rule between two properties** (the maintainer's look, §15
+            // D1006): a property's chips wrapped under its name sat as close to
+            // the next property's name as to their own, so which chips were whose
+            // took reading. The Properties card's hairline (`card_rule`, D1000).
+            if pi > 0 {
+                card_rule(ui);
+            }
             ui.add_space(2.0);
             // The property's name, renamed in place, with its delete beside it.
             ui.horizontal(|ui| {

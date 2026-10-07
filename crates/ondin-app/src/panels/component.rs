@@ -1194,25 +1194,14 @@ pub(super) fn label_mark_in(
         None => ink,
     };
     let right = align == egui::Align::Max && size.is_some();
-    let galley = match size.filter(|_| right) {
-        Some(slot) => {
-            let mut job = egui::text::LayoutJob::single_section(
-                text.to_owned(),
-                egui::TextFormat::simple(egui::FontId::proportional(pt), color),
-            );
-            job.wrap = egui::text::TextWrapping {
-                max_width: (slot.x - MARK_ROOM).max(0.0),
-                max_rows: 1,
-                break_anywhere: true,
-                overflow_character: Some('…'),
-            };
-            ui.painter().layout_job(job)
-        }
-        None => ui
-            .painter()
-            .layout_no_wrap(text.to_owned(), egui::FontId::proportional(pt), color),
+    let (galley, cut) = match size.filter(|_| right) {
+        Some(slot) => fitted_label(ui, text, pt, color, (slot.x - MARK_ROOM).max(0.0)),
+        None => (
+            ui.painter()
+                .layout_no_wrap(text.to_owned(), egui::FontId::proportional(pt), color),
+            false,
+        ),
     };
-    let cut = galley.text() != text;
     let w = galley.size().x;
     // The dot's room beside the text, so a marked label's width does not move
     // what follows it.
@@ -1254,6 +1243,37 @@ pub(super) fn label_mark_in(
         false => resp.on_hover_text(&m.tip),
     }
     .clicked()
+}
+
+/// `text` laid out on one line no wider than `max_w`, cut with an ellipsis, and
+/// whether it was cut — what decides that a label names itself in a tooltip.
+///
+/// 🚨 **Asked of `Galley::elided`, never of the text** (§15 D1006, the
+/// maintainer's look: a cut property name on an instance's card had no tooltip).
+/// `Galley::text()` is the *job's* text — the whole name, ellipsis or not — so
+/// the comparison this replaced, `galley.text() != text`, was false for every
+/// label and the tooltip D996 promised was never attached. `ui::menu_row` already
+/// asked `elided`.
+fn fitted_label(
+    ui: &egui::Ui,
+    text: &str,
+    pt: f32,
+    color: egui::Color32,
+    max_w: f32,
+) -> (std::sync::Arc<egui::Galley>, bool) {
+    let mut job = egui::text::LayoutJob::single_section(
+        text.to_owned(),
+        egui::TextFormat::simple(egui::FontId::proportional(pt), color),
+    );
+    job.wrap = egui::text::TextWrapping {
+        max_width: max_w,
+        max_rows: 1,
+        break_anywhere: true,
+        overflow_character: Some('…'),
+    };
+    let galley = ui.painter().layout_job(job);
+    let cut = galley.elided;
+    (galley, cut)
 }
 
 /// An overridden dropdown's dot, where it has no label to sit after: beside its
@@ -4926,6 +4946,87 @@ mod tests {
             !painted.iter().any(|(t, _)| t == "Variant"),
             "no Variant on a set"
         );
+    }
+
+    /// **The Variants card rules off one property from the next** (§15 D1006, the
+    /// maintainer's look: which chips were whose took reading). A set with *Size*
+    /// and *Style*: one `card_rule` hairline between *Size*'s name and *Style*'s,
+    /// and none between the counts line and *Size* — a rule *between* properties,
+    /// not above each.
+    ///
+    /// **Flip run**: the rule drawn above every property (`pi > 0` dropped) fails
+    /// *"none above the first"*.
+    #[test]
+    fn the_variants_card_rules_between_its_properties() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut v = variants_fixture(&ctx);
+        let tx = ondin_core::variant::add_property(&v.app.session.doc, v.set, "Style", "Primary")
+            .expect("a second property");
+        assert!(v.app.session.commit(tx));
+        let out = settled(&mut v.app, &ctx, v.set);
+        let painted = texts(&out);
+        let at = |s: &str| {
+            painted
+                .iter()
+                .find(|(t, _)| t == s)
+                .unwrap_or_else(|| panic!("{s} painted: {painted:?}"))
+                .1
+        };
+        let rule = crate::theme::color::text_a(26);
+        let mut rules = Vec::new();
+        fn walk(s: &egui::Shape, rule: egui::Color32, o: &mut Vec<f32>) {
+            match s {
+                egui::Shape::LineSegment { points, stroke } if stroke.color == rule => {
+                    o.push(points[0].y)
+                }
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, rule, o)),
+                _ => {}
+            }
+        }
+        for s in &out.shapes {
+            walk(&s.shape, rule, &mut rules);
+        }
+        let (size, style) = (at("Size"), at("Style"));
+        let counts = at("2 variants · 1 instance");
+        let between = |a: f32, b: f32| rules.iter().filter(|y| **y > a && **y < b).count();
+        assert_eq!(
+            between(size.bottom(), style.top()),
+            1,
+            "one rule between Size and Style: {rules:?}"
+        );
+        assert_eq!(
+            between(counts.bottom(), size.top()),
+            0,
+            "none above the first: {rules:?}"
+        );
+    }
+
+    /// **A label cut to its slot says so, and one that fits does not** (§15 D1006,
+    /// the maintainer's look: *Initials ka…* on an instance's card, no tooltip).
+    /// In the Component card's label column — `LABEL_W` less `MARK_ROOM` at 12pt —
+    /// a long property name is cut and a short one is not; and the galley's own
+    /// text is the whole name either way, the premise that made the old check
+    /// blind. The tooltip itself never reaches `FullOutput::shapes` (CLAUDE.md), so
+    /// the answer it hangs from is what is asserted.
+    ///
+    /// **Flip run**: `cut` back to `galley.text() != text` fails *"a long name is
+    /// cut"* — the shipped defect.
+    #[test]
+    fn a_label_cut_to_its_slot_names_itself_and_one_that_fits_does_not() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            let w = 76.0 - MARK_ROOM;
+            let long = "Initials kana for the avatar";
+            let (galley, cut) = fitted_label(ui, long, 12.0, egui::Color32::WHITE, w);
+            assert_eq!(galley.text(), long, "the job's text, whole");
+            assert!(galley.size().x <= w + 0.5, "laid out inside the slot");
+            assert!(cut, "a long name is cut");
+            let (_, cut) = fitted_label(ui, "Size", 12.0, egui::Color32::WHITE, w);
+            assert!(!cut, "a name that fits is not");
+        });
     }
 
     /// **A property bound from a layer inside the main opens the card when the main

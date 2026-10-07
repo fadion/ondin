@@ -67,9 +67,18 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1000 index rows, 1000 body headings, next free
-D1001** (measured at session 55's close, 2026-10-07) — but trust the procedure over any number
-written down here, including that one. **No block is reserved**: the next session reserves its own.
+anywhere cited either. **The live figures: 1002 index rows, 1002 body headings, next free
+D1003** (measured at session 56's close, 2026-10-07) — but trust the procedure over any number
+written down here, including that one. ⚠️ **Session 56 reserved D1001–D1010 at `fe1e191` and spent
+one** — D1001, the fifth components polish pass (no canvas tag inside an instance nor on an
+instance inside a main; a main's or instance's selection chrome violet, `color::COMPONENT`). The
+closing negative grep over **D1002–D1010 found zero sites** and they are released. Census **899**,
+one arrival, none unresolved. ⚠️ **`arch-scribe` found a real cost in the first cut** — withholding
+every tag below a main took an occupied plain frame's one handle besides its edge (D22) — and the
+rule was narrowed before commit. Its second request (the labels violet too) reserved
+**D1002–D1011** first and spent none — an amendment to D1001 — and released them at zero sites;
+its third (an instance's tag only while selected or entered) reserved them again and spent
+**D1002**, releasing **D1003–D1011** at zero sites. Census **900**, none unresolved. **No block is reserved**: the next session reserves its own.
 ⚠️ **Numbers are four digits now, and the census sieve was widened first**: `D[0-9]{1,4}\b`
 (below), measured against the three-digit sieve before D1000 was spent — both 896 over `crates/`,
 so the widening added no false positive. ⚠️ **A five-digit number is the same trap again at

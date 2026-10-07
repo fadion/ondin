@@ -2171,7 +2171,17 @@ below — measured for one path, not settled in general.
 brief: **component-ness is shape, never the accent** — a filled hexagon on a neutral chip for a main's
 label, an outline hexagon and a bare label for an instance's, a renamed instance trailing its main's
 name in grey — and 🚨 **a component's label never changes hue on selection**, for components only,
-where an ordinary frame's label still does (the maintainer's ruling). A group that is a main gets a
+where an ordinary frame's label still does (the maintainer's ruling). ⚠️ **On the canvas the hue rule
+is overturned since §15 D1001** (the maintainer's, two rulings the same day): a main's or an instance
+root's selection and hover outlines are `color::COMPONENT`, a violet (`canvas::chrome_hue`), and so are
+the handles and the size badge when every selected layer is one (`OndinApp::selection_hue`); a set and
+every layer inside a component keep `SELECT`. **And the labels are violet**: the main's chip filled
+`COMPONENT` with its hexagon and name in `COMPONENT_INK`, the instance's tag in `COMPONENT` with its
+trailing name in `COMPONENT_DIM` — neither changing on selection, the set's tab still neutral, and
+nothing off the canvas taking the hue. ⚠️ **And an instance's tag is drawn only while the instance is
+selected or entered** (§15 D1002, the maintainer's), where a main's chip and a frame's name always
+show — a page of tagged instances was clutter, and an instance picks like a group, so the tag was never
+its handle. A group that is a main gets a
 canvas label as a frame does, the one group that has one (`OndinApp::tagged`, which
 `canvas::draw_frame_labels` walks in place of `artboards()`); ⚠️ whether a group *instance* gets one is **not ruled** — D981 has the record's reading of the
 mockup. 🚨 **An instance picks like a group, whatever its kind**: a click anywhere on it, its empty
@@ -2290,10 +2300,22 @@ does not skip an occupied frame that is or sits in an instance; **`Enter` enters
 text, picture and path arms (`enter_action`), and **so does a double-click on its own background** —
 where the leaf is the instance and the chain starts above it, so `double_click_pick` carries an arm of
 its own after the group step (the first build cropped a picture-filled one there, D228's disagreement;
-fixed the same day). **A main's tag** is a `CARD` chip with the filled
-hexagon, *N instances* while selected; **an instance's** the outline hexagon and its name in `MUTED`,
-its main's name trailing in `DIM` when the two differ, and *Name › Child* while it is entered with a
-layer inside selected; 🚨 neither ever takes `color::SELECT`. `canvas::draw_component_chrome` draws a
+fixed the same day). **A main's tag** is a chip with the filled
+hexagon, *N instances* while selected; **an instance's** the outline hexagon and its name, its main's
+name trailing when the two differ, and *Name › Child* while it is entered with a layer inside selected
+— **drawn only while the instance is selected or `entered_instance`** since §15 D1002, a selected main
+not bringing its instances' tags;
+🚨 neither ever takes `color::SELECT`. **Both are violet since §15 D1001**, at rest and selected alike —
+the chip a `COMPONENT` fill with no edge (a `CARD` chip with a `CARD_BORDER` edge before), its hexagon
+and name `COMPONENT_INK` and its count `COMPONENT_INK_DIM`; the instance's tag `COMPONENT` (`MUTED`
+before), its trailing name and the path's › `COMPONENT_DIM` (`DIM` before) — and a set's tab stays
+neutral. **No tag inside an instance, nor on an
+instance inside a main**, since §15 D1001 (`canvas::tag_withheld`: a linked layer strictly above, or an
+instance root with a main strictly above), a main excepted: a nested instance's tag had slid under its
+main's chip when zoomed out and painted over it, every instance repeated its inner frames' tags, and
+each was a pick past the instance's group-like picking. ⚠️ **A plain frame inside a main keeps its
+tag** — occupied, it is that frame's one handle besides its edge (§15 D22, D816); the first cut
+withheld it too and was narrowed for that reason. `canvas::draw_component_chrome` draws a
 `FAINT` hairline round each instance of a selected main and, round the entered instance, a dashed `DIM`
 boundary and *Editing inside instance · Esc to exit* — for `canvas::entered_instance`, the nearest
 instance root at or above `entered_group`, so they stay while the user steps into a group inside it.
@@ -9434,7 +9456,9 @@ a sheared box is not the same as turning the screen direction), which is what di
 the resize cursor on the same band. §15 D52 has the design.
 
 **The box is drawn dimmer than the layers it is drawn around**: 1px `SELECT_DIM` against the 1.2px
-`SELECT` each member already gets for its own outline. It is derived chrome saying "these move
+`SELECT` each member already gets for its own outline (`COMPONENT_DIM`, and the handles `COMPONENT`, when
+every member is a main or an instance, each such member's own outline `COMPONENT` either way — §5.3d,
+§15 D1001). It is derived chrome saying "these move
 together" and must not compete with the artwork it encloses, each piece of which still shows its own
 edge. A single layer's box is not drawn twice — its selection outline already *is* the box. `Handles`
 deliberately does **not** keep the box's extent: everything that needs it recomputes from the
@@ -12520,7 +12544,7 @@ selected-but-unselectable trap (above) reaching two more call sites.
 own colour; hover is that same 1px line *plus* the position chip and the dotted extension, with no
 darken and no extra weight — the chip is the affordance, and Figma's darken-on-hover would have been
 defeated by a per-guide colour anyway; selected is 2px in `color::SELECT`, the same blue as every
-hover outline and bounding box in the app (§15 D13), with the chip. **The blue overrides a recoloured
+hover outline and bounding box in the app but a component's (§15 D13, D1001), with the chip. **The blue overrides a recoloured
 guide for as long as it is picked**, which reverses an earlier decision and is intended; §15 D139 has
 the reversal and the bug it caused.
 
@@ -12589,15 +12613,23 @@ exemption from the drag-aware click-away rule with it (see above).
 the canvas, above its own top-left corner and outside the box so the tag never covers artwork — 5px
 in from the left edge, 5px between the bottom of the text and the top edge, 11pt, in `text::MUTED`
 or `color::SELECT` when that frame is selected, drawn under every other overlay bar the pixel grid —
-except a component's: a main's tag is a neutral chip and an instance's carries an outline hexagon, and
-**neither ever takes `color::SELECT`**; a group main is tagged too (§5.3d, §15 D981, D985).
+except a component's: a main's tag is a violet chip, the same selected or not, and an instance's a
+violet label with an outline hexagon (`color::COMPONENT`, §15 D1001), and **neither ever takes
+`color::SELECT`**; a group main is tagged too (§5.3d, §15 D981, D985). **A frame
+inside an instance carries none, nor does an instance inside a main** — an instance picks like a
+group, and a frame inside one picks with it — while a main keeps its chip wherever it is and **a plain frame
+inside a main keeps its tag**, for the reason below (§15 D1001). **And an instance's tag is drawn only
+while the instance is selected or entered** (§15 D1002, the maintainer's) — the one tag that does not
+always show; a selected main does not bring its instances' tags.
 That tag exists
 because a frame with anything in it is no longer directly clickable: `canvas::pick_leaf` skips it so
 its background passes the press through to the marquee (§5.10, §15 D22). **Not a frame with a group
 above it** (§15 D876): a card in a row is part of the row, so a click on its background selects the
 row and a press there drags it, the group chain deciding which level — which gives up the marquee
 from a card's background inside a row, even stepped into the card. **Nor an instance, or a frame
-inside one** (§15 D981 (b), D985): an instance picks like a group, its empty background included. An **empty** frame is still
+inside one** (§15 D981 (b), D985): an instance picks like a group, its empty background included —
+so an instance never needed its tag to be picked, which is why hiding it while unselected (§15 D1002)
+costs no reach; a hidden tag is no pick either. An **empty** frame is still
 clickable anywhere, and a frame that is *already* the selection stays draggable from anywhere inside
 it (`selected_frame_at`), so picking one by its name and then reaching for the middle of it does not
 rubber-band the selection away.

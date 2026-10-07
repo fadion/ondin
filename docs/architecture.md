@@ -1991,7 +1991,12 @@ without the prune the commit is *not* refused, because `settle_links` cuts the d
 transaction touched, and an unlinked copy would land in silence
 (`a_child_moved_elsewhere_is_not_restored_twice`, flip run). *Reset order* re-slots the linked children
 into their sources' order and leaves local layers in their slots. *Reset all* is restore, then order,
-then fields, each computed on the document the one before leaves, in one transaction. `reset::reset`
+then fields, each computed on the document the one before leaves, in one transaction. *Restore
+children* (`reset::restore_own_children`, §15 D1003 (9), `5bce910`) is the row-scoped fifth: one
+parent's **own** removed children back through `restore_children`'s body (`restore_missing`, shared),
+then that parent's linked children in their source's order, read on the document the restore leaves as
+*Reset all* reads its order — exactly what `child_drift` counts for that parent, and no field, nothing
+deeper, no sibling. `reset::reset`
 takes the **outermost** of its scopes (`build::outermost`), so an instance and a layer inside it reset
 together restore a missing child once (`overlapping_scopes_restore_a_child_once`). **Every reset is
 an ordinary commit**, so resetting a nested copy inside a main reaches that main's instances by
@@ -2305,8 +2310,10 @@ a row carries a **dot** for its own override and **+** if it is local, and **a c
 it differs from its main in any way** — overrides, local layers and removed children alike, as the
 card's drift summary counts them, a removed child having no row of its own — ⚠️ and since 2026-10-07
 (`bae6dcf`, §15 D1003 (9)) a removed or reordered child's dot goes on **its parent's row**, expanded or
-collapsed, with a tooltip naming what (*1 removed · order changed*, `reset::child_drift`); the ruling's
-*Restore* in that row's context menu is not built yet; 🚨 **a kept child shows as local** (the maintainer's ruling), since nothing records
+collapsed, with a tooltip naming what (*1 removed · order changed*, `reset::child_drift`), and the
+ruling's *Restore* in that layer's context menu, at both doors, is ***Restore children*** (`5bce910`) —
+one row for both things the tooltip names, offered exactly where `child_drift` says anything and
+omitted at zero; 🚨 **a kept child shows as local** (the maintainer's ruling), since nothing records
 provenance. The inspector gains a **component card** above Transform per selection state, its resets —
 *Reset all*, *Reset fields*, *Restore removed children*, *Reset order*, each with a count — disabled
 rather than hidden when there is nothing to do, and **no reset deletes a local addition** — ⚠️ a local

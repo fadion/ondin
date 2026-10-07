@@ -1006,6 +1006,7 @@ impl OndinApp {
     /// they are a shown group's copies, which draw no Swap row (4O, see
     /// [`Self::shown_groups`]).
     fn own_rows(&mut self, ui: &mut egui::Ui, roots: &[NodeId], group: bool) {
+        let rev = self.session.revision();
         let doc = &self.session.doc;
         let Some(&first) = roots.first() else { return };
         let Some(main) = component::main_of(doc, first) else {
@@ -1193,22 +1194,52 @@ impl OndinApp {
             .into_iter()
             .filter(|p| p.kind != PropKind::Nested)
             .collect();
+        // Each row's readings from `PropCache` while the document is unchanged,
+        // and its reset built only for a row that is overridden — the mark and
+        // its ↺ are the reset's only readers (`[X10-L4-01]`). Uncached and
+        // unconditional, the two were half each of a 33 ms share of the frame at
+        // 300 selected instances.
+        let cache = self.prop_cache.at(rev);
         for p in &props {
             let states: Vec<(PropValue, bool)> = roots
                 .iter()
-                .filter_map(|r| variant::property_state(doc, *r, p))
+                .filter_map(|r| {
+                    cache
+                        .states
+                        .entry((*r, p.id))
+                        .or_insert_with(|| {
+                            #[cfg(test)]
+                            super::component::count(|c| c.state += 1);
+                            variant::property_state(doc, *r, p)
+                        })
+                        .clone()
+                })
                 .collect();
             let Some((value, _)) = states.first().cloned() else {
                 continue;
             };
             let mixed = states.iter().any(|(v, _)| *v != value);
             let overridden = states.iter().any(|(_, o)| *o);
-            let reset = variant::reset_property(doc, roots, p);
-            let default = main_default(doc, main, p);
-            let mark = overridden.then(|| super::component::OverrideMark {
-                tip: format!("Reset to main · {}", say(doc, &default)),
-                tx: Transaction(reset.clone()),
+            let mark = overridden.then(|| {
+                let (tip, reset) = cache
+                    .marks
+                    .entry((roots.to_vec(), p.id))
+                    .or_insert_with(|| {
+                        #[cfg(test)]
+                        super::component::count(|c| c.reset += 1);
+                        let default = main_default(doc, main, p);
+                        (
+                            format!("Reset to main · {}", say(doc, &default)),
+                            variant::reset_property(doc, roots, p),
+                        )
+                    })
+                    .clone();
+                super::component::OverrideMark {
+                    tip,
+                    tx: Transaction(reset),
+                }
             });
+            let reset = || mark.as_ref().map(|m| m.tx.clone());
             match p.kind {
                 // Filtered out above: a showing has no value to draw.
                 PropKind::Nested => {}
@@ -1217,7 +1248,7 @@ impl OndinApp {
                     let (resp, reset_hit) =
                         toggle_row(ui, &p.name, (!mixed).then_some(on), mark.as_ref());
                     if reset_hit {
-                        out = Some(Transaction(reset.clone()));
+                        out = reset();
                     }
                     let resp = match &mark {
                         Some(m) => resp.on_hover_text(&m.tip),
@@ -1237,7 +1268,7 @@ impl OndinApp {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 0.0;
                         if row_label(ui, &p.name, mark.as_ref()) {
-                            out = Some(Transaction(reset.clone()));
+                            out = reset();
                         }
                         let text = match &value {
                             PropValue::Text(t) => t.clone(),
@@ -1276,7 +1307,7 @@ impl OndinApp {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 0.0;
                         if row_label(ui, &p.name, mark.as_ref()) {
-                            out = Some(Transaction(reset.clone()));
+                            out = reset();
                         }
                         let shown = match (&value, mixed) {
                             (_, true) => "Mixed".to_string(),

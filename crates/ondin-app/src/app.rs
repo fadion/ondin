@@ -970,6 +970,9 @@ pub struct OndinApp {
         u64,
         std::collections::HashMap<NodeId, ondin_core::reset::Drift>,
     ),
+    /// The Component card's property readings, kept beside `drift_cache` on the
+    /// same key (`panels::PropCache`, `[X8.1-L4-02]`).
+    pub(crate) prop_cache: crate::panels::PropCache,
     /// This frame's overrides of the selected instance layers, by the inspector
     /// card that shows them: the card's title, its unit count and the operations
     /// that reset it — what a card header's dot, count and *Reset effects* read
@@ -2284,6 +2287,7 @@ impl OndinApp {
             collapsed_panels: HashSet::from(["Effects", "Preview"]),
             // `u64::MAX` is no revision a session has, so the first read fills it.
             drift_cache: (u64::MAX, Default::default()),
+            prop_cache: Default::default(),
             card_overrides: Vec::new(),
             field_overrides: Vec::new(),
             per_corner_radius: HashSet::new(),

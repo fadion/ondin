@@ -75,8 +75,11 @@ enum Face {
     },
     /// A layer inside a main, which can be bound to its properties (§15 D982).
     InMain { node: NodeId },
-    /// One instance root.
+    /// One instance root — `root`, which the face was decided on: the card's
+    /// rows read it rather than the raw selection, which may hold a layer inside
+    /// it too, in either order (`[X8.1-L1-03]`).
     Instance {
+        root: NodeId,
         main: NodeId,
         main_name: String,
         drift: Drift,
@@ -119,6 +122,8 @@ pub(crate) struct PropDrift {
 /// [`PropDrift`] for the instance rooted at `root`.
 pub(crate) fn prop_drift(doc: &ondin_core::Document, root: NodeId) -> PropDrift {
     use ondin_core::variant::{self, PropKind};
+    #[cfg(test)]
+    count(|r| r.drift += 1);
     let defined = !variant::instance_properties(doc, root).is_empty();
     // The instance's own properties, then the shown rows of the nested instances
     // its card shows (§15 D988, 4N: *"it counts as a property"*).
@@ -144,6 +149,77 @@ pub(crate) fn prop_drift(doc: &ondin_core::Document, root: NodeId) -> PropDrift 
         props,
         units,
         defined,
+    }
+}
+
+/// What the Component card computed on this thread: `prop_drift`, and the
+/// property rows' `variant::property_state` and `variant::reset_property` —
+/// counted so a test can say an idle frame computes none of them
+/// (`[X8.1-L4-02]`, `[X10-L4-01]`). A count and not a clock, the shape
+/// `svg::def_count_tests` took when a timing assertion would not hold.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct Reads {
+    pub(crate) drift: usize,
+    pub(crate) state: usize,
+    pub(crate) reset: usize,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// This thread's `Reads` so far.
+    pub(crate) static READS: std::cell::Cell<Reads> = std::cell::Cell::new(Reads::default());
+}
+
+/// Add to this thread's `Reads`.
+#[cfg(test)]
+pub(crate) fn count(f: impl FnOnce(&mut Reads)) {
+    READS.with(|r| {
+        let mut v = r.get();
+        f(&mut v);
+        r.set(v);
+    });
+}
+
+/// The Component card's **property readings**, as of the session revision they
+/// were read at — the twin of `OndinApp::drift_cache`, and for the same reason:
+/// the card is drawn every frame it is up and each reading is a walk of an
+/// instance (`[X8.1-L4-02]`, `[X10-L4-01]`).
+///
+/// Uncached, a selection of many instances paid for every one of them every
+/// frame, idle or not — `prop_drift` twice, since the card draws in two halves
+/// (§15 D995) and each starts from `OndinApp::component_face`, and every
+/// property's `variant::property_state` and `variant::reset_property` per root
+/// in `OndinApp::own_rows`: measured at 200 instances, a 33–49 ms inspector
+/// frame. Keyed on the revision, so an edit, undo or redo empties it — a preview
+/// never writes the document, so nothing else can make a reading stale.
+#[derive(Default)]
+pub(crate) struct PropCache {
+    /// The revision the readings below are of; `None` before the first.
+    rev: Option<u64>,
+    /// [`prop_drift`] per instance root.
+    drift: std::collections::HashMap<NodeId, PropDrift>,
+    /// `variant::property_state` per root and property.
+    pub(super) states: std::collections::HashMap<
+        (NodeId, ondin_core::ItemId),
+        Option<(ondin_core::variant::PropValue, bool)>,
+    >,
+    /// An overridden property row's mark — its tooltip and its reset — per set
+    /// of roots and property: built only for a row that is overridden.
+    pub(super) marks:
+        std::collections::HashMap<(Vec<NodeId>, ondin_core::ItemId), (String, Vec<Operation>)>,
+}
+
+impl PropCache {
+    /// The cache as of revision `rev`, emptied first if it holds another's.
+    pub(super) fn at(&mut self, rev: u64) -> &mut Self {
+        if self.rev != Some(rev) {
+            *self = Self {
+                rev: Some(rev),
+                ..Self::default()
+            };
+        }
+        self
     }
 }
 
@@ -187,6 +263,19 @@ impl OndinApp {
             .1
             .entry(scope)
             .or_insert_with(|| ondin_core::reset::drift(doc, scope))
+    }
+
+    /// [`prop_drift`] at instance `root`, from [`PropCache`] while the document
+    /// is unchanged (`[X8.1-L4-02]`).
+    pub(crate) fn prop_drift_of(&mut self, root: NodeId) -> PropDrift {
+        let rev = self.session.revision();
+        let doc = &self.session.doc;
+        *self
+            .prop_cache
+            .at(rev)
+            .drift
+            .entry(root)
+            .or_insert_with(|| prop_drift(doc, root))
     }
 
     /// Gather [`OndinApp::card_overrides`] for this frame: every selected linked
@@ -460,8 +549,9 @@ impl OndinApp {
                 });
             }
             let drift = self.drift_of(root);
-            let props = prop_drift(&self.session.doc, root);
+            let props = self.prop_drift_of(root);
             return Some(Face::Instance {
+                root,
                 main,
                 main_name,
                 drift,
@@ -504,14 +594,15 @@ impl OndinApp {
             doc.get(o)?.set()?;
             Some((o, name(o)))
         });
-        let props = roots
-            .iter()
-            .map(|r| prop_drift(doc, *r))
-            .fold(PropDrift::default(), |a, b| PropDrift {
-                props: a.props + b.props,
-                units: a.units + b.units,
-                defined: a.defined || b.defined,
-            });
+        let props =
+            roots
+                .iter()
+                .map(|r| self.prop_drift_of(*r))
+                .fold(PropDrift::default(), |a, b| PropDrift {
+                    props: a.props + b.props,
+                    units: a.units + b.units,
+                    defined: a.defined || b.defined,
+                });
         let drifts: Vec<Drift> = roots.iter().map(|r| self.drift_of(*r)).collect();
         Some(Face::Instances {
             count,
@@ -593,6 +684,7 @@ impl OndinApp {
                         main_tail(ui, *instances, &mut act);
                     }
                     Face::Instance {
+                        root,
                         main,
                         main_name,
                         drift,
@@ -604,14 +696,12 @@ impl OndinApp {
                         // of* caption over it is gone, the outline hexagon saying
                         // it (§15 D993, as the main's face).
                         heading(ui, false, "", link, None, &summary, &mut act);
-                        let roots = app.session.selection.ids().to_vec();
-                        if let Some(&root) = roots.first() {
-                            app.chosen_by_note(ui, root);
-                        }
-                        app.instance_rows(ui, &roots);
-                        if let Some(&root) = roots.first() {
-                            app.show_switch(ui, root);
-                        }
+                        // The root the face was decided on, not the selection: a
+                        // layer of the instance selected first drew no rows, and
+                        // selected after it was asked to switch (`[X8.1-L1-03]`).
+                        app.chosen_by_note(ui, *root);
+                        app.instance_rows(ui, &[*root]);
+                        app.show_switch(ui, *root);
                         reset_row(ui, *drift, *props, true, &mut act);
                     }
                     Face::Instances {
@@ -691,14 +781,18 @@ impl OndinApp {
                 if let Some(tx) = self.reset_tx(Kind::Fields) {
                     let doc = &self.session.doc;
                     use ondin_core::variant::PropKind;
-                    let bound: std::collections::HashSet<(NodeId, PropKind)> = self
-                        .session
-                        .selection
-                        .ids()
-                        .iter()
-                        .filter_map(|id| component::instance_root(doc, *id))
-                        .flat_map(|r| ondin_core::variant::property_fields(doc, r))
-                        .collect();
+                    // The roots `reset_tx` scoped — the outermost selected, as the
+                    // face and its count were read — not every selected layer's
+                    // nearest instance: a nested copy selected inside its outer
+                    // instance put its own properties' fields here, filtered out
+                    // the very reset the row counted, and the click did nothing
+                    // (`[X8.1-L1-03]`).
+                    let bound: std::collections::HashSet<(NodeId, PropKind)> =
+                        ondin_core::build::outermost(doc, self.session.selection.ids())
+                            .into_iter()
+                            .filter_map(|id| component::instance_root(doc, id))
+                            .flat_map(|r| ondin_core::variant::property_fields(doc, r))
+                            .collect();
                     let kept: Vec<Operation> =
                         tx.0.into_iter()
                             .filter(|op| match op {
@@ -714,7 +808,12 @@ impl OndinApp {
                                 _ => true,
                             })
                             .collect();
-                    if !kept.is_empty() {
+                    if kept.is_empty() {
+                        // Every difference was a property's, which *Reset fields*
+                        // leaves alone: said, as `reset_tx` says its own nothing,
+                        // rather than a click that silently does nothing.
+                        self.session.info("Only component properties differ here");
+                    } else {
                         self.commit_reset(Transaction(kept));
                     }
                 }
@@ -4335,5 +4434,308 @@ mod tests {
             "the click deselected"
         );
         assert!(v.app.inspector_hold.is_none(), "and the hold let go");
+    }
+
+    // --- the card's cost and the roots it reads (K17) ------------------------
+
+    /// This thread's `Reads`, zeroed.
+    fn reads_taken() -> Reads {
+        READS.with(|r| r.replace(Reads::default()))
+    }
+
+    /// **An idle frame computes no property reading, and a filling one computes
+    /// one drift per root** (`[X8.1-L4-02]`, `[X10-L4-01]`). Two instances of
+    /// *Small*, one with its *Label text* overridden, both selected: the first
+    /// frame reads `prop_drift` once per root — not once per root per half of the
+    /// card (§15 D995) — and the next two frames, the document unchanged, read
+    /// nothing at all: no drift, no `property_state`, no `reset_property`.
+    /// Counted, never timed (the `svg::def_count_tests` shape). Flips, run:
+    /// `prop_drift_of` computing every time fails *"one per root"* with 4; the
+    /// rows' states read uncached fails *"an idle frame reads nothing"* with
+    /// `state: 4`.
+    #[test]
+    fn an_idle_frame_computes_no_property_reading() {
+        let ctx = egui::Context::default();
+        let mut v = variants_fixture(&ctx);
+        let j = second_instance(&mut v, "Sign up");
+        v.app.session.selection.set(vec![v.i, j]);
+        reads_taken();
+        let out = frame(&mut v.app, &ctx, Vec::new());
+        assert!(
+            texts(&out).iter().any(|(t, _)| t == "Label text"),
+            "the fixture: the shared property row is drawn"
+        );
+        let first = reads_taken();
+        assert_eq!(first.drift, 2, "one per root: {first:?}");
+        frame(&mut v.app, &ctx, Vec::new());
+        frame(&mut v.app, &ctx, Vec::new());
+        assert_eq!(
+            reads_taken(),
+            Reads::default(),
+            "an idle frame reads nothing"
+        );
+    }
+
+    /// **A property row builds its reset only when it is overridden**
+    /// (`[X10-L4-01]`): an instance following its main draws the *Label text*
+    /// row and builds no reset for it; overridden, it builds one, once. Flip,
+    /// run: the reset built unconditionally and uncached, as it was, fails
+    /// *"nothing to reset"* with `reset: 4` — one a frame over `settle`'s four.
+    #[test]
+    fn a_property_rows_reset_is_built_only_when_it_is_overridden() {
+        let ctx = egui::Context::default();
+        let mut v = variants_fixture(&ctx);
+        v.app.session.selection.set_one(v.i);
+        reads_taken();
+        settle(&mut v.app, &ctx);
+        assert_eq!(reads_taken().reset, 0, "nothing to reset");
+        let j = second_instance(&mut v, "Sign up");
+        v.app.session.selection.set_one(j);
+        reads_taken();
+        settle(&mut v.app, &ctx);
+        assert_eq!(
+            reads_taken().reset,
+            1,
+            "built once, then read from the cache"
+        );
+    }
+
+    /// **The property cache follows the document**, as the drift cache does: the
+    /// instance's *Label text* set through its property moves the summary to
+    /// *1 property* and the row's field to *Sign up* on the next frame. Flip,
+    /// run: `PropCache::at` emptying only when it was never filled fails *"the
+    /// count follows"* with the stale `props: 0`.
+    #[test]
+    fn the_property_cache_follows_an_edit() {
+        let ctx = egui::Context::default();
+        let mut v = variants_fixture(&ctx);
+        v.app.session.selection.set_one(v.i);
+        settle(&mut v.app, &ctx);
+        assert_eq!(v.app.prop_drift_of(v.i).props, 0);
+        let p = ondin_core::variant::instance_properties(&v.app.session.doc, v.i)[0]
+            .value
+            .clone();
+        let ops = ondin_core::variant::set_property(
+            &v.app.session.doc,
+            &[v.i],
+            &p,
+            &ondin_core::variant::PropValue::Text("Sign up".into()),
+        );
+        assert!(v.app.session.commit(Transaction(ops)));
+        assert_eq!(v.app.prop_drift_of(v.i).props, 1, "the count follows");
+        let out = settle(&mut v.app, &ctx);
+        let painted: Vec<String> = texts(&out).into_iter().map(|(t, _)| t).collect();
+        assert!(painted.contains(&"1 property".to_string()), "{painted:?}");
+        assert!(painted.contains(&"Sign up".to_string()), "{painted:?}");
+    }
+
+    /// **The one-instance card reads the root it was drawn for, whatever else
+    /// the selection holds** (`[X8.1-L1-03]`). The instance selected with its own
+    /// label, the label first — Ctrl-clicking in the layers panel gives that
+    /// order — draws the variant dropdown and the property row; the other order
+    /// draws them too, and is not refused the switch. Flip, run: the rows given
+    /// `selection.ids()` again fails *"label first"*.
+    #[test]
+    fn the_one_instance_card_reads_its_root_and_not_the_selection() {
+        let ctx = egui::Context::default();
+        let mut v = variants_fixture(&ctx);
+        for (order, ids) in [
+            ("label first", vec![v.ilabel, v.i]),
+            ("instance first", vec![v.i, v.ilabel]),
+        ] {
+            v.app.session.selection.set(ids);
+            assert!(
+                matches!(v.app.component_face(), Some(Face::Instance { root, .. }) if root == v.i),
+                "the fixture: one instance's face"
+            );
+            let out = settle(&mut v.app, &ctx);
+            let painted: Vec<String> = texts(&out).into_iter().map(|(t, _)| t).collect();
+            assert!(
+                painted.contains(&"Size".to_string())
+                    && painted.contains(&"Label text".to_string()),
+                "{order}: {painted:?}"
+            );
+            assert!(
+                !painted.iter().any(|t| t.contains("Only an instance")),
+                "{order}: not refused the switch"
+            );
+        }
+    }
+
+    /// **The card's *Reset fields* resets what its count counted, with a nested
+    /// copy selected inside its instance** (`[X8.1-L1-03]`). The Badge copy's
+    /// *Count* text is set to 3 — a field of the Button instance, since the
+    /// Button does not show the Badge's properties. With the Button instance
+    /// *and* the copy selected, the face is the Button's and *Reset fields*
+    /// puts the 1 back. Flip, run: `bound` read from every selected layer's
+    /// nearest instance again fails *"the count's reset is made"*, the click
+    /// committing nothing.
+    #[test]
+    fn reset_fields_resets_what_it_counted_with_a_nested_copy_selected() {
+        let ctx = egui::Context::default();
+        let mut n = nested_fixture(&ctx);
+        let count = n.app.session.doc.get(n.r).unwrap().children()[0];
+        assert!(n.app.session.commit(Transaction(vec![Operation::SetText {
+            id: count,
+            content: "3".into(),
+            spans: Default::default(),
+            para_spans: Default::default(),
+        }])));
+        n.app.session.selection.set(vec![n.b1, n.r]);
+        assert!(
+            matches!(n.app.component_face(), Some(Face::Instance { root, .. }) if root == n.b1),
+            "the fixture: the Button's face"
+        );
+        n.app.component_act(Some(Act::Reset(Kind::Fields)));
+        assert_eq!(content(&n.app, count), "1", "the count's reset is made");
+    }
+
+    /// **Several instances, reset as one** (`[X8.2-L6-04]`, D981's *"a reset
+    /// resets every one of them"*). Two instances of *Button*, each dimmed to 0.5:
+    /// the Appearance header counts two and its reset puts both back; and the
+    /// opacity field's own mark writes both. Flip, run:
+    /// `gather_card_overrides` reading the first selected layer alone fails
+    /// *"both counted"* with 1.
+    #[test]
+    fn a_reset_over_two_instances_resets_both() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let second = {
+            let doc = &f.app.session.doc;
+            let (tx, made) = ondin_core::insert_subtrees(
+                doc,
+                &mut f.app.session.ids,
+                &[Placement {
+                    nodes: doc.capture_subtree(f.m).unwrap(),
+                    parent: doc.root(),
+                    index: None,
+                }],
+                Default::default(),
+            );
+            assert!(f.app.session.commit(tx));
+            made[0]
+        };
+        let dim = |id| Operation::SetOpacity { id, opacity: 0.5 };
+        assert!(
+            f.app
+                .session
+                .commit(Transaction(vec![dim(f.i), dim(second)]))
+        );
+        let opacity = |app: &OndinApp, id| app.session.doc.get(id).unwrap().opacity();
+        f.app.session.selection.set(vec![f.i, second]);
+        f.app.gather_card_overrides();
+        let (n, ops) = f.app.card_override("Appearance").expect("a header count");
+        assert_eq!(n, 2, "both counted");
+        let header = Transaction(ops.to_vec());
+        let field = f
+            .app
+            .sub_mark(
+                &[f.i, second],
+                |op| match op {
+                    Operation::SetOpacity { opacity, .. } => Some(*opacity),
+                    _ => None,
+                },
+                |n| Some(n.opacity()),
+                |o| *o,
+                |o, v| *o = v,
+                |id, opacity| Operation::SetOpacity { id, opacity },
+                |v| v.to_string(),
+            )
+            .expect("the opacity field is marked");
+        assert_eq!(field.tx.0.len(), 2, "the field's reset writes both");
+        assert!(f.app.session.commit(header));
+        assert_eq!(
+            (opacity(&f.app, f.i), opacity(&f.app, second)),
+            (1.0, 1.0),
+            "both back"
+        );
+    }
+
+    /// **Several instances' faces** (`[X8.2-L6-04]`): instances of two variants
+    /// of one set read as instances of the set — named for it, with its rows —
+    /// and instances of two unrelated mains read as *Instances of 2
+    /// components*. Flip, run: `shared` never `Some` fails the face's own
+    /// `shared: Some(_)` match, before *"the set's rows"* is reached — and fails
+    /// `a_mixed_boolean_property_turns_on` and
+    /// `typing_over_a_mixed_text_property_writes_what_was_typed` beside it, whose
+    /// rows are drawn through `shared` too.
+    #[test]
+    fn several_instances_are_named_for_their_set_or_counted() {
+        let ctx = egui::Context::default();
+        let mut v = variants_fixture(&ctx);
+        let k = {
+            let doc = &v.app.session.doc;
+            let (tx, made) = ondin_core::insert_subtrees(
+                doc,
+                &mut v.app.session.ids,
+                &[Placement {
+                    nodes: doc.capture_subtree(v.large).unwrap(),
+                    parent: doc.root(),
+                    index: None,
+                }],
+                Default::default(),
+            );
+            assert!(v.app.session.commit(tx));
+            made[0]
+        };
+        v.app.session.selection.set(vec![v.i, k]);
+        assert!(matches!(
+            v.app.component_face(),
+            Some(Face::Instances { count: 2, main: Some((m, _)), shared: Some(_), .. }) if m == v.set
+        ));
+        let out = settle(&mut v.app, &ctx);
+        let painted: Vec<String> = texts(&out).into_iter().map(|(t, _)| t).collect();
+        assert!(
+            painted.contains(&"2 instances of".to_string())
+                && painted.contains(&"Button".to_string()),
+            "named for the set: {painted:?}"
+        );
+        assert!(
+            painted.contains(&"Label text".to_string()),
+            "the set's rows: {painted:?}"
+        );
+
+        let mut f = fixture(&ctx);
+        let card = f.app.session.ids.mint();
+        let root = f.app.session.doc.root();
+        assert!(f.app.session.commit(Transaction(vec![
+            Operation::CreateNode {
+                id: card,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(50.0, 50.0),
+                },
+                transform: None,
+                name: Some("Card".into()),
+            },
+            Operation::SetComponent {
+                id: card,
+                component: true,
+            },
+        ])));
+        let other = {
+            let doc = &f.app.session.doc;
+            let (tx, made) = ondin_core::insert_subtrees(
+                doc,
+                &mut f.app.session.ids,
+                &[Placement {
+                    nodes: doc.capture_subtree(card).unwrap(),
+                    parent: doc.root(),
+                    index: None,
+                }],
+                Default::default(),
+            );
+            assert!(f.app.session.commit(tx));
+            made[0]
+        };
+        f.app.session.selection.set(vec![f.i, other]);
+        let out = settle(&mut f.app, &ctx);
+        assert!(
+            texts(&out)
+                .iter()
+                .any(|(t, _)| t == "Instances of 2 components"),
+            "no single main"
+        );
     }
 }

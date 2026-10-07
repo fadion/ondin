@@ -16,6 +16,8 @@ mod picker;
 mod typography;
 pub(crate) mod variants;
 
+/// The Component card's property readings, cached per revision (`[X8.1-L4-02]`).
+pub(crate) use component::PropCache;
 /// What an SVG export could not say exactly, worded once for every surface that
 /// reports it — the export card and *Copy as SVG* (§15 D780).
 pub(crate) use export::fidelity_clauses;

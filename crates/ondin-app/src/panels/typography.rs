@@ -856,16 +856,34 @@ impl OndinApp {
                 |s, v| s.font_family = v,
                 |v| v.clone(),
             ),
-            // The face: weight, italic and the axes a variant sets, as one.
+            // The face: weight, italic and the axes they drive
+            // (`AXES_DRIVEN_ELSEWHERE`), as one. Not the whole `variations`
+            // (`[X9.2-L1-03]`): `opsz` and the listed axes are Optical size's and
+            // Axes' to mark, and comparing them here marked one difference twice,
+            // with a face ↺ that reset those sections' axes as well as its own.
             variant: self.style_mark(
                 id,
-                |s| (s.weight, s.italic, s.variations.clone()),
-                |s, (w, i, v)| {
-                    s.weight = w;
-                    s.italic = i;
-                    s.variations = v;
+                |s| AxesOf {
+                    shown: (
+                        s.weight,
+                        s.italic,
+                        s.variations
+                            .iter()
+                            .copied()
+                            .filter(|a| AXES_DRIVEN_ELSEWHERE.contains(&a.tag))
+                            .collect::<Vec<_>>(),
+                    ),
+                    whole: s.variations.clone(),
                 },
-                |(w, i, _)| match i {
+                |s, v| {
+                    (s.weight, s.italic) = (v.shown.0, v.shown.1);
+                    s.variations = axes_reset(&s.variations, &v.whole, |t| {
+                        AXES_DRIVEN_ELSEWHERE.contains(&t)
+                    });
+                },
+                |AxesOf {
+                     shown: (w, i, _), ..
+                 }| match i {
                     true => format!("{w} italic"),
                     false => w.to_string(),
                 },
@@ -2339,17 +2357,16 @@ impl OndinApp {
         };
         let auto = !coords.iter().any(|a| a.tag == OPSZ);
         // The one coordinate, absent for Auto. The Axes section's mark compares
-        // the rest, so a difference shows on the section that draws it.
+        // the rest, so a difference shows on the section that draws it. The reset
+        // rebuilds the list in the main's order (`axes_reset`, `[X9.2-L1-01]`).
         let mark = self.style_mark(
             subject.id,
-            |s| opsz_of(&s.variations),
-            |s, v| {
-                s.variations.retain(|a| a.tag != OPSZ);
-                if let Some(v) = v {
-                    s.variations.push(AxisSetting::new(OPSZ, v));
-                }
+            |s| AxesOf {
+                shown: opsz_of(&s.variations),
+                whole: s.variations.clone(),
             },
-            |v| v.map_or_else(|| "auto".to_owned(), mark_num),
+            |s, v| s.variations = axes_reset(&s.variations, &v.whole, |t| t == OPSZ),
+            |v| v.shown.map_or_else(|| "auto".to_owned(), mark_num),
         );
         let (_, hit) = section_marked(ui, "Optical size", mark.as_ref(), |ui| {
             if let Some(i) = segmented(
@@ -2609,15 +2626,21 @@ impl OndinApp {
         }
         // The coordinates this list draws: not `opsz`, which is Optical size's,
         // and not the axes the variant drives, which are the card's face mark.
-        let own = |a: &AxisSetting| a.tag != OPSZ && !AXES_DRIVEN_ELSEWHERE.contains(&a.tag);
+        // Reset in the main's order (`axes_reset`, `[X9.2-L1-01]`).
+        let own = |t: Tag| t != OPSZ && !AXES_DRIVEN_ELSEWHERE.contains(&t);
         let mark = self.style_mark(
             subject.id,
-            move |s| s.variations.iter().copied().filter(own).collect::<Vec<_>>(),
-            move |s, v| {
-                s.variations.retain(|a| !own(a));
-                s.variations.extend(v);
+            move |s| AxesOf {
+                shown: s
+                    .variations
+                    .iter()
+                    .copied()
+                    .filter(|a| own(a.tag))
+                    .collect::<Vec<_>>(),
+                whole: s.variations.clone(),
             },
-            |v| match v.len() {
+            move |s, v| s.variations = axes_reset(&s.variations, &v.whole, own),
+            |v| match v.shown.len() {
                 0 => "the font's defaults".to_owned(),
                 1 => "1 axis set".to_owned(),
                 n => format!("{n} axes set"),
@@ -4687,6 +4710,52 @@ fn axis_value(axis: &FontAxis, coords: &[AxisSetting]) -> f64 {
 /// The `opsz` coordinate in `coords`, or `None` where the optical size is Auto.
 fn opsz_of(coords: &[AxisSetting]) -> Option<f64> {
     coords.iter().find(|a| a.tag == OPSZ).map(|a| a.value)
+}
+
+/// What a `variations` mark compares — `shown`, the coordinates its section
+/// draws — carrying the `whole` list it was read from, so the mark's `put` can
+/// rebuild the copy's list in the source's order (`[X9.2-L1-01]`). Equal when
+/// the shown parts are: the rest is the other sections' to mark.
+#[derive(Clone)]
+struct AxesOf<V> {
+    shown: V,
+    whole: Vec<AxisSetting>,
+}
+
+impl<V: PartialEq> PartialEq for AxesOf<V> {
+    fn eq(&self, other: &Self) -> bool {
+        self.shown == other.shown
+    }
+}
+
+/// `cur`'s coordinates with the ones `owned` picks reset to `src`'s, **in
+/// `src`'s order** — the copy's own value kept at each tag `owned` does not
+/// pick, and a tag only the copy has kept after them (`[X9.2-L1-01]`).
+///
+/// The order is the whole point. `reset::overrides` and `propagate`'s merge
+/// compare `variations` as a list, in order, and `axis_coords_after` appends the
+/// axis it edits — so a reset that wrote the main's values where the copy
+/// happened to hold them (`retain` then `push`, as these marks did) left the
+/// same coordinates in another order: still one override, the section's dot gone
+/// and the face's lit instead, and every later main edit to `variations` no
+/// longer reaching the copy. Rebuilt in the source's order, a copy that differed
+/// only in the section's axes comes out equal to its source.
+fn axes_reset(
+    cur: &[AxisSetting],
+    src: &[AxisSetting],
+    owned: impl Fn(Tag) -> bool,
+) -> Vec<AxisSetting> {
+    let mine = |tag: Tag| cur.iter().find(|a| a.tag == tag).copied();
+    let mut out: Vec<AxisSetting> = src
+        .iter()
+        .filter_map(|a| if owned(a.tag) { Some(*a) } else { mine(a.tag) })
+        .collect();
+    out.extend(
+        cur.iter()
+            .filter(|a| !owned(a.tag) && !src.iter().any(|s| s.tag == a.tag))
+            .copied(),
+    );
+    out
 }
 
 /// The attribute that puts `color` in `slot` — `None` meaning "inherit".
@@ -12395,5 +12464,315 @@ mod instance_mark_tests {
             Transaction(vec![sizing(copy, TextSizing::AutoHeight(100.0))]),
             "the main's whole sizing"
         );
+    }
+
+    // --- the popup's other resets, clicked through (`[X9.2-L6-05]`) ---------
+    //
+    // Each test below draws the real section over the copy, clicks the reset the
+    // user would click, and asserts the two things a reset owes: the copy equals
+    // its main in what the section covers, and `reset::overrides` has nothing
+    // left to say about it. The second is the assertion `[X9.2-L1-01]` failed: a
+    // reset that writes the main's values in another order leaves an override
+    // standing, and the copy stops following.
+
+    /// A synthetic `fvar` axis, so the sections that need a font's axes draw
+    /// without one loaded.
+    fn font_axis(tag: Tag, min: f64, default: f64, max: f64) -> FontAxis {
+        FontAxis {
+            tag,
+            min,
+            default,
+            max,
+            name: tag.to_string(),
+            hidden: false,
+        }
+    }
+
+    /// Write `edit` into `id`'s own paragraph.
+    fn repara(app: &mut OndinApp, id: NodeId, edit: impl FnOnce(&mut ParagraphStyle)) {
+        let mut p = match app.session.doc.get(id).unwrap().kind() {
+            ondin_core::NodeKind::Text { paragraph, .. } => paragraph.clone(),
+            _ => unreachable!("a text"),
+        };
+        edit(&mut p);
+        assert!(
+            app.session
+                .commit(Transaction(vec![Operation::SetParagraphStyle {
+                    id,
+                    paragraph: p,
+                    spans: None,
+                }]))
+        );
+    }
+
+    fn paragraph(app: &OndinApp, id: NodeId) -> ParagraphStyle {
+        match app.session.doc.get(id).unwrap().kind() {
+            ondin_core::NodeKind::Text { paragraph, .. } => paragraph.clone(),
+            _ => unreachable!("a text"),
+        }
+    }
+
+    /// The overrides the core still finds on `id`.
+    fn left(app: &OndinApp, id: NodeId) -> usize {
+        ondin_core::reset::overrides(&app.session.doc, id).len()
+    }
+
+    /// Where `label` is painted, after one frame of `draw`.
+    fn painted_at(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        id: NodeId,
+        label: &str,
+        draw: impl Fn(&mut OndinApp, &mut egui::Ui, &TypeSubject),
+    ) -> egui::Pos2 {
+        let out = frame(ctx, app, id, Vec::new(), draw);
+        let (texts, _) = painted(&out);
+        texts
+            .iter()
+            .find(|(t, ..)| t.contains(label))
+            .map(|(_, r, _)| r.center())
+            .unwrap_or_else(|| panic!("no {label} in {texts:?}"))
+    }
+
+    fn axes(list: &[(Tag, f64)]) -> Vec<AxisSetting> {
+        list.iter().map(|(t, v)| AxisSetting::new(*t, *v)).collect()
+    }
+
+    const WGHT: Tag = Tag::new(*b"wght");
+    const GRAD: Tag = Tag::new(*b"GRAD");
+
+    /// **The Optical size reset writes the main's coordinates in the main's
+    /// order, so nothing is left overridden and the copy follows again**
+    /// (`[X9.2-L1-01]`). The main is `[opsz 14, wght 700]`; the copy's own opsz
+    /// edit left it `[wght 700, opsz 20]` (`axis_coords_after` appends). A click on
+    /// *OPTICAL SIZE* puts the main's whole list back, and the main's next opsz
+    /// edit reaches the copy. Flip, run: the `put` back to `retain` + `push`
+    /// writes `[wght 700, opsz 14]` and fails *"the main's list, in its order"*.
+    #[test]
+    fn the_optical_size_reset_keeps_the_mains_order_and_the_copy_follows_again() {
+        let (ctx, mut app, main, copy) = instance();
+        restyle(&mut app, main, |s| {
+            s.variations = axes(&[(OPSZ, 14.0), (WGHT, 700.0)]);
+        });
+        restyle(&mut app, copy, |s| {
+            s.variations = axes(&[(WGHT, 700.0), (OPSZ, 20.0)]);
+        });
+        let draw = |app: &mut OndinApp, ui: &mut egui::Ui, s: &TypeSubject| {
+            let coords = style(app, s.id).variations;
+            app.optical_size_section(ui, s, &[font_axis(OPSZ, 6.0, 14.0, 72.0)], &coords);
+        };
+        let at = painted_at(&ctx, &mut app, copy, "OPTICAL SIZE", draw);
+        click(&ctx, &mut app, copy, at, draw);
+        assert_eq!(
+            style(&app, copy).variations,
+            style(&app, main).variations,
+            "the main's list, in its order"
+        );
+        assert_eq!(left(&app, copy), 0, "nothing is left overridden");
+        restyle(&mut app, main, |s| {
+            s.variations = axes(&[(OPSZ, 30.0), (WGHT, 700.0)]);
+        });
+        assert_eq!(
+            style(&app, copy).variations,
+            style(&app, main).variations,
+            "the copy follows the main again"
+        );
+    }
+
+    /// **The Axes reset does the same for the axes it lists** (`[X9.2-L1-01]`):
+    /// main `[GRAD 50, wght 700]`, copy `[wght 700, GRAD 80]`; a click on *AXES*
+    /// leaves the copy equal to the main and nothing overridden. Flip, run: the
+    /// `put` back to `retain` + `extend` writes `[wght 700, GRAD 50]` and fails
+    /// *"the main's list, in its order"*.
+    #[test]
+    fn the_axes_reset_keeps_the_mains_order() {
+        let (ctx, mut app, main, copy) = instance();
+        restyle(&mut app, main, |s| {
+            s.variations = axes(&[(GRAD, 50.0), (WGHT, 700.0)]);
+        });
+        restyle(&mut app, copy, |s| {
+            s.variations = axes(&[(WGHT, 700.0), (GRAD, 80.0)]);
+        });
+        let draw = |app: &mut OndinApp, ui: &mut egui::Ui, s: &TypeSubject| {
+            let coords = style(app, s.id).variations;
+            app.axes_section(ui, s, &[font_axis(GRAD, 0.0, 0.0, 100.0)], &coords);
+        };
+        let at = painted_at(&ctx, &mut app, copy, "AXES", draw);
+        click(&ctx, &mut app, copy, at, draw);
+        assert_eq!(
+            style(&app, copy).variations,
+            style(&app, main).variations,
+            "the main's list, in its order"
+        );
+        assert_eq!(left(&app, copy), 0, "nothing is left overridden");
+    }
+
+    /// **The face mark compares the face — weight, slant and the axes the
+    /// variant drives — and its reset leaves the other sections' axes alone**
+    /// (`[X9.2-L1-03]`). A copy differing only in `opsz` has no face mark: that
+    /// difference is Optical size's. A copy whose weight *and* `GRAD` differ: the
+    /// face reset writes the weight and the `wght` coordinate back and keeps the
+    /// copy's `GRAD 80`, which is the Axes section's to reset. Flip, run: the face
+    /// mark comparing the whole `variations` again fails *"opsz is Optical
+    /// size's"* with `Some("Reset to main · 400")`.
+    #[test]
+    fn the_face_mark_is_the_faces_and_leaves_the_other_axes() {
+        let (_ctx, mut app, main, copy) = instance();
+        restyle(&mut app, main, |s| {
+            s.weight = 400;
+            s.variations = axes(&[(WGHT, 400.0)]);
+        });
+        restyle(&mut app, copy, |s| {
+            s.variations = axes(&[(WGHT, 400.0), (OPSZ, 20.0)]);
+        });
+        app.gather_card_overrides();
+        assert_eq!(
+            app.type_marks(copy).variant.map(|m| m.tip),
+            None,
+            "opsz is Optical size's"
+        );
+        restyle(&mut app, main, |s| {
+            s.variations = axes(&[(GRAD, 50.0), (WGHT, 400.0)]);
+        });
+        restyle(&mut app, copy, |s| {
+            s.weight = 700;
+            s.variations = axes(&[(GRAD, 80.0), (WGHT, 700.0)]);
+        });
+        app.gather_card_overrides();
+        let mark = app.type_marks(copy).variant.expect("the face differs");
+        assert_eq!(mark.tip, "Reset to main · 400");
+        assert!(app.session.commit(mark.tx));
+        let s = style(&app, copy);
+        assert_eq!(s.weight, 400, "the main's weight");
+        assert_eq!(
+            s.variations,
+            axes(&[(GRAD, 80.0), (WGHT, 400.0)]),
+            "the main's wght, the copy's own GRAD"
+        );
+    }
+
+    /// **A click on *Word break* resets the word break, and one on *Long words*
+    /// the long-word rule** — `wrap_section` routes each through `inner_hit`, and
+    /// a swap of the two would reset the field beside the one clicked. Both
+    /// overridden; the first click puts the word break back and leaves the copy's
+    /// long-word rule standing, the second finishes the job. Flip, run: the two
+    /// `inner_hit = Some(&…)` swapped fails *"Word break's, not Long words'"*.
+    #[test]
+    fn the_wrap_sections_inner_labels_reset_their_own_fields() {
+        let (ctx, mut app, main, copy) = instance();
+        let mine = (WordBreak::ALL[1], OverflowWrap::ALL[1]);
+        repara(&mut app, copy, |p| {
+            p.word_break = mine.0;
+            p.overflow_wrap = mine.1;
+        });
+        assert_ne!(
+            paragraph(&app, main).word_break,
+            mine.0,
+            "the fixture differs"
+        );
+        assert_ne!(
+            paragraph(&app, main).overflow_wrap,
+            mine.1,
+            "the fixture differs"
+        );
+        let draw = |app: &mut OndinApp, ui: &mut egui::Ui, s: &TypeSubject| {
+            app.wrap_section(ui, s);
+        };
+        let at = painted_at(&ctx, &mut app, copy, "WORD BREAK", draw);
+        click(&ctx, &mut app, copy, at, draw);
+        let p = paragraph(&app, copy);
+        assert_eq!(
+            (p.word_break, p.overflow_wrap),
+            (paragraph(&app, main).word_break, mine.1),
+            "Word break's, not Long words'"
+        );
+        let at = painted_at(&ctx, &mut app, copy, "LONG WORDS", draw);
+        click(&ctx, &mut app, copy, at, draw);
+        assert_eq!(paragraph(&app, copy), paragraph(&app, main));
+        assert_eq!(left(&app, copy), 0, "nothing is left overridden");
+    }
+
+    /// **Spacing & indent resets its five values as one**: the copy's paragraph
+    /// spacing, start indent and hanging differ, a click on the label puts all
+    /// three back. Flip, run: the mark's `put` skipping `indent_start` fails the
+    /// paragraph equality with the copy's `indent_start: Px(12.0)` left.
+    #[test]
+    fn the_spacing_and_indent_label_resets_all_five() {
+        let (ctx, mut app, main, copy) = instance();
+        repara(&mut app, copy, |p| {
+            p.spacing = Length::Px(24.0);
+            p.indent_start = Length::Px(12.0);
+            p.hanging = true;
+        });
+        let draw = |app: &mut OndinApp, ui: &mut egui::Ui, s: &TypeSubject| {
+            app.type_paragraph_tab(ui, s);
+        };
+        let at = painted_at(&ctx, &mut app, copy, "SPACING & INDENT", draw);
+        click(&ctx, &mut app, copy, at, draw);
+        assert_eq!(paragraph(&app, copy), paragraph(&app, main));
+        assert_eq!(left(&app, copy), 0, "nothing is left overridden");
+    }
+
+    /// **List resets the marker and its level as one.** Flip, run: the mark's
+    /// `put` skipping `level` fails the paragraph equality with `level: 2` left.
+    #[test]
+    fn the_list_label_resets_the_marker_and_its_level() {
+        let (ctx, mut app, main, copy) = instance();
+        repara(&mut app, copy, |p| {
+            p.marker = Some(ListMarker::ALL[0]);
+            p.level = 2;
+        });
+        let draw = |app: &mut OndinApp, ui: &mut egui::Ui, s: &TypeSubject| {
+            let shown = s.shown_paragraph();
+            app.list_section(ui, s, &shown);
+        };
+        let at = painted_at(&ctx, &mut app, copy, "LIST", draw);
+        click(&ctx, &mut app, copy, at, draw);
+        assert_eq!(paragraph(&app, copy), paragraph(&app, main));
+        assert_eq!(left(&app, copy), 0, "nothing is left overridden");
+    }
+
+    /// **The line height's ↺ is the prefix strip's press, and it commits the
+    /// main's value** before the valve is told — the copy's 30 px back to the
+    /// main's auto. Flip, run: dropping the field's `commit_reset` fails *"the
+    /// main's line height"* with `Some(Px(30.0))` left.
+    #[test]
+    fn the_line_height_prefix_resets_the_line_height() {
+        let (ctx, mut app, main, copy) = instance();
+        restyle(&mut app, copy, |s| s.line_height = Some(Length::Px(30.0)));
+        let draw = |app: &mut OndinApp, ui: &mut egui::Ui, s: &TypeSubject| {
+            let marks = app.type_marks(s.id);
+            app.type_line_height_field(ui, s, egui::vec2(120.0, 28.0), marks.line_height.as_ref());
+        };
+        let at = painted_at(&ctx, &mut app, copy, icon::ARROWS_VERTICAL, draw);
+        click(&ctx, &mut app, copy, at, draw);
+        assert_eq!(
+            style(&app, copy),
+            style(&app, main),
+            "the main's line height"
+        );
+        assert_eq!(left(&app, copy), 0, "nothing is left overridden");
+    }
+
+    /// **The family dropdown's first row is the reset**: open the list, click
+    /// *Reset to main · Inter*, and the copy's family is the main's again. Flip,
+    /// run: the row's `commit_reset` dropped (the early `return` kept) fails *"the
+    /// main's family"*. The variant dropdown's reset row is not driven: it draws
+    /// only for a family with two faces or more, which needs a font the headless
+    /// app may not have.
+    #[test]
+    fn the_family_dropdowns_reset_row_puts_the_family_back() {
+        let (ctx, mut app, main, copy) = instance();
+        restyle(&mut app, copy, |s| s.font_family = "Elsewhere Sans".into());
+        let draw = |app: &mut OndinApp, ui: &mut egui::Ui, s: &TypeSubject| {
+            let marks = app.type_marks(s.id);
+            app.type_family_row(ui, s, marks.family.as_ref());
+        };
+        let at = painted_at(&ctx, &mut app, copy, "Elsewhere Sans", draw);
+        click(&ctx, &mut app, copy, at, draw);
+        let row = painted_at(&ctx, &mut app, copy, "Reset to main · Inter", draw);
+        click(&ctx, &mut app, copy, row, draw);
+        assert_eq!(style(&app, copy), style(&app, main), "the main's family");
+        assert_eq!(left(&app, copy), 0, "nothing is left overridden");
     }
 }

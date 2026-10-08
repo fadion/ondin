@@ -1335,6 +1335,12 @@ pub struct OndinApp {
     /// This kit's changes since its last publish, with the session revision and
     /// mark version they were counted at (`OndinApp::kit_changes`).
     pub(crate) kit_changes: Option<(u64, u32, ondin_core::kit::Changes)>,
+    /// The vendored main *Make local*'s confirmation is asking about, while it is
+    /// up (§5.3e, 4E; §15 D1016).
+    pub(crate) making_local: Option<NodeId>,
+    /// The document *Go to main in the kit* came from, and its name — the kit's
+    /// top bar links back to it until the user leaves the kit (§15 D1011 (7)).
+    pub(crate) kit_return: Option<(std::path::PathBuf, String)>,
     /// The one open context menu (`docs/context-menus.md` §0 R4).
     ///
     /// **One slot, so opening the next one is what closes the last.** Not a
@@ -2316,6 +2322,8 @@ impl OndinApp {
             kit_button: egui::Rect::NOTHING,
             publishing: None,
             kit_changes: None,
+            making_local: None,
+            kit_return: None,
             context_menu: None,
             secondary_press: None,
             show_grid: true,
@@ -2800,6 +2808,7 @@ impl eframe::App for OndinApp {
             self.picker_ui(&ctx);
             self.kit_picker_ui(&ctx);
             self.publish_dialog(&ctx);
+            self.make_local_dialog(&ctx);
         }
         // **After every door has had its say**, so a right-click that *replaced*
         // the open menu has already written the slot by the time the click-away
@@ -7410,6 +7419,10 @@ impl OndinApp {
         // The insert picker's open kits and its seeding were the old document's
         // (`D1014`'s minor note).
         self.kit_picker = None;
+        // Leaving a kit ends its link back (D1011 (7)); *Go to main in the kit*
+        // sets it again after the open that cleared it.
+        self.kit_return = None;
+        self.making_local = None;
         self.paint_hex = None;
         self.guide_previews.clear();
         // Ids from the old document's stream, and the one field in this struct
@@ -8873,6 +8886,8 @@ impl OndinApp {
                     self.save_dot(ui);
                     // Beside the save state, in its quiet register (§5.3e, 5A).
                     self.kit_update_pill(ui);
+                    // In a kit opened by *Go to main*, the way back (D1011 (7)).
+                    self.kit_back_link(ui);
                     self.status_text(ui);
 
                     // ⚠️ **No open or save buttons here since §15 D962.** The
@@ -9219,6 +9234,7 @@ impl OndinApp {
             || !self.recovery.pending.is_empty()
             || self.deleting_value.is_some()
             || self.publishing.is_some()
+            || self.making_local.is_some()
     }
 
     /// Read a workspace switch.

@@ -164,9 +164,11 @@ impl OndinApp {
         let ctx = ui.ctx().clone();
         self.kit_shelf.pass(&ctx);
         let anchor = egui::pos2(rect.left(), rect.bottom() + crate::ui::MENU_GAP);
+        // Waiting only on a read in flight: a kit the shelf could not load is
+        // read again by the accept itself, which reports what it cannot read.
         let ready = waiting
             .iter()
-            .all(|w| matches!(self.kit_shelf.load(&w.kit.id), Some(Load::Ready(Some(_)))));
+            .all(|w| !matches!(self.kit_shelf.load(&w.kit.id), Some(Load::Pending)));
         self.dropdown(&ctx, "kit-updates", anchor, POP_W, &resp, |app, ui| {
             ui.spacing_mut().item_spacing.y = 4.0;
             ui.label(
@@ -243,14 +245,22 @@ impl OndinApp {
             .collect();
         let mut loaded = Vec::new();
         for w in &waiting {
-            match self.kit_shelf.load(&w.kit.id) {
-                Some(Load::Ready(Some(p))) => {
-                    loaded.push((w.kit.id.clone(), w.kit.version, p.clone()))
-                }
-                _ => {
-                    self.kit_shelf.ask(&w.kit);
-                    self.session.info(format!(
-                        "Still reading {} — try again in a moment",
+            // The shelf's copy when it has one; otherwise the file, read here —
+            // an accept is a click, and the card's *Accept kit updates* arrives
+            // with nothing asked for beforehand.
+            let p = match self.kit_shelf.load(&w.kit.id) {
+                Some(Load::Ready(Some(p))) => Some(p.clone()),
+                _ => std::fs::read(&w.kit.path)
+                    .ok()
+                    .and_then(|b| ondin_core::io::load(&b).ok())
+                    .and_then(|d| d.published().cloned())
+                    .map(std::sync::Arc::new),
+            };
+            match p {
+                Some(p) => loaded.push((w.kit.id.clone(), w.kit.version, p)),
+                None => {
+                    self.session.fail(format!(
+                        "{} could not be read, so its update waits",
                         w.kit.name
                     ));
                     return;
@@ -579,6 +589,113 @@ mod tests {
         assert_eq!((at.x, at.y), (content.x1 + super::LOCAL_GAP, content.y0));
         let toast = app.session.status().text.clone();
         assert!(toast.contains("Badge is now a local main"), "{toast}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A kit instance's card says where its main lives** (4A, 4B): *Atlas kit
+    /// · v4*, and *· v5 waiting* once the kit publishes again — painted, read off
+    /// the frame. Its own *Accept kit updates* takes its kit **with nothing loaded
+    /// beforehand**: the accept reads the kit's file itself when the shelf has
+    /// not.
+    #[test]
+    fn a_kit_instance_names_its_kit_and_accepts_its_own_update() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let root = temp_root("card");
+        let (path, kit, badge, dot) = file_kit(&root);
+        let (mut app, inst) = consumer(&ctx, &root, &kit, badge);
+        let main = app.session.doc.get(inst).unwrap().link().unwrap();
+        let line = app.kit_line(main).expect("a kit instance");
+        assert_eq!(
+            (line.kit_name.as_str(), line.version, line.waiting),
+            ("Atlas", 4, None)
+        );
+        assert_eq!(
+            app.kit_line(inst),
+            None,
+            "the instance itself is no kit's main"
+        );
+
+        republish(
+            &path,
+            vec![Operation::SetOpacity {
+                id: dot,
+                opacity: 0.5,
+            }],
+            "",
+        );
+        app.library.refresh();
+        let line = app.kit_line(main).unwrap();
+        assert_eq!(line.waiting, Some(5));
+        let painted: Vec<String> = ctx
+            .run_ui(Default::default(), |ui| {
+                super::super::card::source_line(ui, &line)
+            })
+            .shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Text(t) => Some(t.galley.text().to_string()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            painted.contains(&"Atlas kit · v4 · v5 waiting".to_string()),
+            "{painted:?}"
+        );
+
+        app.kit_shelf = Default::default();
+        app.accept_kit_updates(Some(&kit));
+        assert!(
+            app.kits_waiting(false).is_empty(),
+            "accepted from the file itself"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// ***Make local* from the card** (4D/4E): the vendored main is revealed down
+    /// the right of the content, the instance still linked, the toast saying
+    /// where; one undo. And *Go to main in the kit* opens the kit with the main
+    /// selected there and leaves the way back, which leaving the kit ends.
+    #[test]
+    fn make_local_and_go_to_main_in_the_kit() {
+        let ctx = egui::Context::default();
+        let root = temp_root("local-go");
+        let (path, kit, badge, _) = file_kit(&root);
+        let (mut app, inst) = consumer(&ctx, &root, &kit, badge);
+        let consumer_path = app.session.path.clone().unwrap();
+
+        // Go to main, then back.
+        app.session.selection.set_one(inst);
+        app.go_to_kit_main();
+        assert_eq!(
+            app.session.path.as_deref(),
+            Some(path.as_path()),
+            "the kit opened"
+        );
+        assert_eq!(app.session.selection.ids(), &[badge], "its main selected");
+        assert_eq!(
+            app.kit_return.as_ref().map(|(p, n)| (p.clone(), n.clone())),
+            Some((consumer_path.clone(), "Landing".to_string()))
+        );
+        app.open_path(&consumer_path);
+        assert!(app.kit_return.is_none(), "leaving the kit ends the link");
+
+        // Make local.
+        let main = app.session.doc.get(inst).unwrap().link().unwrap();
+        let before = app.session.doc.clone();
+        app.make_local_now(&[main]);
+        let doc = &app.session.doc;
+        assert_eq!(doc.get(main).unwrap().parent(), Some(doc.root()));
+        assert_eq!(doc.get(inst).unwrap().link(), Some(main));
+        assert!(
+            app.session
+                .status()
+                .text
+                .contains("Badge is now a local main")
+        );
+        assert!(app.kit_line(main).is_none(), "no kit's any more");
+        app.undo();
+        assert_eq!(app.session.doc, before, "one undo");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

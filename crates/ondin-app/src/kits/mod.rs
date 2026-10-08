@@ -9,6 +9,7 @@
 //! the mark is an outward act — *Save* and *Export* are its company — and is not
 //! undoable (§15 D1011 (2)).
 
+pub(crate) mod card;
 pub(crate) mod index;
 pub(crate) mod picker;
 pub(crate) mod publish;

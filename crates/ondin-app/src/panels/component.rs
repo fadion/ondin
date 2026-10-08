@@ -248,6 +248,12 @@ enum Act {
     Detach,
     SelectAllInstances,
     DuplicateAsComponent,
+    /// A kit instance's ⋯ rows (§5.3e, 4D; §15 D1016): open the kit at its main,
+    /// accept the waiting update of the instance's own kit, and reveal the
+    /// vendored main as a local one, after a confirmation.
+    GoToKitMain,
+    AcceptKitUpdate(String),
+    MakeLocal(NodeId),
 }
 
 impl OndinApp {
@@ -686,13 +692,18 @@ impl OndinApp {
                         // of* caption over it is gone, the outline hexagon saying
                         // it (§15 D993, as the main's face).
                         heading(ui, false, "", link, None, &summary, &mut act);
+                        // A kit instance names where its main lives (4A, 4B).
+                        let kit = app.kit_line(*main);
+                        if let Some(k) = &kit {
+                            crate::kits::card::source_line(ui, k);
+                        }
                         // The root the face was decided on, not the selection: a
                         // layer of the instance selected first drew no rows, and
                         // selected after it was asked to switch (`[X8.1-L1-03]`).
                         app.chosen_by_note(ui, *root);
                         app.instance_rows(ui, &[*root]);
                         app.show_switch(ui, *root);
-                        reset_row(ui, *drift, *props, true, &mut act);
+                        reset_row(ui, *drift, *props, true, kit.as_ref(), &mut act);
                     }
                     Face::Instances {
                         count,
@@ -722,14 +733,14 @@ impl OndinApp {
                                 if let Some(roots) = shared {
                                     app.instance_rows(ui, roots);
                                 }
-                                reset_row(ui, *drift, *props, true, &mut act);
+                                reset_row(ui, *drift, *props, true, None, &mut act);
                             }
                             // 3F: no single main to go to, so no name link and no
                             // overflow of counted resets.
                             None => {
                                 let title = format!("Instances of {mains} components");
                                 heading(ui, false, "", None, Some(&title), &summary, &mut act);
-                                reset_row(ui, *drift, *props, false, &mut act);
+                                reset_row(ui, *drift, *props, false, None, &mut act);
                             }
                         }
                     }
@@ -823,6 +834,19 @@ impl OndinApp {
             Some(Act::Detach) => self.detach_instances(),
             Some(Act::SelectAllInstances) => self.select_all_instances(),
             Some(Act::DuplicateAsComponent) => self.duplicate_as_component(),
+            Some(Act::GoToKitMain) => self.go_to_kit_main(),
+            Some(Act::AcceptKitUpdate(kit)) => {
+                // The instance's own kit, not every kit waiting — the question
+                // D1011 left to the build, answered by the row's place: it is
+                // on one instance's card (§15 D1016).
+                for w in self.kits_waiting(false) {
+                    if w.kit.id == kit {
+                        self.kit_shelf.ask(&w.kit);
+                    }
+                }
+                self.accept_kit_updates(Some(&kit));
+            }
+            Some(Act::MakeLocal(top)) => self.making_local = Some(top),
         }
     }
 
@@ -1480,7 +1504,16 @@ fn heading(
 
 /// **Reset all**, **Detach**, and — where there is one main to count against —
 /// the overflow of counted resets (3B, 3C).
-fn reset_row(ui: &mut egui::Ui, d: Drift, p: PropDrift, overflow: bool, act: &mut Option<Act>) {
+fn reset_row(
+    ui: &mut egui::Ui,
+    d: Drift,
+    p: PropDrift,
+    overflow: bool,
+    kit: Option<&crate::kits::card::KitLine>,
+    act: &mut Option<Act>,
+) {
+    // A kit instance always has the ⋯, for its kit rows (§15 D1011 (6)).
+    let overflow = overflow || kit.is_some();
     let gap = ui::CARD_COL_GAP;
     let h = ui::CONTROL_H;
     let w = ui.available_width();
@@ -1522,8 +1555,10 @@ fn reset_row(ui: &mut egui::Ui, d: Drift, p: PropDrift, overflow: bool, act: &mu
             *act = Some(Act::Detach);
         }
         if overflow {
+            // *More*, not *More resets*, since the kit rows joined (§15 D1011
+            // (6)).
             let more = ui::field_button(ui, icon::DOTS_THREE, h, 15.0, FieldButton::Off)
-                .on_hover_text("More resets");
+                .on_hover_text("More");
             egui::Popup::menu(&more)
                 .align(egui::RectAlign::BOTTOM_END)
                 .gap(ui::MENU_GAP)
@@ -1587,6 +1622,32 @@ fn reset_row(ui: &mut egui::Ui, d: Drift, p: PropDrift, overflow: bool, act: &mu
                             .enabled(n > 0);
                         if ui::menu_row(ui, row, ui::MENU_ROW_H).clicked() && n > 0 {
                             *act = Some(Act::Reset(kind));
+                        }
+                    }
+                    // The kit rows, after the resets (4D): where the main lives,
+                    // the update when one waits, and the way out.
+                    if let Some(k) = kit {
+                        ui::menu_sep(ui);
+                        let go = format!("Go to main in {}", k.kit_name);
+                        if ui::menu_item(ui, icon::ARROW_SQUARE_OUT, &go, ui::MENU_ROW_H).clicked()
+                        {
+                            *act = Some(Act::GoToKitMain);
+                        }
+                        if k.waiting.is_some()
+                            && ui::menu_item(
+                                ui,
+                                icon::ARROW_CIRCLE_DOWN,
+                                "Accept kit updates",
+                                ui::MENU_ROW_H,
+                            )
+                            .clicked()
+                        {
+                            *act = Some(Act::AcceptKitUpdate(k.kit.clone()));
+                        }
+                        ui::menu_sep(ui);
+                        if ui::menu_item(ui, icon::PACKAGE, "Make local…", ui::MENU_ROW_H).clicked()
+                        {
+                            *act = Some(Act::MakeLocal(k.top));
                         }
                     }
                 });

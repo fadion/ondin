@@ -1355,14 +1355,9 @@ pub fn insert(
         Some(_) => main,
         None => return Err(KitError::NotPublished(main)),
     };
-    let (mut ops, shown) = vendor(doc, ids, kit, version, published, main)?;
-
     // The instance is built against the document the vendoring leaves, which
     // holds the main to copy.
-    let mut scratch = doc.clone();
-    scratch
-        .apply_unchecked(&Transaction(ops.clone()))
-        .map_err(|_| KitError::Incomplete(main))?;
+    let (mut ops, scratch, shown) = vendored(doc, ids, kit, version, published, main)?;
     let template = scratch
         .capture_subtree(shown)
         .ok_or(KitError::Incomplete(main))?;
@@ -1380,4 +1375,73 @@ pub fn insert(
     let instance = *created.first().ok_or(KitError::Incomplete(main))?;
     ops.extend(tx.0);
     Ok((Transaction(ops), instance))
+}
+
+/// [`vendor`], and the document its ops leave — what a verb that goes on to use
+/// the vendored main builds the rest of its transaction against: [`insert`]'s
+/// instance, or a swap to a kit main the document has never used (§15 D1019).
+/// The vault is never resolved, so the scratch is the only place the copy can be
+/// read before the commit.
+pub fn vendored(
+    doc: &Document,
+    ids: &mut IdSource,
+    kit: &str,
+    version: u32,
+    published: &Published,
+    main: NodeId,
+) -> Result<(Vec<Operation>, Document, NodeId), KitError> {
+    let (ops, shown) = vendor(doc, ids, kit, version, published, main)?;
+    let mut scratch = doc.clone();
+    scratch
+        .apply_unchecked(&Transaction(ops.clone()))
+        .map_err(|_| KitError::Incomplete(main))?;
+    Ok((ops, scratch, shown))
+}
+
+/// The mains of kit `kit`'s published state that a swap at `root` could show and
+/// `doc` **does not hold yet** — the swap picker's offer past the vault (§15
+/// D1019): a pick is vendored at the swap, through [`vendored`], and swapped to
+/// in the same transaction. What `doc` already holds of the kit is
+/// `swap::options`' to list, as any main of `doc`'s own.
+///
+/// The same rules as `swap::options`: `root` must take a swap, a main of the
+/// **same kind** only, `filter` a prefix of the name and `search` anywhere in it,
+/// both without case; sorted by name, then id. A main the kit itself vendored
+/// from a third kit — its published vault — is not offered: it is that kit's,
+/// and the third kit lists it. ⚠️ **No cycle check here**, unlike
+/// `swap::can_swap_to`: a kit main reaches only kit mains, never one of `doc`'s
+/// own, so it cannot hold the main `root` sits in — and the swap verb's own
+/// check runs on the scratch [`vendored`] leaves, so a wrong argument here is
+/// refused there rather than committed.
+pub fn swap_offers(
+    doc: &Document,
+    kit: &str,
+    published: &Published,
+    root: NodeId,
+    filter: &str,
+    search: &str,
+) -> Vec<NodeId> {
+    let Some(r) = doc.get(root) else {
+        return Vec::new();
+    };
+    if !crate::swap::can_swap(doc, root) {
+        return Vec::new();
+    }
+    let src = published.document();
+    let filter = filter.trim().to_lowercase();
+    let search = search.trim().to_lowercase();
+    let held = held_index(doc);
+    let mut out: Vec<&Node> = src
+        .node_map()
+        .values()
+        .filter(|n| n.component && !src.in_vault(n.id))
+        .filter(|n| std::mem::discriminant(&n.kind) == std::mem::discriminant(&r.kind))
+        .filter(|n| {
+            let name = n.name.to_lowercase();
+            name.starts_with(&filter) && name.contains(&search)
+        })
+        .filter(|n| find(doc, &held, &(kit.to_string(), n.id)).is_none())
+        .collect();
+    out.sort_by(|a, b| a.name.cmp(&b.name).then(a.id.cmp(&b.id)));
+    out.into_iter().map(|n| n.id).collect()
 }

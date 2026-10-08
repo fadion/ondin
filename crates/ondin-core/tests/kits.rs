@@ -1107,3 +1107,71 @@ fn a_kit_rename_arrives_with_its_update() {
     let dot = d.get(top).unwrap().children()[0];
     assert_eq!(d.get(dot).unwrap().origin().unwrap().name, None, "top only");
 }
+
+/// **A swap to a kit main the document has never used** (§15 D1019): D's own
+/// *Row* nests a *Glyph*; in an instance of *Row*, that nested copy is offered
+/// every frame main the kit published — none held yet — and picking *Icon*
+/// vendors it and swaps to it in one transaction, through the commit's own
+/// passes, the copy then showing the vendored *Icon* with its dot. Afterwards
+/// *Icon* is no longer offered past the vault, being held; one undo takes the
+/// vault away with the swap.
+///
+/// Flip, run: `swap_offers` without its `find` filter fails *"a held main is
+/// the vault's to list"*, *Icon* still offered.
+#[test]
+fn a_swap_to_an_unused_kit_main_vendors_it_at_the_swap() {
+    let k = kit();
+    let (mut d, mut ids) = consumer();
+    let root = d.root();
+    let [glyph, glyph_dot, row] = [(); 3].map(|_| ids.mint());
+    d.apply(&Transaction(vec![
+        create(glyph, root, 0, frame(24.0, 24.0), "Glyph"),
+        create(glyph_dot, glyph, 0, rect(), "Square"),
+        main_on(glyph),
+        create(row, root, 1, frame(200.0, 40.0), "Row"),
+    ]))
+    .unwrap();
+    instance(&mut d, &mut ids, glyph, row);
+    d.apply(&Transaction(vec![main_on(row)])).unwrap();
+    let row_copy = instance(&mut d, &mut ids, row, root);
+    let nested = d.get(row_copy).unwrap().children()[0];
+    assert!(ondin_core::swap::can_swap(&d, nested), "the fixture's slot");
+
+    let offers = kit::swap_offers(&d, L_ID, published(&k), nested, "", "");
+    assert_eq!(
+        offers,
+        vec![k.card, k.icon, k.large, k.small],
+        "every frame main, by name"
+    );
+    assert_eq!(
+        kit::swap_offers(&d, L_ID, published(&k), nested, "ic", ""),
+        vec![k.icon],
+        "the property's prefix filter"
+    );
+
+    let (mut ops, scratch, shown) =
+        kit::vendored(&d, &mut ids, L_ID, 4, published(&k), k.icon).unwrap();
+    let swap = ondin_core::variant::swap_carrying(&scratch, nested, shown).expect("a swap");
+    ops.extend(swap.0);
+    let mut tx = Transaction(ops);
+    ondin_core::propagate::owed(&d, &mut tx, &mut ids);
+    let undo = d.apply(&tx).expect("vendor and swap commit as one").inverse;
+
+    assert!(d.in_vault(shown), "vendored");
+    assert_eq!(
+        ondin_core::component::main_of(&d, nested),
+        Some(shown),
+        "the copy shows the kit's Icon"
+    );
+    let kids = d.get(nested).unwrap().children();
+    assert_eq!(kids.len(), 1, "Icon's one layer");
+    assert_eq!(d.get(kids[0]).unwrap().name(), "Dot", "rewritten to Icon's");
+    assert!(
+        !kit::swap_offers(&d, L_ID, published(&k), nested, "", "").contains(&k.icon),
+        "a held main is the vault's to list"
+    );
+
+    d.apply(&undo).unwrap();
+    assert!(d.vault().is_none(), "one undo takes the vault away");
+    assert_eq!(ondin_core::component::main_of(&d, nested), Some(glyph));
+}

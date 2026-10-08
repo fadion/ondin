@@ -2858,7 +2858,7 @@ amendment); ~~exposing nested properties, later
 by the mockup~~ — built 2026-10-06 from the mockup's 4K–4S (§15 D988), with the binding line a nested
 instance in a main had never drawn (§15 D989), unlooked-at in the GUI; and a verb that un-makes a component, which would owe a detach.
 
-### 5.3e Kits — shared component libraries (designed 2026-10-08; steps 1–4 built, swap in part; §15 D1010–D1016)
+### 5.3e Kits — shared component libraries (designed 2026-10-08; steps 1–4 built, swap in part; §15 D1010–D1017)
 
 > **Design ahead of code, most of it.** Ruled with the maintainer on 2026-10-08: that a kit is a
 > document marked as one, that publishing is explicit, and that the first version's update is an
@@ -2870,7 +2870,8 @@ instance in a main had never drawn (§15 D989), unlooked-at in the GUI; and a ve
 > **with no chrome**; ~~everything from *Publishing* on is still design~~. **Step 2's chrome is built,
 > swap in part** (§15 D1013, D1014, *Step 2 as built* below): the document menu with *Make this a kit*,
 > the *Kit* tag, the insert picker, and the swap picker grouped by kit. **Step 4, publishing, is built**
-> (§15 D1015, *Step 4 as built* below) but for 1D's confirmation and the dashboard's 1B. **Step 3,
+> (§15 D1015, *Step 4 as built* below), and with it 1D's confirmation, less its count, and the
+> dashboard's 1B (§15 D1017). **Step 3,
 > updates and *Make local*, is built** (§15 D1016, *Step 3 as built* below), with the canvas menu's
 > kit rows, *Kits used…* and *Make all local* (7A, 6A, 6B). The rest of the build is `roadmap.md`'s *Next · Shared
 > component libraries*.
@@ -2932,7 +2933,8 @@ components changed since v8 (date)*, grouped *Added* / *Changed* / *Removed*, ea
 optional note; *Cancel* / *Publish*. A first publish lists every set and lone main, *+ N more*, its button
 *Publish 12 components*. Afterwards a toast, *Published Atlas v9 · 4 components*, and the count is 0.
 *Stop sharing Atlas as a kit?* (1D) says how many documents use it ~~— read from the library scan, which
-reads every file for its cover anyway~~ — ⚠️ **how it counts them is undecided, step 4's**: the scan
+reads every file for its cover anyway~~ — ⚠️ **how it counts them is undecided**, and the dialog is
+built without the number (§15 D1017): the scan
 reads only a 4 KB prefix of each file (`io::probe::meta_in_prefix`, §5.11a) and loads one whole only
 when the probe is inconclusive, and covers are rendered for on-screen cards alone (§15 D862), so the
 count needs either a consumer's kit ids in its prefix-readable `meta` or a full load per file — and
@@ -3039,8 +3041,8 @@ reaches a second machine through the synced base folder (§5.11a), with no netwo
 - **The document menu** (`TopMenu::Document`, `OndinApp::document_menu`): the document's name is its
   head, pulled left by `ui::HEAD_PAD` so the name stays 12 from the mark (§15 D962). It holds **only rows
   with a verb behind them** — on a kit *Publish kit…* (§15 D1015); *Kits used…* while the vault holds
-  anything (§15 D1016); *Stop sharing as kit* or *Make this a kit*; then *Show in library*; the design's other rows join when their verbs exist. *Stop sharing* has no confirmation until 1D's count
-  is decided (step 4).
+  anything (§15 D1016); *Stop sharing as kit* or *Make this a kit*; then *Show in library*; the design's other rows join when their verbs exist. *Stop sharing* asks first, through 1D's
+  confirmation without its count (§15 D1017).
 - **An unfiled document made a kit is given its `meta.id` by the verb** (`make_kit`), as filing gives
   one: a pre-library file has a path and nothing else would mint it, and a kit with no id is one the
   scan can never find. Marking saves; it is not undoable. A save that fails leaves its own status, and
@@ -3056,7 +3058,11 @@ reaches a second machine through the synced base folder (§5.11a), with no netwo
   and otherwise only in search. A placement is one transaction: `kit::insert`, or `build::insert_subtrees`
   for a local main or an unavailable kit's vault copy, then a `SetTransform` centring the instance on the
   viewport — measured on a scratch document with the transaction applied, because the vault is never
-  resolved.
+  resolved. ⚠️ **The panel is one height whatever it holds** — 460, the mockup's, or less where the
+  canvas above the button is shorter (`panel_height`) — and that is not the default: an `Area` lays its
+  content out in *last* frame's rect, so a list asking only for a `max_height` never grows past the
+  panel's first height. The list asks `min_scrolled_height` and does not shrink, and the area is placed
+  by its top-left, a bottom pivot also reading last frame's size (§15 D1014).
 - **The library's kits** (`kits/index.rs`): `kits_in` lists them from the scan's `meta.kit`, a conflict
   copy losing in either order; `KitShelf` loads each whole file and renders its tile pictures on a worker,
   keyed by the mtime the scan read. Opening the picker loads every kit in the library.
@@ -3073,8 +3079,8 @@ reaches a second machine through the synced base folder (§5.11a), with no netwo
   before `input::resolve` runs (§15 D317), so the ladder's rung sees the press, and an arm in the field
   closed the picker a second time beside whatever the press had already closed (§15 D1014).
 
-**Step 4 as built** (`kit::changes`, `kit::publish`, `kits/publish.rs`; §15 D1015; less 1D's
-confirmation and the dashboard's 1B).
+**Step 4 as built** (`kit::changes`, `kit::publish`, `kits/publish.rs`; §15 D1015; 1D's confirmation
+and the dashboard's 1B §15 D1017).
 
 - **The change count is the kit frozen now against the kit frozen at its last publish**, each top by
   id — added, changed, removed; never published, everything added. A top is compared with the vault mains
@@ -3091,6 +3097,15 @@ confirmation and the dashboard's 1B).
 - **The dialog** is a modal card: a first publish lists six and *+ N more* with *Publish N components*;
   a later one *Added* / *Changed* / *Removed*, the removed read from the last published state; a note;
   *Cancel* / *Publish*. Publishing saves, and a failed save keeps its own status.
+- **_Stop sharing_ asks first** (1D, `OndinApp::stop_sharing_dialog`, one card for the document menu
+  and the file card, in `modal_is_up`): that documents using the kit keep their copies and stop
+  receiving updates, and that publishing continues from its last version — 🚨 **without 1D's count**,
+  whose source is undecided; the sentences are written to stand without it (§15 D1017).
+- **The dashboard** (1B): a *Kits* row under *Starred*, a **filter** over the library's sharing kits
+  that sorts and filters by project as any page does; a *Kit* chip at the cover's bottom-left, after a
+  conflict or unreadable mark — on the card only, not the list; and the file card's ⋯ *Make a kit*,
+  acting at once, or *Stop sharing as kit*, asking first. A closed file's mark is written into the file
+  (`library::store::set_kit`), the open document's by the editor's own verbs.
 
 **Step 3 as built** (`kit::update`, `kit::make_local`, `kits/updates.rs`, `kits/card.rs`, `kits/used.rs`,
 `menu.rs`; §15 D1016).

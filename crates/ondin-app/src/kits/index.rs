@@ -13,7 +13,9 @@
 //! The shelf is keyed by kit id and the file's modification time **as the
 //! library scan last read it**, so a kit that publishes while this document is
 //! open is read again once the library has rescanned — which opening the picker
-//! does (`OndinApp::toggle_kit_picker`); nothing else invalidates it.
+//! does (`OndinApp::toggle_kit_picker`), and the update watch does when a kit the
+//! document uses changed on disk (`OndinApp::watch_kits`, §15 D1020); nothing
+//! else invalidates it.
 
 use crate::library::scan::Entry;
 use crate::library::state::Library;

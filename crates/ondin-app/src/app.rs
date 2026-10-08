@@ -1327,6 +1327,9 @@ pub struct OndinApp {
     /// The library's kits' published states and tile pictures, loaded off the
     /// frame for the picker (`kits::index`).
     pub(crate) kit_shelf: crate::kits::index::KitShelf,
+    /// When the kits this document uses were last looked at on disk, for the
+    /// update pill (`kits::updates`, §15 D1020).
+    pub(crate) kit_watch: crate::kits::updates::KitWatch,
     /// Where the rail's insert button was drawn last frame — the picker hangs
     /// beside it, bottom-aligned (3A). `NOTHING` until the rail has drawn.
     pub(crate) kit_button: egui::Rect,
@@ -2327,6 +2330,7 @@ impl OndinApp {
             open_menu: TopMenu::None,
             kit_picker: None,
             kit_shelf: Default::default(),
+            kit_watch: Default::default(),
             kit_button: egui::Rect::NOTHING,
             publishing: None,
             kit_changes: None,
@@ -2814,6 +2818,9 @@ impl eframe::App for OndinApp {
                 self.canvas_ui(ui);
             });
 
+        // A kit this document uses that published since the library was last
+        // read brings the update pill on its own (§15 D1020).
+        self.watch_kits(&ctx);
         if !self.present {
             self.inspector_panel(&ctx);
             self.picker_ui(&ctx);

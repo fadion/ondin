@@ -2,7 +2,9 @@
 //!
 //! A document notices a newer publish of a kit it vendors from by comparing what
 //! the library scan says each kit last published (`meta.kit.version`, read from
-//! the file's first 4 KB) with the versions its vendored mains carry. A pill
+//! the file's first 4 KB) with the versions its vendored mains carry — that scan
+//! kept fresh for the kits it uses while the document is open, by a look at their
+//! files every 45 seconds and on the window's focus (`watch_kits`, §15 D1020). A pill
 //! beside the save state says how many kits wait, its popover what each brings,
 //! and *Accept all* takes them in one undoable transaction
 //! (`ondin_core::kit::update_all`) — the commit's main-edit passes carrying the
@@ -36,7 +38,103 @@ pub(crate) struct Waiting {
     pub later: bool,
 }
 
+/// How often the kits a document uses are looked at on disk while it is open —
+/// within the half-minute to minute the maintainer ruled (§15 D1020): every few
+/// seconds would be nearer the design's *"the moment a kit publishes"*, and was
+/// ruled too often.
+pub(crate) const WATCH_EVERY: f64 = 45.0;
+
+/// When the kits a document uses were last looked at (§15 D1020).
+#[derive(Default)]
+pub(crate) struct KitWatch {
+    /// The input clock's time of the next look; 0 before the first.
+    next: f64,
+    /// Whether the window had the focus last frame — a look is due the moment it
+    /// comes back, as the kit's author has most likely just published in another
+    /// window.
+    focused: bool,
+}
+
+/// A file's modification time, in the scan's whole seconds, and its size — what
+/// the library scan read of it (`library::scan`), so the two compare. `None`
+/// when it cannot be read.
+fn on_disk(path: &std::path::Path) -> Option<(u64, u64)> {
+    let m = std::fs::metadata(path).ok()?;
+    let modified = m
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_secs());
+    Some((modified, m.len()))
+}
+
 impl OndinApp {
+    /// Bring the update pill (5A) when a kit this document uses publishes while
+    /// it is open — the design's *"the moment a kit publishes"*, met every
+    /// [`WATCH_EVERY`] seconds and whenever the window regains the focus (§15
+    /// D1020; until then it waited for the library's next rescan, D1016).
+    ///
+    /// **A look is a `stat` of the used kits' files, not a scan**: the library is
+    /// rescanned only when one of them changed size or modification time, or has
+    /// gone (moved, so the scan finds it again by its id). A kit the library could
+    /// not find is looked for on a focus only, that being a whole scan. Nothing
+    /// happens for a document that uses no kit.
+    pub(crate) fn watch_kits(&mut self, ctx: &egui::Context) {
+        let (now, focused) = ctx.input(|i| (i.time, i.viewport().focused.unwrap_or(true)));
+        if let Some(wait) = self.watch_kits_at(now, focused) {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait));
+        }
+    }
+
+    /// [`Self::watch_kits`] at the clock reading `now`, answering how long until
+    /// the next look — `None` when there is nothing to watch.
+    pub(crate) fn watch_kits_at(&mut self, now: f64, focused: bool) -> Option<f64> {
+        let regained = focused && !self.kit_watch.focused;
+        self.kit_watch.focused = focused;
+        let used = self.used_kit_ids();
+        if used.is_empty() {
+            return None;
+        }
+        if now < self.kit_watch.next && !regained {
+            return Some(self.kit_watch.next - now);
+        }
+        self.kit_watch.next = now + WATCH_EVERY;
+        let own = self.session.doc.meta().id.clone();
+        let library = kits_in(&self.library, own.as_deref());
+        let mut stale = false;
+        for id in &used {
+            let Some(k) = library.iter().find(|k| k.id == *id) else {
+                stale |= regained;
+                continue;
+            };
+            let read = self.library.entry_at(&k.path).map(|e| (e.modified, e.size));
+            stale |= on_disk(&k.path) != read;
+        }
+        if stale {
+            self.library.refresh();
+        }
+        Some(WATCH_EVERY)
+    }
+
+    /// The kits the vault holds mains of, each once.
+    fn used_kit_ids(&self) -> Vec<String> {
+        let doc = &self.session.doc;
+        let Some(vault) = doc.vault().and_then(|v| doc.get(v)) else {
+            return Vec::new();
+        };
+        let mut out: Vec<String> = Vec::new();
+        for o in vault
+            .children()
+            .iter()
+            .filter_map(|t| doc.get(*t).and_then(|n| n.origin()))
+        {
+            if !out.contains(&o.kit) {
+                out.push(o.kit.clone());
+            }
+        }
+        out
+    }
+
     /// Every kit this document uses with a newer publish in the library.
     ///
     /// `count` asks for each kit's instance count, which is a scan of the whole
@@ -571,6 +669,57 @@ mod tests {
         );
         app.undo();
         assert_eq!(app.session.doc, before, "one undo");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A kit that publishes while its consumer is open brings the pill without
+    /// a rescan from anywhere else** (§15 D1020): a look every `WATCH_EVERY`
+    /// seconds `stat`s the kit's file and rescans the library when it changed.
+    /// Between looks nothing is read; a window regaining the focus looks at once.
+    ///
+    /// Flip, run: the look never rescanning (`stale` never set) fails *"due: the
+    /// pill"*.
+    #[test]
+    fn a_publish_while_open_is_noticed_by_the_next_look() {
+        use super::WATCH_EVERY;
+        let ctx = egui::Context::default();
+        let root = temp_root("watch");
+        let (path, kit, badge, dot) = file_kit(&root);
+        let (mut app, _) = consumer(&ctx, &root, &kit, badge);
+
+        assert_eq!(app.watch_kits_at(0.0, true), Some(WATCH_EVERY), "a look");
+        assert!(app.kits_waiting(false).is_empty(), "up to date");
+
+        republish(
+            &path,
+            vec![Operation::SetOpacity {
+                id: dot,
+                opacity: 0.5,
+            }],
+            "Softer dot",
+        );
+        assert_eq!(app.watch_kits_at(10.0, true), Some(WATCH_EVERY - 10.0));
+        assert!(app.kits_waiting(false).is_empty(), "not due: nothing read");
+        app.watch_kits_at(WATCH_EVERY, true);
+        assert_eq!(app.kits_waiting(false).len(), 1, "due: the pill");
+
+        // Away and back: the look comes with the focus, not the clock.
+        app.watch_kits_at(WATCH_EVERY + 1.0, false);
+        republish(
+            &path,
+            vec![Operation::SetOpacity {
+                id: dot,
+                opacity: 0.25,
+            }],
+            "Softer still",
+        );
+        app.watch_kits_at(WATCH_EVERY + 2.0, true);
+        let w = app.kits_waiting(false);
+        assert_eq!(w[0].kit.version, 6, "the focus looked");
+
+        // A document using no kit watches nothing.
+        app.undo();
+        assert_eq!(app.watch_kits_at(1000.0, true), None);
         let _ = std::fs::remove_dir_all(&root);
     }
 

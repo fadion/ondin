@@ -67,8 +67,19 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1018 index rows, 1018 body headings, next free
-D1019** (measured 2026-10-08, session 62; ⚠️ **the Kits polish request reserved D1017–D1026 at
+anywhere cited either. **The live figures: 1024 index rows, 1024 body headings, next free
+D1025** (measured 2026-10-08, session 63; ⚠️ **the Kits QA request reserved D1019–D1032 at
+`8dab0f6` as its first act and spent six** — D1019 (a swap to a kit main never used), D1020 (the
+update pill's 45-second watch, the maintainer's ruling), D1021 (1D's count on a worker, the
+maintainer's ruling), D1022–D1024 (two QA review passes over the whole kits range and their
+fixes — among them an update failing for good by vault order, every update of a main holding a
+group or a nested main refused, and a group/ungroup/frame in a kit duplicating layers in every
+consumer). The closing negative grep over **D1025–D1032 found zero sites** and they are
+released. Census **922**, arrivals D1019–D1024 against `8dab0f6`, no departures, none
+unresolved. ⚠️ **Both review passes' worst findings were reproduced by a throwaway probe crate
+outside the repo** (path-dependent on `ondin-core`) — and the fix for the first High turned up
+a second, worse defect its probe had stopped short of: *read the commit, not only the build*.
+Before that, session 62; ⚠️ **the Kits polish request reserved D1017–D1026 at
 `8753970` and spent two** — D1017 (the dashboard's kits, 1B, and 1D's confirmation without its
 count) and D1018 (a picker tile's drag onto the canvas, and 3G's *Open library*); the publish
 note's field and the picker's fixed height went into amendments to D1015 and D1014. The closing

@@ -412,12 +412,20 @@ pub struct Changes {
     /// Published before and not now — ids in the last published state, whose
     /// consumers keep them as local copies (D1011 (3)).
     pub removed: Vec<NodeId>,
+    /// The kit's name changed since its last publish — what a consumer calls it
+    /// once the kit is lost (3I), so worth a publish though no component changed.
+    pub renamed: bool,
 }
 
 impl Changes {
     /// How many components a publish would carry — the top bar's *Publish N*.
     pub fn count(&self) -> usize {
         self.added.len() + self.changed.len() + self.removed.len()
+    }
+
+    /// Whether a publish would carry anything: a component, or the kit's name.
+    pub fn any(&self) -> bool {
+        self.count() > 0 || self.renamed
     }
 }
 
@@ -439,7 +447,11 @@ pub fn changes(doc: &Document) -> Changes {
         if !tops_before.contains(t) {
             out.added.push(*t);
         } else if let (Some(n), Some(b)) = (&now, before)
-            && reach(n.document(), *t) != reach(b.document(), *t)
+            && (reach(n.document(), *t) != reach(b.document(), *t)
+                // Its top-level frame is a consumer's picker grouping (D1011
+                // (4)), so moving it into another frame is a change downstream
+                // though no node is (`arch-scribe`'s reading of the first cut).
+                || n.group(*t) != b.group(*t))
         {
             out.changed.push(*t);
         }
@@ -448,12 +460,13 @@ pub fn changes(doc: &Document) -> Changes {
         .into_iter()
         .filter(|t| !tops_now.contains(t))
         .collect();
+    out.renamed = before.is_some_and(|b| b.name() != doc.meta().name.as_deref());
     out
 }
 
 /// Every node `top` shows in a frozen document — its subtree and, transitively,
-/// the vault mains it reaches — by id, with the top's own place blanked
-/// ([`changes`]).
+/// the vault mains it reaches — by id, with **every reached top's own place
+/// blanked**, not only `top`'s ([`changes`]).
 fn reach(frozen: &Document, top: NodeId) -> std::collections::BTreeMap<NodeId, Node> {
     let mut out = std::collections::BTreeMap::new();
     let mut pending = vec![top];

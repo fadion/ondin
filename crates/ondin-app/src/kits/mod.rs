@@ -73,21 +73,22 @@ impl OndinApp {
         // Left-aligned under the name, as the mockup's menu hangs from it.
         let anchor = egui::pos2(head.rect.left(), head.rect.bottom() + crate::ui::MENU_GAP);
         let shared = self.shared_kit().is_some();
-        let publishable = self.kit_changes().map_or(0, |c| c.count());
+        let publishable = self.kit_changes().is_some_and(|c| c.any());
         self.dropdown(&ctx, "document-menu", anchor, MENU_W, &head, |app, ui| {
             const H: f32 = crate::ui::MENU_ITEM_H;
             if shared {
-                // *Publish kit…*, disabled with its reason at zero (2D).
+                // *Publish kit…*, disabled with its reason when nothing would go
+                // out (2D).
                 let row = crate::ui::MenuRow {
-                    accel: Some(if publishable > 0 {
+                    accel: Some(if publishable {
                         "Ctrl+Alt+P"
                     } else {
                         "No changes"
                     }),
-                    enabled: publishable > 0,
+                    enabled: publishable,
                     ..crate::ui::MenuRow::new(icon::UPLOAD_SIMPLE, "Publish kit…")
                 };
-                if crate::ui::menu_row(ui, row, H).clicked() && publishable > 0 {
+                if crate::ui::menu_row(ui, row, H).clicked() && publishable {
                     app.open_menu = TopMenu::None;
                     app.open_publish();
                 }

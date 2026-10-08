@@ -840,6 +840,38 @@ fn the_change_count_is_what_consumers_would_receive() {
     assert!(k.doc.published().unwrap().tops().contains(&fresh));
 }
 
+/// **A regroup and a rename are worth a publish** (§15 D1015's fix): moving
+/// the Button set out of its *Buttons* frame changes no node a consumer copies,
+/// but it changes the picker's grouping downstream, so the set counts as
+/// changed; renaming the kit changes no component and is still something to
+/// publish — what a consumer calls the kit once it is lost.
+///
+/// Flip, run: `changes` without the group comparison fails *"the regrouped
+/// set"*, the count 0.
+#[test]
+fn a_regroup_and_a_rename_are_worth_a_publish() {
+    let mut k = kit();
+    let root = k.doc.root();
+    k.doc
+        .apply(&Transaction(vec![Operation::Reparent {
+            id: k.set,
+            new_parent: root,
+            index: 0,
+        }]))
+        .unwrap();
+    let c = kit::changes(&k.doc);
+    assert_eq!(c.changed, vec![k.set], "the regrouped set");
+    assert!(!c.renamed);
+
+    kit::publish(&mut k.doc, None, 1).unwrap();
+    let mut meta = k.doc.meta().clone();
+    meta.name = Some("Atlas 2".into());
+    k.doc.set_meta(meta);
+    let c = kit::changes(&k.doc);
+    assert_eq!(c.count(), 0, "no component changed");
+    assert!(c.renamed && c.any(), "but the name did");
+}
+
 /// Accept `k`'s current publish into `d`, through the commit's own passes
 /// (`propagate::owed`), as the app's commit does. Answers the update and the
 /// inverse that undoes it.

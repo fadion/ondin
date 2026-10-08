@@ -52,6 +52,8 @@ impl OndinApp {
         let n = c.count();
         let tip = if version == 0 {
             "Never published: the count is every component".to_string()
+        } else if n == 0 && c.renamed {
+            format!("The kit's name changed since v{version}")
         } else if n == 0 {
             format!("Nothing to publish · no changes since v{version}")
         } else {
@@ -61,7 +63,7 @@ impl OndinApp {
                 breakdown(&c)
             )
         };
-        let enabled = n > 0;
+        let enabled = c.any();
         let ink = if enabled {
             color::TEXT
         } else {
@@ -135,7 +137,7 @@ impl OndinApp {
                 .info("Make this document a kit first, from the menu on its name");
             return;
         };
-        if c.count() == 0 {
+        if !c.any() {
             let version = self.shared_kit().map_or(0, |k| k.version);
             self.session
                 .info(format!("Nothing to publish · no changes since v{version}"));
@@ -178,12 +180,15 @@ impl OndinApp {
                     .date
                     .map(|d| format!(" ({})", crate::library::clock::date_label(d)))
                     .unwrap_or_default();
-                format!(
-                    "{} component{} changed since v{}{when}.",
-                    c.count(),
-                    plural(c.count()),
-                    mark.version
-                )
+                match (c.count(), c.renamed) {
+                    (0, _) => format!("The kit's name changed since v{}{when}.", mark.version),
+                    (n, renamed) => format!(
+                        "{n} component{} changed since v{}{when}{}.",
+                        plural(n),
+                        mark.version,
+                        if renamed { ", and the kit's name" } else { "" }
+                    ),
+                }
             };
             ui.label(
                 egui::RichText::new(sub)
@@ -355,7 +360,9 @@ fn item_row(ui: &mut egui::Ui, doc: &Document, id: NodeId, aside: Option<&str>) 
     let right = match (aside, n.set().is_some()) {
         (Some(a), _) => Some(a.to_string()),
         (None, true) => {
-            let k = n.children().len();
+            // Its variants, not its children — a set may hold a plain layer too
+            // (`arch-scribe`'s reading of the first cut).
+            let k = ondin_core::variant::variants(doc, id).len();
             Some(format!("{k} variant{}", plural(k)))
         }
         (None, false) => None,
@@ -483,5 +490,73 @@ mod tests {
             "counted again"
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A set's row counts its variants, not its children** (§15 D1015's fix):
+    /// a set may hold a plain layer beside its variants, and the dialog read
+    /// three for two.
+    ///
+    /// Flip, run: counting `children()` fails, the row reading *"3 variants"*.
+    #[test]
+    fn a_sets_row_counts_its_variants() {
+        use ondin_core::variant::{VariantProp, VariantSet};
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let mut meta = app.session.doc.meta().clone();
+        meta.name = Some("Atlas".into());
+        meta.kit = Some(Default::default());
+        app.session.doc.set_meta(meta);
+        let [set, small, large, note] = [(); 4].map(|_| app.session.ids.mint());
+        let root = app.session.doc.root();
+        let frame = |id, parent, index, name: &str| Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind: NodeKind::Artboard {
+                size: Size::new(40.0, 20.0),
+            },
+            transform: None,
+            name: Some(name.into()),
+        };
+        assert!(app.session.commit(Transaction(vec![
+            frame(set, root, 0, "Button"),
+            frame(small, set, 0, "Small"),
+            frame(large, set, 1, "Large"),
+            frame(note, set, 2, "Note"),
+            Operation::SetComponent {
+                id: small,
+                component: true,
+            },
+            Operation::SetComponent {
+                id: large,
+                component: true,
+            },
+            Operation::SetVariantSet {
+                id: set,
+                set: Some(VariantSet {
+                    props: vec![VariantProp {
+                        name: "Size".into(),
+                        values: vec!["Small".into(), "Large".into()],
+                    }],
+                }),
+            },
+            Operation::SetVariant {
+                id: small,
+                values: vec!["Small".into()],
+            },
+            Operation::SetVariant {
+                id: large,
+                values: vec!["Large".into()],
+            },
+        ])));
+        assert_eq!(
+            app.session.doc.get(set).unwrap().children().len(),
+            3,
+            "the fixture"
+        );
+        app.open_publish();
+        let text = painted(&ctx, &mut app);
+        assert!(text.contains(&"2 variants".to_string()), "{text:?}");
     }
 }

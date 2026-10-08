@@ -1676,3 +1676,83 @@ fn a_removed_main_is_made_local_whole() {
         "the local Icon keeps its Dot"
     );
 }
+
+/// **An update reaching a newer version of a third kit's main asks for that
+/// kit's update, and takes it together with it** (§15 D1022's `resolve`, D1024):
+/// L's *Chip* nests K's *Badge*; D placed *Chip* with *Badge* at K's v2. K gives
+/// *Badge* a dot; L takes K's update and publishes again. Accepting L alone
+/// cannot point *Chip*'s nested dot at a dot D's *Badge* lacks — `NeedsUpdate`,
+/// which the app answers by accepting K's waiting update with it — and the two
+/// together commit, in either order.
+///
+/// Flip, run: `resolve` answering `Incomplete` for a held top too fails
+/// *"an update owed, named as one"*.
+#[test]
+fn a_third_kits_newer_main_asks_for_its_update() {
+    // K: *Badge*, at v2.
+    let mut kids = IdSource::new(0xAB);
+    let kroot = kids.mint();
+    let mut kdoc = Document::new(kroot);
+    let badge = kids.mint();
+    kdoc.apply(&Transaction(vec![
+        create(badge, kroot, 0, frame(16.0, 16.0), "Badge"),
+        main_on(badge),
+    ]))
+    .unwrap();
+    kdoc.set_published(kit::freeze(&kdoc));
+    let k2 = kdoc.published().unwrap().clone();
+
+    // L: *Chip* nesting K's *Badge*, published as v7.
+    let mut lids = IdSource::new(0xAC);
+    let lroot = lids.mint();
+    let mut ldoc = Document::new(lroot);
+    let (tx, placed) = kit::insert(&ldoc, &mut lids, K_ID, 2, &k2, badge, lroot).unwrap();
+    ldoc.apply(&tx).unwrap();
+    let chip = lids.mint();
+    ldoc.apply(&Transaction(vec![
+        create(chip, lroot, 0, frame(60.0, 20.0), "Chip"),
+        Operation::Reparent {
+            id: placed,
+            new_parent: chip,
+            index: 0,
+        },
+        main_on(chip),
+    ]))
+    .unwrap();
+    let l7 = kit::freeze(&ldoc).unwrap();
+
+    let (mut d, mut ids) = consumer();
+    let root = d.root();
+    let (tx, _) = kit::insert(&d, &mut ids, L_ID, 7, &l7, chip, root).unwrap();
+    d.apply(&tx).unwrap();
+
+    // K v3: a dot in *Badge*. L takes it, and publishes v8.
+    let dot = kids.mint();
+    kdoc.apply(&Transaction(vec![create(dot, badge, 0, rect(), "Dot")]))
+        .unwrap();
+    kdoc.set_published(kit::freeze(&kdoc));
+    let k3 = kdoc.published().unwrap().clone();
+    let u = kit::update(&ldoc, &mut lids, K_ID, 3, &k3).unwrap();
+    let mut tx = u.tx;
+    ondin_core::propagate::owed(&ldoc, &mut tx, &mut lids);
+    ldoc.apply(&tx).unwrap();
+    let l8 = kit::freeze(&ldoc).unwrap();
+
+    assert!(
+        matches!(
+            kit::update(&d, &mut ids, L_ID, 8, &l8).map(|_| ()),
+            Err(kit::KitError::NeedsUpdate(_))
+        ),
+        "an update owed, named as one"
+    );
+    for kits in [
+        [(K_ID, 3, &k3), (L_ID, 8, &l8)],
+        [(L_ID, 8, &l8), (K_ID, 3, &k3)],
+    ] {
+        let mut d = d.clone();
+        let u = kit::update_all(&d, &mut ids, &kits).expect("both together build");
+        let mut tx = u.tx;
+        ondin_core::propagate::owed(&d, &mut tx, &mut ids);
+        d.apply(&tx).expect("and commit");
+    }
+}

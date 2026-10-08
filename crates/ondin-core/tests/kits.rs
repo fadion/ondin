@@ -1641,3 +1641,38 @@ fn an_accept_leaves_a_pinned_layer_where_the_kit_draws_it() {
     let after = Resolved::rebuild(&gr.d).world_bounds(ib).unwrap();
     assert_eq!(after.x0, before.x0, "the instance's badge did not move");
 }
+
+/// **A removed main is made local whole** (§15 D1024): the kit moves *Icon*'s
+/// *Dot* into *Card* and deletes *Icon*. D's *Icon* is made local — kept as a
+/// copy where used — with its *Dot* still in it; *Card* takes a fresh dot of its
+/// own. A sync run before the classification moved D's *Dot* out of the copy
+/// being made local, and its instances lost it.
+///
+/// Flip, run: the move-in without its `keep_out` guard fails *"the local Icon
+/// keeps its Dot"*.
+#[test]
+fn a_removed_main_is_made_local_whole() {
+    let mut k = kit();
+    let (mut d, mut ids) = consumer();
+    insert(&mut d, &mut ids, &k, k.card);
+    let icon_here = vault_children(&d)[0];
+    let (card, dot, icon) = (k.card, k.icon_dot, k.icon);
+    edit_and_publish(
+        &mut k,
+        vec![
+            Operation::Reparent {
+                id: dot,
+                new_parent: card,
+                index: 1,
+            },
+            Operation::DeleteNode { id: icon },
+        ],
+    );
+    let (u, _) = accept(&mut d, &mut ids, &k);
+    assert_eq!(u.made_local, [icon_here], "Icon made local");
+    assert_eq!(
+        shape(&d, icon_here).len(),
+        1,
+        "the local Icon keeps its Dot"
+    );
+}

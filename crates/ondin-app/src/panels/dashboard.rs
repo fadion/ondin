@@ -1625,7 +1625,12 @@ impl OndinApp {
                 .iter()
                 .filter(|e| self.is_starred(e))
                 .count(),
-            Nav::Kits => self.library.entries.iter().filter(|e| is_kit(e)).count(),
+            Nav::Kits => self
+                .library
+                .entries
+                .iter()
+                .filter(|e| is_kit(&self.library, e))
+                .count(),
             // **The cache, not the scan** (§15 D728, `[S20.1-L3-07]`). This ran
             // `store::trashed` — a scan of every file in `.trash` — and the
             // sidebar paints this count on **every nav, every frame**, whether or
@@ -1977,7 +1982,7 @@ impl OndinApp {
                 .library
                 .entries
                 .iter()
-                .filter(|e| is_kit(e))
+                .filter(|e| is_kit(&self.library, e))
                 .cloned()
                 .collect(),
             // The cache, for `nav_count`'s reason — and this was the *second*
@@ -2969,7 +2974,7 @@ impl OndinApp {
         }
         // The *Kit* chip shares the corner (§5.3e, 1B), after a mark when there
         // is one: a conflicted copy of a kit is both.
-        if is_kit(entry) {
+        if marks_kit(entry) {
             kit_chip(ui, corner);
         }
         // **The star, on the cover rather than in the caption** — the design's
@@ -3833,6 +3838,26 @@ impl OndinApp {
         }
     }
 
+    /// The file menu's kit row (1B): *Make a kit* or *Stop sharing as kit*, the
+    /// same toggle as the document menu's — and **none on a conflict copy** (§15
+    /// D1024, the kits QA review's second pass): it carries the original's id,
+    /// so *Make a kit* made a second kit of that identity, the original's own
+    /// `kit::find` then landing pasted origins on its live nodes, and *Stop
+    /// sharing* would have turned off a mark on a file that is not the kit.
+    fn kit_row(&self, entry: &Entry) -> Option<(&'static str, Act)> {
+        if self.library.conflict(entry).is_some() {
+            return None;
+        }
+        Some(if is_kit(&self.library, entry) {
+            (
+                "Stop sharing as kit",
+                Act::SetKit(entry.path.clone(), false),
+            )
+        } else {
+            ("Make a kit", Act::SetKit(entry.path.clone(), true))
+        })
+    }
+
     fn file_menu_popup(
         &mut self,
         ui: &mut egui::Ui,
@@ -3865,19 +3890,14 @@ impl OndinApp {
                     Act::ToggleStar(entry.meta.id.clone().unwrap_or_default()),
                 ),
                 ("Move to project", Act::MoveTo(entry.path.clone(), None)),
-                // After the file's own verbs, before *Delete* — the mockup's
-                // place (1B), and the same toggle as the document menu's.
-                if is_kit(entry) {
-                    (
-                        "Stop sharing as kit",
-                        Act::SetKit(entry.path.clone(), false),
-                    )
-                } else {
-                    ("Make a kit", Act::SetKit(entry.path.clone(), true))
-                },
                 ("Delete", Act::Trash(entry.path.clone())),
             ]
         };
+        let mut rows = rows;
+        // After the file's own verbs, before *Delete* — the mockup's place (1B).
+        if !trashed && let Some(row) = self.kit_row(entry) {
+            rows.insert(rows.len() - 1, row);
+        }
 
         // Narrower than the filter's `FILTER_MENU_W`: these are verbs and those
         // are project names, so the two widths are a decision rather than drift.
@@ -6582,7 +6602,18 @@ fn mark_chip(ui: &egui::Ui, at: egui::Pos2, align: egui::Align2, mark: Mark) -> 
 /// Whether a library file is a kit that is sharing — the *Kits* filter's
 /// question and the card's chip (§5.3e, 1B; §15 D1017). Read off the scan's prefix, which
 /// carries the mark (§15 D1012). A mark that stopped sharing is not one.
-fn is_kit(entry: &Entry) -> bool {
+///
+/// **Nor is a conflict copy** (§15 D1024, the kits QA review's second pass): it
+/// carries the kit's id and mark, so the filter counted one kit twice — and the
+/// kit `kits::index::kits_in` lists is the original. The copy's card still wears
+/// the chip beside its conflict mark ([`marks_kit`], 1B).
+fn is_kit(lib: &crate::library::state::Library, entry: &Entry) -> bool {
+    lib.conflict(entry).is_none() && marks_kit(entry)
+}
+
+/// Whether a file carries a sharing kit mark — the card's *Kit* chip, which a
+/// conflict copy of a kit wears beside its conflict mark.
+fn marks_kit(entry: &Entry) -> bool {
     entry
         .meta
         .kit
@@ -11908,6 +11939,40 @@ mod tests {
             app.nav_count(&Nav::Kits),
             0,
             "a mark that stopped sharing is not a kit"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A kit's conflict copy is not a second kit** (§15 D1024): the *Kits*
+    /// filter counts the kit once, and the copy's file menu offers no kit row —
+    /// its *Make a kit* made a second kit of the original's identity.
+    ///
+    /// Flips, run: `is_kit` without its conflict test fails *"one kit"*, 2;
+    /// `kit_row` without it fails *"no kit row on the copy"*.
+    #[test]
+    fn a_kits_conflict_copy_is_not_a_second_kit() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, root) = app(&ctx, "kit-conflict");
+        let mut a = ondin_core::Document::new(app.session.ids.mint());
+        let atlas = store::file_document(&root, None, "Atlas", &mut a).unwrap();
+        app.library.refresh();
+        app.dashboard_act(Act::SetKit(atlas.clone(), true));
+        let copy = root.join("atlas (Jon's conflicted copy 2026-10-08).ondin");
+        std::fs::copy(&atlas, &copy).unwrap();
+        app.library.refresh();
+        assert_eq!(app.library.entries.len(), 2, "the fixture: both files");
+
+        assert_eq!(app.nav_count(&Nav::Kits), 1, "one kit");
+        let entry = |p: &Path| app.library.entry_at(p).unwrap().clone();
+        assert!(
+            app.kit_row(&entry(&copy)).is_none(),
+            "no kit row on the copy"
+        );
+        assert_eq!(
+            app.kit_row(&entry(&atlas)).map(|r| r.0),
+            Some("Stop sharing as kit"),
+            "the original's"
         );
         let _ = std::fs::remove_dir_all(&root);
     }

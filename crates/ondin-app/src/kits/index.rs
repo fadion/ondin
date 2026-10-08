@@ -55,10 +55,10 @@ pub(crate) struct KitEntry {
 pub(crate) fn kits_in(lib: &Library, own: Option<&str>) -> Vec<KitEntry> {
     let mut by_id: HashMap<&str, &Entry> = HashMap::new();
     for e in &lib.entries {
-        let (Some(id), Some(kit)) = (e.meta.id.as_deref(), e.meta.kit.as_ref()) else {
+        let (Some(id), Some(_)) = (e.meta.id.as_deref(), e.meta.kit.as_ref()) else {
             continue;
         };
-        if !kit.is_shared() || Some(id) == own {
+        if Some(id) == own {
             continue;
         }
         match by_id.get(id) {
@@ -69,8 +69,13 @@ pub(crate) fn kits_in(lib: &Library, own: Option<&str>) -> Vec<KitEntry> {
             }
         }
     }
+    // **Sharing is asked of the file that won, not before** (§15 D1024, the
+    // kits QA review's second pass): filtered first, a kit that stopped sharing
+    // left its conflict copy — still marked sharing — standing in for it, and
+    // consumers went on seeing the kit, usually at a stale publish.
     let mut out: Vec<KitEntry> = by_id
         .into_iter()
+        .filter(|(_, e)| e.meta.kit.as_ref().is_some_and(|k| k.is_shared()))
         .map(|(id, e)| KitEntry {
             id: id.to_string(),
             name: e.display_name(),

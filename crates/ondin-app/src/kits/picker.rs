@@ -1238,6 +1238,20 @@ pub(crate) mod tests {
             kits_in(&lib, Some(&id)).is_empty(),
             "the kit itself lists no kit"
         );
+        // **The original stops sharing; its conflict copy still says it is**
+        // (§15 D1024): the kit is gone, in both orders — not stood in for by
+        // the copy. Flip, run: sharing filtered before the tie-break fails
+        // *"no kit once the original stops"*, the copy listed.
+        for e in lib.entries.iter_mut().filter(|e| e.path == original) {
+            e.meta.kit.as_mut().unwrap().sharing = false;
+        }
+        for _ in 0..2 {
+            assert!(
+                kits_in(&lib, None).is_empty(),
+                "no kit once the original stops"
+            );
+            lib.entries.reverse();
+        }
         let _ = std::fs::remove_dir_all(&root);
     }
 

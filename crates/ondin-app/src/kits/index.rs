@@ -150,6 +150,9 @@ struct Pixels {
 
 struct Shelf {
     modified: u64,
+    /// The version the file said it last published **when it was read** — not
+    /// the scan's, which may be older (§15 D1023).
+    version: Option<u32>,
     load: Load,
     pixels: HashMap<NodeId, Pixels>,
     tiles: HashMap<NodeId, egui::TextureHandle>,
@@ -164,6 +167,7 @@ struct Job {
 struct Done {
     id: String,
     modified: u64,
+    version: Option<u32>,
     load: Load,
     pixels: HashMap<NodeId, Pixels>,
 }
@@ -191,6 +195,7 @@ impl KitShelf {
             kit.id.clone(),
             Shelf {
                 modified: kit.modified,
+                version: None,
                 load: Load::Pending,
                 pixels: HashMap::new(),
                 tiles: HashMap::new(),
@@ -225,6 +230,7 @@ impl KitShelf {
             && s.modified == d.modified
         {
             s.load = d.load;
+            s.version = d.version;
             s.pixels = d.pixels;
             s.tiles.clear();
         }
@@ -243,12 +249,28 @@ impl KitShelf {
     /// kit published again would be written into the document under the new
     /// version, and the update it was meant to bring would never arrive
     /// (`arch-scribe`'s reading of D1016's first cut).
+    ///
+    /// ⚠️ **And `None` when the file read had published past the scan's
+    /// version** (§15 D1023, the kits QA review's finding): a kit that published
+    /// between the scan and the read gave the newer content under the older
+    /// number, written into the document as that version — a mislabel the next
+    /// pill re-offered. The library rescans and the shelf is asked again.
     pub(crate) fn current(&self, kit: &KitEntry) -> Option<Arc<Published>> {
         let s = self.shelves.get(&kit.id)?;
         match &s.load {
-            Load::Ready(Some(p)) if s.modified == kit.modified => Some(p.clone()),
+            Load::Ready(Some(p))
+                if s.modified == kit.modified && s.version == Some(kit.version) =>
+            {
+                Some(p.clone())
+            }
             _ => None,
         }
+    }
+
+    /// The version `id`'s file said it published when the shelf read it — what
+    /// a vendoring from [`Self::load`]'s state records (§15 D1023).
+    pub(crate) fn read_version(&self, id: &str) -> Option<u32> {
+        self.shelves.get(id)?.version
     }
 
     /// Where `id`'s published state is, if it was asked for.
@@ -304,10 +326,11 @@ fn spawn() -> (mpsc::Sender<Job>, mpsc::Receiver<Done>) {
         .name("ondin-kits".into())
         .spawn(move || {
             for job in job_rx {
-                let (load, pixels) = read(&job.path);
+                let (load, version, pixels) = read(&job.path);
                 let sent = done_tx.send(Done {
                     id: job.id,
                     modified: job.modified,
+                    version,
                     load,
                     pixels,
                 });
@@ -320,16 +343,18 @@ fn spawn() -> (mpsc::Sender<Job>, mpsc::Receiver<Done>) {
     (job_tx, done_rx)
 }
 
-/// Load a kit's file and render a tile for every published main and set.
-fn read(path: &std::path::Path) -> (Load, HashMap<NodeId, Pixels>) {
+/// Load a kit's file and render a tile for every published main and set — with
+/// the version the file says it published, as read.
+fn read(path: &std::path::Path) -> (Load, Option<u32>, HashMap<NodeId, Pixels>) {
     let Some(doc) = std::fs::read(path)
         .ok()
         .and_then(|b| ondin_core::io::load(&b).ok())
     else {
-        return (Load::Failed, HashMap::new());
+        return (Load::Failed, None, HashMap::new());
     };
+    let version = doc.meta().kit.as_ref().map(|k| k.version);
     let Some(published) = doc.published() else {
-        return (Load::Ready(None), HashMap::new());
+        return (Load::Ready(None), version, HashMap::new());
     };
     let frozen = published.document();
     let res = ondin_core::Resolved::rebuild(frozen);
@@ -355,5 +380,9 @@ fn read(path: &std::path::Path) -> (Load, HashMap<NodeId, Pixels>) {
             );
         }
     }
-    (Load::Ready(Some(Arc::new(published.clone()))), pixels)
+    (
+        Load::Ready(Some(Arc::new(published.clone()))),
+        version,
+        pixels,
+    )
 }

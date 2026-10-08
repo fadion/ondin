@@ -171,7 +171,15 @@ impl OndinApp {
         } else {
             search(&query, &local, &shown)
         };
-        if !results.is_empty() {
+        // **Only while the search field holds the keyboard** (§15 D1023, the
+        // kits QA review's finding): the field gives the keyboard back for good
+        // (`D1014`'s fix (b)), and read from anywhere, `Enter` stepping into a
+        // group, committing an inspector field or a dialog's note also placed the
+        // highlighted result, and the arrows nudged the selection and moved the
+        // highlight at once. Asked before the field is drawn, which is before a
+        // single-line field lets go of the keyboard on `Enter`.
+        let typing = ctx.memory(|m| m.has_focus(egui::Id::new(SEARCH_ID)));
+        if typing && !results.is_empty() {
             let (down, up, enter) = ctx.input(|i| {
                 (
                     i.key_pressed(egui::Key::ArrowDown),
@@ -319,6 +327,10 @@ impl OndinApp {
         match self.kit_shelf.load(&k.id) {
             Some(Load::Ready(Some(p))) => {
                 let p = p.clone();
+                // What a placement records: the version this state was read at,
+                // which a publish since the scan may have moved past the scan's
+                // (§15 D1023).
+                let version = self.kit_shelf.read_version(&k.id).unwrap_or(k.version);
                 shown.status = if used {
                     format!("v{} · {}", k.version, p.tops().len())
                 } else {
@@ -333,7 +345,7 @@ impl OndinApp {
                     let item = Item {
                         source: Source::Kit {
                             id: k.id.clone(),
-                            version: k.version,
+                            version,
                             published: p.clone(),
                             top,
                         },
@@ -632,6 +644,9 @@ fn search(query: &str, local: &[Item], shown: &[Shown]) -> Vec<Item> {
         .collect()
 }
 
+/// The search field's id, which the result keys ask about.
+const SEARCH_ID: &str = "kit-picker-search";
+
 /// The search box: a magnifier, the field, and a clear button once it holds
 /// something. Takes the keyboard when `focus` asks, once. Answers whether it
 /// changed.
@@ -662,7 +677,7 @@ fn search_field(ui: &mut egui::Ui, query: &mut String, focus: &mut bool) -> bool
     let edit = ui.put(
         field,
         egui::TextEdit::singleline(query)
-            .id(egui::Id::new("kit-picker-search"))
+            .id(egui::Id::new(SEARCH_ID))
             .frame(egui::Frame::NONE)
             .hint_text(
                 egui::RichText::new("Search components")
@@ -1588,8 +1603,10 @@ pub(crate) mod tests {
     /// so it finds the set; the picker is driven for real, two frames, then
     /// `Enter`.
     ///
-    /// Flip, run: a set's variant values left out of its aliases fails the first
-    /// assertion, the list reading *"No components match"*.
+    /// Flips, run: a set's variant values left out of its aliases fails the first
+    /// assertion, the list reading *"No components match"*; the keys read
+    /// whoever holds the keyboard (`typing` always true) fails *"not the
+    /// picker's Enter"* (§15 D1023).
     #[test]
     fn search_finds_a_set_by_its_variant_and_enter_places_it() {
         let ctx = egui::Context::default();
@@ -1615,15 +1632,27 @@ pub(crate) mod tests {
         assert!(painted.contains(&"Button".to_string()), "{painted:?}");
         assert!(!painted.contains(&"Badge".to_string()), "{painted:?}");
 
-        let mut input = egui::RawInput::default();
-        input.events.push(egui::Event::Key {
-            key: egui::Key::Enter,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers: Default::default(),
-        });
-        let _ = ctx.run_ui(input, |_| app.kit_picker_ui(&ctx));
+        let enter = || {
+            let mut input = egui::RawInput::default();
+            input.events.push(egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Default::default(),
+            });
+            input
+        };
+        // **With the field let go, `Enter` is someone else's** (§15 D1023): a
+        // group stepped into, a field committed — and nothing is placed.
+        let field = egui::Id::new(SEARCH_ID);
+        ctx.memory_mut(|m| m.surrender_focus(field));
+        let before = app.session.doc.clone();
+        let _ = ctx.run_ui(enter(), |_| app.kit_picker_ui(&ctx));
+        assert_eq!(app.session.doc, before, "not the picker's Enter");
+
+        ctx.memory_mut(|m| m.request_focus(field));
+        let _ = ctx.run_ui(enter(), |_| app.kit_picker_ui(&ctx));
         let inst = app.session.selection.single().expect("Enter placed it");
         let main = app.session.doc.get(inst).unwrap().link().unwrap();
         assert_eq!(app.session.doc.get(main).unwrap().origin().unwrap().kit, id);

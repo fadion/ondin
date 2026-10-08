@@ -196,6 +196,12 @@ pub fn set_kit(entry: &Entry, sharing: bool) -> io::Result<()> {
 ///
 /// The creation stamp is new for the same reason.
 ///
+/// **And a kit's published state is left behind** (§15 D1023, the kits QA
+/// review's finding): it is the kit's last publish, of the kit's identity, and
+/// the copy is no kit until it is made one. Kept, it carried a dead copy of every
+/// published main, and once the copy was made a kit its first publish compared
+/// against it — *Publish 0 components*, enabled only by the changed name.
+///
 /// **Not `ondin_core::copy_name`**, which answers a different question: that one
 /// numbers a name *within a set of siblings* and returns `None` for a name a
 /// person typed, because renaming somebody's "Hero content" to "Hero content 2"
@@ -207,6 +213,7 @@ pub fn set_kit(entry: &Entry, sharing: bool) -> io::Result<()> {
 pub fn duplicate(root: &Path, entry: &Entry, project: Option<&Project>) -> io::Result<PathBuf> {
     let mut doc = load(&entry.path)?;
     doc.set_meta(DocumentMeta::default());
+    doc.set_published(None);
     let name = format!("{} copy", entry.display_name());
     file_document(root, project, &name, &mut doc)
 }
@@ -603,6 +610,49 @@ mod tests {
             .expect("the copy must be in the library");
         assert_ne!(copied.meta.id, entry.meta.id, "a copy is a new document");
         assert_eq!(copied.display_name(), "Landing v4 copy");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A duplicated kit leaves its publish behind** (§15 D1023): the copy keeps
+    /// the drawing, mains and all, but neither the mark nor the frozen copy.
+    ///
+    /// Flip, run: `duplicate` without `set_published(None)` fails *"no publish"*.
+    #[test]
+    fn a_duplicated_kit_leaves_its_publish_behind() {
+        use ondin_core::{NodeKind, Operation, Transaction};
+        let root = temp_root("dup-kit");
+        let mut doc = blank();
+        let main = ondin_core::IdSource::new(0xC1).mint();
+        let parent = doc.root();
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: main,
+                parent,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: ondin_core::kurbo::Size::new(24.0, 24.0),
+                },
+                transform: None,
+                name: Some("Badge".into()),
+            },
+            Operation::SetComponent {
+                id: main,
+                component: true,
+            },
+        ]))
+        .unwrap();
+        let path = file_document(&root, None, "Atlas", &mut doc).unwrap();
+        let mut meta = doc.meta().clone();
+        meta.kit = Some(ondin_core::meta::KitMark::default());
+        doc.set_meta(meta);
+        ondin_core::kit::publish(&mut doc, None, 1).unwrap();
+        write_document(&path, &doc).unwrap();
+
+        let copy = duplicate(&root, &entry_named(&root, "Atlas"), None).unwrap();
+        let copied = load(&copy).unwrap();
+        assert!(copied.contains(main), "the drawing, mains and all");
+        assert!(copied.meta().kit.is_none(), "no mark");
+        assert!(copied.published().is_none(), "no publish");
         let _ = std::fs::remove_dir_all(&root);
     }
 

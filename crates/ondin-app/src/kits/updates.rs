@@ -346,16 +346,21 @@ impl OndinApp {
             // The shelf's copy when it has one; otherwise the file, read here —
             // an accept is a click, and the card's *Accept kit updates* arrives
             // with nothing asked for beforehand.
+            //
+            // Read here, it records **the version the file says**, not the
+            // scan's, which a publish since may have passed (§15 D1023).
             let p = match self.kit_shelf.current(&w.kit) {
-                Some(p) => Some(p),
+                Some(p) => Some((w.kit.version, p)),
                 None => std::fs::read(&w.kit.path)
                     .ok()
                     .and_then(|b| ondin_core::io::load(&b).ok())
-                    .and_then(|d| d.published().cloned())
-                    .map(std::sync::Arc::new),
+                    .and_then(|d| {
+                        let version = d.meta().kit.as_ref().map(|k| k.version)?;
+                        Some((version, std::sync::Arc::new(d.published()?.clone())))
+                    }),
             };
             match p {
-                Some(p) => loaded.push((w.kit.id.clone(), w.kit.version, p)),
+                Some((version, p)) => loaded.push((w.kit.id.clone(), version, p)),
                 None => {
                     self.session.fail(format!(
                         "{} could not be read, so its update waits",
@@ -720,6 +725,39 @@ mod tests {
         // A document using no kit watches nothing.
         app.undo();
         assert_eq!(app.watch_kits_at(1000.0, true), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A publish read past the scan's version is not passed off as it** (§15
+    /// D1023, the kits QA review's finding): the library scanned the kit at v4,
+    /// the kit published v5, and the shelf then read the file. Its content is
+    /// v5's, so it is not the current publish of an entry that says v4 — an
+    /// accept would have written v5's mains labelled v4.
+    ///
+    /// Flip, run: `current` without its version comparison fails *"not v4's"*.
+    #[test]
+    fn a_publish_read_after_the_scan_is_not_the_scans_version() {
+        let ctx = egui::Context::default();
+        let root = temp_root("race");
+        let (path, kit, badge, dot) = file_kit(&root);
+        let (mut app, _) = consumer(&ctx, &root, &kit, badge);
+        let scanned = super::kits_in(&app.library, app.session.doc.meta().id.as_deref())
+            .into_iter()
+            .find(|k| k.id == kit)
+            .unwrap();
+        republish(
+            &path,
+            vec![Operation::SetOpacity {
+                id: dot,
+                opacity: 0.5,
+            }],
+            "Softer dot",
+        );
+        // A shelf that has never read it, asked with the scan's entry.
+        app.kit_shelf = Default::default();
+        app.kit_shelf.ask(&scanned);
+        app.kit_shelf.settle();
+        assert!(app.kit_shelf.current(&scanned).is_none(), "not v4's");
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -6,8 +6,10 @@
 //! library scan reads each file's first 4 KB (`io::probe::meta_in_prefix`), and
 //! which kits a document uses is in its vault, past that prefix; a `meta` field
 //! would have been a schema addition that leaves every file saved before it
-//! uncounted. A whole load per file is hundreds of milliseconds at worst, and the
-//! dialog asks once, when it opens, so the number arrives while it is read.
+//! uncounted. A whole load per file is the cost — not measured here; the kit
+//! shelf's worker exists for the same load (`kits::index`) — so it runs off the
+//! frame, asked once when the dialog opens, and the number arrives while the
+//! dialog is read.
 //!
 //! A document **uses** a kit when its vault holds a main that came from it,
 //! `origin.kit` on a vault top. The kit's own file is never counted — a kit never

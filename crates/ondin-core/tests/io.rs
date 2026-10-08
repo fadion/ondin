@@ -2405,6 +2405,14 @@ fn a_filed_document_round_trips_its_library_identity() {
         name: Some("My cool design".into()),
         project: Some("kestrel".into()),
         created: Some(1_774_483_200),
+        // A kit's mark rides in the same block (§15 D1012), so the scan reads
+        // which version a kit last published without loading it.
+        kit: Some(ondin_core::meta::KitMark {
+            version: 3,
+            date: Some(1_774_500_000),
+            note: Some("New buttons".into()),
+            sharing: true,
+        }),
     });
     let bytes = io::save(&doc).unwrap();
     let loaded = io::load(&bytes).unwrap();
@@ -2469,6 +2477,14 @@ fn the_first_four_kilobytes_of_a_real_save_carry_the_library_block() {
         name: Some("My cool design".into()),
         project: Some("kestrel".into()),
         created: Some(1_774_483_200),
+        // A kit's mark rides in the same block (§15 D1012), so the scan reads
+        // which version a kit last published without loading it.
+        kit: Some(ondin_core::meta::KitMark {
+            version: 3,
+            date: Some(1_774_500_000),
+            note: Some("New buttons".into()),
+            sharing: true,
+        }),
     });
     let bytes = io::save(&doc).unwrap();
     let prefix = &bytes[..bytes.len().min(io::probe::PREFIX_BYTES)];

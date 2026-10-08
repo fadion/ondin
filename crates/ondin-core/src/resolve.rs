@@ -694,8 +694,13 @@ impl Resolved {
             return;
         }
 
-        // Drop nodes that no longer exist.
-        for id in dirty.0.iter().filter(|id| !doc.contains(**id)) {
+        // Drop nodes that no longer exist — and the vault's, which exist and are
+        // never resolved (§15 D1012). `rebuild` walks from the root and so never
+        // meets the vault; this is the other door, a transaction that dirtied a
+        // vendored main, and resolving it here would put a hidden main in the
+        // spatial index and under the pointer.
+        let unresolved = |id: NodeId| !doc.contains(id) || doc.in_vault(id);
+        for id in dirty.0.iter().filter(|id| unresolved(**id)) {
             self.world.remove(id);
             self.world_bounds.remove(id);
             self.ink_bounds.remove(id);
@@ -710,7 +715,7 @@ impl Resolved {
             .0
             .iter()
             .copied()
-            .filter(|id| doc.contains(*id))
+            .filter(|id| !unresolved(*id))
             .collect();
         if existing.is_empty() {
             // Only deletions happened; still refresh bounds up-tree from parents,

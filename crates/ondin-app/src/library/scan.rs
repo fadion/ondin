@@ -526,6 +526,7 @@ mod tests {
             name: Some(name.into()),
             project: project.map(str::to_string),
             created: Some(1_774_483_200),
+            kit: None,
         }
     }
 

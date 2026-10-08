@@ -105,6 +105,11 @@ pub(crate) struct Clip {
     /// remaps them. A `Vec` of subtrees rather than one, so copying a
     /// multi-selection keeps all of it.
     pub(crate) subtrees: Vec<Vec<Node>>,
+    /// The vault mains those subtrees reach, with their origins
+    /// (`ondin_core::kit::carried`, §15 D1012) — empty unless the copy holds a
+    /// kit instance. A paste vendors them, so the instance lands linked in a
+    /// document that has never used the kit.
+    pub(crate) kits: Vec<Vec<Node>>,
     /// The table entries those subtrees reference (`build::image_ids_in`), which
     /// `insert_all` adds to the target document if it does not already have them.
     /// Empty for everything that is not a picture, which is most copies.
@@ -4482,7 +4487,20 @@ impl OndinApp {
             Some(src) => src,
             None => return,
         };
-        self.session.selection.set_one(target);
+        self.select_main(target);
+    }
+
+    /// Select `main` — a main or a node inside one — and bring it into view, unless
+    /// it is a vendored kit main, which lives in the vault and is never selected
+    /// (§15 D1012): selecting it would hand the inspector a layer the user cannot
+    /// see and must not edit. *Go to main in the kit* is the kit's own verb.
+    pub(crate) fn select_main(&mut self, main: NodeId) {
+        if self.session.doc.in_vault(main) {
+            self.session
+                .info("Its main is in a kit, not in this document");
+            return;
+        }
+        self.session.selection.set_one(main);
         self.reveal_selection();
     }
 
@@ -5406,6 +5424,7 @@ impl OndinApp {
         self.clipboard_from = payload.from;
         self.clipboard = Some(Clip {
             subtrees: payload.subtrees,
+            kits: payload.kits,
             images: payload.images,
         });
         // The stamp is written here for the same reason `stamp_clipboard` writes
@@ -5487,7 +5506,13 @@ impl OndinApp {
         // certainly the one on screen. A copy is nodes plus the table entries those
         // nodes key into (`Clip`), because a node carries the key and the document
         // carries the bytes.
-        let flat: Vec<Node> = templates.iter().flatten().cloned().collect();
+        //
+        // **And the kit mains a kit instance links to** (§15 D1012), with every
+        // picture they show: a paste into a document that has never used the kit
+        // vendors them, where the link alone would arrive pointing at nothing and
+        // be cut (§15 D979 (d)).
+        let kits = ondin_core::kit::carried(&self.session.doc, &templates);
+        let flat: Vec<Node> = templates.iter().chain(&kits).flatten().cloned().collect();
         let images: Vec<_> = build::image_ids_in(&flat)
             .into_iter()
             .filter_map(|id| Some((id.clone(), self.session.doc.image(&id)?.clone())))
@@ -5504,13 +5529,20 @@ impl OndinApp {
         // fallback is the behaviour this call had until D823, which leaves the
         // in-app clipboard working and only the crossing lost.
         let heading = names.join(", ");
-        let text = ondin_core::io::clip::write(&templates, &images, self.clipboard_from, &heading)
-            .unwrap_or(heading);
+        let text = ondin_core::io::clip::write_carrying(
+            &templates,
+            &kits,
+            &images,
+            self.clipboard_from,
+            &heading,
+        )
+        .unwrap_or(heading);
         self.stamp_clipboard(ctx, text.clone());
         self.session
             .info(format!("Copied {} layer(s)", templates.len()));
         self.clipboard = Some(Clip {
             subtrees: templates,
+            kits,
             images,
         });
         // One clipboard, two typed fields — see `OndinApp::guide_clipboard`.
@@ -5997,7 +6029,7 @@ impl OndinApp {
         }
         // Down and right, so the copy is obviously a copy rather than sitting
         // invisibly on top of what it came from.
-        self.insert_all(placements, "Pasted", offset, &clip.images);
+        self.insert_all(placements, "Pasted", offset, &clip.images, &clip.kits);
         true
     }
 
@@ -6072,12 +6104,12 @@ impl OndinApp {
         // clipboard, the copy settles as an instance of `m` inside `m` and the commit
         // refused the whole paste as `ComponentCycle`; a main whose original is gone
         // stays a main, `NestedMain` inside a main or an instance.
-        if !self.paste_is_held(&placements, &clip.images) {
+        if !self.paste_is_held(&placements, &clip.images, &clip.kits) {
             return self.paste_clipboard_at(PASTE_OFFSET);
         }
         // Offset like every other paste: a copy landing exactly on top of something
         // is invisible, and this door decided the *slot*, not the position.
-        self.insert_all(placements, "Pasted", PASTE_OFFSET, &clip.images);
+        self.insert_all(placements, "Pasted", PASTE_OFFSET, &clip.images, &clip.kits);
         true
     }
 
@@ -6097,6 +6129,7 @@ impl OndinApp {
         &mut self,
         placements: &[build::Placement],
         images: &[(ondin_core::ImageId, ondin_core::ImageEntry)],
+        kits: &[Vec<Node>],
     ) -> bool {
         let doc = &self.session.doc;
         let under_a_component = placements.iter().any(|p| {
@@ -6106,7 +6139,15 @@ impl OndinApp {
         if !under_a_component {
             return true;
         }
-        let (tx, _) = build::insert_subtrees(doc, &mut self.session.ids, placements, PASTE_OFFSET);
+        // The transaction `insert_all` will commit, kit mains and all (§15
+        // D1012) — without them a carried instance would be judged detached.
+        let (tx, _) = ondin_core::kit::insert_carrying(
+            doc,
+            &mut self.session.ids,
+            kits,
+            placements,
+            PASTE_OFFSET,
+        );
         let mut ops = build::missing_image_ops(doc, images);
         ops.extend(tx.0);
         let mut tx = Transaction(ops);
@@ -6229,7 +6270,7 @@ impl OndinApp {
         }
         // No pictures to carry: a duplicate is made from the document it lands in,
         // so every id it references is already in that document's table.
-        self.insert_all(placements, "Duplicated", step, &[]);
+        self.insert_all(placements, "Duplicated", step, &[], &[]);
 
         // Remember where this copy landed, so moving it and pressing again
         // repeats that move.
@@ -6282,12 +6323,19 @@ impl OndinApp {
     /// copy came from produces no extra ops and the ordinary case is unchanged;
     /// the duplicate path passes none at all, being unable to leave the document
     /// it reads from.
+    ///
+    /// `kits` is the same argument one level up (§15 D1012): the vendored kit
+    /// mains a copied kit instance links to, which a document that has never used
+    /// the kit is given so the instance lands linked (`kit::insert_carrying`).
+    /// Back in the document they came from they are already held, and nothing is
+    /// added.
     fn insert_all(
         &mut self,
         placements: Vec<build::Placement>,
         verb: &str,
         offset: Vec2,
         images: &[(ondin_core::ImageId, ondin_core::ImageEntry)],
+        kits: &[Vec<Node>],
     ) {
         if placements.is_empty() {
             return;
@@ -6295,9 +6343,10 @@ impl OndinApp {
         if self.paste_cut_move(&placements, verb, offset, images) {
             return;
         }
-        let (tx, created) = build::insert_subtrees(
+        let (tx, created) = ondin_core::kit::insert_carrying(
             &self.session.doc,
             &mut self.session.ids,
+            kits,
             &placements,
             offset,
         );
@@ -20646,6 +20695,104 @@ mod component_verb_tests {
             text.contains("2 instances detached"),
             "the delete counts the two instances: {text}"
         );
+    }
+
+    /// **A kit instance's main is never selected** (§15 D1012): it lives in the
+    /// vault, which nothing draws, so selecting it would hand the inspector a
+    /// layer the user cannot see and must not edit. *Go to main* on the instance
+    /// and on a member says where the main is and leaves the selection; a vault id
+    /// that reaches the selection some other way is pruned at the next commit.
+    ///
+    /// Flip, run: `select_main`'s vault guard removed fails *"an instance stays
+    /// selected"*, the selection on the vendored main.
+    #[test]
+    fn a_kit_instances_main_is_never_selected() {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        let mut lids = IdSource::new(0xAC);
+        let lroot = lids.mint();
+        let mut kit = Document::new(lroot);
+        let [m, r] = [(); 2].map(|_| lids.mint());
+        kit.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: m,
+                parent: lroot,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(40.0, 40.0),
+                },
+                transform: None,
+                name: Some("Badge".into()),
+            },
+            Operation::CreateNode {
+                id: r,
+                parent: m,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(10.0, 10.0),
+                    corner_radii: Default::default(),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetComponent {
+                id: m,
+                component: true,
+            },
+        ]))
+        .unwrap();
+        let published = ondin_core::kit::freeze(&kit).unwrap();
+        let root = app.session.doc.root();
+        let (tx, inst) = ondin_core::kit::insert(
+            &app.session.doc,
+            &mut app.session.ids,
+            "5eed0000000000000000000000000001",
+            1,
+            &published,
+            m,
+            root,
+        )
+        .unwrap();
+        assert!(app.session.commit(tx));
+        let main = app.session.doc.get(inst).unwrap().link().unwrap();
+        assert!(app.session.doc.in_vault(main), "the fixture vendored it");
+
+        app.session.selection.set_one(inst);
+        app.go_to_main();
+        assert_eq!(
+            app.session.selection.ids(),
+            &[inst],
+            "an instance stays selected"
+        );
+        assert!(app.session.status().text.contains("in a kit"));
+        let member = app.session.doc.get(inst).unwrap().children()[0];
+        app.session.selection.set_one(member);
+        app.go_to_main();
+        assert_eq!(
+            app.session.selection.ids(),
+            &[member],
+            "a member stays selected"
+        );
+
+        app.session.selection.set(vec![inst, main]);
+        app.session.selection.retain_existing(&app.session.doc);
+        assert_eq!(app.session.selection.ids(), &[inst], "the vault id pruned");
+
+        // **Copied into another document, it lands an instance** (§15 D1012):
+        // through `copy_selection`, the document swapped, and the paste chord's
+        // `insert_all` — `session.commit`'s passes included, which the core tests
+        // do not run. Flip, run: `insert_all` calling `build::insert_subtrees`
+        // instead of `kit::insert_carrying` fails *"still an instance"*.
+        app.session.selection.set_one(inst);
+        app.copy_selection(&ctx);
+        let mut eids = IdSource::new(0xEA);
+        let eroot = eids.mint();
+        app.session.adopt_document(Document::new(eroot), None);
+        assert!(app.paste_clipboard());
+        let pasted = app.session.selection.single().expect("the paste selected");
+        let main = app.session.doc.get(pasted).unwrap().link();
+        let main = main.expect("still an instance");
+        assert!(app.session.doc.in_vault(main));
     }
 
     /// **A cut main moves** (§15 D1003 (1), `[X2-L5-01]`): the cut detaches the

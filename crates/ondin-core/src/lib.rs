@@ -34,6 +34,7 @@ pub mod id;
 pub mod image;
 pub mod io;
 pub mod item;
+pub mod kit;
 pub mod layout;
 pub mod meta;
 pub mod naming;

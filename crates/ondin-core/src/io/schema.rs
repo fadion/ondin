@@ -46,6 +46,11 @@ pub(crate) struct DocumentDto {
     #[serde(default, skip_serializing_if = "DocumentMeta::is_empty")]
     pub meta: DocumentMeta,
     pub root: String,
+    /// The vault's root — the second root holding vendored kit mains (§15 D1012)
+    /// — absent in a document that has used no kit. Its nodes are in `nodes` with
+    /// the rest, which is why the reachability check walks from both roots.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vault: Option<String>,
     /// Sorted by node id on save for byte-stable output (invariant 9).
     pub nodes: Vec<NodeDto>,
     /// The ground behind and around the frames (§15 D18). Defaulted rather than
@@ -70,6 +75,33 @@ pub(crate) struct DocumentDto {
     /// existed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<ImageDto>,
+    /// What a kit last published (§5.3e, §15 D1012) — absent in every document
+    /// that has not. **After the images**, at the very end, for `images`' diff
+    /// reason: it changes only at a publish, and it can hold a copy of every
+    /// main.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub published: Option<PublishedDto>,
+}
+
+/// A kit's published state on disk: a whole document, in this same form, and
+/// the frame each published main sat in.
+///
+/// ⚠️ **A migration that reshapes a document must reshape this one too** — the
+/// ladder (`io::migrate`) walks the outer value, and the nested `document` is a
+/// document of the same version that the ladder does not yet descend into. None
+/// has had to, since this arrived with v6.
+#[derive(Serialize, Deserialize)]
+pub(crate) struct PublishedDto {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<GroupDto>,
+    pub document: Box<DocumentDto>,
+}
+
+/// One published main or set and the top-level frame it sat in (§15 D1011 (4)).
+#[derive(Serialize, Deserialize)]
+pub(crate) struct GroupDto {
+    pub top: String,
+    pub frame: String,
 }
 
 /// One image table entry on disk.
@@ -254,6 +286,10 @@ pub(crate) struct NodeDto {
     /// (§15 D982). Bound layers are wire ids, checked on load with the links.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub props: Vec<Keyed<crate::variant::Property>>,
+    /// Where a vault node was vendored from (§15 D1012), absent on every node
+    /// outside the vault — which `crate::kit::check` holds on load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<OriginDto>,
 }
 
 /// What a file written before `clip` existed meant: frames clipped.
@@ -342,6 +378,11 @@ impl NodeDto {
             set: n.set().cloned(),
             variant: n.variant().to_vec(),
             props: n.props().to_vec(),
+            origin: n.origin().map(|o| OriginDto {
+                kit: o.kit.clone(),
+                node: o.node.to_wire(),
+                version: o.version,
+            }),
         }
     }
 
@@ -441,8 +482,27 @@ impl NodeDto {
             // lose the artwork over a defect the app itself wrote. Deterministic —
             // a function of the list — so the same bytes still give one document.
             props: crate::item::rekey_repeats(self.props),
+            origin: self
+                .origin
+                .map(|o| -> Result<_, IoError> {
+                    Ok(crate::kit::Origin {
+                        kit: o.kit,
+                        node: parse_id(&o.node)?,
+                        version: o.version,
+                    })
+                })
+                .transpose()?,
         })
     }
+}
+
+/// A vendored node's provenance on disk (§15 D1012): the kit's `meta.id`, the
+/// node there as a wire id, and the published version.
+#[derive(Serialize, Deserialize)]
+pub(crate) struct OriginDto {
+    pub kit: String,
+    pub node: String,
+    pub version: u32,
 }
 
 impl ImageDto {
@@ -527,17 +587,30 @@ impl DocumentDto {
         Self {
             schema_version: CURRENT_SCHEMA_VERSION,
             root: doc.root().to_wire(),
+            vault: doc.vault().map(NodeId::to_wire),
             nodes,
             canvas_background: doc.canvas_background(),
             guides,
             images,
             meta: doc.meta().clone(),
+            published: doc.published().map(|p| PublishedDto {
+                groups: p
+                    .groups()
+                    .iter()
+                    .map(|(t, f)| GroupDto {
+                        top: t.to_wire(),
+                        frame: f.clone(),
+                    })
+                    .collect(),
+                document: Box::new(Self::from_document(p.document())),
+            }),
         }
     }
 
     /// Rebuild a document from a (migrated) DTO, verifying tree integrity.
     pub(crate) fn into_document(self) -> Result<Document, IoError> {
         let root = parse_id(&self.root)?;
+        let vault = self.vault.as_deref().map(parse_id).transpose()?;
         // Opaque, always — the same rule the editor applies when setting it.
         let ground = self.canvas_background.with_alpha(1.0);
 
@@ -610,11 +683,33 @@ impl DocumentDto {
             }
         }
 
-        verify_integrity(&nodes, root)?;
+        verify_integrity(&nodes, root, vault)?;
+
+        // The published state is a document of its own, held to the same rules
+        // by the same loader (§15 D1012) — but one level deep only: a frozen copy
+        // never carries a frozen copy, and refusing one here bounds the
+        // recursion a hand-made file could ask for.
+        let published = match self.published {
+            None => None,
+            Some(p) => {
+                if p.document.published.is_some() {
+                    return Err(IoError::Integrity(
+                        "a published kit state holds a published state of its own".into(),
+                    ));
+                }
+                let doc = p.document.into_document()?;
+                let mut groups = Vec::with_capacity(p.groups.len());
+                for g in p.groups {
+                    groups.push((parse_id(&g.top)?, g.frame));
+                }
+                Some(crate::kit::Published::from_parts(doc, groups))
+            }
+        };
         Ok(Document::from_parts(
             CURRENT_SCHEMA_VERSION,
             nodes,
             root,
+            vault,
             ground,
             guides,
             images,
@@ -632,6 +727,7 @@ impl DocumentDto {
             // [`DocumentMeta::is_wellformed_id`] — and note this is still
             // deterministic, because it is a function of the bytes alone.
             self.meta.sanitized(),
+            published,
         ))
     }
 }
@@ -740,7 +836,11 @@ fn parse_id(s: &str) -> Result<NodeId, IoError> {
 /// grid draws, and the dashboard is the landing screen, so one such file in the
 /// synced base folder crashes the app at launch with nothing on screen naming
 /// the file.
-fn verify_integrity(nodes: &FxHashMap<NodeId, Node>, root: NodeId) -> Result<(), IoError> {
+fn verify_integrity(
+    nodes: &FxHashMap<NodeId, Node>,
+    root: NodeId,
+    vault: Option<NodeId>,
+) -> Result<(), IoError> {
     let root_node = nodes
         .get(&root)
         .ok_or_else(|| IoError::Integrity("root node not present".into()))?;
@@ -760,7 +860,7 @@ fn verify_integrity(nodes: &FxHashMap<NodeId, Node>, root: NodeId) -> Result<(),
         node.check_item_ids()
             .map_err(|e| IoError::Integrity(e.to_string()))?;
         match node.parent() {
-            None if node.id() != root => {
+            None if node.id() != root && Some(node.id()) != vault => {
                 return Err(IoError::Integrity(format!(
                     "non-root node {:?} has no parent",
                     node.id()
@@ -816,9 +916,24 @@ fn verify_integrity(nodes: &FxHashMap<NodeId, Node>, root: NodeId) -> Result<(),
     // mask at any depth (§15 D876). It is an ancestor rule, so the pairwise
     // `check_child_kind` above cannot see it, and the flag each stack entry
     // carries is "something above here bars frames".
+    //
+    // **From both roots** (§15 D1012): the vault's nodes hang from a second root
+    // beside the document's, so "reachable" means reachable from either. Its
+    // shape — parentless, a `Root`, not the document's own — is `kit::check`'s,
+    // below; here it only has to exist before the walk starts from it.
     let mut visited: FxHashSet<NodeId> = FxHashSet::default();
     let mut stack = vec![(root, 0usize, false)];
     visited.insert(root);
+    if let Some(v) = vault {
+        if v == root || !nodes.contains_key(&v) {
+            return Err(IoError::Integrity(format!(
+                "node {v:?} {}",
+                crate::kit::VaultRule::Shape
+            )));
+        }
+        stack.push((v, 0, false));
+        visited.insert(v);
+    }
     while let Some((id, depth, barred)) = stack.pop() {
         if depth > MAX_TREE_DEPTH {
             return Err(IoError::Integrity(format!(
@@ -855,6 +970,9 @@ fn verify_integrity(nodes: &FxHashMap<NodeId, Node>, root: NodeId) -> Result<(),
     // to nothing is refused rather than dropped, a guide owner's answer (§5.11):
     // dropping it would turn an instance into a detached copy without a word.
     crate::component::check(nodes)
+        .map_err(|(id, rule)| IoError::Integrity(format!("node {id:?} {rule}")))?;
+    // And the vault's (§15 D1012), `Document::apply`'s post-condition at this door.
+    crate::kit::check(nodes, root, vault)
         .map_err(|(id, rule)| IoError::Integrity(format!("node {id:?} {rule}")))?;
 
     Ok(())

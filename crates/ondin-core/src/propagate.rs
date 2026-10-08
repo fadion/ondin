@@ -103,7 +103,9 @@ fn mode(op: &Operation) -> Mode {
         | Operation::SetGuideColor { .. }
         | Operation::SetGuideScope { .. }
         | Operation::AddImage { .. }
-        | Operation::RemoveImage { .. } => Mode::Skip,
+        | Operation::RemoveImage { .. }
+        | Operation::OpenVault { .. }
+        | Operation::CloseVault { .. } => Mode::Skip,
     }
 }
 

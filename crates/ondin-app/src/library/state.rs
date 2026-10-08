@@ -476,6 +476,7 @@ mod tests {
                 name: Some(name.into()),
                 project: None,
                 created: Some(created),
+                kit: None,
             },
             modified,
             size,

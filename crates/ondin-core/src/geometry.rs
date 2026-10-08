@@ -1562,6 +1562,7 @@ mod tests {
             set: None,
             variant: Vec::new(),
             props: Vec::new(),
+            origin: None,
         }
     }
 

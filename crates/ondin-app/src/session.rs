@@ -301,11 +301,13 @@ impl Selection {
         self.frame = None;
     }
 
-    /// Drop ids that are no longer in the document (after a delete or an undo).
+    /// Drop ids that are no longer in the document (after a delete or an undo) —
+    /// or that are in its vault, which is never selectable (§15 D1012).
     pub fn retain_existing(&mut self, doc: &Document) {
         let before = self.ids.len();
-        self.ids.retain(|id| doc.contains(*id));
-        self.key.take_if(|id| !doc.contains(*id));
+        let gone = |id: NodeId| !doc.contains(id) || doc.in_vault(id);
+        self.ids.retain(|id| !gone(*id));
+        self.key.take_if(|id| gone(*id));
         self.guides.retain(|id| doc.guide(*id).is_some());
         // **Only when it actually dropped something.** This runs after every commit
         // and every undo, so forgetting unconditionally would throw the orientation

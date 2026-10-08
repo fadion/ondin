@@ -377,6 +377,20 @@ pub enum Operation {
     RemoveImage {
         id: ImageId,
     },
+    /// Open the document's **vault** — the parentless `Root` that holds vendored
+    /// kit mains, beside the document's own (§5.3e, §15 D1012). Inverts to
+    /// [`Self::CloseVault`]; refused when a vault is open.
+    ///
+    /// **An operation rather than a side effect of the first vendoring insert**,
+    /// so the insert's undo takes the vault away with it and a document that has
+    /// never used a kit saves as it did before kits existed.
+    OpenVault {
+        id: NodeId,
+    },
+    /// Close the vault. Refused unless it is open, is `id`, and is empty.
+    CloseVault {
+        id: NodeId,
+    },
 }
 
 impl Operation {
@@ -450,7 +464,10 @@ impl Operation {
             // The image table is document-level, like the guides and the ground:
             // these name an `ImageId` and no node at all.
             | Operation::AddImage { .. }
-            | Operation::RemoveImage { .. } => None,
+            | Operation::RemoveImage { .. }
+            // Structural: the vault is a root coming and going (§15 D1012).
+            | Operation::OpenVault { .. }
+            | Operation::CloseVault { .. } => None,
         }
     }
 
@@ -625,7 +642,11 @@ impl Operation {
             | Operation::RemoveGuide { .. }
             | Operation::SetGuidePosition { .. }
             | Operation::SetGuideColor { .. }
-            | Operation::SetGuideScope { .. } => false,
+            | Operation::SetGuideScope { .. }
+            // The vault is never drawn (§15 D1012): opening or closing it changes
+            // nothing on the canvas — what a kit insert draws is its instance.
+            | Operation::OpenVault { .. }
+            | Operation::CloseVault { .. } => false,
             Operation::CreateNode { .. }
             | Operation::DeleteNode { .. }
             | Operation::InsertSubtree { .. }
@@ -730,7 +751,9 @@ impl Operation {
             | Operation::AddGuide { .. }
             | Operation::RemoveGuide { .. }
             | Operation::AddImage { .. }
-            | Operation::RemoveImage { .. } => false,
+            | Operation::RemoveImage { .. }
+            | Operation::OpenVault { .. }
+            | Operation::CloseVault { .. } => false,
 
             // **The index is read the way `apply` writes it** — the child is
             // removed from its parent's list and re-inserted at `index`, so the
@@ -1248,6 +1271,11 @@ pub enum OpError {
     /// is judged by where it ends.
     #[error("node {0:?} {1}")]
     BadLink(NodeId, crate::component::LinkRule),
+    /// A vault rule broken (§15 D1012, `crate::kit::check`) — an origin outside
+    /// the vault or a vault node without one, a vault child that is not a main or
+    /// a set — or a vault opened twice or closed while it held something.
+    #[error("node {0:?} {1}")]
+    Vault(NodeId, crate::kit::VaultRule),
     /// A number that is `NaN` or infinite — in a node's geometry, in its
     /// transform, in its **pivot** (§15 D639), in an **effect** it carries — a
     /// shadow's offset, blur, spread and colour, a layer blur's radius, the four

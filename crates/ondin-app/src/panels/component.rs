@@ -809,10 +809,7 @@ impl OndinApp {
                 }
             }
             Some(Act::Select(ids)) => self.session.selection.set(ids),
-            Some(Act::GoToMain(main)) => {
-                self.session.selection.set_one(main);
-                self.reveal_selection();
-            }
+            Some(Act::GoToMain(main)) => self.select_main(main),
             Some(Act::GoToSource) => self.go_to_main(),
             // Through `commit_reset`, which is `commit_edit` as every inspector edit
             // that changes ink is (`OndinApp::reset_tx`), restyling a live text
@@ -1134,7 +1131,9 @@ fn card_of(op: &Operation) -> Option<&'static str> {
         | O::SetGuideColor { .. }
         | O::SetGuideScope { .. }
         | O::AddImage { .. }
-        | O::RemoveImage { .. } => None,
+        | O::RemoveImage { .. }
+        | O::OpenVault { .. }
+        | O::CloseVault { .. } => None,
     }
 }
 

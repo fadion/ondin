@@ -1590,6 +1590,11 @@ impl RenderOverrides {
             // about to read out of the committed tree, and no patch can say
             // "somewhere else" or "not there".
             Operation::DeleteNode { .. } | Operation::Reparent { .. } => return None,
+            // The vault coming and going (§15 D1012) draws nothing, but it is a
+            // root, and no gesture builds one — a kit insert is a click. Refused
+            // rather than filed with the no-ops, whose count is pinned against
+            // `changes_ink`'s.
+            Operation::OpenVault { .. } | Operation::CloseVault { .. } => return None,
         }
         Some(())
     }

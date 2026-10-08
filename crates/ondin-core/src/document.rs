@@ -33,6 +33,15 @@ pub struct Document {
     schema_version: u32,
     nodes: FxHashMap<NodeId, Node>,
     root: NodeId,
+    /// The **vault** — a second, parentless `Root` holding the kit mains this
+    /// document has vendored, when it has any (§5.3e, §15 D1012, `crate::kit`).
+    ///
+    /// Its nodes are in [`Self::nodes`] like any other, so every pass that asks by
+    /// id sees them, and outside the tree under [`Self::root`], so every walk from
+    /// the root skips them. Opened and closed by operations
+    /// ([`Operation::OpenVault`], [`Operation::CloseVault`]), so the first kit
+    /// insert and its undo bring it and take it away with the rest of the edit.
+    vault: Option<NodeId>,
     /// The ground behind and around the frames (§15 D18).
     ///
     /// The one piece of document state that is not a node. It sat on
@@ -75,6 +84,18 @@ pub struct Document {
     /// a step in its editing history. `crate::meta` records the rest of that
     /// reasoning and the invariant-9 rule that constrains what may go in it.
     meta: DocumentMeta,
+    /// What this document last **published** as a kit (§5.3e, §15 D1012) — a
+    /// frozen copy of its mains and sets, which consumers vendor from and never
+    /// from the working document (§15 D1011 (2)).
+    ///
+    /// **Outside undo for `meta`'s reason**: publishing is an outward act, as a
+    /// save is, and an undo cannot take it back from documents that already
+    /// read it. Behind an `Arc` because `apply` clones the document per
+    /// transaction and this copy only changes at a publish. Not derived state
+    /// under invariant 4 either, though it is computed from the tree: it is
+    /// the tree *as it was at the publish*, which the working document no longer
+    /// holds once it is edited.
+    published: Option<std::sync::Arc<crate::kit::Published>>,
     /// **True only while [`Self::apply_restoring`] runs** — a history step putting
     /// back values this document already held, which the layout operations then
     /// take whether or not CSS accepts them (§15 D937). Never true between calls,
@@ -114,6 +135,7 @@ impl Document {
             set: None,
             variant: Vec::new(),
             props: Vec::new(),
+            origin: None,
         };
         let mut nodes = FxHashMap::default();
         nodes.insert(root_id, root);
@@ -121,6 +143,7 @@ impl Document {
             schema_version: CURRENT_SCHEMA_VERSION,
             nodes,
             root: root_id,
+            vault: None,
             canvas_background: DEFAULT_CANVAS_BACKGROUND,
             guides: Vec::new(),
             images: FxHashMap::default(),
@@ -129,6 +152,7 @@ impl Document {
             // fixture and the starter document use. Minting here would put a
             // fresh identity on a document nobody has saved.
             meta: DocumentMeta::default(),
+            published: None,
             restoring: false,
         }
     }
@@ -246,6 +270,18 @@ impl Document {
         self.meta = meta;
     }
 
+    /// What this document last published as a kit (§15 D1012), when it has.
+    pub fn published(&self) -> Option<&crate::kit::Published> {
+        self.published.as_deref()
+    }
+
+    /// Replace the published state — the publish itself, or *Stop sharing*'s
+    /// nothing. Outside undo and reporting no `DirtySet`, as [`Self::set_meta`]
+    /// is and for its reason.
+    pub fn set_published(&mut self, published: Option<crate::kit::Published>) {
+        self.published = published.map(std::sync::Arc::new);
+    }
+
     /// Every ruler guide on the document, in no particular order.
     pub fn guides(&self) -> &[Guide] {
         &self.guides
@@ -306,6 +342,30 @@ impl Document {
         self.root
     }
 
+    /// The vault's root, when this document has vendored a kit main (§15 D1012).
+    pub fn vault(&self) -> Option<NodeId> {
+        self.vault
+    }
+
+    /// Whether `id` is the vault or under it — a vendored kit node, never drawn,
+    /// picked or selected (§15 D1012). False for a node not in the document.
+    pub fn in_vault(&self, id: NodeId) -> bool {
+        let Some(v) = self.vault else {
+            return false;
+        };
+        let mut cursor = Some(id);
+        // Bounded by the node count, as every ancestor walk over stored parents
+        // must be against a file the loader has not yet certified.
+        for _ in 0..=self.nodes.len() {
+            match cursor {
+                Some(c) if c == v => return true,
+                Some(c) => cursor = self.nodes.get(&c).and_then(|n| n.parent),
+                None => return false,
+            }
+        }
+        false
+    }
+
     pub fn schema_version(&self) -> u32 {
         self.schema_version
     }
@@ -325,23 +385,31 @@ impl Document {
 
     /// Build a document from already-validated parts (used by IO on load).
     /// Performs no validation itself — the caller (io::schema) checks integrity.
+    ///
+    /// One argument per field a file stores, which is why there are nine: a
+    /// struct of the same nine fields would be this signature with a name.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn from_parts(
         schema_version: u32,
         nodes: FxHashMap<NodeId, Node>,
         root: NodeId,
+        vault: Option<NodeId>,
         canvas_background: Color,
         guides: Vec<Guide>,
         images: FxHashMap<ImageId, ImageEntry>,
         meta: DocumentMeta,
+        published: Option<crate::kit::Published>,
     ) -> Self {
         Self {
             schema_version,
             nodes,
             root,
+            vault,
             canvas_background,
             guides,
             images,
             meta,
+            published: published.map(std::sync::Arc::new),
             restoring: false,
         }
     }
@@ -455,6 +523,12 @@ impl Document {
         // when nothing is a main or linked (`component::check`).
         crate::component::check(&working.nodes).map_err(|(id, rule)| OpError::BadLink(id, rule))?;
 
+        // The vault's rules (§15 D1012): an origin on every vault node and on
+        // nothing else, a main or a set at each of its children. After the last op
+        // for the guide owners' reason — vendoring opens the vault, then inserts.
+        crate::kit::check(&working.nodes, working.root, working.vault)
+            .map_err(|(id, rule)| OpError::Vault(id, rule))?;
+
         // All ops succeeded — commit the working copy.
         *self = working;
 
@@ -519,10 +593,12 @@ impl Document {
             schema_version: self.schema_version,
             nodes,
             root: self.root,
+            vault: self.vault,
             canvas_background: self.canvas_background,
             guides: Vec::new(),
             images: FxHashMap::default(),
             meta: DocumentMeta::default(),
+            published: None,
             restoring: self.restoring,
         };
         one.apply_one(op, &mut DirtySet::default()).ok()
@@ -656,7 +732,37 @@ impl Document {
             } => self.op_set_guide_scope(*id, *owner, *position),
             Operation::AddImage { id, entry } => self.op_add_image(id.clone(), entry.clone()),
             Operation::RemoveImage { id } => self.op_remove_image(id.clone()),
+            Operation::OpenVault { id } => self.op_open_vault(*id),
+            Operation::CloseVault { id } => self.op_close_vault(*id),
         }
+    }
+
+    /// Open the vault as an empty parentless `Root` (§15 D1012). Refused when one
+    /// is open or the id is taken. Nothing is dirtied: nothing in it is drawn.
+    fn op_open_vault(&mut self, id: NodeId) -> Result<Operation, OpError> {
+        if self.vault.is_some() {
+            return Err(OpError::Vault(id, crate::kit::VaultRule::State));
+        }
+        if self.nodes.contains_key(&id) {
+            return Err(OpError::DuplicateId(id));
+        }
+        let mut vault = Document::new(id).nodes.remove(&id).expect("just made");
+        vault.name = "Kits".to_string();
+        self.nodes.insert(id, vault);
+        self.vault = Some(id);
+        Ok(Operation::CloseVault { id })
+    }
+
+    /// Close the vault — only when it is `id` and holds nothing, so the inverse of
+    /// an open undoes exactly that.
+    fn op_close_vault(&mut self, id: NodeId) -> Result<Operation, OpError> {
+        let empty = self.nodes.get(&id).is_some_and(|n| n.children.is_empty());
+        if self.vault != Some(id) || !empty {
+            return Err(OpError::Vault(id, crate::kit::VaultRule::State));
+        }
+        self.nodes.remove(&id);
+        self.vault = None;
+        Ok(Operation::OpenVault { id })
     }
 
     // --- operation implementations ---
@@ -755,6 +861,7 @@ impl Document {
             set: None,
             variant: Vec::new(),
             props: Vec::new(),
+            origin: None,
         };
         self.nodes.insert(id, node);
         self.nodes
@@ -2171,6 +2278,12 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
                     })
                 })
                 .collect(),
+            // ⚠️ **Never carried, unlike every field above** (§15 D1012). A copy of
+            // a vendored node is a duplicate, an instance or a pasted layer — none
+            // of them lives in the vault, and `kit::check` refuses an origin
+            // outside it. The kit verbs mint their copies here too and write the
+            // origin afterwards, so this is the one place a copy can lose it.
+            origin: None,
         });
     }
     Some((out, new_root?))
@@ -2391,6 +2504,7 @@ mod tests {
             set: None,
             variant: Vec::new(),
             props: Vec::new(),
+            origin: None,
         }
     }
 

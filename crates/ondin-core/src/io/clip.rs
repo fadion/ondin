@@ -64,6 +64,11 @@ pub struct Payload {
     /// mints fresh ones through `document::remap_subtree`, so the ids arriving
     /// from another window are a template rather than a claim on this document.
     pub subtrees: Vec<Vec<Node>>,
+    /// The vault mains the copy reaches, captured whole with their origins
+    /// (`crate::kit::carried`, §15 D1012) — empty unless the copy holds a kit
+    /// instance. The paste vendors them (`crate::kit::adopt`) so the instance
+    /// lands linked rather than detached.
+    pub kits: Vec<Vec<Node>>,
     /// The image table entries those subtrees key into. A node carries the key
     /// and the document carries the bytes, so a picture that crossed without
     /// these would arrive as the missing-picture placeholder in silence.
@@ -84,6 +89,10 @@ struct ClipDto {
     /// subtree's root and its `parent` still names the node it was copied out
     /// of, which is what lets a same-document paste land back in its own group.
     subtrees: Vec<Vec<NodeDto>>,
+    /// The carried kit mains, each a subtree in `subtrees`' form. Absent for a
+    /// copy holding no kit instance.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    kits: Vec<Vec<NodeDto>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     images: Vec<ImageDto>,
     /// `[x0, y0, x1, y1]`, absent when the copy had no measurable box.
@@ -103,12 +112,23 @@ pub fn write(
     from: Option<Rect>,
     heading: &str,
 ) -> Result<String, IoError> {
+    write_carrying(subtrees, &[], images, from, heading)
+}
+
+/// [`write()`], carrying the kit mains the copy reaches (`crate::kit::carried`,
+/// §15 D1012).
+pub fn write_carrying(
+    subtrees: &[Vec<Node>],
+    kits: &[Vec<Node>],
+    images: &[(ImageId, ImageEntry)],
+    from: Option<Rect>,
+    heading: &str,
+) -> Result<String, IoError> {
+    let dto_of = |t: &Vec<Node>| t.iter().map(NodeDto::from_node).collect();
     let dto = ClipDto {
         schema_version: CURRENT_SCHEMA_VERSION,
-        subtrees: subtrees
-            .iter()
-            .map(|t| t.iter().map(NodeDto::from_node).collect())
-            .collect(),
+        subtrees: subtrees.iter().map(dto_of).collect(),
+        kits: kits.iter().map(dto_of).collect(),
         images: images
             .iter()
             .map(|(id, entry)| ImageDto::from_entry(id, entry))
@@ -156,7 +176,11 @@ fn parse(json: &str) -> Result<Payload, IoError> {
         return Err(IoError::UnsupportedVersion(u64::from(dto.schema_version)));
     }
     let mut subtrees = Vec::with_capacity(dto.subtrees.len());
-    for dto_nodes in dto.subtrees {
+    let mut kits = Vec::with_capacity(dto.kits.len());
+    // The carried kit mains are subtrees in the same form and held to the same
+    // two rules (§15 D1012); only where they land differs.
+    let tagged = dto.subtrees.into_iter().map(|t| (false, t));
+    for (carried, dto_nodes) in tagged.chain(dto.kits.into_iter().map(|t| (true, t))) {
         if dto_nodes.is_empty() {
             return Err(IoError::Integrity("empty subtree on the clipboard".into()));
         }
@@ -204,7 +228,11 @@ fn parse(json: &str) -> Result<Payload, IoError> {
                  begins with its root"
             )));
         }
-        subtrees.push(nodes);
+        if carried {
+            kits.push(nodes);
+        } else {
+            subtrees.push(nodes);
+        }
     }
     let mut images = Vec::with_capacity(dto.images.len());
     let mut seen: Vec<ImageId> = Vec::new();
@@ -253,11 +281,13 @@ fn parse(json: &str) -> Result<Payload, IoError> {
     // already produces exactly the set this keeps.
     let referenced: Vec<ImageId> = subtrees
         .iter()
+        .chain(&kits)
         .flat_map(|nodes| crate::build::image_ids_in(nodes))
         .collect();
     images.retain(|(id, _)| referenced.contains(id));
     Ok(Payload {
         subtrees,
+        kits,
         images,
         // A non-finite box would sit in every comparison `paste_aim` makes and
         // match none of them, so it is dropped rather than carried — the copy

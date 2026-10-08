@@ -210,6 +210,12 @@ pub struct Node {
     /// view over a field of the layers it is bound to. Empty everywhere else, and
     /// on a variant, whose properties are its set's.
     pub(crate) props: Vec<Keyed<crate::variant::Property>>,
+    /// Where this node was **vendored from**, when it is part of a kit main in the
+    /// document's vault (§5.3e, §15 D1012) — the kit, the node there, the version.
+    /// `None` on every node outside the vault, and a copy of a vendored node never
+    /// keeps it (`remap_subtree`): only the kit verbs write one
+    /// (`crate::kit::check`).
+    pub(crate) origin: Option<crate::kit::Origin>,
 }
 
 impl Node {
@@ -253,6 +259,10 @@ impl Node {
     /// The component properties this main or set defines (§15 D982).
     pub fn props(&self) -> &[Keyed<crate::variant::Property>] {
         &self.props
+    }
+    /// Where this node was vendored from, when it is in the vault (§15 D1012).
+    pub fn origin(&self) -> Option<&crate::kit::Origin> {
+        self.origin.as_ref()
     }
     /// Refuse a node whose keyed lists repeat an item id within one list (§15
     /// D980) — `Document::apply`'s post-condition and the loader's check. Across

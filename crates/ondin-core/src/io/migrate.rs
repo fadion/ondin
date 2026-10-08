@@ -40,6 +40,7 @@ pub(crate) fn migrate(mut value: Value) -> Result<Value, IoError> {
             2 => migrate_2_to_3(&mut value),
             3 => migrate_3_to_4(&mut value),
             4 => migrate_4_to_5(&mut value),
+            5 => migrate_5_to_6(&mut value),
             other => return Err(IoError::UnsupportedVersion(other)),
         }
     }
@@ -234,4 +235,17 @@ fn migrate_4_to_5(value: &mut Value) {
         }
     }
     value["schema_version"] = Value::from(5u32);
+}
+
+/// v5 → v6: the vault (§15 D1012). **A number and nothing else** — a v5 file has
+/// no vault and no origins, which is exactly what v6 reads absent keys as.
+///
+/// The bump is for the older build's sake, which §5.11 names as a reason of its
+/// own: a v5 reader has no `deny_unknown_fields`, so it would drop the `vault`
+/// key and refuse the file over the vault itself — *"non-root node … has no
+/// parent"*, the first check to meet it (`tests/kits.rs` pins that message) —
+/// rather than over its age. With the bump it says the file is newer than it,
+/// which is true.
+fn migrate_5_to_6(value: &mut Value) {
+    value["schema_version"] = Value::from(6u32);
 }

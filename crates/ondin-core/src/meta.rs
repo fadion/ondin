@@ -82,6 +82,70 @@ pub struct DocumentMeta {
     /// Written once at creation — see the module's warning about clocks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created: Option<u64>,
+    /// The **kit mark** (§5.3e, §15 D1012) — present when this document is a kit,
+    /// whether or not it has published yet.
+    ///
+    /// **Here, in the block the library scan reads from a file's first 4 KB**
+    /// (`io::probe`), because the two questions every consumer asks of every kit —
+    /// *is this one a kit*, and *which version did it last publish* — are then
+    /// answered without loading the file. The frozen published state itself is
+    /// not here; it is `Document::published`, written at the end of the file.
+    ///
+    /// Written by the user's *Make this a kit*, *Stop sharing* and *Publish*, never
+    /// by a save, so the module's rule about clocks holds: the publish date is
+    /// stamped by the publish (§15 D1011 (2)).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kit: Option<KitMark>,
+}
+
+/// A kit's mark and what it last published (§5.3e). Version 0 with no date is a
+/// kit that has never published.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KitMark {
+    /// The last publish's version, counting from 1; 0 before the first. Carried
+    /// on when a kit stops sharing and is made one again (§5.3e, 1D), so a
+    /// consumer's copies are never newer than the kit.
+    #[serde(default)]
+    pub version: u32,
+    /// When the last publish was made, in whole seconds since the Unix epoch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date: Option<u64>,
+    /// The last publish's note, when one was written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    /// False once the kit has **stopped sharing** (1D): the mark stays, so its
+    /// version carries on if it is made a kit again, and consumers read the
+    /// document as no longer a kit.
+    #[serde(default = "sharing_by_default", skip_serializing_if = "is_sharing")]
+    pub sharing: bool,
+}
+
+fn sharing_by_default() -> bool {
+    true
+}
+
+fn is_sharing(b: &bool) -> bool {
+    *b
+}
+
+/// A fresh mark: sharing, never published — what *Make this a kit* writes, and
+/// what serde's per-field defaults agree with.
+impl Default for KitMark {
+    fn default() -> Self {
+        Self {
+            version: 0,
+            date: None,
+            note: None,
+            sharing: true,
+        }
+    }
+}
+
+impl KitMark {
+    /// Whether consumers should treat the document as a kit right now.
+    pub fn is_shared(&self) -> bool {
+        self.sharing
+    }
 }
 
 impl DocumentMeta {

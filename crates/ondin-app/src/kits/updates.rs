@@ -378,9 +378,32 @@ impl OndinApp {
         let content = self.session.preview_world_bounds(doc.root());
         let update = match ondin_core::kit::update_all(doc, &mut self.session.ids, &args) {
             Ok(u) => u,
-            Err(e) => {
-                self.session
-                    .fail(format!("The kit update could not be applied ({e:?})"));
+            // **This kit's publish reaches a newer version of a third kit's
+            // main than the document holds** (§15 D1024, the kits QA review's
+            // second pass): from the card or the canvas menu, which accept one
+            // kit, it failed for good. When more updates wait, all of them are
+            // accepted together — the third kit's among them — as *Accept all*
+            // does; otherwise the third kit is not in the library to update from.
+            Err(ondin_core::kit::KitError::NeedsUpdate(_))
+                if only.is_some() && self.kits_waiting(false).len() > waiting.len() =>
+            {
+                self.accept_kit_updates(None);
+                return;
+            }
+            Err(ondin_core::kit::KitError::NeedsUpdate(_)) => {
+                self.session.fail(
+                    "This update needs a newer version of another kit it uses, which is not \
+                     in your library"
+                        .to_string(),
+                );
+                return;
+            }
+            Err(_) => {
+                self.session.fail(
+                    "The kit update could not be applied — its published components are \
+                     incomplete"
+                        .to_string(),
+                );
                 return;
             }
         };

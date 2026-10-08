@@ -26,6 +26,17 @@ pub(crate) struct KitUsers {
     rx: mpsc::Receiver<usize>,
     /// The number, once the worker has it.
     pub count: Option<usize>,
+    /// Set when the count is dropped, so the worker stops between files rather
+    /// than loading the rest of the library for nobody — each reopening of the
+    /// dialog started another whole-library load beside it (§15 D1024, the kits
+    /// QA review's second pass).
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Drop for KitUsers {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 impl KitUsers {
@@ -33,10 +44,18 @@ impl KitUsers {
     pub(crate) fn start(kit: String, paths: Vec<PathBuf>) -> Self {
         let (tx, rx) = mpsc::channel();
         let id = kit.clone();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stopped = stop.clone();
         std::thread::Builder::new()
             .name("ondin-kit-users".into())
             .spawn(move || {
-                let n = paths.iter().filter(|p| uses(p, &id)).count();
+                let mut n = 0;
+                for p in &paths {
+                    if stopped.load(std::sync::atomic::Ordering::Relaxed) {
+                        return;
+                    }
+                    n += usize::from(uses(p, &id));
+                }
                 // The dialog closed and dropped the receiver: nobody is asking.
                 let _ = tx.send(n);
             })
@@ -45,6 +64,7 @@ impl KitUsers {
             kit,
             rx,
             count: None,
+            stop,
         }
     }
 

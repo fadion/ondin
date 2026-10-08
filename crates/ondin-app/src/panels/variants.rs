@@ -365,7 +365,7 @@ fn swap_picker(
     width: f32,
     shown: &str,
     current: Option<NodeId>,
-    options: impl Fn(&str) -> Vec<(NodeId, String)>,
+    options: impl Fn(&str) -> Vec<SwapOption>,
     enabled: Option<&str>,
 ) -> Option<NodeId> {
     let mut pick = None;
@@ -403,13 +403,21 @@ fn swap_picker(
                 egui::ScrollArea::vertical()
                     .max_height(240.0)
                     .show(ui, |ui| {
-                        for (id, name) in found {
-                            if ui
-                                .add(egui::Button::selectable(current == Some(id), name))
-                                .clicked()
-                            {
-                                pick = Some(id);
-                                ui.close();
+                        for (heading, group) in swap_groups(found) {
+                            if let Some((name, status)) = &heading {
+                                // A kit's heading wears the kit glyph; *This
+                                // document*, which has no status, does not.
+                                let glyph = (!status.is_empty()).then_some(icon::PACKAGE);
+                                swap_heading(ui, glyph, name, status);
+                            }
+                            for (id, name, _) in group {
+                                if ui
+                                    .add(egui::Button::selectable(current == Some(id), name))
+                                    .clicked()
+                                {
+                                    pick = Some(id);
+                                    ui.close();
+                                }
                             }
                         }
                     });
@@ -422,6 +430,73 @@ fn swap_picker(
         }
     });
     pick
+}
+
+/// A kit's heading in the swap picker: its name, and its version or
+/// `"unavailable"` on the right (§5.3e, 4F).
+type KitHeading = (String, String);
+
+/// A main the swap picker offers: its id, its name, and the kit it came from as
+/// a heading — or `None` for one of the document's own.
+type SwapOption = (NodeId, String, Option<KitHeading>);
+
+/// The swap picker's list grouped as 4F has it (§15 D1014): the document's own
+/// mains first, under *This document* only when a kit group follows, then one
+/// group per kit by name, each in the name order `swap::options` gave.
+fn swap_groups(found: Vec<SwapOption>) -> Vec<(Option<KitHeading>, Vec<SwapOption>)> {
+    let mut own = Vec::new();
+    let mut kits: Vec<(KitHeading, Vec<SwapOption>)> = Vec::new();
+    for o in found {
+        match o.2.clone() {
+            None => own.push(o),
+            Some(h) => match kits.iter_mut().find(|(k, _)| k.0 == h.0) {
+                Some((_, g)) => g.push(o),
+                None => kits.push((h, vec![o])),
+            },
+        }
+    }
+    kits.sort_by_key(|(h, _)| h.0.to_lowercase());
+    let mut out = Vec::new();
+    if !own.is_empty() {
+        let heading = (!kits.is_empty()).then(|| ("This document".to_string(), String::new()));
+        out.push((heading, own));
+    }
+    out.extend(kits.into_iter().map(|(h, g)| (Some(h), g)));
+    out
+}
+
+/// A group's heading in the swap picker: the kit glyph, the name, and its status
+/// on the right.
+fn swap_heading(ui: &mut egui::Ui, glyph: Option<&str>, name: &str, status: &str) {
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 20.0), egui::Sense::hover());
+    let p = ui.painter();
+    let y = rect.center().y;
+    let mut x = rect.left() + 4.0;
+    if let Some(g) = glyph {
+        p.text(
+            egui::pos2(x, y),
+            egui::Align2::LEFT_CENTER,
+            g,
+            theme::icon_font(12.0),
+            theme::text::DIM,
+        );
+        x += 16.0;
+    }
+    p.text(
+        egui::pos2(x, y),
+        egui::Align2::LEFT_CENTER,
+        name,
+        egui::FontId::proportional(11.0),
+        theme::text::MUTED,
+    );
+    p.text(
+        egui::pos2(rect.right() - 4.0, y),
+        egui::Align2::RIGHT_CENTER,
+        status,
+        egui::FontId::proportional(10.5),
+        theme::text::FAINT,
+    );
 }
 
 /// A row's label in the label column, **right-aligned against its control**
@@ -1199,6 +1274,10 @@ impl OndinApp {
                 .map(|n| n.name().to_string())
                 .unwrap_or_default()
         };
+        // The library's kits, for the swap pickers' headings (4F): which kit a
+        // vendored main is from, and whether the library can still find it.
+        let kits = crate::kits::index::kits_in(&self.library, doc.meta().id.as_deref());
+        let heading = |m: NodeId| crate::kits::index::kit_heading(doc, &kits, m);
         // **Swap**, on a nested copy inside an outer instance (§15 D983) — every
         // main of its kind, the session's: a swap property narrows this list for
         // an instance's users, and this row is the nested copy's own, with no
@@ -1233,7 +1312,7 @@ impl OndinApp {
                 let options = |search: &str| {
                     swap::options(doc, first, "", search)
                         .into_iter()
-                        .map(|m| (m, name_of(m)))
+                        .map(|m| (m, name_of(m), heading(m)))
                         .collect()
                 };
                 if let Some(m) =
@@ -1502,7 +1581,7 @@ impl OndinApp {
                             copy.map(|c| swap::options(doc, c, &p.filter, search))
                                 .unwrap_or_default()
                                 .into_iter()
-                                .map(|m| (m, name_of(m)))
+                                .map(|m| (m, name_of(m), heading(m)))
                                 .collect()
                         };
                         let salt = ("prop-swap", first, p.id);
@@ -2316,5 +2395,43 @@ mod tests {
         };
         assert_eq!(mixed.commits("", ""), None, "untouched");
         assert_eq!(mixed.commits("OK", "Go"), Some("OK".into()));
+    }
+
+    /// **The swap picker groups as 4F has it** (§15 D1014): the document's own
+    /// mains first, under *This document* only when a kit follows, then one group
+    /// per kit alphabetically, each keeping the name order it was given. Without a
+    /// kit the list is the flat one it always was, with no heading at all.
+    #[test]
+    fn the_swap_picker_lists_own_mains_first_then_each_kit() {
+        let mut ids = ondin_core::IdSource::new(0xBE);
+        let [a, b, c, d] = [(); 4].map(|_| ids.mint());
+        let kit = |n: &str| Some((n.to_string(), "v3".to_string()));
+        let found = vec![
+            (a, "Icon / Arrow".to_string(), kit("Atlas")),
+            (b, "Icon / Logo".to_string(), None),
+            (c, "Icon / Quote".to_string(), kit("Marketing")),
+            (d, "Icon / Check".to_string(), kit("Atlas")),
+        ];
+        let groups = swap_groups(found);
+        let shape: Vec<(Option<String>, Vec<NodeId>)> = groups
+            .iter()
+            .map(|(h, g)| {
+                (
+                    h.as_ref().map(|h| h.0.clone()),
+                    g.iter().map(|o| o.0).collect(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            shape,
+            vec![
+                (Some("This document".into()), vec![b]),
+                (Some("Atlas".into()), vec![a, d]),
+                (Some("Marketing".into()), vec![c]),
+            ]
+        );
+        let alone = swap_groups(vec![(b, "Icon / Logo".into(), None)]);
+        assert_eq!(alone.len(), 1);
+        assert!(alone[0].0.is_none(), "no heading without a kit");
     }
 }

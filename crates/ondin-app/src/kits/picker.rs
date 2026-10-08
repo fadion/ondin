@@ -1151,6 +1151,44 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// **A vendored main names its kit, found or not** (4F, 3I): with the kit in
+    /// the library the heading is its name and the copy's version; with the file
+    /// gone it is the name the copy recorded when it was vendored
+    /// (`Origin::name`), and *unavailable*. A main of the document's own has none.
+    ///
+    /// Flip, run: `vendor` writing no name onto the top fails *"named by the copy
+    /// once the kit is gone"*, the heading falling back to *Kit*.
+    #[test]
+    fn a_vendored_main_names_its_kit_even_when_the_kit_is_gone() {
+        let ctx = egui::Context::default();
+        let root = temp_root("heading");
+        let (id, _, badge) = file_kit(&root);
+        let mut app = app_on(&ctx, root.clone());
+        let source = kit_source(&mut app, &id, badge);
+        app.place_from_picker(&ctx, source);
+        let inst = app.session.selection.single().unwrap();
+        let main = app.session.doc.get(inst).unwrap().link().unwrap();
+
+        let kits = kits_in(&app.library, app.session.doc.meta().id.as_deref());
+        let found = super::super::index::kit_heading(&app.session.doc, &kits, main);
+        assert_eq!(found, Some(("Atlas".into(), "v4".into())));
+        assert_eq!(
+            super::super::index::kit_heading(&app.session.doc, &kits, inst),
+            None,
+            "an instance in the tree is no kit's"
+        );
+
+        std::fs::remove_file(root.join("atlas.ondin")).unwrap();
+        app.library.refresh();
+        let kits = kits_in(&app.library, app.session.doc.meta().id.as_deref());
+        assert_eq!(
+            super::super::index::kit_heading(&app.session.doc, &kits, main),
+            Some(("Atlas".into(), "unavailable".into())),
+            "named by the copy once the kit is gone"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// **Browsing lists a kit by what it is to this document** (3E): one not used
     /// here sits under *In your library, not used here* with its component count,
     /// closed; once something from it is placed it moves above that heading, open,

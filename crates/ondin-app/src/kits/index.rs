@@ -78,6 +78,36 @@ pub(crate) fn kits_in(lib: &Library, own: Option<&str>) -> Vec<KitEntry> {
     out
 }
 
+/// Which kit a vendored main came from, as a list heading says it: the kit's name
+/// and, on the right, its version — or *unavailable* when the library cannot find
+/// it (4F, 3I). `None` for a main of the document's own.
+pub(crate) fn kit_heading(
+    doc: &ondin_core::Document,
+    library: &[KitEntry],
+    main: NodeId,
+) -> Option<(String, String)> {
+    let vault = doc.vault()?;
+    let mut top = main;
+    for _ in 0..=doc.len() {
+        let parent = doc.get(top)?.parent()?;
+        if parent == vault {
+            break;
+        }
+        top = parent;
+    }
+    let origin = doc.get(top)?.origin()?;
+    let found = library.iter().find(|k| k.id == origin.kit);
+    let name = found
+        .map(|k| k.name.clone())
+        .or_else(|| origin.name.clone())
+        .unwrap_or_else(|| "Kit".into());
+    let status = match found {
+        Some(_) => format!("v{}", origin.version),
+        None => "unavailable".into(),
+    };
+    Some((name, status))
+}
+
 /// Where a kit's published state is.
 #[derive(Clone)]
 pub(crate) enum Load {

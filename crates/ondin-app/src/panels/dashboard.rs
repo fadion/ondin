@@ -363,6 +363,9 @@ pub(crate) enum Nav {
     Recent,
     All,
     Starred,
+    /// The library's kits that are sharing (§5.3e, 1B) — a filter, not a
+    /// section: they sort and filter by project as any file does.
+    Kits,
     Trash,
     Project(String),
 }
@@ -374,6 +377,7 @@ impl Nav {
             Nav::Recent => "recent",
             Nav::All => "all",
             Nav::Starred => "starred",
+            Nav::Kits => "kits",
             Nav::Trash => "trash",
             Nav::Project(id) => id,
         }
@@ -389,14 +393,17 @@ impl Nav {
             Nav::Recent => "Recent",
             Nav::All => "All files",
             Nav::Starred => "Starred",
+            Nav::Kits => "Kits",
             Nav::Trash => "Trash",
             Nav::Project(_) => "Project",
         }
     }
 
-    /// Read a preference back. **Only the four fixed entries**, deliberately: a
+    /// Read a preference back. **Only four of the fixed entries**, deliberately: a
     /// remembered project may have been deleted between launches, and landing on
-    /// *Recent* is better than landing on a heading with nothing under it.
+    /// *Recent* is better than landing on a heading with nothing under it. *Kits*
+    /// is not read back either — Settings does not offer it, so `"kits"` is never
+    /// written, and would land on *Recent* (§15 D1017).
     pub(crate) fn from_id(id: &str) -> Nav {
         match id {
             "all" => Nav::All,
@@ -747,6 +754,10 @@ enum Act {
     /// cannot rename a folder.
     SetArchived(String, bool),
     ToggleStar(String),
+    /// *Make a kit* (`true`) or *Stop sharing as kit* (`false`) on a file — the
+    /// second asks first, so the menu sets `OndinApp::unsharing_kit` instead of
+    /// acting (1B, 1D).
+    SetKit(PathBuf, bool),
     Import,
     /// Delete a project. `Some(id)` transfers its files to another project;
     /// `None` leaves them unfiled; `keep_files: false` trashes them.
@@ -830,6 +841,7 @@ impl OndinApp {
         self.delete_project_modal(ui.ctx(), &mut act);
         self.move_modal(ui.ctx(), &mut act);
         self.delete_modal(ui.ctx(), &mut act);
+        self.stop_sharing_dialog(ui.ctx());
         self.library_settings_modal(ui.ctx());
 
         if let Some(act) = act {
@@ -1541,6 +1553,7 @@ impl OndinApp {
             (Nav::Recent, icon::CLOCK_COUNTER_CLOCKWISE),
             (Nav::All, icon::FILES),
             (Nav::Starred, icon::STAR),
+            (Nav::Kits, icon::PACKAGE),
             (Nav::Trash, icon::TRASH_SIMPLE),
         ] {
             let count = self.nav_count(&nav);
@@ -1612,6 +1625,7 @@ impl OndinApp {
                 .iter()
                 .filter(|e| self.is_starred(e))
                 .count(),
+            Nav::Kits => self.library.entries.iter().filter(|e| is_kit(e)).count(),
             // **The cache, not the scan** (§15 D728, `[S20.1-L3-07]`). This ran
             // `store::trashed` — a scan of every file in `.trash` — and the
             // sidebar paints this count on **every nav, every frame**, whether or
@@ -1959,6 +1973,13 @@ impl OndinApp {
                 .filter(|e| self.is_starred(e))
                 .cloned()
                 .collect(),
+            Nav::Kits => self
+                .library
+                .entries
+                .iter()
+                .filter(|e| is_kit(e))
+                .cloned()
+                .collect(),
             // The cache, for `nav_count`'s reason — and this was the *second*
             // scan of the same folder in the same frame (§15 D728).
             Nav::Trash => self.library.trashed().to_vec(),
@@ -2197,8 +2218,10 @@ impl OndinApp {
     /// that empty dropdown, and the predicate has to agree with what the menu
     /// actually offers or the button appears over a list of one.
     fn filter_applies(&self) -> bool {
-        matches!(self.dash.nav, Nav::All | Nav::Starred | Nav::Trash)
-            && self.library.projects.active().next().is_some()
+        matches!(
+            self.dash.nav,
+            Nav::All | Nav::Starred | Nav::Kits | Nav::Trash
+        ) && self.library.projects.active().next().is_some()
     }
 
     /// *All projects ⌄* — the body header's project filter
@@ -2373,6 +2396,7 @@ impl OndinApp {
         match nav {
             Nav::Recent => (nav.label().into(), "Picked up where you left off".into()),
             Nav::All | Nav::Starred => (nav.label().into(), "{n} files".into()),
+            Nav::Kits => (nav.label().into(), "{n} kits".into()),
             Nav::Trash => (
                 nav.label().into(),
                 match self.prefs.trash_keep_days {
@@ -2418,6 +2442,10 @@ impl OndinApp {
                     "Nothing opened on this computer yet.",
                 ),
                 Nav::Starred => (icon::STAR, "Star a file and it will show up here."),
+                Nav::Kits => (
+                    icon::PACKAGE,
+                    "No kits yet. Make a file a kit from its menu to share its components.",
+                ),
                 Nav::Trash => (icon::TRASH_SIMPLE, "The trash is empty."),
                 _ => (icon::FILES, "No files here yet."),
             };
@@ -2934,13 +2962,15 @@ impl OndinApp {
         // the star's argument for being on the picture rather than in the caption
         // — a grid is scanned, not read — and takes the other corner because the
         // two are unrelated facts and a document can wear both.
+        let mut corner = egui::pos2(thumb.left() + 8.0, thumb.bottom() - 8.0);
         if let Some(mark) = self.mark_of(entry) {
-            mark_chip(
-                ui,
-                egui::pos2(thumb.left() + 8.0, thumb.bottom() - 8.0),
-                egui::Align2::LEFT_BOTTOM,
-                mark,
-            );
+            let took = mark_chip(ui, corner, egui::Align2::LEFT_BOTTOM, mark);
+            corner.x = took.right() + 5.0;
+        }
+        // The *Kit* chip shares the corner (§5.3e, 1B), after a mark when there
+        // is one: a conflicted copy of a kit is both.
+        if is_kit(entry) {
+            kit_chip(ui, corner);
         }
         // **The star, on the cover rather than in the caption** — the design's
         // `top:7px;right:7px` over the thumbnail. It goes here and not beside the
@@ -3235,6 +3265,7 @@ impl OndinApp {
             && self.dash.edit_project.is_none()
             && self.library_settings.is_none()
             && self.rename_entry.is_none()
+            && self.unsharing_kit.is_none()
     }
 
     /// The library's own keymap — arrows, `Enter`, `Delete`, `Escape`, `F2`,
@@ -3834,6 +3865,16 @@ impl OndinApp {
                     Act::ToggleStar(entry.meta.id.clone().unwrap_or_default()),
                 ),
                 ("Move to project", Act::MoveTo(entry.path.clone(), None)),
+                // After the file's own verbs, before *Delete* — the mockup's
+                // place (1B), and the same toggle as the document menu's.
+                if is_kit(entry) {
+                    (
+                        "Stop sharing as kit",
+                        Act::SetKit(entry.path.clone(), false),
+                    )
+                } else {
+                    ("Make a kit", Act::SetKit(entry.path.clone(), true))
+                },
                 ("Delete", Act::Trash(entry.path.clone())),
             ]
         };
@@ -3875,16 +3916,27 @@ impl OndinApp {
             // (§15 D729).
             let action = rows.into_iter().nth(i).expect("index from the same list").1;
             self.dash.menu_for = None;
-            match action {
-                // *Move to project* and *Delete* open something rather than
-                // doing something, so they set state instead of becoming an act.
-                Act::MoveTo(path, None) => self.dash.moving = Some(path),
-                Act::Trash(path) if !trashed => self.dash.deleting = Some(path),
-                other => *act = Some(other),
+            if let Some(a) = self.file_menu_chose(action, trashed) {
+                *act = Some(a);
             }
         } else if out.dismissed {
             self.dash.menu_for = None;
         }
+    }
+
+    /// What a chosen ⋯ row does: a row that opens a card sets its state and
+    /// answers `None`; any other becomes the frame's act.
+    fn file_menu_chose(&mut self, action: Act, trashed: bool) -> Option<Act> {
+        match action {
+            // *Move to project*, *Delete* and *Stop sharing as kit* open
+            // something rather than doing something, so they set state instead
+            // of becoming an act.
+            Act::MoveTo(path, None) => self.dash.moving = Some(path),
+            Act::Trash(path) if !trashed => self.dash.deleting = Some(path),
+            Act::SetKit(path, false) => self.unsharing_kit = Some(Some(path)),
+            other => return Some(other),
+        }
+        None
     }
 
     /// Apply what the frame decided. See [`Act`] for why this is deferred.
@@ -3980,6 +4032,7 @@ impl OndinApp {
                     self.library.local.save();
                 }
             }
+            Act::SetKit(path, sharing) => self.set_kit_at(&path, sharing),
             Act::Import => self.import_documents(),
             Act::DeleteProject {
                 id,
@@ -5515,7 +5568,8 @@ impl OndinApp {
                     // ⚠️ Only the three that always exist. *Trash* is not offered
                     // — landing there on launch would be a strange way to start —
                     // and a project is not offered because it can be deleted
-                    // between launches (`Nav::from_id`).
+                    // between launches (`Nav::from_id`). *Kits* is not offered
+                    // either, the session's call (§15 D1017).
                     for nav in [Nav::Recent, Nav::All, Nav::Starred] {
                         let label = nav.label();
                         ui.selectable_value(&mut d.default_page, nav, label);
@@ -6521,6 +6575,55 @@ fn mark_chip(ui: &egui::Ui, at: egui::Pos2, align: egui::Align2, mark: Mark) -> 
         mark.label(),
         egui::FontId::proportional(MARK_PT),
         color,
+    );
+    rect
+}
+
+/// Whether a library file is a kit that is sharing — the *Kits* filter's
+/// question and the card's chip (§5.3e, 1B; §15 D1017). Read off the scan's prefix, which
+/// carries the mark (§15 D1012). A mark that stopped sharing is not one.
+fn is_kit(entry: &Entry) -> bool {
+    entry
+        .meta
+        .kit
+        .as_ref()
+        .is_some_and(ondin_core::meta::KitMark::is_shared)
+}
+
+/// The *Kit* chip on a card's cover (1B), its bottom-left at `at`: the package
+/// glyph and the word, neutral like the editor's tag (1C). Returns its rect.
+///
+/// ⚠️ **A dark pass under the 8% ground**, for [`mark_chip`]'s reason: it sits
+/// on arbitrary artwork, and an 8% white over a pale cover is nothing.
+fn kit_chip(ui: &egui::Ui, at: egui::Pos2) -> egui::Rect {
+    const H: f32 = 20.0;
+    const PAD: f32 = 7.0;
+    const GAP: f32 = 5.0;
+    const GLYPH: f32 = 11.0;
+    let ink = theme::color::text_a(179);
+    let word = ui
+        .ctx()
+        .fonts_mut(|f| f.layout_no_wrap("Kit".into(), egui::FontId::proportional(10.5), ink));
+    let w = PAD + GLYPH + GAP + word.size().x + PAD;
+    let rect = egui::Align2::LEFT_BOTTOM.anchor_size(at, egui::vec2(w, H));
+    let p = ui.painter();
+    let r = egui::CornerRadius::same(5);
+    p.rect_filled(rect, r, egui::Color32::from_black_alpha(150));
+    p.rect_filled(rect, r, theme::color::text_a(20));
+    p.text(
+        egui::pos2(rect.left() + PAD + GLYPH / 2.0, rect.center().y),
+        egui::Align2::CENTER_CENTER,
+        icon::PACKAGE,
+        theme::icon_font(GLYPH),
+        ink,
+    );
+    p.galley(
+        egui::pos2(
+            rect.left() + PAD + GLYPH + GAP,
+            rect.center().y - word.size().y / 2.0,
+        ),
+        word,
+        ink,
     );
     rect
 }
@@ -11726,5 +11829,86 @@ mod tests {
             assert_eq!(app.dash.search, None);
             let _ = std::fs::remove_dir_all(&root);
         }
+    }
+
+    /// **The dashboard's kits** (§5.3e, 1B, 1D): *Make a kit* on a closed file
+    /// writes the mark into it, after which the *Kits* filter lists it with its
+    /// count and its card wears the *Kit* chip; *Stop sharing as kit* asks first,
+    /// and only the confirmation turns the sharing off — the mark and its version
+    /// kept, so the filter and the chip let it go.
+    ///
+    /// Flip, run: `is_kit` answering for any mark, sharing or not, fails *"a
+    /// mark that stopped sharing is not a kit"*, the filter still counting 1;
+    /// `file_menu_chose`'s `SetKit(_, false)` arm deleted fails *"the row opens
+    /// the confirmation rather than acting"*. ⚠️ The confirmation's own *Stop
+    /// sharing* click is not driven: the test calls `set_kit_at`, what it runs.
+    #[test]
+    fn a_card_makes_a_kit_the_filter_lists_it_and_stopping_asks_first() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, root) = app(&ctx, "kits");
+        let mark_in = |path: &Path| {
+            ondin_core::io::load(&std::fs::read(path).unwrap())
+                .unwrap()
+                .meta()
+                .kit
+                .clone()
+        };
+        let mut a = ondin_core::Document::new(app.session.ids.mint());
+        let atlas = store::file_document(&root, None, "Atlas", &mut a).unwrap();
+        let mut b = ondin_core::Document::new(app.session.ids.mint());
+        store::file_document(&root, None, "Landing", &mut b).unwrap();
+        app.library.refresh();
+        app.dash.nav = Nav::Kits;
+        assert_eq!(app.visible_entries().len(), 0, "no kit yet");
+        assert!(
+            !galleys(&mut app, &ctx).iter().any(|(_, _, t)| t == "Kit"),
+            "no chip yet"
+        );
+
+        app.dashboard_act(Act::SetKit(atlas.clone(), true));
+        assert_eq!(
+            mark_in(&atlas).map(|k| k.sharing),
+            Some(true),
+            "in the file"
+        );
+        assert_eq!(app.nav_count(&Nav::Kits), 1);
+        let shown = app.visible_entries();
+        assert_eq!(shown.len(), 1);
+        assert_eq!(shown[0].path, atlas);
+        let text = galleys(&mut app, &ctx);
+        assert!(
+            text.iter().any(|(_, _, t)| t == "Kit"),
+            "the chip: {text:?}"
+        );
+        assert!(text.iter().any(|(_, _, t)| t == "Kits"), "the sidebar row");
+
+        // The card's row asks; the file is untouched until the answer.
+        assert!(
+            app.file_menu_chose(Act::SetKit(atlas.clone(), false), false)
+                .is_none(),
+            "the row opens the confirmation rather than acting"
+        );
+        assert_eq!(app.unsharing_kit, Some(Some(atlas.clone())));
+        let text = galleys(&mut app, &ctx);
+        assert!(
+            text.iter()
+                .any(|(_, _, t)| t == "Stop sharing Atlas as a kit?"),
+            "{text:?}"
+        );
+        assert_eq!(
+            mark_in(&atlas).map(|k| k.sharing),
+            Some(true),
+            "asking changed nothing"
+        );
+        app.unsharing_kit = None;
+        app.set_kit_at(&atlas, false);
+        assert_eq!(mark_in(&atlas).map(|k| k.sharing), Some(false), "stopped");
+        assert_eq!(
+            app.nav_count(&Nav::Kits),
+            0,
+            "a mark that stopped sharing is not a kit"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

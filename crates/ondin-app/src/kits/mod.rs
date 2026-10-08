@@ -41,10 +41,11 @@ impl OndinApp {
     /// caret beside the name — then the neutral *Kit* tag when it is one (1C).
     ///
     /// ⚠️ **The menu holds only rows whose verbs exist** (§15 D1013): the mockup's
-    /// *Rename*, *Duplicate*, *Version history*, *Kits used…* and *Export…* have
-    /// no editor verb behind them yet, and a row that does nothing is worse than
-    /// a short menu. On a kit, *Publish kit…* comes first, disabled with *No
-    /// changes* when there is nothing to publish (2D, §15 D1015).
+    /// *Rename*, *Duplicate*, *Version history* and *Export…* have no editor verb
+    /// behind them yet, and a row that does nothing is worse than a short menu.
+    /// On a kit, *Publish kit…* comes first, disabled with *No changes* when there
+    /// is nothing to publish (2D, §15 D1015); *Kits used…* joined with its verb
+    /// (§15 D1016), offered while the vault holds anything.
     pub(crate) fn document_menu(&mut self, ui: &mut egui::Ui, title: String) {
         let ctx = ui.ctx().clone();
         let open = self.open_menu == TopMenu::Document;
@@ -109,14 +110,10 @@ impl OndinApp {
                 app.kits_used_open = true;
             }
             if shared {
-                if crate::ui::menu_item(ui, icon::PACKAGE, "Stop sharing as kit", H)
-                    .on_hover_text(
-                        "Documents using it keep their copies and stop receiving \
-                         updates. Making it a kit again continues from its last version.",
-                    )
-                    .clicked()
-                {
-                    app.stop_sharing_kit();
+                // Asks first (1D), as the card's row does — so an ellipsis, as on
+                // this menu's other dialog rows (D1011's name for it).
+                if crate::ui::menu_item(ui, icon::PACKAGE, "Stop sharing as kit…", H).clicked() {
+                    app.unsharing_kit = Some(None);
                     app.open_menu = TopMenu::None;
                 }
             } else if crate::ui::menu_item(ui, icon::PACKAGE, "Make this a kit", H)
@@ -166,13 +163,8 @@ impl OndinApp {
 
     /// *Stop sharing as kit* (1D): the mark stays, no longer sharing, so its
     /// version carries on if the document is made a kit again. Documents that use
-    /// it keep their copies; they read it as no longer a kit.
-    ///
-    /// ⚠️ **No confirmation yet** (§15 D1013): 1D's dialog counts the documents
-    /// using the kit, and nothing can count them — the library scan reads each
-    /// file's first 4 KB, and which kits a document uses is not in it. The step
-    /// that decides where that count comes from (step 4) brings the dialog. The
-    /// verb loses nothing meanwhile: *Make this a kit* undoes it exactly.
+    /// it keep their copies; they read it as no longer a kit. Reached through
+    /// [`OndinApp::stop_sharing_dialog`], which asks first.
     pub(crate) fn stop_sharing_kit(&mut self) {
         let mut meta = self.session.doc.meta().clone();
         let Some(kit) = meta.kit.as_mut() else {
@@ -191,6 +183,131 @@ impl OndinApp {
         self.session.info(format!(
             "{name} is no longer shared — documents using it keep their copies"
         ));
+    }
+
+    /// The card menu's *Make a kit* / *Stop sharing as kit* on a library file
+    /// (1B). The open document goes through the editor's own verbs, which save
+    /// it; a closed one has its mark written into the file
+    /// (`library::store::set_kit`). Stopping is confirmed first (1D) — this is
+    /// what the confirmation runs.
+    pub(crate) fn set_kit_at(&mut self, path: &std::path::Path, sharing: bool) {
+        if self.session.path.as_deref() == Some(path) {
+            if sharing {
+                self.make_kit();
+            } else {
+                self.stop_sharing_kit();
+            }
+            self.library.refresh();
+            return;
+        }
+        let Some(entry) = self.library.entry_at(path).cloned() else {
+            return;
+        };
+        if let Err(e) = crate::library::store::set_kit(&entry, sharing) {
+            self.session
+                .fail(format!("Could not change {}: {e}", entry.display_name()));
+            return;
+        }
+        self.library.refresh();
+        let name = entry.display_name();
+        self.session.info(if sharing {
+            format!("{name} is a kit — nothing is shared until you publish it")
+        } else {
+            format!("{name} is no longer shared — documents using it keep their copies")
+        });
+    }
+
+    /// *Stop sharing as kit*'s confirmation (§5.3e, 1D), for the document menu
+    /// and the card menu alike: what happens to the documents that use the kit,
+    /// and that making it a kit again continues from its last version.
+    ///
+    /// ⚠️ **It does not say how many documents use the kit**, which 1D does
+    /// (§15 D1017): the
+    /// library scan reads each file's first 4 KB and which kits a document uses is
+    /// not in it, so a count needs either those ids in the prefix-readable `meta`
+    /// or a full load of every file — undecided (`roadmap.md`). The sentence is
+    /// written to stand without the number.
+    pub(crate) fn stop_sharing_dialog(&mut self, ctx: &egui::Context) {
+        let Some(target) = self.unsharing_kit.clone() else {
+            return;
+        };
+        let here = target
+            .as_deref()
+            .is_none_or(|p| self.session.path.as_deref() == Some(p));
+        let found = if here {
+            self.session
+                .doc
+                .meta()
+                .kit
+                .as_ref()
+                .map(|k| (self.session.document_title(), k.version))
+        } else {
+            target
+                .as_deref()
+                .and_then(|p| self.library.entry_at(p))
+                .and_then(|e| e.meta.kit.as_ref().map(|k| (e.display_name(), k.version)))
+        };
+        let Some((name, version)) = found else {
+            self.unsharing_kit = None;
+            return;
+        };
+        let mut decision: Option<bool> = None;
+        let modal = crate::settings::card("stop-sharing-kit", ctx, |ui| {
+            ui.set_width(crate::ui::menu_inner_w(380.0, crate::settings::PAD));
+            if crate::settings::modal_title(ui, &format!("Stop sharing {name} as a kit?")) {
+                decision = Some(false);
+            }
+            ui.add_space(8.0);
+            let again = if version == 0 {
+                "You can make it a kit again later.".to_string()
+            } else {
+                format!(
+                    "You can make it a kit again later. Publishing then continues from v{version}."
+                )
+            };
+            for line in [
+                format!(
+                    "Documents that use components from {name} keep their copies, which keep \
+                     working, and stop receiving updates."
+                ),
+                again,
+            ] {
+                ui.label(
+                    egui::RichText::new(line)
+                        .size(12.0)
+                        .color(theme::text::MUTED),
+                );
+                ui.add_space(4.0);
+            }
+            ui.add_space(crate::settings::FOOTER_GAP);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                if crate::settings::text_button(ui, "Stop sharing", crate::ui::FieldButton::On)
+                    .clicked()
+                {
+                    decision = Some(true);
+                }
+                if crate::settings::text_button(ui, "Cancel", crate::ui::FieldButton::Off).clicked()
+                {
+                    decision = Some(false);
+                }
+            });
+        });
+        // `Escape` and the backdrop are *Cancel*, as on every card (§15 D525).
+        if modal.should_close() {
+            decision = Some(false);
+        }
+        match decision {
+            Some(true) => {
+                self.unsharing_kit = None;
+                match target {
+                    Some(path) => self.set_kit_at(&path, false),
+                    None => self.stop_sharing_kit(),
+                }
+            }
+            Some(false) => self.unsharing_kit = None,
+            None => {}
+        }
     }
 }
 

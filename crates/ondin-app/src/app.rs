@@ -1345,6 +1345,10 @@ pub struct OndinApp {
     pub(crate) kits_used_open: bool,
     /// The kit *Make all local*'s confirmation is asking about (6B).
     pub(crate) making_all_local: Option<String>,
+    /// *Stop sharing as kit*'s confirmation, while it is up (1D): `Some(None)`
+    /// asks about the open document, `Some(Some(path))` about a library file
+    /// from its card.
+    pub(crate) unsharing_kit: Option<Option<std::path::PathBuf>>,
     /// The one open context menu (`docs/context-menus.md` §0 R4).
     ///
     /// **One slot, so opening the next one is what closes the last.** Not a
@@ -2330,6 +2334,7 @@ impl OndinApp {
             kit_return: None,
             kits_used_open: false,
             making_all_local: None,
+            unsharing_kit: None,
             context_menu: None,
             secondary_press: None,
             show_grid: true,
@@ -2816,6 +2821,7 @@ impl eframe::App for OndinApp {
             self.publish_dialog(&ctx);
             self.make_local_dialog(&ctx);
             self.kits_used_dialog(&ctx);
+            self.stop_sharing_dialog(&ctx);
         }
         // **After every door has had its say**, so a right-click that *replaced*
         // the open menu has already written the slot by the time the click-away
@@ -7432,6 +7438,7 @@ impl OndinApp {
         self.making_local = None;
         self.kits_used_open = false;
         self.making_all_local = None;
+        self.unsharing_kit = None;
         self.paint_hex = None;
         self.guide_previews.clear();
         // Ids from the old document's stream, and the one field in this struct
@@ -9246,6 +9253,7 @@ impl OndinApp {
             || self.making_local.is_some()
             || self.kits_used_open
             || self.making_all_local.is_some()
+            || self.unsharing_kit.is_some()
     }
 
     /// Read a workspace switch.
@@ -16706,7 +16714,7 @@ mod library_wiring_tests {
         let painted = top_bar_text(&ctx, &mut app);
         assert!(painted.contains(&"Kit".to_string()), "the tag: {painted:?}");
         assert!(
-            painted.contains(&"Stop sharing as kit".to_string()),
+            painted.contains(&"Stop sharing as kit…".to_string()),
             "{painted:?}"
         );
 
@@ -16843,6 +16851,7 @@ mod library_wiring_tests {
             crate::panels::dashboard::Nav::Recent,
             crate::panels::dashboard::Nav::All,
             crate::panels::dashboard::Nav::Starred,
+            crate::panels::dashboard::Nav::Kits,
             crate::panels::dashboard::Nav::Trash,
             crate::panels::dashboard::Nav::Project("p-1".into()),
         ] {

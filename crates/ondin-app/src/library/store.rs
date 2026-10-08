@@ -157,6 +157,35 @@ pub fn move_to_project(
     Ok(target)
 }
 
+/// Make a closed document a kit, or stop it sharing — the card menu's *Make a
+/// kit* / *Stop sharing as kit* (§5.3e, 1B, 1D). The editor's verbs
+/// (`OndinApp::make_kit`, `OndinApp::stop_sharing_kit`) do the same to the
+/// open document.
+///
+/// Turning a mark on keeps its version, so a kit made again continues from its
+/// last publish; turning it off keeps the mark and its published state, and
+/// only stops the sharing. An unfiled document's identity is minted here as
+/// filing mints one, since a kit is found by its id.
+pub fn set_kit(entry: &Entry, sharing: bool) -> io::Result<()> {
+    let mut doc = load(&entry.path)?;
+    let mut meta = doc.meta().clone();
+    if sharing {
+        if meta.id.is_none() {
+            meta.id = Some(ids::mint());
+        }
+        meta.kit
+            .get_or_insert_with(ondin_core::meta::KitMark::default)
+            .sharing = true;
+    } else {
+        match meta.kit.as_mut() {
+            Some(kit) => kit.sharing = false,
+            None => return Ok(()),
+        }
+    }
+    doc.set_meta(meta);
+    write_document(&entry.path, &doc)
+}
+
 /// Copy a document into a new one, with a fresh identity.
 ///
 /// ⚠️ **A new id, deliberately.** A copy that kept the original's id would share

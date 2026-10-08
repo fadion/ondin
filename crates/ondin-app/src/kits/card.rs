@@ -205,7 +205,8 @@ impl OndinApp {
         if tx.0.is_empty() {
             return;
         }
-        tx.0.extend(super::updates::stack_local(doc, tops, content));
+        let placed = super::updates::stack_local(doc, &tx, tops, content);
+        tx.0.extend(placed);
         if !self.session.commit(tx) {
             return;
         }

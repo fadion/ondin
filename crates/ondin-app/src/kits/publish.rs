@@ -76,13 +76,17 @@ impl OndinApp {
             .ctx()
             .fonts_mut(|f| f.layout_no_wrap(n.to_string(), egui::FontId::proportional(10.5), ink));
         let chip_w = (count.size().x + 10.0).max(18.0);
+        // The count's chip only when it counts something: a rename alone is
+        // publishable with no component changed, and *Publish 0* would say there
+        // is nothing to send (`arch-scribe`'s reading of D1015's fix).
+        let chip = enabled && n > 0;
         let w = 10.0
             + 13.0
             + 7.0
             + label.size().x
-            + if enabled { 7.0 + chip_w } else { 0.0 }
+            + if chip { 7.0 + chip_w } else { 0.0 }
             + 4.0
-            + if enabled { 0.0 } else { 6.0 };
+            + if chip { 0.0 } else { 6.0 };
         let (rect, resp) = ui.allocate_exact_size(
             egui::vec2(w, 26.0),
             if enabled {
@@ -114,7 +118,7 @@ impl OndinApp {
         x += 13.0 + 7.0;
         p.galley(egui::pos2(x, y - label.size().y / 2.0), label.clone(), ink);
         x += label.size().x + 7.0;
-        if enabled {
+        if chip {
             let chip = egui::Rect::from_min_size(egui::pos2(x, y - 9.0), egui::vec2(chip_w, 18.0));
             p.rect_filled(chip, egui::CornerRadius::same(4), color::text_a(26));
             p.galley(
@@ -278,10 +282,10 @@ impl OndinApp {
             return;
         }
         let name = self.session.document_title();
-        self.session.info(format!(
-            "Published {name} v{version} · {count} component{}",
-            plural(count)
-        ));
+        self.session.info(match count {
+            0 => format!("Published {name} v{version} · its new name"),
+            n => format!("Published {name} v{version} · {n} component{}", plural(n)),
+        });
     }
 }
 

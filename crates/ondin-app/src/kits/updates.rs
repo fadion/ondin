@@ -248,9 +248,9 @@ impl OndinApp {
             // The shelf's copy when it has one; otherwise the file, read here —
             // an accept is a click, and the card's *Accept kit updates* arrives
             // with nothing asked for beforehand.
-            let p = match self.kit_shelf.load(&w.kit.id) {
-                Some(Load::Ready(Some(p))) => Some(p.clone()),
-                _ => std::fs::read(&w.kit.path)
+            let p = match self.kit_shelf.current(&w.kit) {
+                Some(p) => Some(p),
+                None => std::fs::read(&w.kit.path)
                     .ok()
                     .and_then(|b| ondin_core::io::load(&b).ok())
                     .and_then(|d| d.published().cloned())
@@ -282,7 +282,8 @@ impl OndinApp {
             }
         };
         let mut tx = update.tx;
-        tx.0.extend(stack_local(doc, &update.made_local, content));
+        let placed = stack_local(doc, &tx, &update.made_local, content);
+        tx.0.extend(placed);
         if !self.session.commit(tx) {
             return;
         }
@@ -322,29 +323,48 @@ impl OndinApp {
 }
 
 /// The `SetTransform`s that stack mains made local down the right of the
-/// document's content, `LOCAL_GAP` out and apart (D1011 (3)). A frame's box is
-/// its size; a group, whose box is its children's, is placed by its origin.
+/// document's content, `LOCAL_GAP` out and apart (D1011 (3)) — each main's own
+/// box, top-left, at its place in the column.
+///
+/// **Measured on the document `tx` leaves**, laid out: until the transaction
+/// lands the mains are in the vault, which nothing resolves, and a group's box
+/// is its children's — the first cut placed a group by its origin at height 0, so
+/// a tall one overlapped the next (`arch-scribe`'s reading of D1016).
 pub(crate) fn stack_local(
     doc: &ondin_core::Document,
+    tx: &ondin_core::Transaction,
     mains: &[NodeId],
     content: Option<Rect>,
 ) -> Vec<Operation> {
+    if mains.is_empty() {
+        return Vec::new();
+    }
+    let mut scratch = doc.clone();
+    if scratch.apply(tx).is_err() {
+        return Vec::new();
+    }
+    let res = ondin_core::Resolved::rebuild(&scratch);
     let start = content.map_or(ondin_core::kurbo::Point::ZERO, |c| {
         ondin_core::kurbo::Point::new(c.x1 + LOCAL_GAP, c.y0)
     });
     let mut y = start.y;
     let mut out = Vec::new();
     for m in mains {
-        let Some(n) = doc.get(*m) else { continue };
-        let h = match n.kind() {
-            NodeKind::Artboard { size } => size.height,
-            _ => 0.0,
+        let Some(n) = scratch.get(*m) else { continue };
+        let at = n.transform();
+        let bounds = match n.kind() {
+            NodeKind::Artboard { size } => {
+                Some(at.transform_rect_bbox(Rect::from_origin_size((0.0, 0.0), *size)))
+            }
+            _ => res.world_bounds(*m),
         };
+        let Some(b) = bounds else { continue };
+        let shift = Vec2::new(start.x - b.x0, y - b.y0);
         out.push(Operation::SetTransform {
             id: *m,
-            transform: Affine::translate(Vec2::new(start.x, y)),
+            transform: Affine::translate(shift) * at,
         });
-        y += h + LOCAL_GAP;
+        y += b.height() + LOCAL_GAP;
     }
     out
 }
@@ -765,5 +785,91 @@ mod tests {
         app.make_local_now(&tops);
         assert!(app.kits_used().is_empty(), "off the list");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **An accept never takes a stale copy** (§15 D1016's fix (a)): the shelf
+    /// read the kit at v4 (the fixture's insert did), the kit publishes v5, and the
+    /// card's *Accept kit updates* — which asks the shelf nothing first — must
+    /// bring v5's change, not write v4's content under v5's number.
+    ///
+    /// Flip, run: the accept taking `load`'s `Ready` copy whatever its file's
+    /// time fails *"v5's change arrived"*, the dot still at full opacity.
+    #[test]
+    fn an_accept_never_takes_a_stale_copy() {
+        let ctx = egui::Context::default();
+        let root = temp_root("stale");
+        let (path, kit, badge, dot) = file_kit(&root);
+        let (mut app, inst) = consumer(&ctx, &root, &kit, badge);
+        assert!(
+            matches!(app.kit_shelf.load(&kit), Some(super::Load::Ready(Some(_)))),
+            "the fixture: the shelf holds v4"
+        );
+        republish(
+            &path,
+            vec![Operation::SetOpacity {
+                id: dot,
+                opacity: 0.5,
+            }],
+            "",
+        );
+        app.library.refresh();
+        app.accept_kit_updates(Some(&kit));
+        let idot = app.session.doc.get(inst).unwrap().children()[0];
+        assert_eq!(
+            app.session.doc.get(idot).unwrap().opacity(),
+            0.5,
+            "v5's change arrived"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **Mains made local stack without overlapping, groups included** (§15
+    /// D1016's fix (c)): two groups, each a 30-tall square, are stacked down the
+    /// right of the content — each by its own laid-out box, `LOCAL_GAP` apart.
+    ///
+    /// Flip, run: a group's height counted as 0, as the first cut did, fails
+    /// *"no overlap"*.
+    #[test]
+    fn mains_made_local_stack_without_overlapping() {
+        let mut ids = IdSource::new(0xC0);
+        let r = ids.mint();
+        let mut doc = Document::new(r);
+        let [g1, s1, g2, s2] = [(); 4].map(|_| ids.mint());
+        let square = |id, parent| Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(30.0, 30.0),
+                corner_radii: Default::default(),
+            },
+            transform: None,
+            name: None,
+        };
+        let group = |id, index| Operation::CreateNode {
+            id,
+            parent: r,
+            index,
+            kind: NodeKind::Group,
+            transform: None,
+            name: None,
+        };
+        doc.apply(&Transaction(vec![
+            group(g1, 0),
+            square(s1, g1),
+            group(g2, 1),
+            square(s2, g2),
+        ]))
+        .unwrap();
+        let content = ondin_core::kurbo::Rect::new(0.0, 0.0, 100.0, 100.0);
+        let ops = super::stack_local(&doc, &Transaction(vec![]), &[g1, g2], Some(content));
+        doc.apply(&Transaction(ops)).unwrap();
+        let res = ondin_core::Resolved::rebuild(&doc);
+        let (b1, b2) = (res.world_bounds(g1).unwrap(), res.world_bounds(g2).unwrap());
+        assert_eq!((b1.x0, b1.y0), (100.0 + super::LOCAL_GAP, 0.0));
+        assert!(
+            b2.y0 >= b1.y1 + super::LOCAL_GAP - 1e-9,
+            "no overlap: {b1:?} {b2:?}"
+        );
     }
 }

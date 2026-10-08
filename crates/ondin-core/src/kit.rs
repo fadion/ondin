@@ -1214,10 +1214,23 @@ impl Builder<'_> {
                 *bnd = resolve(self, *bnd).ok_or(KitError::Incomplete(*bnd))?;
             }
         }
-        let origin = Some(Origin {
-            name: dn.origin.as_ref().and_then(|o| o.name.clone()),
-            ..source_origin(src, self.kit, self.version, &pn)
-        });
+        // A top carries the kit's name (`Origin::name`): this kit's tops take the
+        // name it publishes now — a rename is what `Changes::renamed` lets
+        // through, and it must arrive (`arch-scribe`'s reading of D1016's first
+        // cut, which kept each copy's first name) — and a third kit's top keeps
+        // the one it arrived with. Below the top, none.
+        let base = source_origin(src, self.kit, self.version, &pn);
+        let is_top = self.scratch.get(d).and_then(|n| n.parent) == self.scratch.vault();
+        let name = match (is_top, base.kit == self.kit) {
+            (true, true) => self
+                .published
+                .name()
+                .map(str::to_string)
+                .or_else(|| dn.origin.as_ref().and_then(|o| o.name.clone())),
+            (true, false) => dn.origin.as_ref().and_then(|o| o.name.clone()),
+            (false, _) => None,
+        };
+        let origin = Some(Origin { name, ..base });
         for op in [
             Operation::SetLocked {
                 id: d,

@@ -234,6 +234,21 @@ impl KitShelf {
             .any(|s| matches!(s.load, Load::Pending))
     }
 
+    /// `kit`'s published state **as its file now stands** — `None` when the shelf
+    /// read an older version of the file, or has not read it.
+    ///
+    /// ⚠️ **What an accept must ask, not [`Self::load`]**: a copy read before the
+    /// kit published again would be written into the document under the new
+    /// version, and the update it was meant to bring would never arrive
+    /// (`arch-scribe`'s reading of D1016's first cut).
+    pub(crate) fn current(&self, kit: &KitEntry) -> Option<Arc<Published>> {
+        let s = self.shelves.get(&kit.id)?;
+        match &s.load {
+            Load::Ready(Some(p)) if s.modified == kit.modified => Some(p.clone()),
+            _ => None,
+        }
+    }
+
     /// Where `id`'s published state is, if it was asked for.
     pub(crate) fn load(&self, id: &str) -> Option<&Load> {
         self.shelves.get(id).map(|s| &s.load)

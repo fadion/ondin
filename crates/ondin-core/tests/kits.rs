@@ -1078,3 +1078,32 @@ fn make_local_reveals_the_copy_and_promotes_no_instance() {
     d.apply(&undo).unwrap();
     assert_eq!(d, before, "one undo");
 }
+
+/// **A kit's rename arrives with its update** (§15 D1016's fix (b)): the kit is
+/// renamed and publishes nothing else; accepting moves the vendored top's
+/// recorded name to the new one — what the picker calls the kit once it is
+/// lost — and leaves the nodes below it without one.
+///
+/// Flip, run: `sync` keeping each copy's first name fails *"the new name"*,
+/// still *Atlas*.
+#[test]
+fn a_kit_rename_arrives_with_its_update() {
+    let mut k = kit();
+    let (mut d, mut ids) = consumer();
+    insert(&mut d, &mut ids, &k, k.icon);
+    let mut meta = k.doc.meta().clone();
+    meta.name = Some("Atlas 2".into());
+    k.doc.set_meta(meta);
+    assert!(kit::changes(&k.doc).renamed);
+    kit::publish(&mut k.doc, None, 1).unwrap();
+
+    accept(&mut d, &mut ids, &k);
+    let top = vault_children(&d)[0];
+    assert_eq!(
+        d.get(top).unwrap().origin().unwrap().name.as_deref(),
+        Some("Atlas 2"),
+        "the new name"
+    );
+    let dot = d.get(top).unwrap().children()[0];
+    assert_eq!(d.get(dot).unwrap().origin().unwrap().name, None, "top only");
+}

@@ -1593,9 +1593,23 @@ fn reset_row(
                         (Kind::Children, "Restore removed children", d.removed),
                         (Kind::Order, "Reset order", d.order),
                     ];
+                    // The kit rows too, with their glyph's room: sized from the
+                    // resets alone, a long *Go to main in <kit>* overflowed the
+                    // menu (`arch-scribe`'s reading of D1016).
+                    let kit_labels: Vec<String> = kit
+                        .map(|k| {
+                            vec![
+                                format!("Go to main in {}", k.kit_name),
+                                "Accept kit updates".into(),
+                                "Make local…".into(),
+                            ]
+                        })
+                        .unwrap_or_default();
+                    const GLYPH_ROOM: f32 = 22.0;
                     let widest = std::iter::once(PROPS)
                         .chain(rows.iter().map(|(_, l, _)| *l))
                         .map(label_w)
+                        .chain(kit_labels.iter().map(|l| label_w(l) + GLYPH_ROOM))
                         .fold(0.0, f32::max);
                     ui.set_width((8.0 + widest + 24.0 + 16.0 + 8.0).ceil());
                     // A count only where there is something to reset: the `—` a

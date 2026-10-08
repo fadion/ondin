@@ -67,8 +67,13 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1016 index rows, 1016 body headings, next free
-D1017** (measured 2026-10-08, session 61; ⚠️ **Kits steps 2–4 reserved D1013–D1024 at `1e0d023`
+anywhere cited either. **The live figures: 1018 index rows, 1018 body headings, next free
+D1019** (measured 2026-10-08, session 62; ⚠️ **the Kits polish request reserved D1017–D1026 at
+`8753970` and spent two** — D1017 (the dashboard's kits, 1B, and 1D's confirmation without its
+count) and D1018 (a picker tile's drag onto the canvas, and 3G's *Open library*); the publish
+note's field and the picker's fixed height went into amendments to D1015 and D1014. The closing
+negative grep over **D1019–D1026 found zero sites** and they are released. Census **916**,
+arrivals D1017 and D1018, none unresolved. Before that, session 61; ⚠️ **Kits steps 2–4 reserved D1013–D1024 at `1e0d023`
 and spent four** — D1013 (the document menu and the kit mark's chrome), D1014 (the insert picker),
 D1015 (publishing), D1016 (updates and *Make local*); every fix `arch-scribe`'s readings turned up
 went into amendments. The closing negative grep over **D1017–D1024 found zero sites** and they are

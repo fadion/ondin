@@ -407,6 +407,75 @@ fn a_transitive_main_keeps_the_kit_it_came_from() {
     );
 }
 
+/// **A third kit's main never takes the name of the kit it came through.** K
+/// published with no name — a pre-library file has none — and L, *Atlas*, nests
+/// K's main in its own; a consumer's copy of K's main must not read *Atlas*,
+/// which is what the picker would then call K once K is lost (3I).
+///
+/// Flip, run: `vendor`'s `o.kit == kit` guard removed fails the assertion, the
+/// badge's copy named *Atlas*.
+#[test]
+fn a_third_kits_main_keeps_its_own_name_or_none() {
+    let mut kids = IdSource::new(0xAB);
+    let kroot = kids.mint();
+    let mut kdoc = Document::new(kroot);
+    let badge = kids.mint();
+    kdoc.apply(&Transaction(vec![
+        create(badge, kroot, 0, frame(16.0, 16.0), "Badge"),
+        main_on(badge),
+    ]))
+    .unwrap();
+    kdoc.set_published(kit::freeze(&kdoc));
+
+    let mut lids = IdSource::new(0xAC);
+    let lroot = lids.mint();
+    let mut ldoc = Document::new(lroot);
+    ldoc.set_meta(DocumentMeta {
+        name: Some("Atlas".into()),
+        ..DocumentMeta::default()
+    });
+    let (tx, placed) = kit::insert(
+        &ldoc,
+        &mut lids,
+        K_ID,
+        1,
+        kdoc.published().unwrap(),
+        badge,
+        lroot,
+    )
+    .unwrap();
+    ldoc.apply(&tx).unwrap();
+    let chip = lids.mint();
+    ldoc.apply(&Transaction(vec![
+        create(chip, lroot, 0, frame(60.0, 20.0), "Chip"),
+        Operation::Reparent {
+            id: placed,
+            new_parent: chip,
+            index: 0,
+        },
+    ]))
+    .unwrap();
+    ldoc.apply(&Transaction(vec![main_on(chip)])).unwrap();
+    let p = kit::freeze(&ldoc).unwrap();
+
+    let (mut d, mut ids) = consumer();
+    let root = d.root();
+    let (tx, _) = kit::insert(&d, &mut ids, L_ID, 1, &p, chip, root).unwrap();
+    d.apply(&tx).unwrap();
+    let names: Vec<(String, Option<String>)> = vault_children(&d)
+        .iter()
+        .map(|v| {
+            let o = d.get(*v).unwrap().origin().unwrap();
+            (o.kit.clone(), o.name.clone())
+        })
+        .collect();
+    assert!(
+        names.contains(&(L_ID.into(), Some("Atlas".into()))),
+        "{names:?}"
+    );
+    assert!(names.contains(&(K_ID.into(), None)), "{names:?}");
+}
+
 /// An edit to a vendored main reaches its instances through the ordinary
 /// propagation — the component passes ask by id, so the vault is no different —
 /// which is what an update will lean on.
@@ -705,4 +774,68 @@ fn a_copy_of_a_kit_instance_is_an_instance_without_an_origin() {
     let dup = instance(&mut d, &mut ids, inst, root);
     assert_eq!(d.get(dup).unwrap().link(), d.get(inst).unwrap().link());
     assert!(d.get(dup).unwrap().origin().is_none());
+}
+
+/// **The change count is what consumers would receive** (§5.3e, 2A): nothing
+/// right after a publish; nothing for moving a main across the kit's canvas,
+/// which no consumer's copy can see; a main whose layer changed is *changed*, a
+/// new one *added*, a deleted one *removed*. Publishing bumps the version, stamps
+/// the date and note, and leaves nothing to publish.
+///
+/// Flip, run: `reach` comparing the top's own transform fails *"a move is not a
+/// change"*, the moved Icon counted as changed.
+#[test]
+fn the_change_count_is_what_consumers_would_receive() {
+    let mut k = kit();
+    assert_eq!(kit::changes(&k.doc).count(), 0, "just published");
+
+    k.doc
+        .apply(&Transaction(vec![Operation::SetTransform {
+            id: k.icon,
+            transform: Affine::translate((500.0, 40.0)),
+        }]))
+        .unwrap();
+    assert_eq!(kit::changes(&k.doc).count(), 0, "a move is not a change");
+
+    k.doc
+        .apply(&Transaction(vec![Operation::SetOpacity {
+            id: k.icon_dot,
+            opacity: 0.5,
+        }]))
+        .unwrap();
+    let mut ids = IdSource::new(0xAD);
+    let fresh = ids.mint();
+    let root = k.doc.root();
+    k.doc
+        .apply(&Transaction(vec![
+            create(fresh, root, 0, frame(30.0, 30.0), "Chip"),
+            main_on(fresh),
+        ]))
+        .unwrap();
+    let c = kit::changes(&k.doc);
+    assert_eq!(c.added, vec![fresh]);
+    assert_eq!(
+        c.changed,
+        vec![k.icon, k.card],
+        "the Icon, and the Card that nests it"
+    );
+    assert!(c.removed.is_empty());
+
+    // Card is detached from Icon's change by deleting it: removed, not changed.
+    k.doc
+        .apply(&Transaction(vec![Operation::DeleteNode { id: k.card }]))
+        .unwrap();
+    let c = kit::changes(&k.doc);
+    assert_eq!(c.removed, vec![k.card]);
+    assert_eq!(c.count(), 3);
+
+    let v = kit::publish(&mut k.doc, Some("New chip".into()), 1_780_000_000);
+    assert_eq!(v, Some(5));
+    let mark = k.doc.meta().kit.clone().unwrap();
+    assert_eq!(
+        (mark.version, mark.date, mark.note.as_deref()),
+        (5, Some(1_780_000_000), Some("New chip"))
+    );
+    assert_eq!(kit::changes(&k.doc).count(), 0, "nothing left to publish");
+    assert!(k.doc.published().unwrap().tops().contains(&fresh));
 }

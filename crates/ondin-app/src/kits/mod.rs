@@ -117,7 +117,12 @@ impl OndinApp {
         meta.kit.get_or_insert_with(KitMark::default).sharing = true;
         self.session.doc.set_meta(meta);
         self.session.mark_unsaved();
-        self.save_file(false);
+        // A failed save's own message stands — the status line has one slot
+        // (`D1013`'s fix); the mark is in the document and goes out with the
+        // next save that works.
+        if !self.save_file(false) {
+            return;
+        }
         let name = self.session.document_title();
         self.session.info(format!(
             "{name} is a kit — nothing is shared until you publish it"
@@ -141,7 +146,12 @@ impl OndinApp {
         kit.sharing = false;
         self.session.doc.set_meta(meta);
         self.session.mark_unsaved();
-        self.save_file(false);
+        // A failed save's own message stands — the status line has one slot
+        // (`D1013`'s fix); the mark is in the document and goes out with the
+        // next save that works.
+        if !self.save_file(false) {
+            return;
+        }
         let name = self.session.document_title();
         self.session.info(format!(
             "{name} is no longer shared — documents using it keep their copies"

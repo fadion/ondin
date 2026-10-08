@@ -400,6 +400,111 @@ pub fn freeze(doc: &Document) -> Option<Published> {
     })
 }
 
+/// What a publish would change (§5.3e, 2A–2C): the kit's mains and sets against
+/// what it last published, by id — added, changed, removed. Never published,
+/// every one is added.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Changes {
+    /// Published now and not before, in the kit's document order.
+    pub added: Vec<NodeId>,
+    /// Published both times, and different.
+    pub changed: Vec<NodeId>,
+    /// Published before and not now — ids in the last published state, whose
+    /// consumers keep them as local copies (D1011 (3)).
+    pub removed: Vec<NodeId>,
+}
+
+impl Changes {
+    /// How many components a publish would carry — the top bar's *Publish N*.
+    pub fn count(&self) -> usize {
+        self.added.len() + self.changed.len() + self.removed.len()
+    }
+}
+
+/// `doc`'s changes since its last publish (§5.3e's change count).
+///
+/// **Frozen state against frozen state**: the working document is frozen as a
+/// publish would freeze it ([`freeze`]) and each published main or set compared,
+/// with the kit mains it reaches, to the last publish's. **A main's own place is
+/// not compared** — its transform, and its parent in the kit — because a
+/// consumer's copy sits in a vault where neither means anything; moving a main
+/// across the kit's canvas is not a change anyone downstream receives.
+pub fn changes(doc: &Document) -> Changes {
+    let now = freeze(doc);
+    let before = doc.published();
+    let tops_now: Vec<NodeId> = now.as_ref().map(|p| p.tops().to_vec()).unwrap_or_default();
+    let tops_before: Vec<NodeId> = before.map(|p| p.tops().to_vec()).unwrap_or_default();
+    let mut out = Changes::default();
+    for t in &tops_now {
+        if !tops_before.contains(t) {
+            out.added.push(*t);
+        } else if let (Some(n), Some(b)) = (&now, before)
+            && reach(n.document(), *t) != reach(b.document(), *t)
+        {
+            out.changed.push(*t);
+        }
+    }
+    out.removed = tops_before
+        .into_iter()
+        .filter(|t| !tops_now.contains(t))
+        .collect();
+    out
+}
+
+/// Every node `top` shows in a frozen document — its subtree and, transitively,
+/// the vault mains it reaches — by id, with the top's own place blanked
+/// ([`changes`]).
+fn reach(frozen: &Document, top: NodeId) -> std::collections::BTreeMap<NodeId, Node> {
+    let mut out = std::collections::BTreeMap::new();
+    let mut pending = vec![top];
+    while let Some(t) = pending.pop() {
+        let Some(captured) = frozen.capture_subtree(t) else {
+            continue;
+        };
+        for r in refs_out(&captured) {
+            if let Some(rt) = top_of(frozen, r)
+                && !out.contains_key(&rt)
+            {
+                pending.push(rt);
+            }
+        }
+        // Every top's place, not only `top`'s: a main nesting another reaches it,
+        // and moving the nested one across the canvas changes neither for a
+        // consumer — the first cut blanked `top` alone and counted Card changed
+        // when Icon moved.
+        for mut n in captured {
+            if n.id == t {
+                n.transform = kurbo::Affine::IDENTITY;
+                n.parent = None;
+            }
+            out.insert(n.id, n);
+        }
+    }
+    out
+}
+
+/// Publish `doc` as a kit (§5.3e, 2B): freeze it, bump its mark's version, stamp
+/// `date` and `note`, and keep the frozen copy beside the working document. The
+/// new version, or `None` when the document is not a kit or has nothing to
+/// publish.
+///
+/// **Not undoable** (§15 D1011 (2)), and not an operation: like *Save*, it is an
+/// outward act the history cannot take back from documents that already read it.
+/// `date` is the caller's clock — a publish is stamped by the user's act, never
+/// by a save (`crate::meta`'s rule about clocks).
+pub fn publish(doc: &mut Document, note: Option<String>, date: u64) -> Option<u32> {
+    let mut meta = doc.meta().clone();
+    let mark = meta.kit.as_mut()?;
+    let frozen = freeze(doc)?;
+    mark.version += 1;
+    mark.date = Some(date);
+    mark.note = note.filter(|n| !n.trim().is_empty());
+    let version = mark.version;
+    doc.set_meta(meta);
+    doc.set_published(Some(frozen));
+    Some(version)
+}
+
 /// Why a kit insert could not be built.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum KitError {
@@ -483,10 +588,13 @@ pub fn vendor(
             c.origin = Some(source_origin(src, kit, version, s));
             held.insert(key(s), c.id);
         }
-        // The kit's name on the top node, for when the kit cannot be found; a
-        // main from a third kit arrived with that kit's name already.
+        // The kit's name on the top node, for when the kit cannot be found — only
+        // on a main **of this kit**: a third kit's main keeps the name it arrived
+        // with, or none, rather than taking the name of the kit it came through
+        // (`D1014`'s fix (c)).
         if let Some(o) = copy.first_mut().and_then(|c| c.origin.as_mut())
             && o.name.is_none()
+            && o.kit == kit
         {
             o.name = name.map(str::to_string);
         }

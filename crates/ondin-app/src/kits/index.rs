@@ -10,9 +10,10 @@
 //! shape (`library::cover`, §15 D820) and its reason: a document load and a
 //! render are hundreds of milliseconds at worst, and the picker opens on a click.
 //!
-//! The shelf is keyed by kit id and the file's modification time, so a kit that
-//! publishes while this document is open is read again the next time the picker
-//! asks for it; nothing else invalidates it.
+//! The shelf is keyed by kit id and the file's modification time **as the
+//! library scan last read it**, so a kit that publishes while this document is
+//! open is read again once the library has rescanned — which opening the picker
+//! does (`OndinApp::toggle_kit_picker`); nothing else invalidates it.
 
 use crate::library::scan::Entry;
 use crate::library::state::Library;

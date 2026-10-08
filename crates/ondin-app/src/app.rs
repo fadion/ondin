@@ -3583,7 +3583,7 @@ impl OndinApp {
     /// floor; what finds it is asking whether the run's *first line* describes
     /// the item beneath it, and *"Leaving a tool or pressing Escape"* plainly
     /// does not describe *"abandon whatever gesture is in flight"*.
-    fn escape(&mut self, ctx: &egui::Context) {
+    pub(crate) fn escape(&mut self, ctx: &egui::Context) {
         // Present mode first: it is the only state whose own way out is hidden
         // by the state itself, so nothing **in this ladder** may take the key ahead
         // of it.
@@ -3604,6 +3604,11 @@ impl OndinApp {
         } else if self.picker.take().is_some() {
             // The picker floats over the canvas and owns no gesture, so it is
             // the outermost thing Escape can dismiss.
+        } else if self.kit_picker.take().is_some() {
+            // The insert picker floats the same way (§5.3e, 3A), one rung
+            // further in: a rung of its own, so one press closes one thing
+            // (`D1014`'s fix (a) — it read `Escape` itself and closed beside
+            // whatever else the press was spent on).
         } else if self.text.is_some() {
             self.finish_text_edit();
         } else if self.pen.is_some() {
@@ -6620,18 +6625,22 @@ impl OndinApp {
     /// gone** (§15 D548): `atomic::temp_for` is unique per write now, so two
     /// writers of one path no longer tear the destination. The ordering hazard
     /// above is what is left, and it was always the larger one.
-    pub(crate) fn save_file(&mut self, pin: bool) {
+    ///
+    /// **Answers whether the document was written**, for a caller whose own
+    /// message would otherwise land on top of the failure's — the status line has
+    /// one slot (`make_kit`, `D1013`'s fix).
+    pub(crate) fn save_file(&mut self, pin: bool) -> bool {
         self.disk_settle();
         let path = match self.session.path.clone() {
             Some(p) => p,
             None => match self.file_untitled() {
                 Some(p) => p,
-                None => return,
+                None => return false,
             },
         };
         if let Err(e) = crate::library::store::write_document(&path, &self.session.doc) {
             self.session.fail(format!("Save failed: {e}"));
-            return;
+            return false;
         }
         // No status message: the save dot goes green and the top bar
         // already names the file, so echoing the path was one more thing on
@@ -6666,6 +6675,7 @@ impl OndinApp {
         if self.prefs.export_on_save {
             self.export_all(crate::panels::ExportAll::Quietly);
         }
+        true
     }
 
     /// File a document that has never been saved, under whatever name it
@@ -7386,6 +7396,9 @@ impl OndinApp {
         self.layer_filter = None;
         self.layer_drag = None;
         self.picker = None;
+        // The insert picker's open kits and its seeding were the old document's
+        // (`D1014`'s minor note).
+        self.kit_picker = None;
         self.paint_hex = None;
         self.guide_previews.clear();
         // Ids from the old document's stream, and the one field in this struct
@@ -16600,10 +16613,12 @@ mod library_wiring_tests {
     /// again continues from it. The top bar draws the *Kit* tag only while it is
     /// shared, and the open menu offers the row the state calls for.
     ///
-    /// Two documents with no id, because they get one by different routes: an
-    /// untitled one is filed by the mark's save, and filing mints the id
-    /// (`store::file_document`); a **pre-library file** already has a path, so
-    /// the save writes it in place and only `make_kit` can give it an identity.
+    /// Two documents with no id. `make_kit` mints one for both; what differs is
+    /// what would happen if it did not. An untitled one is filed by the mark's
+    /// save, and filing would mint one (`store::file_document` keeps an id that is
+    /// already there, so as built it keeps `make_kit`'s); a **pre-library file**
+    /// already has a path, so the save writes it in place and only `make_kit`
+    /// gives it an identity.
     ///
     /// Flip, run: `make_kit` without minting an id fails *"a pre-library kit is
     /// found by its id"* — the untitled half stays green, filing having minted
@@ -16677,6 +16692,29 @@ mod library_wiring_tests {
                 .any(|e| e.path == old && e.meta.id.is_some() && e.meta.id == id),
             "a pre-library kit is found by its id"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A failed save is not reported as a made kit** (§15 D1013's fix): the
+    /// status line has one slot, and *"… is a kit"* written after the save used to
+    /// cover *"Save failed: …"*. The mark is in the document either way and goes
+    /// out with the next save that works.
+    ///
+    /// Flip, run: `make_kit` ignoring `save_file`'s answer fails on the status,
+    /// which reads *"… is a kit — nothing is shared until you publish it"*.
+    #[test]
+    fn a_kit_whose_save_failed_says_the_save_failed() {
+        let ctx = egui::Context::default();
+        let root = temp_root("kit-save-fails");
+        let mut app = app_at(&ctx, root.clone());
+        // A directory where the file should be: the write fails.
+        let blocked = root.join("blocked.ondin");
+        std::fs::create_dir_all(&blocked).unwrap();
+        app.session.path = Some(blocked);
+        app.make_kit();
+        let status = app.session.status().text.clone();
+        assert!(status.contains("Save failed"), "{status}");
+        assert!(app.shared_kit().is_some(), "the mark is in the document");
         let _ = std::fs::remove_dir_all(&root);
     }
 

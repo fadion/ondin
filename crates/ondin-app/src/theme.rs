@@ -762,7 +762,7 @@ pub mod icon {
     /// (`ui::paint_hexagon_filled`, §15 D985) over this glyph's box.
     pub const HEXAGON: &str = "\u{e2ae}";
     /// A **kit** (§5.3e, §15 D1011): the top bar's *Kit* tag, the document menu's
-    /// kit rows, the picker's kit headings and an instance's source line —
+    /// kit rows, and the insert and swap pickers' kit headings —
     /// Phosphor's `package`, read off the mockups' own stylesheet beside
     /// `ph-hexagon`, which gives this file's `HEXAGON` and so vouches for the font.
     pub const PACKAGE: &str = "\u{e390}";

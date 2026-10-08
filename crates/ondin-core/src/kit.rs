@@ -946,7 +946,9 @@ pub struct Update {
 /// nothing about instances is decided here. A main the new publish reaches and
 /// this document does not hold yet is vendored first. **A main the kit no longer
 /// publishes is made local**: moved out of the vault as an ordinary main, its
-/// origins cleared — no instance is promoted (D1011 (3)).
+/// origins cleared — no instance is promoted (D1011 (3)). **A node the kit only
+/// moved is moved** — a variant out of its set, a main into a set, a layer into
+/// another group — never deleted and copied again (§15 D1022).
 ///
 /// Built against a scratch document that each op is applied to as it is made,
 /// so every op is read against the state the ones before it leave, and an op
@@ -982,13 +984,16 @@ pub fn update_all(
         kit: kit0,
         version: version0,
         published: published0,
+        at: 0,
+        later: Vec::new(),
+        dropped: Vec::new(),
     };
     let mut updated = Vec::new();
     let mut made_local = Vec::new();
-    for &(kit, version, published) in kits {
-        (b.kit, b.version, b.published) = (kit, version, published);
+    for (at, &(kit, version, published)) in kits.iter().enumerate() {
+        (b.kit, b.version, b.published, b.at) = (kit, version, published, at);
         let src = published.document();
-        let tops: Vec<NodeId> = b
+        let mut tops: Vec<NodeId> = b
             .scratch
             .vault()
             .and_then(|v| b.scratch.get(v))
@@ -1002,7 +1007,59 @@ pub fn update_all(
                     .is_some_and(|o| o.kit == kit)
             })
             .collect();
+        // 🚨 **A main the kit moved between a set and the top level is moved
+        // here, never deleted and vendored again** (§15 D1022, the kits QA
+        // review's finding). A variant taken out of its set left its set's sync
+        // deleting the copy — every instance of it cut loose, the toast saying
+        // overrides were kept — and a lone main combined into a set was made
+        // local, though still published, its instances no longer following it.
+        //
+        // A published top held below the vault's top level — the variant taken
+        // out — is lifted to it, and synced as a top.
+        if let Some(v) = b.scratch.vault() {
+            for &p in published.tops() {
+                if let Some(h) = b.here(p)
+                    && b.scratch.get(h).and_then(|n| n.parent) != Some(v)
+                {
+                    let index = b.scratch.get(v).map_or(0, |n| n.children.len());
+                    b.push(Operation::Reparent {
+                        id: h,
+                        new_parent: v,
+                        index,
+                    })?;
+                    tops.push(h);
+                }
+            }
+        }
+        // A vault top the kit put inside another top — the main combined into a
+        // set — waits for that top's sync, which moves it in ([`Builder::sync`]
+        // finds a child anywhere in the vault); a top the document does not hold
+        // yet is begun as an empty shell for the sync to fill.
+        let mut moving: FxHashSet<NodeId> = FxHashSet::default();
+        for t in tops.clone() {
+            let Some(x) = b
+                .scratch
+                .get(t)
+                .and_then(|n| n.origin.as_ref())
+                .map(|o| o.node)
+            else {
+                continue;
+            };
+            if src.get(x).is_none() || src.in_vault(x) {
+                continue;
+            }
+            if let Some(s) = top_of(src, x).filter(|s| *s != x) {
+                moving.insert(t);
+                if b.here(s).is_none() {
+                    let shell = b.insert_shell(ids, s)?;
+                    tops.push(shell);
+                }
+            }
+        }
         for t in tops {
+            if moving.contains(&t) {
+                continue;
+            }
             let Some(x) = b
                 .scratch
                 .get(t)
@@ -1019,6 +1076,36 @@ pub fn update_all(
             b.vendor_reached(ids, x)?;
             b.sync(ids, t, x)?;
             updated.push(t);
+        }
+        // What a sync dropped and no other sync moved away is gone from the
+        // publish; what was moved is where its new parent's sync put it.
+        for (n, from) in std::mem::take(&mut b.dropped) {
+            if b.scratch.get(n).and_then(|n| n.parent) == Some(from) {
+                b.push(Operation::DeleteNode { id: n })?;
+            }
+        }
+    }
+    // The references a sync could not point yet, now that every main of every
+    // kit accepted is synced (§15 D1022).
+    for (d, x, at) in std::mem::take(&mut b.later) {
+        let (kit, version, published) = kits[at];
+        (b.kit, b.version, b.published, b.at) = (kit, version, published, at);
+        let n = published.document().get(x).ok_or(KitError::Incomplete(x))?;
+        let (link, swap, props) = (n.link, n.swap, n.props.clone());
+        let link = link.map(|l| b.resolve(l)).transpose()?;
+        let swap = swap.map(|s| b.resolve(s)).transpose()?;
+        let mut props = props;
+        for p in &mut props {
+            for bnd in &mut p.value.bound {
+                *bnd = b.resolve(*bnd)?;
+            }
+        }
+        for op in [
+            Operation::SetLink { id: d, link },
+            Operation::SetSwap { id: d, swap },
+            Operation::SetProperties { id: d, props },
+        ] {
+            b.push(op)?;
         }
     }
     for op in make_local(&b.scratch, &made_local).0 {
@@ -1077,9 +1164,116 @@ struct Builder<'a> {
     kit: &'a str,
     version: u32,
     published: &'a Published,
+    /// Which of [`update_all`]'s kits `kit`, `version` and `published` are.
+    at: usize,
+    /// 🚨 **The references a sync could not point yet** (§15 D1022): a node of
+    /// the scratch, the published node it was built from, and its kit's index.
+    /// A layer added to a main reaches the scratch only when that main is
+    /// synced, so a main that nests it — synced first by vault order, which a
+    /// paste or a later vendoring can leave either way round, or a variant
+    /// nesting a later sibling — has nothing to link its new layer's copy to.
+    /// The update failed there as `Incomplete`, on every accept, for good (the
+    /// kits QA review's finding, reproduced). Such a link, swap or binding is
+    /// written empty and recorded here, and [`update_all`] points it once
+    /// every main of every kit accepted is synced. The ops between apply
+    /// unchecked, so nothing sees the gap; the commit's checks see the end.
+    later: Vec<(NodeId, NodeId, usize)>,
+    /// A child a sync found its published parent no longer holding, though the
+    /// publish still has it elsewhere, and the parent it was dropped from: deleted
+    /// once the kit's tops are synced unless another sync moved it away (§15
+    /// D1022). Deleted at once, a move between parents was a delete and a fresh
+    /// copy, its instances cut loose.
+    dropped: Vec<(NodeId, NodeId)>,
 }
 
 impl Builder<'_> {
+    /// [`Self::here`], or why not: a node whose main the scratch holds without
+    /// it is an update owed — a third kit's main held at another version —
+    /// named as one, as `vendor` names it, rather than as a broken kit.
+    fn resolve(&self, r: NodeId) -> Result<NodeId, KitError> {
+        if let Some(h) = self.here(r) {
+            return Ok(h);
+        }
+        let src = self.published.document();
+        let held = top_of(src, r).and_then(|t| self.here(t)).is_some();
+        Err(if held {
+            KitError::NeedsUpdate(r)
+        } else {
+            KitError::Incomplete(r)
+        })
+    }
+
+    /// Point `n`'s outside references at the scratch where they can be, and
+    /// clear the rest — answering whether any was cleared, to be pointed later
+    /// (`later`). `inside` is what needs no pointing: the subtree being
+    /// inserted, already remapped.
+    fn point_or_defer(&self, n: &mut Node, inside: &FxHashSet<NodeId>) -> bool {
+        let mut deferred = false;
+        if let Some(l) = n.link
+            && !inside.contains(&l)
+        {
+            n.link = self.here(l);
+            deferred |= n.link.is_none();
+        }
+        if let Some(s) = n.swap
+            && !inside.contains(&s)
+        {
+            n.swap = self.here(s);
+            deferred |= n.swap.is_none();
+        }
+        for p in &mut n.props {
+            let before = p.value.bound.len();
+            p.value.bound = p
+                .value
+                .bound
+                .iter()
+                .filter_map(|b| {
+                    if inside.contains(b) {
+                        Some(*b)
+                    } else {
+                        self.here(*b)
+                    }
+                })
+                .collect();
+            deferred |= p.value.bound.len() != before;
+        }
+        deferred
+    }
+
+    /// Whether `a` is `n` or above it in the scratch.
+    fn is_ancestor(&self, a: NodeId, n: NodeId) -> bool {
+        std::iter::successors(Some(n), |x| self.scratch.get(*x).and_then(|x| x.parent))
+            .take(self.scratch.len() + 1)
+            .any(|x| x == a)
+    }
+
+    /// Published top `s` as an **empty** vault top — its own fields, no
+    /// children — for [`Self::sync`] to fill, moving in the copies the document
+    /// already holds of what is under it (§15 D1022): a set the kit combined a
+    /// held lone main into. Vendoring it whole would have copied that main a
+    /// second time. Answers the shell's id.
+    fn insert_shell(&mut self, ids: &mut IdSource, s: NodeId) -> Result<NodeId, KitError> {
+        let src = self.published.document();
+        let mut top = src.get(s).ok_or(KitError::Incomplete(s))?.clone();
+        top.children.clear();
+        let template = vec![top];
+        let (mut copy, root) =
+            crate::document::remap_subtree(&template, ids).ok_or(KitError::Incomplete(s))?;
+        copy[0].origin = Some(source_origin(src, self.kit, self.version, &template[0]));
+        let inside: FxHashSet<NodeId> = [root].into_iter().collect();
+        if self.point_or_defer(&mut copy[0], &inside) {
+            self.later.push((root, s, self.at));
+        }
+        let vault = self.scratch.vault().ok_or(KitError::Incomplete(s))?;
+        let index = self.scratch.get(vault).map_or(0, |v| v.children.len());
+        self.push(Operation::InsertSubtree {
+            nodes: copy,
+            parent: vault,
+            index,
+        })?;
+        Ok(root)
+    }
+
     /// Apply `op` to the scratch and keep it — unless it would change nothing.
     fn push(&mut self, op: Operation) -> Result<(), KitError> {
         if op.changes_nothing(&self.scratch) {
@@ -1149,23 +1343,42 @@ impl Builder<'_> {
         let key_of = |n: &Node| n.origin.as_ref().map(|o| o.node);
         let mut placed: Vec<NodeId> = Vec::with_capacity(pn.children.len());
         for dc in &dn.children {
-            let kept = self
-                .scratch
-                .get(*dc)
-                .and_then(key_of)
-                .is_some_and(|k| pn.children.contains(&k));
-            if !kept {
+            let key = self.scratch.get(*dc).and_then(key_of);
+            if key.is_some_and(|k| pn.children.contains(&k)) {
+                continue;
+            }
+            // Still published, under another parent: its new parent's sync may
+            // move it there (`dropped`).
+            if key.is_some_and(|k| src.get(k).is_some() && !src.in_vault(k)) {
+                self.dropped.push((*dc, d));
+            } else {
                 self.push(Operation::DeleteNode { id: *dc })?;
             }
         }
         for (i, pc) in pn.children.iter().enumerate() {
-            let held = self
+            let mut held = self
                 .scratch
                 .get(d)
                 .map(|n| n.children.clone())
                 .unwrap_or_default()
                 .into_iter()
                 .find(|c| self.scratch.get(*c).and_then(key_of) == Some(*pc));
+            // **Not here but held elsewhere is a move** (§15 D1022): a main the
+            // kit combined into this set, a layer it moved into this group. Never
+            // one of `d`'s own ancestors, which would make a cycle.
+            if held.is_none()
+                && let Some(h) = self.here(*pc)
+                && h != d
+                && !self.is_ancestor(h, d)
+            {
+                let index = i.min(self.scratch.get(d).map_or(0, |n| n.children.len()));
+                self.push(Operation::Reparent {
+                    id: h,
+                    new_parent: d,
+                    index,
+                })?;
+                held = Some(h);
+            }
             // A layer whose kind changed between publishes cannot be rewritten
             // field by field — no operation turns a rectangle into an ellipse —
             // so it is replaced.
@@ -1199,21 +1412,11 @@ impl Builder<'_> {
         for op in crate::reset::state_ops(&want) {
             self.push(op)?;
         }
-        let resolve = |b: &Builder, r: NodeId| b.here(r);
-        let link = match pn.link {
-            Some(l) => Some(resolve(self, l).ok_or(KitError::Incomplete(l))?),
-            None => None,
-        };
-        let swap = match pn.swap {
-            Some(s) => Some(resolve(self, s).ok_or(KitError::Incomplete(s))?),
-            None => None,
-        };
-        let mut props = pn.props.clone();
-        for p in &mut props {
-            for bnd in &mut p.value.bound {
-                *bnd = resolve(self, *bnd).ok_or(KitError::Incomplete(*bnd))?;
-            }
+        let mut pointed = pn.clone();
+        if self.point_or_defer(&mut pointed, &FxHashSet::default()) {
+            self.later.push((d, x, self.at));
         }
+        let (link, swap, props) = (pointed.link, pointed.swap, pointed.props);
         // A top carries the kit's name (`Origin::name`): this kit's tops take the
         // name it publishes now — a rename is what `Changes::renamed` lets
         // through, and it must arrive (`arch-scribe`'s reading of D1016's first
@@ -1280,23 +1483,9 @@ impl Builder<'_> {
         for (c, t) in copy.iter_mut().zip(&template) {
             c.origin = Some(source_origin(src, self.kit, self.version, t));
         }
-        for c in &mut copy {
-            if let Some(l) = c.link
-                && !inside.contains(&l)
-            {
-                c.link = Some(self.here(l).ok_or(KitError::Incomplete(l))?);
-            }
-            if let Some(s) = c.swap
-                && !inside.contains(&s)
-            {
-                c.swap = Some(self.here(s).ok_or(KitError::Incomplete(s))?);
-            }
-            for p in &mut c.props {
-                for bnd in &mut p.value.bound {
-                    if !inside.contains(bnd) {
-                        *bnd = self.here(*bnd).ok_or(KitError::Incomplete(*bnd))?;
-                    }
-                }
+        for (c, t) in copy.iter_mut().zip(&template) {
+            if self.point_or_defer(c, &inside) {
+                self.later.push((c.id, t.id, self.at));
             }
         }
         let index = index.min(self.scratch.get(parent).map_or(0, |p| p.children.len()));

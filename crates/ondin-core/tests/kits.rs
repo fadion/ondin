@@ -1175,3 +1175,172 @@ fn a_swap_to_an_unused_kit_main_vendors_it_at_the_swap() {
     assert!(d.vault().is_none(), "one undo takes the vault away");
     assert_eq!(ondin_core::component::main_of(&d, nested), Some(glyph));
 }
+
+/// **An update does not depend on the vault's order** (§15 D1022, the kits QA
+/// review's finding). A picker insert vendors dependencies first — *Icon*, then
+/// *Card* — but a paste lands them the other way round, and so does an update
+/// that newly reaches a main. The kit then gives *Icon* a ring, which reaches
+/// *Card*'s nested *Icon* too. **Two defects, one per order**:
+///
+/// - Out of order, syncing *Card* first met a new layer linked to a ring the
+///   scratch did not hold yet, and the update failed to build, `Incomplete`, on
+///   every accept, for good. The link is now pointed once both are synced.
+/// - **In order too** — which the review did not reach, its probe stopping at
+///   the build — the commit was refused: the update writes *Card*'s nested ring
+///   itself, as published, and the structural pass, seeing *Icon* gain a layer,
+///   copied it into that same nested copy again, with no origin, so the vault
+///   refused it. The pass now skips a copy the edit already supplied.
+///
+/// Each instance ends with one ring.
+///
+/// Flips, run: the structural pass without its `supplied` skip fails at the
+/// in-order commit, `accept`'s *"an accepted update commits"*,
+/// `Vault(.., NoOrigin)`; `point_or_defer` written to record nothing — the
+/// cleared link left empty — fails *"the update commits"* out of order, also
+/// `Vault(.., NoOrigin)`: the ring's copy with no link reads to the structural
+/// pass as no counterpart, and it copies one in.
+#[test]
+fn an_update_does_not_depend_on_the_vaults_order() {
+    let mut k = kit();
+    let (mut d, mut ids) = consumer();
+    let card_copy = insert(&mut d, &mut ids, &k, k.card);
+    let (mut e, mut eids) = (
+        Document::new(IdSource::new(0xEA).mint()),
+        IdSource::new(0xEB),
+    );
+    let pasted = paste_across(&d, card_copy, &mut e, &mut eids);
+    let names = |doc: &Document| -> Vec<String> {
+        vault_children(doc)
+            .iter()
+            .map(|c| doc.get(*c).unwrap().name().to_string())
+            .collect()
+    };
+    assert_eq!(
+        names(&d),
+        ["Icon", "Card"],
+        "the insert: dependencies first"
+    );
+    assert_eq!(
+        names(&e),
+        ["Card", "Icon"],
+        "the paste: the other way round"
+    );
+
+    let mut kids = IdSource::new(0xAD);
+    let ring = kids.mint();
+    let mut tx = Transaction(vec![create(ring, k.icon, 1, rect(), "Ring")]);
+    ondin_core::propagate::owed(&k.doc, &mut tx, &mut kids);
+    k.doc.apply(&tx).unwrap();
+    kit::publish(&mut k.doc, None, 2).unwrap();
+
+    let layers = |doc: &Document, card: NodeId| -> Vec<String> {
+        let nested = doc.get(card).unwrap().children()[0];
+        doc.get(nested)
+            .unwrap()
+            .children()
+            .iter()
+            .map(|c| doc.get(*c).unwrap().name().to_string())
+            .collect()
+    };
+    // In order: `accept` asserts the commit.
+    accept(&mut d, &mut ids, &k);
+    assert_eq!(layers(&d, card_copy), ["Dot", "Ring"], "in order: one ring");
+
+    let u =
+        kit::update(&e, &mut eids, L_ID, 5, k.doc.published().unwrap()).expect("the update builds");
+    let mut tx = u.tx;
+    ondin_core::propagate::owed(&e, &mut tx, &mut eids);
+    e.apply(&tx).expect("the update commits");
+    assert_eq!(
+        layers(&e, pasted),
+        ["Dot", "Ring"],
+        "out of order: one ring"
+    );
+}
+
+/// Commit `ops` in the kit through the commit's passes, and publish.
+fn edit_and_publish(k: &mut Kit, ops: Vec<Operation>) {
+    let mut kids = IdSource::new(0xAE);
+    let mut tx = Transaction(ops);
+    ondin_core::propagate::owed(&k.doc, &mut tx, &mut kids);
+    k.doc.apply(&tx).expect("the kit's edit");
+    kit::publish(&mut k.doc, None, 2).unwrap();
+}
+
+/// **A variant the kit takes out of its set stays the main its instances
+/// follow** (§15 D1022, the kits QA review's finding). D placed *Small*; the kit
+/// drags *Small* out of *Button* to the top level and publishes. The update
+/// lifts D's copy out of its set copy to the vault's top level — the same node,
+/// so the instance is still its instance — and nothing is made local.
+///
+/// Flip, run: without the lift, the set's sync drops *Small* and nothing moves
+/// it, so it is deleted — fails *"the same main, still followed"*, the instance
+/// cut loose.
+#[test]
+fn a_variant_taken_out_of_its_set_keeps_its_instances() {
+    let mut k = kit();
+    let (mut d, mut ids) = consumer();
+    let inst = insert(&mut d, &mut ids, &k, k.small);
+    let main = d.get(inst).unwrap().link().unwrap();
+    let (root, small) = (k.doc.root(), k.small);
+    edit_and_publish(
+        &mut k,
+        vec![Operation::Reparent {
+            id: small,
+            new_parent: root,
+            index: 1,
+        }],
+    );
+    let (u, _) = accept(&mut d, &mut ids, &k);
+    assert!(u.made_local.is_empty(), "nothing made local");
+    assert_eq!(
+        d.get(inst).unwrap().link(),
+        Some(main),
+        "the same main, still followed"
+    );
+    assert_eq!(d.get(main).unwrap().parent(), d.vault(), "a vault top now");
+}
+
+/// **A lone main the kit combines into a set stays the main its instances
+/// follow** (§15 D1022). D placed *Icon*; the kit moves *Icon* into *Button* as
+/// a variant and publishes. D held no copy of *Button*, so the update begins one
+/// as an empty shell and its sync moves D's *Icon* in beside fresh copies of
+/// *Large* and *Small* — the instance still on the same node, no second *Icon*,
+/// nothing made local.
+///
+/// Flip, run: `update_all` making such a top local, as it did — no `moving`
+/// set, the old `still` test alone — fails *"nothing made local"*.
+#[test]
+fn a_main_combined_into_a_set_keeps_its_instances() {
+    let mut k = kit();
+    let (mut d, mut ids) = consumer();
+    let inst = insert(&mut d, &mut ids, &k, k.icon);
+    let main = d.get(inst).unwrap().link().unwrap();
+    let (icon, set) = (k.icon, k.set);
+    edit_and_publish(
+        &mut k,
+        vec![Operation::Reparent {
+            id: icon,
+            new_parent: set,
+            index: 2,
+        }],
+    );
+    let (u, _) = accept(&mut d, &mut ids, &k);
+    assert!(u.made_local.is_empty(), "nothing made local");
+    assert_eq!(d.get(inst).unwrap().link(), Some(main), "the same main");
+    let set = d.get(main).unwrap().parent().unwrap();
+    assert_eq!(
+        d.get(set).unwrap().parent(),
+        d.vault(),
+        "inside the set's copy"
+    );
+    let names: Vec<&str> = d
+        .get(set)
+        .unwrap()
+        .children()
+        .iter()
+        .map(|c| d.get(*c).unwrap().name())
+        .collect();
+    assert_eq!(names.len(), 3, "Large, Small and the one Icon: {names:?}");
+    assert_eq!(vault_children(&d), [set], "no second Icon beside the set");
+}

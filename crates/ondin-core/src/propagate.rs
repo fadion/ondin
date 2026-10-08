@@ -546,6 +546,22 @@ pub fn propagate_structure(
                     if deleted.contains(&pc) || !after_nodes.contains_key(&pc) {
                         continue;
                     }
+                    // **A copy the edit already gave its counterpart is owed
+                    // nothing either** (§15 D1022): a kit update writes the
+                    // published structure into every vault main, so a main nested
+                    // in another — *Icon* in *Card* — gains its new layer and the
+                    // copy inside *Card* gains that layer's copy in the same
+                    // transaction. Copying it in again made a second, with no
+                    // origin, and the vault refused the commit; every update that
+                    // added a layer to a nested kit main failed. That copy's own
+                    // gain reaches its instances as a parent of its own above.
+                    let supplied = after_nodes[&pc].children.iter().any(|k| {
+                        !before.contains_key(k)
+                            && after_nodes.get(k).and_then(|n| n.link) == Some(nodes[0].id)
+                    });
+                    if supplied {
+                        continue;
+                    }
                     let Some((mut copy, _)) = crate::document::remap_subtree(&nodes, ids) else {
                         continue;
                     };

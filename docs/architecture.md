@@ -1303,7 +1303,11 @@ kept in its unit — judged against the frame the edit leaves it in, and a no-op
 transaction untouched when nothing it places is pinned. ⚠️ **Only a patch that can change the box is
 a resize there** (`GeometryPatch::resizes`, no wildcard): a corner radius, a side count or an inner
 ratio is applied to a kind still at its *stored* size, and reading it as a resize un-stretched a
-stretched layer until §15 D874 fixed it.
+stretched layer until §15 D874 fixed it. ⚠️ **Never a vault node** (§5.3e, §15 D1024): the vault is
+never resolved, so `used_local` has nothing for one and its stored transform would stand in for where
+it is drawn — a kit update re-pinned a layer from a stale place, in its main and every instance. A kit
+update writes a vault node exactly as published, so `keep_insets` and `keep_flex_sizes`' two passes,
+`flex_holds` and `kept_flow_translations`, leave every node in the vault as the transaction writes it.
 
 **Every leaf is measured, and shapes are replaced elements** (§15 D872). `Rect`, `Ellipse`,
 `Polygon`, `Star`, `Path`, `Line` and `Boolean` have an intrinsic size equal to their stored
@@ -2863,7 +2867,7 @@ amendment); ~~exposing nested properties, later
 by the mockup~~ — built 2026-10-06 from the mockup's 4K–4S (§15 D988), with the binding line a nested
 instance in a main had never drawn (§15 D989), unlooked-at in the GUI; and a verb that un-makes a component, which would owe a detach.
 
-### 5.3e Kits — shared component libraries (designed 2026-10-08; steps 1–4 built; §15 D1010–D1023)
+### 5.3e Kits — shared component libraries (designed 2026-10-08; steps 1–4 built; §15 D1010–D1024)
 
 > **Design ahead of code, most of it.** Ruled with the maintainer on 2026-10-08: that a kit is a
 > document marked as one, that publishing is explicit, and that the first version's update is an
@@ -3086,7 +3090,8 @@ reaches a second machine through the synced base folder (§5.11a), with no netwo
   panel's first height. The list asks `min_scrolled_height` and does not shrink, and the area is placed
   by its top-left, a bottom pivot also reading last frame's size (§15 D1014).
 - **The library's kits** (`kits/index.rs`): `kits_in` lists them from the scan's `meta.kit`, a conflict
-  copy losing in either order; `KitShelf` loads each whole file and renders its tile pictures on a worker,
+  copy losing in either order, and **whether a kit is sharing asked of the file that won** — asked
+  first, a kit that stopped sharing was listed through its conflict copy (§15 D1024); `KitShelf` loads each whole file and renders its tile pictures on a worker,
   keyed by the mtime the scan read, and recording the version the file said when it was read — a
   placement records that, not the scan's, which a publish between the two has passed (§15 D1023).
   Opening the picker loads every kit in the library.
@@ -3136,13 +3141,16 @@ and the dashboard's 1B §15 D1017).
   receiving updates, and that publishing continues from its last version — ~~🚨 **without 1D's count**,
   whose source is undecided~~ with 1D's count (`kits/users.rs`, §15 D1021): opening the dialog starts
   a worker loading every library file but the kit's own and counting those whose vault holds a main
-  from it, and closing it drops the count, so each opening counts afresh. Until it arrives the first
+  from it, and closing it drops the count — the worker stopping between files (§15 D1024) — so each
+  opening counts afresh. Until it arrives the first
   sentence stands without the number, as it was written to (§15 D1017). ⚠️ It counts files on disk, so
   an open document's unsaved vault is not counted.
 - **The dashboard** (1B): a *Kits* row under *Starred*, a **filter** over the library's sharing kits
-  that sorts and filters by project as any page does; a *Kit* chip at the cover's bottom-left, after a
-  conflict or unreadable mark — on the card only, not the list; and the file card's ⋯ *Make a kit*,
-  acting at once, or *Stop sharing as kit*, asking first. A closed file's mark is written into the file
+  that sorts and filters by project as any page does, a kit's conflict copy left out so a kit is
+  counted once; a *Kit* chip at the cover's bottom-left, after a conflict or unreadable mark — on the
+  card only, not the list, and on a conflict copy too, which wears both; and the file card's ⋯ *Make a
+  kit*, acting at once, or *Stop sharing as kit*, asking first — **no kit row on a conflict copy**,
+  which carries the original's id and would make a second kit of it (§15 D1024). A closed file's mark is written into the file
   (`library::store::set_kit`), the open document's by the editor's own verbs. *Duplicate* leaves the
   mark and the published state behind (`library::store::duplicate`): the copy is no kit until it is
   made one, and a kept publish made its first one compare against a dead copy (§15 D1023).
@@ -3156,7 +3164,13 @@ and the dashboard's 1B §15 D1017).
   transaction across every kit accepted. Each op is built against a scratch the ones before it were
   applied to. 🚨 **It never touches an instance**: the commit's main-edit passes carry the change, so
   overrides survive by value comparison and instance-side structure by §5.3d's rules, and an instance
-  root's placement stays its own. A main the publish newly reaches is vendored first.
+  root's placement stays its own. A main the publish newly reaches is vendored first. 🚨 **A node new
+  to the publish is an empty shell filled by the same sync**, never its published subtree copied whole,
+  so a group or a frame the kit made around held layers moves them in rather than minting them again
+  (§15 D1024); and a node's own fields are written only where its kind takes them — a group's paint
+  ops, which `apply` refuses, are skipped, or every update of a main holding a group failed to build.
+  The commit door's placement passes leave the vault alone (§5.3c, `keep_insets`): a vault node is
+  never resolved, so they would read its stale stored transform as where it is drawn.
 - 🚨 **It does not depend on the vault's order** (§15 D1022): a paste or a later vendoring can leave a
   nesting main before the main it nests, so a link, swap or binding a sync cannot point yet is written
   empty and pointed once every kit's tops are synced (`Builder::later`) — a missing node whose main is
@@ -3164,11 +3178,14 @@ and the dashboard's 1B §15 D1017).
   moved**, never deleted and copied again: a published top held below the vault's top level (a variant
   taken out of its set) is lifted to it; a top the kit put inside another (a main combined into a set)
   waits for that top's sync, which reparents it in — an empty shell begun for a set D does not hold yet;
-  and a child a sync drops while it is still published elsewhere is deleted only if no other sync moved
-  it, so a layer moved between groups is a move too.
+  and **every** child a sync drops waits until the kit's tops are synced, deleted then only if no other
+  sync moved it, so a layer moved between groups is a move too, and a group the kit ungrouped does not
+  take the layers it lifted out with it (§15 D1024).
 - ***Make local*** (`kit::make_local`, `Operation::SetOrigin`): every origin in the main cleared, the
   main moved last under the root and placed right of the content; 🚨 no instance promoted; a kit main it
-  nests stays vendored. An update makes the kit's removed mains local the same way.
+  nests stays vendored. An update makes the kit's removed mains local the same way, and **whole**: every
+  top is classified before any is synced, and no sync moves a layer out of one being made local
+  (`Builder::keep_out`, §15 D1024).
 - **The notice**: a pill after the save dot when the library says a kit published past the version D
   holds; its popover lists each kit, *Later* (kept per machine, per document, per version) and *Accept
   all*, one step, a text toast naming `Ctrl+Z`. ~~⚠️ It appears when the library next rescans, not the
@@ -3183,7 +3200,10 @@ and the dashboard's 1B §15 D1017).
   An accept uses a loaded publish only when it was read at the kit file's current modification time
   **and at the version the scan read** (`KitShelf::current`), else reads the file and records the
   version the file says (§15 D1023), and an update writes the publish's name onto the kit's own
-  vendored tops.
+  vendored tops. **A one-kit accept** — the card's, the canvas menu's, *Kits used…*'s row — that meets
+  a newer version of a third kit's main than D holds (`NeedsUpdate`) accepts every waiting update
+  together, as *Accept all* does, when more wait than it took; otherwise it says the other kit is not
+  in the library (§15 D1024).
 - **The canvas menu** (7A, `context-menus.md` §4): on a kit instance's root, *Go to main in Atlas*,
   *Accept kit updates* when one waits — omitted otherwise, a departure from that file's §3 recorded as
   its §9.6 item 17 — and *Make local…* after *Detach instance*. A local instance's menu is unchanged.

@@ -6600,7 +6600,7 @@ fn mark_chip(ui: &egui::Ui, at: egui::Pos2, align: egui::Align2, mark: Mark) -> 
 }
 
 /// Whether a library file is a kit that is sharing — the *Kits* filter's
-/// question and the card's chip (§5.3e, 1B; §15 D1017). Read off the scan's prefix, which
+/// question and the file menu's (§5.3e, 1B; §15 D1017). Read off the scan's prefix, which
 /// carries the mark (§15 D1012). A mark that stopped sharing is not one.
 ///
 /// **Nor is a conflict copy** (§15 D1024, the kits QA review's second pass): it

@@ -2858,7 +2858,7 @@ amendment); ~~exposing nested properties, later
 by the mockup~~ — built 2026-10-06 from the mockup's 4K–4S (§15 D988), with the binding line a nested
 instance in a main had never drawn (§15 D989), unlooked-at in the GUI; and a verb that un-makes a component, which would owe a detach.
 
-### 5.3e Kits — shared component libraries (designed 2026-10-08; steps 1–4 built, swap in part; §15 D1010–D1018)
+### 5.3e Kits — shared component libraries (designed 2026-10-08; steps 1–4 built; §15 D1010–D1021)
 
 > **Design ahead of code, most of it.** Ruled with the maintainer on 2026-10-08: that a kit is a
 > document marked as one, that publishing is explicit, and that the first version's update is an
@@ -2867,15 +2867,18 @@ instance in a main had never drawn (§15 D989), unlooked-at in the GUI; and a ve
 > That file is untracked and regenerated, so its screen numbers here are pointers and the content is
 > this section's. **Build step 1 is in core** (§15 D1012, *Step 1 as built* below) — the vault,
 > provenance, the kit mark, the published state, vendoring and inserting, and a kit instance's paste —
-> **with no chrome**; ~~everything from *Publishing* on is still design~~. **Step 2's chrome is built,
-> swap in part** (§15 D1013, D1014, *Step 2 as built* below): the document menu with *Make this a kit*,
+> **with no chrome**; ~~everything from *Publishing* on is still design~~. **Step 2's chrome is built**
+> (§15 D1013, D1014, *Step 2 as built* below): the document menu with *Make this a kit*,
 > the *Kit* tag, the insert picker — its tiles' drag and *Open library* since (§15 D1018) — and the
-> swap picker grouped by kit. **Step 4, publishing, is built**
-> (§15 D1015, *Step 4 as built* below), and with it 1D's confirmation, less its count, and the
-> dashboard's 1B (§15 D1017). **Step 3,
+> swap picker grouped by kit, offering a kit main the document has never used since (§15 D1019). **Step 4, publishing, is built**
+> (§15 D1015, *Step 4 as built* below), and with it 1D's confirmation and the
+> dashboard's 1B (§15 D1017), and 1D's count (§15 D1021). **Step 3,
 > updates and *Make local*, is built** (§15 D1016, *Step 3 as built* below), with the canvas menu's
-> kit rows, *Kits used…* and *Make all local* (7A, 6A, 6B). The rest of the build is `roadmap.md`'s *Next · Shared
-> component libraries*.
+> kit rows, *Kits used…* and *Make all local* (7A, 6A, 6B), and the pill noticing a publish while D is
+> open (§15 D1020). ~~The rest of the build is `roadmap.md`'s *Next · Shared component libraries*.~~
+> **Nothing of the build is left**; that section closed into §15 (D1010's amendment), and what is later —
+> the review table, the kit verbs in a palette, team publishing — is `roadmap.md`'s *Later · Components
+> and layout, past the first build*.
 
 **The word is *Kit*** (§15 D1011): a document whose components others use. *Library* stays the
 dashboard's collection (§5.11a, §9.6). A component whose main lives in a kit is a *kit component*; an
@@ -2934,11 +2937,13 @@ components changed since v8 (date)*, grouped *Added* / *Changed* / *Removed*, ea
 optional note; *Cancel* / *Publish*. A first publish lists every set and lone main, *+ N more*, its button
 *Publish 12 components*. Afterwards a toast, *Published Atlas v9 · 4 components*, and the count is 0.
 *Stop sharing Atlas as a kit?* (1D) says how many documents use it ~~— read from the library scan, which
-reads every file for its cover anyway~~ — ⚠️ **how it counts them is undecided**, and the dialog is
-built without the number (§15 D1017): the scan
+reads every file for its cover anyway~~ — ~~⚠️ **how it counts them is undecided**, and the dialog is
+built without the number (§15 D1017)~~ **counted by loading every library file on a worker** (§15
+D1021, the maintainer's choice), the dialog standing without the number until it arrives: the scan
 reads only a 4 KB prefix of each file (`io::probe::meta_in_prefix`, §5.11a) and loads one whole only
 when the probe is inconclusive, and covers are rendered for on-screen cards alone (§15 D862), so the
-count needs either a consumer's kit ids in its prefix-readable `meta` or a full load per file — and
+count needed either a consumer's kit ids in its prefix-readable `meta` — a schema addition leaving every
+earlier file uncounted — or a full load per file — and
 that they keep their copies and stop receiving updates, and that making it a kit again later continues
 from the last version. On the dashboard (1B) a kit's thumbnail
 carries a *Kit* chip opposite the star, the sidebar a *Kits* filter under *Starred* with a count, and the
@@ -2980,8 +2985,9 @@ was. The revealed main goes at the top-right of D's content bounds, several stac
 selection does not move.
 
 **An update is a diff plus an ordinary commit** (5A–5D). D notices a newer publish of a kit it vendors
-from; a pill beside *Saved*, *2 kit updates*, appears on open and the moment a kit publishes while D is
-open, with no toast. Its popover lists per kit *v8 → v9*, a component count and the publish note,
+from; a pill beside *Saved*, *2 kit updates*, appears on open and, while D is open, ~~the moment a kit
+publishes~~ at the next look at the used kits' files — every 45 seconds, and the moment the window
+regains the focus (§15 D1020, the maintainer's ruling of 30 to 60 seconds) — with no toast. Its popover lists per kit *v8 → v9*, a component count and the publish note,
 *Changes 23 instances. Your overrides stay.*, and *Later* / *Accept all*. Accepting rewrites the vendored
 mains in **one transaction**, undoable as one step (*Undo accept kit updates*), and the main-edit passes
 carry it to D's instances — overrides surviving by value comparison, instance-side structure by §5.3d's
@@ -3037,13 +3043,13 @@ reaches a second machine through the synced base folder (§5.11a), with no netwo
   mains a copy reaches (`kit::carried`, `io::clip`'s `kits`), and `kit::insert_carrying` vendors what
   the target lacks before inserting the paste (§5.3d's paste rule, §9.4).
 
-**Step 2 as built** (`kits/`, §15 D1013, D1014; swap across kits in part).
+**Step 2 as built** (`kits/`, §15 D1013, D1014; a swap to an unused kit main §15 D1019).
 
 - **The document menu** (`TopMenu::Document`, `OndinApp::document_menu`): the document's name is its
   head, pulled left by `ui::HEAD_PAD` so the name stays 12 from the mark (§15 D962). It holds **only rows
   with a verb behind them** — on a kit *Publish kit…* (§15 D1015); *Kits used…* while the vault holds
   anything (§15 D1016); *Stop sharing as kit* or *Make this a kit*; then *Show in library*; the design's other rows join when their verbs exist. *Stop sharing* asks first, through 1D's
-  confirmation without its count (§15 D1017).
+  confirmation (§15 D1017) and its count (§15 D1021).
 - **An unfiled document made a kit is given its `meta.id` by the verb** (`make_kit`), as filing gives
   one: a pre-library file has a path and nothing else would mint it, and a kit with no id is one the
   scan can never find. Marking saves; it is not undoable. A save that fails leaves its own status, and
@@ -3076,12 +3082,21 @@ reaches a second machine through the synced base folder (§5.11a), with no netwo
   third kit's main keeps its own kit's name, or none.
 - **The swap picker groups by kit** (`panels/variants.rs`, `kits::index::kit_heading`): D's own mains
   first, headed *This document* only when a kit group follows, then one group per kit by name, with the
-  kit glyph and the version D holds, or *unavailable*; the name-prefix filter across all of them.
-  **A swap to a kit main D has never used is not offered** — it would vendor at the swap.
+  kit glyph and **one version for the whole group** — the oldest D holds of that kit, the figure the
+  update pill counts from; the library's for a kit D holds nothing of; or *unavailable* (`swap_list`,
+  §15 D1019's amendment); the name-prefix filter across all of them.
   Groups are keyed by kit id, not by the heading's name, so two kits of one name stay apart.
-- **Not built**: ~~a tile's drag,~~ a swap to an unvendored kit main~~, *Go to main in <kit>*, and 3G's
+- **A swap to a kit main D has never used is offered and vendored at the swap** (§15 D1019). Each
+  library kit whose published state `KitShelf` holds at the file's current mtime adds its
+  `kit::swap_offers` — mains of the copy's kind, under the same filter and search, that `kit::find` says
+  D does not hold, so a held copy is listed once, by `swap::options` — to its kit's group, under the
+  group's one version (above); an open list asks the shelf for every kit. A pick is `kit::vendored` — `vendor`
+  plus the document its ops leave — and the swap built **against that scratch**, where the main exists:
+  `variant::swap_carrying` for the copy's own row, `variant::set_property` for a property's, all one
+  transaction and one undo step. A kit main vendored from a third kit is that kit's to offer.
+- **Not built**: ~~a tile's drag, a swap to an unvendored kit main, *Go to main in <kit>*, and 3G's
   *Open library*~~ — the drag and *Open library* built since (§15 D1018), *Go to main* with step 3 (§15
-  D1016). ⚠️ The search field has **no `Escape` arm of its own**, deliberately: egui clears its focus
+  D1016), the swap (§15 D1019). ⚠️ The search field has **no `Escape` arm of its own**, deliberately: egui clears its focus
   before `input::resolve` runs (§15 D317), so the ladder's rung sees the press, and an arm in the field
   closed the picker a second time beside whatever the press had already closed (§15 D1014).
 
@@ -3105,8 +3120,12 @@ and the dashboard's 1B §15 D1017).
   *Cancel* / *Publish*. Publishing saves, and a failed save keeps its own status.
 - **_Stop sharing_ asks first** (1D, `OndinApp::stop_sharing_dialog`, one card for the document menu
   and the file card, in `modal_is_up`): that documents using the kit keep their copies and stop
-  receiving updates, and that publishing continues from its last version — 🚨 **without 1D's count**,
-  whose source is undecided; the sentences are written to stand without it (§15 D1017).
+  receiving updates, and that publishing continues from its last version — ~~🚨 **without 1D's count**,
+  whose source is undecided~~ with 1D's count (`kits/users.rs`, §15 D1021): opening the dialog starts
+  a worker loading every library file but the kit's own and counting those whose vault holds a main
+  from it, and closing it drops the count, so each opening counts afresh. Until it arrives the first
+  sentence stands without the number, as it was written to (§15 D1017). ⚠️ It counts files on disk, so
+  an open document's unsaved vault is not counted.
 - **The dashboard** (1B): a *Kits* row under *Starred*, a **filter** over the library's sharing kits
   that sorts and filters by project as any page does; a *Kit* chip at the cover's bottom-left, after a
   conflict or unreadable mark — on the card only, not the list; and the file card's ⋯ *Make a kit*,
@@ -3128,8 +3147,12 @@ and the dashboard's 1B §15 D1017).
   nests stays vendored. An update makes the kit's removed mains local the same way.
 - **The notice**: a pill after the save dot when the library says a kit published past the version D
   holds; its popover lists each kit, *Later* (kept per machine, per document, per version) and *Accept
-  all*, one step, a text toast naming `Ctrl+Z`. ⚠️ It appears when the library next rescans, not the
-  moment a kit publishes (§15 D1016, unruled).
+  all*, one step, a text toast naming `Ctrl+Z`. ~~⚠️ It appears when the library next rescans, not the
+  moment a kit publishes (§15 D1016, unruled).~~ **A publish while D is open is noticed by a look**
+  (`watch_kits`, §15 D1020): while the vault holds anything, every 45 seconds and on the frame the
+  window regains the focus, each used kit's file is `stat`ed against what the library scan read of it —
+  modification time and size — and a difference rescans the library. A used kit the library cannot find
+  is looked for on a focus only, that being a whole scan; a document using no kit watches nothing.
 - **The card**: *Atlas kit · v8 · v9 waiting* under the instance's name; the ⋯ (*More*) always on a kit
   instance, with *Go to main in Atlas*, *Accept kit updates* — **the instance's own kit** — and *Make
   local…* through 4E's dialog. *Go to main* opens the kit with the main selected and a *← <D>* link back.

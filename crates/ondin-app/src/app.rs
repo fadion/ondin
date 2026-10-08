@@ -1330,6 +1330,11 @@ pub struct OndinApp {
     /// Where the rail's insert button was drawn last frame — the picker hangs
     /// beside it, bottom-aligned (3A). `NOTHING` until the rail has drawn.
     pub(crate) kit_button: egui::Rect,
+    /// The publish dialog, while it is open (§5.3e, 2B; §15 D1015).
+    pub(crate) publishing: Option<crate::kits::publish::PublishDraft>,
+    /// This kit's changes since its last publish, with the session revision and
+    /// mark version they were counted at (`OndinApp::kit_changes`).
+    pub(crate) kit_changes: Option<(u64, u32, ondin_core::kit::Changes)>,
     /// The one open context menu (`docs/context-menus.md` §0 R4).
     ///
     /// **One slot, so opening the next one is what closes the last.** Not a
@@ -2307,6 +2312,8 @@ impl OndinApp {
             kit_picker: None,
             kit_shelf: Default::default(),
             kit_button: egui::Rect::NOTHING,
+            publishing: None,
+            kit_changes: None,
             context_menu: None,
             secondary_press: None,
             show_grid: true,
@@ -2790,6 +2797,7 @@ impl eframe::App for OndinApp {
             self.inspector_panel(&ctx);
             self.picker_ui(&ctx);
             self.kit_picker_ui(&ctx);
+            self.publish_dialog(&ctx);
         }
         // **After every door has had its say**, so a right-click that *replaced*
         // the open menu has already written the slot by the time the click-away
@@ -3013,6 +3021,7 @@ impl OndinApp {
             Action::ExportAll => self.export_all(crate::panels::ExportAll::Asking),
             Action::PlaceImage => self.place_image_action(),
             Action::InsertPicker => self.toggle_kit_picker(),
+            Action::PublishKit => self.open_publish(),
             Action::Copy => {
                 self.copy_selection(ctx);
             }
@@ -8934,6 +8943,11 @@ impl OndinApp {
                             self.finish_text_first();
                             self.undo();
                         }
+                        // *Publish N*, on a kit only, left of undo (§5.3e, 1C).
+                        if self.shared_kit().is_some() {
+                            ui.add_space(6.0);
+                            self.publish_button(ui);
+                        }
                     });
                 });
             });
@@ -9200,6 +9214,7 @@ impl OndinApp {
             || self.confirming_close
             || !self.recovery.pending.is_empty()
             || self.deleting_value.is_some()
+            || self.publishing.is_some()
     }
 
     /// Read a workspace switch.

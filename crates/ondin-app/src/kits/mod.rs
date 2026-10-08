@@ -11,6 +11,7 @@
 
 pub(crate) mod index;
 pub(crate) mod picker;
+pub(crate) mod publish;
 
 use crate::app::{OndinApp, TOP_GAP, TopMenu};
 use crate::theme::{self, color, icon};
@@ -39,7 +40,8 @@ impl OndinApp {
     /// ⚠️ **The menu holds only rows whose verbs exist** (§15 D1013): the mockup's
     /// *Rename*, *Duplicate*, *Version history*, *Kits used…* and *Export…* have
     /// no editor verb behind them yet, and a row that does nothing is worse than
-    /// a short menu. *Publish kit…* joins with publishing (step 4).
+    /// a short menu. On a kit, *Publish kit…* comes first, disabled with *No
+    /// changes* when there is nothing to publish (2D, §15 D1015).
     pub(crate) fn document_menu(&mut self, ui: &mut egui::Ui, title: String) {
         let ctx = ui.ctx().clone();
         let open = self.open_menu == TopMenu::Document;
@@ -71,9 +73,24 @@ impl OndinApp {
         // Left-aligned under the name, as the mockup's menu hangs from it.
         let anchor = egui::pos2(head.rect.left(), head.rect.bottom() + crate::ui::MENU_GAP);
         let shared = self.shared_kit().is_some();
+        let publishable = self.kit_changes().map_or(0, |c| c.count());
         self.dropdown(&ctx, "document-menu", anchor, MENU_W, &head, |app, ui| {
             const H: f32 = crate::ui::MENU_ITEM_H;
             if shared {
+                // *Publish kit…*, disabled with its reason at zero (2D).
+                let row = crate::ui::MenuRow {
+                    accel: Some(if publishable > 0 {
+                        "Ctrl+Alt+P"
+                    } else {
+                        "No changes"
+                    }),
+                    enabled: publishable > 0,
+                    ..crate::ui::MenuRow::new(icon::UPLOAD_SIMPLE, "Publish kit…")
+                };
+                if crate::ui::menu_row(ui, row, H).clicked() && publishable > 0 {
+                    app.open_menu = TopMenu::None;
+                    app.open_publish();
+                }
                 if crate::ui::menu_item(ui, icon::PACKAGE, "Stop sharing as kit", H)
                     .on_hover_text(
                         "Documents using it keep their copies and stop receiving \

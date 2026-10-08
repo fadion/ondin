@@ -766,6 +766,9 @@ pub mod icon {
     /// Phosphor's `package`, read off the mockups' own stylesheet beside
     /// `ph-hexagon`, which gives this file's `HEXAGON` and so vouches for the font.
     pub const PACKAGE: &str = "\u{e390}";
+    /// *Publish* (§5.3e, 2A) — Phosphor `upload-simple`, read off the mockups'
+    /// stylesheet as [`PACKAGE`] was.
+    pub const UPLOAD_SIMPLE: &str = "\u{e4c0}";
     /// *Detach instance* — "no longer from the main" (§15 D981).
     pub const LINK_BREAK: &str = "\u{e2e4}";
     /// *Go to main component*, everywhere it is offered — the menu row, the
@@ -1071,6 +1074,7 @@ pub mod icon {
         ("clipboard", CLIPBOARD),
         ("hexagon", HEXAGON),
         ("package", PACKAGE),
+        ("upload-simple", UPLOAD_SIMPLE),
         ("link-break", LINK_BREAK),
         ("arrow-up-right", ARROW_UP_RIGHT),
         ("arrow-square-out", ARROW_SQUARE_OUT),

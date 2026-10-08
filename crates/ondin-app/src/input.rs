@@ -187,6 +187,8 @@ pub enum Action {
     /// Open or close the insert picker (`Shift+I`, and the rail's hexagon — §5.3e,
     /// §15 D1011 (5)).
     InsertPicker,
+    /// *Publish kit…* (`Ctrl+Alt+P` — §5.3e, §15 D1011 (5)).
+    PublishKit,
     /// Move the selection by a world-space delta (arrow keys).
     Nudge(Vec2),
     /// Grow or shrink the selection's box by this many points on each axis —
@@ -1463,6 +1465,14 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
             Action::InsertPicker,
             &mut out,
         );
+        // *Publish kit…*, on the maintainer's `Ctrl+Alt+P` (§15 D1011 (5)) — in
+        // the `Ctrl+Alt` namespace beside the booleans' `U/S/I/X`, and clear of
+        // them and of `Ctrl+P`, which nothing binds.
+        on(
+            cmd && m.alt && !m.shift && i.key_pressed(egui::Key::P),
+            Action::PublishKit,
+            &mut out,
+        );
 
         // --- align and distribute (Alt, without Ctrl) ---
         //
@@ -2505,6 +2515,42 @@ mod tests {
             !actions(Mode::Normal, vec![key(egui::Key::B, cmd)], cmd)
                 .contains(&Action::DetachInstance),
             "Ctrl+B is not an alias"
+        );
+    }
+
+    /// **The kit chords** (§15 D1011 (5)): `Shift+I` opens the insert picker and
+    /// `Ctrl+Alt+P` publishes; plain `I`, `Ctrl+P` and `Ctrl+Alt+I` (Intersect)
+    /// keep their own answers.
+    #[test]
+    fn the_kit_chords_land_and_leave_their_neighbours_alone() {
+        let shift = egui::Modifiers::SHIFT;
+        assert_eq!(
+            actions(Mode::Normal, vec![key(egui::Key::I, shift)], shift),
+            vec![Action::InsertPicker]
+        );
+        let cmd_alt = egui::Modifiers {
+            alt: true,
+            ..egui::Modifiers::COMMAND
+        };
+        assert_eq!(
+            actions(Mode::Normal, vec![key(egui::Key::P, cmd_alt)], cmd_alt),
+            vec![Action::PublishKit]
+        );
+        assert!(
+            !actions(Mode::Normal, vec![key(egui::Key::I, cmd_alt)], cmd_alt)
+                .contains(&Action::InsertPicker),
+            "Ctrl+Alt+I is Intersect's"
+        );
+        let cmd = egui::Modifiers::COMMAND;
+        assert!(
+            !actions(Mode::Normal, vec![key(egui::Key::P, cmd)], cmd).contains(&Action::PublishKit),
+            "Ctrl+P is not an alias"
+        );
+        let none = egui::Modifiers::NONE;
+        assert!(
+            !actions(Mode::Normal, vec![key(egui::Key::I, none)], none)
+                .contains(&Action::InsertPicker),
+            "plain I is not this"
         );
     }
 

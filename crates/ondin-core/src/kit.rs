@@ -827,6 +827,19 @@ pub fn adopt(
         if template.iter().any(|n| n.origin.is_none()) {
             continue;
         }
+        // 🚨 **A kit never vendors itself, by paste either** (§15 D1023, the kits
+        // QA review's finding): a main of this very kit that is no longer here —
+        // deleted, then an instance copied from a consumer pasted back — is not
+        // `landed`, and copying it in opened a vault in the kit holding a copy of
+        // its own main, two frozen nodes later carrying one origin key. Left out,
+        // the paste lands detached, as a link to any missing source does.
+        if top
+            .origin
+            .as_ref()
+            .is_some_and(|o| doc.meta().id.as_deref() == Some(o.kit.as_str()))
+        {
+            continue;
+        }
         let Some((mut copy, _)) = crate::document::remap_subtree(template, ids) else {
             continue;
         };

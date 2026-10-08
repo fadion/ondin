@@ -549,11 +549,18 @@ pub fn instance_root(doc: &Document, id: NodeId) -> Option<NodeId> {
 
 /// Every instance of `main` in the document — each instance root whose chain of
 /// links ends at it, nested copies included — in id order.
+///
+/// **Never one inside the vault** (§15 D1023, the kits QA review's finding): a
+/// kit main nesting `main` holds a copy of it there, which no one can see, pick
+/// or edit. Iterating the node map met it, so *Select all instances* put a vault
+/// node in the selection — an inspector edit then writing into a vendored main —
+/// and every count of a main's instances counted it.
 pub fn instances_of(doc: &Document, main: NodeId) -> Vec<NodeId> {
     let nodes = doc.node_map();
     let mut out: Vec<NodeId> = nodes
         .values()
         .filter(|n| n.link.is_some() && is_instance_root(nodes, n))
+        .filter(|n| !doc.in_vault(n.id))
         .filter(|n| main_of(doc, n.id) == Some(main))
         .map(|n| n.id)
         .collect();

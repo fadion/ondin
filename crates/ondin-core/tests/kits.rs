@@ -1344,3 +1344,44 @@ fn a_main_combined_into_a_set_keeps_its_instances() {
     assert_eq!(names.len(), 3, "Large, Small and the one Icon: {names:?}");
     assert_eq!(vault_children(&d), [set], "no second Icon beside the set");
 }
+
+/// **A main's instances are the document's, never the vault's** (§15 D1023):
+/// D places *Card*, so the vault's *Card* holds a copy of *Icon* and D's own
+/// *Card* another. *Icon*'s instances are the one in D's tree.
+///
+/// Flip, run: `instances_of` without its vault filter fails *"the vault's copy
+/// is no one's"*, 2 against 1.
+#[test]
+fn a_mains_instances_leave_out_the_vault() {
+    let k = kit();
+    let (mut d, mut ids) = consumer();
+    let card = insert(&mut d, &mut ids, &k, k.card);
+    let icon = vault_children(&d)[0];
+    let nested = d.get(card).unwrap().children()[0];
+    assert_eq!(
+        ondin_core::component::instances_of(&d, icon),
+        [nested],
+        "the vault's copy is no one's"
+    );
+}
+
+/// **A kit never vendors its own main by paste** (§15 D1023, the kits QA
+/// review's finding): the kit deletes *Icon*, then an *Icon* instance copied from
+/// a consumer is pasted back in. No vault opens in the kit; the paste lands
+/// detached, as any copy of a main that is gone does.
+///
+/// Flip, run: `adopt` without its own-kit skip fails *"no vault in the kit"*.
+#[test]
+fn a_kit_never_vendors_its_own_main_by_paste() {
+    let mut k = kit();
+    let (mut d, mut ids) = consumer();
+    let inst = insert(&mut d, &mut ids, &k, k.icon);
+    let mut kids = IdSource::new(0xAF);
+    let mut tx = Transaction(vec![Operation::DeleteNode { id: k.icon }]);
+    ondin_core::propagate::owed(&k.doc, &mut tx, &mut kids);
+    k.doc.apply(&tx).unwrap();
+
+    let pasted = paste_across(&d, inst, &mut k.doc, &mut kids);
+    assert!(k.doc.vault().is_none(), "no vault in the kit");
+    assert_eq!(k.doc.get(pasted).unwrap().link(), None, "detached");
+}

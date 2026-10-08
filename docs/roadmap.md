@@ -45,7 +45,7 @@ which is this file's own §9.5 lesson: **check the section before believing the 
 | *Now · Core, rendering and export* | **Opened 2026-10-06**, each item a live *Fix* in §15 with no feature section here and never carried in this file: core's dependency gate still a denylist (§15 D427), a finite absurd blur accepted at the operation (D454), a descending ramp left descending on load (D455), three rules stated in more than one place (D458, D460, D473), and a sweep gradient's literal radius in SVG (D762); and, added 2026-10-07, a failed effect pass leaving that frame's atlas slots registered (D1003 (7)'s *Fix*), and a long chain of mains loading super-linearly, cause not found (D416's amendment). |
 | *Next · Nested component properties* | **Built 2026-10-06** from the maintainer's mockup (§15 D988, with D989's binding line). **What is left**: the maintainer's look in the GUI, begun on 2026-10-07 (§15 D1000 ruled on the Properties card and a hidden group); a variant moved into a set after a showing exists not bound; a nested instance an instance's author added having no slot to show; the sub-heading's type. *The text below is the row as it stood that morning.* **One item, opened 2026-10-06**: exposing a nested instance's component properties on the instance that holds it — later by §15 D982, and waiting on its mockup. **The section it came from, *Next · Container layout*, closed into §15 the same day** (D867's amendment): its five steps — used geometry, absolute insets, flex, grid, components — are all built, §15 D867–D927 and D978–D985 their record and `architecture.md` §5.3c and §5.3d their design; the one other thing it held open, exact equality against the commit's arithmetic for a pass not yet written, is a question for that pass and lives in §5.3d and D979. |
 | *Next · The polishing pass over the accepted calls* | **One item, opened 2026-10-06**: the maintainer's review of every call accepted wholesale that day (§15's header). |
-| *Next · Shared component libraries* | **Opened 2026-10-08**, moved from *Later · Parked decisions* when the maintainer ruled (§15 D1010); **designed the same day** — the *Kits* design and its rulings (§15 D1011) closed both open questions. **Step 1 built in core** the same day (§15 D1012 — the vault a second parentless root, refining D1011 (9)), no chrome; **the document menu, the insert picker and publishing built** the same day (§15 D1013–D1015): open are a swap to an unvendored kit main and the rest of step 2, step 3 (updates), 1D's confirmation and the dashboard's 1B, two read-not-run readings of the publish count, the instance's *Accept kit updates* scope, and how 1D counts a kit's consumers. |
+| *Next · Shared component libraries* | **Opened 2026-10-08**, moved from *Later · Parked decisions* when the maintainer ruled (§15 D1010); **designed the same day** — the *Kits* design and its rulings (§15 D1011) closed both open questions. **Step 1 built in core** the same day (§15 D1012 — the vault a second parentless root, refining D1011 (9)), no chrome; **the document menu, the insert picker, publishing, and updates with *Make local* built** the same day (§15 D1013–D1016): open are a swap to an unvendored kit main and the rest of step 2, the canvas menu's kit rows, *Kits used…* and *Make all local*, 1D's confirmation and the dashboard's 1B, four read-not-run defects, the pill's timing (unruled), and how 1D counts a kit's consumers. |
 | *Later* | Components and layout past the first build (pushing to a main, un-making a component, §5.3c's deferred properties — opened 2026-10-06); the command palette and cheatsheet; the parked decisions, which gained four on 2026-10-06 (components' unruled questions, the 32-row menu, `AltGr`, the chrome's keyboard traversal) and two more components questions on 2026-10-07, when the release review's fix phase closed (§15 D1003, all twelve rulings built); post-v1 (MCP, which gained the snapshot's questions the same day, Command Mode, multiplayer). |
 
 **Sections with nothing open**: *Now · Images*, *Now · SVG import*, *Now · Path editing*, *Now · Text
@@ -1607,27 +1607,27 @@ it is here because it is the next work the record names, as the section above is
 
 ## Next · Shared component libraries
 
-**Ruled and designed 2026-10-08; step 1 built in core the same day, step 2's chrome with swap in part,
-and step 4, publishing.** The model is §15 D1010, the *Kits* design and the maintainer's ten rulings on
-it §15 D1011, step 1 as built §15 D1012, the document menu §15 D1013, the insert picker §15 D1014 and
-publishing §15 D1015, and all are `architecture.md` §5.3e — a document marked as a *Kit* publishes its last state, its mains are
+**Ruled and designed 2026-10-08; steps 1–4 built the same day, with what is listed below left.** The
+model is §15 D1010, the *Kits* design and the maintainer's ten rulings on it §15 D1011, step 1 as built
+§15 D1012, the document menu §15 D1013, the insert picker §15 D1014, publishing §15 D1015 and updates
+and *Make local* §15 D1016, and all are `architecture.md` §5.3e — a document marked as a *Kit* publishes its last state, its mains are
 vendored into a **vault**, a second parentless root beside each consumer's own, a floating picker at the
 toolbar's foot inserts them, and a top-bar notice accepts updates — and are not restated here. What is
 open:
 
-- **The build, in order**: (1) and the mark's chrome are built (D1012, D1013), and (2)'s picker and
-  the swap picker's per-kit groups (D1014); what (2) has left is *Go to main in <kit>*, **a swap to a
-  kit main this document has never used** — not offered, since it would have to vendor at the swap —
-  dragging a tile onto the canvas, and 3G's *Open library*; (3) updates — detecting a newer publish, the pill,
-  *Accept all*, and a removed component made local; (4) is built (D1015) but for 1D's confirmation for
-  *Stop sharing* and the dashboard's 1B — the thumbnail's *Kit* chip, the sidebar's *Kits* filter and
-  the file card's ⋯ *Make a kit* / *Stop sharing as kit*.
-- **Two read-not-run readings of the publish count** (D1015, each ***Fix*** or measure): a regroup of a
-  main into another top-level frame, or a rename of the kit, counts nothing — `kit::changes` compares
-  nodes with every top's parent blanked, and not the published `groups` or `name` — so neither can be
-  published alone; and the dialog's set row counts `children()`, not `variant::variants`.
-- **Left by the design for the build to say** (D1011), still open: whether an instance's *Accept kit
-  updates* takes its own kit or every kit waiting.
+- **What the build has left**: from (2), **a swap to a kit main this document has never used** — not
+  offered, since it would have to vendor at the swap — dragging a tile onto the canvas, and 3G's *Open
+  library*; from (3) (D1016), the canvas context menu's kit rows (7A), *Kits used…* (6A) and *Make all
+  local* (6B); from (4) (D1015), 1D's confirmation for *Stop sharing* and the dashboard's 1B — the
+  thumbnail's *Kit* chip, the sidebar's *Kits* filter and the file card's ⋯ *Make a kit* / *Stop sharing
+  as kit*.
+- **Read-not-run defects** (each ***Fix***, reproduce first): the card's *Accept kit updates* can use a
+  shelf copy read before the kit's last publish and stamp it with the new version (D1016 (a)); an update
+  keeps each copy's recorded kit name, so a rename-only publish (which also reads *Publish 0*) reaches
+  no consumer (D1015, D1016 (b)); a non-frame main made local is stacked without its height (D1016 (c));
+  the card's ⋯ menu is sized from its reset rows only (D1016 (d), measure).
+- **Unruled**: the update pill appears when the library next rescans, not *"the moment a kit
+  publishes"* as §5.3e designed it (D1016).
 - **How 1D's *N documents use this* counts** (undecided, and all that keeps 1D's dialog unbuilt): the library scan reads a 4 KB
   prefix, not every file (D1011 (10)'s premise, corrected), so the count needs either a consumer's kit
   ids in its prefix-readable `meta` or a full load per file.
@@ -1639,8 +1639,8 @@ publishing and servers, undesigned. Real-time collaboration stays a non-goal (§
 
 *Opened 2026-10-08, moved from* Later · Parked decisions *when the maintainer ruled on it; edited
 down the same day when the* Kits *design was accepted (§15 D1011), again when step 1 was built (§15
-D1012), again when the document menu and the picker were (§15 D1013, D1014), and again when publishing
-was (§15 D1015).*
+D1012), again when the document menu and the picker were (§15 D1013, D1014), again when publishing
+was (§15 D1015), and again when updates and *Make local* were (§15 D1016).*
 
 ## Later · Components and layout, past the first build
 

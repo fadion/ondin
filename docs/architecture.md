@@ -2858,7 +2858,7 @@ amendment); ~~exposing nested properties, later
 by the mockup~~ — built 2026-10-06 from the mockup's 4K–4S (§15 D988), with the binding line a nested
 instance in a main had never drawn (§15 D989), unlooked-at in the GUI; and a verb that un-makes a component, which would owe a detach.
 
-### 5.3e Kits — shared component libraries (designed 2026-10-08; steps 1, 2 and 4 built, swap in part; §15 D1010–D1015)
+### 5.3e Kits — shared component libraries (designed 2026-10-08; steps 1–4 built, swap in part; §15 D1010–D1016)
 
 > **Design ahead of code, most of it.** Ruled with the maintainer on 2026-10-08: that a kit is a
 > document marked as one, that publishing is explicit, and that the first version's update is an
@@ -2870,8 +2870,9 @@ instance in a main had never drawn (§15 D989), unlooked-at in the GUI; and a ve
 > **with no chrome**; ~~everything from *Publishing* on is still design~~. **Step 2's chrome is built,
 > swap in part** (§15 D1013, D1014, *Step 2 as built* below): the document menu with *Make this a kit*,
 > the *Kit* tag, the insert picker, and the swap picker grouped by kit. **Step 4, publishing, is built**
-> (§15 D1015, *Step 4 as built* below) but for 1D's confirmation and the dashboard's 1B. Updates,
-> *Make local* and *Kits used…* are still design. The rest of the build is `roadmap.md`'s *Next · Shared
+> (§15 D1015, *Step 4 as built* below) but for 1D's confirmation and the dashboard's 1B. **Step 3,
+> updates and *Make local*, is built** (§15 D1016, *Step 3 as built* below) but for the canvas menu's
+> kit rows; *Kits used…* and *Make all local* (6A, 6B) are still design. The rest of the build is `roadmap.md`'s *Next · Shared
 > component libraries*.
 
 **The word is *Kit*** (§15 D1011): a document whose components others use. *Library* stays the
@@ -3079,16 +3080,41 @@ confirmation and the dashboard's 1B).
   id — added, changed, removed; never published, everything added. A top is compared with the vault mains
   it reaches, and 🚨 **every reached top's own place — transform and parent — is left out**: a consumer's
   copy sits in a vault where neither means anything, so moving a main, or a main another nests, is no
-  change. ⚠️ The published state's frame groups and the kit's name are not compared either, so a regroup
-  or a rename alone is nothing to publish (read, not run).
+  change. **A move into another top-level frame is**, the frame being a consumer's picker grouping, and
+  a rename of the kit is worth a publish though no component changed (`Changes::renamed`, `any()`).
 - **`kit::publish`** bumps the version, stamps the caller's date and a non-blank note, and stores the
-  frozen copy. Not an operation and not undoable; the date is the user's act, never a save's.
+  frozen copy. Not an operation and not undoable; the date is the user's act, never a save's. A kit that
+  has published and now holds no main publishes an empty state, so its consumers learn of the removal.
 - ***Publish N*** sits left of undo in a kit's top bar, disabled at 0 with its reason; *Publish kit…* in
   the document menu and `Ctrl+Alt+P` open the same dialog, or say by status why not. The count is cached
   on the session's revision and the mark's version.
 - **The dialog** is a modal card: a first publish lists six and *+ N more* with *Publish N components*;
   a later one *Added* / *Changed* / *Removed*, the removed read from the last published state; a note;
   *Cancel* / *Publish*. Publishing saves, and a failed save keeps its own status.
+
+**Step 3 as built** (`kit::update`, `kit::make_local`, `kits/updates.rs`, `kits/card.rs`; §15 D1016; less
+the canvas menu's kit rows, 6A and 6B).
+
+- **An update is a diff plus an ordinary commit, as designed**: `kit::update_all` rewrites each vendored
+  main in place to its new publish — children first (matched by origin node; dropped, replaced where the
+  kind changed, inserted, reordered), then its own fields and its origin at the new version — as one
+  transaction across every kit accepted. Each op is built against a scratch the ones before it were
+  applied to. 🚨 **It never touches an instance**: the commit's main-edit passes carry the change, so
+  overrides survive by value comparison and instance-side structure by §5.3d's rules, and an instance
+  root's placement stays its own. A main the publish newly reaches is vendored first.
+- ***Make local*** (`kit::make_local`, `Operation::SetOrigin`): every origin in the main cleared, the
+  main moved last under the root and placed right of the content; 🚨 no instance promoted; a kit main it
+  nests stays vendored. An update makes the kit's removed mains local the same way.
+- **The notice**: a pill after the save dot when the library says a kit published past the version D
+  holds; its popover lists each kit, *Later* (kept per machine, per document, per version) and *Accept
+  all*, one step, a text toast naming `Ctrl+Z`. ⚠️ It appears when the library next rescans, not the
+  moment a kit publishes (§15 D1016, unruled).
+- **The card**: *Atlas kit · v8 · v9 waiting* under the instance's name; the ⋯ (*More*) always on a kit
+  instance, with *Go to main in Atlas*, *Accept kit updates* — **the instance's own kit** — and *Make
+  local…* through 4E's dialog. *Go to main* opens the kit with the main selected and a *← <D>* link back.
+- ⚠️ Recorded read-not-run in §15 D1016: the card's accept can use a shelf copy read before the kit's
+  last publish and stamp it current; an update keeps each copy's recorded kit name, so a rename never
+  arrives; and a non-frame main made local is stacked without its height.
 
 ### 5.4 Text node
 
@@ -12506,7 +12532,8 @@ their left.
 The three dropdowns are mutually exclusive **by construction**: `app::TopMenu` holds one value
 (`None | View | Snap | Zoom`), replacing the old `zoom_menu: bool`, and the design models it the same
 way — its `openMenu` prop is an enum over exactly those. **A fourth since 2026-10-08**, `Document`, the
-document menu hung from the document's name (§5.3e, §15 D1013), in the same slot. Three independent flags would admit two menus
+document menu hung from the document's name (§5.3e, §15 D1013), in the same slot — **and a fifth**,
+`KitUpdates`, the kit-update pill's popover (§15 D1016). Three independent flags would admit two menus
 overlapping with nothing ever closing the one behind. `OndinApp::dropdown` spells the *closing* half
 once as well — a click outside, and Escape — because that is the half that gets forgotten, and a menu
 that only closes by re-clicking its own head is one that sits over the canvas while the user works

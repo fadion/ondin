@@ -1021,27 +1021,52 @@ pub fn update_all(
             updated.push(t);
         }
     }
-    let root = doc.root();
-    for t in &made_local {
-        let below = b.scratch.capture_subtree(*t).unwrap_or_default();
-        for n in below {
-            b.push(Operation::SetOrigin {
-                id: n.id,
-                origin: None,
-            })?;
-        }
-        let end = b.scratch.get(root).map_or(0, |r| r.children.len());
-        b.push(Operation::Reparent {
-            id: *t,
-            new_parent: root,
-            index: end,
-        })?;
+    for op in make_local(&b.scratch, &made_local).0 {
+        b.push(op)?;
     }
     Ok(Update {
         tx: Transaction(b.ops),
         updated,
         made_local,
     })
+}
+
+/// ***Make local*** (§5.3e, 4D/4E, 6B; §15 D1011 (3), D1016): reveal each of
+/// `mains` — children of the vault — as an ordinary main of the document, last
+/// under its root, every origin in it cleared. It no longer follows its kit.
+///
+/// 🚨 **No instance is promoted**, which is the whole of D1011 (3): promoting one
+/// would make its overrides the main's values and re-base every other instance
+/// against it. Revealing the copy leaves every instance linked to the same main
+/// with every override as it was — and is undone in one step. A kit main this
+/// one nests stays vendored; it is still that kit's. Placing the revealed main
+/// is the caller's (the vault is never resolved). A node that is not a vault
+/// child is skipped.
+pub fn make_local(doc: &Document, mains: &[NodeId]) -> Transaction {
+    let mut ops = Vec::new();
+    let Some(vault) = doc.vault() else {
+        return Transaction(ops);
+    };
+    let root = doc.root();
+    let mut end = doc.get(root).map_or(0, |r| r.children.len());
+    for m in mains {
+        if doc.get(*m).and_then(|n| n.parent) != Some(vault) {
+            continue;
+        }
+        for n in doc.capture_subtree(*m).unwrap_or_default() {
+            ops.push(Operation::SetOrigin {
+                id: n.id,
+                origin: None,
+            });
+        }
+        ops.push(Operation::Reparent {
+            id: *m,
+            new_parent: root,
+            index: end,
+        });
+        end += 1;
+    }
+    Transaction(ops)
 }
 
 /// [`update`]'s state: the scratch document every op is applied to as it is

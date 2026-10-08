@@ -1038,3 +1038,43 @@ fn an_update_vendors_a_main_it_newly_reaches() {
         .unwrap();
     assert_eq!(d.get(nested).unwrap().link(), Some(pip_here));
 }
+
+/// ***Make local* reveals the copy and promotes no instance** (D1011 (3)): the
+/// vendored Card leaves the vault as an ordinary main with no origin left in it;
+/// both instances still link to it and the one with an override keeps it, by
+/// value; Icon, which Card nests, stays vendored. One undo puts it back.
+///
+/// Flip, run: `make_local` without the `SetOrigin`s is refused at the commit —
+/// `kit::check`'s `OutsideVault` — so the transaction never lands.
+#[test]
+fn make_local_reveals_the_copy_and_promotes_no_instance() {
+    let k = kit();
+    let (mut d, mut ids) = consumer();
+    let a = insert(&mut d, &mut ids, &k, k.card);
+    let b = insert(&mut d, &mut ids, &k, k.card);
+    let card = d.get(a).unwrap().link().unwrap();
+    d.apply(&Transaction(vec![Operation::SetOpacity {
+        id: b,
+        opacity: 0.4,
+    }]))
+    .unwrap();
+    let before = d.clone();
+
+    let tx = kit::make_local(&d, &[card]);
+    let undo = d.apply(&tx).expect("make local commits").inverse;
+    assert_eq!(d.get(card).unwrap().parent(), Some(d.root()));
+    assert!(d.get(card).unwrap().component());
+    assert!(
+        d.capture_subtree(card)
+            .unwrap()
+            .iter()
+            .all(|n| n.origin().is_none())
+    );
+    assert_eq!(d.get(a).unwrap().link(), Some(card));
+    assert_eq!(d.get(b).unwrap().link(), Some(card));
+    assert_eq!(d.get(b).unwrap().opacity(), 0.4, "the override stays");
+    assert_eq!(vault_children(&d).len(), 1, "Icon stays vendored");
+
+    d.apply(&undo).unwrap();
+    assert_eq!(d, before, "one undo");
+}

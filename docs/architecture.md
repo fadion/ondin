@@ -2871,8 +2871,8 @@ instance in a main had never drawn (§15 D989), unlooked-at in the GUI; and a ve
 > swap in part** (§15 D1013, D1014, *Step 2 as built* below): the document menu with *Make this a kit*,
 > the *Kit* tag, the insert picker, and the swap picker grouped by kit. **Step 4, publishing, is built**
 > (§15 D1015, *Step 4 as built* below) but for 1D's confirmation and the dashboard's 1B. **Step 3,
-> updates and *Make local*, is built** (§15 D1016, *Step 3 as built* below) but for the canvas menu's
-> kit rows; *Kits used…* and *Make all local* (6A, 6B) are still design. The rest of the build is `roadmap.md`'s *Next · Shared
+> updates and *Make local*, is built** (§15 D1016, *Step 3 as built* below), with the canvas menu's
+> kit rows, *Kits used…* and *Make all local* (7A, 6A, 6B). The rest of the build is `roadmap.md`'s *Next · Shared
 > component libraries*.
 
 **The word is *Kit*** (§15 D1011): a document whose components others use. *Library* stays the
@@ -3038,8 +3038,8 @@ reaches a second machine through the synced base folder (§5.11a), with no netwo
 
 - **The document menu** (`TopMenu::Document`, `OndinApp::document_menu`): the document's name is its
   head, pulled left by `ui::HEAD_PAD` so the name stays 12 from the mark (§15 D962). It holds **only rows
-  with a verb behind them** — *Make this a kit*, or on a kit *Publish kit…* (§15 D1015) and *Stop sharing
-  as kit*, then *Show in library*; the design's other rows join when their verbs exist. *Stop sharing* has no confirmation until 1D's count
+  with a verb behind them** — on a kit *Publish kit…* (§15 D1015); *Kits used…* while the vault holds
+  anything (§15 D1016); *Stop sharing as kit* or *Make this a kit*; then *Show in library*; the design's other rows join when their verbs exist. *Stop sharing* has no confirmation until 1D's count
   is decided (step 4).
 - **An unfiled document made a kit is given its `meta.id` by the verb** (`make_kit`), as filing gives
   one: a pre-library file has a path and nothing else would mint it, and a kit with no id is one the
@@ -3092,8 +3092,8 @@ confirmation and the dashboard's 1B).
   a later one *Added* / *Changed* / *Removed*, the removed read from the last published state; a note;
   *Cancel* / *Publish*. Publishing saves, and a failed save keeps its own status.
 
-**Step 3 as built** (`kit::update`, `kit::make_local`, `kits/updates.rs`, `kits/card.rs`; §15 D1016; less
-the canvas menu's kit rows, 6A and 6B).
+**Step 3 as built** (`kit::update`, `kit::make_local`, `kits/updates.rs`, `kits/card.rs`, `kits/used.rs`,
+`menu.rs`; §15 D1016).
 
 - **An update is a diff plus an ordinary commit, as designed**: `kit::update_all` rewrites each vendored
   main in place to its new publish — children first (matched by origin node; dropped, replaced where the
@@ -3112,9 +3112,17 @@ the canvas menu's kit rows, 6A and 6B).
 - **The card**: *Atlas kit · v8 · v9 waiting* under the instance's name; the ⋯ (*More*) always on a kit
   instance, with *Go to main in Atlas*, *Accept kit updates* — **the instance's own kit** — and *Make
   local…* through 4E's dialog. *Go to main* opens the kit with the main selected and a *← <D>* link back.
-- ⚠️ Recorded read-not-run in §15 D1016: the card's accept can use a shelf copy read before the kit's
-  last publish and stamp it current; an update keeps each copy's recorded kit name, so a rename never
-  arrives; and a non-frame main made local is stacked without its height.
+  An accept uses a loaded publish only when it was read at the kit file's current modification time,
+  else reads the file, and an update writes the publish's name onto the kit's own vendored tops.
+- **The canvas menu** (7A, `context-menus.md` §4): on a kit instance's root, *Go to main in Atlas*,
+  *Accept kit updates* when one waits — omitted otherwise, a departure from that file's §3 recorded as
+  its §9.6 item 17 — and *Make local…* after *Detach instance*. A local instance's menu is unchanged.
+- ***Kits used…*** (6A), in the document menu while the vault holds anything: a row per kit with its
+  location, instance count and status (*v9 waiting*, *Up to date · v16*, *Unavailable*), each with *Open
+  kit*, *Accept update* and *Make all local…* (6B, a confirmation, one undo); *Accept all* when any
+  waits; no *Locate…*.
+- **Mains made local are placed by their laid-out boxes**, measured on the document the transaction
+  leaves, stacked down the right of the content 80 apart.
 
 ### 5.4 Text node
 

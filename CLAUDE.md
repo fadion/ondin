@@ -67,8 +67,13 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1012 index rows, 1012 body headings, next free
-D1013** (measured 2026-10-08, session 61; ⚠️ **Kits build step 1 reserved D1012–D1023 at `261a030`
+anywhere cited either. **The live figures: 1016 index rows, 1016 body headings, next free
+D1017** (measured 2026-10-08, session 61; ⚠️ **Kits steps 2–4 reserved D1013–D1024 at `1e0d023`
+and spent four** — D1013 (the document menu and the kit mark's chrome), D1014 (the insert picker),
+D1015 (publishing), D1016 (updates and *Make local*); every fix `arch-scribe`'s readings turned up
+went into amendments. The closing negative grep over **D1017–D1024 found zero sites** and they are
+released. Census **914**, arrivals D1013–D1016 against `1e0d023`, none unresolved. Before that,
+⚠️ **Kits build step 1 reserved D1012–D1023 at `261a030`
 and spent one** — D1012, the vault as a second root (the maintainer's choice over D1011 (9)'s
 container), provenance, the kit mark, the published state, vendoring and the carrying paste. The
 closing negative grep over **D1013–D1023 found zero sites** and they are released. Census **910**,
@@ -683,7 +688,9 @@ exactly as it found it only holds if the probe comes back out the way it went in
 and its doc comment — and the result compiles, tests, lints, formats and passes
 `cargo doc`, while paragraphs of reasoning now describe the wrong thing.
 
-**There are thirty-three recorded instances.** 🚨 **Session 34 added four, and three of them
+**There are thirty-four recorded instances** — the latest in session 61 (§15 D1014): a
+`type` alias and two functions anchored on `fn row_label` landed between it and its doc, and were
+caught only because a clippy warning on the alias sent the session to read the spot. 🚨 **Session 34 added four, and three of them
 were already sitting in the tree** (§15 D876, D877): `renderer::flex_relayout` had taken
 `relayout`'s whole doc (session 33's uncommitted code, anchored on `fn relayout`; found by
 `arch-scribe` reading the file); `canvas::move_tx`'s summary and two paragraphs sat on

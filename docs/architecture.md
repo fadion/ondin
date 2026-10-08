@@ -2858,7 +2858,7 @@ amendment); ~~exposing nested properties, later
 by the mockup~~ — built 2026-10-06 from the mockup's 4K–4S (§15 D988), with the binding line a nested
 instance in a main had never drawn (§15 D989), unlooked-at in the GUI; and a verb that un-makes a component, which would owe a detach.
 
-### 5.3e Kits — shared component libraries (designed 2026-10-08; steps 1 and 2 built, swap in part; §15 D1010–D1014)
+### 5.3e Kits — shared component libraries (designed 2026-10-08; steps 1, 2 and 4 built, swap in part; §15 D1010–D1015)
 
 > **Design ahead of code, most of it.** Ruled with the maintainer on 2026-10-08: that a kit is a
 > document marked as one, that publishing is explicit, and that the first version's update is an
@@ -2867,9 +2867,11 @@ instance in a main had never drawn (§15 D989), unlooked-at in the GUI; and a ve
 > That file is untracked and regenerated, so its screen numbers here are pointers and the content is
 > this section's. **Build step 1 is in core** (§15 D1012, *Step 1 as built* below) — the vault,
 > provenance, the kit mark, the published state, vendoring and inserting, and a kit instance's paste —
-> **with no chrome**; everything from *Publishing* on is still design. **Step 2's chrome is built,
+> **with no chrome**; ~~everything from *Publishing* on is still design~~. **Step 2's chrome is built,
 > swap in part** (§15 D1013, D1014, *Step 2 as built* below): the document menu with *Make this a kit*,
-> the *Kit* tag, the insert picker, and the swap picker grouped by kit. The rest of the build is `roadmap.md`'s *Next · Shared
+> the *Kit* tag, the insert picker, and the swap picker grouped by kit. **Step 4, publishing, is built**
+> (§15 D1015, *Step 4 as built* below) but for 1D's confirmation and the dashboard's 1B. Updates,
+> *Make local* and *Kits used…* are still design. The rest of the build is `roadmap.md`'s *Next · Shared
 > component libraries*.
 
 **The word is *Kit*** (§15 D1011): a document whose components others use. *Library* stays the
@@ -3035,8 +3037,8 @@ reaches a second machine through the synced base folder (§5.11a), with no netwo
 
 - **The document menu** (`TopMenu::Document`, `OndinApp::document_menu`): the document's name is its
   head, pulled left by `ui::HEAD_PAD` so the name stays 12 from the mark (§15 D962). It holds **only rows
-  with a verb behind them** — *Make this a kit* or *Stop sharing as kit*, then *Show in library*; the
-  design's other rows join when their verbs exist. *Stop sharing* has no confirmation until 1D's count
+  with a verb behind them** — *Make this a kit*, or on a kit *Publish kit…* (§15 D1015) and *Stop sharing
+  as kit*, then *Show in library*; the design's other rows join when their verbs exist. *Stop sharing* has no confirmation until 1D's count
   is decided (step 4).
 - **An unfiled document made a kit is given its `meta.id` by the verb** (`make_kit`), as filing gives
   one: a pre-library file has a path and nothing else would mint it, and a kit with no id is one the
@@ -3064,10 +3066,29 @@ reaches a second machine through the synced base folder (§5.11a), with no netwo
   first, headed *This document* only when a kit group follows, then one group per kit by name, with the
   kit glyph and the version D holds, or *unavailable*; the name-prefix filter across all of them.
   **A swap to a kit main D has never used is not offered** — it would vendor at the swap.
+  Groups are keyed by kit id, not by the heading's name, so two kits of one name stay apart.
 - **Not built**: a tile's drag, a swap to an unvendored kit main, *Go to main in <kit>*, and 3G's *Open
-  library*. ⚠️ Two concerns are recorded read-not-run in §15 D1014: the search field's own `Escape` arm
-  may close the picker beside a dropdown or the colour picker the same press closed, and the swap groups
-  are keyed by kit name rather than id.
+  library*. ⚠️ The search field has **no `Escape` arm of its own**, deliberately: egui clears its focus
+  before `input::resolve` runs (§15 D317), so the ladder's rung sees the press, and an arm in the field
+  closed the picker a second time beside whatever the press had already closed (§15 D1014).
+
+**Step 4 as built** (`kit::changes`, `kit::publish`, `kits/publish.rs`; §15 D1015; less 1D's
+confirmation and the dashboard's 1B).
+
+- **The change count is the kit frozen now against the kit frozen at its last publish**, each top by
+  id — added, changed, removed; never published, everything added. A top is compared with the vault mains
+  it reaches, and 🚨 **every reached top's own place — transform and parent — is left out**: a consumer's
+  copy sits in a vault where neither means anything, so moving a main, or a main another nests, is no
+  change. ⚠️ The published state's frame groups and the kit's name are not compared either, so a regroup
+  or a rename alone is nothing to publish (read, not run).
+- **`kit::publish`** bumps the version, stamps the caller's date and a non-blank note, and stores the
+  frozen copy. Not an operation and not undoable; the date is the user's act, never a save's.
+- ***Publish N*** sits left of undo in a kit's top bar, disabled at 0 with its reason; *Publish kit…* in
+  the document menu and `Ctrl+Alt+P` open the same dialog, or say by status why not. The count is cached
+  on the session's revision and the mark's version.
+- **The dialog** is a modal card: a first publish lists six and *+ N more* with *Publish N components*;
+  a later one *Added* / *Changed* / *Removed*, the removed read from the last published state; a note;
+  *Cancel* / *Publish*. Publishing saves, and a failed save keeps its own status.
 
 ### 5.4 Text node
 

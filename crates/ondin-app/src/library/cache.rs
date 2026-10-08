@@ -52,6 +52,13 @@ pub struct LocalIndex {
     /// [`Self::opened`] and [`Self::starred`], a stale query is a *string* and
     /// refers to nothing that could have been deleted.
     pub recent_searches: Vec<String>,
+    /// For each document, the kits it inserted from here, most recent first —
+    /// the insert picker's *last use* order (§5.3e, 3E; §15 D1014).
+    ///
+    /// Local for `opened`'s reason: "the kit I used last" is what this machine's
+    /// hand did, and a sync client would carry another laptop's habits in. Keyed
+    /// on the *document*, since the order is the picker's in that document.
+    pub kit_use: HashMap<String, Vec<String>>,
     /// Set when `library.json` exists but could not be read (§15 D418).
     ///
     /// ⚠️ **A latch on writing, the same one
@@ -226,6 +233,10 @@ impl LocalIndex {
         // restore the document from the trash and it is mysteriously starred
         // again, months later, because nothing ever cleared the id.
         self.starred.retain(|id| live.contains(id));
+        // A deleted document's kit order is unreachable; a deleted kit in a live
+        // document's order is harmless — the picker orders the kits it finds by
+        // it and ignores the rest — so only the documents are swept.
+        self.kit_use.retain(|id, _| live.contains(id));
     }
 }
 

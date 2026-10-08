@@ -95,6 +95,9 @@ pub(crate) struct PublishedDto {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub groups: Vec<GroupDto>,
     pub document: Box<DocumentDto>,
+    /// The kit's name at the publish (§15 D1014).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 /// One published main or set and the top-level frame it sat in (§15 D1011 (4)).
@@ -382,6 +385,7 @@ impl NodeDto {
                 kit: o.kit.clone(),
                 node: o.node.to_wire(),
                 version: o.version,
+                name: o.name.clone(),
             }),
         }
     }
@@ -489,6 +493,7 @@ impl NodeDto {
                         kit: o.kit,
                         node: parse_id(&o.node)?,
                         version: o.version,
+                        name: o.name,
                     })
                 })
                 .transpose()?,
@@ -503,6 +508,9 @@ pub(crate) struct OriginDto {
     pub kit: String,
     pub node: String,
     pub version: u32,
+    /// The kit's name, on a vault main's top node only (§15 D1014).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 impl ImageDto {
@@ -603,6 +611,7 @@ impl DocumentDto {
                     })
                     .collect(),
                 document: Box::new(Self::from_document(p.document())),
+                name: p.name().map(str::to_string),
             }),
         }
     }
@@ -702,7 +711,7 @@ impl DocumentDto {
                 for g in p.groups {
                     groups.push((parse_id(&g.top)?, g.frame));
                 }
-                Some(crate::kit::Published::from_parts(doc, groups))
+                Some(crate::kit::Published::from_parts(doc, groups, p.name))
             }
         };
         Ok(Document::from_parts(

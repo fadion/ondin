@@ -56,6 +56,12 @@ pub struct Origin {
     pub node: NodeId,
     /// The kit's version this copy was published at.
     pub version: u32,
+    /// The kit's name when this copy was vendored — **on a vault main's top
+    /// node only**, `None` below it (§15 D1014). What the picker calls a kit the
+    /// library can no longer find (3I): the id alone names nothing a person
+    /// recognises, and the kit is exactly what is missing. A label, so not part
+    /// of [`Self::key`].
+    pub name: Option<String>,
 }
 
 impl Origin {
@@ -185,13 +191,20 @@ pub struct Published {
     /// in when it was published — the picker's grouping, since Ondin has no
     /// pages (§15 D1011 (4)). Absent for one outside any frame.
     groups: Vec<(NodeId, String)>,
+    /// The kit's typed name at the publish, which each vendored main records
+    /// ([`Origin::name`]) so a consumer can still say which kit it lost (3I).
+    name: Option<String>,
 }
 
 impl Published {
     /// Assemble a published state read from a file. `doc` has been through the
     /// loader; a group naming a node that is not published is dropped rather than
     /// refused, since it is a label.
-    pub(crate) fn from_parts(doc: Document, groups: Vec<(NodeId, String)>) -> Self {
+    pub(crate) fn from_parts(
+        doc: Document,
+        groups: Vec<(NodeId, String)>,
+        name: Option<String>,
+    ) -> Self {
         let tops: FxHashSet<NodeId> = doc
             .get(doc.root())
             .map(|r| r.children.iter().copied().collect())
@@ -200,7 +213,12 @@ impl Published {
             .into_iter()
             .filter(|(t, _)| tops.contains(t))
             .collect();
-        Self { doc, groups }
+        Self { doc, groups, name }
+    }
+
+    /// The kit's name at the publish, when it had one.
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
     }
 
     /// The frozen document: published mains and sets under its root, their kit
@@ -378,6 +396,7 @@ pub fn freeze(doc: &Document) -> Option<Published> {
     Some(Published {
         doc: frozen,
         groups,
+        name: doc.meta().name.clone(),
     })
 }
 
@@ -406,6 +425,7 @@ fn source_origin(src: &Document, kit: &str, version: u32, n: &Node) -> Origin {
             kit: kit.to_string(),
             node: n.id,
             version,
+            name: None,
         },
     }
 }
@@ -424,9 +444,10 @@ pub fn vendor(
     ids: &mut IdSource,
     kit: &str,
     version: u32,
-    src: &Document,
+    published: &Published,
     main: NodeId,
 ) -> Result<(Vec<Operation>, NodeId), KitError> {
+    let (src, name) = (published.document(), published.name());
     if !crate::meta::DocumentMeta::is_wellformed_id(kit) {
         return Err(KitError::KitId);
     }
@@ -461,6 +482,13 @@ pub fn vendor(
         for (c, s) in copy.iter_mut().zip(&template) {
             c.origin = Some(source_origin(src, kit, version, s));
             held.insert(key(s), c.id);
+        }
+        // The kit's name on the top node, for when the kit cannot be found; a
+        // main from a third kit arrived with that kit's name already.
+        if let Some(o) = copy.first_mut().and_then(|c| c.origin.as_mut())
+            && o.name.is_none()
+        {
+            o.name = name.map(str::to_string);
         }
         copies.push(copy);
     }
@@ -783,7 +811,7 @@ pub fn insert(
         Some(_) => main,
         None => return Err(KitError::NotPublished(main)),
     };
-    let (mut ops, shown) = vendor(doc, ids, kit, version, src, main)?;
+    let (mut ops, shown) = vendor(doc, ids, kit, version, published, main)?;
 
     // The instance is built against the document the vendoring leaves, which
     // holds the main to copy.

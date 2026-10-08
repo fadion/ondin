@@ -1,11 +1,16 @@
-//! The kit chrome (§5.3e, §15 D1011, D1012, D1013) — the document menu that makes
-//! a document a kit, and the *Kit* tag that says it is one.
+//! The kit chrome (§5.3e, §15 D1011–D1014) — the document menu that makes a
+//! document a kit and the *Kit* tag that says it is one (here), the library's kits
+//! as the picker reads them ([`index`]), and the floating insert picker
+//! ([`picker`]).
 //!
 //! The model is `ondin_core::kit`; this module is the editor's face of it. A kit
 //! is a document whose `meta.kit` mark is present and sharing
 //! (`ondin_core::meta::KitMark`): marking writes that block and saves, because
 //! the mark is an outward act — *Save* and *Export* are its company — and is not
 //! undoable (§15 D1011 (2)).
+
+pub(crate) mod index;
+pub(crate) mod picker;
 
 use crate::app::{OndinApp, TOP_GAP, TopMenu};
 use crate::theme::{self, color, icon};

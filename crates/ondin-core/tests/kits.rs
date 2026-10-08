@@ -123,6 +123,7 @@ fn kit() -> Kit {
         .expect("a main nesting an instance");
     doc.set_meta(DocumentMeta {
         id: Some(L_ID.into()),
+        name: Some("Atlas".into()),
         kit: Some(KitMark {
             version: 4,
             ..KitMark::default()
@@ -204,10 +205,13 @@ fn an_insert_vendors_the_main_and_places_an_instance() {
             kit: L_ID.into(),
             node: k.icon,
             version: 4,
-        })
+            name: Some("Atlas".into()),
+        }),
+        "the kit's name on the top node, for a kit that cannot be found"
     );
     let dot = d.get(copy).unwrap().children()[0];
     assert_eq!(d.get(dot).unwrap().origin().unwrap().node, k.icon_dot);
+    assert_eq!(d.get(dot).unwrap().origin().unwrap().name, None, "top only");
     assert_eq!(d.get(inst).unwrap().link(), Some(copy));
     assert_eq!(d.get(inst).unwrap().parent(), Some(root));
     assert_eq!(
@@ -333,6 +337,10 @@ fn a_transitive_main_keeps_the_kit_it_came_from() {
         main_on(badge),
     ]))
     .unwrap();
+    kdoc.set_meta(DocumentMeta {
+        name: Some("Badges".into()),
+        ..DocumentMeta::default()
+    });
     kdoc.set_published(kit::freeze(&kdoc));
 
     // L uses K's *Badge* inside its own main *Chip*, then publishes.
@@ -386,12 +394,17 @@ fn a_transitive_main_keeps_the_kit_it_came_from() {
         kit: L_ID.into(),
         node: chip,
         version: 7,
+        name: None,
     }));
-    assert!(origins.contains(&Origin {
-        kit: K_ID.into(),
-        node: badge,
-        version: 2,
-    }));
+    assert!(
+        origins.contains(&Origin {
+            kit: K_ID.into(),
+            node: badge,
+            version: 2,
+            name: Some("Badges".into()),
+        }),
+        "K's own name, carried through L: {origins:?}"
+    );
 }
 
 /// An edit to a vendored main reaches its instances through the ordinary

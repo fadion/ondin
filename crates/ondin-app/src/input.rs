@@ -184,6 +184,9 @@ pub enum Action {
     /// Pick image files and load the cursor with them (`Ctrl+Shift+K`, and the
     /// rail's image button, which is the same action).
     PlaceImage,
+    /// Open or close the insert picker (`Shift+I`, and the rail's hexagon — §5.3e,
+    /// §15 D1011 (5)).
+    InsertPicker,
     /// Move the selection by a world-space delta (arrow keys).
     Nudge(Vec2),
     /// Grow or shrink the selection's box by this many points on each axis —
@@ -1450,6 +1453,14 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
         on(
             plain && m.shift && i.key_pressed(egui::Key::V),
             Action::Flip(build::Axis::Y),
+            &mut out,
+        );
+        // The insert picker, on the maintainer's `Shift+I` (§15 D1011 (5)) — a
+        // free chord in `docs/shortcuts.md` §13, kept off `I` itself, which the
+        // tool block's `!m.shift` leaves to whatever claims it later.
+        on(
+            plain && m.shift && i.key_pressed(egui::Key::I),
+            Action::InsertPicker,
             &mut out,
         );
 

@@ -1322,6 +1322,14 @@ pub struct OndinApp {
     /// admit a state where two menus overlap, and nothing would ever close the
     /// one behind.
     pub(crate) open_menu: TopMenu,
+    /// The floating insert picker, while it is open (§5.3e, 3A; §15 D1014).
+    pub(crate) kit_picker: Option<crate::kits::picker::Picker>,
+    /// The library's kits' published states and tile pictures, loaded off the
+    /// frame for the picker (`kits::index`).
+    pub(crate) kit_shelf: crate::kits::index::KitShelf,
+    /// Where the rail's insert button was drawn last frame — the picker hangs
+    /// beside it, bottom-aligned (3A). `NOTHING` until the rail has drawn.
+    pub(crate) kit_button: egui::Rect,
     /// The one open context menu (`docs/context-menus.md` §0 R4).
     ///
     /// **One slot, so opening the next one is what closes the last.** Not a
@@ -2296,6 +2304,9 @@ impl OndinApp {
             field_overrides: Vec::new(),
             per_corner_radius: HashSet::new(),
             open_menu: TopMenu::None,
+            kit_picker: None,
+            kit_shelf: Default::default(),
+            kit_button: egui::Rect::NOTHING,
             context_menu: None,
             secondary_press: None,
             show_grid: true,
@@ -2778,6 +2789,7 @@ impl eframe::App for OndinApp {
         if !self.present {
             self.inspector_panel(&ctx);
             self.picker_ui(&ctx);
+            self.kit_picker_ui(&ctx);
         }
         // **After every door has had its say**, so a right-click that *replaced*
         // the open menu has already written the slot by the time the click-away
@@ -3000,6 +3012,7 @@ impl OndinApp {
             // one of a session finds out where.
             Action::ExportAll => self.export_all(crate::panels::ExportAll::Asking),
             Action::PlaceImage => self.place_image_action(),
+            Action::InsertPicker => self.toggle_kit_picker(),
             Action::Copy => {
                 self.copy_selection(ctx);
             }
@@ -9502,6 +9515,18 @@ impl OndinApp {
                                 }
                             }
                         }
+                    }
+                });
+                // The insert picker's button, at the rail's foot (§5.3e, 3A): a
+                // toggle, lit while the picker is open, and the corner the picker
+                // hangs from.
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                    let open = self.kit_picker.is_some();
+                    let resp = icon_button(ui, icon::HEXAGON, 30.0, 20.0, open, true)
+                        .on_hover_text("Insert components (Shift+I)");
+                    self.kit_button = resp.rect;
+                    if resp.clicked() {
+                        self.toggle_kit_picker();
                     }
                 });
             });

@@ -88,7 +88,7 @@
   and inspector built; **instance swap left it the same day as a ruling, and was built on
   2026-10-06** (§15 D983);
   ~~**shared libraries stay on it.**~~ **shared libraries left it on 2026-10-08 as a ruling, and are
-  designed, not built** (§5.3e, §15 D1010).
+  designed, ~~not built~~ their first build step built the same day** (§5.3e, §15 D1010, D1012).
   ~~Auto-layout/constraints~~ **left this list on 2026-09-23 and are
   designed**: CSS flexbox, CSS grid and absolute insets (§5.3c, §15 D867, D871) — insets on frames
   built 2026-09-24, inspector card included (§15 D874); flex built the same day — its model, engine
@@ -310,9 +310,11 @@ permission.
    ⚠️ **Components make it the first of two** (~~designed, not built~~ built since 2026-10-04 —
    §5.3d, §15 D978): an
    instance's copies are stored nodes whose following fields the commit writes from their sources.
-   ⚠️ **Shared libraries would make it the first of three** (designed, not built — §5.3e, §15 D1010):
-   a vendored library main is a stored copy of another document's main at a published version,
-   rewritten only by the commit that accepts an update.
+   ⚠️ **Kits make it the first of three** (~~designed, not built~~ vendoring built 2026-10-08 —
+   §5.3e, §15 D1010, D1012): a vendored kit main is a stored copy of another document's main at a
+   published version, rewritten only by the commit that accepts an update. **A kit's own published
+   state is not a fourth member**: it is the tree as it stood at the publish, which the document no
+   longer holds once edited, so there is nothing to derive it from (§15 D1011 (2)).
 5. **Uncommitted state never enters the Document.** Interactive gestures (drag, resize, pen preview,
    text-in-progress) live in app-side preview state and reach the renderer as `RenderOverrides`
    (§6.2) — per-node patches projected from the very transaction the gesture will commit. Exactly
@@ -644,6 +646,9 @@ pub struct Node {
     variant: Vec<String>,      // a variant's values, one per property of the set around it
     props: Vec<Keyed<Property>>, // the component properties a main or a set defines, and its one
                                // showing of nested instances (§15 D988)
+    origin: Option<kit::Origin>, // where a VAULT node was vendored from — kit, node there, version
+                               // (§5.3e, §15 D1012); on every vault node and on nothing else;
+                               // never carried by a copy; skipped when None
 }
 
 pub enum NodeKind {
@@ -2071,9 +2076,11 @@ created, read as outside every instance and was cut.
 are no cross-document libraries, and a document stays self-contained as it does with embedded images.
 Pasting into another document drops every link whose source is not in the target document. ~~**Shared
 libraries are deferred, not a non-goal** (`roadmap.md`, *Later · Parked decisions*).~~ **Shared
-libraries were ruled on 2026-10-08 and are designed, not built** (§5.3e, §15 D1010): a library's mains
-are vendored into the document that uses them, so this paragraph stays true of `HEAD` and the
-self-contained document stays true of the design.
+libraries were ruled on 2026-10-08 and are designed** (§5.3e, §15 D1010): a library's mains are vendored
+into the document that uses them, so the self-contained document stays true of the design. **Their first
+build step landed the same day** (§15 D1012), and with it the one exception to the paste rule: a copy of
+a **kit instance** carries the vendored mains it reaches, and the paste vendors them into the target, so
+it lands an instance. Every other link the target cannot resolve is still dropped.
 
 **A copy of a main component is an instance** (§15 D979's ruling (e), the maintainer's, the same
 day). Copy and paste, duplicate and Alt-drag of a main make an instance of it; a separate *Duplicate as
@@ -2851,15 +2858,17 @@ amendment); ~~exposing nested properties, later
 by the mockup~~ — built 2026-10-06 from the mockup's 4K–4S (§15 D988), with the binding line a nested
 instance in a main had never drawn (§15 D989), unlooked-at in the GUI; and a verb that un-makes a component, which would owe a detach.
 
-### 5.3e Kits — shared component libraries (designed 2026-10-08; not built; §15 D1010, D1011)
+### 5.3e Kits — shared component libraries (designed 2026-10-08; step 1 built; §15 D1010–D1012)
 
-> **Design ahead of code, all of it.** Ruled with the maintainer on 2026-10-08: that a kit is a
+> **Design ahead of code, most of it.** Ruled with the maintainer on 2026-10-08: that a kit is a
 > document marked as one, that publishing is explicit, and that the first version's update is an
 > "accept all" notice are theirs; the model below is the session's proposal, accepted the same day
 > (§15 D1010); the chrome is `design/Kits.dc.html`, accepted the same day with ten rulings (§15 D1011).
 > That file is untracked and regenerated, so its screen numbers here are pointers and the content is
-> this section's. Nothing is built, so §5.3d's *document-local* paragraph is still true of `HEAD`. Its
-> build is `roadmap.md`'s *Next · Shared component libraries*.
+> this section's. **Build step 1 is in core** (§15 D1012, *Step 1 as built* below) — the vault,
+> provenance, the kit mark, the published state, vendoring and inserting, and a kit instance's paste —
+> **with no chrome**; everything from *Publishing* on is still design. The rest of the build is
+> `roadmap.md`'s *Next · Shared component libraries*.
 
 **The word is *Kit*** (§15 D1011): a document whose components others use. *Library* stays the
 dashboard's collection (§5.11a, §9.6). A component whose main lives in a kit is a *kit component*; an
@@ -2872,7 +2881,8 @@ caret beside the document's name), one click and safe, because nothing is shared
 published main or set, kept beside the working document — and consumers vendor from that, never from the
 working document. **Neither marking nor publishing is undoable**: both are outward acts, as *Save* and
 *Export* are, and the publish date is stamped by the user's publish, not by a save, so §5.11a's no-clock
-rule holds. Where the mark and the published state are stored is the build's.
+rule holds. The mark is in the library block and the published state is a whole `Document` beside the
+tree (§15 D1012, below).
 
 **Its mains are vendored.** Using a component from kit L in document D copies L's published main into D
 as a hidden, read-only **vendored kit main** — the whole set if it is a variant (§5.3d's variants), and
@@ -2884,15 +2894,24 @@ main that happens to have come from elsewhere. **D stays self-contained** — it
 exports with L deleted or offline, and no link points out of it — which is §15 D979 (d)'s reason kept
 while its *document-local* is lifted. Images travel as a cross-document paste carries them (§15 D280).
 
-🚨 **The vendored mains live in a hidden container in D's node tree** (§15 D1011 (9)), so the component
-passes, all keyed on `Document.nodes` and its tree, need nothing new — a separate table would teach each a
-second place to look. **The cost is a closed list of tree readers that must skip the container**, and the
-build sweeps it: the layers panel; the canvas render and hit-test; export — SVG, PNG and the CLI; the MCP
-snapshot; *Select all*; search and find; the dashboard cover; zoom-to-fit (`OndinApp::document_bounds`,
-the root's world bounds); and *Make local*'s placement, which reads the same bounds. ⚠️ **Nothing fails to
-compile when a reader forgets it** — the *adding a `NodeKind`* sweep again — so this list is a floor.
+🚨 **The vendored mains live in D's *vault*: a second parentless `Root` beside D's own**
+(`Document::vault`, named *Kits*; §15 D1012, the maintainer's choice, refining D1011 (9)). Its nodes are
+in `Document.nodes` with everything else, so the component passes — which ask by id, not by walking —
+need nothing new, and a separate table would have taught each a second place to look. ~~The vendored
+mains live in a hidden container in D's node tree (§15 D1011 (9)), and the cost is a closed list of tree
+readers that must skip the container.~~ **Outside the tree under the root, so every walk from
+`doc.root()` skips it untold** — the render, `Resolved::rebuild`, the three exports, the snapshot, the
+layers panel, the cover, zoom-to-fit, *Select all* — and **a reader that forgets fails safe**, where a
+container under the root would have shown the user a kit's mains as their own artwork. The cost moved
+to a handful of guards, each named in §15 D1012: the loader's reachability walk from both roots,
+`kit::check` in `apply` and the loader, `Resolved::update` dropping a dirtied vault node as if deleted
+(`rebuild` never meets it, an update would), `Selection::retain_existing` and `select_main` in the app,
+and `RenderOverrides::absorb` refusing the vault's two operations. ⚠️ **A reader that iterates the node
+map instead of walking from the root does meet the vault** — `swap::options` lists vendored mains flat
+among D's own until step 2 groups them by kit — so that is the shape to suspect.
 
-**Each vendored node is minted its own `NodeId` in D and records the node it came from in L** (§5.2).
+**Each vendored node is minted its own `NodeId` in D and records the node it came from in L** (§5.2),
+on the node itself: `Node::origin`, the kit's `meta.id`, the node in L's published state and the version.
 Reusing L's ids would make two documents vendoring the same
 kit collide when one is pasted into the other.
 
@@ -2905,9 +2924,13 @@ components changed since v8 (date)*, grouped *Added* / *Changed* / *Removed*, ea
 (set, main, variant) and a set with its variant count, a removed one *kept as copy where used*; an
 optional note; *Cancel* / *Publish*. A first publish lists every set and lone main, *+ N more*, its button
 *Publish 12 components*. Afterwards a toast, *Published Atlas v9 · 4 components*, and the count is 0.
-*Stop sharing Atlas as a kit?* (1D) says how many documents use it — read from the library scan, which
-reads every file for its cover anyway — that they keep their copies and stop receiving updates, and that
-making it a kit again later continues from the last version. On the dashboard (1B) a kit's thumbnail
+*Stop sharing Atlas as a kit?* (1D) says how many documents use it ~~— read from the library scan, which
+reads every file for its cover anyway~~ — ⚠️ **how it counts them is undecided, step 4's**: the scan
+reads only a 4 KB prefix of each file (`io::probe::meta_in_prefix`, §5.11a) and loads one whole only
+when the probe is inconclusive, and covers are rendered for on-screen cards alone (§15 D862), so the
+count needs either a consumer's kit ids in its prefix-readable `meta` or a full load per file — and
+that they keep their copies and stop receiving updates, and that making it a kit again later continues
+from the last version. On the dashboard (1B) a kit's thumbnail
 carries a *Kit* chip opposite the star, the sidebar a *Kits* filter under *Starred* with a count, and the
 file card's ⋯ *Make a kit* / *Stop sharing as kit*.
 
@@ -2965,6 +2988,44 @@ to date · v16*, *Unavailable* — and per row *Open kit*, *Make all local* and 
 accept toast names `Ctrl+Z` instead of 5B's *Undo* button, and a revealed main's toast says where it went
 instead of offering *Show*. Real-time collaboration stays a non-goal (§12, §15 D978); a kit
 reaches a second machine through the synced base folder (§5.11a), with no network code.
+
+**Step 1 as built** (`kit.rs`, §15 D1012; core only, no chrome).
+
+- **The vault's rules** (`kit::check`, after `component::check` in `apply` and in the loader): the
+  vault is a parentless `Root` that is not the root; every node under it carries an origin naming a
+  well-formed kit id, and no node outside carries one; each child of the vault is a main or a component
+  set. **No rule makes a vendored main read-only** — nothing can tell an edit from an update; read-only
+  is the app's, a vault node being never resolved and so never drawn, picked or selected.
+- **`Operation::OpenVault` / `CloseVault`**, each the other's inverse; a close is refused unless the
+  vault is open, is `id` and is empty. The first insert that copies anything in opens it, so its undo
+  takes the vault away and a document that never used a kit saves as before.
+- 🚨 **`remap_subtree` never carries `origin`** — every copy goes through it, and a copy of a vendored
+  node is a duplicate, an instance or a paste, none of which lives in the vault. The kit verbs write the
+  origin after minting.
+- **The kit mark** is `DocumentMeta::kit: Option<KitMark>` — the last publish's version (0 before the
+  first), date and note, and `sharing`, false after *Stop sharing*, which keeps the version so a later
+  re-marking continues from it. In `meta` so the scan's 4 KB prefix answers *is this a kit* and *which
+  version* without loading the file (§5.11a).
+- **The published state is a whole `Document`** (`Document::published`, outside undo as `meta` is):
+  every published main and set under its root **with the kit's own ids**, so `Origin::node` names the
+  same main across publishes; the other kits' mains those reach, transitively, in its vault; and each
+  top's top-level frame name. Being a `Document`, the loader and both checks hold it with no second rule
+  set. `kit::freeze` builds it — the tops every set and every main that is not a variant — and the file
+  holds it one level deep.
+- **Vendoring** (`kit::vendor`, `kit::insert`): a main, its whole set if a variant, and every main it
+  reaches through a link, a swap or a bound layer; a node held by its origin key is reused **whatever
+  its version**, bringing it up to date being an update's job — a node a later publish added to a held
+  main is refused as `KitError::NeedsUpdate`; 🚨 **a kit never vendors itself**: `kit::find`, the
+  lookup `vendor` and `adopt` share, lands an origin naming the document's own `meta.id` on the live
+  node, so a kit's own main inserted or pasted into the kit links to the main and opens no vault; a
+  main the kit itself vendored keeps the
+  third kit's origin; images added if missing; and an instance placed under the given parent at the
+  main's own transform, one transaction. Centring it is the app's.
+- **A set inserts its first variant in reading order** (`kit::default_variant`), topmost then leftmost,
+  ties to the earlier child — the build's ruling, §5.3d defining no default.
+- **A kit instance pasted into another document stays an instance**: the clipboard carries the vault
+  mains a copy reaches (`kit::carried`, `io::clip`'s `kits`), and `kit::insert_carrying` vendors what
+  the target lacks before inserting the paste (§5.3d's paste rule, §9.4).
 
 ### 5.4 Text node
 
@@ -3604,13 +3665,18 @@ pub struct Document {
     schema_version: u32,
     nodes: FxHashMap<NodeId, Node>,
     root: NodeId,
+    vault: Option<NodeId>,              // a SECOND parentless Root holding vendored kit mains — §5.3e
     canvas_background: peniko::Color,   // the ground behind and around the frames
     guides: Vec<Guide>,                 // ruler guides; unordered
+    published: Option<Arc<kit::Published>>, // a kit's last publish, frozen; outside undo — §5.3e
 }
 impl Document {
     pub fn new(root_id: NodeId) -> Self;
     pub fn get(&self, id: NodeId) -> Option<&Node>;
     pub fn root(&self) -> NodeId;
+    pub fn vault(&self) -> Option<NodeId>;
+    pub fn in_vault(&self, id: NodeId) -> bool;   // the vault or under it — never resolved
+    pub fn published(&self) -> Option<&kit::Published>;
     pub fn canvas_background(&self) -> peniko::Color;
     pub fn guides(&self) -> &[Guide];
     pub fn guide(&self, id: GuideId) -> Option<&Guide>;
@@ -5570,9 +5636,9 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
 
 ### 5.11 IO
 
-- Native format = JSON, currently **v5** (`io::CURRENT_SCHEMA_VERSION`; v4 until 2026-10-04, when
-  list items gained ids — §15 D980, the v4 → v5 bullet below). `schema.rs` defines a versioned DTO
-  decoupled from in-memory types.
+- Native format = JSON, currently **v6** (`io::CURRENT_SCHEMA_VERSION`; v5 until 2026-10-08, when
+  kits brought the vault — §15 D1012, the v5 → v6 bullet below; v4 until 2026-10-04, when list items
+  gained ids — §15 D980). `schema.rs` defines a versioned DTO decoupled from in-memory types.
 - ⚠️ **The schema has a *second reader*, and it is not the on-disk format's alone** (§15 D823).
   `io::clip` writes a copied subtree for the system clipboard using the same `NodeDto` and `ImageDto`
   a file goes through — `from_node`/`into_node` and `from_entry`/`into_entry` are lifted out of
@@ -5596,6 +5662,10 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   attacker-chosen URL written verbatim into every SVG export as an `href`; it **drops** an image entry no node keys into, §5.11's own asymmetry for a value
   that is ancillary, and drops a non-finite *Paste here* box. 🚨 **None of that validates the tree**, which is `op_insert_subtree`'s business
   (§5.7) and was short of it in three places on the day this door opened.
+  **The envelope carries a second list since v6** (§5.3e, §15 D1012): `kits`, the vault mains a copied
+  kit instance reaches, each a subtree in `subtrees`' form with its origins, written by
+  `write_carrying` and skipped when empty. `parse` holds them to the same envelope rules, and an image
+  entry they key into is kept as one the subtrees key into is.
 - **The library block is the first key after `schema_version`** (§5.11a). Its position is a decision
   about *reading* rather than about diffs: the dashboard lists a folder by reading each document's
   name, project and date, and `io::probe` reaches them from a 4 KB prefix without parsing the
@@ -5618,7 +5688,9 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   produced by `apply` cannot contain a cycle. That makes the loader the place where that guarantee
   is established, so it checks: root exists / is `Root` / has no parent; every non-root parent
   resolves; every listed child points back; **no node is listed as a child twice**; **every node is
-  reachable from the root**; **no node is deeper than `io::MAX_TREE_DEPTH` (256)**; every
+  reachable from the root — or from the vault**, the one other parentless node a file may hold (§5.3e,
+  §15 D1012; the walk starts from both, and `kit::check` holds the vault's shape and its origins at the
+  end, beside `component::check`); **no node is deeper than `io::MAX_TREE_DEPTH` (256)**; every
   parent/child pair obeys the same kind rules operations do; and **no frame sits anywhere under a
   boolean or a mask** (§5.3, §15 D876) — the ancestor rule the pairwise check cannot see, riding the
   reachability walk as a flag per stack entry, as the depth does — and **no item id twice in one of a
@@ -5889,12 +5961,30 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   array, or an item that is not an object, is left for the loader to refuse with a message, as
   `migrate_3_to_4` does. `reserve_existing_ids` sweeps item ids, so nothing a session mints lands on a
   migrated one.
+- **v5 → v6** is the vault (§5.3e, §15 D1012), and **`migrate_5_to_6` is a number and nothing else**: a
+  v5 file has no vault and no origins, which is what v6 reads absent keys as. The keys are additive —
+  `vault` after `root`, `NodeDto::origin`, `meta.kit`, and `published` last, after `images`, for
+  `images`' diff reason — so the bump is **for the older build's sake**, the reason the component
+  fields gave v5 (above): a v5 reader has no `deny_unknown_fields`, would drop `vault`, and would refuse
+  the file over the vault's parentless node (*"non-root node … has no parent"*,
+  `a_file_that_lost_its_vault_key_is_refused`) rather than say it is newer. ⚠️ **`published.document` is
+  a whole document of the same version, and the ladder does not descend into it**: a later migration
+  that reshapes a document owes the nested one too (`PublishedDto`'s doc). The loader refuses a
+  published state that carries one of its own, so the nesting is one level.
 
 ### 5.11a The library block (§15 D362)
 
 - **A document knows its own library identity, and it is the only document state that is not about
-  drawing.** `core::meta::DocumentMeta` — `id`, `name`, `project`, `created` — is a top-level key in
-  the `.ondin`, written second, after `schema_version`.
+  drawing.** `core::meta::DocumentMeta` — `id`, `name`, `project`, `created`, and since v6 `kit` — is a
+  top-level key in the `.ondin`, written second, after `schema_version`.
+- **`kit` is the kit mark** (§5.3e, §15 D1012): `Option<KitMark { version, date, note, sharing }>`,
+  present when the document is a kit. Here because the two questions every consumer asks of every kit —
+  *is this one a kit*, and *which version did it last publish* — are then answered from the scan's 4 KB
+  prefix without loading the file; the frozen published state itself is `Document::published`, at the
+  end of the file. Written by *Make this a kit*, *Stop sharing* and *Publish*, never by a save, so the
+  clock rule below holds — the publish date is stamped by the user's publish (§15 D1011 (2)). ⚠️ The
+  note is free text inside the prefix's budget: a long enough one makes the probe *Inconclusive* and
+  the scan load that file whole, the slow path rather than a wrong one.
 - **It is in the file because the base folder syncs.** The library's root is user-settable precisely
   so it can be a Drive, Dropbox or OneDrive directory (§9.6); a fact that lives anywhere else does not
   arrive on the user's second machine, and a library there with every document named by its slug and
@@ -13172,7 +13262,12 @@ into a note wants to read. Every paste door asks `OndinApp::take_clipboard` rath
 would paste the user's own JSON as a text layer. **The placement rules needed nothing**: ids are
 minted against a per-process-random actor, so a foreign parent fails `Document::contains` and the
 paste lands at the root, which is §15 D221's fallback; the *same* document open twice does resolve,
-and the subtree goes back into its own group.
+and the subtree goes back into its own group. **A kit instance's main travels with it** (§5.3e, §15
+D1012): `copy_selection` adds `kit::carried`'s vault mains to `Clip::kits` and the payload's `kits`,
+with the pictures they show, and `insert_all` and `paste_is_held` both build the paste through
+`kit::insert_carrying`, which vendors what the target lacks — so an instance of a kit main lands linked
+in a document that has never used the kit, where §5.3d's paste rule alone would cut it. Back in its own
+document the carry adds nothing.
 ⚠️ **`go_to_dashboard`'s clear list is the second one of the same class and it had the same kind of
 hole** (§15 D526): it clears `picker`, `context_menu`, `open_menu` and `rename_entry` and did not clear
 `confirming_close`, so walking to the library under the *Unsaved changes* card left the flag stuck
@@ -15003,8 +15098,8 @@ What v1 locks in so a future sync layer is possible without re-architecting:
 4. **No derived state in the document** — replicas converge by replaying ops; `Resolved` is local.
    ⚠️ **Components bend this** (§5.3d, §15 D978, ~~not built~~ built since 2026-10-04): an instance is a stored
    copy its main's edits are written into at the commit, so replay still converges, but a main edit
-   racing an instance's creation on two peers would need a resync on merge. **Shared libraries
-   (§5.3e, §15 D1010, designed, not built) bend it no further**: a vendored library main changes only
+   racing an instance's creation on two peers would need a resync on merge. **Kits
+   (§5.3e, §15 D1010, ~~designed, not built~~ vendoring built, updates not — D1012) bend it no further**: a vendored library main changes only
    by the commit that accepts an update, so replay converges, and an accept racing an instance's
    creation is the same resync.
 

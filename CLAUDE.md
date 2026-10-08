@@ -67,8 +67,13 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1011 index rows, 1011 body headings, next free
-D1012** (measured 2026-10-08; ⚠️ **D1011 reserved in a ninth request's block D1011–D1020 at
+anywhere cited either. **The live figures: 1012 index rows, 1012 body headings, next free
+D1013** (measured 2026-10-08, session 61; ⚠️ **Kits build step 1 reserved D1012–D1023 at `261a030`
+and spent one** — D1012, the vault as a second root (the maintainer's choice over D1011 (9)'s
+container), provenance, the kit mark, the published state, vendoring and the carrying paste. The
+closing negative grep over **D1013–D1023 found zero sites** and they are released. Census **910**,
+three arrivals — D1010 and D1011 now cited from the code they designed, and D1012 — none unresolved.
+Before that, ⚠️ **D1011 reserved in a ninth request's block D1011–D1020 at
 `a925da1`** — the Kits design folded, record-only like D1010, no code cites either; **D1012–D1020
 found at zero sites and released**; census still 907) — but trust the procedure over any number written down here,
 including that one. ⚠️ **Session 60's eighth request reserved D1010–D1019 at `a925da1` and spent

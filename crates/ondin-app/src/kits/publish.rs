@@ -230,10 +230,15 @@ impl OndinApp {
                     .size(11.0)
                     .color(theme::text::DIM),
             );
-            ui.add(
-                egui::TextEdit::singleline(&mut draft.note)
-                    .desired_width(f32::INFINITY)
-                    .hint_text("What changed, in a line. Shown with the update."),
+            ui.add_space(4.0);
+            // The app's text field, not a bare `TextEdit`: egui's own frame has
+            // almost no inset and a focus ring nothing else draws (`ui::text_field`).
+            crate::ui::text_field(
+                ui,
+                egui::vec2(ui.available_width(), crate::settings::FIELD_H),
+                &mut draft.note,
+                "What changed, in a line. Shown with the update.",
+                12.5,
             );
             ui.add_space(crate::settings::FOOTER_GAP);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

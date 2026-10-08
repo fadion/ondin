@@ -1,0 +1,584 @@
+//! Kit updates in a consumer (§5.3e, 5A–5C; §15 D1016).
+//!
+//! A document notices a newer publish of a kit it vendors from by comparing what
+//! the library scan says each kit last published (`meta.kit.version`, read from
+//! the file's first 4 KB) with the versions its vendored mains carry. A pill
+//! beside the save state says how many kits wait, its popover what each brings,
+//! and *Accept all* takes them in one undoable transaction
+//! (`ondin_core::kit::update_all`) — the commit's main-edit passes carrying the
+//! change to the instances. *Later* shrinks the pill to its glyph and count, and
+//! it does not grow back until a kit publishes again.
+
+use super::index::{KitEntry, Load, kits_in};
+use crate::app::{OndinApp, TopMenu};
+use crate::theme::{self, color, icon};
+use eframe::egui;
+use ondin_core::kurbo::{Affine, Rect, Vec2};
+use ondin_core::{NodeId, NodeKind, Operation};
+
+/// The popover's width.
+const POP_W: f32 = 300.0;
+/// The gap between the content's right edge and a main made local, and between
+/// mains stacked there (D1011 (3)).
+const LOCAL_GAP: f64 = 80.0;
+
+/// One kit with a newer publish than this document's copies.
+#[derive(Clone, Debug)]
+pub(crate) struct Waiting {
+    pub kit: KitEntry,
+    /// The version this document's copies are at — the oldest, if they differ.
+    pub held: u32,
+    /// How many vendored mains and sets of it this document holds.
+    pub mains: usize,
+    /// How many instances of them this document has.
+    pub instances: usize,
+    /// Told *Later* for this version (5C).
+    pub later: bool,
+}
+
+impl OndinApp {
+    /// Every kit this document uses with a newer publish in the library.
+    ///
+    /// `count` asks for each kit's instance count, which is a scan of the whole
+    /// document per vendored main — the open popover's, never the pill's, which
+    /// asks every frame.
+    pub(crate) fn kits_waiting(&self, count: bool) -> Vec<Waiting> {
+        let doc = &self.session.doc;
+        let Some(vault) = doc.vault().and_then(|v| doc.get(v)) else {
+            return Vec::new();
+        };
+        let own = doc.meta().id.clone();
+        let library = kits_in(&self.library, own.as_deref());
+        let later = own
+            .as_ref()
+            .and_then(|d| self.library.local.kit_later.get(d))
+            .cloned()
+            .unwrap_or_default();
+        let mut out: Vec<Waiting> = Vec::new();
+        for top in vault.children() {
+            let Some(o) = doc.get(*top).and_then(|n| n.origin()) else {
+                continue;
+            };
+            let Some(k) = library.iter().find(|k| k.id == o.kit) else {
+                continue;
+            };
+            let instances: usize = if count {
+                let mains: Vec<NodeId> = match doc.get(*top) {
+                    Some(n) if n.set().is_some() => ondin_core::variant::variants(doc, *top),
+                    _ => vec![*top],
+                };
+                mains
+                    .iter()
+                    .map(|m| ondin_core::component::instances_of(doc, *m).len())
+                    .sum()
+            } else {
+                0
+            };
+            match out.iter_mut().find(|w| w.kit.id == o.kit) {
+                Some(w) => {
+                    w.held = w.held.min(o.version);
+                    w.mains += 1;
+                    w.instances += instances;
+                }
+                None => out.push(Waiting {
+                    kit: k.clone(),
+                    held: o.version,
+                    mains: 1,
+                    instances,
+                    later: false,
+                }),
+            }
+        }
+        out.retain(|w| w.kit.version > w.held);
+        for w in &mut out {
+            w.later = later.get(&w.kit.id).is_some_and(|v| *v >= w.kit.version);
+        }
+        out.sort_by_key(|w| w.kit.name.to_lowercase());
+        out
+    }
+
+    /// The pill beside the save state (5A, 5C): *N kit updates*, or after
+    /// *Later* its glyph and count; its popover summarises them.
+    pub(crate) fn kit_update_pill(&mut self, ui: &mut egui::Ui) {
+        let open = self.open_menu == TopMenu::KitUpdates;
+        let waiting = self.kits_waiting(open);
+        if waiting.is_empty() {
+            if self.open_menu == TopMenu::KitUpdates {
+                self.open_menu = TopMenu::None;
+            }
+            return;
+        }
+        let n = waiting.len();
+        let quiet = waiting.iter().all(|w| w.later);
+        let text = if quiet {
+            n.to_string()
+        } else {
+            format!("{n} kit update{}", if n == 1 { "" } else { "s" })
+        };
+        let galley = ui
+            .ctx()
+            .fonts_mut(|f| f.layout_no_wrap(text, egui::FontId::proportional(11.5), color::TEXT));
+        let w = 9.0 + 13.0 + 6.0 + galley.size().x + 9.0;
+        let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 24.0), egui::Sense::click());
+        let p = ui.painter();
+        let ground = if open || resp.hovered() {
+            color::text_a(48)
+        } else if quiet {
+            color::text_a(18)
+        } else {
+            color::text_a(36)
+        };
+        p.rect_filled(rect, egui::CornerRadius::same(6), ground);
+        let y = rect.center().y;
+        p.text(
+            egui::pos2(rect.left() + 9.0, y),
+            egui::Align2::LEFT_CENTER,
+            icon::ARROW_CIRCLE_DOWN,
+            theme::icon_font(13.0),
+            color::text_a(191),
+        );
+        p.galley(
+            egui::pos2(rect.left() + 28.0, y - galley.size().y / 2.0),
+            galley,
+            color::TEXT,
+        );
+        let resp = resp.on_hover_text(if quiet {
+            format!(
+                "{n} kit update{} · click to review",
+                if n == 1 { "" } else { "s" }
+            )
+        } else {
+            "Kits this document uses have published updates".to_string()
+        });
+        if resp.clicked() {
+            // The published states the popover's Accept needs, loaded off the
+            // frame while the user reads it.
+            for w in &waiting {
+                self.kit_shelf.ask(&w.kit);
+            }
+            self.toggle_menu(TopMenu::KitUpdates);
+        }
+        if self.open_menu != TopMenu::KitUpdates {
+            return;
+        }
+        let ctx = ui.ctx().clone();
+        self.kit_shelf.pass(&ctx);
+        let anchor = egui::pos2(rect.left(), rect.bottom() + crate::ui::MENU_GAP);
+        let ready = waiting
+            .iter()
+            .all(|w| matches!(self.kit_shelf.load(&w.kit.id), Some(Load::Ready(Some(_)))));
+        self.dropdown(&ctx, "kit-updates", anchor, POP_W, &resp, |app, ui| {
+            ui.spacing_mut().item_spacing.y = 4.0;
+            ui.label(
+                egui::RichText::new(format!(
+                    "{n} kit{} {} updates",
+                    if n == 1 { "" } else { "s" },
+                    if n == 1 { "has" } else { "have" }
+                ))
+                .size(12.0)
+                .color(theme::text::STRONG),
+            );
+            ui.add_space(4.0);
+            for w in &waiting {
+                waiting_row(ui, w);
+            }
+            let instances: usize = waiting.iter().map(|w| w.instances).sum();
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(format!(
+                    "Changes {instances} instance{}. Your overrides stay.",
+                    if instances == 1 { "" } else { "s" }
+                ))
+                .size(11.0)
+                .color(theme::text::DIM),
+            );
+            ui.add_space(6.0);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                let accept = crate::settings::text_button(
+                    ui,
+                    if ready { "Accept all" } else { "Loading…" },
+                    if ready {
+                        crate::ui::FieldButton::On
+                    } else {
+                        crate::ui::FieldButton::Disabled
+                    },
+                );
+                if accept.clicked() && ready {
+                    app.open_menu = TopMenu::None;
+                    app.accept_kit_updates(None);
+                }
+                if crate::settings::text_button(ui, "Later", crate::ui::FieldButton::Off).clicked()
+                {
+                    app.open_menu = TopMenu::None;
+                    app.later_kit_updates();
+                }
+            });
+        });
+    }
+
+    /// *Later* (5C): remember the versions waiting now, so the pill shrinks and
+    /// stays shrunk until a kit publishes past them.
+    pub(crate) fn later_kit_updates(&mut self) {
+        let Some(doc) = self.session.doc.meta().id.clone() else {
+            return;
+        };
+        let waiting = self.kits_waiting(false);
+        let entry = self.library.local.kit_later.entry(doc).or_default();
+        for w in waiting {
+            entry.insert(w.kit.id.clone(), w.kit.version);
+        }
+        self.library.local.save();
+    }
+
+    /// Accept the waiting updates — every kit's, or only `only`'s — in one
+    /// transaction (5B). Mains a kit removed are made local and stacked at the
+    /// top right of the content (D1011 (3)); the toast says what changed and that
+    /// overrides were kept, and names `Ctrl+Z` (D981 (d): toasts are text).
+    pub(crate) fn accept_kit_updates(&mut self, only: Option<&str>) {
+        let waiting: Vec<Waiting> = self
+            .kits_waiting(false)
+            .into_iter()
+            .filter(|w| only.is_none_or(|k| k == w.kit.id))
+            .collect();
+        let mut loaded = Vec::new();
+        for w in &waiting {
+            match self.kit_shelf.load(&w.kit.id) {
+                Some(Load::Ready(Some(p))) => {
+                    loaded.push((w.kit.id.clone(), w.kit.version, p.clone()))
+                }
+                _ => {
+                    self.kit_shelf.ask(&w.kit);
+                    self.session.info(format!(
+                        "Still reading {} — try again in a moment",
+                        w.kit.name
+                    ));
+                    return;
+                }
+            }
+        }
+        let args: Vec<(&str, u32, &ondin_core::kit::Published)> = loaded
+            .iter()
+            .map(|(k, v, p)| (k.as_str(), *v, p.as_ref()))
+            .collect();
+        let doc = &self.session.doc;
+        let content = self.session.preview_world_bounds(doc.root());
+        let update = match ondin_core::kit::update_all(doc, &mut self.session.ids, &args) {
+            Ok(u) => u,
+            Err(e) => {
+                self.session
+                    .fail(format!("The kit update could not be applied ({e:?})"));
+                return;
+            }
+        };
+        let mut tx = update.tx;
+        tx.0.extend(stack_local(doc, &update.made_local, content));
+        if !self.session.commit(tx) {
+            return;
+        }
+        let doc = &self.session.doc;
+        let kept = update
+            .updated
+            .iter()
+            .flat_map(|m| match doc.get(*m) {
+                Some(n) if n.set().is_some() => ondin_core::variant::variants(doc, *m),
+                _ => vec![*m],
+            })
+            .flat_map(|m| ondin_core::component::instances_of(doc, m))
+            .filter(|i| ondin_core::reset::drift(doc, *i).any())
+            .count();
+        let kits = waiting.len();
+        let mut toast = format!(
+            "Updated {} component{} from {kits} kit{} · overrides kept on {kept} instance{} · \
+             Ctrl+Z to undo",
+            update.updated.len(),
+            if update.updated.len() == 1 { "" } else { "s" },
+            if kits == 1 { "" } else { "s" },
+            if kept == 1 { "" } else { "s" },
+        );
+        if let Some(first) = update.made_local.first().and_then(|m| doc.get(*m)) {
+            toast = match update.made_local.len() {
+                1 => format!(
+                    "{toast} · {} is now a local main, at the top right of the canvas",
+                    first.name()
+                ),
+                n => format!(
+                    "{toast} · {n} removed components are now local mains, at the top right"
+                ),
+            };
+        }
+        self.session.info(toast);
+    }
+}
+
+/// The `SetTransform`s that stack mains made local down the right of the
+/// document's content, `LOCAL_GAP` out and apart (D1011 (3)). A frame's box is
+/// its size; a group, whose box is its children's, is placed by its origin.
+pub(crate) fn stack_local(
+    doc: &ondin_core::Document,
+    mains: &[NodeId],
+    content: Option<Rect>,
+) -> Vec<Operation> {
+    let start = content.map_or(ondin_core::kurbo::Point::ZERO, |c| {
+        ondin_core::kurbo::Point::new(c.x1 + LOCAL_GAP, c.y0)
+    });
+    let mut y = start.y;
+    let mut out = Vec::new();
+    for m in mains {
+        let Some(n) = doc.get(*m) else { continue };
+        let h = match n.kind() {
+            NodeKind::Artboard { size } => size.height,
+            _ => 0.0,
+        };
+        out.push(Operation::SetTransform {
+            id: *m,
+            transform: Affine::translate(Vec2::new(start.x, y)),
+        });
+        y += h + LOCAL_GAP;
+    }
+    out
+}
+
+/// One kit in the popover: its name and *v8 → v9*, how many components, and
+/// its publish note (5A).
+fn waiting_row(ui: &mut egui::Ui, w: &Waiting) {
+    ui.horizontal(|ui| {
+        ui.label(theme::icon_text(icon::PACKAGE, 12.0, theme::text::MUTED));
+        ui.label(
+            egui::RichText::new(&w.kit.name)
+                .size(12.0)
+                .color(color::TEXT),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(
+                egui::RichText::new(format!("v{} → v{}", w.held, w.kit.version))
+                    .size(10.5)
+                    .color(theme::text::FAINT),
+            );
+        });
+    });
+    ui.label(
+        egui::RichText::new(format!(
+            "{} component{}",
+            w.mains,
+            if w.mains == 1 { "" } else { "s" }
+        ))
+        .size(11.0)
+        .color(theme::text::DIM),
+    );
+    if let Some(note) = &w.kit.note {
+        ui.label(
+            egui::RichText::new(format!("“{note}”"))
+                .size(11.0)
+                .italics()
+                .color(theme::text::MUTED),
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::app::OndinApp;
+    use crate::library::state::Library;
+    use eframe::egui;
+    use ondin_core::kurbo::Size;
+    use ondin_core::meta::KitMark;
+    use ondin_core::{Document, IdSource, NodeId, NodeKind, Operation, Transaction};
+    use std::path::{Path, PathBuf};
+
+    fn temp_root(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ondin-updates-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A kit *Atlas* in `root`, published at v4: one main *Badge* holding a dot.
+    fn file_kit(root: &Path) -> (PathBuf, String, NodeId, NodeId) {
+        let mut ids = IdSource::new(0xAC);
+        let r = ids.mint();
+        let mut doc = Document::new(r);
+        let [badge, dot] = [(); 2].map(|_| ids.mint());
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: badge,
+                parent: r,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(40.0, 20.0),
+                },
+                transform: None,
+                name: Some("Badge".into()),
+            },
+            Operation::CreateNode {
+                id: dot,
+                parent: badge,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(4.0, 4.0),
+                },
+                transform: None,
+                name: Some("Dot".into()),
+            },
+            Operation::SetComponent {
+                id: badge,
+                component: true,
+            },
+        ]))
+        .unwrap();
+        let path = crate::library::store::file_document(root, None, "Atlas", &mut doc).unwrap();
+        let mut meta = doc.meta().clone();
+        meta.kit = Some(KitMark {
+            version: 3,
+            ..KitMark::default()
+        });
+        doc.set_meta(meta);
+        ondin_core::kit::publish(&mut doc, None, 1).unwrap();
+        crate::library::store::write_document(&path, &doc).unwrap();
+        (path, doc.meta().id.clone().unwrap(), badge, dot)
+    }
+
+    /// Edit the kit file with `ops` and publish it again, as its author would.
+    fn republish(path: &Path, ops: Vec<Operation>, note: &str) {
+        let mut doc = ondin_core::io::load(&std::fs::read(path).unwrap()).unwrap();
+        doc.apply(&Transaction(ops)).unwrap();
+        ondin_core::kit::publish(&mut doc, Some(note.into()), 2).unwrap();
+        crate::library::store::write_document(path, &doc).unwrap();
+        // A modification time a second on, so the shelf reads the file again
+        // whatever the filesystem's resolution (the CLAUDE.md mtime lesson).
+        let f = std::fs::File::options().write(true).open(path).unwrap();
+        f.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(2))
+            .unwrap();
+    }
+
+    /// A consumer with an instance of the kit's Badge, and the app open on it.
+    fn consumer(ctx: &egui::Context, root: &Path, kit: &str, badge: NodeId) -> (OndinApp, NodeId) {
+        let mut app = OndinApp::headless(ctx);
+        app.prefs.base_folder = Some(root.to_path_buf());
+        app.library = Library::open(root.to_path_buf());
+        let mut doc = Document::new(app.session.ids.mint());
+        let path = crate::library::store::file_document(root, None, "Landing", &mut doc).unwrap();
+        app.library.refresh();
+        app.open_path(&path);
+        let k = super::super::index::kits_in(&app.library, app.session.doc.meta().id.as_deref())
+            .into_iter()
+            .find(|k| k.id == kit)
+            .unwrap();
+        app.kit_shelf.ask(&k);
+        app.kit_shelf.settle();
+        let Some(super::Load::Ready(Some(p))) = app.kit_shelf.load(kit) else {
+            panic!("the kit loads")
+        };
+        let root_id = app.session.doc.root();
+        let (tx, inst) = ondin_core::kit::insert(
+            &app.session.doc,
+            &mut app.session.ids,
+            kit,
+            4,
+            p,
+            badge,
+            root_id,
+        )
+        .unwrap();
+        assert!(app.session.commit(tx));
+        (app, inst)
+    }
+
+    fn settle_for_accept(app: &mut OndinApp) {
+        for w in app.kits_waiting(false) {
+            app.kit_shelf.ask(&w.kit);
+        }
+        app.kit_shelf.settle();
+    }
+
+    /// **A newer publish waits, *Later* quiets it, *Accept all* takes it in one
+    /// step** (§5.3e, 5A–5C; §15 D1016). The kit re-publishes with its dot
+    /// changed; the consumer sees one kit waiting, v4 → v5, with the note; *Later*
+    /// keeps it waiting but quiet; *Accept all* rewrites the vendored main and the
+    /// instance follows, nothing waits, the toast says so, and one undo takes it
+    /// back.
+    #[test]
+    fn a_newer_publish_waits_and_accept_all_takes_it() {
+        let ctx = egui::Context::default();
+        let root = temp_root("accept");
+        let (path, kit, badge, dot) = file_kit(&root);
+        let (mut app, inst) = consumer(&ctx, &root, &kit, badge);
+        assert!(app.kits_waiting(false).is_empty(), "up to date");
+
+        republish(
+            &path,
+            vec![Operation::SetOpacity {
+                id: dot,
+                opacity: 0.5,
+            }],
+            "Softer dot",
+        );
+        app.library.refresh();
+        let w = app.kits_waiting(true);
+        assert_eq!(w.len(), 1);
+        assert_eq!((w[0].held, w[0].kit.version), (4, 5));
+        assert_eq!(w[0].kit.note.as_deref(), Some("Softer dot"));
+        assert_eq!((w[0].mains, w[0].instances), (1, 1));
+        assert!(!w[0].later);
+
+        app.later_kit_updates();
+        assert!(app.kits_waiting(false)[0].later, "quiet, still waiting");
+
+        settle_for_accept(&mut app);
+        let before = app.session.doc.clone();
+        app.accept_kit_updates(None);
+        let idot = app.session.doc.get(inst).unwrap().children()[0];
+        assert_eq!(
+            app.session.doc.get(idot).unwrap().opacity(),
+            0.5,
+            "the instance follows"
+        );
+        assert!(app.kits_waiting(false).is_empty(), "nothing waits");
+        let toast = app.session.status().text.clone();
+        assert!(
+            toast.contains("Updated 1 component from 1 kit") && toast.contains("Ctrl+Z"),
+            "{toast}"
+        );
+        app.undo();
+        assert_eq!(app.session.doc, before, "one undo");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A component the kit removed is made local at the top right of the
+    /// content** (D1011 (3)): its copy leaves the vault as an ordinary main, set
+    /// `LOCAL_GAP` to the right of everything else and level with its top, its
+    /// instance still linked, and the toast says where it went.
+    #[test]
+    fn a_removed_component_lands_local_at_the_top_right() {
+        let ctx = egui::Context::default();
+        let root = temp_root("local");
+        let (path, kit, badge, _) = file_kit(&root);
+        let (mut app, inst) = consumer(&ctx, &root, &kit, badge);
+        let content = app
+            .session
+            .preview_world_bounds(app.session.doc.root())
+            .unwrap();
+        republish(
+            &path,
+            vec![Operation::DeleteNode { id: badge }],
+            "Badge retired",
+        );
+        app.library.refresh();
+        settle_for_accept(&mut app);
+        app.accept_kit_updates(None);
+
+        let main = app.session.doc.get(inst).unwrap().link().unwrap();
+        let doc = &app.session.doc;
+        assert_eq!(
+            doc.get(main).unwrap().parent(),
+            Some(doc.root()),
+            "out of the vault"
+        );
+        assert!(doc.get(main).unwrap().origin().is_none());
+        let at = doc.get(main).unwrap().transform().translation();
+        assert_eq!((at.x, at.y), (content.x1 + super::LOCAL_GAP, content.y0));
+        let toast = app.session.status().text.clone();
+        assert!(toast.contains("Badge is now a local main"), "{toast}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}

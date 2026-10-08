@@ -769,6 +769,9 @@ pub mod icon {
     /// *Publish* (§5.3e, 2A) — Phosphor `upload-simple`, read off the mockups'
     /// stylesheet as [`PACKAGE`] was.
     pub const UPLOAD_SIMPLE: &str = "\u{e4c0}";
+    /// A kit update waiting (§5.3e, 5A) — Phosphor `arrow-circle-down`, read off
+    /// the mockups' stylesheet as [`PACKAGE`] was.
+    pub const ARROW_CIRCLE_DOWN: &str = "\u{e028}";
     /// *Detach instance* — "no longer from the main" (§15 D981).
     pub const LINK_BREAK: &str = "\u{e2e4}";
     /// *Go to main component*, everywhere it is offered — the menu row, the
@@ -1075,6 +1078,7 @@ pub mod icon {
         ("hexagon", HEXAGON),
         ("package", PACKAGE),
         ("upload-simple", UPLOAD_SIMPLE),
+        ("arrow-circle-down", ARROW_CIRCLE_DOWN),
         ("link-break", LINK_BREAK),
         ("arrow-up-right", ARROW_UP_RIGHT),
         ("arrow-square-out", ARROW_SQUARE_OUT),

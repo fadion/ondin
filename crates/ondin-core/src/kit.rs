@@ -508,7 +508,14 @@ fn reach(frozen: &Document, top: NodeId) -> std::collections::BTreeMap<NodeId, N
 pub fn publish(doc: &mut Document, note: Option<String>, date: u64) -> Option<u32> {
     let mut meta = doc.meta().clone();
     let mark = meta.kit.as_mut()?;
-    let frozen = freeze(doc)?;
+    // A kit that deleted its last main still has something to publish — that it
+    // publishes nothing now, so its consumers keep their copies as local mains
+    // (D1011 (3)). Only a kit that never published and holds no main has none.
+    let frozen = match freeze(doc) {
+        Some(f) => f,
+        None if doc.published().is_some() => empty_published(doc),
+        None => return None,
+    };
     mark.version += 1;
     mark.date = Some(date);
     mark.note = note.filter(|n| !n.trim().is_empty());
@@ -516,6 +523,33 @@ pub fn publish(doc: &mut Document, note: Option<String>, date: u64) -> Option<u3
     doc.set_meta(meta);
     doc.set_published(Some(frozen));
     Some(version)
+}
+
+/// A published state holding nothing: the kit's root and no main — what a kit
+/// that removed its last component publishes.
+fn empty_published(doc: &Document) -> Published {
+    let mut nodes = FxHashMap::default();
+    let root = Document::new(doc.root())
+        .node_map()
+        .get(&doc.root())
+        .cloned()
+        .expect("a new document holds its root");
+    nodes.insert(root.id, root);
+    Published {
+        doc: Document::from_parts(
+            doc.schema_version(),
+            nodes,
+            doc.root(),
+            None,
+            doc.canvas_background(),
+            Vec::new(),
+            FxHashMap::default(),
+            Default::default(),
+            None,
+        ),
+        groups: Vec::new(),
+        name: doc.meta().name.clone(),
+    }
 }
 
 /// Why a kit insert could not be built.
@@ -924,45 +958,68 @@ pub fn update(
     version: u32,
     published: &Published,
 ) -> Result<Update, KitError> {
-    let src = published.document();
-    let vault = doc.vault();
-    let tops: Vec<NodeId> = vault
-        .and_then(|v| doc.get(v))
-        .map(|v| v.children.clone())
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|t| {
-            doc.get(*t)
-                .and_then(|n| n.origin.as_ref())
-                .is_some_and(|o| o.kit == kit)
-        })
-        .collect();
+    update_all(doc, ids, &[(kit, version, published)])
+}
+
+/// [`update`] for several kits as **one** transaction — *Accept all* (5B), one
+/// undo step. Built on one scratch, each kit against the state the ones before
+/// it leave, so the commit's propagation runs once over the whole of it.
+pub fn update_all(
+    doc: &Document,
+    ids: &mut IdSource,
+    kits: &[(&str, u32, &Published)],
+) -> Result<Update, KitError> {
+    let Some(&(kit0, version0, published0)) = kits.first() else {
+        return Ok(Update {
+            tx: Transaction(Vec::new()),
+            updated: Vec::new(),
+            made_local: Vec::new(),
+        });
+    };
     let mut b = Builder {
         scratch: doc.clone(),
         ops: Vec::new(),
-        kit,
-        version,
-        published,
+        kit: kit0,
+        version: version0,
+        published: published0,
     };
     let mut updated = Vec::new();
     let mut made_local = Vec::new();
-    for t in tops {
-        let Some(x) = b
+    for &(kit, version, published) in kits {
+        (b.kit, b.version, b.published) = (kit, version, published);
+        let src = published.document();
+        let tops: Vec<NodeId> = b
             .scratch
-            .get(t)
-            .and_then(|n| n.origin.as_ref())
-            .map(|o| o.node)
-        else {
-            continue;
-        };
-        let still = src.get(x).is_some() && top_of(src, x) == Some(x) && !src.in_vault(x);
-        if !still {
-            made_local.push(t);
-            continue;
+            .vault()
+            .and_then(|v| b.scratch.get(v))
+            .map(|v| v.children.clone())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|t| {
+                b.scratch
+                    .get(*t)
+                    .and_then(|n| n.origin.as_ref())
+                    .is_some_and(|o| o.kit == kit)
+            })
+            .collect();
+        for t in tops {
+            let Some(x) = b
+                .scratch
+                .get(t)
+                .and_then(|n| n.origin.as_ref())
+                .map(|o| o.node)
+            else {
+                continue;
+            };
+            let still = src.get(x).is_some() && top_of(src, x) == Some(x) && !src.in_vault(x);
+            if !still {
+                made_local.push(t);
+                continue;
+            }
+            b.vendor_reached(ids, x)?;
+            b.sync(ids, t, x)?;
+            updated.push(t);
         }
-        b.vendor_reached(ids, x)?;
-        b.sync(ids, t, x)?;
-        updated.push(t);
     }
     let root = doc.root();
     for t in &made_local {

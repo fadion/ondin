@@ -1442,6 +1442,8 @@ pub enum TopMenu {
     Zoom,
     /// The document menu — the caret beside the document's name (§5.3e, 1A).
     Document,
+    /// The kit update notice's popover (§5.3e, 5A).
+    KitUpdates,
 }
 
 /// The system clipboard's text, if it holds any.
@@ -8869,6 +8871,8 @@ impl OndinApp {
                     // Straight after the name, at the row's own 8-point spacing,
                     // so it reads as the name's state (§15 D962).
                     self.save_dot(ui);
+                    // Beside the save state, in its quiet register (§5.3e, 5A).
+                    self.kit_update_pill(ui);
                     self.status_text(ui);
 
                     // ⚠️ **No open or save buttons here since §15 D962.** The

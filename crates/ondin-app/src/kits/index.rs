@@ -38,6 +38,8 @@ pub(crate) struct KitEntry {
     pub modified: u64,
     /// The version it last published; 0 when it never has (3H).
     pub version: u32,
+    /// The last publish's note, when it had one — the update notice shows it (5A).
+    pub note: Option<String>,
 }
 
 /// Every kit in `lib` but `own` — the document being edited, whose mains are its
@@ -73,6 +75,7 @@ pub(crate) fn kits_in(lib: &Library, own: Option<&str>) -> Vec<KitEntry> {
             path: e.path.clone(),
             modified: e.modified,
             version: e.meta.kit.as_ref().map_or(0, |k| k.version),
+            note: e.meta.kit.as_ref().and_then(|k| k.note.clone()),
         })
         .collect();
     out.sort_by_key(|k| k.name.to_lowercase());

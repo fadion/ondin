@@ -59,6 +59,10 @@ pub struct LocalIndex {
     /// hand did, and a sync client would carry another laptop's habits in. Keyed
     /// on the *document*, since the order is the picker's in that document.
     pub kit_use: HashMap<String, Vec<String>>,
+    /// For each document, the kit versions its update notice was told *Later*
+    /// for — the notice does not nag again for those, and a newer publish grows
+    /// it back (§5.3e, 5C; §15 D1016). Local for [`Self::kit_use`]'s reason.
+    pub kit_later: HashMap<String, HashMap<String, u32>>,
     /// Set when `library.json` exists but could not be read (§15 D418).
     ///
     /// ⚠️ **A latch on writing, the same one
@@ -237,6 +241,7 @@ impl LocalIndex {
         // document's order is harmless — the picker orders the kits it finds by
         // it and ignores the rest — so only the documents are swept.
         self.kit_use.retain(|id, _| live.contains(id));
+        self.kit_later.retain(|id, _| live.contains(id));
     }
 }
 

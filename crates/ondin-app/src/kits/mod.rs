@@ -12,6 +12,7 @@
 pub(crate) mod index;
 pub(crate) mod picker;
 pub(crate) mod publish;
+pub(crate) mod updates;
 
 use crate::app::{OndinApp, TOP_GAP, TopMenu};
 use crate::theme::{self, color, icon};

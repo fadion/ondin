@@ -87,8 +87,6 @@ struct Item {
 enum Act {
     Place(Source),
     Toggle(String),
-    /// `Escape` in the search field.
-    Close,
 }
 
 /// One kit as the picker lists it.
@@ -132,8 +130,8 @@ impl OndinApp {
             return;
         }
         // `Escape` is not read here: it is a rung of `OndinApp::escape`, so one
-        // press closes one thing — except a press inside the search field, which
-        // the keymap never sees and `search_field` answers.
+        // press closes one thing — a press inside the search field included,
+        // since egui lets go of the field before the keymap reads the key.
         let own = self.session.doc.meta().id.clone();
         let library = kits_in(&self.library, own.as_deref());
         for k in &library {
@@ -202,13 +200,8 @@ impl OndinApp {
                     })
                     .show(ui, |ui| {
                         ui.set_width(W - 2.0 * PAD);
-                        let (changed, escaped) =
-                            search_field(ui, &mut picker.query, &mut picker.focus);
-                        if changed {
+                        if search_field(ui, &mut picker.query, &mut picker.focus) {
                             picker.highlight = 0;
-                        }
-                        if escaped {
-                            act = Some(Act::Close);
                         }
                         ui.add_space(8.0);
                         egui::ScrollArea::vertical()
@@ -234,7 +227,6 @@ impl OndinApp {
                 }
             }
             Some(Act::Place(source)) => self.place_from_picker(ctx, source),
-            Some(Act::Close) => self.kit_picker = None,
             None => {}
         }
     }
@@ -583,8 +575,8 @@ fn search(query: &str, local: &[Item], shown: &[Shown]) -> Vec<Item> {
 
 /// The search box: a magnifier, the field, and a clear button once it holds
 /// something. Takes the keyboard when `focus` asks, once. Answers whether it
-/// changed, and whether `Escape` was pressed in it.
-fn search_field(ui: &mut egui::Ui, query: &mut String, focus: &mut bool) -> (bool, bool) {
+/// changed.
+fn search_field(ui: &mut egui::Ui, query: &mut String, focus: &mut bool) -> bool {
     let (rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 30.0), egui::Sense::hover());
     let p = ui.painter();
@@ -627,11 +619,12 @@ fn search_field(ui: &mut egui::Ui, query: &mut String, focus: &mut bool) -> (boo
         *focus = false;
         edit.request_focus();
     }
-    // `Escape` in the field is the picker's: egui takes focus from it on the same
-    // press, and the keymap never sees a key the field held. It closes the
-    // picker and commits nothing — the search is not a value anything stores.
-    // valve-gate-not-a-commit
-    let escaped = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape));
+    // ⚠️ **No `Escape` arm here.** egui clears focus on `Escape` in `begin_pass`
+    // (§15 D317), so the press reaches the keymap and the escape ladder's rung
+    // closes the picker — and an arm here, reading the field's `lost_focus`,
+    // closed it a second time beside whatever the ladder had closed instead (an
+    // open dropdown, the colour picker): `D1014`'s fix (a) again, through a
+    // narrower door (`arch-scribe`'s reading).
     let mut changed = edit.changed();
     if !query.is_empty() {
         let x = egui::Rect::from_center_size(
@@ -655,7 +648,7 @@ fn search_field(ui: &mut egui::Ui, query: &mut String, focus: &mut bool) -> (boo
             changed = true;
         }
     }
-    (changed, escaped)
+    changed
 }
 
 /// Browsing: this document's mains first when there are no kits (3G), then each
@@ -1206,7 +1199,9 @@ mod tests {
 
         let kits = kits_in(&app.library, app.session.doc.meta().id.as_deref());
         let found = super::super::index::kit_heading(&app.session.doc, &kits, main);
-        assert_eq!(found, Some(("Atlas".into(), "v4".into())));
+        let read =
+            |h: Option<super::super::index::KitHeading>| h.map(|h| (h.kit, h.name, h.status));
+        assert_eq!(read(found), Some((id.clone(), "Atlas".into(), "v4".into())));
         assert_eq!(
             super::super::index::kit_heading(&app.session.doc, &kits, inst),
             None,
@@ -1217,8 +1212,12 @@ mod tests {
         app.library.refresh();
         let kits = kits_in(&app.library, app.session.doc.meta().id.as_deref());
         assert_eq!(
-            super::super::index::kit_heading(&app.session.doc, &kits, main),
-            Some(("Atlas".into(), "unavailable".into())),
+            read(super::super::index::kit_heading(
+                &app.session.doc,
+                &kits,
+                main
+            )),
+            Some((id.clone(), "Atlas".into(), "unavailable".into())),
             "named by the copy once the kit is gone"
         );
         let _ = std::fs::remove_dir_all(&root);
@@ -1228,12 +1227,16 @@ mod tests {
     /// (§15 D1014's fixes (a) and (b)). Its search field takes the keyboard when
     /// the picker opens and only then — it used to retake it on any frame nothing
     /// else held it, which left the keymap dead for as long as the picker was
-    /// open. And `Escape` is a rung of `OndinApp::escape`: a press the picker did
-    /// not see leaves it open, the escape ladder closes it, and a press inside its
-    /// own field closes it there.
+    /// open. And `Escape` is a rung of `OndinApp::escape` and nothing else: the
+    /// picker reads no `Escape` itself, **with its field focused or not** — egui
+    /// lets go of the field before the keymap reads the key (§15 D317), so a
+    /// field arm closed the picker a second time beside whatever the ladder had
+    /// closed (an open dropdown).
     ///
     /// Flip, run: `search_field` requesting focus whenever none is held fails
-    /// *"the keyboard is given back"*.
+    /// *"the keyboard is given back"*; the field's old `Escape` arm, which closed
+    /// the picker on the field's `lost_focus`, fails *"not with the field
+    /// focused"*.
     #[test]
     fn the_picker_gives_the_keyboard_back_and_escape_closes_one_thing() {
         let ctx = egui::Context::default();
@@ -1256,17 +1259,27 @@ mod tests {
             "the keyboard is given back"
         );
 
-        // `Escape` with the field let go is the ladder's, not the picker's.
-        let mut input = egui::RawInput::default();
-        input.events.push(egui::Event::Key {
-            key: egui::Key::Escape,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers: Default::default(),
-        });
-        let _ = ctx.run_ui(input, |_| app.kit_picker_ui(&ctx));
+        // `Escape` is the ladder's, not the picker's — with the field let go, and
+        // with it focused.
+        let escape = || {
+            let mut input = egui::RawInput::default();
+            input.events.push(egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Default::default(),
+            });
+            input
+        };
+        let _ = ctx.run_ui(escape(), |_| app.kit_picker_ui(&ctx));
         assert!(app.kit_picker.is_some(), "the picker does not read the key");
+        ctx.memory_mut(|m| m.request_focus(field));
+        let _ = ctx.run_ui(Default::default(), |_| app.kit_picker_ui(&ctx));
+        assert!(ctx.memory(|m| m.has_focus(field)), "the fixture: focused");
+        let _ = ctx.run_ui(escape(), |_| app.kit_picker_ui(&ctx));
+        let _ = ctx.run_ui(Default::default(), |_| app.kit_picker_ui(&ctx));
+        assert!(app.kit_picker.is_some(), "not with the field focused");
         app.escape(&ctx);
         assert!(app.kit_picker.is_none(), "the ladder closes it");
         let _ = std::fs::remove_dir_all(&root);

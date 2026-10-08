@@ -79,6 +79,18 @@ pub(crate) fn kits_in(lib: &Library, own: Option<&str>) -> Vec<KitEntry> {
     out
 }
 
+/// A kit as a list heading names it (4F, 3I).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct KitHeading {
+    /// The kit's id — what a list groups by, since two kits can share a name
+    /// and two lost ones both read *Kit* (`arch-scribe`'s reading).
+    pub kit: String,
+    /// What the heading reads.
+    pub name: String,
+    /// On the right: the copy's version, or *unavailable*.
+    pub status: String,
+}
+
 /// Which kit a vendored main came from, as a list heading says it: the kit's name
 /// and, on the right, its version — or *unavailable* when the library cannot find
 /// it (4F, 3I). `None` for a main of the document's own.
@@ -86,7 +98,7 @@ pub(crate) fn kit_heading(
     doc: &ondin_core::Document,
     library: &[KitEntry],
     main: NodeId,
-) -> Option<(String, String)> {
+) -> Option<KitHeading> {
     let vault = doc.vault()?;
     let mut top = main;
     for _ in 0..=doc.len() {
@@ -106,7 +118,11 @@ pub(crate) fn kit_heading(
         Some(_) => format!("v{}", origin.version),
         None => "unavailable".into(),
     };
-    Some((name, status))
+    Some(KitHeading {
+        kit: origin.kit.clone(),
+        name,
+        status,
+    })
 }
 
 /// Where a kit's published state is.

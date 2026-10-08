@@ -24,6 +24,7 @@
 //! with a ×.
 
 use crate::app::OndinApp;
+use crate::kits::index::KitHeading;
 use crate::theme::{self, icon};
 use crate::ui::{self, FieldButton};
 use eframe::egui;
@@ -404,11 +405,11 @@ fn swap_picker(
                     .max_height(240.0)
                     .show(ui, |ui| {
                         for (heading, group) in swap_groups(found) {
-                            if let Some((name, status)) = &heading {
+                            if let Some(h) = &heading {
                                 // A kit's heading wears the kit glyph; *This
-                                // document*, which has no status, does not.
-                                let glyph = (!status.is_empty()).then_some(icon::PACKAGE);
-                                swap_heading(ui, glyph, name, status);
+                                // document*, which is no kit, does not.
+                                let glyph = (!h.kit.is_empty()).then_some(icon::PACKAGE);
+                                swap_heading(ui, glyph, &h.name, &h.status);
                             }
                             for (id, name, _) in group {
                                 if ui
@@ -432,33 +433,37 @@ fn swap_picker(
     pick
 }
 
-/// A kit's heading in the swap picker: its name, and its version or
-/// `"unavailable"` on the right (§5.3e, 4F).
-type KitHeading = (String, String);
-
 /// A main the swap picker offers: its id, its name, and the kit it came from as
-/// a heading — or `None` for one of the document's own.
+/// a heading — or `None` for one of the document's own (§5.3e, 4F).
 type SwapOption = (NodeId, String, Option<KitHeading>);
 
 /// The swap picker's list grouped as 4F has it (§15 D1014): the document's own
 /// mains first, under *This document* only when a kit group follows, then one
 /// group per kit by name, each in the name order `swap::options` gave.
+///
+/// **Grouped by the kit's id, not its heading's name**: two kits may share a
+/// name, and two the library has lost may both read *Kit* (`arch-scribe`'s
+/// reading of the first cut, which keyed on the name).
 fn swap_groups(found: Vec<SwapOption>) -> Vec<(Option<KitHeading>, Vec<SwapOption>)> {
     let mut own = Vec::new();
     let mut kits: Vec<(KitHeading, Vec<SwapOption>)> = Vec::new();
     for o in found {
         match o.2.clone() {
             None => own.push(o),
-            Some(h) => match kits.iter_mut().find(|(k, _)| k.0 == h.0) {
+            Some(h) => match kits.iter_mut().find(|(k, _)| k.kit == h.kit) {
                 Some((_, g)) => g.push(o),
                 None => kits.push((h, vec![o])),
             },
         }
     }
-    kits.sort_by_key(|(h, _)| h.0.to_lowercase());
+    kits.sort_by_key(|(h, _)| (h.name.to_lowercase(), h.kit.clone()));
     let mut out = Vec::new();
     if !own.is_empty() {
-        let heading = (!kits.is_empty()).then(|| ("This document".to_string(), String::new()));
+        let heading = (!kits.is_empty()).then(|| KitHeading {
+            kit: String::new(),
+            name: "This document".into(),
+            status: String::new(),
+        });
         out.push((heading, own));
     }
     out.extend(kits.into_iter().map(|(h, g)| (Some(h), g)));
@@ -2404,20 +2409,30 @@ mod tests {
     #[test]
     fn the_swap_picker_lists_own_mains_first_then_each_kit() {
         let mut ids = ondin_core::IdSource::new(0xBE);
-        let [a, b, c, d] = [(); 4].map(|_| ids.mint());
-        let kit = |n: &str| Some((n.to_string(), "v3".to_string()));
+        let [a, b, c, d, e, f] = [(); 6].map(|_| ids.mint());
+        let kit = |id: &str, n: &str| {
+            Some(KitHeading {
+                kit: id.into(),
+                name: n.into(),
+                status: "v3".into(),
+            })
+        };
+        // Two kits the library lost, both falling back to *Kit*: two groups,
+        // not one — the grouping is by id (`arch-scribe`'s reading).
         let found = vec![
-            (a, "Icon / Arrow".to_string(), kit("Atlas")),
+            (a, "Icon / Arrow".to_string(), kit("k1", "Atlas")),
             (b, "Icon / Logo".to_string(), None),
-            (c, "Icon / Quote".to_string(), kit("Marketing")),
-            (d, "Icon / Check".to_string(), kit("Atlas")),
+            (c, "Icon / Quote".to_string(), kit("k2", "Marketing")),
+            (d, "Icon / Check".to_string(), kit("k1", "Atlas")),
+            (e, "Icon / Bell".to_string(), kit("k3", "Kit")),
+            (f, "Icon / Bolt".to_string(), kit("k4", "Kit")),
         ];
         let groups = swap_groups(found);
         let shape: Vec<(Option<String>, Vec<NodeId>)> = groups
             .iter()
             .map(|(h, g)| {
                 (
-                    h.as_ref().map(|h| h.0.clone()),
+                    h.as_ref().map(|h| h.name.clone()),
                     g.iter().map(|o| o.0).collect(),
                 )
             })
@@ -2427,6 +2442,8 @@ mod tests {
             vec![
                 (Some("This document".into()), vec![b]),
                 (Some("Atlas".into()), vec![a, d]),
+                (Some("Kit".into()), vec![e]),
+                (Some("Kit".into()), vec![f]),
                 (Some("Marketing".into()), vec![c]),
             ]
         );

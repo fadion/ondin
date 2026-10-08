@@ -14,6 +14,7 @@ pub(crate) mod index;
 pub(crate) mod picker;
 pub(crate) mod publish;
 pub(crate) mod updates;
+pub(crate) mod used;
 
 use crate::app::{OndinApp, TOP_GAP, TopMenu};
 use crate::theme::{self, color, icon};
@@ -76,6 +77,12 @@ impl OndinApp {
         let anchor = egui::pos2(head.rect.left(), head.rect.bottom() + crate::ui::MENU_GAP);
         let shared = self.shared_kit().is_some();
         let publishable = self.kit_changes().is_some_and(|c| c.any());
+        let uses_kits = self
+            .session
+            .doc
+            .vault()
+            .and_then(|v| self.session.doc.get(v))
+            .is_some_and(|v| !v.children().is_empty());
         self.dropdown(&ctx, "document-menu", anchor, MENU_W, &head, |app, ui| {
             const H: f32 = crate::ui::MENU_ITEM_H;
             if shared {
@@ -94,6 +101,14 @@ impl OndinApp {
                     app.open_menu = TopMenu::None;
                     app.open_publish();
                 }
+            }
+            // *Kits used…* (6A), between the publish and the mark (7A) — offered
+            // when the document vendors from any kit.
+            if uses_kits && crate::ui::menu_item(ui, icon::PACKAGE, "Kits used…", H).clicked() {
+                app.open_menu = TopMenu::None;
+                app.kits_used_open = true;
+            }
+            if shared {
                 if crate::ui::menu_item(ui, icon::PACKAGE, "Stop sharing as kit", H)
                     .on_hover_text(
                         "Documents using it keep their copies and stop receiving \

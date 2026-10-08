@@ -1341,6 +1341,10 @@ pub struct OndinApp {
     /// The document *Go to main in the kit* came from, and its name — the kit's
     /// top bar links back to it until the user leaves the kit (§15 D1011 (7)).
     pub(crate) kit_return: Option<(std::path::PathBuf, String)>,
+    /// *Kits used…*, while it is open (§5.3e, 6A).
+    pub(crate) kits_used_open: bool,
+    /// The kit *Make all local*'s confirmation is asking about (6B).
+    pub(crate) making_all_local: Option<String>,
     /// The one open context menu (`docs/context-menus.md` §0 R4).
     ///
     /// **One slot, so opening the next one is what closes the last.** Not a
@@ -2324,6 +2328,8 @@ impl OndinApp {
             kit_changes: None,
             making_local: None,
             kit_return: None,
+            kits_used_open: false,
+            making_all_local: None,
             context_menu: None,
             secondary_press: None,
             show_grid: true,
@@ -2809,6 +2815,7 @@ impl eframe::App for OndinApp {
             self.kit_picker_ui(&ctx);
             self.publish_dialog(&ctx);
             self.make_local_dialog(&ctx);
+            self.kits_used_dialog(&ctx);
         }
         // **After every door has had its say**, so a right-click that *replaced*
         // the open menu has already written the slot by the time the click-away
@@ -7423,6 +7430,8 @@ impl OndinApp {
         // sets it again after the open that cleared it.
         self.kit_return = None;
         self.making_local = None;
+        self.kits_used_open = false;
+        self.making_all_local = None;
         self.paint_hex = None;
         self.guide_previews.clear();
         // Ids from the old document's stream, and the one field in this struct
@@ -9235,6 +9244,8 @@ impl OndinApp {
             || self.deleting_value.is_some()
             || self.publishing.is_some()
             || self.making_local.is_some()
+            || self.kits_used_open
+            || self.making_all_local.is_some()
     }
 
     /// Read a workspace switch.

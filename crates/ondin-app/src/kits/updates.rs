@@ -698,4 +698,72 @@ mod tests {
         assert_eq!(app.session.doc, before, "one undo");
         let _ = std::fs::remove_dir_all(&root);
     }
+
+    /// ***Kits used…* lists each kit with its status, and *Make all local* empties
+    /// it** (§5.3e, 6A/6B): *Up to date · v4*, then *v5 waiting* once the kit
+    /// publishes, then *Unavailable* — still named, from what its copies recorded —
+    /// once the file is gone; the dialog paints its title and the kit; making the
+    /// kit's components local takes it off the list.
+    #[test]
+    fn kits_used_lists_the_status_and_make_all_local_empties_it() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let root = temp_root("used");
+        let (path, kit, badge, dot) = file_kit(&root);
+        let (mut app, _) = consumer(&ctx, &root, &kit, badge);
+        let used = app.kits_used();
+        assert_eq!(used.len(), 1);
+        assert_eq!(
+            (
+                used[0].name.as_str(),
+                used[0].location.as_str(),
+                used[0].instances
+            ),
+            ("Atlas", "Library", 1)
+        );
+        assert_eq!(used[0].status(), "Up to date · v4");
+
+        republish(
+            &path,
+            vec![Operation::SetOpacity {
+                id: dot,
+                opacity: 0.5,
+            }],
+            "",
+        );
+        app.library.refresh();
+        assert_eq!(app.kits_used()[0].status(), "v5 waiting");
+
+        app.kits_used_open = true;
+        let mut painted = Vec::new();
+        for _ in 0..2 {
+            painted = ctx
+                .run_ui(Default::default(), |_| app.kits_used_dialog(&ctx))
+                .shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::Text(t) => Some(t.galley.text().to_string()),
+                    _ => None,
+                })
+                .collect::<Vec<String>>();
+        }
+        assert!(
+            painted.contains(&"Kits used in Landing".to_string()),
+            "{painted:?}"
+        );
+        assert!(painted.contains(&"v5 waiting".to_string()), "{painted:?}");
+
+        std::fs::remove_file(&path).unwrap();
+        app.library.refresh();
+        let used = app.kits_used();
+        assert_eq!(
+            (used[0].name.as_str(), used[0].status().as_str()),
+            ("Atlas", "Unavailable")
+        );
+
+        let tops = used[0].tops.clone();
+        app.make_local_now(&tops);
+        assert!(app.kits_used().is_empty(), "off the list");
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

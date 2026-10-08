@@ -35,7 +35,7 @@ hand-written spec would be lost with the next regeneration.
 
 **§1–§10 are the sections that were reviewed and agreed, and keep their numbers from that
 review. §11 completes the inventory** — the history, structure and navigation keys that were
-already built and never in question. §12 is components' three rows, agreed 2026-10-04 — two bound the same day, `Enter` not yet. The file is the whole keymap, not the new part of it.
+already built and never in question. §12 is components' three rows, agreed 2026-10-04 — two bound the same day, `Enter` not yet. §13 is kits' two rows, agreed 2026-10-08 and unbuilt with the feature. The file is the whole keymap, not the new part of it.
 
 **Where the bindings come from.** Figma and Sketch agree with each other far more often
 than either agrees with Adobe, so the rule applied throughout was: take the Figma/Sketch
@@ -826,6 +826,21 @@ chords for the mask, the booleans, the properties clipboard and *export all*, so
 about the whole keymap rather than about components. It is open, and this file has no section for open
 questions; it is recorded here, beside the two rows that raised it.
 
+## 13. Kits — agreed 2026-10-08, neither built
+
+Agreed with the *Kits* design (`decisions.md` §15 D1011, ruling (5); `architecture.md` §5.3e), and
+unbuilt with the feature — `roadmap.md`'s *Next · Shared component libraries*, steps 2 and 4. Not counted
+in the header's line, which is §8's and §10's.
+
+| Key | Action | |
+|---|---|---|
+| `Shift+I` | ➕ open the insert picker | The floating picker at the foot of the vertical toolbar. Free in the editor: `I` is bound only in `Ctrl+Alt+I`, *Intersect* (§11's booleans), and §1's tool letters are read with no Shift, so a plain `I` stays unbound |
+| `Ctrl+Alt+P` | ➕ publish kit… | The document menu's *Publish kit…*, in a kit only, and disabled with *No changes* when nothing is new. Free in the editor — `P` alone is the Pen. ⚠️ **The dashboard's `Ctrl+Alt+P` is deliberately inert** (`decisions.md` §15 D712), so the chord means nothing there, and the dashboard's own *Make a kit* is a card-menu row with no key |
+
+**A command palette comes later**, and the design had assumed one for reaching the kit verbs by keyboard;
+until it exists these two rows are the keyboard's whole route. ⚠️ `Ctrl+Alt+P` is one more chord for §12's
+`AltGr` question, which is about the whole keymap.
+
 ---
 
 ## Deliberately unbound
@@ -899,7 +914,7 @@ dropdowns render their rows *from*: they were keyed by the row's own string
 for as long as nobody typed a different string, and the chords are a second caller that never
 sees the row at all. One enum, two callers, one `label()`.
 
-**Still to build**: `New`, `Close`, `Export`, `Palette`, `Cheatsheet`. ~~And §12's `Enter` into an
+**Still to build**: `New`, `Close`, `Export`, `Palette`, `Cheatsheet`; and §13's two, with kits. ~~And §12's `Enter` into an
 instance~~ — built 2026-10-06 (§15 D985). ~~§12's two chords~~ — **bound 2026-10-04**, `Action::CreateComponent` and
 `Action::DetachInstance` (§15 D979's amendment). ~~`PasteInPlace`,
 `CopyProperties`, `PasteProperties` (§7, deferred whole)~~ — **all three built 2026-08-20**

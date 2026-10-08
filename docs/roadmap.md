@@ -45,6 +45,7 @@ which is this file's own §9.5 lesson: **check the section before believing the 
 | *Now · Core, rendering and export* | **Opened 2026-10-06**, each item a live *Fix* in §15 with no feature section here and never carried in this file: core's dependency gate still a denylist (§15 D427), a finite absurd blur accepted at the operation (D454), a descending ramp left descending on load (D455), three rules stated in more than one place (D458, D460, D473), and a sweep gradient's literal radius in SVG (D762); and, added 2026-10-07, a failed effect pass leaving that frame's atlas slots registered (D1003 (7)'s *Fix*), and a long chain of mains loading super-linearly, cause not found (D416's amendment). |
 | *Next · Nested component properties* | **Built 2026-10-06** from the maintainer's mockup (§15 D988, with D989's binding line). **What is left**: the maintainer's look in the GUI, begun on 2026-10-07 (§15 D1000 ruled on the Properties card and a hidden group); a variant moved into a set after a showing exists not bound; a nested instance an instance's author added having no slot to show; the sub-heading's type. *The text below is the row as it stood that morning.* **One item, opened 2026-10-06**: exposing a nested instance's component properties on the instance that holds it — later by §15 D982, and waiting on its mockup. **The section it came from, *Next · Container layout*, closed into §15 the same day** (D867's amendment): its five steps — used geometry, absolute insets, flex, grid, components — are all built, §15 D867–D927 and D978–D985 their record and `architecture.md` §5.3c and §5.3d their design; the one other thing it held open, exact equality against the commit's arithmetic for a pass not yet written, is a question for that pass and lives in §5.3d and D979. |
 | *Next · The polishing pass over the accepted calls* | **One item, opened 2026-10-06**: the maintainer's review of every call accepted wholesale that day (§15's header). |
+| *Next · Shared component libraries* | **Opened 2026-10-08**, moved from *Later · Parked decisions* when the maintainer ruled (§15 D1010); **designed the same day** — the *Kits* design and its rulings (§15 D1011) closed both open questions. Nothing built: the four build steps and the questions the design left the build (a set's default variant, an unfiled document made a kit, a paste into a third document among them). |
 | *Later* | Components and layout past the first build (pushing to a main, un-making a component, §5.3c's deferred properties — opened 2026-10-06); the command palette and cheatsheet; the parked decisions, which gained four on 2026-10-06 (components' unruled questions, the 32-row menu, `AltGr`, the chrome's keyboard traversal) and two more components questions on 2026-10-07, when the release review's fix phase closed (§15 D1003, all twelve rulings built); post-v1 (MCP, which gained the snapshot's questions the same day, Command Mode, multiplayer). |
 
 **Sections with nothing open**: *Now · Images*, *Now · SVG import*, *Now · Path editing*, *Now · Text
@@ -1604,6 +1605,34 @@ it is here because it is the next work the record names, as the section above is
 
 *Opened 2026-10-06.*
 
+## Next · Shared component libraries
+
+**Ruled and designed 2026-10-08, nothing built.** The model is §15 D1010, the *Kits* design and the
+maintainer's ten rulings on it §15 D1011, and both are `architecture.md` §5.3e — a document marked as a
+*Kit* publishes its last state, its mains are vendored into a hidden container in each consumer's tree,
+a floating picker at the toolbar's foot inserts them, and a top-bar notice accepts updates — and are not
+restated here. What is open:
+
+- **The build, in order**: (1) the hidden container — and the sweep of every tree reader §5.3e lists,
+  which the compiler will not find — provenance, the kit mark and its published state, and inserting
+  from a kit; (2) the insert picker, `Shift+I`, and swap across kits; (3) updates — detecting a newer
+  publish, the pill, *Accept all*, and a removed component made local; (4) publishing — the dialog, the
+  change count, `Ctrl+Alt+P`.
+- **Left by the design for the build to say** (D1011): which variant is a set's default, which the
+  picker inserts and §5.3d does not define; whether an instance's *Accept kit updates* takes its own kit
+  or every kit waiting; how an **unfiled** document, with no `meta.id` and in no library scan, answers
+  *Make this a kit* (D1010's premise (a), its other half); where the picker's *last use* order is kept;
+  where the kit mark and the published state are stored; and what a paste of an instance of a vendored
+  main carries into a third document, where D979 (d) today drops the link (D1010's premise (d)).
+
+**Later, not this item**: the per-component review table of updates — the next phase by the
+maintainer's ruling, deferred and not a non-goal, the design reserving its room in the notice's popover;
+a command palette for the kit verbs, which the design assumed and *Later · Command palette* holds; team
+publishing and servers, undesigned. Real-time collaboration stays a non-goal (§15 D978).
+
+*Opened 2026-10-08, moved from* Later · Parked decisions *when the maintainer ruled on it; edited
+down the same day when the* Kits *design was accepted (§15 D1011).*
+
 ## Later · Components and layout, past the first build
 
 Each is named as later by the record and is undesigned; the pointer restates no ruling.
@@ -1715,14 +1744,6 @@ than an oversight. None blocks v1.
 - History cap / snapshot compaction for huge delete inverses.
 - Font embedding in `.ondin` files for non-Google local fonts (document portability) —
   `architecture.md` §5.4a.
-- **Shared component libraries across documents** — deferred, **not a non-goal** (§15 D979's ruling
-  (d), 2026-10-04). Components are document-local in their first version, a document staying
-  self-contained as embedded images keep it, and a paste into another document drops the links it
-  cannot resolve (`architecture.md` §5.3d). Libraries are a later, separate feature, undesigned. ~~The
-  trigger is document-local components being built.~~ **That trigger is met** — document-local
-  components are built, the last of their steps on 2026-10-06 (§15 D978–D985) — and nothing in the
-  record schedules libraries since, so they stay deferred rather than next: what a met trigger buys is
-  that the question can be asked, not an answer to it.
 - **Every point edit is a whole-path `GeometryPatch::Path`, deliberately.** Right for undo
   granularity — one gesture, one step — and coarse only for **MCP**, where "move anchor 3" would
   rather be an op than a path replacement. **Parked here 2026-09-22**, moved out of *Now · Path

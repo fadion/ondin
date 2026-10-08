@@ -87,7 +87,8 @@
   id. **Variants and component properties left it on 2026-10-05** (§5.3d, §15 D982), their core
   and inspector built; **instance swap left it the same day as a ruling, and was built on
   2026-10-06** (§15 D983);
-  **shared libraries stay on it.**
+  ~~**shared libraries stay on it.**~~ **shared libraries left it on 2026-10-08 as a ruling, and are
+  designed, not built** (§5.3e, §15 D1010).
   ~~Auto-layout/constraints~~ **left this list on 2026-09-23 and are
   designed**: CSS flexbox, CSS grid and absolute insets (§5.3c, §15 D867, D871) — insets on frames
   built 2026-09-24, inspector card included (§15 D874); flex built the same day — its model, engine
@@ -309,6 +310,9 @@ permission.
    ⚠️ **Components make it the first of two** (~~designed, not built~~ built since 2026-10-04 —
    §5.3d, §15 D978): an
    instance's copies are stored nodes whose following fields the commit writes from their sources.
+   ⚠️ **Shared libraries would make it the first of three** (designed, not built — §5.3e, §15 D1010):
+   a vendored library main is a stored copy of another document's main at a published version,
+   rewritten only by the commit that accepts an update.
 5. **Uncommitted state never enters the Document.** Interactive gestures (drag, resize, pen preview,
    text-in-progress) live in app-side preview state and reach the renderer as `RenderOverrides`
    (§6.2) — per-node patches projected from the very transaction the gesture will commit. Exactly
@@ -2065,8 +2069,11 @@ created, read as outside every instance and was cut.
 
 **Components are document-local** in the first version (§15 D979's ruling (d), the maintainer's). There
 are no cross-document libraries, and a document stays self-contained as it does with embedded images.
-Pasting into another document drops every link whose source is not in the target document. **Shared
-libraries are deferred, not a non-goal** (`roadmap.md`, *Later · Parked decisions*).
+Pasting into another document drops every link whose source is not in the target document. ~~**Shared
+libraries are deferred, not a non-goal** (`roadmap.md`, *Later · Parked decisions*).~~ **Shared
+libraries were ruled on 2026-10-08 and are designed, not built** (§5.3e, §15 D1010): a library's mains
+are vendored into the document that uses them, so this paragraph stays true of `HEAD` and the
+self-contained document stays true of the design.
 
 **A copy of a main component is an instance** (§15 D979's ruling (e), the maintainer's, the same
 day). Copy and paste, duplicate and Alt-drag of a main make an instance of it; a separate *Duplicate as
@@ -2843,6 +2850,121 @@ for the Type resets' live-session restyle (§15 D981's amendment)~~ — written 
 amendment); ~~exposing nested properties, later
 by the mockup~~ — built 2026-10-06 from the mockup's 4K–4S (§15 D988), with the binding line a nested
 instance in a main had never drawn (§15 D989), unlooked-at in the GUI; and a verb that un-makes a component, which would owe a detach.
+
+### 5.3e Kits — shared component libraries (designed 2026-10-08; not built; §15 D1010, D1011)
+
+> **Design ahead of code, all of it.** Ruled with the maintainer on 2026-10-08: that a kit is a
+> document marked as one, that publishing is explicit, and that the first version's update is an
+> "accept all" notice are theirs; the model below is the session's proposal, accepted the same day
+> (§15 D1010); the chrome is `design/Kits.dc.html`, accepted the same day with ten rulings (§15 D1011).
+> That file is untracked and regenerated, so its screen numbers here are pointers and the content is
+> this section's. Nothing is built, so §5.3d's *document-local* paragraph is still true of `HEAD`. Its
+> build is `roadmap.md`'s *Next · Shared component libraries*.
+
+**The word is *Kit*** (§15 D1011): a document whose components others use. *Library* stays the
+dashboard's collection (§5.11a, §9.6). A component whose main lives in a kit is a *kit component*; an
+instance of one names its source as *Atlas kit*.
+
+**A kit is a document marked as one**, not any document — *Make this a kit* in the document menu (the
+caret beside the document's name), one click and safe, because nothing is shared until the first publish
+— and **its changes reach the documents that use it only when it publishes them**: saving only saves.
+**A kit keeps only its last publish** — version number, publish date, note, and a frozen copy of each
+published main or set, kept beside the working document — and consumers vendor from that, never from the
+working document. **Neither marking nor publishing is undoable**: both are outward acts, as *Save* and
+*Export* are, and the publish date is stamped by the user's publish, not by a save, so §5.11a's no-clock
+rule holds. Where the mark and the published state are stored is the build's.
+
+**Its mains are vendored.** Using a component from kit L in document D copies L's published main into D
+as a hidden, read-only **vendored kit main** — the whole set if it is a variant (§5.3d's variants), and
+every kit main it nests, transitively — and records its **provenance**: L's `meta.id` (§5.11a), the
+main's node id in L, and the published version it came from. D's instances link to that copy exactly
+as to any main of D's, so everything §5.3d describes — `link`, field and structural propagation, the
+value-compared overrides, `component::check`, swap, variants and properties — runs unchanged over a
+main that happens to have come from elsewhere. **D stays self-contained** — it opens, renders and
+exports with L deleted or offline, and no link points out of it — which is §15 D979 (d)'s reason kept
+while its *document-local* is lifted. Images travel as a cross-document paste carries them (§15 D280).
+
+🚨 **The vendored mains live in a hidden container in D's node tree** (§15 D1011 (9)), so the component
+passes, all keyed on `Document.nodes` and its tree, need nothing new — a separate table would teach each a
+second place to look. **The cost is a closed list of tree readers that must skip the container**, and the
+build sweeps it: the layers panel; the canvas render and hit-test; export — SVG, PNG and the CLI; the MCP
+snapshot; *Select all*; search and find; the dashboard cover; zoom-to-fit (`OndinApp::document_bounds`,
+the root's world bounds); and *Make local*'s placement, which reads the same bounds. ⚠️ **Nothing fails to
+compile when a reader forgets it** — the *adding a `NodeKind`* sweep again — so this list is a floor.
+
+**Each vendored node is minted its own `NodeId` in D and records the node it came from in L** (§5.2).
+Reusing L's ids would make two documents vendoring the same
+kit collide when one is pasted into the other.
+
+**Publishing** (1C, 2A–2D). A kit's top bar carries a neutral *Kit* tag after the document's name and, on
+the right, *Publish N* — the components changed since the last publish, the working document against the
+published state; on hover *1 added, 2 changed, 1 removed*; at zero disabled, *Nothing to publish · no
+changes since v8*; never published, every component. *Publish kit…* is the document menu's row and
+`Ctrl+Alt+P`, disabled with *No changes* when nothing is new. The dialog, *Publish Atlas · v9*: *N
+components changed since v8 (date)*, grouped *Added* / *Changed* / *Removed*, each item with its glyph
+(set, main, variant) and a set with its variant count, a removed one *kept as copy where used*; an
+optional note; *Cancel* / *Publish*. A first publish lists every set and lone main, *+ N more*, its button
+*Publish 12 components*. Afterwards a toast, *Published Atlas v9 · 4 components*, and the count is 0.
+*Stop sharing Atlas as a kit?* (1D) says how many documents use it — read from the library scan, which
+reads every file for its cover anyway — that they keep their copies and stop receiving updates, and that
+making it a kit again later continues from the last version. On the dashboard (1B) a kit's thumbnail
+carries a *Kit* chip opposite the star, the sidebar a *Kits* filter under *Starred* with a count, and the
+file card's ⋯ *Make a kit* / *Stop sharing as kit*.
+
+**Inserting** (3A–3I). A **floating insert picker** opens from a hexagon button at the **foot of the
+vertical toolbar**, or `Shift+I`: a panel beside the toolbar, bottom-aligned with the button, and nothing
+else closes or moves — not a tab in place of layers. Search at the top; grouped by kit, then by set; a
+click places at the viewport's centre, a drag onto the canvas; `Escape` or the button closes it.
+Browsing lists the kits D uses first, by last use, each opening to its sets and lone mains grouped by the
+**top-level frame** they sit in (Ondin has no pages), those outside a frame under the kit's name; a set is
+listed once and inserts its default variant; then *In your library, not used here*, with component
+counts; a kit's header reads *v8 · 24*. Search runs across every kit, used or not, as a flat list with the
+kit on the right, best match first, `Enter` placing the highlighted one; a variant matches through its
+set. With no kits the picker shows **D's own mains first** (*This document*) and says how a kit comes to
+exist. A kit never published is listed *not published*, with nothing to insert; a kit not found is
+*Unavailable* and offers only the copies D already holds, which still insert. **A conflict copy of a kit**
+— a second file carrying its `meta.id` — loses to the file that is not one, recognised by filename (§15
+D375); the rest are ignored.
+
+**A kit instance** (4A–4F, 7A). It keeps the violet selection every instance has (`color::COMPONENT`,
+§15 D1001); only the kit glyph is neutral. The Component card shows a source line under the main's name,
+*kit glyph · Atlas kit · v8* — *· v9 waiting* when an update waits, no badge, no colour — and its ⋯ menu,
+tooltip *More*, gains *Go to main in Atlas*, *Accept kit updates* (when one waits) and *Make local…* after
+the resets. The layers panel adds no mark; its tooltip names the kit, *Button · Atlas kit*. The canvas
+context menu on a kit instance gains the same three rows beside *Reset all* and *Detach instance*, in the
+existing groups; a local instance's menus are unchanged. The swap picker lists D's own mains first, then
+one group per kit, alphabetically, the kit glyph in the heading, the name-prefix filter (§15 D983) across
+all of them, an unavailable kit's copies still listed.
+
+**Read-only in D.** A vendored main cannot be edited from D. *Go to main* opens L with the main selected,
+and L's top bar then shows a *← <D>* link back until the user leaves L — the app holds one document at a
+time. *Detach* works as on any instance. ***Make local* reveals the hidden copy** onto the canvas as an
+ordinary editable main of D, no longer following L — from the card (*Make Button local?*: all N instances
+here, overrides stay, undoable), from *Make all local*, and for a component the kit removed. 🚨 **No
+instance is promoted** (§15 D1011 (3)): promoting one would make its overrides the main's values and
+re-base every other instance's against it; revealing the copy leaves every instance and override as it
+was. The revealed main goes at the top-right of D's content bounds, several stacked downwards; the
+selection does not move.
+
+**An update is a diff plus an ordinary commit** (5A–5D). D notices a newer publish of a kit it vendors
+from; a pill beside *Saved*, *2 kit updates*, appears on open and the moment a kit publishes while D is
+open, with no toast. Its popover lists per kit *v8 → v9*, a component count and the publish note,
+*Changes 23 instances. Your overrides stay.*, and *Later* / *Accept all*. Accepting rewrites the vendored
+mains in **one transaction**, undoable as one step (*Undo accept kit updates*), and the main-edit passes
+carry it to D's instances — overrides surviving by value comparison, instance-side structure by §5.3d's
+free-structure rules; a component the kit removed is made local, as above, and the toast says so —
+*Updated 13 components from 2 kits · overrides kept on 6 instances*. *Later* shrinks the pill to its glyph
+and count, and it never nags again for those versions; a newer publish grows it back. *Kits used…*, in
+the document menu (6A), lists each kit with its location, instance count and status — *v9 waiting*, *Up
+to date · v16*, *Unavailable* — and per row *Open kit*, *Make all local* and *Accept update*. There is no
+*Locate…*: a kit is found by `meta.id` through the library scan, so a moved one is found again, and
+*Unavailable* means it is not in the library folder. **A per-component review table is the next phase**
+(§15 D1010), not a non-goal; the popover's kit rows leave room for its disclosure (5D).
+
+⚠️ **Toasts stay text-only** (§15 D981 (d), kept by the maintainer over the design, §15 D1011): the
+accept toast names `Ctrl+Z` instead of 5B's *Undo* button, and a revealed main's toast says where it went
+instead of offering *Show*. Real-time collaboration stays a non-goal (§12, §15 D978); a kit
+reaches a second machine through the synced base folder (§5.11a), with no network code.
 
 ### 5.4 Text node
 
@@ -14881,7 +15003,10 @@ What v1 locks in so a future sync layer is possible without re-architecting:
 4. **No derived state in the document** — replicas converge by replaying ops; `Resolved` is local.
    ⚠️ **Components bend this** (§5.3d, §15 D978, ~~not built~~ built since 2026-10-04): an instance is a stored
    copy its main's edits are written into at the commit, so replay still converges, but a main edit
-   racing an instance's creation on two peers would need a resync on merge.
+   racing an instance's creation on two peers would need a resync on merge. **Shared libraries
+   (§5.3e, §15 D1010, designed, not built) bend it no further**: a vendored library main changes only
+   by the commit that accepts an update, so replay converges, and an accept racing an instance's
+   creation is the same resync.
 
 Explicitly *not* designed now: conflict resolution, causality/ordering metadata, presence, network
 protocol. Ops are the unit of change; everything else is future work that these four properties

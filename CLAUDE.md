@@ -67,9 +67,12 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1008 index rows, 1008 body headings, next free
-D1009** (measured 2026-10-08) — but trust the procedure over any number written down here,
-including that one. ⚠️ **Session 60's sixth request reserved D1008–D1017 at `8f16684` and spent
+anywhere cited either. **The live figures: 1009 index rows, 1009 body headings, next free
+D1010** (measured 2026-10-08) — but trust the procedure over any number written down here,
+including that one. ⚠️ **Session 60's seventh request reserved D1009–D1018 at `95fbf4c` and spent
+one** — D1009, the Variants and Properties cards' writes deferred until the card is drawn (D1008's
+*Fix*). The closing negative grep over **D1010–D1018 found zero sites** and they are released.
+Census **907**, one arrival (D1009), none unresolved. ⚠️ **Session 60's sixth request reserved D1008–D1017 at `8f16684` and spent
 one** — D1008, a typed instance property lost to a click on the switch below it (one `Option` of
 writes a frame; the Variants and Properties cards still open, `roadmap.md`). The closing negative
 grep over **D1009–D1017 found zero sites** and they are released. Census **906**, one arrival

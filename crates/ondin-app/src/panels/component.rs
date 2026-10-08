@@ -4710,6 +4710,210 @@ mod tests {
         );
     }
 
+    /// Click into the field showing `text`, send End and type `typed`, leaving it
+    /// focused; then click the × on the row showing `other` — the two commits
+    /// falling on one frame (§15 D1008's door). For the D1009 tests.
+    fn rename_then_delete(
+        app: &mut OndinApp,
+        ctx: &egui::Context,
+        text: &str,
+        typed: &str,
+        other: &str,
+    ) {
+        let out = settle(app, ctx);
+        let painted = texts(&out);
+        let at = |s: &str| {
+            painted
+                .iter()
+                .find(|(t, _)| t == s)
+                .unwrap_or_else(|| panic!("{s} painted: {painted:?}"))
+                .1
+        };
+        let field = at(text);
+        let row = at(other);
+        let x = painted
+            .iter()
+            .find(|(t, r)| t == icon::X && (r.center().y - row.center().y).abs() < 4.0)
+            .unwrap_or_else(|| panic!("the × on {other}'s row: {painted:?}"))
+            .1
+            .center();
+        click(app, ctx, field.center());
+        frame(
+            app,
+            ctx,
+            vec![egui::Event::Key {
+                key: egui::Key::End,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Default::default(),
+            }],
+        );
+        frame(app, ctx, vec![egui::Event::Text(typed.into())]);
+        click(app, ctx, x);
+        settle(app, ctx);
+    }
+
+    /// **A variant property renamed and left focused survives a click on another
+    /// property's ×** (§15 D1009, D1008's *Fix* on the Variants card). The set's
+    /// *Size* typed to *Size2*, then *Style*'s × clicked: *Style* is gone and the
+    /// rename landed. Both writes rewrite the whole `VariantSet`, so the second has
+    /// to be built against the document the first left.
+    ///
+    /// **Run against the shipped code** (one `Option` of writes, built while
+    /// drawing) before the fix: *Style* deleted and the rename lost — `["Size"]` —
+    /// the reproduction of D1008's *Fix* that had been read and not run.
+    #[test]
+    fn a_variant_property_rename_survives_a_click_on_another_delete() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut v = variants_fixture(&ctx);
+        let tx = ondin_core::variant::add_property(&v.app.session.doc, v.set, "Style", "Primary")
+            .expect("a second property");
+        assert!(v.app.session.commit(tx));
+        v.app.session.selection.set_one(v.set);
+        rename_then_delete(&mut v.app, &ctx, "Size", "2", "Style");
+        let names: Vec<String> = v
+            .app
+            .session
+            .doc
+            .get(v.set)
+            .unwrap()
+            .set()
+            .unwrap()
+            .props
+            .iter()
+            .map(|p| p.name.clone())
+            .collect();
+        assert_eq!(names, ["Size2"], "Style deleted and Size renamed");
+    }
+
+    /// **A rename and then a click on its own row's control act on the renamed
+    /// thing** (§15 D1009's `Renames`). A set property's *Size* typed to *Size2*
+    /// and its own × clicked: deleted, not left renamed. A value's *Small* typed to
+    /// *Small2* in its chip's menu and *Move later* clicked in the same menu: the
+    /// renamed value moves. A set's properties and values have no ids, so the
+    /// deferred delete and move find theirs by the name they were drawn with,
+    /// followed through the frame's renames.
+    ///
+    /// **Flips run**, each alone: `Renames::prop` answering the name it is given
+    /// fails *"Size2 deleted by its own ×"* with `["Size2", "Style"]` — the delete
+    /// found nothing; `Renames::value` the same fails *"Small2 moved later by its
+    /// own menu"* with `["Small2", "Large"]`. Each bites, so the rename and the
+    /// click do fall on one frame here.
+    #[test]
+    fn a_rename_then_its_own_rows_control_acts_on_the_renamed_thing() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut v = variants_fixture(&ctx);
+        let tx = ondin_core::variant::add_property(&v.app.session.doc, v.set, "Style", "Primary")
+            .expect("a second property");
+        assert!(v.app.session.commit(tx));
+        v.app.session.selection.set_one(v.set);
+        let props = |v: &V| {
+            v.app
+                .session
+                .doc
+                .get(v.set)
+                .unwrap()
+                .set()
+                .unwrap()
+                .props
+                .clone()
+        };
+        rename_then_delete(&mut v.app, &ctx, "Size", "2", "Size");
+        let names: Vec<String> = props(&v).iter().map(|p| p.name.clone()).collect();
+        assert_eq!(names, ["Style"], "Size2 deleted by its own ×");
+
+        let mut v = variants_fixture(&ctx);
+        let before = props(&v)[0].values.clone();
+        assert_eq!(before, ["Small", "Large"], "the fixture's order");
+        let painted = texts(&settled(&mut v.app, &ctx, v.set));
+        let chip = painted
+            .iter()
+            .find(|(t, _)| t == "Small")
+            .unwrap()
+            .1
+            .center();
+        click(&mut v.app, &ctx, chip);
+        // The menu's field is the last *Small* painted; the chip the first.
+        let painted = texts(&settle(&mut v.app, &ctx));
+        let field = painted
+            .iter()
+            .rev()
+            .find(|(t, _)| t == "Small")
+            .unwrap()
+            .1
+            .center();
+        click(&mut v.app, &ctx, field);
+        frame(
+            &mut v.app,
+            &ctx,
+            vec![egui::Event::Key {
+                key: egui::Key::End,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Default::default(),
+            }],
+        );
+        frame(&mut v.app, &ctx, vec![egui::Event::Text("2".into())]);
+        let painted = texts(&settle(&mut v.app, &ctx));
+        let later = painted
+            .iter()
+            .find(|(t, _)| t == "Move later")
+            .unwrap_or_else(|| panic!("the chip's menu: {painted:?}"))
+            .1
+            .center();
+        click(&mut v.app, &ctx, later);
+        settle(&mut v.app, &ctx);
+        assert_eq!(
+            props(&v)[0].values,
+            ["Large", "Small2"],
+            "Small2 moved later by its own menu"
+        );
+    }
+
+    /// **A component property renamed and left focused survives a click on another
+    /// property's ×** (§15 D1009, D1008's *Fix* on the Properties card). The
+    /// Button's *Shown* typed to *Shown2*, then *Words*' × clicked: *Words* is gone
+    /// and the rename landed — both writes are the owner's whole list.
+    ///
+    /// **Run against the shipped code** before the fix: *Words* deleted and the
+    /// rename lost — `["Shown"]`.
+    #[test]
+    fn a_component_property_rename_survives_a_click_on_another_delete() {
+        use ondin_core::variant::{PropKind, define};
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut n = nested_fixture(&ctx);
+        for (name, kind) in [("Shown", PropKind::Boolean), ("Words", PropKind::Text)] {
+            let (tx, _) = define(
+                &n.app.session.doc,
+                &mut n.app.session.ids,
+                n.button,
+                name,
+                kind,
+                Vec::new(),
+            )
+            .expect("a property");
+            assert!(n.app.session.commit(tx));
+        }
+        n.app.session.selection.set_one(n.button);
+        rename_then_delete(&mut n.app, &ctx, "Shown", "2", "Words");
+        let names: Vec<String> = n
+            .app
+            .session
+            .doc
+            .get(n.button)
+            .unwrap()
+            .props()
+            .iter()
+            .map(|p| p.name.clone())
+            .collect();
+        assert_eq!(names, ["Shown2"], "Words deleted and Shown renamed");
+    }
+
     /// The frame after a few settling passes with `id` selected.
     fn settled(app: &mut OndinApp, ctx: &egui::Context, id: NodeId) -> egui::FullOutput {
         app.session.selection.set_one(id);

@@ -45,6 +45,119 @@ const ADD_MENU_MAX_W: f32 = 280.0;
 /// — the ⋯ reset menu's between a label and its count.
 pub(super) const ADD_MENU_GAP: f32 = 24.0;
 
+/// An edit the Variants or Properties card asks for while it draws, **built only
+/// once the card is drawn** (§15 D1009): against the document every earlier edit
+/// of the frame has already changed, and naming what it edits by a key that
+/// survives them.
+///
+/// **Why not a transaction taken while drawing** (D1008's *Fix* on these two
+/// cards): a field commits on the frame it loses focus, which is the frame a click
+/// elsewhere on the card lands, and every write here rewrites the owner's whole
+/// property list or the whole `VariantSet`. One slot kept only the click's write;
+/// committing both in turn would have the second, built from the frame's document,
+/// put back what the first changed — argued from the writes, not run. An
+/// instance's rows write separate fields, and D1008's `Vec` was enough there.
+type Deferred = Box<dyn FnOnce(&mut EditCx<'_>) -> Result<Option<Transaction>, &'static str>>;
+
+/// What a [`Deferred`] edit is built against: the document as the frame's earlier
+/// edits left it, the id source, and the names they changed.
+struct EditCx<'a> {
+    doc: &'a ondin_core::Document,
+    ids: &'a mut ondin_core::IdSource,
+    renamed: &'a mut Renames,
+}
+
+/// The variant properties and values a frame's earlier edits renamed, old name to
+/// new (§15 D1009). A set's property and value have no id — they are named, and
+/// placed by index — so a later edit of the frame finds its target by the name it
+/// was drawn with, followed through these: a value typed to a new name and then
+/// *Move later* in its own menu moves the renamed value.
+#[derive(Default)]
+struct Renames {
+    props: Vec<(String, String)>,
+    /// The property's name when the value was renamed, the old value, the new.
+    values: Vec<(String, String, String)>,
+}
+
+impl Renames {
+    /// The name the property drawn as `name` has now.
+    fn prop(&self, name: &str) -> String {
+        let mut now = name.to_string();
+        for (from, to) in &self.props {
+            if *from == now {
+                now = to.clone();
+            }
+        }
+        now
+    }
+
+    /// The name the value drawn as `value`, under the property drawn as `prop`,
+    /// has now.
+    fn value(&self, prop: &str, value: &str) -> String {
+        let prop = self.prop(prop);
+        let mut now = value.to_string();
+        for (p, from, to) in &self.values {
+            if self.prop(p) == prop && *from == now {
+                now = to.clone();
+            }
+        }
+        now
+    }
+}
+
+impl EditCx<'_> {
+    /// Where the set's property drawn as `name` is now.
+    fn prop_at(&self, set: NodeId, name: &str) -> Option<usize> {
+        let name = self.renamed.prop(name);
+        self.doc
+            .get(set)?
+            .set()?
+            .props
+            .iter()
+            .position(|p| p.name == name)
+    }
+
+    /// Where the value drawn as `value`, under the property drawn as `prop`, is
+    /// now: the property's place and the value's.
+    fn value_at(&self, set: NodeId, prop: &str, value: &str) -> Option<(usize, usize)> {
+        let pi = self.prop_at(set, prop)?;
+        let value = self.renamed.value(prop, value);
+        let vi = self.doc.get(set)?.set()?.props[pi]
+            .values
+            .iter()
+            .position(|v| *v == value)?;
+        Some((pi, vi))
+    }
+
+    /// The set's variant properties as they are now.
+    fn set_now(&self, set: NodeId) -> Option<variant::VariantSet> {
+        self.doc.get(set)?.set().cloned()
+    }
+}
+
+/// The value drawn as `value`, under the property drawn as `prop`, renamed to
+/// `to` — the chip's menu field and its commit on close (§15 D1003 (11)) — and
+/// the rename recorded for the frame's later edits (§15 D1009).
+fn rename_value_edit(set: NodeId, prop: String, value: String, to: String) -> Deferred {
+    defer(move |cx| {
+        let Some((pi, vi)) = cx.value_at(set, &prop, &value) else {
+            return Ok(None);
+        };
+        let now = cx.renamed.value(&prop, &value);
+        let tx = variant::rename_value(cx.doc, set, pi, vi, &to).ok_or("That value is taken")?;
+        let p = cx.renamed.prop(&prop);
+        cx.renamed.values.push((p, now, to));
+        Ok(Some(tx))
+    })
+}
+
+/// A [`Deferred`] edit from a closure.
+fn defer(
+    f: impl FnOnce(&mut EditCx<'_>) -> Result<Option<Transaction>, &'static str> + 'static,
+) -> Deferred {
+    Box::new(f)
+}
+
 /// What a row of the Properties card's `+` menu adds (§15 D1005).
 #[derive(Clone, Copy)]
 enum Add {
@@ -409,6 +522,27 @@ pub(crate) fn clash_text(doc: &ondin_core::Document, set: NodeId) -> Option<Stri
 }
 
 impl OndinApp {
+    /// Build and commit a card's [`Deferred`] edits in the order it asked for
+    /// them, each against the document the one before left and each its own undo
+    /// step; a refusal says why on the status line (§15 D1009).
+    fn run_edits(&mut self, edits: Vec<Deferred>) {
+        let mut renamed = Renames::default();
+        for edit in edits {
+            let mut cx = EditCx {
+                doc: &self.session.doc,
+                ids: &mut self.session.ids,
+                renamed: &mut renamed,
+            };
+            match edit(&mut cx) {
+                Ok(Some(tx)) if !tx.0.is_empty() => {
+                    self.commit_edit(tx);
+                }
+                Ok(_) => {}
+                Err(why) => self.session.info(why),
+            }
+        }
+    }
+
     /// The **Variants** card's body for the set `set` (3A–3C): its name and
     /// instance count, a clash note, each property with its values as chips, and the
     /// verbs that add to it.
@@ -423,10 +557,10 @@ impl OndinApp {
             .map(|v| component::instances_of(doc, *v).len())
             .sum();
         let clash = clash_text(doc, set);
-        let mut out: Option<Transaction> = None;
+        // Every write the card asks for, built after it is drawn (§15 D1009).
+        let mut edits: Vec<Deferred> = Vec::new();
         let mut select_all = false;
         let mut add_variant = false;
-        let mut refused: Option<&str> = None;
         let mut confirm: Option<ValueDelete> = None;
 
         // **One line, the set's name alone** (§15 D1000, the maintainer's look):
@@ -459,10 +593,17 @@ impl OndinApp {
                 let w = ui.available_width() - ui::CONTROL_H - ui::CARD_COL_GAP;
                 let id = ui.id().with(("variant-prop", set, pi));
                 if let Some(n) = name_field(ui, id, &p.name, egui::vec2(w, ui::CONTROL_H), 12.0) {
-                    match variant::rename_property(doc, set, pi, &n) {
-                        Some(tx) => out = Some(tx),
-                        None => refused = Some("That name is taken"),
-                    }
+                    let drawn = p.name.clone();
+                    edits.push(defer(move |cx| {
+                        let Some(pi) = cx.prop_at(set, &drawn) else {
+                            return Ok(None);
+                        };
+                        let now = cx.renamed.prop(&drawn);
+                        let tx = variant::rename_property(cx.doc, set, pi, &n)
+                            .ok_or("That name is taken")?;
+                        cx.renamed.props.push((now, n));
+                        Ok(Some(tx))
+                    }));
                 }
                 let last = vs.props.len() < 2;
                 let state = if last {
@@ -478,7 +619,12 @@ impl OndinApp {
                     },
                 );
                 if resp.clicked() && !last {
-                    out = variant::delete_property(doc, set, pi);
+                    let drawn = p.name.clone();
+                    edits.push(defer(move |cx| {
+                        Ok(cx
+                            .prop_at(set, &drawn)
+                            .and_then(|pi| variant::delete_property(cx.doc, set, pi)))
+                    }));
                 }
             });
             ui.horizontal_wrapped(|ui| {
@@ -516,11 +662,15 @@ impl OndinApp {
                                 hold_inspector(ui.ctx());
                             }
                             if let Some(n) = renamed {
-                                match variant::rename_value(doc, set, pi, vi, &n) {
-                                    Some(tx) => out = Some(tx),
-                                    None => refused = Some("That value is taken"),
-                                }
+                                edits.push(rename_value_edit(set, p.name.clone(), v.clone(), n));
                             }
+                            // A move or a delete names the value as drawn, and
+                            // finds it renamed if the field above committed on
+                            // this frame (§15 D1009).
+                            let at = move |cx: &EditCx<'_>, prop: &str, value: &str| {
+                                cx.value_at(set, prop, value)
+                            };
+                            let (pname, vname) = (p.name.clone(), v.clone());
                             let n = p.values.len();
                             let row = |ui: &mut egui::Ui, label: &str, ok: bool| {
                                 ui::menu_row(
@@ -531,13 +681,21 @@ impl OndinApp {
                                 .clicked()
                                     && ok
                             };
-                            if row(ui, "Move earlier", vi > 0) {
-                                out = variant::move_value(doc, set, pi, vi, vi - 1);
-                                ui.close();
-                            }
-                            if row(ui, "Move later", vi + 1 < n) {
-                                out = variant::move_value(doc, set, pi, vi, vi + 1);
-                                ui.close();
+                            for (label, ok, later) in [
+                                ("Move earlier", vi > 0, false),
+                                ("Move later", vi + 1 < n, true),
+                            ] {
+                                if row(ui, label, ok) {
+                                    let (pname, vname) = (pname.clone(), vname.clone());
+                                    edits.push(defer(move |cx| {
+                                        Ok(at(cx, &pname, &vname).and_then(|(pi, vi)| {
+                                            let to =
+                                                if later { vi + 1 } else { vi.checked_sub(1)? };
+                                            variant::move_value(cx.doc, set, pi, vi, to)
+                                        }))
+                                    }));
+                                    ui.close();
+                                }
                             }
                             ui::menu_sep(ui);
                             // 3C: confirm only when variants use it, with exact
@@ -550,7 +708,11 @@ impl OndinApp {
                             let using = variant::using_value(doc, set, pi, vi);
                             if row(ui, "Delete value", n >= 2) {
                                 if using.is_empty() {
-                                    out = variant::delete_value(doc, set, pi, vi);
+                                    edits.push(defer(move |cx| {
+                                        Ok(at(cx, &pname, &vname).and_then(|(pi, vi)| {
+                                            variant::delete_value(cx.doc, set, pi, vi)
+                                        }))
+                                    }));
                                 } else {
                                     confirm = Some(ValueDelete {
                                         set,
@@ -576,10 +738,7 @@ impl OndinApp {
                     if shown.is_none()
                         && let Some(n) = pending(ui, field, v, Rules::NAME)
                     {
-                        match variant::rename_value(doc, set, pi, vi, &n) {
-                            Some(tx) => out = Some(tx),
-                            None => refused = Some("That value is taken"),
-                        }
+                        edits.push(rename_value_edit(set, p.name.clone(), v.clone(), n));
                     }
                 }
                 let add = ui.add(
@@ -591,7 +750,19 @@ impl OndinApp {
                     .min_size(egui::vec2(CHIP_H, CHIP_H)),
                 );
                 if add.on_hover_text("Add a value").clicked() {
-                    out = variant::add_value(doc, set, pi, &variant::next_value_name(&vs, pi));
+                    let drawn = p.name.clone();
+                    edits.push(defer(move |cx| {
+                        let (Some(pi), Some(vs)) = (cx.prop_at(set, &drawn), cx.set_now(set))
+                        else {
+                            return Ok(None);
+                        };
+                        Ok(variant::add_value(
+                            cx.doc,
+                            set,
+                            pi,
+                            &variant::next_value_name(&vs, pi),
+                        ))
+                    }));
                 }
             });
         }
@@ -609,7 +780,16 @@ impl OndinApp {
             .on_hover_text("Add a variant property")
             .clicked()
             {
-                out = variant::add_property(doc, set, &variant::next_property_name(&vs), "Default");
+                edits.push(defer(move |cx| {
+                    Ok(cx.set_now(set).and_then(|vs| {
+                        variant::add_property(
+                            cx.doc,
+                            set,
+                            &variant::next_property_name(&vs),
+                            "Default",
+                        )
+                    }))
+                }));
             }
             if ui::action_button(
                 ui,
@@ -624,12 +804,7 @@ impl OndinApp {
                 add_variant = true;
             }
         });
-        if let Some(why) = refused {
-            self.session.info(why);
-        }
-        if let Some(tx) = out {
-            self.commit_edit(tx);
-        }
+        self.run_edits(edits);
         if confirm.is_some() {
             self.deleting_value = confirm;
         }
@@ -1398,9 +1573,9 @@ impl OndinApp {
             })
             .collect();
         let no_slots = slots.is_empty();
-        let mut out: Option<Transaction> = None;
+        // Every write the card asks for, built after it is drawn (§15 D1009).
+        let mut edits: Vec<Deferred> = Vec::new();
         let mut combine = false;
-        let mut refused = None;
         let mut select = None;
         // **Collapsed while empty, opened by an add** — Fill's and Stroke's rule
         // (`sync_paint_collapse`, the maintainer's ask, §15 D1005): an empty card
@@ -1430,14 +1605,14 @@ impl OndinApp {
             let (swaps, plain): (Vec<&Keyed<Property>>, Vec<&Keyed<Property>>) =
                 props.iter().partition(|p| p.kind == PropKind::Swap);
             for p in &plain {
-                property_row(ui, doc, owner, p, &mut out, &mut refused);
+                property_row(ui, doc, owner, p, &mut edits);
             }
             let mut first = plain.is_empty();
             for p in &swaps {
                 if !std::mem::take(&mut first) {
                     card_rule(ui);
                 }
-                property_row(ui, doc, owner, p, &mut out, &mut refused);
+                property_row(ui, doc, owner, p, &mut edits);
             }
             // **Shown from nested** (4L): the nested instances whose properties
             // the main's instances show, with what they show and a − to stop — a
@@ -1494,7 +1669,10 @@ impl OndinApp {
                             .on_hover_text("Stop showing its properties on instances")
                             .clicked()
                             {
-                                out = variant::set_shown(doc, &mut app.session.ids, *slot, false);
+                                let slot = *slot;
+                                edits.push(defer(move |cx| {
+                                    Ok(variant::set_shown(cx.doc, cx.ids, slot, false))
+                                }));
                             }
                         });
                     });
@@ -1604,32 +1782,32 @@ impl OndinApp {
             // A `+` on a collapsed header is a legal press, and what it adds is
             // shown (the Effects card's rule, `open_paint_panel`).
             self.open_paint_panel("Properties");
-            let doc = &self.session.doc;
             match add {
-                // The property keeps the kind's full name (§15 D995).
-                Add::Kind(kind, name) => {
-                    out = variant::define(
-                        doc,
-                        &mut self.session.ids,
+                // The property keeps the kind's full name (§15 D995), made
+                // fresh against the list as the frame's earlier edits left it.
+                Add::Kind(kind, name) => edits.push(defer(move |cx| {
+                    let now = cx
+                        .doc
+                        .get(owner)
+                        .map(|o| o.props().to_vec())
+                        .unwrap_or_default();
+                    Ok(variant::define(
+                        cx.doc,
+                        cx.ids,
                         owner,
-                        &fresh_name(&props, name),
+                        &fresh_name(&now, name),
                         kind,
                         Vec::new(),
                     )
-                    .map(|(tx, _)| tx);
-                }
-                Add::Swap(slot) => {
-                    out = new_swap_property(doc, &mut self.session.ids, owner, slot);
-                }
+                    .map(|(tx, _)| tx))
+                })),
+                Add::Swap(slot) => edits.push(defer(move |cx| {
+                    Ok(new_swap_property(cx.doc, cx.ids, owner, slot))
+                })),
                 Add::Variant => combine = true,
             }
         }
-        if let Some(why) = refused {
-            self.session.info(why);
-        }
-        if let Some(tx) = out {
-            self.commit_edit(tx);
-        }
+        self.run_edits(edits);
         if combine {
             self.combine_as_variants();
         }
@@ -1826,9 +2004,12 @@ fn property_row(
     doc: &ondin_core::Document,
     owner: NodeId,
     p: &Keyed<Property>,
-    out: &mut Option<Transaction>,
-    refused: &mut Option<&'static str>,
+    edits: &mut Vec<Deferred>,
 ) {
+    // Each write names the property by its item id and is built after the card
+    // is drawn (§15 D1009), so a rename typed here and a click on another row's
+    // × on the frame it commits both land.
+    let item = p.id;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
         let glyph = match p.kind {
@@ -1846,28 +2027,31 @@ fn property_row(
         let w = ui.available_width() - ui::CONTROL_H - ui::CARD_COL_GAP;
         let id = ui.id().with(("prop-name", owner, p.id));
         if let Some(n) = name_field(ui, id, &p.name, egui::vec2(w, ui::CONTROL_H), 12.0) {
-            // Another property's name, or one of a set's variant properties —
-            // `variant::check`'s `PropertyName`, asked before the commit is.
-            let taken = doc.get(owner).is_some_and(|o| {
-                o.props().iter().any(|q| q.id != p.id && q.name == n)
-                    || o.set().is_some_and(|s| s.props.iter().any(|v| v.name == n))
-            });
-            if taken {
-                *refused = Some("That name is taken");
-            } else {
-                *out = variant::edit_property(doc, owner, p.id, |q| {
+            edits.push(defer(move |cx| {
+                // Another property's name, or one of a set's variant properties
+                // — `variant::check`'s `PropertyName`, asked before the commit is.
+                let taken = cx.doc.get(owner).is_some_and(|o| {
+                    o.props().iter().any(|q| q.id != item && q.name == n)
+                        || o.set().is_some_and(|s| s.props.iter().any(|v| v.name == n))
+                });
+                if taken {
+                    return Err("That name is taken");
+                }
+                Ok(variant::edit_property(cx.doc, owner, item, |q| {
                     Some(Property {
                         name: n.clone(),
                         ..q.clone()
                     })
-                });
-            }
+                }))
+            }));
         }
         if ui::field_button(ui, icon::X, ui::CONTROL_H, 13.0, FieldButton::Off)
             .on_hover_text("Delete this property — its layers keep their values")
             .clicked()
         {
-            *out = variant::edit_property(doc, owner, p.id, |_| None);
+            edits.push(defer(move |cx| {
+                Ok(variant::edit_property(cx.doc, owner, item, |_| None))
+            }));
         }
     });
     let bound: Vec<String> = p
@@ -1917,12 +2101,14 @@ fn property_row(
             let w = ui.available_width();
             let id = ui.id().with(("prop-filter", owner, p.id));
             if let Some(f) = filter_field(ui, id, &p.filter, egui::vec2(w, ui::CONTROL_H)) {
-                *out = variant::edit_property(doc, owner, p.id, |q| {
-                    Some(Property {
-                        filter: f.clone(),
-                        ..q.clone()
-                    })
-                });
+                edits.push(defer(move |cx| {
+                    Ok(variant::edit_property(cx.doc, owner, item, |q| {
+                        Some(Property {
+                            filter: f.clone(),
+                            ..q.clone()
+                        })
+                    }))
+                }));
             }
         });
         ui.label(

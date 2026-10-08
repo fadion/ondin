@@ -1405,7 +1405,8 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D1005** — **The Properties card adds from a `+` in its header — a menu of *Boolean*, *Text*, an *Instance swap* per nested instance no swap property drives and, on a lone main, *Variant* — overturning D995 (2)'s *Bool* / *Text* / *Var* buttons and taking in D1000's offered swap rows; the rest of the mockup's card held out by the rulings that already decided it.** The maintainer, comparing `design/Variants.dc.html` 3G–3M, 4K and 4L with the card: *"If any of the following we rule out in previous decisions, than it stays ruled out. What's most important is the way properties are added (via the + button instead of the 3 buttons)."* A header `ui::HeadAction` opening an `egui::Popup` at `ui::HeadClicks::action_rect` (`OndinApp::panel_head`) — amended: the box the `+` paints, not its padded hit target, so it hangs `MENU_GAP` under it as the ⋯ reset menu does, and fitted to its widest row (D993's method) under `ADD_MENU_MAX_W` where it was a fixed `ADD_MENU_W` 200 — each row's kind in full and what it binds in the accelerator column; D995's width reason gone with the third of the card, the property still named in full; adding expands a collapsed card — amended 2026-10-08 (the maintainer's ask): the card rests collapsed while empty, no property and nothing shown from nested, on Fill's rule (`sync_paint_collapse`), the add opening it through `open_paint_panel`, and the four panels' latch fields are one map, `OndinApp::synced_selection`, as D389 said a fifth should make them; ⚠️ a property made from a child's binding line left the card shut when the main was selected again, its edge asked only where the card drew — `arch-scribe`'s find, reproduced and fixed before commit by asking it above the early returns. `dormant_swap_row` deleted, its purpose kept in the menu; D983 (iii)'s *"not from an add button"* no longer holds, the binding line still making one. A swap's bound line reads *· main*, the default kept first; a *Shown from nested* row leads with the instance hexagon. Held out: a define popover and read-only rows (D982 (c), (d) its set-card twin), the filter in a popover (D1000 (5)), the empty line and binding from three cards (D993 (7), D982 (b), 3M already D989's *Instance* row), 4L's *Not shown* rows (D1000 (5)), and a default-less bound line. *(Ruled by the maintainer and built 2026-10-07, uncommitted when recorded. **Keep.** Tests `the_properties_card_adds_from_its_header_menu` and the rewritten `a_nested_instance_is_offered_as_a_swap_property_and_its_filter_is_a_row`, each flip failing at its predicted site, as the caller reports them; the amendment's `the_properties_menu_hangs_from_its_plus_and_fits_its_rows`, both its flips biting; the second amendment's two assertions and `a_property_bound_from_inside_the_main_opens_its_card`, each flip biting. D389, D982, D983, D995 and D1000 amended; `architecture.md` §5.3d; `roadmap.md` *Next · Nested component properties*)*
 - **D1006** — **The maintainer's look of 2026-10-08 over the components chrome: a hairline between one variant property and the next on the Variants card, and a label cut in the Component card's label column naming itself in a tooltip — the second a defect, D996's promise never kept.** `card_rule` (D1000's hairline) before every property but the first in `set_body`'s loop, so none under the counts line. 🚨 D996's cut test was `galley.text() != text`, and in egui 0.35 `Galley::text()` is the *job's* text, the whole name cut or not, so no label was ever cut by that test and neither the plain tooltip nor the marked label's name-over-reset one was attached; now `component::fitted_label`, asking `Galley::elided` as `ui::menu_row` did. Every `row_label` caller is reached. No gate saw it: D996 recorded the elision and its tooltip as untested. *(Ruled by the maintainer and built 2026-10-08, uncommitted when recorded. **Keep** the rule; the tooltip **Resolved**. Tests `the_variants_card_rules_between_its_properties` and `a_label_cut_to_its_slot_names_itself_and_one_that_fits_does_not`, each flip biting, as the caller reports them; the tooltip itself untestable headless, the answer it hangs from asserted. D996 amended; `architecture.md` §5.3d. **Amended 2026-10-08** (D1007): the counts line under the name is gone, the name line's count the last thing above the first property)*
 - **D1007** — **A face's instance count is on its name's line and is the *Select all*; the set's variant count is its card's title — tried and accepted, the count as a row under the name the fallback not needed.** The maintainer, on the counts line and *Select all* making *"a stepped layout, especially in variants"*, the caption under the name rejected: *"I want to get away from having 2 lines in the name. "Variant in" is the only when where we left it … Name [count] instances … where count and "instances" is the same size but dimmer, and underline, with a tooltip (click to select all), and function as select all. Inline instead of new row. The select all button goes. For the number of variants … the panel title: Variants 4."* `component::name_line(ui, glyph, name, instances)` on a main's face and a set's, the name at `NAME_PT` 13 cut by `Label::truncate` to leave the count its room, `count_link` `COUNT_GAP` 6 after it — `text::MUTED`, underlined, `STRONG` under the pointer, *Click to select all*, a click `Act::SelectAllInstances` or the set's `select_all`, at zero plain `DIM` and dead; a variant's derived name drawn bare by `name_and_count` under *Variant in*. `main_tail` *Duplicate* alone; the main's, variant's and set's counts rows and *Select all* gone, the context menu's *Select all instances* unchanged. `OndinApp::panel_head`'s `size` writes *VARIANTS 4*, the title alone the key. Two layout traps measured by `the_component_cards_rows_line_up_with_the_other_cards`: the inner row's `interact_size.y` zeroed, scoped (24 against 20), and the row kept in a `ui.vertical` block (32). *(Ruled by the maintainer and built 2026-10-08, tried and accepted the same day. **Keep**; the count as a row under the name the recorded fallback, unneeded. Test `the_count_after_a_faces_name_selects_its_instances`, its flip failing *"the main's count selects its instance"*; three tests updated, as the caller reports them. The heading's link not brightening where the count does, flagged, unruled. D981, D982, D995, D1000 and D1006 amended; `architecture.md` §5.3d)*
-- **D1008** — **A text typed into an instance's property field was lost when the next click, the field still focused, landed on the switch below it: the field committed on that frame and `own_rows` kept one write per frame, so the switch's replaced it — the commit-on-blur family by a third door, after D999's and D1003 (11)'s.** The maintainer: *"If I update a text property on an instance, then while still having the focus on the field, I click on the toggle. The text field reverts to its old value."* `own_rows` collects every row's write in a `Vec` and commits each non-empty one in turn through `commit_edit`, its own undo step — safe there because each is a field write on the instance's nodes and two rows write different fields. ⚠️ The same one-`Option` shape is in `set_body` and `inspector_properties`, whose writes are whole-list rewrites (`SetProperties`, the whole `VariantSet`) built from the frame's document, so committing two in turn would have the second undo the first; the repair there is a deferred edit computed against the live document — read, not run. *(Reported by the maintainer and fixed 2026-10-08, uncommitted when recorded. **Resolved** for the Component card; the Variants and Properties cards ***Fix***, open in `roadmap.md` *Now · Inspector*. Test `a_typed_property_survives_a_click_on_the_toggle_below_it`, its flip failing *"the typed text survived the toggle's click"* with the label still *Go*, as the caller reports it. D999 amended; `architecture.md` §9.3)*
+- **D1008** — **A text typed into an instance's property field was lost when the next click, the field still focused, landed on the switch below it: the field committed on that frame and `own_rows` kept one write per frame, so the switch's replaced it — the commit-on-blur family by a third door, after D999's and D1003 (11)'s.** The maintainer: *"If I update a text property on an instance, then while still having the focus on the field, I click on the toggle. The text field reverts to its old value."* `own_rows` collects every row's write in a `Vec` and commits each non-empty one in turn through `commit_edit`, its own undo step — safe there because each is a field write on the instance's nodes and two rows write different fields. ⚠️ The same one-`Option` shape is in `set_body` and `inspector_properties`, whose writes are whole-list rewrites (`SetProperties`, the whole `VariantSet`) built from the frame's document, so committing two in turn would have the second undo the first; the repair there is a deferred edit computed against the live document — read, not run. *(Reported by the maintainer and fixed 2026-10-08, uncommitted when recorded. **Resolved** for the Component card; the Variants and Properties cards ~~***Fix***, open in `roadmap.md` *Now · Inspector*~~ fixed by D1009. Test `a_typed_property_survives_a_click_on_the_toggle_below_it`, its flip failing *"the typed text survived the toggle's click"* with the label still *Go*, as the caller reports it. D999 amended; `architecture.md` §9.3. **Amended 2026-10-08** (D1009): both cards build each write after drawing, a set's targets followed by name through the frame's renames; the reproduction run on both)*
+- **D1009** — **The Variants and Properties cards build each write after they are drawn, against the document the frame's earlier writes left and naming its target by a key they do not change, so a rename typed and then a click on another control of the card both land — D1008's *Fix*.** The maintainer: *"And yes, take those 2 cards too."* Each write a `Deferred` (`defer`), built and committed by `OndinApp::run_edits` once the card is drawn, in the order asked, each its own undo step, an `Err` on the status line; every write of `set_body` and of `inspector_properties`/`property_row`, the `+` menu's fresh names against the live list; `combine`, `select_all`, `add_variant` and the modal unchanged. A component property named by its item id; a set's property or value, which has none, by its drawn name through `EditCx::prop_at`/`value_at`, followed through `Renames` — without it a rename and then its own row's ×, or *Move later* in its own menu, found nothing and dropped the click. ⚠️ `ValueDelete` still names its value by place; the modal re-checks the name there, so a used value renamed in its menu and then *Delete value* clicked deletes nothing, silently — read, not run. *(Asked for by the maintainer and built 2026-10-08, uncommitted when recorded. **Resolved.** Tests `a_variant_property_rename_survives_a_click_on_another_delete` and `a_component_property_rename_survives_a_click_on_another_delete`, each failing on the shipped code; `a_rename_then_its_own_rows_control_acts_on_the_renamed_thing`, both `Renames` flips biting, as the caller reports them; D1008's `Vec` argued, not run. D1008 amended; `architecture.md` §9.3; `roadmap.md` *Now · Inspector* struck)*
 
 ---
 
@@ -22651,12 +22652,14 @@ a second defence whose flip stays green. D1003 (11)'s ✅ has the test. The laye
 true of the click this entry measured and not of every one. On an instance's Component card a click on
 another row's control — the switch below a text property — lands on the frame the field blurs, and the
 card kept one write per frame, so the switch's write replaced the text's. The field was drawn and did
-commit; the card dropped it. D1008 has the fix there and the two cards where it is still open.
+commit; the card dropped it. D1008 has the fix there and the two cards where it ~~is still open~~
+stayed open until D1009.
 
 **D1008 — A text typed into an instance's property field was lost when the next click, with the
 field still focused, landed on the switch below it: the field committed on that frame and the card
 kept one write per frame, so the switch's replaced it. *Reported by the maintainer and fixed
-2026-10-08; Resolved — and open on two other cards, where the same fix does not carry.*** The
+2026-10-08; Resolved — ~~and open on two other cards, where the same fix does not carry~~ and on the
+two other cards since D1009, by the deferred edit this entry named.*** The
 maintainer: *"found a weird issue while testing. If I update a text property on an instance, then
 while still having the focus on the field, I click on the toggle. The text field reverts to its old
 value."* — their screenshots *Label* overridden to *Button2* with *Show icon* off, and after the
@@ -22708,8 +22711,87 @@ landed — the reported symptom, and the evidence that the two commits fall on o
 the maintainer and fixed 2026-10-08, uncommitted when recorded; from the caller's brief and a read of
 `own_rows`, `set_body`, `inspector_properties`, `property_row`, `variant::edit_property`, the set
 edits and the test. **Resolved** for the Component card; the Variants and Properties cards
-***Fix* with a deferred edit**, not the `Vec`. D999 amended; `architecture.md` §9.3; `roadmap.md`
-*Now · Inspector*)*
+~~***Fix* with a deferred edit**, not the `Vec`~~ fixed with one by D1009. D999 amended;
+`architecture.md` §9.3; `roadmap.md` *Now · Inspector*, struck by D1009)*
+
+⚠️ **Amended 2026-10-08 by D1009**: the *Still open* paragraph above is closed. Both cards now build
+every write after they are drawn, against the document the frame's earlier writes left, and name
+their target by a key those writes do not change — a component property by its item id, a set's
+property or value by the name it was drawn with, followed through the frame's renames. *"Read from
+the code, not measured by a test"* no longer holds of the reproduction: D1009's tests ran it against
+the shipped code on both cards. What it says of `bind_line` and `variant_rows` stands.
+
+**D1009 — The Variants and Properties cards build each write after they are drawn, against the
+document the frame's earlier writes left and naming its target by a key they do not change, so a
+rename typed and then a click on another control of the card both land: D1008's *Fix*, by the
+deferred edit it named. *Asked for by the maintainer and built 2026-10-08; Resolved.*** The
+maintainer, offered the two cards D1008 had left open: *"And yes, take those 2 cards too."*
+
+**What was wrong, run this time.** D1008 read the defect from the code: `set_body` and
+`inspector_properties` kept one `Option<Transaction>` a frame, and a field commits on the frame a
+click elsewhere on its card lands, so the click's write replaced the rename's. Run against the
+shipped code, the new tests reproduce it on both cards: a set's *Size* typed to *Size2* and then
+*Style*'s × clicked leaves `["Size"]` — *Style* deleted, the rename gone — and a main's *Shown* typed
+to *Shown2* and then *Words*' × clicked leaves `["Shown"]`. D1008's `Vec` would not have carried, for
+the reason it gave: each write here rewrites a whole list built from the frame's document —
+`variant::edit_property` the owner's properties as one `SetProperties`, the set edits the whole
+`VariantSet` — so the second committed would put back what the first changed. That half was argued
+from the writes and not run.
+
+**The fix** (`panels/variants.rs`). A card asks for each write as a `Deferred` — `Box<dyn
+FnOnce(&mut EditCx<'_>) -> Result<Option<Transaction>, &'static str>>`, made by `defer` — and builds
+none while drawing. Once the card is drawn, `OndinApp::run_edits` builds and commits them in the
+order they were asked for, each against the document the one before left (`EditCx { doc, ids,
+renamed }`) and each its own undo step through `commit_edit`; an `Err` says why on the status line
+through `session.info`, where the card had kept a `refused`. On the Variants card that is every
+write `set_body` made — a property's rename and ×, a value's rename (its chip-menu field and the
+commit on the menu's close, D1003 (11), both through `rename_value_edit`), *Move earlier*, *Move
+later*, *Delete value* on a value nothing uses, the chips' `+` and *Property*. On the Properties card
+it is the name field, the ×, a swap property's filter (all three in `property_row`), *Shown from
+nested*'s − and the `+` menu's adds, whose fresh names are worked out against the list as the earlier
+writes left it. `combine`, `select_all`, `add_variant` and the value-delete modal's `confirm` stay
+flags acted on after, unchanged.
+
+**The key is the load-bearing half.** Building late is not enough if the late edit names its target
+by something an earlier one changed. The Properties card names a property by its item id
+(`Keyed::id`, D980), which a rename leaves alone. A set's variant properties and values have **no
+ids** — they are named, and placed by index — so a deferred edit there names its target by the name
+it was drawn with and finds it through `EditCx::prop_at` and `value_at`, which follow that name
+through `Renames`: the frame's renames, recorded by each rename as it is built (`props: (old, new)`,
+`values: (prop, old, new)`, a value's property followed as well). Without it a rename and then a
+click on its own row's control — *Size* typed to *Size2* and then its own ×, or D1008's own example,
+a value renamed in its chip's menu and then *Move later* in the same menu — looks for the old name,
+finds nothing, and drops the click: the rename lands and the user's second act is lost without a
+word. ⚠️ **Do not "simplify" the set's edits to the drawn index**: an index is right only until the
+edit before it reorders or deletes, and the rename-then-own-control case is the one a user meets.
+
+**Tests** (`panels::component::tests`, mostly through `rename_then_delete`: a click into the field,
+`End`, the text typed, the field left focused, then a click on the × in the row named).
+`a_variant_property_rename_survives_a_click_on_another_delete` (`["Size2"]`) and
+`a_component_property_rename_survives_a_click_on_another_delete` (`["Shown2"]`), each run against the
+shipped code before the fix and failing with `["Size"]` and `["Shown"]`; and
+`a_rename_then_its_own_rows_control_acts_on_the_renamed_thing` — *Size2* deleted by its own ×
+(`["Style"]`), *Small2* moved later by its own menu (`["Large", "Small2"]`). **Flips run**, each
+alone: `Renames::prop` answering the name it is given fails *"Size2 deleted by its own ×"* with
+`["Size2", "Style"]`, the delete having found nothing; `Renames::value` the same fails *"Small2 moved
+later by its own menu"* with `["Small2", "Large"]` — so the rename and the click do fall on one
+frame in these fixtures. The plausible wrong repair, D1008's `Vec` built while drawing, was not run.
+
+⚠️ **The value-delete confirmation still names its value by place.** `ValueDelete` (D996) is taken
+while drawing, from the drawn indices and the drawn name, and applied frames later from the modal.
+`value_delete_confirmation` re-checks before deleting — the value at that property's and value's
+place must still be called that name, or *Delete* deletes nothing, as its doc says — so a value moved
+or renamed meanwhile is not deleted in its neighbour's place. One route reaches the re-check on the
+same frame, read and not run: a used value renamed in its chip's menu and then *Delete value* clicked
+in the same menu — the rename commits through `run_edits`, the modal opens over the old name, and
+*Delete* deletes nothing and says nothing. Safe in direction, silent in effect. And it is a check by
+name at a place, not a find by name: a same-named value in whichever property then sat at that index
+would pass it — no route to that was traced. *Revisit if* a user reports a *Delete* that did nothing.
+`bind_line` and `variant_rows` keep one `Option` and have no text field, as D1008 recorded. *(Asked
+for by the maintainer and built 2026-10-08, uncommitted when recorded; from the caller's brief and a
+read of `Deferred`, `EditCx`, `Renames`, `defer`, `rename_value_edit`, `run_edits`, `set_body`,
+`inspector_properties`, `property_row`, `value_delete_confirmation` and the three tests. **Resolved.**
+D1008 amended, its *Fix* closed; `architecture.md` §9.3; `roadmap.md` *Now · Inspector* struck)*
 
 **D1000 — The maintainer's fourth polish pass over the components chrome: the set's `+` over its
 outline, a set grown by `SET_PAD`, one-line set face, a two-word clash, the Properties card in three

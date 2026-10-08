@@ -332,7 +332,7 @@ impl OndinApp {
                 // (§15 D1023).
                 let version = self.kit_shelf.read_version(&k.id).unwrap_or(k.version);
                 shown.status = if used {
-                    format!("v{} · {}", k.version, p.tops().len())
+                    format!("v{version} · {}", p.tops().len())
                 } else {
                     match p.tops().len() {
                         1 => "1 component".to_string(),

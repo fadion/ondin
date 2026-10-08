@@ -26,8 +26,13 @@ use std::sync::Arc;
 const W: f32 = 340.0;
 const PAD: f32 = 12.0;
 const RADIUS: u8 = 8;
-/// The tallest the panel grows before it scrolls — the mockup's height.
-const MAX_H: f32 = 460.0;
+/// The panel's height — the mockup's — whatever it holds: it does not grow as
+/// a kit opens or shrink as a search narrows, so nothing under the pointer jumps.
+/// Shorter only when the canvas has less room above the button than this.
+const H: f32 = 460.0;
+/// The search box's height and the gap below it.
+const SEARCH_H: f32 = 30.0;
+const SEARCH_GAP: f32 = 8.0;
 /// A tile: three to a row, 52 tall, 8 apart across and 10 down (3E).
 const COLS: usize = 3;
 const TILE_H: f32 = 52.0;
@@ -155,6 +160,7 @@ impl OndinApp {
         } else {
             self.canvas_rect.left_bottom() + egui::vec2(8.0, -8.0)
         };
+        let height = panel_height(anchor.y, self.canvas_rect.top());
         let mut act: Option<Act> = None;
         let query = picker.query.trim().to_lowercase();
         let results: Vec<Item> = if query.is_empty() {
@@ -182,10 +188,12 @@ impl OndinApp {
             }
         }
 
+        // Placed by its top-left, not pivoted on its bottom: a pivot places the
+        // area by *last* frame's size, and with the height fixed the top edge is
+        // known before the frame starts.
         egui::Area::new(egui::Id::new("kit-picker"))
             .order(egui::Order::Foreground)
-            .pivot(egui::Align2::LEFT_BOTTOM)
-            .fixed_pos(anchor)
+            .fixed_pos(anchor - egui::vec2(0.0, height))
             .show(ctx, |ui| {
                 egui::Frame::NONE
                     .fill(color::CARD)
@@ -200,13 +208,25 @@ impl OndinApp {
                     })
                     .show(ui, |ui| {
                         ui.set_width(W - 2.0 * PAD);
+                        // The gaps are the constants `list_height` counts, so the
+                        // panel comes out exactly `height` tall.
+                        ui.spacing_mut().item_spacing.y = 0.0;
                         if search_field(ui, &mut picker.query, &mut picker.focus) {
                             picker.highlight = 0;
                         }
-                        ui.add_space(8.0);
+                        ui.add_space(SEARCH_GAP);
+                        // Not shrunk to its content in either axis: the list's
+                        // height is the panel's, empty or full. ⚠️ **The minimum
+                        // is load-bearing**: an `Area`'s `max_rect` is *last*
+                        // frame's size, so a list asking only for room up to a
+                        // maximum gets what the panel had before — which is how
+                        // it stayed at its first height as kits opened. Only
+                        // `min_scrolled_height` is taken whatever is available.
+                        let list = list_height(height);
                         egui::ScrollArea::vertical()
-                            .max_height(MAX_H - 2.0 * PAD - 40.0)
-                            .auto_shrink([false, true])
+                            .max_height(list)
+                            .min_scrolled_height(list)
+                            .auto_shrink([false, false])
                             .show(ui, |ui| {
                                 ui.spacing_mut().item_spacing.y = 4.0;
                                 if !query.is_empty() {
@@ -488,6 +508,20 @@ impl OndinApp {
     }
 }
 
+/// The panel's whole height with its foot at `bottom`: [`H`], or less when the
+/// canvas above the button is shorter than that, never so little that the
+/// search box and a row of tiles do not fit.
+fn panel_height(bottom: f32, canvas_top: f32) -> f32 {
+    let floor = 2.0 * PAD + SEARCH_H + SEARCH_GAP + TILE_H + 22.0;
+    H.min(bottom - canvas_top - 8.0).max(floor)
+}
+
+/// The scrolled list's height inside a panel `height` tall — less the padding,
+/// the search box, and the frame's hairline at top and bottom.
+fn list_height(height: f32) -> f32 {
+    height - 2.0 * PAD - 2.0 - SEARCH_H - SEARCH_GAP
+}
+
 /// The `SetTransform` that puts `instance` — just inserted by `tx` at its main's
 /// own transform — with its box centred on `centre`. Measured by laying out the
 /// document the transaction leaves, which is the one place the copy's box is
@@ -577,8 +611,10 @@ fn search(query: &str, local: &[Item], shown: &[Shown]) -> Vec<Item> {
 /// something. Takes the keyboard when `focus` asks, once. Answers whether it
 /// changed.
 fn search_field(ui: &mut egui::Ui, query: &mut String, focus: &mut bool) -> bool {
-    let (rect, _) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 30.0), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), SEARCH_H),
+        egui::Sense::hover(),
+    );
     let p = ui.painter();
     p.rect_filled(rect, egui::CornerRadius::same(6), color::text_a(12));
     p.rect_stroke(
@@ -1328,6 +1364,57 @@ mod tests {
             !text.contains(&"IN YOUR LIBRARY, NOT USED HERE".to_string()),
             "{text:?}"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **The picker keeps one height whatever it holds**: a closed kit, the same
+    /// kit open, and a search matching nothing all draw the panel at the same
+    /// rect, its foot on the button. Reported as the panel keeping its first
+    /// height as kits opened, hard to navigate: an `Area` lays its content out
+    /// in last frame's rect, so the list never had room to grow into.
+    ///
+    /// Flip, run, both on `kit_picker_ui`'s list: `auto_shrink` back to
+    /// `[false, true]` fails *"a closed kit"*, the panel 114 tall; dropping
+    /// `min_scrolled_height` fails it too, the panel 400 tall — egui's default
+    /// area height on the first frame, kept ever after.
+    #[test]
+    fn the_picker_keeps_one_height_whatever_it_holds() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let root = temp_root("height");
+        let (id, _, _) = file_kit(&root);
+        let mut app = app_on(&ctx, root.clone());
+        app.kit_button = egui::Rect::from_min_size(egui::pos2(4.0, 560.0), egui::vec2(32.0, 32.0));
+        let input = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 600.0),
+            )),
+            ..Default::default()
+        };
+        let rect = |app: &mut OndinApp| {
+            for _ in 0..3 {
+                let _ = ctx.run_ui(input(), |_| app.kit_picker_ui(&ctx));
+                app.kit_shelf.settle();
+            }
+            let layer = egui::LayerId::new(egui::Order::Foreground, egui::Id::new("kit-picker"));
+            ctx.memory(|m| m.area_rect(layer.id)).expect("drawn")
+        };
+        app.toggle_kit_picker();
+        // `W` is the frame's inside; its hairline adds a point at each side.
+        let want = egui::Rect::from_min_max(
+            egui::pos2(44.0, 592.0 - H),
+            egui::pos2(44.0 + W + 2.0, 592.0),
+        );
+        let closed = rect(&mut app);
+        assert!(
+            (closed.min - want.min).length() < 0.5 && (closed.max - want.max).length() < 0.5,
+            "a closed kit: {closed:?} against {want:?}"
+        );
+        app.kit_picker.as_mut().unwrap().open.insert(id);
+        assert_eq!(rect(&mut app), closed, "the kit open");
+        app.kit_picker.as_mut().unwrap().query = "zzz".into();
+        assert_eq!(rect(&mut app), closed, "a search matching nothing");
         let _ = std::fs::remove_dir_all(&root);
     }
 

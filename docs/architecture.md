@@ -2858,7 +2858,7 @@ amendment); ~~exposing nested properties, later
 by the mockup~~ — built 2026-10-06 from the mockup's 4K–4S (§15 D988), with the binding line a nested
 instance in a main had never drawn (§15 D989), unlooked-at in the GUI; and a verb that un-makes a component, which would owe a detach.
 
-### 5.3e Kits — shared component libraries (designed 2026-10-08; steps 1–4 built, swap in part; §15 D1010–D1017)
+### 5.3e Kits — shared component libraries (designed 2026-10-08; steps 1–4 built, swap in part; §15 D1010–D1018)
 
 > **Design ahead of code, most of it.** Ruled with the maintainer on 2026-10-08: that a kit is a
 > document marked as one, that publishing is explicit, and that the first version's update is an
@@ -2869,7 +2869,8 @@ instance in a main had never drawn (§15 D989), unlooked-at in the GUI; and a ve
 > provenance, the kit mark, the published state, vendoring and inserting, and a kit instance's paste —
 > **with no chrome**; ~~everything from *Publishing* on is still design~~. **Step 2's chrome is built,
 > swap in part** (§15 D1013, D1014, *Step 2 as built* below): the document menu with *Make this a kit*,
-> the *Kit* tag, the insert picker, and the swap picker grouped by kit. **Step 4, publishing, is built**
+> the *Kit* tag, the insert picker — its tiles' drag and *Open library* since (§15 D1018) — and the
+> swap picker grouped by kit. **Step 4, publishing, is built**
 > (§15 D1015, *Step 4 as built* below), and with it 1D's confirmation, less its count, and the
 > dashboard's 1B (§15 D1017). **Step 3,
 > updates and *Make local*, is built** (§15 D1016, *Step 3 as built* below), with the canvas menu's
@@ -3055,10 +3056,14 @@ reaches a second machine through the synced base folder (§5.11a), with no netwo
   does not hold it. Opening it rescans the library. *Used* means a kit among the `origin.kit`s
   of the vault's children; their order is **last use, kept per machine and per document**
   (`library::cache::LocalIndex::kit_use`). A document's own mains are tiles only when there are no kits,
-  and otherwise only in search. A placement is one transaction: `kit::insert`, or `build::insert_subtrees`
-  for a local main or an unavailable kit's vault copy, then a `SetTransform` centring the instance on the
-  viewport — measured on a scratch document with the transaction applied, because the vault is never
-  resolved. ⚠️ **The panel is one height whatever it holds** — 460, the mockup's, or less where the
+  and otherwise only in search; that empty state ends with 3G's *Open library*, which closes the picker
+  for the dashboard's *Kits* filter (§15 D1018). A placement is one transaction: `kit::insert`, or
+  `build::insert_subtrees` for a local main or an unavailable kit's vault copy, then a `SetTransform`
+  centring the instance on the viewport — or, for a **tile dragged out and let go over the canvas**, on
+  the point of release (`OndinApp::place_kit_at`; a release back over the panel places nothing) —
+  measured on a scratch document with the transaction applied, because the vault is never resolved.
+  Either way the instance lands at the document's top level, never into a frame under the pointer, and
+  only tiles drag, not search rows (§15 D1018). ⚠️ **The panel is one height whatever it holds** — 460, the mockup's, or less where the
   canvas above the button is shorter (`panel_height`) — and that is not the default: an `Area` lays its
   content out in *last* frame's rect, so a list asking only for a `max_height` never grows past the
   panel's first height. The list asks `min_scrolled_height` and does not shrink, and the area is placed
@@ -3074,8 +3079,9 @@ reaches a second machine through the synced base folder (§5.11a), with no netwo
   kit glyph and the version D holds, or *unavailable*; the name-prefix filter across all of them.
   **A swap to a kit main D has never used is not offered** — it would vendor at the swap.
   Groups are keyed by kit id, not by the heading's name, so two kits of one name stay apart.
-- **Not built**: a tile's drag, a swap to an unvendored kit main, *Go to main in <kit>*, and 3G's *Open
-  library*. ⚠️ The search field has **no `Escape` arm of its own**, deliberately: egui clears its focus
+- **Not built**: ~~a tile's drag,~~ a swap to an unvendored kit main~~, *Go to main in <kit>*, and 3G's
+  *Open library*~~ — the drag and *Open library* built since (§15 D1018), *Go to main* with step 3 (§15
+  D1016). ⚠️ The search field has **no `Escape` arm of its own**, deliberately: egui clears its focus
   before `input::resolve` runs (§15 D317), so the ladder's rung sees the press, and an arm in the field
   closed the picker a second time beside whatever the press had already closed (§15 D1014).
 

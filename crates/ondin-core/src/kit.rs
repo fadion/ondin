@@ -1000,6 +1000,7 @@ pub fn update_all(
         at: 0,
         later: Vec::new(),
         dropped: Vec::new(),
+        keep_out: Vec::new(),
     };
     let mut updated = Vec::new();
     let mut made_local = Vec::new();
@@ -1064,11 +1065,19 @@ pub fn update_all(
             if let Some(s) = top_of(src, x).filter(|s| *s != x) {
                 moving.insert(t);
                 if b.here(s).is_none() {
-                    let shell = b.insert_shell(ids, s)?;
+                    let vault = b.scratch.vault().ok_or(KitError::Incomplete(s))?;
+                    let end = b.scratch.get(vault).map_or(0, |v| v.children.len());
+                    let shell = b.insert_shell(ids, vault, end, s)?;
                     tops.push(shell);
                 }
             }
         }
+        // Every top classified before any is synced: a main the kit removed is
+        // made local **whole** — kept as a copy where used — so no sync may move a
+        // layer out of it, which one that ran first did (§15 D1024, the kits QA
+        // review's second pass: a layer the kit moved from a removed main into
+        // another was taken out of the local copy, and its instances lost it).
+        let mut syncing: Vec<(NodeId, NodeId)> = Vec::new();
         for t in tops {
             if moving.contains(&t) {
                 continue;
@@ -1082,10 +1091,14 @@ pub fn update_all(
                 continue;
             };
             let still = src.get(x).is_some() && top_of(src, x) == Some(x) && !src.in_vault(x);
-            if !still {
+            if still {
+                syncing.push((t, x));
+            } else {
                 made_local.push(t);
-                continue;
+                b.keep_out.push(t);
             }
+        }
+        for (t, x) in syncing {
             b.vendor_reached(ids, x)?;
             b.sync(ids, t, x)?;
             updated.push(t);
@@ -1197,6 +1210,9 @@ struct Builder<'a> {
     /// D1022). Deleted at once, a move between parents was a delete and a fresh
     /// copy, its instances cut loose.
     dropped: Vec<(NodeId, NodeId)>,
+    /// The vault tops being made local: nothing is moved out of them (§15
+    /// D1024).
+    keep_out: Vec<NodeId>,
 }
 
 impl Builder<'_> {
@@ -1260,12 +1276,19 @@ impl Builder<'_> {
             .any(|x| x == a)
     }
 
-    /// Published top `s` as an **empty** vault top — its own fields, no
-    /// children — for [`Self::sync`] to fill, moving in the copies the document
-    /// already holds of what is under it (§15 D1022): a set the kit combined a
-    /// held lone main into. Vendoring it whole would have copied that main a
-    /// second time. Answers the shell's id.
-    fn insert_shell(&mut self, ids: &mut IdSource, s: NodeId) -> Result<NodeId, KitError> {
+    /// Published node `s` as an **empty** child of `parent` at `index` — its own
+    /// fields, no children — for [`Self::sync`] to fill, moving in the copies the
+    /// document already holds of what is under it (§15 D1022, D1024): a set the
+    /// kit combined a held lone main into, at the vault's top, or a group made
+    /// around held layers. A whole copy would have minted those a second time.
+    /// Answers the shell's id.
+    fn insert_shell(
+        &mut self,
+        ids: &mut IdSource,
+        parent: NodeId,
+        index: usize,
+        s: NodeId,
+    ) -> Result<NodeId, KitError> {
         let src = self.published.document();
         let mut top = src.get(s).ok_or(KitError::Incomplete(s))?.clone();
         top.children.clear();
@@ -1277,11 +1300,9 @@ impl Builder<'_> {
         if self.point_or_defer(&mut copy[0], &inside) {
             self.later.push((root, s, self.at));
         }
-        let vault = self.scratch.vault().ok_or(KitError::Incomplete(s))?;
-        let index = self.scratch.get(vault).map_or(0, |v| v.children.len());
         self.push(Operation::InsertSubtree {
             nodes: copy,
-            parent: vault,
+            parent,
             index,
         })?;
         Ok(root)
@@ -1360,13 +1381,14 @@ impl Builder<'_> {
             if key.is_some_and(|k| pn.children.contains(&k)) {
                 continue;
             }
-            // Still published, under another parent: its new parent's sync may
-            // move it there (`dropped`).
-            if key.is_some_and(|k| src.get(k).is_some() && !src.in_vault(k)) {
-                self.dropped.push((*dc, d));
-            } else {
-                self.push(Operation::DeleteNode { id: *dc })?;
-            }
+            // **Every dropped child waits** (`dropped`): one still published
+            // under another parent may be moved there by that parent's sync, and
+            // one gone may still hold layers that were moved out of it — a group
+            // the kit ungrouped, whose layers its parent's sync lifts out (§15
+            // D1024, the kits QA review's second pass; deleted here at once, it
+            // took them with it, and the instances kept the old ones detached
+            // beside fresh copies).
+            self.dropped.push((*dc, d));
         }
         for (i, pc) in pn.children.iter().enumerate() {
             let mut held = self
@@ -1383,6 +1405,7 @@ impl Builder<'_> {
                 && let Some(h) = self.here(*pc)
                 && h != d
                 && !self.is_ancestor(h, d)
+                && !self.keep_out.iter().any(|t| self.is_ancestor(*t, h))
             {
                 let index = i.min(self.scratch.get(d).map_or(0, |n| n.children.len()));
                 self.push(Operation::Reparent {
@@ -1422,8 +1445,21 @@ impl Builder<'_> {
         // property's bound layers may be among.
         let mut want = pn.clone();
         want.id = d;
+        // 🚨 **Only the fields this kind carries** (§15 D1024): `state_ops`
+        // writes every field, and `changes_nothing` never calls paint on a kind
+        // that takes none a no-op, so a group's `SetFills` was applied, refused
+        // as `WrongKindForOp`, and every update of a kit main holding a group
+        // failed — found by the kits QA review's grouping probe, the group being
+        // what that edit makes. What `apply` refuses by kind is skipped.
         for op in crate::reset::state_ops(&want) {
-            self.push(op)?;
+            if op.changes_nothing(&self.scratch) {
+                continue;
+            }
+            match self.scratch.apply_unchecked(&Transaction(vec![op.clone()])) {
+                Ok(_) => self.ops.push(op),
+                Err(crate::OpError::WrongKindForOp) => {}
+                Err(_) => return Err(KitError::Incomplete(d)),
+            }
         }
         let mut pointed = pn.clone();
         if self.point_or_defer(&mut pointed, &FxHashSet::default()) {
@@ -1478,9 +1514,16 @@ impl Builder<'_> {
         Ok(())
     }
 
-    /// Insert published `x`'s subtree as a new child of the scratch's `parent` at
-    /// `index`, minted fresh, with origins, its outside references pointed at the
-    /// scratch's nodes. Answers the new node's id.
+    /// Insert published `x` as a new child of the scratch's `parent` at `index`
+    /// and fill it by [`Self::sync`]. Answers the new node's id.
+    ///
+    /// 🚨 **A shell and a sync, never the published subtree copied whole** (§15
+    /// D1024, the kits QA review's second pass): a node new to the publish may
+    /// hold layers the document already has — a group or a frame the kit made
+    /// around existing layers (*Group selection*, *Frame selection*) — and a
+    /// whole copy minted them a second time while the held ones were dropped, so
+    /// every instance kept its overridden layer detached beside a fresh one. The
+    /// sync moves a held layer in and copies only what is new.
     fn insert_new(
         &mut self,
         ids: &mut IdSource,
@@ -1488,26 +1531,10 @@ impl Builder<'_> {
         index: usize,
         x: NodeId,
     ) -> Result<NodeId, KitError> {
-        let src = self.published.document();
-        let template = src.capture_subtree(x).ok_or(KitError::Incomplete(x))?;
-        let (mut copy, root) =
-            crate::document::remap_subtree(&template, ids).ok_or(KitError::Incomplete(x))?;
-        let inside: FxHashSet<NodeId> = copy.iter().map(|n| n.id).collect();
-        for (c, t) in copy.iter_mut().zip(&template) {
-            c.origin = Some(source_origin(src, self.kit, self.version, t));
-        }
-        for (c, t) in copy.iter_mut().zip(&template) {
-            if self.point_or_defer(c, &inside) {
-                self.later.push((c.id, t.id, self.at));
-            }
-        }
         let index = index.min(self.scratch.get(parent).map_or(0, |p| p.children.len()));
-        self.push(Operation::InsertSubtree {
-            nodes: copy,
-            parent,
-            index,
-        })?;
-        Ok(root)
+        let shell = self.insert_shell(ids, parent, index, x)?;
+        self.sync(ids, shell, x)?;
+        Ok(shell)
     }
 }
 

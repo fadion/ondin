@@ -4137,7 +4137,9 @@ pub fn flex_holds(doc: &Document, res: &Resolved, tx: &Transaction) -> Vec<Opera
         let Operation::SetGeometry { id, geometry } = op else {
             continue;
         };
-        if !geometry.resizes() || explicit.contains(id) {
+        // Never a vault node, which a kit update writes exactly as published
+        // (§15 D1024, `keep_insets`' reason).
+        if !geometry.resizes() || explicit.contains(id) || doc.in_vault(*id) {
             continue;
         }
         let Some(used) = res.used_kind(doc, *id) else {
@@ -4348,8 +4350,11 @@ fn kept_flow_translations(doc: &Document, tx: Transaction) -> Transaction {
     let ops =
         tx.0.into_iter()
             .filter_map(|op| match op {
+                // Never a vault node: a kit update's published translation is
+                // the kit's, not a tool's guess at a slot (§15 D1024).
                 Operation::SetTransform { id, transform }
                     if is_flex_item(doc, id)
+                        && !doc.in_vault(id)
                         && !leaves.contains(&id)
                         && !doc
                             .get(id)
@@ -5075,7 +5080,14 @@ pub fn keep_insets(doc: &Document, res: &Resolved, tx: Transaction) -> Transacti
     let mut unmoved: FxHashSet<NodeId> = FxHashSet::default();
     let mut out = tx;
     for (id, (to, geometry_changed)) in ids {
-        if explicit.contains(&id) {
+        // 🚨 **Never a vault node** (§15 D1024, the kits QA review's second
+        // pass): the vault is never resolved, so `used_local` has nothing for
+        // it and the stored transform stood in for where it is drawn — a pinned
+        // layer whose main had widened since was re-pinned from its stale
+        // stored place on an accept, jumping in the main and in every instance.
+        // A kit update writes a vault node exactly as published; there is no
+        // drawn placement here to keep.
+        if explicit.contains(&id) || after.in_vault(id) {
             continue;
         }
         let Some(node) = after.get(id) else { continue };

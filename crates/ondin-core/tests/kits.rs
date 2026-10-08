@@ -1385,3 +1385,259 @@ fn a_kit_never_vendors_its_own_main_by_paste() {
     assert!(k.doc.vault().is_none(), "no vault in the kit");
     assert_eq!(k.doc.get(pasted).unwrap().link(), None, "detached");
 }
+
+/// The app's commit door, less its history: the two layout rewrites, the
+/// component passes, and the apply.
+fn door(d: &mut Document, ids: &mut IdSource, tx: Transaction) {
+    let res = Resolved::rebuild(d);
+    let tx = ondin_core::build::keep_insets(d, &res, tx);
+    let mut tx = ondin_core::build::keep_flex_sizes(d, &res, tx);
+    ondin_core::propagate::owed(d, &mut tx, ids);
+    d.apply(&tx).expect("the door commits");
+}
+
+/// A kit of one main, *Card*, built by `ops` after its root and marked; and a
+/// consumer that has placed it and overridden one layer's opacity — the layer
+/// `overridden` picks from the instance.
+struct Grouping {
+    kit: Document,
+    d: Document,
+    ids: IdSource,
+    inst: NodeId,
+}
+
+fn placed_card(
+    ops: impl FnOnce(NodeId) -> (Vec<Operation>, NodeId),
+    overridden: impl Fn(&Document, NodeId) -> NodeId,
+) -> Grouping {
+    let mut kids = IdSource::new(0xB0);
+    let root = kids.mint();
+    let mut kit_doc = Document::new(root);
+    let (ops, card) = ops(root);
+    kit_doc.apply(&Transaction(ops)).unwrap();
+    kit_doc.set_meta(DocumentMeta {
+        id: Some(L_ID.into()),
+        name: Some("Atlas".into()),
+        kit: Some(KitMark::default()),
+        ..DocumentMeta::default()
+    });
+    kit::publish(&mut kit_doc, None, 1).unwrap();
+    let (mut d, mut ids) = consumer();
+    let droot = d.root();
+    let (tx, inst) = kit::insert(
+        &d,
+        &mut ids,
+        L_ID,
+        1,
+        kit_doc.published().unwrap(),
+        card,
+        droot,
+    )
+    .unwrap();
+    door(&mut d, &mut ids, tx);
+    let layer = overridden(&d, inst);
+    door(
+        &mut d,
+        &mut ids,
+        Transaction(vec![Operation::SetOpacity {
+            id: layer,
+            opacity: 0.3,
+        }]),
+    );
+    Grouping {
+        kit: kit_doc,
+        d,
+        ids,
+        inst,
+    }
+}
+
+/// Publish `g.kit` again after `ops`, and accept it in `g.d` through the door.
+fn republish_and_accept(g: &mut Grouping, ops: Vec<Operation>) {
+    g.kit.apply(&Transaction(ops)).unwrap();
+    kit::publish(&mut g.kit, None, 2).unwrap();
+    let u = kit::update(&g.d, &mut g.ids, L_ID, 2, g.kit.published().unwrap())
+        .expect("the update builds");
+    door(&mut g.d, &mut g.ids, u.tx);
+}
+
+/// Each child of `id`, by name and opacity.
+fn shape(d: &Document, id: NodeId) -> Vec<(String, f32)> {
+    d.get(id)
+        .unwrap()
+        .children()
+        .iter()
+        .map(|c| {
+            let n = d.get(*c).unwrap();
+            (n.name().to_string(), n.opacity())
+        })
+        .collect()
+}
+
+/// **An ungroup in the kit keeps the layers it lifts out** (§15 D1024, the kits
+/// QA review's second pass, reproduced by its probe): *Card* > *G* > *A*, the
+/// instance's *A* overridden; the kit ungroups *G*. The vault's *A* is the same
+/// node after, and the instance holds the one *A*, its override kept. Deleting
+/// *G* at once took *A* with it, and the instance kept the old *A* detached in
+/// the old *G* beside a fresh one.
+///
+/// Flip, run: a dropped child deleted at once, as it was, fails *"A kept its
+/// identity"*.
+#[test]
+fn an_ungroup_in_the_kit_keeps_the_layers_and_their_overrides() {
+    let mut ids = IdSource::new(0xB1);
+    let [card, g, a] = [(); 3].map(|_| ids.mint());
+    let mut gr = placed_card(
+        |root| {
+            (
+                vec![
+                    create(card, root, 0, frame(200.0, 100.0), "Card"),
+                    create(g, card, 0, NodeKind::Group, "G"),
+                    create(a, g, 0, rect(), "A"),
+                    main_on(card),
+                ],
+                card,
+            )
+        },
+        |d, inst| {
+            d.get(d.get(inst).unwrap().children()[0])
+                .unwrap()
+                .children()[0]
+        },
+    );
+    let main = gr.d.get(gr.inst).unwrap().link().unwrap();
+    let vault_a =
+        gr.d.get(gr.d.get(main).unwrap().children()[0])
+            .unwrap()
+            .children()[0];
+    republish_and_accept(
+        &mut gr,
+        vec![
+            Operation::Reparent {
+                id: a,
+                new_parent: card,
+                index: 0,
+            },
+            Operation::DeleteNode { id: g },
+        ],
+    );
+    assert!(gr.d.contains(vault_a), "A kept its identity");
+    assert_eq!(
+        shape(&gr.d, gr.inst),
+        [("A".to_string(), 0.3)],
+        "the override on A stays"
+    );
+}
+
+/// **A group or a frame the kit makes around a layer keeps it** (§15 D1024):
+/// *Card* > *A*, the instance's *A* overridden; the kit groups *A* (*Group
+/// selection*). The vault's *A* moves into the new group, and the instance's
+/// *A* into the group's copy, override kept. A whole copy of the new group minted
+/// a second *A* and dropped the first, the instance keeping it detached. This
+/// also found **every sync of a group failing**: `state_ops` wrote a group's
+/// `SetFills`, which `apply` refuses by kind.
+///
+/// Flips, run: `sync` never moving a held node in — so the group's shell
+/// copies *A* fresh, which is what a whole copy did — fails *"A kept its
+/// identity"* (and the ungroup test and the set test with it); the group's
+/// fields written without the kind skip fails *"the update builds"*,
+/// `Incomplete`.
+#[test]
+fn a_group_in_the_kit_keeps_the_layer_and_its_override() {
+    let mut ids = IdSource::new(0xB2);
+    let [card, a, g] = [(); 3].map(|_| ids.mint());
+    let mut gr = placed_card(
+        |root| {
+            (
+                vec![
+                    create(card, root, 0, frame(200.0, 100.0), "Card"),
+                    create(a, card, 0, rect(), "A"),
+                    main_on(card),
+                ],
+                card,
+            )
+        },
+        |d, inst| d.get(inst).unwrap().children()[0],
+    );
+    let main = gr.d.get(gr.inst).unwrap().link().unwrap();
+    let vault_a = gr.d.get(main).unwrap().children()[0];
+    republish_and_accept(
+        &mut gr,
+        vec![
+            create(g, card, 0, NodeKind::Group, "G"),
+            Operation::Reparent {
+                id: a,
+                new_parent: g,
+                index: 0,
+            },
+        ],
+    );
+    assert!(gr.d.contains(vault_a), "A kept its identity");
+    assert_eq!(shape(&gr.d, gr.inst).len(), 1, "one child, the group");
+    let ig = gr.d.get(gr.inst).unwrap().children()[0];
+    assert_eq!(
+        shape(&gr.d, ig),
+        [("A".to_string(), 0.3)],
+        "the override on A stays"
+    );
+}
+
+/// **An accept leaves a pinned layer where the kit draws it** (§15 D1024, the
+/// kits QA review's second pass, reproduced): *Badge* pinned `right: 10` in a
+/// *Card* widened since its transform was stored, so drawn at x 170 from a
+/// stored 70. The kit changes *Badge*'s height and publishes; the commit door's
+/// `keep_insets`, with no resolved place for a vault node, read the stored
+/// transform as where it is drawn and re-pinned it `right: 110`, and the
+/// instance's badge jumped to x 70.
+///
+/// Flip, run: `keep_insets` without its vault skip fails *"the kit's inset
+/// arrived unchanged"*.
+#[test]
+fn an_accept_leaves_a_pinned_layer_where_the_kit_draws_it() {
+    use ondin_core::{GeometryPatch, Insets, LengthPct};
+    let mut ids = IdSource::new(0xB3);
+    let [card, badge] = [(); 2].map(|_| ids.mint());
+    let mut gr = placed_card(
+        |root| {
+            (
+                vec![
+                    create(card, root, 0, frame(200.0, 100.0), "Card"),
+                    create(badge, card, 0, rect(), "Badge"),
+                    Operation::SetTransform {
+                        id: badge,
+                        transform: Affine::translate((70.0, 10.0)),
+                    },
+                    Operation::SetInsets {
+                        id: badge,
+                        insets: Insets {
+                            right: Some(LengthPct::Px(10.0)),
+                            top: Some(LengthPct::Px(10.0)),
+                            ..Insets::default()
+                        },
+                    },
+                    main_on(card),
+                ],
+                card,
+            )
+        },
+        |d, inst| d.get(inst).unwrap().children()[0],
+    );
+    let ib = gr.d.get(gr.inst).unwrap().children()[0];
+    let before = Resolved::rebuild(&gr.d).world_bounds(ib).unwrap();
+    republish_and_accept(
+        &mut gr,
+        vec![Operation::SetGeometry {
+            id: badge,
+            geometry: GeometryPatch::Size(Size::new(10.0, 14.0)),
+        }],
+    );
+    let main = gr.d.get(gr.inst).unwrap().link().unwrap();
+    let vb = gr.d.get(main).unwrap().children()[0];
+    assert_eq!(
+        gr.d.get(vb).unwrap().insets().right,
+        Some(LengthPct::Px(10.0)),
+        "the kit's inset arrived unchanged"
+    );
+    let after = Resolved::rebuild(&gr.d).world_bounds(ib).unwrap();
+    assert_eq!(after.x0, before.x0, "the instance's badge did not move");
+}

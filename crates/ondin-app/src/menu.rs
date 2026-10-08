@@ -315,6 +315,12 @@ pub enum Item {
     GoToMain,
     /// *Detach instance* (`Ctrl+Alt+B`, §15 D981) — on an instance.
     DetachInstance,
+    /// *Accept kit updates* (§5.3e, 7A; §15 D1016) — on a kit instance whose kit
+    /// has a newer publish: that kit's update, the instance's own.
+    AcceptKitUpdates,
+    /// *Make local…* (§5.3e, 7A) — on a kit instance: reveal its vendored main as
+    /// the document's own, after a confirmation (4E).
+    MakeLocal,
     /// *Reset all* (§15 D981) — on an instance: its fields, its removed children
     /// and its order back to the main's, its own layers kept (`reset::reset_all`).
     ResetInstance,
@@ -715,6 +721,8 @@ impl Item {
         Item::SelectAllInstances,
         Item::GoToMain,
         Item::DetachInstance,
+        Item::AcceptKitUpdates,
+        Item::MakeLocal,
         Item::ResetInstance,
         Item::ResetChild,
         Item::RestoreChildren,
@@ -904,6 +912,13 @@ impl Item {
                 Some("Ctrl+Alt+B"),
                 Group::Structure,
             ),
+            Item::AcceptKitUpdates => s(
+                "Accept kit updates",
+                icon::ARROW_CIRCLE_DOWN,
+                None,
+                Group::Structure,
+            ),
+            Item::MakeLocal => s("Make local…", icon::PACKAGE, None, Group::Structure),
             Item::ResetInstance => s(
                 "Reset all",
                 icon::ARROW_COUNTER_CLOCKWISE,
@@ -1450,6 +1465,11 @@ pub struct Context<'a> {
     pub children_differ: bool,
     /// That one layer's name, which *Reset Label* is named for. Empty for several.
     pub layer_name: String,
+    /// When the one selected instance is a **kit instance**: its kit's name, and
+    /// whether a newer publish waits (§5.3e, 7A). What renames *Go to main* to
+    /// *Go to main in Atlas* and offers *Accept kit updates* and *Make local…* — a
+    /// local instance's menu is exactly as it was.
+    pub kit: Option<(String, bool)>,
     /// The selection is two or more mains, none in a set, sharing a parent — what
     /// offers *Combine as variants* (§15 D982).
     pub combinable: bool,
@@ -1924,7 +1944,17 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
             rows.push(Row::new(Item::SelectAllInstances));
         }
         Role::Instance => {
-            rows.push(Row::new(Item::GoToMain));
+            // On a kit instance *Go to main* says where, *Accept kit updates*
+            // follows it when one waits, and *Make local…* closes the group (7A).
+            match &cx.kit {
+                Some((kit, waiting)) => {
+                    rows.push(Row::new(Item::GoToMain).label(format!("Go to main in {kit}")));
+                    if *waiting {
+                        rows.push(Row::new(Item::AcceptKitUpdates).dim_if(locked, why));
+                    }
+                }
+                None => rows.push(Row::new(Item::GoToMain)),
+            }
             // A nested copy bound to a swap or visibility property is an instance
             // root itself, and its property its outer instance's
             // (`overridden_property_and_root`'s climb, §15 D983) — the row the
@@ -1947,6 +1977,9 @@ fn layer_menu(cx: &Context<'_>) -> Vec<Row> {
                 rows.push(Row::new(Item::RestoreChildren).dim_if(locked, why));
             }
             rows.push(Row::new(Item::DetachInstance).dim_if(locked, why));
+            if cx.kit.is_some() {
+                rows.push(Row::new(Item::MakeLocal).dim_if(locked, why));
+            }
         }
         Role::Member => {
             rows.push(Row::new(Item::GoToMain));
@@ -2921,6 +2954,16 @@ impl OndinApp {
                 .and_then(|id| self.session.doc.get(id))
                 .map(|n| n.name().to_string())
                 .unwrap_or_default(),
+            kit: self
+                .session
+                .selection
+                .single()
+                .filter(|id| {
+                    ondin_core::component::instance_root(&self.session.doc, *id) == Some(*id)
+                })
+                .and_then(|id| ondin_core::component::main_of(&self.session.doc, id))
+                .and_then(|m| self.kit_line(m))
+                .map(|k| (k.kit_name, k.waiting.is_some())),
             combinable: self.combinable_mains().is_some(),
             combine_refused: self.combine_refusal(),
             create_refused: self.create_component_refusal().map(create_refusal),
@@ -3063,7 +3106,35 @@ impl OndinApp {
             // `Ctrl+Alt+G` (§15 D987).
             Item::DuplicateAsComponent => self.duplicate_as_component(),
             Item::SelectAllInstances => self.select_all_instances(),
-            Item::GoToMain => self.go_to_main(),
+            // On a kit instance the row reads *Go to main in Atlas* and goes there.
+            Item::GoToMain => {
+                let kit = self
+                    .session
+                    .selection
+                    .single()
+                    .and_then(|id| ondin_core::component::main_of(&self.session.doc, id))
+                    .is_some_and(|m| self.session.doc.in_vault(m));
+                if kit {
+                    self.go_to_kit_main();
+                } else {
+                    self.go_to_main();
+                }
+            }
+            Item::AcceptKitUpdates | Item::MakeLocal => {
+                let line = self
+                    .session
+                    .selection
+                    .single()
+                    .and_then(|id| ondin_core::component::main_of(&self.session.doc, id))
+                    .and_then(|m| self.kit_line(m));
+                if let Some(k) = line {
+                    if item == Item::MakeLocal {
+                        self.making_local = Some(k.top);
+                    } else {
+                        self.accept_kit_updates(Some(&k.kit));
+                    }
+                }
+            }
             // Both are the selection's reset: the row is offered on one selected
             // layer, and `reset_selection` scopes to exactly it.
             Item::ResetInstance | Item::ResetChild => {
@@ -3486,6 +3557,8 @@ mod tests {
             // fixture and change what the row-count assertions count.
             children_differ: false,
             layer_name: String::new(),
+            // `None`: a local instance's menu, which every existing fixture is.
+            kit: None,
             combinable: false,
             in_set: false,
             holds_main: false,
@@ -4673,6 +4746,39 @@ mod tests {
         assert!(!flat(&build(&cx)).contains(&Item::ResetInstance));
         cx.drifted = false;
         assert!(!flat(&build(&cx)).contains(&Item::ResetChild));
+    }
+
+    /// **A kit instance's menu gains its kit rows in the existing group, and a
+    /// local instance's is exactly as it was** (§5.3e, 7A; §15 D1016): *Go to main*
+    /// reads *Go to main in Atlas* with *Accept kit updates* after it when one
+    /// waits, and *Make local…* closes the group after *Detach instance*.
+    #[test]
+    fn a_kit_instance_gains_its_kit_rows_and_a_local_one_does_not() {
+        let sel = [id(1)];
+        let kinds = [Kind::Frame];
+        let target = Target::Layer {
+            id: id(1),
+            door: Door::Canvas,
+        };
+        let mut cx = open(target, &sel, &kinds);
+        cx.role = Role::Instance;
+        let local = flat(&build(&cx));
+        assert!(!local.contains(&Item::AcceptKitUpdates) && !local.contains(&Item::MakeLocal));
+
+        cx.kit = Some(("Atlas".into(), true));
+        let rows: Vec<Row> = build(&cx).into_iter().flatten().collect();
+        let go = rows.iter().find(|r| r.item == Item::GoToMain).unwrap();
+        assert_eq!(go.label, "Go to main in Atlas");
+        let order: Vec<Item> = rows.iter().map(|r| r.item).collect();
+        let at = |i: Item| order.iter().position(|o| *o == i).unwrap();
+        assert_eq!(at(Item::AcceptKitUpdates), at(Item::GoToMain) + 1);
+        assert!(at(Item::MakeLocal) > at(Item::DetachInstance));
+
+        cx.kit = Some(("Atlas".into(), false));
+        assert!(
+            !flat(&build(&cx)).contains(&Item::AcceptKitUpdates),
+            "only when one waits"
+        );
     }
 
     /// **`height` counts what the rows actually paint.**

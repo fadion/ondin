@@ -839,3 +839,170 @@ fn the_change_count_is_what_consumers_would_receive() {
     assert_eq!(kit::changes(&k.doc).count(), 0, "nothing left to publish");
     assert!(k.doc.published().unwrap().tops().contains(&fresh));
 }
+
+/// Accept `k`'s current publish into `d`, through the commit's own passes
+/// (`propagate::owed`), as the app's commit does. Answers the update and the
+/// inverse that undoes it.
+fn accept(d: &mut Document, ids: &mut IdSource, k: &Kit) -> (kit::Update, Transaction) {
+    let version = k.doc.meta().kit.as_ref().unwrap().version;
+    let u = kit::update(d, ids, L_ID, version, k.doc.published().unwrap()).unwrap();
+    let mut tx = u.tx.clone();
+    ondin_core::propagate::owed(d, &mut tx, ids);
+    let undo = d.apply(&tx).expect("an accepted update commits").inverse;
+    (u, undo)
+}
+
+/// **An update is a diff plus an ordinary commit** (§5.3e, 5B; §15 D1016): the
+/// kit changes Icon's dot and gives Icon a second layer; accepting the new
+/// publish rewrites the vendored Icon in place, and the main-edit passes carry
+/// it to the instances — the one that matched the main follows, **the one with
+/// an override keeps it** — and the new layer reaches both. Every origin moves to
+/// the new version. One undo takes it all back.
+///
+/// Flip, run: `update` leaving out `state_ops` fails *"the vendored main took the
+/// new value"*, the dot still at full opacity.
+#[test]
+fn an_update_reaches_the_instances_and_keeps_their_overrides() {
+    let mut k = kit();
+    let (mut d, mut ids) = consumer();
+    let a = insert(&mut d, &mut ids, &k, k.icon);
+    let b = insert(&mut d, &mut ids, &k, k.icon);
+    let b_dot = d.get(b).unwrap().children()[0];
+    d.apply(&Transaction(vec![Operation::SetOpacity {
+        id: b_dot,
+        opacity: 0.3,
+    }]))
+    .unwrap();
+    let before = d.clone();
+
+    let mut lids = IdSource::new(0xAD);
+    let ring = lids.mint();
+    k.doc
+        .apply(&Transaction(vec![
+            Operation::SetOpacity {
+                id: k.icon_dot,
+                opacity: 0.5,
+            },
+            create(ring, k.icon, 1, rect(), "Ring"),
+        ]))
+        .unwrap();
+    assert_eq!(kit::publish(&mut k.doc, None, 1), Some(5));
+
+    let (u, undo) = accept(&mut d, &mut ids, &k);
+    let main = d.get(a).unwrap().link().unwrap();
+    assert_eq!(u.updated, vec![main]);
+    let dot = d.get(main).unwrap().children()[0];
+    assert_eq!(
+        d.get(dot).unwrap().opacity(),
+        0.5,
+        "the vendored main took the new value"
+    );
+    let a_dot = d.get(a).unwrap().children()[0];
+    assert_eq!(
+        d.get(a_dot).unwrap().opacity(),
+        0.5,
+        "the plain instance follows"
+    );
+    assert_eq!(d.get(b_dot).unwrap().opacity(), 0.3, "the override stays");
+    for i in [a, b] {
+        assert_eq!(
+            d.get(i).unwrap().children().len(),
+            2,
+            "the new layer reached {i:?}"
+        );
+    }
+    let versions: Vec<u32> = d
+        .capture_subtree(main)
+        .unwrap()
+        .iter()
+        .map(|n| n.origin().unwrap().version)
+        .collect();
+    assert_eq!(versions, vec![5, 5, 5]);
+
+    d.apply(&undo).unwrap();
+    assert_eq!(d, before, "one undo");
+}
+
+/// **A component the kit removed is made local, and a layer it dropped goes**
+/// (D1011 (3)): the kit deletes Card and Icon's dot. Card's vendored copy leaves
+/// the vault as an ordinary main of the document — no origin anywhere in it,
+/// its instance still linked to it — and Icon, which Card nests, stays vendored
+/// with its dot gone.
+#[test]
+fn a_removed_component_is_made_local_and_a_dropped_layer_goes() {
+    let mut k = kit();
+    let (mut d, mut ids) = consumer();
+    let inst = insert(&mut d, &mut ids, &k, k.card);
+    let card = d.get(inst).unwrap().link().unwrap();
+    k.doc
+        .apply(&Transaction(vec![
+            Operation::DeleteNode { id: k.card },
+            Operation::DeleteNode { id: k.icon_dot },
+        ]))
+        .unwrap();
+    kit::publish(&mut k.doc, None, 1).unwrap();
+
+    let (u, _) = accept(&mut d, &mut ids, &k);
+    assert_eq!(u.made_local, vec![card]);
+    let n = d.get(card).unwrap();
+    assert_eq!(n.parent(), Some(d.root()), "out of the vault");
+    assert!(n.component(), "an ordinary main");
+    assert!(
+        d.capture_subtree(card)
+            .unwrap()
+            .iter()
+            .all(|n| n.origin().is_none()),
+        "no origin left in it"
+    );
+    assert_eq!(
+        d.get(inst).unwrap().link(),
+        Some(card),
+        "its instance follows it"
+    );
+    let icon = vault_children(&d)
+        .into_iter()
+        .find(|v| d.get(*v).unwrap().origin().unwrap().node == k.icon)
+        .expect("Icon stays vendored");
+    assert!(
+        d.get(icon).unwrap().children().is_empty(),
+        "the dot is gone"
+    );
+}
+
+/// **A main the new publish reaches and this document does not hold is vendored
+/// first**: the kit gives Icon a nested instance of a new main, Pip; accepting
+/// brings Pip into the vault and Icon's nested copy links to it.
+#[test]
+fn an_update_vendors_a_main_it_newly_reaches() {
+    let mut k = kit();
+    let (mut d, mut ids) = consumer();
+    insert(&mut d, &mut ids, &k, k.icon);
+    let mut lids = IdSource::new(0xAD);
+    let pip = lids.mint();
+    let root = k.doc.root();
+    k.doc
+        .apply(&Transaction(vec![
+            create(pip, root, 0, frame(6.0, 6.0), "Pip"),
+            main_on(pip),
+        ]))
+        .unwrap();
+    instance(&mut k.doc, &mut lids, pip, k.icon);
+    kit::publish(&mut k.doc, None, 1).unwrap();
+
+    accept(&mut d, &mut ids, &k);
+    let held: Vec<NodeId> = vault_children(&d)
+        .iter()
+        .map(|v| d.get(*v).unwrap().origin().unwrap().node)
+        .collect();
+    assert!(held.contains(&pip), "{held:?}");
+    let icon = vault_children(&d)
+        .into_iter()
+        .find(|v| d.get(*v).unwrap().origin().unwrap().node == k.icon)
+        .unwrap();
+    let nested = *d.get(icon).unwrap().children().last().unwrap();
+    let pip_here = vault_children(&d)
+        .into_iter()
+        .find(|v| d.get(*v).unwrap().origin().unwrap().node == pip)
+        .unwrap();
+    assert_eq!(d.get(nested).unwrap().link(), Some(pip_here));
+}

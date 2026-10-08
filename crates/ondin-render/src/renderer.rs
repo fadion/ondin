@@ -1594,7 +1594,9 @@ impl RenderOverrides {
             // root, and no gesture builds one — a kit insert is a click. Refused
             // rather than filed with the no-ops, whose count is pinned against
             // `changes_ink`'s.
-            Operation::OpenVault { .. } | Operation::CloseVault { .. } => return None,
+            Operation::OpenVault { .. }
+            | Operation::CloseVault { .. }
+            | Operation::SetOrigin { .. } => return None,
         }
         Some(())
     }

@@ -873,6 +873,334 @@ pub fn relink(nodes: &mut [Node], map: &FxHashMap<NodeId, NodeId>) {
     }
 }
 
+/// What [`update`] built: the transaction, and which vendored mains it rewrote
+/// and which it made local.
+#[derive(Clone, Debug)]
+pub struct Update {
+    /// One transaction for the whole kit — undone in one step (5B).
+    pub tx: Transaction,
+    /// The vault mains rewritten to the new publish, by their id here.
+    pub updated: Vec<NodeId>,
+    /// The vault mains the kit no longer publishes, revealed as ordinary mains
+    /// of the document (D1011 (3)). Placing them is the caller's: the vault is
+    /// never resolved, so nothing here knows the document's content bounds.
+    pub made_local: Vec<NodeId>,
+}
+
+/// Bring every main this document vendored from `kit` up to `published`, at
+/// `version` (§5.3e, 5B; §15 D1016) — **a diff plus an ordinary commit**.
+///
+/// Each vendored main is rewritten in place to match its node in the new
+/// publish: a field that differs is set, a layer the publish added is inserted, a
+/// layer it dropped is deleted, the children are put in its order, and every
+/// node's origin moves to `version`. The commit's main-edit passes then carry the
+/// change to the instances exactly as a hand edit of a main would — overrides
+/// surviving by value comparison, instance-side structure by §5.3d's rules — so
+/// nothing about instances is decided here. A main the new publish reaches and
+/// this document does not hold yet is vendored first. **A main the kit no longer
+/// publishes is made local**: moved out of the vault as an ordinary main, its
+/// origins cleared — no instance is promoted (D1011 (3)).
+///
+/// Built against a scratch document that each op is applied to as it is made,
+/// so every op is read against the state the ones before it leave, and an op
+/// that would change nothing is dropped.
+pub fn update(
+    doc: &Document,
+    ids: &mut IdSource,
+    kit: &str,
+    version: u32,
+    published: &Published,
+) -> Result<Update, KitError> {
+    let src = published.document();
+    let vault = doc.vault();
+    let tops: Vec<NodeId> = vault
+        .and_then(|v| doc.get(v))
+        .map(|v| v.children.clone())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|t| {
+            doc.get(*t)
+                .and_then(|n| n.origin.as_ref())
+                .is_some_and(|o| o.kit == kit)
+        })
+        .collect();
+    let mut b = Builder {
+        scratch: doc.clone(),
+        ops: Vec::new(),
+        kit,
+        version,
+        published,
+    };
+    let mut updated = Vec::new();
+    let mut made_local = Vec::new();
+    for t in tops {
+        let Some(x) = b
+            .scratch
+            .get(t)
+            .and_then(|n| n.origin.as_ref())
+            .map(|o| o.node)
+        else {
+            continue;
+        };
+        let still = src.get(x).is_some() && top_of(src, x) == Some(x) && !src.in_vault(x);
+        if !still {
+            made_local.push(t);
+            continue;
+        }
+        b.vendor_reached(ids, x)?;
+        b.sync(ids, t, x)?;
+        updated.push(t);
+    }
+    let root = doc.root();
+    for t in &made_local {
+        let below = b.scratch.capture_subtree(*t).unwrap_or_default();
+        for n in below {
+            b.push(Operation::SetOrigin {
+                id: n.id,
+                origin: None,
+            })?;
+        }
+        let end = b.scratch.get(root).map_or(0, |r| r.children.len());
+        b.push(Operation::Reparent {
+            id: *t,
+            new_parent: root,
+            index: end,
+        })?;
+    }
+    Ok(Update {
+        tx: Transaction(b.ops),
+        updated,
+        made_local,
+    })
+}
+
+/// [`update`]'s state: the scratch document every op is applied to as it is
+/// made, and the ops so far.
+struct Builder<'a> {
+    scratch: Document,
+    ops: Vec<Operation>,
+    kit: &'a str,
+    version: u32,
+    published: &'a Published,
+}
+
+impl Builder<'_> {
+    /// Apply `op` to the scratch and keep it — unless it would change nothing.
+    fn push(&mut self, op: Operation) -> Result<(), KitError> {
+        if op.changes_nothing(&self.scratch) {
+            return Ok(());
+        }
+        let at = op.overwrites().unwrap_or_else(|| self.scratch.root());
+        self.scratch
+            .apply_unchecked(&Transaction(vec![op.clone()]))
+            .map_err(|_| KitError::Incomplete(at))?;
+        self.ops.push(op);
+        Ok(())
+    }
+
+    /// The scratch's node for a node of the published state, by identity.
+    fn here(&self, x: NodeId) -> Option<NodeId> {
+        let src = self.published.document();
+        let o = source_origin(src, self.kit, self.version, src.get(x)?);
+        find(&self.scratch, &held_index(&self.scratch), &(o.kit, o.node))
+    }
+
+    /// Vendor every main published `x` reaches that the scratch does not hold —
+    /// a nested instance of a main this document has never used.
+    fn vendor_reached(&mut self, ids: &mut IdSource, x: NodeId) -> Result<(), KitError> {
+        let src = self.published.document();
+        let captured = src.capture_subtree(x).ok_or(KitError::Incomplete(x))?;
+        for r in refs_out(&captured) {
+            let rt = top_of(src, r).ok_or(KitError::Incomplete(r))?;
+            if self.here(rt).is_some() {
+                continue;
+            }
+            // `vendor` takes a main; a set is vendored through any variant of it.
+            let main = if src.get(rt).is_some_and(|n| n.component) {
+                rt
+            } else {
+                src.get(rt)
+                    .and_then(|n| {
+                        n.children
+                            .iter()
+                            .copied()
+                            .find(|c| src.get(*c).is_some_and(|c| c.component))
+                    })
+                    .ok_or(KitError::Incomplete(rt))?
+            };
+            let (ops, _) = vendor(
+                &self.scratch,
+                ids,
+                self.kit,
+                self.version,
+                self.published,
+                main,
+            )?;
+            for op in ops {
+                self.push(op)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Rewrite the scratch's node `d` to match the published node `x`, children
+    /// first, then its own fields.
+    fn sync(&mut self, ids: &mut IdSource, d: NodeId, x: NodeId) -> Result<(), KitError> {
+        let src = self.published.document();
+        let pn = src.get(x).ok_or(KitError::Incomplete(x))?.clone();
+        let dn = self.scratch.get(d).ok_or(KitError::Incomplete(d))?.clone();
+
+        // Children: match by identity, delete the dropped, insert the new, order.
+        let key_of = |n: &Node| n.origin.as_ref().map(|o| o.node);
+        let mut placed: Vec<NodeId> = Vec::with_capacity(pn.children.len());
+        for dc in &dn.children {
+            let kept = self
+                .scratch
+                .get(*dc)
+                .and_then(key_of)
+                .is_some_and(|k| pn.children.contains(&k));
+            if !kept {
+                self.push(Operation::DeleteNode { id: *dc })?;
+            }
+        }
+        for (i, pc) in pn.children.iter().enumerate() {
+            let held = self
+                .scratch
+                .get(d)
+                .map(|n| n.children.clone())
+                .unwrap_or_default()
+                .into_iter()
+                .find(|c| self.scratch.get(*c).and_then(key_of) == Some(*pc));
+            // A layer whose kind changed between publishes cannot be rewritten
+            // field by field — no operation turns a rectangle into an ellipse —
+            // so it is replaced.
+            let same_kind = |c: NodeId| {
+                let (Some(a), Some(b)) = (self.scratch.get(c), src.get(*pc)) else {
+                    return false;
+                };
+                std::mem::discriminant(&a.kind) == std::mem::discriminant(&b.kind)
+            };
+            let at = match held {
+                Some(c) if same_kind(c) => {
+                    self.sync(ids, c, *pc)?;
+                    c
+                }
+                Some(c) => {
+                    self.push(Operation::DeleteNode { id: c })?;
+                    self.insert_new(ids, d, i, *pc)?
+                }
+                None => self.insert_new(ids, d, i, *pc)?,
+            };
+            placed.push(at);
+        }
+        for (i, c) in placed.iter().enumerate() {
+            self.push(Operation::Reorder { id: *c, index: i })?;
+        }
+
+        // Then the node's own fields — after its children, which a component
+        // property's bound layers may be among.
+        let mut want = pn.clone();
+        want.id = d;
+        for op in crate::reset::state_ops(&want) {
+            self.push(op)?;
+        }
+        let resolve = |b: &Builder, r: NodeId| b.here(r);
+        let link = match pn.link {
+            Some(l) => Some(resolve(self, l).ok_or(KitError::Incomplete(l))?),
+            None => None,
+        };
+        let swap = match pn.swap {
+            Some(s) => Some(resolve(self, s).ok_or(KitError::Incomplete(s))?),
+            None => None,
+        };
+        let mut props = pn.props.clone();
+        for p in &mut props {
+            for bnd in &mut p.value.bound {
+                *bnd = resolve(self, *bnd).ok_or(KitError::Incomplete(*bnd))?;
+            }
+        }
+        let origin = Some(Origin {
+            name: dn.origin.as_ref().and_then(|o| o.name.clone()),
+            ..source_origin(src, self.kit, self.version, &pn)
+        });
+        for op in [
+            Operation::SetLocked {
+                id: d,
+                locked: pn.locked,
+            },
+            Operation::SetProportionsLocked {
+                id: d,
+                locked: pn.proportions_locked,
+            },
+            Operation::SetComponent {
+                id: d,
+                component: pn.component,
+            },
+            Operation::SetLink { id: d, link },
+            Operation::SetSwap { id: d, swap },
+            Operation::SetVariantSet {
+                id: d,
+                set: pn.set.clone(),
+            },
+            Operation::SetVariant {
+                id: d,
+                values: pn.variant.clone(),
+            },
+            Operation::SetProperties { id: d, props },
+            Operation::SetOrigin { id: d, origin },
+        ] {
+            self.push(op)?;
+        }
+        Ok(())
+    }
+
+    /// Insert published `x`'s subtree as a new child of the scratch's `parent` at
+    /// `index`, minted fresh, with origins, its outside references pointed at the
+    /// scratch's nodes. Answers the new node's id.
+    fn insert_new(
+        &mut self,
+        ids: &mut IdSource,
+        parent: NodeId,
+        index: usize,
+        x: NodeId,
+    ) -> Result<NodeId, KitError> {
+        let src = self.published.document();
+        let template = src.capture_subtree(x).ok_or(KitError::Incomplete(x))?;
+        let (mut copy, root) =
+            crate::document::remap_subtree(&template, ids).ok_or(KitError::Incomplete(x))?;
+        let inside: FxHashSet<NodeId> = copy.iter().map(|n| n.id).collect();
+        for (c, t) in copy.iter_mut().zip(&template) {
+            c.origin = Some(source_origin(src, self.kit, self.version, t));
+        }
+        for c in &mut copy {
+            if let Some(l) = c.link
+                && !inside.contains(&l)
+            {
+                c.link = Some(self.here(l).ok_or(KitError::Incomplete(l))?);
+            }
+            if let Some(s) = c.swap
+                && !inside.contains(&s)
+            {
+                c.swap = Some(self.here(s).ok_or(KitError::Incomplete(s))?);
+            }
+            for p in &mut c.props {
+                for bnd in &mut p.value.bound {
+                    if !inside.contains(bnd) {
+                        *bnd = self.here(*bnd).ok_or(KitError::Incomplete(*bnd))?;
+                    }
+                }
+            }
+        }
+        let index = index.min(self.scratch.get(parent).map_or(0, |p| p.children.len()));
+        self.push(Operation::InsertSubtree {
+            nodes: copy,
+            parent,
+            index,
+        })?;
+        Ok(root)
+    }
+}
+
 /// The variant a set inserts when it is inserted whole (§5.3e's *a set is listed
 /// once and inserts its default variant*): **the one placed first in reading
 /// order** — topmost, then leftmost, by its position in the set — which is where

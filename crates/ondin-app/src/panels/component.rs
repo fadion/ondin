@@ -1133,7 +1133,8 @@ fn card_of(op: &Operation) -> Option<&'static str> {
         | O::AddImage { .. }
         | O::RemoveImage { .. }
         | O::OpenVault { .. }
-        | O::CloseVault { .. } => None,
+        | O::CloseVault { .. }
+        | O::SetOrigin { .. } => None,
     }
 }
 

@@ -734,6 +734,15 @@ impl Document {
             Operation::RemoveImage { id } => self.op_remove_image(id.clone()),
             Operation::OpenVault { id } => self.op_open_vault(*id),
             Operation::CloseVault { id } => self.op_close_vault(*id),
+            Operation::SetOrigin { id, origin } => {
+                let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
+                let old = std::mem::replace(&mut node.origin, origin.clone());
+                dirty.0.insert(*id);
+                Ok(Operation::SetOrigin {
+                    id: *id,
+                    origin: old,
+                })
+            }
         }
     }
 

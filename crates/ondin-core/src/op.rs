@@ -391,6 +391,14 @@ pub enum Operation {
     CloseVault {
         id: NodeId,
     },
+    /// Set or clear a node's kit provenance (§5.3e, §15 D1016) — an update moving
+    /// a vendored node to the new version, or *Make local* clearing it as the
+    /// node leaves the vault. `crate::kit::check` holds where an origin may be,
+    /// after the last op.
+    SetOrigin {
+        id: NodeId,
+        origin: Option<crate::kit::Origin>,
+    },
 }
 
 impl Operation {
@@ -449,7 +457,8 @@ impl Operation {
             | Operation::SetSwap { id, .. }
             | Operation::SetVariantSet { id, .. }
             | Operation::SetVariant { id, .. }
-            | Operation::SetProperties { id, .. } => Some(*id),
+            | Operation::SetProperties { id, .. }
+            | Operation::SetOrigin { id, .. } => Some(*id),
             Operation::CreateNode { .. }
             | Operation::DeleteNode { .. }
             | Operation::InsertSubtree { .. }
@@ -646,7 +655,9 @@ impl Operation {
             // The vault is never drawn (§15 D1012): opening or closing it changes
             // nothing on the canvas — what a kit insert draws is its instance.
             | Operation::OpenVault { .. }
-            | Operation::CloseVault { .. } => false,
+            | Operation::CloseVault { .. }
+            // Provenance is a label on a node, never ink (§15 D1016).
+            | Operation::SetOrigin { .. } => false,
             Operation::CreateNode { .. }
             | Operation::DeleteNode { .. }
             | Operation::InsertSubtree { .. }
@@ -769,6 +780,10 @@ impl Operation {
                     && child_index(doc, *id) == Some(*index)
             }
             Operation::Reorder { id, index } => child_index(doc, *id) == Some(*index),
+
+            Operation::SetOrigin { id, origin } => {
+                node(id).is_some_and(|n| n.origin() == origin.as_ref())
+            }
 
             Operation::SetTransform { id, transform } => {
                 node(id).is_some_and(|n| n.transform() == *transform)

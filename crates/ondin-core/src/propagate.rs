@@ -105,7 +105,9 @@ fn mode(op: &Operation) -> Mode {
         | Operation::AddImage { .. }
         | Operation::RemoveImage { .. }
         | Operation::OpenVault { .. }
-        | Operation::CloseVault { .. } => Mode::Skip,
+        | Operation::CloseVault { .. }
+        // A copy is never vendored, so no copy follows a main's provenance.
+        | Operation::SetOrigin { .. } => Mode::Skip,
     }
 }
 

@@ -357,9 +357,11 @@ fn dropdown(
 }
 
 /// The **swap picker** (§15 D983): a dropdown of the mains `options` answers for
-/// the search typed at its top, showing `shown`, answering the main picked. The
-/// search lives in egui's memory under the dropdown's id while it is open and is
-/// cleared when it closes, so every opening starts from the whole filtered list.
+/// the search typed at its top, showing `shown`, answering the main picked and
+/// whether the dropdown is open — the caller asks for the library's kits while it
+/// is, so a kit's mains not yet used here can be listed (§15 D1019). The search
+/// lives in egui's memory under the dropdown's id while it is open and is cleared
+/// when it closes, so every opening starts from the whole filtered list.
 fn swap_picker(
     ui: &mut egui::Ui,
     salt: impl std::hash::Hash + std::fmt::Debug + Copy,
@@ -368,8 +370,9 @@ fn swap_picker(
     current: Option<NodeId>,
     options: impl Fn(&str) -> Vec<SwapOption>,
     enabled: Option<&str>,
-) -> Option<NodeId> {
+) -> (Option<SwapTarget>, bool) {
     let mut pick = None;
+    let mut open = false;
     let search_id = egui::Id::new(("swap-search", salt));
     ui::disable_unless(ui, enabled.is_none(), |ui| {
         control_height(ui);
@@ -411,31 +414,69 @@ fn swap_picker(
                                 let glyph = (!h.kit.is_empty()).then_some(icon::PACKAGE);
                                 swap_heading(ui, glyph, &h.name, &h.status);
                             }
-                            for (id, name, _) in group {
-                                if ui
-                                    .add(egui::Button::selectable(current == Some(id), name))
-                                    .clicked()
-                                {
-                                    pick = Some(id);
+                            for (target, name, _) in group {
+                                let on =
+                                    matches!(target, SwapTarget::Here(id) if current == Some(id));
+                                if ui.add(egui::Button::selectable(on, name)).clicked() {
+                                    pick = Some(target);
                                     ui.close();
                                 }
                             }
                         }
                     });
             });
-        if resp.inner.is_none() {
+        open = resp.inner.is_some();
+        if !open {
             ui.data_mut(|d| d.remove::<String>(search_id));
         }
         if let Some(why) = enabled {
             resp.response.on_disabled_hover_text(why);
         }
     });
-    pick
+    (pick, open)
 }
 
-/// A main the swap picker offers: its id, its name, and the kit it came from as
-/// a heading — or `None` for one of the document's own (§5.3e, 4F).
-type SwapOption = (NodeId, String, Option<KitHeading>);
+/// What a swap picker's row swaps to.
+#[derive(Clone)]
+pub(crate) enum SwapTarget {
+    /// A main the document holds — its own, or a kit's vendored copy.
+    Here(NodeId),
+    /// A main of `kit`'s published state the document has never used, by its id
+    /// in that state: vendored at the swap, in the swap's own transaction (§15
+    /// D1019).
+    Kit {
+        kit: crate::kits::index::KitEntry,
+        published: std::sync::Arc<ondin_core::kit::Published>,
+        main: NodeId,
+    },
+}
+
+/// A main the swap picker offers: what it swaps to, its name, and the kit it
+/// comes from as a heading — or `None` for one of the document's own (§5.3e, 4F).
+type SwapOption = (SwapTarget, String, Option<KitHeading>);
+
+/// A swap picked from a kit main not yet vendored, kept until the card is drawn:
+/// building it takes the id source, which the card's borrow of the document
+/// holds (§15 D1019).
+struct KitSwap {
+    kit: crate::kits::index::KitEntry,
+    published: std::sync::Arc<ondin_core::kit::Published>,
+    main: NodeId,
+    roots: Vec<NodeId>,
+    /// The swap property the pick was made in, or `None` for the nested copy's
+    /// own *Swap* row.
+    prop: Option<Keyed<Property>>,
+}
+
+/// The heading a kit main not yet vendored is listed under: the kit's name and
+/// the version its pick would vendor.
+fn library_heading(k: &crate::kits::index::KitEntry) -> KitHeading {
+    KitHeading {
+        kit: k.id.clone(),
+        name: k.name.clone(),
+        status: format!("v{}", k.version),
+    }
+}
 
 /// The swap picker's list grouped as 4F has it (§15 D1014): the document's own
 /// mains first, under *This document* only when a kit group follows, then one
@@ -1283,6 +1324,43 @@ impl OndinApp {
         // vendored main is from, and whether the library can still find it.
         let kits = crate::kits::index::kits_in(&self.library, doc.meta().id.as_deref());
         let heading = |m: NodeId| crate::kits::index::kit_heading(doc, &kits, m);
+        // And their published states, for the mains a swap could vendor (§15
+        // D1019) — only those read at the kit file's current time, as an accept
+        // reads them, so a pick vendors what the version it records published.
+        let shelves: Vec<(
+            crate::kits::index::KitEntry,
+            std::sync::Arc<ondin_core::kit::Published>,
+        )> = kits
+            .iter()
+            .filter_map(|k| self.kit_shelf.current(k).map(|p| (k.clone(), p)))
+            .collect();
+        // Every swap row's list: the mains `swap::options` gives — the document's
+        // own and its vault's — and each kit's it does not hold yet, by name.
+        let swap_list = |copy: NodeId, filter: &str, search: &str| -> Vec<SwapOption> {
+            let mut out: Vec<SwapOption> = swap::options(doc, copy, filter, search)
+                .into_iter()
+                .map(|m| (SwapTarget::Here(m), name_of(m), heading(m)))
+                .collect();
+            for (k, p) in &shelves {
+                for m in ondin_core::kit::swap_offers(doc, &k.id, p, copy, filter, search) {
+                    let name = p
+                        .document()
+                        .get(m)
+                        .map(|n| n.name().to_string())
+                        .unwrap_or_default();
+                    let target = SwapTarget::Kit {
+                        kit: k.clone(),
+                        published: p.clone(),
+                        main: m,
+                    };
+                    out.push((target, name, Some(library_heading(k))));
+                }
+            }
+            out.sort_by(|a, b| a.1.cmp(&b.1));
+            out
+        };
+        let mut kit_swap: Option<KitSwap> = None;
+        let mut swap_open = false;
         // **Swap**, on a nested copy inside an outer instance (§15 D983) — every
         // main of its kind, the session's: a swap property narrows this list for
         // an instance's users, and this row is the nested copy's own, with no
@@ -1314,22 +1392,34 @@ impl OndinApp {
                 }
                 let w = ui.available_width();
                 let current = (!mixed).then_some(shows[0]).flatten();
-                let options = |search: &str| {
-                    swap::options(doc, first, "", search)
-                        .into_iter()
-                        .map(|m| (m, name_of(m), heading(m)))
-                        .collect()
-                };
-                if let Some(m) =
-                    swap_picker(ui, ("swap-pick", first), w, &shown, current, options, None)
-                {
-                    // A shown copy carries its variant values by name (4Q).
-                    let ops: Vec<ondin_core::Operation> = roots
-                        .iter()
-                        .filter_map(|r| variant::swap_carrying(doc, *r, m))
-                        .flat_map(|tx| tx.0)
-                        .collect();
-                    out.push(Transaction(ops));
+                let options = |search: &str| swap_list(first, "", search);
+                let (pick, open) =
+                    swap_picker(ui, ("swap-pick", first), w, &shown, current, options, None);
+                swap_open |= open;
+                match pick {
+                    Some(SwapTarget::Here(m)) => {
+                        // A shown copy carries its variant values by name (4Q).
+                        let ops: Vec<ondin_core::Operation> = roots
+                            .iter()
+                            .filter_map(|r| variant::swap_carrying(doc, *r, m))
+                            .flat_map(|tx| tx.0)
+                            .collect();
+                        out.push(Transaction(ops));
+                    }
+                    Some(SwapTarget::Kit {
+                        kit,
+                        published,
+                        main,
+                    }) => {
+                        kit_swap = Some(KitSwap {
+                            kit,
+                            published,
+                            main,
+                            roots: roots.to_vec(),
+                            prop: None,
+                        });
+                    }
+                    None => {}
                 }
             });
         }
@@ -1583,20 +1673,35 @@ impl OndinApp {
                         let copy = variant::counterparts(doc, first, p).first().copied();
                         let w = ui.available_width();
                         let options = |search: &str| {
-                            copy.map(|c| swap::options(doc, c, &p.filter, search))
+                            copy.map(|c| swap_list(c, &p.filter, search))
                                 .unwrap_or_default()
-                                .into_iter()
-                                .map(|m| (m, name_of(m), heading(m)))
-                                .collect()
                         };
                         let salt = ("prop-swap", first, p.id);
-                        if let Some(m) = swap_picker(ui, salt, w, &shown, current, options, None) {
-                            out.push(Transaction(variant::set_property(
-                                doc,
-                                roots,
-                                p,
-                                &PropValue::Swap(m),
-                            )));
+                        let (pick, open) = swap_picker(ui, salt, w, &shown, current, options, None);
+                        swap_open |= open;
+                        match pick {
+                            Some(SwapTarget::Here(m)) => {
+                                out.push(Transaction(variant::set_property(
+                                    doc,
+                                    roots,
+                                    p,
+                                    &PropValue::Swap(m),
+                                )));
+                            }
+                            Some(SwapTarget::Kit {
+                                kit,
+                                published,
+                                main,
+                            }) => {
+                                kit_swap = Some(KitSwap {
+                                    kit,
+                                    published,
+                                    main,
+                                    roots: roots.to_vec(),
+                                    prop: Some(p.clone()),
+                                });
+                            }
+                            None => {}
                         }
                     });
                 }
@@ -1604,6 +1709,70 @@ impl OndinApp {
         }
         for tx in out.into_iter().filter(|t| !t.0.is_empty()) {
             self.commit_edit(tx);
+        }
+        // While a swap list is open, the library's kits are read, so their mains
+        // not used here join it once loaded (§15 D1019); free when held.
+        if swap_open {
+            for k in &kits {
+                self.kit_shelf.ask(k);
+            }
+        }
+        if let Some(s) = kit_swap {
+            self.swap_to_kit(s);
+        }
+    }
+
+    /// Swap `s.roots` to a kit main this document has never used (§15 D1019):
+    /// vendor it, then the swap the row would have made — the nested copy's own,
+    /// carrying its variant values (4Q), or the property's — against the document
+    /// the vendoring leaves, all one transaction and one undo step.
+    fn swap_to_kit(&mut self, s: KitSwap) {
+        let built = ondin_core::kit::vendored(
+            &self.session.doc,
+            &mut self.session.ids,
+            &s.kit.id,
+            s.kit.version,
+            &s.published,
+            s.main,
+        );
+        let (mut ops, scratch, shown) = match built {
+            Ok(b) => b,
+            Err(ondin_core::kit::KitError::NeedsUpdate(_)) => {
+                self.session.fail(
+                    "This kit has an update to accept before that component can be swapped in"
+                        .to_string(),
+                );
+                return;
+            }
+            Err(e) => {
+                self.session
+                    .fail(format!("That component could not be swapped in ({e:?})"));
+                return;
+            }
+        };
+        let swap: Vec<ondin_core::Operation> = match &s.prop {
+            None => s
+                .roots
+                .iter()
+                .filter_map(|r| variant::swap_carrying(&scratch, *r, shown))
+                .flat_map(|tx| tx.0)
+                .collect(),
+            Some(p) => variant::set_property(&scratch, &s.roots, p, &PropValue::Swap(shown)),
+        };
+        if swap.is_empty() {
+            self.session
+                .fail("That component cannot be swapped in here".to_string());
+            return;
+        }
+        ops.extend(swap);
+        if self.commit_edit(Transaction(ops))
+            && let Some(doc) = self.session.doc.meta().id.clone()
+        {
+            // A kit used now, first in the insert picker's order (3A).
+            let order = self.library.local.kit_use.entry(doc).or_default();
+            order.retain(|k| *k != s.kit.id);
+            order.insert(0, s.kit.id.clone());
+            self.library.local.save();
         }
     }
 
@@ -2419,21 +2588,26 @@ mod tests {
         };
         // Two kits the library lost, both falling back to *Kit*: two groups,
         // not one — the grouping is by id (`arch-scribe`'s reading).
+        let here = SwapTarget::Here;
         let found = vec![
-            (a, "Icon / Arrow".to_string(), kit("k1", "Atlas")),
-            (b, "Icon / Logo".to_string(), None),
-            (c, "Icon / Quote".to_string(), kit("k2", "Marketing")),
-            (d, "Icon / Check".to_string(), kit("k1", "Atlas")),
-            (e, "Icon / Bell".to_string(), kit("k3", "Kit")),
-            (f, "Icon / Bolt".to_string(), kit("k4", "Kit")),
+            (here(a), "Icon / Arrow".to_string(), kit("k1", "Atlas")),
+            (here(b), "Icon / Logo".to_string(), None),
+            (here(c), "Icon / Quote".to_string(), kit("k2", "Marketing")),
+            (here(d), "Icon / Check".to_string(), kit("k1", "Atlas")),
+            (here(e), "Icon / Bell".to_string(), kit("k3", "Kit")),
+            (here(f), "Icon / Bolt".to_string(), kit("k4", "Kit")),
         ];
+        let id_of = |o: &SwapOption| match o.0 {
+            SwapTarget::Here(id) => id,
+            SwapTarget::Kit { main, .. } => main,
+        };
         let groups = swap_groups(found);
         let shape: Vec<(Option<String>, Vec<NodeId>)> = groups
             .iter()
             .map(|(h, g)| {
                 (
                     h.as_ref().map(|h| h.name.clone()),
-                    g.iter().map(|o| o.0).collect(),
+                    g.iter().map(id_of).collect(),
                 )
             })
             .collect();
@@ -2447,8 +2621,142 @@ mod tests {
                 (Some("Marketing".into()), vec![c]),
             ]
         );
-        let alone = swap_groups(vec![(b, "Icon / Logo".into(), None)]);
+        let alone = swap_groups(vec![(here(b), "Icon / Logo".into(), None)]);
         assert_eq!(alone.len(), 1);
         assert!(alone[0].0.is_none(), "no heading without a kit");
+    }
+
+    /// **A swap to a kit main the document has never used** (§15 D1019), both
+    /// doors: the nested copy's own *Swap* row and a swap property on its owner.
+    /// Each pick vendors the kit's *Badge* and swaps to it in **one** undo step —
+    /// the vault opens with the swap and closes with its undo — and the property's
+    /// pick reaches the copy in an instance of the owner.
+    ///
+    /// Flip, run: `swap_to_kit` building the swap against `self.session.doc`
+    /// rather than the vendored scratch fails *"the copy shows the kit's Badge"*:
+    /// the main is not in the document yet, so `swap::swap` refuses and the verb
+    /// says it cannot swap.
+    #[test]
+    fn a_swap_to_an_unused_kit_main_vendors_it_in_one_step() {
+        use crate::kits::picker::tests::{app_on, file_kit, temp_root};
+        use ondin_core::{Operation, build};
+        let ctx = egui::Context::default();
+        let dir = temp_root("swap-vendor");
+        let (kit_id, _, badge) = file_kit(&dir);
+        let mut app = app_on(&ctx, dir);
+
+        // *Row* nests an instance of *Glyph*; an instance of *Row* at the top.
+        let root = app.session.doc.root();
+        let [glyph, row] = [(); 2].map(|_| app.session.ids.mint());
+        let frame = |id, index, name: &str| Operation::CreateNode {
+            id,
+            parent: root,
+            index,
+            kind: ondin_core::NodeKind::Artboard {
+                size: ondin_core::kurbo::Size::new(24.0, 24.0),
+            },
+            transform: None,
+            name: Some(name.into()),
+        };
+        assert!(app.session.commit(Transaction(vec![
+            frame(glyph, 0, "Glyph"),
+            Operation::SetComponent {
+                id: glyph,
+                component: true
+            },
+            frame(row, 1, "Row"),
+        ])));
+        let copy_into = |app: &mut OndinApp, main: NodeId, parent: NodeId| {
+            let nodes = app.session.doc.capture_subtree(main).unwrap();
+            let (tx, made) = build::insert_subtrees(
+                &app.session.doc,
+                &mut app.session.ids,
+                &[build::Placement {
+                    nodes,
+                    parent,
+                    index: None,
+                }],
+                Default::default(),
+            );
+            assert!(app.session.commit(tx));
+            made[0]
+        };
+        let slot = copy_into(&mut app, glyph, row);
+        assert!(
+            app.session
+                .commit(Transaction(vec![Operation::SetComponent {
+                    id: row,
+                    component: true
+                }]))
+        );
+        let row_copy = copy_into(&mut app, row, root);
+        let nested = app.session.doc.get(row_copy).unwrap().children()[0];
+        assert!(
+            swap::can_swap(&app.session.doc, nested),
+            "the fixture's slot"
+        );
+
+        let k = crate::kits::index::kits_in(&app.library, app.session.doc.meta().id.as_deref())
+            .into_iter()
+            .find(|k| k.id == kit_id)
+            .expect("the kit is listed");
+        app.kit_shelf.ask(&k);
+        app.kit_shelf.settle();
+        let published = app.kit_shelf.current(&k).expect("its publish loads");
+        let shows_badge = |app: &OndinApp| {
+            let doc = &app.session.doc;
+            component::main_of(doc, nested).is_some_and(|m| {
+                doc.in_vault(m)
+                    && doc.get(m).and_then(|n| n.origin()).map(|o| o.node) == Some(badge)
+            })
+        };
+
+        // The nested copy's own row.
+        app.swap_to_kit(KitSwap {
+            kit: k.clone(),
+            published: published.clone(),
+            main: badge,
+            roots: vec![nested],
+            prop: None,
+        });
+        assert!(shows_badge(&app), "the copy shows the kit's Badge");
+        assert!(app.session.undo());
+        assert!(
+            app.session.doc.vault().is_none(),
+            "one undo takes the vault"
+        );
+        assert_eq!(component::main_of(&app.session.doc, nested), Some(glyph));
+
+        // A swap property on *Row*, bound to its slot, picked on the instance.
+        let (tx, item) = variant::define(
+            &app.session.doc,
+            &mut app.session.ids,
+            row,
+            "Icon",
+            PropKind::Swap,
+            vec![slot],
+        )
+        .unwrap();
+        assert!(app.session.commit(tx));
+        let prop = app
+            .session
+            .doc
+            .get(row)
+            .unwrap()
+            .props()
+            .iter()
+            .find(|p| p.id == item)
+            .unwrap()
+            .clone();
+        app.swap_to_kit(KitSwap {
+            kit: k,
+            published,
+            main: badge,
+            roots: vec![row_copy],
+            prop: Some(prop),
+        });
+        assert!(shows_badge(&app), "the property's pick reaches the copy");
+        assert!(app.session.undo());
+        assert!(app.session.doc.vault().is_none(), "one undo, again");
     }
 }

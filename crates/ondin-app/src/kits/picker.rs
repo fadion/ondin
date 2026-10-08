@@ -1068,7 +1068,7 @@ fn empty_note(ui: &mut egui::Ui) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::library::state::Library;
     use ondin_core::kurbo::Size;
@@ -1077,7 +1077,7 @@ mod tests {
     use ondin_core::{IdSource, NodeKind};
     use std::path::PathBuf;
 
-    fn temp_root(tag: &str) -> PathBuf {
+    pub(crate) fn temp_root(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("ondin-kits-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -1099,7 +1099,7 @@ mod tests {
 
     /// A kit *Atlas* filed in `root`, published at version 4: a set *Button* of
     /// *Small* and *Large* in a frame *Forms*, and a lone main *Badge*.
-    fn file_kit(root: &std::path::Path) -> (String, NodeId, NodeId) {
+    pub(crate) fn file_kit(root: &std::path::Path) -> (String, NodeId, NodeId) {
         let mut ids = IdSource::new(0xAC);
         let r = ids.mint();
         let mut doc = Document::new(r);
@@ -1159,7 +1159,7 @@ mod tests {
 
     /// A headless app on a library at `root`, editing a fresh filed document,
     /// with a canvas to aim at.
-    fn app_on(ctx: &egui::Context, root: PathBuf) -> OndinApp {
+    pub(crate) fn app_on(ctx: &egui::Context, root: PathBuf) -> OndinApp {
         let mut app = OndinApp::headless(ctx);
         app.prefs.base_folder = Some(root.clone());
         app.library = Library::open(root.clone());

@@ -942,6 +942,13 @@ standing trap is a doc comment's job; this file holds open work.
   whatever `booleanable_selection` refused, so it is the one control on that row that cannot say
   why; the fix is to show the `Err` the predicate already computes. *Added 2026-10-06: a live* Fix
   *since 2026-09-10 that this file never carried.*
+- **A typed edit on the Variants or Properties card is lost to a click on another control of the
+  card on the frame it blurs** (§15 D1008's *Fix*). `set_body` and `inspector_properties` keep one
+  `Option<Transaction>` a frame, so a property rename typed and then a click on another property's ×,
+  or a value chip's rename and then *Move later* in its own menu, commits only the click — read, not
+  run. D1008's `Vec` does not carry: the writes rewrite the owner's whole property list or the whole
+  `VariantSet` from the frame's document, so the second would undo the first. The repair is each edit
+  deferred as an intent computed against the live document after the draw. *Added 2026-10-08.*
 
 ## Now · Keyboard
 

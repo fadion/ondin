@@ -4619,6 +4619,97 @@ mod tests {
         );
     }
 
+    /// **A text typed into an instance's property field survives a click on the
+    /// toggle below it** (§15 D1008, the maintainer's report: *"If I update a text
+    /// property on an instance, then while still having the focus on the field, I
+    /// click on the toggle. The text field reverts to its old value."*). On the
+    /// instance: a click into *Label text*, *!* typed, and — the field still
+    /// focused — a click on *Interesante*'s switch. Both writes land: the label's
+    /// text ends in *!* and the toggle is off.
+    ///
+    /// **Flip run** — the shipped code, `own_rows` keeping one `Option` of the
+    /// rows' writes: the toggle lands and *"the typed text survived the toggle's
+    /// click"* fails, the label still *Go* — the reported symptom, and evidence the
+    /// two commits fall on one frame.
+    #[test]
+    fn a_typed_property_survives_a_click_on_the_toggle_below_it() {
+        use ondin_core::variant::{PropValue, property_state};
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut v = variants_fixture(&ctx);
+        with_a_toggle(&mut v);
+        let out = settled(&mut v.app, &ctx, v.i);
+        let painted = texts(&out);
+        let at = |s: &str| {
+            painted
+                .iter()
+                .find(|(t, _)| t == s)
+                .unwrap_or_else(|| panic!("{s} painted: {painted:?}"))
+                .1
+        };
+        let rects: Vec<egui::Rect> = fills(&out).into_iter().map(|(r, _)| r).collect();
+        let label = at("Label text");
+        let field = *rects
+            .iter()
+            .find(|r| {
+                r.height() == ui::CONTROL_H
+                    && r.left() > label.right()
+                    && (r.center().y - label.center().y).abs() < 4.0
+            })
+            .expect("the Label text field");
+        let toggle = at("Interesante");
+        let switch = *rects
+            .iter()
+            .find(|r| r.size() == ui::SWITCH_SIZE && (r.center().y - toggle.center().y).abs() < 4.0)
+            .expect("the switch's track");
+        let prop = |v: &V, name: &str| {
+            let doc = &v.app.session.doc;
+            let p = doc
+                .get(v.set)
+                .unwrap()
+                .props()
+                .iter()
+                .find(|p| p.name == name)
+                .unwrap()
+                .clone();
+            property_state(doc, v.i, &p).unwrap().0
+        };
+        let before = match prop(&v, "Label text") {
+            PropValue::Text(t) => t,
+            other => panic!("a text property: {other:?}"),
+        };
+        assert_eq!(
+            prop(&v, "Interesante"),
+            PropValue::Boolean(true),
+            "on at rest"
+        );
+        click(&mut v.app, &ctx, field.center());
+        frame(
+            &mut v.app,
+            &ctx,
+            vec![egui::Event::Key {
+                key: egui::Key::End,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Default::default(),
+            }],
+        );
+        frame(&mut v.app, &ctx, vec![egui::Event::Text("!".into())]);
+        click(&mut v.app, &ctx, switch.center());
+        settle(&mut v.app, &ctx);
+        assert_eq!(
+            prop(&v, "Interesante"),
+            PropValue::Boolean(false),
+            "the toggle's click landed"
+        );
+        assert_eq!(
+            prop(&v, "Label text"),
+            PropValue::Text(format!("{before}!")),
+            "the typed text survived the toggle's click"
+        );
+    }
+
     /// The frame after a few settling passes with `id` selected.
     fn settled(app: &mut OndinApp, ctx: &egui::Context, id: NodeId) -> egui::FullOutput {
         app.session.selection.set_one(id);

@@ -1013,7 +1013,12 @@ impl OndinApp {
         let Some(owner) = variant::owner_of_main(doc, main) else {
             return;
         };
-        let mut out: Option<Transaction> = None;
+        // **Every row's write, not the last one** (§15 D1008, the maintainer's
+        // report): a text field commits on the frame it loses focus, which is the
+        // frame a click on the switch below it lands, and one `Option` here kept
+        // the switch's write and dropped the text typed into the field. Each is
+        // committed in turn, its own undo step — the two touch different fields.
+        let mut out: Vec<Transaction> = Vec::new();
         let name_of = |id: NodeId| {
             doc.get(id)
                 .map(|n| n.name().to_string())
@@ -1046,7 +1051,7 @@ impl OndinApp {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 if row_label(ui, "Swap", mark.as_ref()) {
-                    out = mark.as_ref().map(|m| m.tx.clone());
+                    out.extend(mark.as_ref().map(|m| m.tx.clone()));
                 }
                 let w = ui.available_width();
                 let current = (!mixed).then_some(shows[0]).flatten();
@@ -1065,7 +1070,7 @@ impl OndinApp {
                         .filter_map(|r| variant::swap_carrying(doc, *r, m))
                         .flat_map(|tx| tx.0)
                         .collect();
-                    out = Some(Transaction(ops));
+                    out.push(Transaction(ops));
                 }
             });
         }
@@ -1151,7 +1156,7 @@ impl OndinApp {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 0.0;
                     if row_label(ui, &p.name, mark.as_ref()) {
-                        out = mark.as_ref().map(|m| m.tx.clone());
+                        out.extend(mark.as_ref().map(|m| m.tx.clone()));
                     }
                     let w = ui.available_width();
                     let refuse =
@@ -1178,7 +1183,7 @@ impl OndinApp {
                                 ops.extend(tx.0);
                             }
                         }
-                        out = Some(Transaction(ops));
+                        out.push(Transaction(ops));
                     }
                 });
             }
@@ -1246,7 +1251,7 @@ impl OndinApp {
                     let (resp, reset_hit) =
                         toggle_row(ui, &p.name, (!mixed).then_some(on), mark.as_ref());
                     if reset_hit {
-                        out = reset();
+                        out.extend(reset());
                     }
                     let resp = match &mark {
                         Some(m) => resp.on_hover_text(&m.tip),
@@ -1254,7 +1259,7 @@ impl OndinApp {
                     };
                     if resp.clicked() {
                         let next = if mixed { true } else { !on };
-                        out = Some(Transaction(variant::set_property(
+                        out.push(Transaction(variant::set_property(
                             doc,
                             roots,
                             p,
@@ -1266,7 +1271,7 @@ impl OndinApp {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 0.0;
                         if row_label(ui, &p.name, mark.as_ref()) {
-                            out = reset();
+                            out.extend(reset());
                         }
                         let text = match &value {
                             PropValue::Text(t) => t.clone(),
@@ -1290,7 +1295,7 @@ impl OndinApp {
                             12.0,
                             rules,
                         ) {
-                            out = Some(Transaction(variant::set_property(
+                            out.push(Transaction(variant::set_property(
                                 doc,
                                 roots,
                                 p,
@@ -1305,7 +1310,7 @@ impl OndinApp {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 0.0;
                         if row_label(ui, &p.name, mark.as_ref()) {
-                            out = reset();
+                            out.extend(reset());
                         }
                         let shown = match (&value, mixed) {
                             (_, true) => "Mixed".to_string(),
@@ -1327,7 +1332,7 @@ impl OndinApp {
                         };
                         let salt = ("prop-swap", first, p.id);
                         if let Some(m) = swap_picker(ui, salt, w, &shown, current, options, None) {
-                            out = Some(Transaction(variant::set_property(
+                            out.push(Transaction(variant::set_property(
                                 doc,
                                 roots,
                                 p,
@@ -1338,7 +1343,7 @@ impl OndinApp {
                 }
             }
         }
-        if let Some(tx) = out.filter(|t| !t.0.is_empty()) {
+        for tx in out.into_iter().filter(|t| !t.0.is_empty()) {
             self.commit_edit(tx);
         }
     }

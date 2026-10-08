@@ -8886,6 +8886,11 @@ input event (winit/egui)
   D999 a click on the canvas or the layers panel that changed the selection dropped every such field's
   typed edit, because the inspector, drawn after both, drew the new selection's cards that frame;
   `inspector_panel`'s hold (§9.2) cures it for every field at once, so no field's commit rule changed.
+  ⚠️ **And a field that is drawn and commits can still be dropped by its card** (§15 D1008): the click
+  that takes its focus is often a click on another control of the same card, on the same frame, so a
+  card that keeps one write per frame keeps the later row's. An instance's Component card commits each
+  row's write in turn (`own_rows`); the Variants and Properties cards still keep one, and there the
+  writes rewrite a whole list from the frame's document, so committing both in turn is not the repair.
   🚨 **And the gate above does not cover that class, which is a fact about its *name* rather than a
   defect in it** (§15 D841). It reports a `lost_focus()` only where `changed()` is within 160
   characters; at the picker's hex field the two are ~700 apart in two separate conditions, so a

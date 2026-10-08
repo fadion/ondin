@@ -6,11 +6,9 @@
 //! first, by last use, each open to its sets and lone mains grouped by the
 //! top-level frame they sat in; then the library's other kits (3E). Typing turns
 //! it into one flat list across every kit, best match first (3F). A click places
-//! an instance at the viewport's centre.
-//!
-//! ⚠️ **Dragging a tile onto the canvas is not built** (§15 D1014): a click
-//! places, and the drag the mockup names is the canvas's to receive, which is a
-//! gesture of its own.
+//! an instance at the viewport's centre; a tile dragged out of the panel and let
+//! go over the canvas places it centred there, at the document's top level as a
+//! click does — not into a frame under the pointer (§15 D1018).
 
 use super::index::{KitEntry, Load, kits_in};
 use crate::app::OndinApp;
@@ -92,6 +90,11 @@ struct Item {
 enum Act {
     Place(Source),
     Toggle(String),
+    /// 3G's *Open library*: the dashboard, on its *Kits* filter.
+    OpenLibrary,
+    /// A tile let go at this screen point — placed there when it is over the
+    /// canvas and not over the panel itself.
+    Drop(Source, egui::Pos2),
 }
 
 /// One kit as the picker lists it.
@@ -191,7 +194,7 @@ impl OndinApp {
         // Placed by its top-left, not pivoted on its bottom: a pivot places the
         // area by *last* frame's size, and with the height fixed the top edge is
         // known before the frame starts.
-        egui::Area::new(egui::Id::new("kit-picker"))
+        let panel = egui::Area::new(egui::Id::new("kit-picker"))
             .order(egui::Order::Foreground)
             .fixed_pos(anchor - egui::vec2(0.0, height))
             .show(ctx, |ui| {
@@ -236,7 +239,9 @@ impl OndinApp {
                                 }
                             });
                     });
-            });
+            })
+            .response
+            .rect;
 
         match act {
             Some(Act::Toggle(id)) => {
@@ -247,6 +252,16 @@ impl OndinApp {
                 }
             }
             Some(Act::Place(source)) => self.place_from_picker(ctx, source),
+            Some(Act::Drop(source, at)) => {
+                if dropped_on_canvas(at, self.canvas_rect, panel) {
+                    self.place_kit_at(ctx, source, at);
+                }
+            }
+            Some(Act::OpenLibrary) => {
+                self.kit_picker = None;
+                self.go_to_dashboard();
+                self.dash.nav = crate::panels::dashboard::Nav::Kits;
+            }
             None => {}
         }
     }
@@ -427,9 +442,16 @@ impl OndinApp {
         out
     }
 
-    /// Place an instance of `source` at the viewport's centre, as one undoable
-    /// step, and select it.
+    /// Place an instance of `source` at the viewport's centre — a tile's click
+    /// (3A).
     fn place_from_picker(&mut self, ctx: &egui::Context, source: Source) {
+        self.place_kit_at(ctx, source, self.canvas_rect.center());
+    }
+
+    /// Place an instance of `source` centred on the screen point `at`, at the
+    /// document's top level, as one undoable step, and select it — a click's
+    /// viewport centre, or where a dragged tile was let go.
+    fn place_kit_at(&mut self, ctx: &egui::Context, source: Source, at: egui::Pos2) {
         let root = self.session.doc.root();
         let built = match &source {
             Source::Kit {
@@ -485,11 +507,7 @@ impl OndinApp {
                 return;
             }
         };
-        let centre = self.to_world(
-            self.canvas_rect.center(),
-            self.canvas_rect,
-            ctx.pixels_per_point(),
-        );
+        let centre = self.to_world(at, self.canvas_rect, ctx.pixels_per_point());
         if let Some(op) = centred(&self.session.doc, &tx, instance, centre) {
             tx.0.push(op);
         }
@@ -514,6 +532,13 @@ impl OndinApp {
 fn panel_height(bottom: f32, canvas_top: f32) -> f32 {
     let floor = 2.0 * PAD + SEARCH_H + SEARCH_GAP + TILE_H + 22.0;
     H.min(bottom - canvas_top - 8.0).max(floor)
+}
+
+/// Whether a tile let go at `at` lands on the canvas: inside it, and not back
+/// on the panel it came from — a drag that ends where it started is a change
+/// of mind, not a placement.
+fn dropped_on_canvas(at: egui::Pos2, canvas: egui::Rect, panel: egui::Rect) -> bool {
+    canvas.contains(at) && !panel.contains(at)
 }
 
 /// The scrolled list's height inside a panel `height` tall — less the padding,
@@ -702,7 +727,9 @@ fn browse(
             tiles(ui, local, act);
             ui.add_space(8.0);
         }
-        empty_note(ui);
+        if empty_note(ui) {
+            *act = Some(Act::OpenLibrary);
+        }
         return;
     }
     let mut heading_drawn = false;
@@ -810,16 +837,42 @@ fn tiles(ui: &mut egui::Ui, items: &[Item], act: &mut Option<Act>) {
             let resp = ui
                 .interact(
                     cell,
-                    ui.id().with(("kit-tile", x as i32, band.top() as i32)),
-                    egui::Sense::click(),
+                    // Keyed by what the tile places, not where it sits: a list
+                    // scrolled under a drag would otherwise re-key the tile and
+                    // drop the drag.
+                    ui.id().with(match &item.source {
+                        Source::Local(id) => ("kit-tile", String::new(), *id),
+                        Source::Kit { id, top, .. } => ("kit-tile", id.clone(), *top),
+                    }),
+                    egui::Sense::click_and_drag(),
                 )
                 .on_hover_text(match &item.kit {
                     Some((kit, _)) => format!("{} · {kit}", item.name),
                     None => item.name.clone(),
                 });
-            draw_tile(ui, cell, item, resp.hovered());
+            draw_tile(ui, cell, item, resp.hovered() || resp.dragged());
             if resp.clicked() {
                 *act = Some(Act::Place(item.source.clone()));
+            }
+            // A drag carries the tile under the pointer and places where it is
+            // let go (3A) — on the canvas, which `kit_picker_ui` decides.
+            if resp.dragged()
+                && let Some(at) = ui.ctx().pointer_latest_pos()
+            {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                let ghost = egui::Rect::from_center_size(at, cell.size());
+                let layer =
+                    egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("kit-tile-drag"));
+                let painter = ui.ctx().layer_painter(layer);
+                // On the panel's ground, so the translucent well reads over
+                // the canvas as it does in the grid.
+                painter.rect_filled(ghost.expand(4.0), egui::CornerRadius::same(7), color::CARD);
+                draw_tile_on(&painter, ghost, item, true);
+            }
+            if resp.drag_stopped()
+                && let Some(at) = ui.ctx().pointer_latest_pos()
+            {
+                *act = Some(Act::Drop(item.source.clone(), at));
             }
         }
         ui.add_space(GAP_Y - 4.0);
@@ -827,7 +880,11 @@ fn tiles(ui: &mut egui::Ui, items: &[Item], act: &mut Option<Act>) {
 }
 
 fn draw_tile(ui: &egui::Ui, cell: egui::Rect, item: &Item, lit: bool) {
-    let p = ui.painter();
+    draw_tile_on(ui.painter(), cell, item, lit);
+}
+
+/// A tile on any painter — the grid's, or the drag layer's under the pointer.
+fn draw_tile_on(p: &egui::Painter, cell: egui::Rect, item: &Item, lit: bool) {
     let well = egui::Rect::from_min_size(cell.min, egui::vec2(cell.width(), TILE_H));
     p.rect_filled(well, egui::CornerRadius::same(5), color::text_a(26));
     if lit {
@@ -981,8 +1038,11 @@ fn caps(ui: &mut egui::Ui, text: &str) {
     );
 }
 
-/// No kit anywhere in the library (3G): how one comes to exist.
-fn empty_note(ui: &mut egui::Ui) {
+/// No kit anywhere in the library (3G): how one comes to exist, and *Open
+/// library* — the dashboard's *Kits* filter, where any file can be made one
+/// from its card. Answers whether *Open library* was clicked.
+fn empty_note(ui: &mut egui::Ui) -> bool {
+    let mut open = false;
     ui.vertical_centered(|ui| {
         ui.add_space(10.0);
         ui.label(theme::icon_text(icon::PACKAGE, 18.0, theme::text::DIM));
@@ -999,8 +1059,12 @@ fn empty_note(ui: &mut egui::Ui) {
             .size(11.0)
             .color(theme::text::DIM),
         );
+        ui.add_space(8.0);
+        open =
+            crate::settings::text_button(ui, "Open library", crate::ui::FieldButton::Off).clicked();
         ui.add_space(10.0);
     });
+    open
 }
 
 #[cfg(test)]
@@ -1364,6 +1428,107 @@ mod tests {
             !text.contains(&"IN YOUR LIBRARY, NOT USED HERE".to_string()),
             "{text:?}"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A tile dragged onto the canvas places there, and 3G's *Open library*
+    /// goes to the dashboard's *Kits*** (§5.3e, 3A, 3G; §15 D1018). With no kit
+    /// in the library the document's own main is a tile under *This document*;
+    /// pressed, carried out of the panel and let go over the canvas, it places an
+    /// instance centred on the point of release — driven by real pointer events.
+    /// Let go back over the panel, nothing is placed.
+    ///
+    /// Flip, run: `dropped_on_canvas` answering `canvas.contains(at)` alone fails
+    /// *"let go over the panel, nothing placed"*.
+    #[test]
+    fn a_dragged_tile_places_where_it_lands_and_open_library_goes_to_kits() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let root = temp_root("drag");
+        let mut app = app_on(&ctx, root.clone());
+        let main = app.session.ids.mint();
+        let doc_root = app.session.doc.root();
+        assert!(app.session.commit(Transaction(vec![
+            frame(main, doc_root, 0, 80.0, "Button"),
+            Operation::SetComponent {
+                id: main,
+                component: true,
+            },
+        ])));
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let frame_with = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(screen),
+                events,
+                ..Default::default()
+            };
+            ctx.run_ui(input, |_| app.kit_picker_ui(&ctx))
+                .shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::Text(t) => {
+                        Some((t.galley.text().to_string(), t.pos + t.galley.size() / 2.0))
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let find = |text: &[(String, egui::Pos2)], want: &str| {
+            text.iter()
+                .find(|(t, _)| t == want)
+                .map(|(_, at)| *at)
+                .unwrap_or_else(|| panic!("{want}: {text:?}"))
+        };
+        let button = egui::PointerButton::Primary;
+        let press = |at, pressed| egui::Event::PointerButton {
+            pos: at,
+            button,
+            pressed,
+            modifiers: Default::default(),
+        };
+        let drag = |app: &mut OndinApp, from: egui::Pos2, to: egui::Pos2| {
+            frame_with(app, vec![egui::Event::PointerMoved(from)]);
+            frame_with(app, vec![press(from, true)]);
+            for k in 1..=4 {
+                let at = from + (to - from) * (k as f32 / 4.0);
+                frame_with(app, vec![egui::Event::PointerMoved(at)]);
+            }
+            frame_with(app, vec![press(to, false)]);
+        };
+
+        app.toggle_kit_picker();
+        frame_with(&mut app, vec![]);
+        let text = frame_with(&mut app, vec![]);
+        // The name sits under the tile's well; aim at the well.
+        let tile = find(&text, "Button") - egui::vec2(0.0, 30.0);
+
+        // Back over the panel: a change of mind.
+        drag(&mut app, tile, tile + egui::vec2(60.0, 0.0));
+        assert!(
+            app.session.selection.single().is_none(),
+            "let go over the panel, nothing placed"
+        );
+
+        let to = egui::pos2(600.0, 300.0);
+        drag(&mut app, tile, to);
+        let inst = app
+            .session
+            .selection
+            .single()
+            .expect("dropped on the canvas");
+        assert_eq!(app.session.doc.get(inst).unwrap().link(), Some(main));
+        let want = app.to_world(to, app.canvas_rect, 1.0);
+        let at = app.session.preview_world_bounds(inst).unwrap().center();
+        assert!((at - want).hypot() < 1e-6, "{at:?} against {want:?}");
+
+        let text = frame_with(&mut app, vec![]);
+        let open = find(&text, "Open library");
+        frame_with(&mut app, vec![egui::Event::PointerMoved(open)]);
+        frame_with(&mut app, vec![press(open, true)]);
+        frame_with(&mut app, vec![press(open, false)]);
+        assert!(app.kit_picker.is_none(), "the picker closes");
+        assert!(app.view == crate::app::View::Dashboard);
+        assert_eq!(app.dash.nav, crate::panels::dashboard::Nav::Kits);
         let _ = std::fs::remove_dir_all(&root);
     }
 

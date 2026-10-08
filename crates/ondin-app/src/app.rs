@@ -1330,6 +1330,9 @@ pub struct OndinApp {
     /// When the kits this document uses were last looked at on disk, for the
     /// update pill (`kits::updates`, §15 D1020).
     pub(crate) kit_watch: crate::kits::updates::KitWatch,
+    /// The *Stop sharing* dialog's count of the documents using the kit, while
+    /// the dialog is open (`kits::users`, §15 D1021).
+    pub(crate) kit_users: Option<crate::kits::users::KitUsers>,
     /// Where the rail's insert button was drawn last frame — the picker hangs
     /// beside it, bottom-aligned (3A). `NOTHING` until the rail has drawn.
     pub(crate) kit_button: egui::Rect,
@@ -2331,6 +2334,7 @@ impl OndinApp {
             kit_picker: None,
             kit_shelf: Default::default(),
             kit_watch: Default::default(),
+            kit_users: None,
             kit_button: egui::Rect::NOTHING,
             publishing: None,
             kit_changes: None,

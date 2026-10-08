@@ -15,6 +15,7 @@ pub(crate) mod picker;
 pub(crate) mod publish;
 pub(crate) mod updates;
 pub(crate) mod used;
+pub(crate) mod users;
 
 use crate::app::{OndinApp, TOP_GAP, TopMenu};
 use crate::theme::{self, color, icon};
@@ -218,17 +219,16 @@ impl OndinApp {
     }
 
     /// *Stop sharing as kit*'s confirmation (§5.3e, 1D), for the document menu
-    /// and the card menu alike: what happens to the documents that use the kit,
-    /// and that making it a kit again continues from its last version.
+    /// and the card menu alike: how many documents use the kit and what happens
+    /// to them, and that making it a kit again continues from its last version.
     ///
-    /// ⚠️ **It does not say how many documents use the kit**, which 1D does
-    /// (§15 D1017): the
-    /// library scan reads each file's first 4 KB and which kits a document uses is
-    /// not in it, so a count needs either those ids in the prefix-readable `meta`
-    /// or a full load of every file — undecided (`roadmap.md`). The sentence is
-    /// written to stand without the number.
+    /// **The count is read by loading every library file on a worker** (§15
+    /// D1021, [`users`]), started when the dialog opens and dropped when it
+    /// closes, so each opening counts afresh; until it arrives the first sentence
+    /// stands without a number, as it did before there was one (§15 D1017).
     pub(crate) fn stop_sharing_dialog(&mut self, ctx: &egui::Context) {
         let Some(target) = self.unsharing_kit.clone() else {
+            self.kit_users = None;
             return;
         };
         let here = target
@@ -251,6 +251,32 @@ impl OndinApp {
             self.unsharing_kit = None;
             return;
         };
+        let kit_id = if here {
+            self.session.doc.meta().id.clone()
+        } else {
+            target
+                .as_deref()
+                .and_then(|p| self.library.entry_at(p))
+                .and_then(|e| e.meta.id.clone())
+        };
+        if let Some(id) = kit_id
+            && self.kit_users.as_ref().is_none_or(|u| u.kit != id)
+        {
+            // Every library file but the kit's own and its conflict copies,
+            // which carry its id and never vendor it.
+            let paths = self
+                .library
+                .entries
+                .iter()
+                .filter(|e| e.meta.id.as_deref() != Some(id.as_str()))
+                .map(|e| e.path.clone())
+                .collect();
+            self.kit_users = Some(users::KitUsers::start(id, paths));
+        }
+        if self.kit_users.as_mut().is_some_and(|u| u.pass()) {
+            ctx.request_repaint_after(std::time::Duration::from_millis(50));
+        }
+        let count = self.kit_users.as_ref().and_then(|u| u.count);
         let mut decision: Option<bool> = None;
         let modal = crate::settings::card("stop-sharing-kit", ctx, |ui| {
             ui.set_width(crate::ui::menu_inner_w(380.0, crate::settings::PAD));
@@ -265,13 +291,7 @@ impl OndinApp {
                     "You can make it a kit again later. Publishing then continues from v{version}."
                 )
             };
-            for line in [
-                format!(
-                    "Documents that use components from {name} keep their copies, which keep \
-                     working, and stop receiving updates."
-                ),
-                again,
-            ] {
+            for line in [users::sentence(&name, count), again] {
                 ui.label(
                     egui::RichText::new(line)
                         .size(12.0)
@@ -307,6 +327,9 @@ impl OndinApp {
             }
             Some(false) => self.unsharing_kit = None,
             None => {}
+        }
+        if self.unsharing_kit.is_none() {
+            self.kit_users = None;
         }
     }
 }

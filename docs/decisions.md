@@ -1408,8 +1408,10 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D1008** — **A text typed into an instance's property field was lost when the next click, the field still focused, landed on the switch below it: the field committed on that frame and `own_rows` kept one write per frame, so the switch's replaced it — the commit-on-blur family by a third door, after D999's and D1003 (11)'s.** The maintainer: *"If I update a text property on an instance, then while still having the focus on the field, I click on the toggle. The text field reverts to its old value."* `own_rows` collects every row's write in a `Vec` and commits each non-empty one in turn through `commit_edit`, its own undo step — safe there because each is a field write on the instance's nodes and two rows write different fields. ⚠️ The same one-`Option` shape is in `set_body` and `inspector_properties`, whose writes are whole-list rewrites (`SetProperties`, the whole `VariantSet`) built from the frame's document, so committing two in turn would have the second undo the first; the repair there is a deferred edit computed against the live document — read, not run. *(Reported by the maintainer and fixed 2026-10-08, uncommitted when recorded. **Resolved** for the Component card; the Variants and Properties cards ~~***Fix***, open in `roadmap.md` *Now · Inspector*~~ fixed by D1009. Test `a_typed_property_survives_a_click_on_the_toggle_below_it`, its flip failing *"the typed text survived the toggle's click"* with the label still *Go*, as the caller reports it. D999 amended; `architecture.md` §9.3. **Amended 2026-10-08** (D1009): both cards build each write after drawing, a set's targets followed by name through the frame's renames; the reproduction run on both)*
 - **D1009** — **The Variants and Properties cards build each write after they are drawn, against the document the frame's earlier writes left and naming its target by a key they do not change, so a rename typed and then a click on another control of the card both land — D1008's *Fix*.** The maintainer: *"And yes, take those 2 cards too."* Each write a `Deferred` (`defer`), built and committed by `OndinApp::run_edits` once the card is drawn, in the order asked, each its own undo step, an `Err` on the status line; every write of `set_body` and of `inspector_properties`/`property_row`, the `+` menu's fresh names against the live list; `combine`, `select_all`, `add_variant` and the modal unchanged. A component property named by its item id; a set's property or value, which has none, by its drawn name through `EditCx::prop_at`/`value_at`, followed through `Renames` — without it a rename and then its own row's ×, or *Move later* in its own menu, found nothing and dropped the click. ⚠️ `ValueDelete` still names its value by place; the modal re-checks the name there, so a used value renamed in its menu and then *Delete value* clicked deletes nothing, silently — read, not run. *(Asked for by the maintainer and built 2026-10-08, uncommitted when recorded. **Resolved.** Tests `a_variant_property_rename_survives_a_click_on_another_delete` and `a_component_property_rename_survives_a_click_on_another_delete`, each failing on the shipped code; `a_rename_then_its_own_rows_control_acts_on_the_renamed_thing`, both `Renames` flips biting, as the caller reports them; D1008's `Vec` argued, not run. D1008 amended; `architecture.md` §9.3; `roadmap.md` *Now · Inspector* struck)*
 - **D1010** — **Shared component libraries: a library is a document marked as one, its mains are vendored into each document that uses them with a record of where they came from, and a change reaches a consumer only when the library publishes it and the consumer accepts.** The session's proposal of 2026-10-08, accepted — *"The rest of the technical specs is fine with me."* Using a component from library L in document D copies L's main (its whole set if a variant, and every library main it nests, transitively) into D as a hidden, read-only **library main** carrying its provenance — L's `meta.id`, the main's node id in L, the published version — and D's instances link to that copy as to any main, so `link`, `propagate`, the value-compared overrides, `component::check`, swap, variants and properties are unchanged, and D opens, renders and exports with L deleted or offline: D979 (d)'s reason kept, its *document-local* lifted. Images travel as a cross-document paste carries them (D280). Vendored nodes record their **origin** in L rather than reusing L's `NodeId`s, which would collide in a paste between two documents vendoring one library. Read-only in D: *Go to main* opens L, *Detach* works, *Make local* makes the copy an ordinary main of D that no longer follows L. The maintainer's rulings: (1) a library is a document **marked** as one; (2) **publishing is explicit**, a save not a version; (3) the first version's update is an **"accept all" notice**, one undoable transaction rewriting the vendored mains, the existing main-edit passes carrying it to D's instances — a per-component **review table is the next phase**, deferred and not a non-goal. **Open**: where browsing and inserting live — the maintainer's own question, a tab in place of layers being *"flimsy to my experience"*, gone to design; and where hidden library mains live in the model, a hidden top-level container in D's tree or a separate table — owed before build step 1. Collaboration stays a non-goal (D978); libraries reach a second machine through the synced base folder (§5.11a), with no network code; team publishing is later and undesigned. *(Ruled 2026-10-08 by the maintainer; **not built**, so no code cites this number — the first build commit plants it. **Keep.** D979 (d) amended; `architecture.md` §5.3e written, §1's deferred bullet, §5.3d's document-local paragraph, invariant 4 and §12's fourth property pointed; `roadmap.md`'s parked entry moved to *Next · Shared component libraries*. **Amended 2026-10-08** (D1011): both open questions closed — a floating insert picker at the toolbar's foot, and a hidden container in the document's tree; the word is *Kit*; neither marking nor publishing undoable; a kit keeps only its last publish; *Make local* reveals the hidden copy. **Amended 2026-10-08** (D1012): step 1 built and cites this number — the hidden mains in a second parentless root, the vault, not a container in the tree; read-only by never being resolved, no rule; premise (d) answered — a kit instance's paste carries its mains and vendors them)*
-- **D1011** — **Kits: the accepted design for shared component libraries — a document marked as a *Kit* publishes its last state, a floating picker at the toolbar's foot inserts from it, and a top-bar notice accepts its updates.** `design/Kits.dc.html` (Claude Design), untracked and regenerated, its substance written into the entry and §5.3e. *Kit* for a document whose components others use, *Library* staying the dashboard's. *Make this a kit* in the document menu, safe until the first publish; *Publish N* in a kit's top bar, a dialog grouping Added / Changed / Removed, *Publish kit…* `Ctrl+Alt+P`; a **floating insert picker** from a hexagon at the vertical toolbar's foot, `Shift+I`, nothing else moving, the document's own mains first when there are no kits, *Unavailable* kits still offering their copies; a kit instance's Component card naming *Atlas kit · v8*, *v9 waiting* with no badge; a *2 kit updates* pill beside *Saved*, *Later* / *Accept all*, one undoable step; *Kits used…* with *Make all local*. The rulings: (1) **violet stays on instances**, only the kit glyph neutral — the design's premise false since D1001; (2) **only the last publish**, frozen beside the working document, neither marking nor publishing undoable, a publish date no breach of §5.11a's no-clock rule; (3) a removed component is kept local, and ***Make local* reveals the hidden vendored copy** rather than promoting an instance, at the top-right of the content bounds; (4) grouped by top-level frame; (5) the two keys, a command palette later; (6) the card's ⋯ takes the kit rows, tooltip *More*; (7) a *← <consumer>* link back; (8) no *Locate…*; (9) **hidden kit mains in a hidden container in the tree**, a closed list of tree readers to sweep; (10) a conflict copy loses to the original, 1D's count from the library scan. **Toasts stay text-only** (D981 (d), the maintainer kept it): 5B names `Ctrl+Z`, no *Undo* button, and (3)'s toast says where the main went, no *Show*. ⚠️ **Not ruled**, left to the build: a set's default variant, the instance's *Accept kit updates* scope, an unfiled document made a kit, and D1010 (d) left to the build. *(Accepted by the maintainer 2026-10-08, (2)'s clock reading, (3), (7), (9) and (10) the session's; **not built**, so no code cites this number — the first build commit plants it. **Keep.** D1010 amended; `architecture.md` §5.3e rewritten; `shortcuts.md` §13; `roadmap.md` *Next · Shared component libraries* edited down. **Amended 2026-10-08** (D1012): (9)'s container is not built — the vault is a second parentless root beside the document's, the maintainer's choice; (10)'s *every file* corrected, the scan reading a 4 KB prefix; the default variant, where the mark and the published state are stored, and D1010 (d) answered by the build)*
-- **D1012** — **Kits, build step 1: the vault is a second parentless `Root` beside the document's, not a container under it — refining D1011 (9) — with a kit origin on every vault node and on nothing else, the kit mark in the library block, the published state a whole `Document`, schema v6, vendoring and inserting in core, and a kit instance pasted into another document carrying its mains.** The maintainer chose the second root when asked, over (9) as written, on (9)'s own named cost: a container under the root needs every tree reader to skip it and none fails to compile when it forgets, so a forgotten reader draws, exports or selects a hidden main; beside the root, every walk from `doc.root()` skips it untold and a forgotten reader fails safe, while the component passes, asking by id over `Document.nodes`, see a vendored main as any other. The cost moved to the loader's reachability walk (from both roots), `kit::check` after `component::check` in `apply`, `Resolved::update` treating a vault node as deleted, `Selection::retain_existing` and `select_main` in the app, and `RenderOverrides::absorb` refusing `OpenVault`/`CloseVault`; ⚠️ a reader iterating the node map meets the vault — `swap::options` lists vendored mains flat until step 2. `Node::origin` (kit, node in the kit's published state, version), minted ids, never carried by `remap_subtree`; `Operation::OpenVault`/`CloseVault`, so an insert's undo takes the vault away; `meta.kit` a `KitMark` (version, date, note, `sharing`), read from the scan's 4 KB prefix; `Document::published`, a frozen `Document` with the kit's own ids and its kit dependencies in its vault, outside undo; v6 a number and nothing else, bumped for the v5 reader's sake. `kit::vendor`/`insert` reuse a held main by `(kit, node)` whatever its version — a node a later publish added to a held main answering `NeedsUpdate` — a transitive main keeping its own kit's origin, and 🚨 `kit::find` landing an origin naming the document's own kit on its live node, so a kit never vendors itself; `default_variant` the first in reading order, the build's ruling. A paste carries the vault mains a copy reaches (`kit::carried`, `adopt`, `insert_carrying`), D1010 (d) answered *vendor*, D979 (d)'s drop rule standing for the rest. No chrome: the app has no document menu for *Make this a kit*. *(Chosen by the maintainer 2026-10-08, the default variant and the carrying paste the build's; built the same day, uncommitted when recorded. **Keep.** Tests in `crates/ondin-core/tests/kits.rs` (17) and `a_kit_instances_main_is_never_selected`, the last driving the paste through `insert_all` and the commit; six flips biting as the caller reports them. `kit::find` and `NeedsUpdate` the record's readings of the first build, fixed before commit. D979, D1010 and D1011 amended; `architecture.md` §1, invariant 4, §5.3, §5.3d, §5.3e, §5.5, §5.11, §5.11a, §9.4 and §12; `roadmap.md` *Next · Shared component libraries*)*
+- **D1011** — **Kits: the accepted design for shared component libraries — a document marked as a *Kit* publishes its last state, a floating picker at the toolbar's foot inserts from it, and a top-bar notice accepts its updates.** `design/Kits.dc.html` (Claude Design), untracked and regenerated, its substance written into the entry and §5.3e. *Kit* for a document whose components others use, *Library* staying the dashboard's. *Make this a kit* in the document menu, safe until the first publish; *Publish N* in a kit's top bar, a dialog grouping Added / Changed / Removed, *Publish kit…* `Ctrl+Alt+P`; a **floating insert picker** from a hexagon at the vertical toolbar's foot, `Shift+I`, nothing else moving, the document's own mains first when there are no kits, *Unavailable* kits still offering their copies; a kit instance's Component card naming *Atlas kit · v8*, *v9 waiting* with no badge; a *2 kit updates* pill beside *Saved*, *Later* / *Accept all*, one undoable step; *Kits used…* with *Make all local*. The rulings: (1) **violet stays on instances**, only the kit glyph neutral — the design's premise false since D1001; (2) **only the last publish**, frozen beside the working document, neither marking nor publishing undoable, a publish date no breach of §5.11a's no-clock rule; (3) a removed component is kept local, and ***Make local* reveals the hidden vendored copy** rather than promoting an instance, at the top-right of the content bounds; (4) grouped by top-level frame; (5) the two keys, a command palette later; (6) the card's ⋯ takes the kit rows, tooltip *More*; (7) a *← <consumer>* link back; (8) no *Locate…*; (9) **hidden kit mains in a hidden container in the tree**, a closed list of tree readers to sweep; (10) a conflict copy loses to the original, 1D's count from the library scan. **Toasts stay text-only** (D981 (d), the maintainer kept it): 5B names `Ctrl+Z`, no *Undo* button, and (3)'s toast says where the main went, no *Show*. ⚠️ **Not ruled**, left to the build: a set's default variant, the instance's *Accept kit updates* scope, an unfiled document made a kit, and D1010 (d) left to the build. *(Accepted by the maintainer 2026-10-08, (2)'s clock reading, (3), (7), (9) and (10) the session's; **not built**, so no code cites this number — the first build commit plants it. **Keep.** D1010 amended; `architecture.md` §5.3e rewritten; `shortcuts.md` §13; `roadmap.md` *Next · Shared component libraries* edited down. **Amended 2026-10-08** (D1012): (9)'s container is not built — the vault is a second parentless root beside the document's, the maintainer's choice; (10)'s *every file* corrected, the scan reading a 4 KB prefix; the default variant, where the mark and the published state are stored, and D1010 (d) answered by the build. **Amended 2026-10-08** (D1013, D1014): the unfiled document answered — *Make this a kit* mints its id — and *last use* kept locally; only the instance's *Accept kit updates* scope left)*
+- **D1012** — **Kits, build step 1: the vault is a second parentless `Root` beside the document's, not a container under it — refining D1011 (9) — with a kit origin on every vault node and on nothing else, the kit mark in the library block, the published state a whole `Document`, schema v6, vendoring and inserting in core, and a kit instance pasted into another document carrying its mains.** The maintainer chose the second root when asked, over (9) as written, on (9)'s own named cost: a container under the root needs every tree reader to skip it and none fails to compile when it forgets, so a forgotten reader draws, exports or selects a hidden main; beside the root, every walk from `doc.root()` skips it untold and a forgotten reader fails safe, while the component passes, asking by id over `Document.nodes`, see a vendored main as any other. The cost moved to the loader's reachability walk (from both roots), `kit::check` after `component::check` in `apply`, `Resolved::update` treating a vault node as deleted, `Selection::retain_existing` and `select_main` in the app, and `RenderOverrides::absorb` refusing `OpenVault`/`CloseVault`; ⚠️ a reader iterating the node map meets the vault — `swap::options` lists vendored mains flat until step 2. `Node::origin` (kit, node in the kit's published state, version), minted ids, never carried by `remap_subtree`; `Operation::OpenVault`/`CloseVault`, so an insert's undo takes the vault away; `meta.kit` a `KitMark` (version, date, note, `sharing`), read from the scan's 4 KB prefix; `Document::published`, a frozen `Document` with the kit's own ids and its kit dependencies in its vault, outside undo; v6 a number and nothing else, bumped for the v5 reader's sake. `kit::vendor`/`insert` reuse a held main by `(kit, node)` whatever its version — a node a later publish added to a held main answering `NeedsUpdate` — a transitive main keeping its own kit's origin, and 🚨 `kit::find` landing an origin naming the document's own kit on its live node, so a kit never vendors itself; `default_variant` the first in reading order, the build's ruling. A paste carries the vault mains a copy reaches (`kit::carried`, `adopt`, `insert_carrying`), D1010 (d) answered *vendor*, D979 (d)'s drop rule standing for the rest. No chrome: the app has no document menu for *Make this a kit*. *(Chosen by the maintainer 2026-10-08, the default variant and the carrying paste the build's; built the same day, uncommitted when recorded. **Keep.** Tests in `crates/ondin-core/tests/kits.rs` (17) and `a_kit_instances_main_is_never_selected`, the last driving the paste through `insert_all` and the commit; six flips biting as the caller reports them. `kit::find` and `NeedsUpdate` the record's readings of the first build, fixed before commit. D979, D1010 and D1011 amended; `architecture.md` §1, invariant 4, §5.3, §5.3d, §5.3e, §5.5, §5.11, §5.11a, §9.4 and §12; `roadmap.md` *Next · Shared component libraries*. **Amended 2026-10-08** (D1013, D1014): the document menu and the mark's chrome built, an unfiled document's answer the verb minting its id; `Origin` and `Published` gain the kit's `name`, additive within v6)*
+- **D1013** — **Kits: the document's name becomes the head of a document menu holding only rows with a verb behind them — *Make this a kit* or *Stop sharing as kit*, then *Show in library* — with a neutral *Kit* tag after the name while it is shared; and an unfiled document made a kit is given its identity by the verb.** `TopMenu::Document`, `OndinApp::document_menu` (`kits/mod.rs`), 232 wide, hanging from the head's left edge. The mockup's *Rename*, *Duplicate*, *Version history*, *Kits used…* and *Export…* left out — no editor verb behind them yet, and a row that does nothing is worse than a short menu; *Publish kit…* joins with publishing. The head pulled left by `ui::HEAD_PAD` (now `pub(crate)`) so the name stays D962's 12 from the mark. `make_kit` writes `meta.kit` (fresh, or turned back to sharing with its version kept), **mints `meta.id` when there is none** — D1011's open question of the unfiled document (D1010 (a)) answered: a pre-library file has a path and only the verb gives it an id, where an untitled one would have been minted one by filing — and saves; not undoable (D1011 (2)). `stop_sharing_kit` keeps the version and saves, ⚠️ **with no confirmation**, 1D's count being undecided (step 4). The tag 20 tall on `text_a(20)`, `theme::icon::PACKAGE` U+E390 vouched for by `HEXAGON`'s neighbour in the mockup's stylesheet. ⚠️ `make_kit`'s status line overwrote a failed save's, so a mark that did not reach the disk read as made — fixed in `cac778b`, `save_file` answering whether it wrote and both verbs returning on `false`. *(Built 2026-10-08, `d48cee6`, the row list and the mint the session's. **Keep**; the status line **Resolved** (`cac778b`). Tests `the_document_menu_makes_a_kit_the_library_can_find`, its flip — no mint — failing only the pre-library half, and `a_kit_whose_save_failed_says_the_save_failed`, as the caller reports them. D1011 and D1012 amended; `architecture.md` §5.3e, §9.4 and §9.5; `roadmap.md` *Next · Shared component libraries*)*
+- **D1014** — **Kits, build step 2 less swap: the floating insert picker — a hexagon at the tool rail's foot and `Shift+I`, browsing the kits used here by last use above the library's others, a flat search reaching through sets' variants, a click or `Enter` placing an instance centred in the viewport as one undo step — and the kit's name recorded on a vault main's top so a kit the library cannot find can still be named.** `kits/picker.rs`, an `Area` pivoted `LEFT_BOTTOM` 8 right of the button (3A), 340 wide; `Escape` or the button closes it. Used kits are the distinct `origin.kit`s of the vault's children, first opening with the picker; a header reads `v8 · 24`, `N components`, *not published*, *Unreadable* or *Unavailable* (its vault copies still inserting, as local); components grouped by `Published::group`. With no kits the document's own mains as tiles (3G); otherwise they are only in search, as *This document*. Search scores start, contains, then a set's variants' names and values, forty at most. A kit component through `kit::insert`, a local one through `build::insert_subtrees`, then one `SetTransform` centring the box — a frame's from its size, else `Resolved::rebuild` of a scratch with the transaction applied, the vault never resolved. **Last use is local** (D1011's open question): `LocalIndex::kit_use`, per document, swept for documents only. `kits_in` lists from the scan's `meta.kit`, **a conflict copy losing in either scan order**; `KitShelf` loads every kit whole on an `ondin-kits` worker and renders ≤200×104 tile pictures there (D820's shape), keyed by the scanned mtime. `Origin::name` and `Published::name`, additive within unreleased v6; `vendor` takes `&Published`. Three defects read in it, all fixed in `cac778b`: `Escape` is now a rung of `OndinApp::escape`, after the colour picker's; the search field takes the keyboard once, on opening, so the keymap is not silenced; `vendor` names a top only where its origin is this kit's. ⚠️ The field's own `Escape` arm assumes the keymap never sees a press the field held, which D317 contradicts — read, not run, it would close a second thing behind a dropdown or the colour picker. **Swap across kits in part** (`051a3f2`): the swap picker lists own mains, then one group per kit with `v{origin.version}` or *unavailable* (`kit_heading`); a swap to a kit main not yet vendored is not offered; ⚠️ groups keyed by name, not id — read, not run. Not built: a tile's drag, *Go to main in <kit>*, 3G's *Open library*. *(Built 2026-10-08, `2fa3039`, the session's calls throughout. **Keep**; the three defects **Resolved** (`cac778b`); the field's `Escape` arm and the swap groups' key ***Fix*** or measure. Tests in `kits/picker.rs`, `panels/variants.rs` and `tests/kits.rs`, each flip biting but the listing's first, which is why it runs both orders, as the caller reports them. D1011 and D1012 amended; `architecture.md` §5.3e; `shortcuts.md` §13 and its ledger; `roadmap.md` *Next · Shared component libraries*)*
 
 ---
 
@@ -21451,8 +21453,9 @@ answers *Make this a kit* — D1010's premise (a), its other half; where 3E's *l
 premise (d), a paste of an instance of a vendored main into a third document. ⚠️ **Two of those answered
 by D1012's build**: the default variant is the first in reading order (`kit::default_variant`), and the
 paste carries and vendors the kit mains; the mark and the published state's storage, which (2) left the
-build, are answered there too. The *Accept kit updates* scope, the unfiled document and *last use* stay
-open.
+build, are answered there too. The *Accept kit updates* scope ~~, the unfiled document and *last use*~~
+stays open. ⚠️ **Two more answered by step 2's chrome**: an unfiled document made a kit is given its
+`meta.id` by the verb (D1013), and *last use* is kept per machine, per document (D1014).
 
 *(Designed by Claude Design and accepted by the maintainer 2026-10-08; rulings (1), (2), (4)–(6) and (8)
 the maintainer's, (2)'s clock reading, (3)'s answer and placement, (7), (9) and (10) the session's,
@@ -21460,7 +21463,9 @@ accepted; **not built**, record-only, no code cites this number, and the first b
 citation. **Keep.** D1010 amended in body and index; `architecture.md` §5.3e rewritten; `shortcuts.md` §13
 added; `roadmap.md` *Next · Shared component libraries* edited down to the build and what is open.
 **Amended 2026-10-08** (D1012): step 1 built, and this number is cited from `crates/` since — (9)
-refined to a second root, (10)'s scan premise corrected, and three of the build's questions answered)*
+refined to a second root, (10)'s scan premise corrected, and three of the build's questions answered.
+**Amended 2026-10-08** (D1013, D1014): the document menu, the tag and the insert picker built; the
+unfiled document and *last use* answered; (5)'s `Shift+I` bound)*
 
 **D1012 — Kits, build step 1: the vault is a second parentless `Root` beside the document's, not a
 container under it, which refines D1011 (9); provenance per node; the kit mark in the library block and
@@ -21496,7 +21501,8 @@ card's main-name button — refuses a vault node with *"Its main is in a kit, no
 count is pinned against `changes_ink`'s; no gesture builds a root. ⚠️ **The safe direction has an
 exception, and it is a shape to suspect**: a reader that iterates the whole node map rather than walking
 from the root meets the vault. `swap::options` is one, and lists vendored mains in one flat list among the
-document's own — interim until step 2's per-kit groups.
+document's own — interim until step 2's per-kit groups, which the swap picker draws since D1014's
+`051a3f2`, grouping what `swap::options` still answers flat.
 
 **`kit::check`'s rules** (`VaultRule`, carried by `OpError::Vault` and the loader's integrity message, as
 `LinkRule` is): the vault is a parentless `Root` that is not the document's root (`Shape`); every node
@@ -21511,7 +21517,8 @@ transactions writing its fields. Read-only is the app's: a vault node is never r
 drawn, picked or selected, and no edit reaches it except one a kit verb builds.
 
 **Provenance is per node**: `Node::origin: Option<kit::Origin { kit, node, version }>`, `node` an id in
-the kit's published document. Each vendored node is minted its own id (§5.2), D1010's trap. Per node
+the kit's published document — and a fourth field since D1014, `name`, the kit's name on a vault main's
+top node only, a label outside `Origin::key`. Each vendored node is minted its own id (§5.2), D1010's trap. Per node
 rather than per main so that any node answers by itself — an update matches by `(kit, node)` across a
 re-publish. 🚨 **`remap_subtree` never carries `origin`**, the one field it drops, and it is the one
 chokepoint every copy goes through — a duplicate, an instance, a paste. The kit verbs mint through it
@@ -21548,7 +21555,7 @@ undo as `meta` is and for its reason, behind an `Arc` because `apply` clones the
 and this changes only at a publish. `kit::Published { doc, groups }`: its root holds every published main
 and set **with the kit's own ids**, so `Origin::node` names the same main across publishes, which is how an
 update will match; its vault holds the mains *of other kits* those reach, transitively; `groups` holds
-each top's top-level frame name (D1011 (4)). **Being a `Document`, it is held by the loader,
+each top's top-level frame name (D1011 (4)); and since D1014 `name`, the kit's `meta.name` at the freeze. **Being a `Document`, it is held by the loader,
 `component::check` and `kit::check` with no second rule set.** It is not derived state under invariant 4
 — D1011 (2)'s reading, which asked the build to say so where it stores it, and `Document`'s field doc
 does: it is the tree as it was at the publish, which the working document no longer holds once edited. On disk it is `published: { groups: [{top, frame}], document: <a
@@ -21606,7 +21613,9 @@ everything not carried**, an ordinary main of another document among it.
 **Not built in step 1.** The app has **no document menu** — the top bar draws the project crumb and the
 title as a plain label with no caret (`document_crumb`) — so 1A's *Make this a kit* needs that menu built
 first, and there is no chrome for the mark at all. How an **unfiled** document answers *Make this a kit*
-is undecided. The picker, *Go to main in <kit>*, updates and publishing are steps 2–4.
+is undecided. The picker, *Go to main in <kit>*, updates and publishing are steps 2–4. ⚠️ **Since
+built**: the document menu, the mark's chrome and the unfiled document's answer are D1013, and the
+picker D1014; *Go to main in <kit>*, swap across kits, updates and publishing are still to come.
 
 *(The second root chosen by the maintainer 2026-10-08 over D1011 (9) as written; the default variant and
 the carrying paste the build's. Built the same day, uncommitted when recorded. **Keep.** Tests in
@@ -21616,7 +21625,246 @@ six flips — `in_vault` in `Resolved::update`, `remap_subtree` carrying `origin
 caller reports them. **Amended before commit, the same day**: `kit::find`, so a kit never vendors itself,
 and `KitError::NeedsUpdate`, the record's two readings of the first build, each with its test. D979, D1010 and D1011 amended;
 `architecture.md` §1, invariant 4, §5.3, §5.3d, §5.3e, §5.5, §5.11, §5.11a, §9.4 and §12;
-`roadmap.md` *Next · Shared component libraries* edited down)*
+`roadmap.md` *Next · Shared component libraries* edited down. **Amended 2026-10-08** (D1013, D1014):
+the chrome this paragraph's *Not built* named, and `Origin::name` and `Published::name`)*
+
+**D1013 — Kits: the document's name becomes the head of a document menu that holds only rows with a verb
+behind them, a neutral *Kit* tag follows the name while the document is shared, and an unfiled document
+made a kit is given its identity by the verb. *Built 2026-10-08 (`d48cee6`); the row list and the mint
+the session's.*** D1012 left the kit mark with no chrome because there was nowhere to put it: the top bar
+drew the project crumb and the title as a plain label (`document_crumb`), so 1A's *Make this a kit* had no
+menu to be a row of. The title is now the head of one — `TopMenu::Document`, drawn by
+`OndinApp::document_menu` (`kits/mod.rs`) through `ui::menu_head` and `OndinApp::dropdown`, 232 wide as
+the mockup's 1A has it, hanging `MENU_GAP` below the head from its left edge, and closing as every top-bar
+dropdown does.
+
+**Only rows with a verb behind them.** *Make this a kit* — or, on a kit that is sharing, *Stop sharing as
+kit* — then a rule and *Show in library*, which goes to the dashboard. The mockup's *Rename*,
+*Duplicate*, *Version history*, *Kits used…* and *Export…* are **left out**: no editor verb exists behind
+any of them yet, and a row that does nothing is worse than a short menu. *Publish kit…* joins with
+publishing (step 4). The session's call; each row joins when its verb exists, and a reader adding a row
+for symmetry with the mockup is adding a dead one.
+
+🚨 **The name must not move, and the head's own padding would move it.** A head pads its content
+`ui::HEAD_PAD` (5) each side to match an icon button's optical box, so a name drawn as a head sits 5
+further from the brand mark than D962's 12 — `the_mark_and_the_name_are_as_far_apart_on_both_screens`
+failed at 17 against 12, as the caller reports it. The head starts `HEAD_PAD` to the left instead
+(`add_space(-HEAD_PAD)`, the constant made `pub(crate)`), its hover ground reaching back into the gap.
+So the menu, hung from the head's edge, starts 5 left of the name's first letter. *Do not* "align" it by
+dropping the negative space — that is the 17 again.
+
+***Make this a kit*** (`make_kit`) writes `meta.kit` — a fresh `KitMark`, or one that stopped sharing
+turned back on with its version kept, so a re-made kit continues from its last publish (1D) — marks the
+session unsaved, and saves (`save_file(false)`, no version pinned). Not undoable (D1011 (2)). **It mints
+`meta.id` when the document has none**, which answers the question D1011 left the build — how an
+**unfiled** document answers the verb, D1010's premise (a), its other half: a kit is found by its id
+through the library scan, so a mark on a document with none would be a kit nobody could ever find. The
+id is minted as filing mints one (`library::ids::mint`); the roadmap's unruled proposal, the row offered
+disabled with a reason, was not taken. ⚠️ **Two kinds of document have no id, and the mint matters to
+only one**: an **untitled** one is filed by the save, and `library::store::file_document` would have
+minted for it anyway (it keeps an id already there); a **pre-library file** already has a path, the save
+writes it in place, and nothing but `make_kit` gives it an identity. That is why the test makes both: the
+flip that drops the mint fails only the pre-library half — *"a pre-library kit is found by its id"* — the
+untitled half staying green because filing minted, as the caller reports it.
+
+***Stop sharing as kit*** (`stop_sharing_kit`) sets `sharing` false, keeps the version, and saves. ⚠️
+**There is no confirmation yet.** 1D's dialog says how many documents use the kit, and nothing can count
+them — the scan reads each file's first 4 KB, and which kits a document uses is not in it (D1011 (10)'s
+correction) — so the dialog comes with whatever step 4 decides about the count. The verb loses nothing
+meanwhile: *Make this a kit* undoes it exactly, version and all.
+
+**The *Kit* tag** (1C), `kit_tag`, follows the name while the kit is sharing: a 20-tall chip on
+`text_a(20)` (8%), radius 5, the package glyph at 12 and *Kit* at 10.5 in `text_a(191)`, its tooltip
+saying other documents can use what it publishes. Neutral, by D1011 (1). The glyph is new,
+`theme::icon::PACKAGE` = U+E390, Phosphor's `package`, read off the mockup's own stylesheet beside
+`ph-hexagon` = U+E2AE — which is the existing `HEXAGON`, and so vouches for the mapping — and listed in
+`icon::ALL`, so the existing atlas test covers it.
+
+⚠️ **A failed save is reported as a made kit** — read, not run. `save_file` reports a failure by
+`session.fail` and returns nothing, and `make_kit` writes its own `session.info` straight after; the status
+is one slot, so *"Save failed: …"*, or `file_untitled`'s *"Could not create the file: …"*, is replaced by
+*"… is a kit — nothing is shared until you publish it"* in the same call. The mark is in memory and the
+session dirty, so the next save writes it; what is wrong is what the user is told. `stop_sharing_kit` has
+the same shape. ⚠️ **And a pre-library kit has no `meta.name`**: filing names a document and an in-place
+save does not, so the kit publishes with no name and D1014's *Unavailable* heading falls back to *Kit not
+found* for it. **Fixed the same day (`cac778b`)**: `OndinApp::save_file` answers whether it wrote, and
+both verbs return on `false`, leaving the failure's status standing — the mark stays in the document and
+goes out with the next save that works (`a_kit_whose_save_failed_says_the_save_failed`, a directory where
+the file should be; the flip that ignores the answer fails on the status, which read *"Blocked is a kit —
+nothing is shared until you publish it"*, as the caller reports it). The nameless pre-library kit is
+unchanged and is not a defect of this verb.
+
+*(Built 2026-10-08, `d48cee6`; the row list, the head's offset and the mint the session's. **Keep**; the
+status line ~~***Fix***~~ **Resolved** in `cac778b`. Tests
+`app::library_wiring_tests::the_document_menu_makes_a_kit_the_library_can_find` — the row painted, the tag
+absent and then present, the scan finding the kit by id with its mark, *Stop sharing* and a re-make
+keeping version 3, and a pre-library file given an id — its flip as above, its doc corrected to say
+`make_kit` mints for both documents; and `a_kit_whose_save_failed_says_the_save_failed`. D1011 and D1012
+amended; `architecture.md` §5.3e, §9.4's `TopMenu` and §9.5's breadcrumb; `roadmap.md` *Next · Shared
+component libraries*)*
+
+**D1014 — Kits, build step 2 less swap: the floating insert picker — a hexagon at the tool rail's foot
+and `Shift+I`, the kits this document uses by last use above the library's others, a flat search that
+reaches through a set's variants, and a click or `Enter` placing an instance centred in the viewport as
+one undo step — with a kit's name now recorded on its vendored mains so a kit the library cannot find can
+still be named. *Built 2026-10-08 (`2fa3039`), the session's calls throughout; its three defects fixed
+the same day (`cac778b`) and swap across kits built in part (`051a3f2`); a tile's drag and *Go to main in
+<kit>* not built.*** D1011 ruled where inserting lives — a panel at the
+foot of the vertical toolbar that nothing else closes or moves — and this is it, `kits/picker.rs`, with
+`kits/index.rs` beside it for what the picker reads.
+
+**The door.** A hexagon `icon_button` at the **foot of the tool rail** — a bottom-up layout after the
+tools — lit while the picker is open, tooltip *Insert components (Shift+I)*; and `Shift+I`,
+`Action::InsertPicker` (`plain && m.shift && I`), §1's tool letters being read with no Shift. Both call
+`toggle_kit_picker`; the picker is `OndinApp::kit_picker`, a fresh `Picker` each time it opens. It is an
+`egui::Area` drawn after the inspector and the colour picker, and not in present mode, pivoted
+`LEFT_BOTTOM` at the button's right edge plus 8 and its bottom (3A) — with the toolbar hidden, 8 in from
+the canvas's bottom-left — 340 wide, padding 12, radius 8, shadow 0/20/50, the mockup's numbers, scrolling
+past 460. `Escape` or the button closes it; the search field takes the keyboard once, when the picker
+opens (`Picker::focus`, set by `toggle_kit_picker` — it read *"whenever nothing else holds it"* here
+until `cac778b`, defect (b) below). Opening the picker rescans the library (`library.refresh()`, the
+4 KB prefixes), so a kit published since the last scan is listed at once.
+
+**Browsing** (3E). First the kits this document uses — the distinct `origin.kit`s of its vault's
+children, so a kit reached only through another kit's main counts as used — in last-use order, those with
+no recorded use after them in vault order; then the library's other kits, by name, under *In your
+library, not used here*. The first used kit opens with the picker; a header toggles. An open kit shows
+its components grouped by the top-level frame they sat in (`Published::group`, else under the kit's name,
+D1011 (4)), three to a row, each tile a 52-tall well holding the component's picture, then a set glyph
+(`SQUARES_FOUR`) or the filled hexagon, and the name. A header's right side reads `v{version} · {count}`
+for a used kit and `{count} components` for an unused one, `v{version}` while it loads; *not published*,
+with 3H's note, for a kit that never published; *Unreadable* for one whose file would not load; and
+*Unavailable*, with 3I's note, for a kit this document uses that the library does not have — its vault
+copies listed as tiles, which still insert, as local mains. **With no kits at all** (3G) the document's
+own mains and sets are tiles under *This document*, then *No kits in your library* naming *Make this a
+kit*; with kits, a document's own mains appear only in search, labelled *This document* — the session's
+reading of §5.3e's *"with no kits the picker shows D's own mains first"*. 3G's *Open library* is not
+built.
+
+**Search** (3F): once the field holds text, one flat list over the document's own mains and every kit's
+components, used or not — a kit still loading has nothing in it yet. A name starting with the query
+scores 0, one holding it 1, a match through a set's variants' names or values 2 — *primary* finds
+*Button* — then by name, lowercased (`(score, name.to_lowercase())`; a case-sensitive comparison until
+`cac778b`); forty at most; the kit's name
+on the right, `· not used` after one this document does not use. ↑ and ↓ move the highlight, `Enter`
+places it.
+
+**Placing** (`place_from_picker`). A kit component through `kit::insert`, a set placing its default
+variant (D1012); a local one — a main, a set's default variant, or a vault copy of an unavailable kit —
+through `build::insert_subtrees`, which makes a copy of a main an instance (D979 (e)). Either lands as
+the root's last child at its main's own transform, and one `SetTransform` appended to the same
+transaction centres the instance's box on the viewport's centre (`centred`): a frame's box from its
+size, anything else measured by `Resolved::rebuild` of a scratch document with the transaction applied.
+🚨 **The scratch is not a detour.** The vault is never resolved (D1012), so the main cannot be measured
+where it is, and a group's box is its children's; the copy, under the root, is the one place the box is
+known whatever the main is. One transaction and one undo — the vault it opened included — and the
+instance selected. `KitError::NeedsUpdate` reads *This kit has an update to accept before that component
+can be placed*.
+
+**Last use is kept locally**, answering D1011's open question: `library::cache::LocalIndex::kit_use`,
+document id to kit ids most recent first, written on each kit placement in a document with an id, swept
+by `retain_known` for documents only — a deleted kit in a live document's order is harmless, the picker
+ordering only the kits it finds. Local for `opened`'s reason: the kit last used is what this machine's
+hand did, and a synced field would carry another laptop's habits in.
+
+**Loading** (`kits/index.rs`). `kits_in` lists the library's kits from the scan's `meta.kit` — sharing,
+with an id, not the document being edited — at no cost beyond the scan. **A conflict copy loses whichever
+order the scan meets them in** (D1011 (10); `Library::conflict`, D375), and if every claimant is one the
+first stands rather than the kit vanishing. ⚠️ **The test runs both orders, and the reason is a flip that
+did not bite**: the scan meets the copy first (a space sorts before a dot), so a listing where the *last*
+claimant won passed the scan's order alone, and failed only once the entries were also reversed — as the
+caller reports it. What a kit published sits at the end of its file, so `KitShelf` loads each kit's whole
+file on a worker thread (`ondin-kits`) and renders a picture per published top there with
+`ondin_export::png::raster_of`, at most 200×104 pixels and 4×, the textures uploaded on first draw — the
+cover worker's shape and its reason (D820). ⚠️ **Every kit in the library is loaded while the picker is
+open**, not only the open ones: an unused kit's header carries its count and search runs through it.
+The shelf is keyed by kit id and the file's modification time *as the scan read it*, so a kit
+re-published while this document is open is read again once the library has scanned it again — which,
+since `cac778b`, opening the picker does; nothing else invalidates a picture.
+
+**The schema, additive within v6**, which no release has written: `kit::Origin::name: Option<String>`,
+the kit's name, written by `vendor` **on a vault main's top node only** — from `Published::name`, the
+kit's `meta.name` at the freeze, or kept as it arrived on a third kit's main — and not part of
+`Origin::key`, being a label. `OriginDto::name` and `PublishedDto::name` are skipped when absent. The
+reason is 3I: a kit the library cannot find has to be named, its id names nothing a person recognises,
+and the library cannot say, being exactly what lost it. `kit::vendor` now takes the `&Published` rather
+than its document.
+
+⚠️ **Three defects, each read and not run.** (a) **`Escape` is read outside §9.4's doors.**
+`kit_picker_ui` asks `key_pressed(Escape)` for itself, so a press that the escape ladder spends on the
+colour picker or a cancelled gesture, or that `dispatch` spends on an open top-bar dropdown, closes the
+kit picker too — one press closing two floating things, which D527's rule exists to stop. (b) **The
+search field silences the keymap.** `input::resolve` answers nothing while any widget is focused, and the
+field takes the focus whenever nothing else holds it, so while the picker is open the editor's keys — the
+tool letters, `Delete`, `Ctrl+Z` straight after a placement — reach the field and not the editor, and
+`Shift+I` types an *I* into the search rather than closing it; its tooltip's chord only opens. (c) **A
+third kit's main can be labelled with the wrong kit.** `vendor` writes its own kit's name wherever the
+top's origin arrived with none, without asking whether that origin is this kit's — so a main from a third
+kit that published with no name (a pre-library kit, D1013) is named, in 3I, after the kit it came
+through. `a_transitive_main_keeps_the_kit_it_came_from` cannot see it: its third kit has a name. Smaller,
+and noted rather than ruled: the picker outlives a document switch with the last document's open kits
+and its first-open seeding spent, and an unused kit of one component reads *1 components*.
+
+**All three fixed the same day (`cac778b`), each with a test and a flip, and the two small ones with
+them.** (a) The picker no longer reads `Escape`: `OndinApp::escape` (now `pub(crate)`) has a rung of its
+own, `self.kit_picker.take()`, straight after the colour picker's, so the ladder's *one press, one thing*
+holds for it as for the rest. A press inside the search field is closed by the field — `search_field`
+answers `(changed, escaped)`, `escaped` being `edit.lost_focus()` with `Escape` pressed, marked
+`valve-gate-not-a-commit` because `valve_condition_gate` reported it: it closes the picker and stores
+nothing. (b) The field takes the keyboard once, on opening, so a click elsewhere or a placement gives it
+back and the keymap with it; `Shift+I` closes the picker only while the field does not hold the keyboard
+— inside it the chord is a capital *I* — which `toggle_kit_picker`'s doc says, `Escape` and the button
+being §5.3e's ways out (`the_picker_gives_the_keyboard_back_and_escape_closes_one_thing`; the flip that
+re-requests focus whenever none is held fails *"the keyboard is given back"*). (c) `vendor` writes the
+name only where the top's origin is this kit's (`o.kit == kit`); `a_third_kits_main_keeps_its_own_name_or_none`
+in `tests/kits.rs`, the guard removed naming the badge's copy *Atlas*. And `reset_transient_state` clears
+the picker, and a one-component kit reads *1 component* — all as the caller reports them.
+
+⚠️ **The field's `Escape` arm rests on a premise this record contradicts — read, not run.** It exists on
+the ground that the keymap never sees a key the field held; D317 (and `input::resolve`'s own doc) says
+the opposite — egui clears focus on `Escape` in `begin_pass`, so the press reaches `resolve` with the
+focus already gone, which is how D821's `chrome_focus` rung ever fires. If D317 holds, the arm is
+redundant on its own — the ladder, which runs before `kit_picker_ui`, has already closed the picker — and
+it closes a **second** thing where the press was spent elsewhere first: with a top-bar dropdown open, or
+the colour picker, the press closes that, and then the field, still reporting `lost_focus`, closes the
+picker too. That is (a) again by a narrower door. The test does not reach it: its `Escape` is sent with
+the field already let go. ***Fix*** **or measure** — send `Escape` with the field focused and a dropdown
+open, and if both close, drop the arm.
+
+**Swap across kits, in part (`051a3f2`).** The swap picker (`panels/variants.rs`'s `swap_picker`,
+`swap_groups`, `swap_heading`; `KitHeading`, `SwapOption`) lists the document's own mains first —
+headed *This document* only when a kit group follows — then one group per kit, alphabetically, each
+headed with the package glyph, the kit's name and `v{origin.version}` (the version this document holds),
+or *unavailable* where `kits_in` does not find the kit; `kits::index::kit_heading` names it, falling back
+to `Origin::name` and then to *Kit*. D983's name-prefix filter and the search run across every group,
+unchanged. **A swap to a kit main this document has never used is not offered** — it would have to
+vendor at the swap — and stays open. Tests `the_swap_picker_lists_own_mains_first_then_each_kit` and
+`a_vendored_main_names_its_kit_even_when_the_kit_is_gone` (no name written, the heading falling back to
+*Kit*), as the caller reports them. ⚠️ **`swap_groups` groups by the heading's *name*, not the kit's id**
+— read, not run: two kits sharing a name, or two unavailable kits that both fell back to *Kit*, become
+one group under the first one's status.
+
+**A doc comment was put on the wrong item while this was built, and caught before commit.** Inserting
+`SwapOption` anchored on `fn row_label` landed the new items between `row_label` and its three-line doc —
+`CLAUDE.md`'s anchor trap — found because clippy's type-complexity warning sent the session to read the
+spot, not by any check aimed at it; repaired before `051a3f2`.
+
+**Not built**: dragging a tile onto the canvas — a click places, and the drag is the canvas's to
+receive, a gesture of its own; ~~**swap across kits** — the swap picker grouped per kit, and a swap to a
+kit main not yet vendored — in progress next, `swap::options` still listing vendored mains flat~~ the
+grouping built (`051a3f2`, above), and a swap to a kit main not yet vendored still not; *Go to main in
+<kit>*; 3G's *Open library*.
+
+*(Built 2026-10-08, `2fa3039`; every call above the session's. **Keep**; (a), (b) and (c)
+~~***Fix***~~ **Resolved** in `cac778b`; the field's `Escape` arm ***Fix*** or measure; the swap groups'
+name key ***Fix***, read not run. Tests in `kits/picker.rs`: `the_library_lists_each_kit_once_and_not_the_document_itself`, its flip
+as above; `a_click_places_a_kit_component_at_the_viewport_centre`, the centring dropped failing at
+`(40, 15)`, the main's own place; `browsing_moves_a_kit_above_the_fold_once_it_is_used`;
+`search_finds_a_set_by_its_variant_and_enter_places_it`, a set's variant values left out of its aliases
+failing on *"No components match"* — as the caller reports them; and the fixes' and the swap grouping's
+tests above. `crates/ondin-core/tests/kits.rs` pins the name on the top only, a third kit's name carried
+through the second, and a third kit's own name or none. D1011 and D1012 amended; `architecture.md` §5.3e;
+`shortcuts.md` §13 and its ledger; `roadmap.md` *Next · Shared component libraries*)*
 
 **D980 — The five item lists carry ids, in a wrapper beside each item rather than a field inside it,
 and an instance's items follow its main's item by item. *Decided 2026-10-04 by the maintainer — per

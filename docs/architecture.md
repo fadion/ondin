@@ -2858,7 +2858,7 @@ amendment); ~~exposing nested properties, later
 by the mockup~~ — built 2026-10-06 from the mockup's 4K–4S (§15 D988), with the binding line a nested
 instance in a main had never drawn (§15 D989), unlooked-at in the GUI; and a verb that un-makes a component, which would owe a detach.
 
-### 5.3e Kits — shared component libraries (designed 2026-10-08; step 1 built; §15 D1010–D1012)
+### 5.3e Kits — shared component libraries (designed 2026-10-08; steps 1 and 2 built, swap in part; §15 D1010–D1014)
 
 > **Design ahead of code, most of it.** Ruled with the maintainer on 2026-10-08: that a kit is a
 > document marked as one, that publishing is explicit, and that the first version's update is an
@@ -2867,8 +2867,10 @@ instance in a main had never drawn (§15 D989), unlooked-at in the GUI; and a ve
 > That file is untracked and regenerated, so its screen numbers here are pointers and the content is
 > this section's. **Build step 1 is in core** (§15 D1012, *Step 1 as built* below) — the vault,
 > provenance, the kit mark, the published state, vendoring and inserting, and a kit instance's paste —
-> **with no chrome**; everything from *Publishing* on is still design. The rest of the build is
-> `roadmap.md`'s *Next · Shared component libraries*.
+> **with no chrome**; everything from *Publishing* on is still design. **Step 2's chrome is built,
+> swap in part** (§15 D1013, D1014, *Step 2 as built* below): the document menu with *Make this a kit*,
+> the *Kit* tag, the insert picker, and the swap picker grouped by kit. The rest of the build is `roadmap.md`'s *Next · Shared
+> component libraries*.
 
 **The word is *Kit*** (§15 D1011): a document whose components others use. *Library* stays the
 dashboard's collection (§5.11a, §9.6). A component whose main lives in a kit is a *kit component*; an
@@ -2908,10 +2910,12 @@ to a handful of guards, each named in §15 D1012: the loader's reachability walk
 (`rebuild` never meets it, an update would), `Selection::retain_existing` and `select_main` in the app,
 and `RenderOverrides::absorb` refusing the vault's two operations. ⚠️ **A reader that iterates the node
 map instead of walking from the root does meet the vault** — `swap::options` lists vendored mains flat
-among D's own until step 2 groups them by kit — so that is the shape to suspect.
+among D's own, and the swap picker groups them by kit (§15 D1014) — so that is the shape to suspect.
 
 **Each vendored node is minted its own `NodeId` in D and records the node it came from in L** (§5.2),
-on the node itself: `Node::origin`, the kit's `meta.id`, the node in L's published state and the version.
+on the node itself: `Node::origin`, the kit's `meta.id`, the node in L's published state and the version
+— and, on a vault main's top node only, the kit's name, so a kit the library cannot find can still be
+named (§15 D1014).
 Reusing L's ids would make two documents vendoring the same
 kit collide when one is pasted into the other.
 
@@ -3026,6 +3030,44 @@ reaches a second machine through the synced base folder (§5.11a), with no netwo
 - **A kit instance pasted into another document stays an instance**: the clipboard carries the vault
   mains a copy reaches (`kit::carried`, `io::clip`'s `kits`), and `kit::insert_carrying` vendors what
   the target lacks before inserting the paste (§5.3d's paste rule, §9.4).
+
+**Step 2 as built** (`kits/`, §15 D1013, D1014; swap across kits in part).
+
+- **The document menu** (`TopMenu::Document`, `OndinApp::document_menu`): the document's name is its
+  head, pulled left by `ui::HEAD_PAD` so the name stays 12 from the mark (§15 D962). It holds **only rows
+  with a verb behind them** — *Make this a kit* or *Stop sharing as kit*, then *Show in library*; the
+  design's other rows join when their verbs exist. *Stop sharing* has no confirmation until 1D's count
+  is decided (step 4).
+- **An unfiled document made a kit is given its `meta.id` by the verb** (`make_kit`), as filing gives
+  one: a pre-library file has a path and nothing else would mint it, and a kit with no id is one the
+  scan can never find. Marking saves; it is not undoable. A save that fails leaves its own status, and
+  the verb says nothing over it (`save_file` answers whether it wrote).
+- **The *Kit* tag** (`kit_tag`) after the name while the kit is sharing — neutral, `theme::icon::PACKAGE`.
+- **The insert picker** (`kits/picker.rs`) opens from the hexagon at the tool rail's foot or `Shift+I`,
+  an `Area` beside the button, closed by `Escape` — a rung of `OndinApp::escape` after the colour
+  picker's, so one press closes one thing (§9.4) — or the button. Its search field takes the keyboard
+  **once**, on opening, and gives it back for good; `Shift+I` closes the picker only while the field
+  does not hold it. Opening it rescans the library. *Used* means a kit among the `origin.kit`s
+  of the vault's children; their order is **last use, kept per machine and per document**
+  (`library::cache::LocalIndex::kit_use`). A document's own mains are tiles only when there are no kits,
+  and otherwise only in search. A placement is one transaction: `kit::insert`, or `build::insert_subtrees`
+  for a local main or an unavailable kit's vault copy, then a `SetTransform` centring the instance on the
+  viewport — measured on a scratch document with the transaction applied, because the vault is never
+  resolved.
+- **The library's kits** (`kits/index.rs`): `kits_in` lists them from the scan's `meta.kit`, a conflict
+  copy losing in either order; `KitShelf` loads each whole file and renders its tile pictures on a worker,
+  keyed by the mtime the scan read. Opening the picker loads every kit in the library.
+- **A vault main's top carries the kit's name** (`Origin::name`, from `Published::name`), additive within
+  v6, for the *Unavailable* heading — written only where the top's origin is the kit being vendored, so a
+  third kit's main keeps its own kit's name, or none.
+- **The swap picker groups by kit** (`panels/variants.rs`, `kits::index::kit_heading`): D's own mains
+  first, headed *This document* only when a kit group follows, then one group per kit by name, with the
+  kit glyph and the version D holds, or *unavailable*; the name-prefix filter across all of them.
+  **A swap to a kit main D has never used is not offered** — it would vendor at the swap.
+- **Not built**: a tile's drag, a swap to an unvendored kit main, *Go to main in <kit>*, and 3G's *Open
+  library*. ⚠️ Two concerns are recorded read-not-run in §15 D1014: the search field's own `Escape` arm
+  may close the picker beside a dropdown or the colour picker the same press closed, and the swap groups
+  are keyed by kit name rather than id.
 
 ### 5.4 Text node
 
@@ -12442,7 +12484,8 @@ their left.
 
 The three dropdowns are mutually exclusive **by construction**: `app::TopMenu` holds one value
 (`None | View | Snap | Zoom`), replacing the old `zoom_menu: bool`, and the design models it the same
-way — its `openMenu` prop is an enum over exactly those. Three independent flags would admit two menus
+way — its `openMenu` prop is an enum over exactly those. **A fourth since 2026-10-08**, `Document`, the
+document menu hung from the document's name (§5.3e, §15 D1013), in the same slot. Three independent flags would admit two menus
 overlapping with nothing ever closing the one behind. `OndinApp::dropdown` spells the *closing* half
 once as well — a click outside, and Escape — because that is the half that gets forgotten, and a menu
 that only closes by re-clicking its own head is one that sits over the canvas while the user works
@@ -14410,7 +14453,8 @@ the sidebar's own group. Three readers, one predicate; the finding named two of 
 
 **The editor's breadcrumb is `Project / Document`**, and the project half navigates — clicking it
 goes to the library standing on that project. A document in no project draws its name alone with no
-leading separator. ⚠️ **The name shown is the *typed* one**, from the metadata block, never the file
+leading separator. **The document half is the head of the document menu** since 2026-10-08 (§5.3e,
+§15 D1013), pulled left by its own padding so the name sits where the plain label did. ⚠️ **The name shown is the *typed* one**, from the metadata block, never the file
 stem: the stem is a slug now, so a title bar reading it would say `landing-v4`. The library and the
 title bar share `library::scan::display_name` so they cannot disagree about one document.
 

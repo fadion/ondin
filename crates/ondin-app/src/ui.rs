@@ -574,7 +574,7 @@ const HEAD_H: f32 = 26.0;
 /// spacing, and it is unequal: the gaps were identical and the *ink* was not
 /// (§15 D44). Padding the head is what makes the two kinds of control
 /// interchangeable in a cluster, and it widens the hit target the same way.
-const HEAD_PAD: f32 = 5.0;
+pub(crate) const HEAD_PAD: f32 = 5.0;
 
 /// The head of a top-bar dropdown — a mark, `gap` points, then a caret —
 /// sensed as **one** rect. Lit like an [`icon_button`] under the pointer, and

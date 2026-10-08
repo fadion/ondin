@@ -761,6 +761,11 @@ pub mod icon {
     /// the *Create component* and *Duplicate as component* rows draw it
     /// (`ui::paint_hexagon_filled`, §15 D985) over this glyph's box.
     pub const HEXAGON: &str = "\u{e2ae}";
+    /// A **kit** (§5.3e, §15 D1011): the top bar's *Kit* tag, the document menu's
+    /// kit rows, the picker's kit headings and an instance's source line —
+    /// Phosphor's `package`, read off the mockups' own stylesheet beside
+    /// `ph-hexagon`, which gives this file's `HEXAGON` and so vouches for the font.
+    pub const PACKAGE: &str = "\u{e390}";
     /// *Detach instance* — "no longer from the main" (§15 D981).
     pub const LINK_BREAK: &str = "\u{e2e4}";
     /// *Go to main component*, everywhere it is offered — the menu row, the
@@ -1065,6 +1070,7 @@ pub mod icon {
         ("copy-simple", COPY_SIMPLE),
         ("clipboard", CLIPBOARD),
         ("hexagon", HEXAGON),
+        ("package", PACKAGE),
         ("link-break", LINK_BREAK),
         ("arrow-up-right", ARROW_UP_RIGHT),
         ("arrow-square-out", ARROW_SQUARE_OUT),

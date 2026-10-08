@@ -48,6 +48,7 @@ mod fonts;
 mod grid;
 mod input;
 mod instances;
+mod kits;
 // **The receipt is spent** (§15 D699, `[S16.5-L3-04]`). It read *"unwired on
 // purpose … delete this attribute the moment the first real caller lands —
 // leaving it is how an abandoned module comes to look finished"*, and the

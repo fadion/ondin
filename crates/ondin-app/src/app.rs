@@ -1427,6 +1427,8 @@ pub enum TopMenu {
     View,
     Snap,
     Zoom,
+    /// The document menu — the caret beside the document's name (§5.3e, 1A).
+    Document,
 }
 
 /// The system clipboard's text, if it holds any.
@@ -6605,7 +6607,7 @@ impl OndinApp {
     /// gone** (§15 D548): `atomic::temp_for` is unique per write now, so two
     /// writers of one path no longer tear the destination. The ordering hazard
     /// above is what is left, and it was always the larger one.
-    fn save_file(&mut self, pin: bool) {
+    pub(crate) fn save_file(&mut self, pin: bool) {
         self.disk_settle();
         let path = match self.session.path.clone() {
             Some(p) => p,
@@ -9007,7 +9009,7 @@ impl OndinApp {
     ///
     /// Opening one closes the others by construction — [`TopMenu`] holds one
     /// value — so there is no path where two dropdowns overlap.
-    fn toggle_menu(&mut self, which: TopMenu) {
+    pub(crate) fn toggle_menu(&mut self, which: TopMenu) {
         self.open_menu = if self.open_menu == which {
             TopMenu::None
         } else {
@@ -9025,7 +9027,7 @@ impl OndinApp {
     /// `width` is the width the card **paints**, border included — the same number
     /// the anchor above right-aligns against, which is the whole reason
     /// [`crate::ui::menu_inner_w`] exists rather than a subtraction here (§15 D307).
-    fn dropdown(
+    pub(crate) fn dropdown(
         &mut self,
         ctx: &egui::Context,
         id: &str,
@@ -9338,11 +9340,7 @@ impl OndinApp {
             );
         }
 
-        ui.label(
-            egui::RichText::new(title)
-                .size(13.0)
-                .color(theme::text::STRONG),
-        );
+        self.document_menu(ui, title);
     }
 
     /// **The save dot** beside the document name (§15 D962): red while the
@@ -16567,6 +16565,93 @@ mod library_wiring_tests {
             "a document in no project must not draw a leading separator: {painted:?}"
         );
         assert!(!painted.contains(&"Kestrel".to_string()), "{painted:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **The document menu makes a kit, and the library can find it by its first
+    /// 4 KB** (§5.3e, 1A, 1C; §15 D1013). An unfiled document is given an id and
+    /// filed by the mark's save, so the scan — which reads only the prefix — lists
+    /// it with its mark; *Stop sharing* keeps the version, and making it a kit
+    /// again continues from it. The top bar draws the *Kit* tag only while it is
+    /// shared, and the open menu offers the row the state calls for.
+    ///
+    /// Two documents with no id, because they get one by different routes: an
+    /// untitled one is filed by the mark's save, and filing mints the id
+    /// (`store::file_document`); a **pre-library file** already has a path, so
+    /// the save writes it in place and only `make_kit` can give it an identity.
+    ///
+    /// Flip, run: `make_kit` without minting an id fails *"a pre-library kit is
+    /// found by its id"* — the untitled half stays green, filing having minted
+    /// one, which is why the second half is here.
+    #[test]
+    fn the_document_menu_makes_a_kit_the_library_can_find() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let root = temp_root("make-kit");
+        let mut app = app_at(&ctx, root.clone());
+        let mut meta = app.session.doc.meta().clone();
+        meta.name = Some("Atlas".into());
+        app.session.doc.set_meta(meta);
+        assert!(app.session.path.is_none() && app.session.doc.meta().id.is_none());
+
+        // Two frames: an egui `Area` measures itself invisibly on the first.
+        app.open_menu = TopMenu::Document;
+        top_bar_text(&ctx, &mut app);
+        let painted = top_bar_text(&ctx, &mut app);
+        assert!(
+            painted.contains(&"Make this a kit".to_string()),
+            "{painted:?}"
+        );
+        assert!(
+            !painted.contains(&"Kit".to_string()),
+            "no tag yet: {painted:?}"
+        );
+
+        app.make_kit();
+        let id = app.session.doc.meta().id.clone();
+        let scanned = crate::library::scan::scan(&root);
+        let entry = scanned
+            .iter()
+            .find(|e| e.meta.id.is_some() && e.meta.id == id)
+            .expect("the scan finds the kit by its id");
+        assert!(entry.meta.kit.as_ref().is_some_and(|k| k.is_shared()));
+        app.open_menu = TopMenu::Document;
+        top_bar_text(&ctx, &mut app);
+        let painted = top_bar_text(&ctx, &mut app);
+        assert!(painted.contains(&"Kit".to_string()), "the tag: {painted:?}");
+        assert!(
+            painted.contains(&"Stop sharing as kit".to_string()),
+            "{painted:?}"
+        );
+
+        // A kit that has published version 3 stops sharing, then is a kit again.
+        let mut meta = app.session.doc.meta().clone();
+        meta.kit.as_mut().unwrap().version = 3;
+        app.session.doc.set_meta(meta);
+        app.stop_sharing_kit();
+        assert!(app.shared_kit().is_none());
+        let scanned = crate::library::scan::scan(&root);
+        let kit = scanned[0].meta.kit.clone().unwrap();
+        assert!(!kit.is_shared() && kit.version == 3, "{kit:?}");
+        app.make_kit();
+        assert_eq!(app.shared_kit().map(|k| k.version), Some(3), "continues");
+        assert_eq!(crate::library::scan::scan(&root).len(), 1, "one file");
+
+        // A pre-library file: on disk, in the folder, with no id.
+        let old = root.join("Old.ondin");
+        let bare = ondin_core::Document::new(app.session.ids.mint());
+        std::fs::write(&old, ondin_core::io::save(&bare).unwrap()).unwrap();
+        app.library.refresh();
+        app.open_path(&old);
+        assert!(app.session.doc.meta().id.is_none(), "the fixture has no id");
+        app.make_kit();
+        let id = app.session.doc.meta().id.clone();
+        assert!(
+            crate::library::scan::scan(&root)
+                .iter()
+                .any(|e| e.path == old && e.meta.id.is_some() && e.meta.id == id),
+            "a pre-library kit is found by its id"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

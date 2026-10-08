@@ -1906,6 +1906,11 @@ other three arms — it was one level deep until 2026-10-07, so a nested copy in
 kept the old order and then refused every later reorder as its own (`[X3-L2-02]`). **No arm acts on a
 copy the edit itself deleted** — deleting a main's child together with its counterpart, or with the
 whole instance, deleted the counterpart twice and was refused (`[X2-L1-02]`, until 2026-10-07).
+**Nor is a gained child copied into a copy the edit itself already gave a new node linked to it**
+(`supplied`, §15 D1022): a kit update writes the published structure into every vault main, so a main
+nested in another gains its layer and the nested copy gains that layer's copy in one transaction, and
+copying it in again made a second with no origin, which the vault refused — every update adding a layer
+to a nested kit main failed. That copy's own gain still reaches its instances, as a parent of its own.
 **Its ops go out inserts → moves → deletes → reorders**, delete decisions made after the moves, `untouched` ignoring the children the pass carries
 out; a parent the edit deleted counts as changed, so the children lifted out of it are moves — which is
 what makes *Ungroup* inside a main work. 🚨 **But its children are lost only where it was itself lost
@@ -2858,7 +2863,7 @@ amendment); ~~exposing nested properties, later
 by the mockup~~ — built 2026-10-06 from the mockup's 4K–4S (§15 D988), with the binding line a nested
 instance in a main had never drawn (§15 D989), unlooked-at in the GUI; and a verb that un-makes a component, which would owe a detach.
 
-### 5.3e Kits — shared component libraries (designed 2026-10-08; steps 1–4 built; §15 D1010–D1021)
+### 5.3e Kits — shared component libraries (designed 2026-10-08; steps 1–4 built; §15 D1010–D1023)
 
 > **Design ahead of code, most of it.** Ruled with the maintainer on 2026-10-08: that a kit is a
 > document marked as one, that publishing is explicit, and that the first version's update is an
@@ -2919,6 +2924,9 @@ to a handful of guards, each named in §15 D1012: the loader's reachability walk
 and `RenderOverrides::absorb` refusing the vault's two operations. ⚠️ **A reader that iterates the node
 map instead of walking from the root does meet the vault** — `swap::options` lists vendored mains flat
 among D's own, and the swap picker groups them by kit (§15 D1014) — so that is the shape to suspect.
+`component::instances_of` was one: a kit main nesting another holds a copy of it in the vault, which
+*Select all instances* put into the selection and every instance count counted, until it was made to
+leave the vault out (§15 D1023).
 
 **Each vendored node is minted its own `NodeId` in D and records the node it came from in L** (§5.2),
 on the node itself: `Node::origin`, the kit's `meta.id`, the node in L's published state and the version
@@ -3033,8 +3041,9 @@ reaches a second machine through the synced base folder (§5.11a), with no netwo
   its version**, bringing it up to date being an update's job — a node a later publish added to a held
   main is refused as `KitError::NeedsUpdate`; 🚨 **a kit never vendors itself**: `kit::find`, the
   lookup `vendor` and `adopt` share, lands an origin naming the document's own `meta.id` on the live
-  node, so a kit's own main inserted or pasted into the kit links to the main and opens no vault; a
-  main the kit itself vendored keeps the
+  node, so a kit's own main inserted or pasted into the kit links to the main and opens no vault — and
+  a pasted copy of one the kit has since **deleted**, which `find` cannot land, is left out by `adopt`
+  and the paste lands detached (§15 D1023); a main the kit itself vendored keeps the
   third kit's origin; images added if missing; and an instance placed under the given parent at the
   main's own transform, one transaction. Centring it is the app's.
 - **A set inserts its first variant in reading order** (`kit::default_variant`), topmost then leftmost,
@@ -3059,7 +3068,9 @@ reaches a second machine through the synced base folder (§5.11a), with no netwo
   an `Area` beside the button, closed by `Escape` — a rung of `OndinApp::escape` after the colour
   picker's, so one press closes one thing (§9.4) — or the button. Its search field takes the keyboard
   **once**, on opening, and gives it back for good; `Shift+I` closes the picker only while the field
-  does not hold it. Opening it rescans the library. *Used* means a kit among the `origin.kit`s
+  does not hold it, and ↑, ↓ and `Enter` move and place the highlighted result **only while it does**
+  — read from anywhere, `Enter` stepping into a group or committing a field also placed one, and the
+  arrows nudged and moved the highlight at once (§15 D1023). Opening it rescans the library. *Used* means a kit among the `origin.kit`s
   of the vault's children; their order is **last use, kept per machine and per document**
   (`library::cache::LocalIndex::kit_use`). A document's own mains are tiles only when there are no kits,
   and otherwise only in search; that empty state ends with 3G's *Open library*, which closes the picker
@@ -3076,7 +3087,9 @@ reaches a second machine through the synced base folder (§5.11a), with no netwo
   by its top-left, a bottom pivot also reading last frame's size (§15 D1014).
 - **The library's kits** (`kits/index.rs`): `kits_in` lists them from the scan's `meta.kit`, a conflict
   copy losing in either order; `KitShelf` loads each whole file and renders its tile pictures on a worker,
-  keyed by the mtime the scan read. Opening the picker loads every kit in the library.
+  keyed by the mtime the scan read, and recording the version the file said when it was read — a
+  placement records that, not the scan's, which a publish between the two has passed (§15 D1023).
+  Opening the picker loads every kit in the library.
 - **A vault main's top carries the kit's name** (`Origin::name`, from `Published::name`), additive within
   v6, for the *Unavailable* heading — written only where the top's origin is the kit being vendored, so a
   third kit's main keeps its own kit's name, or none.
@@ -3130,7 +3143,9 @@ and the dashboard's 1B §15 D1017).
   that sorts and filters by project as any page does; a *Kit* chip at the cover's bottom-left, after a
   conflict or unreadable mark — on the card only, not the list; and the file card's ⋯ *Make a kit*,
   acting at once, or *Stop sharing as kit*, asking first. A closed file's mark is written into the file
-  (`library::store::set_kit`), the open document's by the editor's own verbs.
+  (`library::store::set_kit`), the open document's by the editor's own verbs. *Duplicate* leaves the
+  mark and the published state behind (`library::store::duplicate`): the copy is no kit until it is
+  made one, and a kept publish made its first one compare against a dead copy (§15 D1023).
 
 **Step 3 as built** (`kit::update`, `kit::make_local`, `kits/updates.rs`, `kits/card.rs`, `kits/used.rs`,
 `menu.rs`; §15 D1016).
@@ -3142,6 +3157,15 @@ and the dashboard's 1B §15 D1017).
   applied to. 🚨 **It never touches an instance**: the commit's main-edit passes carry the change, so
   overrides survive by value comparison and instance-side structure by §5.3d's rules, and an instance
   root's placement stays its own. A main the publish newly reaches is vendored first.
+- 🚨 **It does not depend on the vault's order** (§15 D1022): a paste or a later vendoring can leave a
+  nesting main before the main it nests, so a link, swap or binding a sync cannot point yet is written
+  empty and pointed once every kit's tops are synced (`Builder::later`) — a missing node whose main is
+  held at another version answering `NeedsUpdate`, not `Incomplete`. **A node the kit only moved is
+  moved**, never deleted and copied again: a published top held below the vault's top level (a variant
+  taken out of its set) is lifted to it; a top the kit put inside another (a main combined into a set)
+  waits for that top's sync, which reparents it in — an empty shell begun for a set D does not hold yet;
+  and a child a sync drops while it is still published elsewhere is deleted only if no other sync moved
+  it, so a layer moved between groups is a move too.
 - ***Make local*** (`kit::make_local`, `Operation::SetOrigin`): every origin in the main cleared, the
   main moved last under the root and placed right of the content; 🚨 no instance promoted; a kit main it
   nests stays vendored. An update makes the kit's removed mains local the same way.
@@ -3156,8 +3180,10 @@ and the dashboard's 1B §15 D1017).
 - **The card**: *Atlas kit · v8 · v9 waiting* under the instance's name; the ⋯ (*More*) always on a kit
   instance, with *Go to main in Atlas*, *Accept kit updates* — **the instance's own kit** — and *Make
   local…* through 4E's dialog. *Go to main* opens the kit with the main selected and a *← <D>* link back.
-  An accept uses a loaded publish only when it was read at the kit file's current modification time,
-  else reads the file, and an update writes the publish's name onto the kit's own vendored tops.
+  An accept uses a loaded publish only when it was read at the kit file's current modification time
+  **and at the version the scan read** (`KitShelf::current`), else reads the file and records the
+  version the file says (§15 D1023), and an update writes the publish's name onto the kit's own
+  vendored tops.
 - **The canvas menu** (7A, `context-menus.md` §4): on a kit instance's root, *Go to main in Atlas*,
   *Accept kit updates* when one waits — omitted otherwise, a departure from that file's §3 recorded as
   its §9.6 item 17 — and *Make local…* after *Detach instance*. A local instance's menu is unchanged.

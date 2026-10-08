@@ -468,14 +468,80 @@ struct KitSwap {
     prop: Option<Keyed<Property>>,
 }
 
-/// The heading a kit main not yet vendored is listed under: the kit's name and
-/// the version its pick would vendor.
-fn library_heading(k: &crate::kits::index::KitEntry) -> KitHeading {
-    KitHeading {
-        kit: k.id.clone(),
-        name: k.name.clone(),
-        status: format!("v{}", k.version),
+/// A library kit and its published state as the shelf holds it, current.
+type Shelved = (
+    crate::kits::index::KitEntry,
+    std::sync::Arc<ondin_core::kit::Published>,
+);
+
+/// Every swap row's list at `copy` (§15 D1019): the mains `swap::options` gives
+/// — the document's own and its vault's — and each shelved kit's that the
+/// document does not hold yet (`kit::swap_offers`), sorted by name.
+///
+/// **One heading per kit, whatever its rows** (`arch-scribe`'s reading of the
+/// first cut): `kit_heading` reads a vault copy's own version and an unused main
+/// would read the library's, so while an update waited a group shared by both
+/// read one or the other by which name sorted first. A kit the document holds
+/// anything of reads the **oldest version held** — the version the update pill
+/// counts from (`Waiting::held`) — on every row; one it holds nothing of reads
+/// the library's, the version a pick would vendor.
+fn swap_list(
+    doc: &ondin_core::Document,
+    kits: &[crate::kits::index::KitEntry],
+    shelves: &[Shelved],
+    copy: NodeId,
+    filter: &str,
+    search: &str,
+) -> Vec<SwapOption> {
+    let name_of = |d: &ondin_core::Document, id: NodeId| {
+        d.get(id).map(|n| n.name().to_string()).unwrap_or_default()
+    };
+    let mut out: Vec<SwapOption> = swap::options(doc, copy, filter, search)
+        .into_iter()
+        .map(|m| {
+            let h = crate::kits::index::kit_heading(doc, kits, m);
+            (SwapTarget::Here(m), name_of(doc, m), h)
+        })
+        .collect();
+    for (k, p) in shelves {
+        for m in ondin_core::kit::swap_offers(doc, &k.id, p, copy, filter, search) {
+            let heading = KitHeading {
+                kit: k.id.clone(),
+                name: k.name.clone(),
+                status: String::new(),
+            };
+            let target = SwapTarget::Kit {
+                kit: k.clone(),
+                published: p.clone(),
+                main: m,
+            };
+            out.push((target, name_of(p.document(), m), Some(heading)));
+        }
     }
+    // The oldest version held of each kit, read off the vault's tops.
+    let mut held: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
+    if let Some(v) = doc.vault().and_then(|v| doc.get(v)) {
+        for o in v
+            .children()
+            .iter()
+            .filter_map(|t| doc.get(*t).and_then(|n| n.origin()))
+        {
+            let e = held.entry(o.kit.as_str()).or_insert(o.version);
+            *e = (*e).min(o.version);
+        }
+    }
+    for (_, _, h) in &mut out {
+        let Some(h) = h else { continue };
+        let Some(k) = kits.iter().find(|k| k.id == h.kit) else {
+            continue; // *unavailable*, `kit_heading`'s own word.
+        };
+        h.status = format!(
+            "v{}",
+            held.get(h.kit.as_str()).copied().unwrap_or(k.version)
+        );
+    }
+    out.sort_by(|a, b| a.1.cmp(&b.1));
+    out
 }
 
 /// The swap picker's list grouped as 4F has it (§15 D1014): the document's own
@@ -1323,41 +1389,15 @@ impl OndinApp {
         // The library's kits, for the swap pickers' headings (4F): which kit a
         // vendored main is from, and whether the library can still find it.
         let kits = crate::kits::index::kits_in(&self.library, doc.meta().id.as_deref());
-        let heading = |m: NodeId| crate::kits::index::kit_heading(doc, &kits, m);
         // And their published states, for the mains a swap could vendor (§15
         // D1019) — only those read at the kit file's current time, as an accept
         // reads them, so a pick vendors what the version it records published.
-        let shelves: Vec<(
-            crate::kits::index::KitEntry,
-            std::sync::Arc<ondin_core::kit::Published>,
-        )> = kits
+        let shelves: Vec<Shelved> = kits
             .iter()
             .filter_map(|k| self.kit_shelf.current(k).map(|p| (k.clone(), p)))
             .collect();
-        // Every swap row's list: the mains `swap::options` gives — the document's
-        // own and its vault's — and each kit's it does not hold yet, by name.
-        let swap_list = |copy: NodeId, filter: &str, search: &str| -> Vec<SwapOption> {
-            let mut out: Vec<SwapOption> = swap::options(doc, copy, filter, search)
-                .into_iter()
-                .map(|m| (SwapTarget::Here(m), name_of(m), heading(m)))
-                .collect();
-            for (k, p) in &shelves {
-                for m in ondin_core::kit::swap_offers(doc, &k.id, p, copy, filter, search) {
-                    let name = p
-                        .document()
-                        .get(m)
-                        .map(|n| n.name().to_string())
-                        .unwrap_or_default();
-                    let target = SwapTarget::Kit {
-                        kit: k.clone(),
-                        published: p.clone(),
-                        main: m,
-                    };
-                    out.push((target, name, Some(library_heading(k))));
-                }
-            }
-            out.sort_by(|a, b| a.1.cmp(&b.1));
-            out
+        let swap_list = |copy: NodeId, filter: &str, search: &str| {
+            swap_list(doc, &kits, &shelves, copy, filter, search)
         };
         let mut kit_swap: Option<KitSwap> = None;
         let mut swap_open = false;
@@ -2639,62 +2679,17 @@ mod tests {
     #[test]
     fn a_swap_to_an_unused_kit_main_vendors_it_in_one_step() {
         use crate::kits::picker::tests::{app_on, file_kit, temp_root};
-        use ondin_core::{Operation, build};
         let ctx = egui::Context::default();
         let dir = temp_root("swap-vendor");
         let (kit_id, _, badge) = file_kit(&dir);
         let mut app = app_on(&ctx, dir);
-
-        // *Row* nests an instance of *Glyph*; an instance of *Row* at the top.
-        let root = app.session.doc.root();
-        let [glyph, row] = [(); 2].map(|_| app.session.ids.mint());
-        let frame = |id, index, name: &str| Operation::CreateNode {
-            id,
-            parent: root,
-            index,
-            kind: ondin_core::NodeKind::Artboard {
-                size: ondin_core::kurbo::Size::new(24.0, 24.0),
-            },
-            transform: None,
-            name: Some(name.into()),
-        };
-        assert!(app.session.commit(Transaction(vec![
-            frame(glyph, 0, "Glyph"),
-            Operation::SetComponent {
-                id: glyph,
-                component: true
-            },
-            frame(row, 1, "Row"),
-        ])));
-        let copy_into = |app: &mut OndinApp, main: NodeId, parent: NodeId| {
-            let nodes = app.session.doc.capture_subtree(main).unwrap();
-            let (tx, made) = build::insert_subtrees(
-                &app.session.doc,
-                &mut app.session.ids,
-                &[build::Placement {
-                    nodes,
-                    parent,
-                    index: None,
-                }],
-                Default::default(),
-            );
-            assert!(app.session.commit(tx));
-            made[0]
-        };
-        let slot = copy_into(&mut app, glyph, row);
-        assert!(
-            app.session
-                .commit(Transaction(vec![Operation::SetComponent {
-                    id: row,
-                    component: true
-                }]))
-        );
-        let row_copy = copy_into(&mut app, row, root);
-        let nested = app.session.doc.get(row_copy).unwrap().children()[0];
-        assert!(
-            swap::can_swap(&app.session.doc, nested),
-            "the fixture's slot"
-        );
+        let Slotted {
+            glyph,
+            row,
+            slot,
+            row_copy,
+            nested,
+        } = slotted(&mut app);
 
         let k = crate::kits::index::kits_in(&app.library, app.session.doc.meta().id.as_deref())
             .into_iter()
@@ -2758,5 +2753,172 @@ mod tests {
         assert!(shows_badge(&app), "the property's pick reaches the copy");
         assert!(app.session.undo());
         assert!(app.session.doc.vault().is_none(), "one undo, again");
+    }
+
+    /// The swap fixture: *Row* nests an instance of *Glyph* (`slot`), and an
+    /// instance of *Row* (`row_copy`) sits at the top, its copy of the slot
+    /// (`nested`) the one that takes a swap.
+    struct Slotted {
+        glyph: NodeId,
+        row: NodeId,
+        slot: NodeId,
+        row_copy: NodeId,
+        nested: NodeId,
+    }
+
+    fn slotted(app: &mut OndinApp) -> Slotted {
+        use ondin_core::{Operation, build};
+        let root = app.session.doc.root();
+        let [glyph, row] = [(); 2].map(|_| app.session.ids.mint());
+        let frame = |id, index, name: &str| Operation::CreateNode {
+            id,
+            parent: root,
+            index,
+            kind: ondin_core::NodeKind::Artboard {
+                size: ondin_core::kurbo::Size::new(24.0, 24.0),
+            },
+            transform: None,
+            name: Some(name.into()),
+        };
+        assert!(app.session.commit(Transaction(vec![
+            frame(glyph, 0, "Glyph"),
+            Operation::SetComponent {
+                id: glyph,
+                component: true
+            },
+            frame(row, 1, "Row"),
+        ])));
+        let copy_into = |app: &mut OndinApp, main: NodeId, parent: NodeId| {
+            let nodes = app.session.doc.capture_subtree(main).unwrap();
+            let (tx, made) = build::insert_subtrees(
+                &app.session.doc,
+                &mut app.session.ids,
+                &[build::Placement {
+                    nodes,
+                    parent,
+                    index: None,
+                }],
+                Default::default(),
+            );
+            assert!(app.session.commit(tx));
+            made[0]
+        };
+        let slot = copy_into(app, glyph, row);
+        assert!(
+            app.session
+                .commit(Transaction(vec![Operation::SetComponent {
+                    id: row,
+                    component: true
+                }]))
+        );
+        let row_copy = copy_into(app, row, root);
+        let nested = app.session.doc.get(row_copy).unwrap().children()[0];
+        assert!(
+            swap::can_swap(&app.session.doc, nested),
+            "the fixture's slot"
+        );
+        Slotted {
+            glyph,
+            row,
+            slot,
+            row_copy,
+            nested,
+        }
+    }
+
+    /// **The swap list offers a kit's unused mains beside what the document
+    /// holds, under one heading per kit** (§15 D1019): with nothing vendored,
+    /// *Glyph* is the document's own and the kit's three frame mains are offered
+    /// at the library's version. Once *Badge* is vendored at v4 and the library
+    /// reads v5 — an update waiting — *Badge* is listed as the held copy, the
+    /// other two still as offers, and **every row of the kit reads v4**, the
+    /// version held.
+    ///
+    /// Flips, run: `swap_list` leaving out the shelves' offers fails *"offered
+    /// before any use"*; the first cut's headings — an offer reading the
+    /// library's version, nothing evening them out — fail *"one heading per
+    /// kit"*, *Large* and *Small* at v5 beside *Badge* at v4.
+    #[test]
+    fn the_swap_list_offers_unused_kit_mains_under_one_heading() {
+        use crate::kits::picker::tests::{app_on, file_kit, temp_root};
+        let ctx = egui::Context::default();
+        let dir = temp_root("swap-list");
+        let (kit_id, _, badge) = file_kit(&dir);
+        let mut app = app_on(&ctx, dir);
+        let Slotted { glyph, nested, .. } = slotted(&mut app);
+        let k = crate::kits::index::kits_in(&app.library, app.session.doc.meta().id.as_deref())
+            .into_iter()
+            .find(|k| k.id == kit_id)
+            .unwrap();
+        app.kit_shelf.ask(&k);
+        app.kit_shelf.settle();
+        let p = app.kit_shelf.current(&k).unwrap();
+        let shape = |list: &[SwapOption]| -> Vec<(String, bool, Option<String>)> {
+            list.iter()
+                .map(|(t, name, h)| {
+                    (
+                        name.clone(),
+                        matches!(t, SwapTarget::Kit { .. }),
+                        h.as_ref().map(|h| h.status.clone()),
+                    )
+                })
+                .collect()
+        };
+
+        let row = |name: &str, kit: bool, status: Option<&str>| {
+            (name.to_string(), kit, status.map(str::to_string))
+        };
+        let shelves = [(k.clone(), p.clone())];
+        let list = swap_list(
+            &app.session.doc,
+            std::slice::from_ref(&k),
+            &shelves,
+            nested,
+            "",
+            "",
+        );
+        assert_eq!(
+            shape(&list),
+            vec![
+                row("Badge", true, Some("v4")),
+                row("Glyph", false, None),
+                row("Large", true, Some("v4")),
+                row("Row", false, None),
+                row("Small", true, Some("v4")),
+            ],
+            "offered before any use"
+        );
+        assert!(matches!(list[1].0, SwapTarget::Here(m) if m == glyph));
+
+        // *Badge* vendored at v4; the library now says v5.
+        let root = app.session.doc.root();
+        let (tx, _) = ondin_core::kit::insert(
+            &app.session.doc,
+            &mut app.session.ids,
+            &kit_id,
+            4,
+            &p,
+            badge,
+            root,
+        )
+        .unwrap();
+        assert!(app.session.commit(tx));
+        let newer = crate::kits::index::KitEntry {
+            version: 5,
+            ..k.clone()
+        };
+        let shelves = [(newer.clone(), p.clone())];
+        let list = swap_list(&app.session.doc, &[newer], &shelves, nested, "", "");
+        assert_eq!(
+            shape(&list),
+            vec![
+                row("Badge", false, Some("v4")),
+                row("Glyph", false, None),
+                row("Large", true, Some("v4")),
+                row("Row", false, None),
+                row("Small", true, Some("v4")),
+            ],
+            "one heading per kit"
+        );
     }
 }

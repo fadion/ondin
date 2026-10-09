@@ -1,0 +1,6 @@
+{
+  "name": "edit-guard",
+  "version": "0.1.0",
+  "description": "Refuses in-place stream edits and scripted writes into project files, and git commands that sweep or discard the working tree.",
+  "author": { "name": "Fadion Dashi" }
+}

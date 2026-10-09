@@ -15,6 +15,9 @@
 !.claude/agents/
 !.claude/skills/
 !.claude/launch.json
+# A mod under .claude/skills/ is checked in, but the type declarations the
+# engine lays beside it at every load are generated per Claude Code version.
+.claude/skills/*/.claude-plugin/types/
 
 # The maintainer's private scratchpad. The tracked record is docs/roadmap.md.
 /todo.md

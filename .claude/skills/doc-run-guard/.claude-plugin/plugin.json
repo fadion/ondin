@@ -1,0 +1,6 @@
+{
+  "name": "doc-run-guard",
+  "version": "0.1.0",
+  "description": "Warns, in an Edit's own result, when an edit to a .rs file took, moved, swapped or copied an item's /// doc run.",
+  "author": { "name": "Fadion Dashi" }
+}

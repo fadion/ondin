@@ -1,0 +1,6 @@
+{
+  "name": "dnumber-guard",
+  "version": "0.1.0",
+  "description": "Reserves §15 D-number blocks with the negative grep, releases them with the closing grep, and refuses edits that type an unreserved number.",
+  "author": { "name": "Fadion Dashi" }
+}

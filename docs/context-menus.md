@@ -897,6 +897,28 @@ menu appearing over it is the kind of thing that is hard to take back once hands
 ever earns a menu it will be for guides — *Lock guides*, *Clear guides* — which is a different list
 with a different reason, and it is not reserved here.
 
+### 6.7 An inspector field — ruled 2026-10-13, not built
+
+**A new surface**: no inspector field has a right-click menu today (`decisions.md` §15 D1037, premise
+(iii)). Specified by the *Styles and Variables* design (C1–C2), accepted with the maintainer's rulings
+(§15 D1038); `architecture.md` §5.3f. It opens on a **bindable** field — §15 D1038 (7) and §5.3f list
+them; X, Y and rotation are not.
+
+| Row | Chord | Cost | |
+|---|---|---|---|
+| Bind to variable… | `--` | feature | Opens the `--` autocomplete under the field, filtered to the field's type — the route that needs no typing. When the field is bound, the current variable is highlighted. The accelerator column shows `--`, the two characters that open the same list from the keyboard, not a chord |
+| Extract into variable… | — | feature | Opens the browser on *Variables* with a pending row, the value in every mode, the name field focused; the field shows a dashed capsule until `Enter` files it or `Escape` cancels both. **Disabled when the field is bound** |
+| Detach variable | `Backspace` | feature | The field takes the value it resolved to. `Backspace` is the focused chip's key for the same verb. **Omitted when the field is not bound** (§3's exception) |
+
+**In this order.** *Extract into variable…* follows §3's *state decides enabled* and is disabled on a
+bound field; *Detach variable* is §3's one exception, a row whose only purpose is to undo a
+non-default state, and is **omitted** on an unbound field — so an unbound field's menu is two rows and
+a bound one's three. ⚠️ **The design drew three fixed rows, *Detach* disabled; the maintainer ruled
+the omission over it on 2026-10-14** for consistency with §3 (§15 D1038). **The canvas menu's surface, row height and
+colours** (§8). ⚠️ **No variable is offered on the
+field's label badge** — D1037's refusal: the whole field scrubs, label included, and it would offer a
+variable on every hover.
+
 ---
 
 ## 7. Deliberately not in these menus

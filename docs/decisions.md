@@ -1434,7 +1434,8 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D1034** — **Kits: *This document*'s pictures are drawn again only for a main whose subtree changed, once the edits have settled.** D1031's noticed item, the maintainer asking for it fixed. `LocalTiles`: `rev`, `pending` (revision, first seen), `drawn` (each main's `capture_subtree` as drawn), `job`, `tiles`. The first look renders at once; afterwards a new revision waits `SETTLE` 400 ms, restarted by the next; then `tiles` and `drawn` are pruned to the tops, each subtree compared with `drawn`, and the document cloned for `tiles_of(doc, changed)` only when one differs; a landing merges, the others kept. A nested instance's copies are in its main's subtree (D978), so an inner main's edit redraws the outer. ⚠️ Read: ~~a moved main redraws to the same picture; a late font redraws nothing, as before~~ both fixed by D1035; ~~`drawn` is written at the ask, so a failed spawn or a dead worker leaves a main recorded as drawn until it next changes~~ fixed the same day, `LocalTiles::forget` (`13ea7e3`). *(Built 2026-10-13, `2e3e131`. **Keep.** Test `local_pictures_redraw_only_a_changed_main_once_settled`; flips, every main changed failing *"an unrelated edit renders nothing"* and no settle wait failing *"not before the edits settle"* (asked on the edit inside *A*; asked on the unrelated one it passed), as the caller reports them. D1031 amended; `architecture.md` §5.3e; nothing struck from `roadmap.md`. **Amended 2026-10-13** (`cb58347`): a main's ancestors, an input to its picture and not to the comparison, are an input to neither since the picture is drawn as the main lands)*
 - **D1035** — **Kits: a drag's picture is drawn again when the zoom moves, *This document*'s pictures when a family the document names arrives, and a main merely moved is not drawn again.** The maintainer taking the four items left open after D1032–D1034. `Ghost::zoom` and `follow_zoom`, each drag frame after `pass`: no render in flight and the zoom a tenth (`GHOST_REZOOM`) off the one asked, `Ghost::start` again with the old picture kept, drawn stretched at `world × zoom / ppp` until the new lands. The font poll's `fonts.touches(document_families())` arm, whose `session.fonts_changed()` bumps no revision, also calls `Picker::fonts_changed()` → `LocalTiles::invalidate()` (`drawn` cleared, `rev`, `pending` `None`): the next pass is a first look, every main rendered without `SETTLE`. `drawn` holds `content_of` — the subtree, its root's translation zeroed through the new core `Node::with_transform` (a copy, not a write), rotation, scale and skew kept; a reparented main still compares changed, deliberately. The right-click test now asks `open_context_menu` and finds no menu. ⚠️ Read: a local re-render clones the document on the frame, once per tenth; past `GHOST_MAX_PX`'s cap a zoom re-renders identical pixels; the font hook is undriven; neither the drag's picture nor ~~a kit's tiles are~~ — until D1036 (8) — a kit's tiles were redrawn for a late font. *(Built 2026-10-13, `b130f2b`. **Keep.** Tests, as the caller reports them: the result-drag test's zoom 2 → 3, a 72×90 texture — flip, never re-rendering, failing *"a re-render asked, the old picture kept meanwhile"*; the local-pictures test's move and 0.5 rad rotate — flip, the translation kept, failing *"a moved main renders nothing"* — and `invalidate`, *B* replaced, no flip; the right-click test's term flip now failing at *"the cancelling right-click opens no menu"*. D1029, D1033, D1034 amended; `architecture.md` §5.3e; nothing struck from `roadmap.md`. **Amended 2026-10-13** (`12aafc7`, D1036 (8)): a kit's tiles, never redrawn for a late font, are re-read when a family their text names arrives — the question closed; (`9b1af2f`) the mark a flag, not a time no scan has)*
 - **D1036** — **Ten rulings from the `v0.5.0..fb90943` release review, each the review's recommendation; ~~(1)–(8), (10)'s `[X3.1-L1-03]` and both calls~~ every ruling and both calls built since, and the review's fix phase closed.** The maintainer accepted every recommendation of `review/release-v0.5.0/triage.md` §5 as presented, and asked that its two backlog findings be fixed too. (1) *Make local* on a vault main another vault main nests reveals it as the user's own fork and, in the same transaction, vendors a fresh copy for the nesting main, so the vault never links out and the kit's components keep the kit's version — the dialog says so; plus a `kit::check` rule that a vault node's link, swap and bound targets lie inside the vault (`[R1-L2-02]` + `[R3-L5-02]`; extends D1016, D1012). (2) `vendor` refuses another kit's main that nests one of this kit's own, a named `KitError` (*"Card2 in M uses this kit's Icon"*), keeping D1019's *"a kit main reaches only kit mains"*; a frozen own-copy left for later (`[X1-L1-02]`). (3) An instance copied inside the kit itself and pasted into a consumer detaches, D979 (d), and the paste's status says so; carrying the published copy declined (`[X1-L1-03]`). (4) A variant the kit deletes from a published set detaches its instances, D982 (c), and the accept's toast names them; lifting it out as a local main declined, a variant outside its set not being a model shape (`[R3-L5-03]`). (5) *Updated N* counts only mains whose sync changed more than the version; one unreadable kit and *Accept all* applies nothing — as the code already does — saying *"Nothing was updated, because ‹kit› could not be read"* (`[X3.2-L1-02]`; D1016, D1022, D1024). (6) On the dashboard every file is closed for D1017's routing, the session's included: `store::set_kit`, the session's meta patched, the dialog reading disk (`[X3.1-L5-01]`). (7) A carrying paste of a kit main nesting a main held at an older version is refused `NeedsUpdate`-shaped, *"accept ‹kit›'s update first"*, the picker's answer (`[X1-L1-01]`; D1012, D1014). (8) D1035's late-font question measured and closed in §15 — ⚠️ D1035 says a font's arrival cannot be faked headlessly, and a kit's tiles are the shelf worker's (`kits/index.rs`), not `LocalTiles`'. (9) The X7 tooling findings fixed in this phase, `[X7-L1-03]` first. (10) The backlog's `[X3.1-L1-03]` and `[X7-L1-09]` fixed. The session's two calls, not objected to: the kit dialogs drawn outside present mode's guard (`[X5-L1-01]`); a ↺ clicked over typed text wins (`[X6-L1-02]`) — which D1008 already claims, its *"drawn later"* backwards of the code. *(Ruled 2026-10-13 by the maintainer. **Keep**; ~~**not built**~~ each recorded as built by amendment, `triage.md` §7 the order. ~~Record-only, no citation in `crates/` yet. No entry amended; `architecture.md` untouched;~~ nothing struck from `roadmap.md`. **Amended 2026-10-13**: (1)–(5), (7) and the dialogs' call built — `make_local` copying back what the vault still nests, `VaultRule::LinksOut`, `KitError::Circular`, the paste's detach count, `Update::changed`/`removed` and the toast, `adopt` refusing `NeedsUpdate`/`Circular`, the kit dialogs outside the `!present` guard; two defects read, ~~***Fix***~~ each — the make-local card's vault sentence never drawn and its count taking nested copies, and `changed` missing a deleted last layer — **Resolved** in `4974d79`. **Amended again 2026-10-13**: (6) built — `set_kit_at` through `store::set_kit` on the dashboard, the held copy's id and mark patched from disk (`39fc2e2`); (8) measured, a kit's tiles never redrawn for a late font, and fixed — `KitShelf::fonts_changed` re-reading a kit whose text names an arriving family (`12aafc7`), three edges read, one an idle 20 Hz repaint; (10)'s `[X3.1-L1-03]` through `kits::index::kit_file`; the ↺ call built (`e53a48f`); the paste's detach count read off the result, and `adopt` cutting a fresh copy's reference to a carried main it leaves out (`4974d79`). **Amended a third time 2026-10-13 — D1036 built whole**: (9) and (10)'s `[X7-L1-09]` built in the three Claude Code mods, not shipped — dnumber-guard letting an owed entry be written, skipping ignored files, keeping blocks per worktree with an overlap refusal and a high-water mark; doc-run-guard seeing a run stranded by a blank line and a duplicated pair; edit-guard judging the command as the shell parses it, two risks left (`git add` of a new directory refused; a scratchpad splice copied back later passes) (`c34f092`, `b3fa054`, `85f8c2e`); (8)'s three edges, two ordinary kit files' tie, the order-only toast and `changes`' doc fixed (`9b1af2f`); `[R2-L8-01]` (`ad23f6b`); twelve tests for the review's coverage findings, `menu_context`'s `instance_root == id` filter found redundant and kept (`c304532`); four coverage gaps and two edges kept as known limits; all 50 findings closed, `triage.md`'s FIX PHASE table the status)*
-- **D1037** — **Styles and variables: a variable is a typed, named value with one value per mode, a bindable field stores its binding and resolves it at read, and a style is one slot's isolated set of values — applied whole, detached by any edit, never stacked.** Ruled 2026-10-11 by the maintainer, in conversation; reverses `roadmap.md` §0's *styles/variables* non-goal. **Variables** (≈ CSS custom properties): colour, number, string and boolean, and aliases; **modes set per frame**, inherited by descendants — the maintainer's, over once per document; usable in layout fields from the start. **Storage**, the session's proposal and the ground every later ruling stood on: a bindable field holds `Literal(T) | Bound(VarId)`, resolved at read — so D979 (a)'s comparison compares the **binding** (a main rebinding *brand* → *accent* reaches a copy still bound to *brand*; a copy bound elsewhere keeps it as an override), a variable's edit writes no node and propagates nothing, and §12's fourth property holds as written, where D978 bent it; the cost, every reader of a bindable field must resolve and one that skips it draws the fallback in silence, `Bindable<T>` reachable only through `resolve` the proposed guard. Deleting a used variable **detaches** its fields to the resolved value, D979 (c)'s rule. **Styles** (≈ an isolated CSS class): **one per slot** — fills, strokes, effects, text, layout — at most one per slot per node, no stacking; **a card is styled or not, as a whole**, any edit to its fields detaching it, no partial override and no inheritance — *"Styles are much simpler and it's not an issue to have a Body style, plus a Body Large"*; a style's values may be variables; text styles last (§5.4's spans). **The inspector**: a bound field is a **chip with the variable's name at the field's own width**, the resolved value in its tooltip, a typed literal or `Backspace` detaching, *Mixed* across disagreeing bindings, marked by shape and not hue (D981, D1001), beside the override dot; binding by typing **`--`** — `ui::parse_hex` takes `bad` and `facade` as colours, token names open with digits, and `expr.rs` has no names by design — a binding taking the whole field, `--x * 2` refused (§13 decision 1); never on the label badge (the maintainer's refusal); a field's right-click *Bind to variable…*, *Extract into variable* (its value into every mode, the maintainer's) and *Detach*; a *Variables* tab in the swatch popup; a styled card one row, *Detach* on hover, its menu in the header (D1005's precedent). **The browser**: a floating panel on the insert picker's model (D1014), its button at the toolbar's foot, taking turns with the picker, *Variables* / *Styles* tabs, modes as columns up to a capped width, an *In selection* filter, a usage count that selects (D1007), kit variables read-only. The session's, not ruled: kits carry what a vendored main uses (D1010, D1016, not objected to); a CSS export. **Open**: a frame's mode in the UI; the mode list's scope, and a kit's modes in a consumer; the shortcut; what string and boolean variables bind beyond text content and visibility, D982's properties being views over those fields; text styles over spans; a layout style's item-side properties; the export's CSS. *(Ruled 2026-10-11 by the maintainer; **not built**, so no code cites this number — the first build commit plants it. **Keep.** `architecture.md` §5.3f written; invariant 4, §5.3d, §5.3e, §5.9, §5.11, §7 and §12's fourth property pointed; `roadmap.md` §0's non-goal struck, *Next · Styles and variables* opened, the rebinding offer added to *Later · Components and layout, past the first build*)*
+- **D1037** — **Styles and variables: a variable is a typed, named value with one value per mode, a bindable field stores its binding and resolves it at read, and a style is one slot's isolated set of values — applied whole, detached by any edit, never stacked.** Ruled 2026-10-11 by the maintainer, in conversation; reverses `roadmap.md` §0's *styles/variables* non-goal. **Variables** (≈ CSS custom properties): colour, number, string and boolean, and aliases; **modes set per frame**, inherited by descendants — the maintainer's, over once per document; usable in layout fields from the start. **Storage**, the session's proposal and the ground every later ruling stood on: a bindable field holds `Literal(T) | Bound(VarId)`, resolved at read — so D979 (a)'s comparison compares the **binding** (a main rebinding *brand* → *accent* reaches a copy still bound to *brand*; a copy bound elsewhere keeps it as an override), a variable's edit writes no node and propagates nothing, and §12's fourth property holds as written, where D978 bent it; the cost, every reader of a bindable field must resolve and one that skips it draws the fallback in silence, `Bindable<T>` reachable only through `resolve` the proposed guard. Deleting a used variable **detaches** its fields to the resolved value, D979 (c)'s rule. **Styles** (≈ an isolated CSS class): **one per slot** — fills, strokes, effects, text, layout — at most one per slot per node, no stacking; **a card is styled or not, as a whole**, any edit to its fields detaching it, no partial override and no inheritance — *"Styles are much simpler and it's not an issue to have a Body style, plus a Body Large"*; a style's values may be variables; text styles last (§5.4's spans). **The inspector**: a bound field is a **chip with the variable's name at the field's own width**, the resolved value in its tooltip, a typed literal or `Backspace` detaching, *Mixed* across disagreeing bindings, marked by shape and not hue (D981, D1001), beside the override dot; binding by typing **`--`** — `ui::parse_hex` takes `bad` and `facade` as colours, token names open with digits, and `expr.rs` has no names by design — a binding taking the whole field, `--x * 2` refused (§13 decision 1); never on the label badge (the maintainer's refusal); a field's right-click *Bind to variable…*, *Extract into variable* (its value into every mode, the maintainer's) and *Detach*; a *Variables* tab in the swatch popup; a styled card one row, *Detach* on hover, its menu in the header (D1005's precedent). **The browser**: a floating panel on the insert picker's model (D1014), its button at the toolbar's foot, taking turns with the picker, *Variables* / *Styles* tabs, modes as columns up to a capped width, an *In selection* filter, a usage count that selects (D1007), kit variables read-only. The session's, not ruled: kits carry what a vendored main uses (D1010, D1016, not objected to); a CSS export. **Open**: a frame's mode in the UI; the mode list's scope, and a kit's modes in a consumer; the shortcut; what string and boolean variables bind beyond text content and visibility, D982's properties being views over those fields; text styles over spans; a layout style's item-side properties; the export's CSS. *(Ruled 2026-10-11 by the maintainer; **not built**, so no code cites this number — the first build commit plants it. **Keep.** `architecture.md` §5.3f written; invariant 4, §5.3d, §5.3e, §5.9, §5.11, §7 and §12's fourth property pointed; `roadmap.md` §0's non-goal struck, *Next · Styles and variables* opened, the rebinding offer added to *Later · Components and layout, past the first build*. **Amended 2026-10-14** (D1038): the design pass done and accepted; (a), (b), (c), (d), (f) and premise (iv) ruled 2026-10-13, (e) and (g) still open; a styled card's menu a `⋯`, not D1005's `+`, and the card read-only in the inspector, any other door's edit still detaching it)*
+- **D1038** — **Styles and variables: the accepted chrome — a fully rounded capsule means a reference and nothing else in the inspector is round, a styled card is read-only there and edited in the browser alone, a field's right-click binds, extracts and detaches, and the browser swaps in place with the insert picker at a width its modes set — with the maintainer's rulings on D1037's open questions.** `design/Styles and Variables.dc.html` (Claude Design, revised 2026-10-14), its substance written here because `design/` is regenerated; the maintainer's *"Agree with all"* on the session's recommendations, 2026-10-13. **Overruling the mockup**, D982's precedent: H2's per-kit *Mode* row (a frame carries one mode), G5's *String variable* (hidden until step 6), and C1's always-three-row field menu (*Detach variable* omitted on an unbound field, `context-menus.md` §3's exception; 2026-10-14). **Rulings**: (a) a *Mode* row in a frame's identity card — inherited dim, naming the nearest ancestor frame that sets one or the document's default, its first mode; set bright and appended to the canvas label; *Inherit* first; frames only, not groups; a mode set on a copy an override; (b) one mode list per document, a per-kit mapping at document level edited in the kit's browser row, by name, else the kit's first mode; (c) `Shift+S`, agreed and unbound; (d) booleans bind visibility (step 2), strings text content and font family (step 6); (f) a layout style the container's fields only; (e), (g) open. A colour variable binds a whole solid paint, never a gradient stop, and carries its own alpha, the fill's `%` separate and unbindable; a paste into another document rebinds by name and type or detaches, within one keeps its binding; deleting a mode returns its frames to *Inherit*, confirmed with their count. **Additions accepted**: a styled card read-only in the inspector, its values edited only in the browser, any other door's edit still detaching; a canvas gesture on a bound or styled value detaches, the floating status naming it; no scrubbing on a bound field; a hover × in the chip; a header `⋯` on the five slot cards, after the `+`; deleting a style detaches its users; bindable numbers W, H, corner radius, layer opacity, stroke width, effect X/Y/blur/spread, gaps and padding — not X, Y or rotation. **Chrome**: the capsule rule (a reference, no hue); the bound field, two *Mixed* cases, left-eliding by group; the `--` list and B4's refusal manner; the field menu's three fixed rows; *Extract*'s dashed capsule; the swatch popup's *Variables* segment; the styled card; the browser above the hexagon, 340/436/532 wide by mode count, aliases per-mode cell values, *In selection* never falling back, groups, refusals, empty states, kit updates. ⚠️ G13's merge of two groups holding one leaf name is the design's, unruled. *(Ruled 2026-10-13 by the maintainer; **not built**, record-only, no code cites this number. **Keep.** D1037 amended; `architecture.md` §5.3e, §5.3f and §5.11 amended; `shortcuts.md` §14; `context-menus.md` §6.7; `roadmap.md` *Next · Styles and variables* edited down, its *Later* rebinding row's attribution corrected)*
 
 ---
 
@@ -24397,7 +24398,10 @@ per byte range (§5.4), so a text slot over spans is a question of its own, open
 - **A colour row's swatch popup gains a *Variables* tab.**
 - **A styled card collapses to one row** — a swatch or preview and the style's name — with *Detach* on
   hover and the values beneath shown greyed when it is expanded. Applying, creating and detaching go
-  through the card header's menu, D1005's `+` on the Properties card being the precedent.
+  through the card header's menu, D1005's `+` on the Properties card being the precedent. ⚠️
+  **Refined by D1038**: the menu is a `⋯` after the `+`, on the five slot cards only, and a styled
+  card is **read-only in the inspector** — its values change only in the browser, while an edit from
+  any other door still detaches it, as this entry says.
 
 **The browser** — the session's four points, the maintainer: *"Agree with the 4 points"*. **A floating
 panel on the insert picker's model** (`kits/picker.rs`, D1014): beside the vertical toolbar,
@@ -24425,7 +24429,10 @@ variables' modes mean in a consumer whose modes differ. (c) The browser's shortc
 variables bind to beyond text content and visibility — **the fields D982's component properties are
 already views over**, so a field that is both a property's and a variable's is a question in itself.
 (e) Text styles over spans. (f) Whether a layout style carries the item's properties — grow,
-`align-self` — or only the container's. (g) The export's CSS shape.
+`align-self` — or only the container's. (g) The export's CSS shape. ⚠️ **Ruled since, 2026-10-13
+(D1038)**: (a) a *Mode* row in the frame's card, frames only; (b) one list per document and a per-kit
+mapping by name; (c) `Shift+S`; (d) booleans bind visibility, strings text content and font family;
+(f) the container's fields only; and premise (iv) below. **(e) and (g) are still open.**
 
 **The build order** — the session's, accepted: (1) colour and number variables, with aliases and modes,
 bound to paint and corner radius; (2) number variables in layout fields; (3) styles for fills, strokes
@@ -24446,7 +24453,9 @@ cover. (iv) **A bound field leaving its document** — a paste into another, *Pa
 carrying paste: unruled. (v) **The MCP snapshot** reports either the resolved value or the binding, and
 either is a change of its shape. (vi) **A variable's edit is an `Operation`** like any other
 (invariant 2), so it is undoable, and a preview of one through `RenderOverrides` — keyed by node —
-reaches every bound node rather than one.
+reaches every bound node rather than one. ⚠️ **(iv) ruled 2026-10-13 (D1038)**: a paste into another
+document rebinds to a variable of the same name and type there, else detaches to the resolved value;
+within one document a paste keeps its binding.
 
 *(Ruled 2026-10-11 by the maintainer — variables' types, per-frame modes, layout fields, the detach on
 delete, the styles' slots and wholeness, the inspector's chip, `--` and its refusals, the right-click,
@@ -24456,7 +24465,208 @@ ruled. **Not built**, record-only, no code cites this number, and the first buil
 citation. **Keep.** `architecture.md` §5.3f written; invariant 4, §5.3d's override paragraph, §5.3e,
 §5.9, §5.11, §7 and §12's fourth property pointed; `roadmap.md` §0's *styles/variables* struck with its
 reason, *Next · Styles and variables* opened with the build order and the open questions, and *Later ·
-Components and layout, past the first build* given the rebinding offer)*
+Components and layout, past the first build* given the rebinding offer. **Amended 2026-10-14** (D1038):
+the Claude Design pass is done and accepted, and the maintainer ruled (a), (b), (c), (d), (f) and
+premise (iv) on 2026-10-13 — D1038 has each; **(e) and (g) are still open**, to steps 6 and 5. Three
+points in this entry's inspector bullets are refined there rather than reversed: a styled card's menu is a
+`⋯` in its header, not D1005's `+`; a styled card is **read-only in the inspector**, its values edited
+only in the browser — *"an edit to any field of a styled card detaches it"* still holding for every
+other door; and *Mixed* is two cases, a capsule only when every layer is bound)*
+
+**D1038 — Styles and variables: the accepted chrome — a fully rounded capsule means a reference and
+nothing else in the inspector is round, a styled card is read-only there and edited in the browser
+alone, a field's right-click binds, extracts and detaches, and the browser swaps in place with the
+insert picker at a width its modes set — with the maintainer's rulings on D1037's open questions.
+*Ruled 2026-10-13 by the maintainer; not built.*** The design is `design/Styles and Variables.dc.html`
+(Claude Design), revised 2026-10-14 — the pass D1037 put before any of it is drawn, as D1011 followed
+D1010. The session recommended an answer to each of D1037's open questions and to each thing the
+mockup added; the maintainer's answer to the list was *"Agree with all"*. ⚠️ **That folder is
+untracked and regenerated between sessions, and a regeneration deleted this feature's revision spec
+within hours of its writing** — the kits brief's fate under D1011, again — so the file is where this
+came from and not where it lives: the screen numbers below are pointers, and everything a builder
+needs is written here, as D981 and D1011 did. **Nothing is built**, so no line of `crates/` cites this
+number — record-only, as D1037 is — and the first build commit owes the citation at the sites it
+creates.
+
+**Where the rulings overrule the mockup** — D982's precedent, *"The 3 rules go for what we decided.
+That takes precedence over design."* **H2** draws an extra per-kit *Mode* row on a frame's card while
+a kit is in use; (b) gives a frame exactly one mode. **G5** lists *String variable* in the browser's
+`+` menu; (d) hides it until step 6. *Do not* build either from the mockup. Two slips of the first
+draft the revision fixed, recorded so an older copy is not read back: the one-mode browser is **340**
+wide, the insert picker's width (`kits/picker.rs`'s `W`, D1014), where the draft said 320; and Ondin
+has no pages — a frame inherits its mode from an ancestor frame or the document, where the draft wrote
+*from page*.
+
+**The rulings on D1037's open questions**, 2026-10-13.
+
+(a) **A frame's mode is a *Mode* row in the frame's own identity card, under its name.** Inherited,
+it reads dim and names its source — the nearest ancestor frame that sets a mode, *Light · from Hero /
+Desktop*, else the document's **default mode, which is its first mode**, *Light · default*. Set, it
+reads bright and is appended to the frame's canvas label, *Hero / Desktop · Dark*; an inherited mode
+stays off the canvas. *Inherit* is the menu's first row. **Modes are set on frames only, never on
+groups.** On an instance a mode set on the copy is an **override** like any field — dot and ↺ (D981)
+— with no new mechanism. The canvas label (H5) elides the name first and never the mode, and below
+about 40 px hides, as every frame label does.
+
+(b) **One mode list per document, no collections.** A kit's variables' modes map onto the document's
+through **one per-kit mapping held at document level**, shown and edited in the kit's header row in
+the browser (*Day → Light, Night → Dark*): matched **by name** by default, a kit mode with no match
+mapping to the **kit's first mode**. **A frame carries exactly one mode** — which is what H2 breaks.
+
+(c) **`Shift+S` opens the browser** — *Styles* — beside `Shift+I` for the insert picker; agreed and
+unbound (`shortcuts.md` §14). Free in the editor's map: `S` alone is the Star tool, read with no
+Shift; `Alt+S` (align bottom) and `Ctrl+Alt+S` (subtract) both require Alt; `Ctrl+S` saves, and
+`Ctrl+Shift+S` is deliberately inert (`shortcuts.md` §8).
+
+(d) **Booleans bind visibility, in build step 2. Strings bind text content and font family, built
+with text styles in step 6**, both meeting §5.4's per-span text attributes as (e) does. **The `+`
+menu hides *String variable* until step 6**, so no type exists that binds nothing. A field that is
+both a component property's and bound needs no rule of its own: the property is a view over the field
+(D982), so it shows the chip, and an edit through the property detaches like any edit.
+
+(e) Text styles over spans and (g) the CSS export's shape are **left open**, to steps 6 and 5.
+
+(f) **A layout style carries only the container's fields** — display, direction, wrap, alignment,
+gaps, padding — and never an item's grow or `align-self`.
+
+**Four more rulings, the same day.** **A colour variable binds a whole solid paint** — the swatch
+popup's *Variables* segment is a fourth paint kind beside Solid, Linear and Radial — and **never a
+gradient stop**; a reusable gradient is a **fill style**. **A colour variable carries its own alpha**;
+the fill's `%` stays a separate field, **not bindable**, and what draws is the variable's colour times
+that `%`. **Premise (iv), a bound field leaving its document**: a paste into another document
+**rebinds to a variable of the same name and type if the target has one, and otherwise detaches to the
+resolved value** — the name matching (b)'s; within one document a paste keeps its binding. ⚠️ (iv) also
+named *Paste properties* and a preset, and the ruling as put speaks of a paste; whether those two read
+the same way was not put separately. **Deleting a mode** returns every frame set to it to *Inherit*
+and removes its column; *Delete mode…* confirms with the number of frames affected, and one `Ctrl+Z`
+restores all.
+
+**The mockup's additions, each accepted.** (1) **A styled card is read-only in the inspector**:
+expanded, it shows its values greyed and inert, *Read-only — Detach to edit*; a style's values change
+only through the browser's *Edit* (the Styles tab, the style's card inline, live to every user).
+D1037's *"an edit to any field of a styled card detaches it"* **still holds for every other door** —
+the canvas, *Paste properties*, MCP. (2) **A canvas gesture on a bound or styled value detaches** —
+dragging a gap handle on a layout-styled container, resizing a bound W — the record's rule, since
+refusing would leave the handles dead; **the floating status says what was detached** (*Detached
+Stack/Row 12*, D1025's bar), and `Ctrl+Z` restores. (3) **A bound field does not scrub**, so a drag
+can never detach by accident, and the cursor says the field will not scrub. (4) **A × inside the
+chip, on hover, detaches** — it takes the chip's last 14 px and the name elides; bound fields only.
+(5) **A `⋯` menu in the card header** — *Apply style…*, *Create style from this…* (*…as a copy…* on a
+styled card), *Detach style* — **on the five style slots' cards only**: fill, stroke, effects, text,
+and layout's Container card. The header's order (F8): at the left end the title, then the override dot
+and count, the count becoming the *Reset …* chip on header hover (Components 4E); at the right end the
+`+` and then the `⋯`, always last; the `+` hides while the card is styled and nothing moves. This is
+the shape D1037's *"its menu in the header, D1005's `+` the precedent"* took. (6) **Deleting a style
+detaches its users** to their values, as deleting a variable does (D1037, D979 (c)): no confirmation,
+the floating status says it, one `Ctrl+Z` restores. (7) **The bindable numbers are W, H, corner
+radius, layer opacity, stroke width, effect X, Y, blur and spread, and the layout gaps and padding.**
+**Not X, Y or rotation**: those are placement, not design values, and an instance already keeps its
+own placement — a direct instance's never compares with its main's (§5.3d, `reset::placement_is_own`),
+and a swapped slot keeps the root's (D983 (3)).
+
+**The chrome.** 🚨 **The capsule rule**: a fully rounded shape means *a reference* — a bound field's
+chip, a collapsed styled card, an alias in the browser — and **no other inspector element is fully
+round**. **No hue**: the accent still means selected only, so a focused chip takes the accent and a
+highlighted autocomplete row the neutral hover. The override dot sits on the label and the capsule in
+the value — never touching. *Do not* round any other control: the shape is the whole of the signal.
+
+**A bound field (A1–A7).** The capsule fills the value area; the label badge and the field's width are
+unchanged (D1037's constraint). A bound colour row keeps its swatch, showing the resolved colour, and
+the chip replaces the hex; a field's trailing CSS name gives way to the chip. Hover: a tooltip with the
+resolved value and the mode it resolved in, the full name first when elided. Focus selects the chip as
+one token: **`Backspace` detaches, leaving the resolved literal selected**; `--` rebinds; any other key
+replaces the chip. **Mixed, two cases**: every selected layer bound, to different variables → a capsule
+reading *Mixed*, its tooltip listing them; some bound and some not → the plain grey *Mixed* of Variants
+4G, no capsule (D130's rule: *Mixed*, no new dash). **Long names elide from the left by whole groups**
+(`…/width-collapsed`), then the leaf. **On an instance** a binding different from the main's is an
+override — bright label, dot, ↺ restoring the main's binding; the same variable is not.
+
+**The `--` autocomplete (B1–B4).** Opens under the field at the card's inner width, listing only the
+field's type; a substring match on the full name, the match bright; grouped by slash group, kit groups
+last; values resolved in the selected layer's mode, the footer naming it. The highlighted row previews
+live on the canvas, and `Escape` restores. On a hex field each row is swatch, name and hex, aliases
+resolved. With no match the list stays one row tall and `Enter` is inert. **A refused `--space/4 * 2`**:
+the trailing text dims with a dotted underline, one plain sentence says why, `Enter` is inert — no red,
+no shake. This is the manner every refusal below borrows.
+
+**A field's right-click (C1–C2)** — the new surface D1037's premise (iii) named, `context-menus.md`
+§6.7. Its rows, in this order: *Bind to variable…*, its accelerator column showing `--`, opening the
+list with the current variable highlighted when bound; *Extract into variable…*, disabled when bound;
+*Detach variable*, showing `Backspace`, **omitted on an unbound field** — `context-menus.md` §3's one
+exception, a row whose only purpose is to undo a non-default state. 🚨 **The maintainer's ruling over
+the design** (2026-10-14): C1 draws the three rows fixed, *Detach* disabled, and the maintainer ruled
+the omission instead, for consistency with every other reset row — so an unbound field's menu is two
+rows and a bound one's three. *Extract* stays disabled rather than hidden: it undoes nothing, so §3's ordinary
+*state decides enabled* governs it. The canvas menu's surface, row height and colours.
+
+**Extract (D1–D3).** The browser opens on *Variables* with a pending row pinned above the groups, the
+value in every mode column (D1037's ruling) and the name field focused; meanwhile the inspector field
+shows a **dashed capsule**. `Escape` cancels both; `Enter` files the variable into its group and the
+capsule turns solid. Its usage count is 1 — binding the value's other users is `roadmap.md`'s *Later*
+item. From a colour the swatch stays and only the hex becomes the dashed capsule. The browser replaces
+the insert picker if it is open.
+
+**The swatch popup's *Variables* segment (E1)**, the fourth beside Solid, Linear and Radial: the popup
+keeps its height on every tab; the current variable is tinted with a check and scrolled into view; hexes
+are in the layer's mode; picking on Solid while bound detaches.
+
+**A styled card (F1–F10).** It collapses to one capsule — caret, preview, name and a short summary;
+hover puts *Detach* in the summary's place (no toast; every value kept; the normal card reopens).
+Expanded, the values are greyed and inert, variables inside still capsules. *Apply style…* is a picker
+under the header listing only that card's styles, grouped, kit groups last, the highlighted row
+previewing on the canvas. *Create style from this…* collapses straight into a capsule with its name
+field focused — `Enter` keeps, `Escape` undoes, `/` groups — and variables stay bound inside the style.
+**A layout style**'s capsule shows the display glyph turned with the direction; expanded it is the whole
+Container card, greyed. **On an instance** (F9) the main's own style is no override; a different style
+or a detached card is one, and *Reset fill* (and the like) restores the main's style. **Several selected**
+(F10): all styled differently → a *Mixed* capsule without a caret, its tooltip listing them, *Create*
+off; some styled → grey *Mixed* fields; all the same → read as one; every `⋯` row names how many layers
+it acts on; and the `+` hides whenever any selected card is styled.
+
+**The browser (G1–G22).** A swatches-glyph button **directly above the hexagon** at the toolbar's foot;
+the browser and the insert picker both bottom-align, so they **swap in place** — one open at a time, its
+button tinted while open. A canvas selection leaves it open; only `Escape` or its button closes it; its
+search takes the keyboard once, on opening, as the picker's does (D1014); hidden in present mode.
+**Width is the 220 name column plus 96 per mode plus padding — 340 with one mode (its column headed
+*Value*), 436 with two, 532 with three, the cap**; past three the mode columns scroll sideways under a
+fixed name column, and the width changes only when a mode is added or removed. **An alias is a per-mode
+cell value, not a fifth type** — *button/bg* → *brand/500* in Light, *brand/400* in Dark — drawn as a
+capsule naming its target. No type column: a swatch, a bare number, a quoted string or *true*/*false*
+shows it, the type chosen once in the `+` menu and fixed. ***In selection***, shared by both tabs: groups
+read *n of m*, the line under search names the selection, and it stays pressed across selection changes
+and **never silently falls back to the full list**. A usage count selects every user in the document,
+its tooltip first. One `+`: *Colour*, *Number* (*String* hidden until step 6) and *Boolean variable*, and
+*New mode* — copying the first mode's values, its name selected; a double-click on a header renames, and
+a header's right-click has *Rename*, *Duplicate* and *Delete mode…*. Cells edit in place — `Enter`
+commits, `Tab` moves to the next mode — and a colour cell opens the colour popup beside the panel, its
+*Variables* segment making an alias. A kit's rows are inert. **The Styles tab** groups by card in
+inspector order, each row a preview, a name and a count; right-click or double-click: *Rename*, *Edit*,
+*Select*, *Delete*. **A variable row's menu**: *Rename* (typing another group moves it), *Duplicate*,
+*Select n layers*, *Delete*. **Groups** rename by double-click or *Rename group*, the members moving and
+the bindings following, a name already in use merging the two groups; *Select n layers*; *Delete group*.
+They collapse by their caret, Alt-click collapsing or opening all, the state kept per document, and a
+search opens the groups it matches. **Refusals in B4's manner**: a taken name, checked per group, dims
+with a dotted underline and one sentence; a row in the *Variables* segment that would make an **alias
+loop** dims and reads *uses brand/500* or *this variable* in place of its hex, inert; a wrong-type alias
+cannot arise, every list being filtered by type. **Empty states** are text alone, naming the real ways
+in. ⚠️ **G13's merge is the design's and not ruled**: what happens when both groups hold a leaf of one
+name — *brand/500* renamed into *accent/* where *accent/500* exists — is undrawn; G14's refusal is the
+natural answer and is not decided (`roadmap.md`).
+
+**Kit updates** (Kits 5A and 4B, extended): the summary counts components, variables and styles, shows
+old → new swatches and values, and lists the layers a removed variable or style detaches (*keep its
+values*); *Accept all* is one undo step and the floating status gives the count. While an update waits
+the kit's line in the browser reads *v8 → v9*, a click opening the summary, and its rows keep showing
+v8's values.
+
+*(Designed by Claude Design and accepted by the maintainer with the rulings of 2026-10-13, every one
+the session's recommendation; (b) and (d) overrule the mockup's H2 and G5, and the field menu's
+*Detach variable* omitted when unbound overrules C1 (ruled 2026-10-14); G13's same-leaf merge the
+design's, unruled. **Keep.** **Not built**, record-only, no code cites this number, and the first build
+commit owes the citation. D1037 amended in body and index; `architecture.md` §5.3e's kit-modes line,
+§5.3f and §5.11's v7 note amended; `shortcuts.md` §14 added; `context-menus.md` §6.7 added; `roadmap.md`
+*Next · Styles and variables* edited down — the design pass and (a), (b), (c), (d), (f) and (iv)
+struck, (e), (g) and the merge left — and its *Later* rebinding row's attribution corrected)*
 
 **D980 — The five item lists carry ids, in a wrapper beside each item rather than a field inside it,
 and an instance's items follow its main's item by item. *Decided 2026-10-04 by the maintainer — per

@@ -35,7 +35,7 @@ hand-written spec would be lost with the next regeneration.
 
 **§1–§10 are the sections that were reviewed and agreed, and keep their numbers from that
 review. §11 completes the inventory** — the history, structure and navigation keys that were
-already built and never in question. §12 is components' three rows, agreed 2026-10-04 — two bound the same day, `Enter` not yet. §13 is kits' two rows, agreed 2026-10-08 and both bound the same day. The file is the whole keymap, not the new part of it.
+already built and never in question. §12 is components' three rows, agreed 2026-10-04 — two bound the same day, `Enter` not yet. §13 is kits' two rows, agreed 2026-10-08 and both bound the same day. §14 is styles and variables' one row, agreed 2026-10-13 and unbound. The file is the whole keymap, not the new part of it.
 
 **Where the bindings come from.** Figma and Sketch agree with each other far more often
 than either agrees with Adobe, so the rule applied throughout was: take the Figma/Sketch
@@ -846,6 +846,16 @@ Agreed with the *Kits* design (`decisions.md` §15 D1011, ruling (5); `architect
 **A command palette comes later**, and the design had assumed one for reaching the kit verbs by keyboard;
 until it exists these two rows are the keyboard's whole route. ⚠️ `Ctrl+Alt+P` is one more chord for §12's
 `AltGr` question, which is about the whole keymap.
+
+## 14. Styles and variables — agreed 2026-10-13, not built
+
+Agreed with the *Styles and Variables* design (`decisions.md` §15 D1038, ruling (c); `architecture.md`
+§5.3f). Nothing is bound: the browser it opens does not exist yet. Not counted in the header's line,
+which is §8's and §10's.
+
+| Key | Action | |
+|---|---|---|
+| `Shift+S` | ➕ open the styles and variables browser | Beside §13's `Shift+I`, and for the same reason: the browser and the insert picker are panels at the foot of the vertical toolbar that swap in place, one open at a time, so the two chords are a pair. Free in the editor: §1's `S` is the Star tool and the tool letters are read with no Shift (`plain && !m.shift`); `Alt+S` (§5's align bottom) and `Ctrl+Alt+S` (§11's subtract) both require Alt; `Ctrl+S` is §8's save, and `Ctrl+Shift+S` is deliberately inert there. ⚠️ **Expect `Shift+I`'s caveat**: if the browser's search takes the keyboard on opening, as the design has it, the chord pressed straight after opening is a capital *S* in the search |
 
 ---
 

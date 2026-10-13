@@ -2957,7 +2957,8 @@ kit collide when one is pasted into the other.
 
 ⚠️ **Kits are to carry the variables and styles a vendored main uses** (§5.3f, §15 D1037 — the
 session's proposal, not objected to; not built), under this section's provenance and update flow,
-read-only in D as the main is. What a kit's modes mean in a consumer whose modes differ is open.
+read-only in D as the main is. A kit's modes map onto the consumer's through one per-kit mapping
+held at document level, by name, else the kit's first mode (§15 D1038).
 
 **Publishing** (1C, 2A–2D). A kit's top bar carries a neutral *Kit* tag after the document's save dot and,
 hard against it in the same 26-tall box, *Publish N* (§15 D1025: the mockups put it on the right, and
@@ -3317,19 +3318,38 @@ and the dashboard's 1B §15 D1017).
 - **Mains made local are placed by their laid-out boxes**, a frame's too, measured on the document the
   transaction leaves, stacked down the right of the content 80 apart.
 
-### 5.3f Styles and variables (ruled 2026-10-11; not built; §15 D1037)
+### 5.3f Styles and variables (ruled 2026-10-11 and 2026-10-13; not built; §15 D1037, D1038)
 
 > **Design ahead of code, all of it.** Ruled with the maintainer on 2026-10-11, in conversation, on a
-> design the session put: §15 D1037 says which part is whose. **Nothing is built**; the build order and
-> what is open are `roadmap.md`'s *Next · Styles and variables*, and a Claude Design pass on the chrome
-> comes first. **When a step lands, this section is rewritten in the present tense** and the pointers
-> to it from invariant 4, §5.3d, §5.3e, §5.9, §5.11, §7 and §12 go.
+> design the session put: §15 D1037 says which part is whose. The Claude Design pass on the chrome is
+> done and accepted, with the maintainer's rulings on D1037's open questions (2026-10-13, §15 D1038,
+> which carries the chrome's substance — `design/` is regenerated). **Nothing is built**; the build
+> order and what is open are `roadmap.md`'s *Next · Styles and variables*. **When a step lands, this
+> section is rewritten in the present tense** and the pointers to it from invariant 4, §5.3d, §5.3e,
+> §5.9, §5.11, §7 and §12 go.
 
-**A variable** is a named, typed value — **colour, number, string or boolean** — or an **alias** naming
-another variable, with **one value per mode**. CSS custom properties are the model. **A mode is set on a
-frame and inherited by its descendants** (the maintainer's ruling), so what a variable resolves to
-depends on where it is read. Variables bind **layout fields from the start** (§5.3c's padding, gap and
-the rest), not only paint.
+**A variable** is a named, typed value — **colour, number, string or boolean** — with **one value per
+mode**; an **alias** is a per-mode cell value naming another variable of the same type, not a fifth
+type (D1038). CSS custom properties are the model. **A mode is set on a frame and inherited by its
+descendants** (the maintainer's ruling), so what a variable resolves to depends on where it is read.
+Variables bind **layout fields from the start** (§5.3c's padding, gap and the rest), not only paint.
+
+**Modes** (D1038). **One mode list per document**, no collections; the document's **default mode is its
+first**. **Only a frame sets a mode** — never a group — and a frame carries **exactly one**; a frame that
+sets none inherits from the nearest ancestor frame that does, else the default. On an instance a mode set
+on the copy is an **override** like any field (§5.3d). **A kit's variables' modes map onto the
+document's through one per-kit mapping held at document level**, matched by name by default, a kit mode
+with no match mapping to the kit's first mode. **Deleting a mode** returns every frame set to it to
+inherit, as one undoable transaction.
+
+**What binds** (D1038). **Numbers**: W, H, corner radius, layer opacity, stroke width, an effect's X,
+Y, blur and spread, and the layout gaps and padding — **not X, Y or rotation**, which are placement and
+which an instance already keeps as its own (§5.3d's `reset::placement_is_own`; a swapped slot's,
+§15 D983 (3)). **Colours** bind a **whole solid paint**,
+never a gradient stop — a reusable gradient is a fill style — and carry their own alpha: the fill's `%`
+stays a separate, unbindable field, and what draws is the variable's colour times it. **Booleans** bind
+visibility; **strings** bind text content and font family, with text styles. A field that is also a
+component property's needs no rule: the property is a view over the field (§5.3d).
 
 🚨 **A bindable field stores its binding and resolves it at read** (the session's, accepted): it holds
 `Literal(T) | Bound(VarId)`, and the value it draws is found against the mode in force at that node.
@@ -3343,28 +3363,46 @@ through `resolve`, so the compiler lists the readers. **There is no resolve step
 `Resolved` holds none, and the scene build reads a node's fields as stored.
 
 **Deleting a variable in use detaches** every field bound to it to the value it resolved to, as ops in
-the deleting transaction — §5.3d's rule for a deleted main.
+the deleting transaction — §5.3d's rule for a deleted main. **Deleting a style detaches its users** the
+same way (D1038). **A bound field leaving its document** (D1038): a paste into another document rebinds
+to a variable of the same name and type there, else detaches to the resolved value; within one document
+a paste keeps its binding.
 
 **A style** is one slot's isolated set of values — an isolated CSS class, not the cascade. **The slots
 are fills, strokes, effects, text and layout**; a node holds at most one style per slot, and styles do
-not stack. **A card is styled or not, as a whole**: editing any field of a styled card detaches it, with
-no partial override and no inheritance (the maintainer's ruling). A style's values may be variables.
-Text styles come last, text storing its character attributes per span (§5.4).
+not stack. **A layout style carries only the container's fields** — display, direction, wrap,
+alignment, gaps, padding — never an item's grow or `align-self` (D1038). **A card is styled or not, as
+a whole**: editing any field of a styled card detaches it, with no partial override and no inheritance
+(the maintainer's ruling). ⚠️ **The inspector is the one door that does not**: there a styled card is
+**read-only**, and a style's values change only through the browser's *Edit*, live to every user
+(D1038). Every other door — a canvas gesture on a styled or bound value, *Paste properties*, MCP —
+detaches, the floating status saying what was detached; refusing would leave the canvas's handles
+dead. A style's values may be variables. Text styles come last, text storing its character attributes
+per span (§5.4).
 
-**The chrome** (the maintainer's rulings, §15 D1037 in full). A bound field is a **chip with the
-variable's name at the field's own width**, its resolved value in the tooltip; a typed literal or
-`Backspace` detaches; disagreeing bindings show *Mixed*; it is marked by shape, never by hue, beside
-§5.3d's override dot. **Binding is by typing `--`** into the field, which takes the whole field —
-`--x * 2` is refused, `expr.rs` being a calculator with no names (§13 decision 1). A field's right-click
-offers *Bind to variable…*, *Extract into variable* (its value into every mode) and *Detach*; a colour's
-swatch popup gains a *Variables* tab; a styled card is one row with *Detach* on hover. **The browser** is a
-floating panel on §5.3e's insert picker's model, its button at the toolbar's foot, taking turns with the
-picker, with *Variables* and *Styles* tabs, modes as columns, and a usage count that selects.
+**The chrome** (the maintainer's rulings, §15 D1037; the accepted design, §15 D1038 in full). **A fully
+rounded capsule means a reference** — a bound field's chip, a collapsed styled card, an alias — and
+nothing else in the inspector is round; no hue, the accent still meaning selected. A bound field is a
+**chip with the variable's name at the field's own width**, its resolved value in the tooltip; a typed
+literal, `Backspace` or the chip's hover × detaches; it does not scrub; *Mixed* is a capsule only when
+every layer is bound, else the plain grey *Mixed*; it sits beside §5.3d's override dot, never touching.
+**Binding is by typing `--`** into the field, which takes the whole field — `--x * 2` is refused,
+`expr.rs` being a calculator with no names (§13 decision 1). A field's right-click offers
+*Bind to variable…*, *Extract into variable…* (its value into every mode, disabled when bound) and
+*Detach variable*, omitted on an unbound field (`context-menus.md` §6.7, §3's exception); a colour's swatch popup gains a *Variables* segment, a fourth paint kind; a
+styled card collapses to one capsule with *Detach* on hover, and the five slot cards' headers gain a `⋯`
+— *Apply style…*, *Create style from this…*, *Detach style* — after the `+`. **The browser** is a
+floating panel on §5.3e's insert picker's model, its button directly above the hexagon at the
+toolbar's foot, swapping in place with the picker, opened by `Shift+S`; *Variables* and *Styles* tabs,
+modes as columns at a width of 340, 436 or 532 by mode count (the cap at three, sideways scrolling
+beyond), an *In selection* filter, and a usage count that selects. A frame's mode is a *Mode* row in
+its own card, a set mode appended to its canvas label.
 
 **Kits carry the variables and styles a vendored main uses** (the session's, not objected to), under
-§5.3e's provenance and update flow. **The export as CSS custom properties** is the session's and not
-ruled; §7 writes paint as presentation attributes today, so where a `var()` would go is part of the
-question.
+§5.3e's provenance and update flow; a kit update's summary counts variables and styles beside
+components and lists the layers a removed one detaches (D1038). **The export as CSS custom properties**
+is the session's and not ruled; §7 writes paint as presentation attributes today, so where a `var()`
+would go is part of the question.
 
 ### 5.4 Text node
 
@@ -6316,7 +6354,8 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   that reshapes a document owes the nested one too (`PublishedDto`'s doc). The loader refuses a
   published state that carries one of its own, so the nesting is one level.
 - ⚠️ **Variables and styles owe v7** (§5.3f, §15 D1037, ruled, not built): a document-level table of
-  variables and styles, and a bindable field becoming `Literal | Bound` — a change of an existing
+  variables and styles — with the mode list, a frame's set mode and each kit's mode mapping (§15
+  D1038) — and a bindable field becoming `Literal | Bound` — a change of an existing
   field's shape, so a bump with a migration under the rule above, v6 being the version the v0.6.0
   release commit (`51b4550`) carries. The
   nested published document is owed the same step.

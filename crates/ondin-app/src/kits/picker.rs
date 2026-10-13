@@ -561,7 +561,7 @@ impl OndinApp {
             }
             Some(Act::Place(source)) => self.ask_place(source, None),
             Some(Act::Drop(source, at)) => {
-                if dropped_on_canvas(at, self.canvas_rect, panel) {
+                if dropped_on_canvas(at, self.canvas_rect, panel, ctx.layer_id_at(at)) {
                     self.ask_place(source, Some(at));
                 }
             }
@@ -890,8 +890,22 @@ fn panel_height(bottom: f32, canvas_top: f32) -> f32 {
 /// Whether a tile let go at `at` lands on the canvas: inside it, and not back
 /// on the panel it came from — a drag that ends where it started is a change
 /// of mind, not a placement.
-fn dropped_on_canvas(at: egui::Pos2, canvas: egui::Rect, panel: egui::Rect) -> bool {
-    canvas.contains(at) && !panel.contains(at)
+///
+/// **Nor over anything floating on the canvas** — `under` is the area there
+/// (`Context::layer_id_at`), and only the canvas's own background layer, or
+/// none, takes the drop. The inspector, the status bar and the colour picker
+/// float over the canvas's rect, and a tile let go on one was placed out of
+/// sight beneath it (the v0.5.0 release review's `[X4.1-L1-03]`); aiming at a
+/// panel is the same change of mind as aiming back at the picker.
+fn dropped_on_canvas(
+    at: egui::Pos2,
+    canvas: egui::Rect,
+    panel: egui::Rect,
+    under: Option<egui::LayerId>,
+) -> bool {
+    canvas.contains(at)
+        && !panel.contains(at)
+        && under.is_none_or(|l| l.order == egui::Order::Background)
 }
 
 /// The scrolled list's height inside a panel `height` tall — less the padding,
@@ -2812,5 +2826,31 @@ pub(crate) mod tests {
         let main = app.session.doc.get(inst).unwrap().link().unwrap();
         assert_eq!(app.session.doc.get(main).unwrap().origin().unwrap().kit, id);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A tile let go over a panel floating on the canvas places nothing**
+    /// (the v0.5.0 release review's `[X4.1-L1-03]`): inside the canvas's rect,
+    /// off the picker, but over the inspector's area. This asks the predicate;
+    /// that the call site hands it `Context::layer_id_at` is read, not driven —
+    /// the picker's drag test runs the picker alone, with no inspector drawn.
+    ///
+    /// Flip, run: `under` ignored fails *"over a floating panel"*.
+    #[test]
+    fn a_tile_let_go_over_a_floating_panel_places_nothing() {
+        let canvas = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let panel = egui::Rect::from_min_size(egui::pos2(0.0, 300.0), egui::vec2(200.0, 300.0));
+        let at = egui::pos2(700.0, 100.0);
+        let inspector = egui::LayerId::new(egui::Order::Middle, egui::Id::new("inspector"));
+        assert!(super::dropped_on_canvas(at, canvas, panel, None));
+        assert!(super::dropped_on_canvas(
+            at,
+            canvas,
+            panel,
+            Some(egui::LayerId::background())
+        ));
+        assert!(
+            !super::dropped_on_canvas(at, canvas, panel, Some(inspector)),
+            "over a floating panel"
+        );
     }
 }

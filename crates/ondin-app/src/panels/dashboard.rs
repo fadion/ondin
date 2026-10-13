@@ -6661,18 +6661,16 @@ fn is_kit(lib: &crate::library::state::Library, entry: &Entry) -> bool {
 }
 
 /// Whether `entry` is the file that stands for the kit id it carries (§15
-/// D1011 (10)) — true of any file that is not a conflict copy, and of a
-/// conflict copy left as its kit's only claimant.
+/// D1011 (10)) — `kits::index::kit_file`'s answer, the picker's, so one file is
+/// the kit to both; a file with no kit mark stands for none and may become
+/// one, unless it is a conflict copy (§15 D1024).
 fn stands_for_its_kit(lib: &crate::library::state::Library, entry: &Entry) -> bool {
-    if lib.conflict(entry).is_none() {
-        return true;
-    }
-    entry
-        .meta
-        .id
-        .as_deref()
-        .and_then(|id| crate::kits::index::kit_file(lib, id))
-        .is_some_and(|k| k.path == entry.path)
+    let (Some(id), Some(_)) = (entry.meta.id.as_deref(), entry.meta.kit.as_ref()) else {
+        // No kit mark: nothing claims a kit here, and *Make a kit* is the
+        // row — but not on a conflict copy (§15 D1024).
+        return lib.conflict(entry).is_none();
+    };
+    crate::kits::index::kit_file(lib, id).is_some_and(|k| k.path == entry.path)
 }
 
 /// Whether a file carries a sharing kit mark — the card's *Kit* chip, which a
@@ -12181,6 +12179,41 @@ mod tests {
             app.kit_row(&entry).map(|r| r.0),
             Some("Stop sharing as kit")
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **Two ordinary files of one kit are one kit** (the record's reading of
+    /// `39fc2e2`): a copy made outside the library's own *Duplicate*, which
+    /// mints a new id, carries the kit's id and mark. The picker took the first
+    /// by scan order and the dashboard took both, listing two kits and offering
+    /// *Stop sharing* on a file that is not the one consumers read.
+    ///
+    /// Flip, run: `stands_for_its_kit` answering yes to every file that is not
+    /// a conflict copy fails *"one kit"* with 2.
+    #[test]
+    fn two_files_of_one_kit_are_one_kit() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, root) = app(&ctx, "kit-twice");
+        let atlas = shared_atlas(&mut app, &root);
+        let copy = root.join("atlas copy.ondin");
+        std::fs::copy(&atlas, &copy).unwrap();
+        app.library.refresh();
+        assert_eq!(app.library.entries.len(), 2, "fixture: both files");
+        assert_eq!(app.nav_count(&Nav::Kits), 1, "one kit");
+        let picked = crate::kits::index::kits_in(&app.library, None);
+        let stands = |p: &Path| app.kit_row(app.library.entry_at(p).unwrap()).is_some();
+        assert_eq!(picked.len(), 1);
+        assert!(
+            stands(&picked[0].path),
+            "the picker's file is the dashboard's"
+        );
+        let other = if picked[0].path == atlas {
+            &copy
+        } else {
+            &atlas
+        };
+        assert!(!stands(other), "and the other gets no kit row");
         let _ = std::fs::remove_dir_all(&root);
     }
 

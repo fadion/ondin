@@ -459,9 +459,13 @@ impl Changes {
 /// **Frozen state against frozen state**: the working document is frozen as a
 /// publish would freeze it ([`freeze`]) and each published main or set compared,
 /// with the kit mains it reaches, to the last publish's. **A main's own place is
-/// not compared** — its transform, and its parent in the kit — because a
-/// consumer's copy sits in a vault where neither means anything; moving a main
-/// across the kit's canvas is not a change anyone downstream receives.
+/// not compared** — its transform, its parent in the kit, its insets, its layout
+/// item and its visibility, every field an instance root keeps as its own — nor
+/// an origin's version: a consumer's copy sits in a vault where none of them
+/// reaches an instance, so moving, pinning or hiding a main on the kit's canvas
+/// is not a change anyone downstream receives ([`reach`]). **The mains' order
+/// is**, as [`Changes::reordered`]: it is the order a consumer's picker lists
+/// them in.
 pub fn changes(doc: &Document) -> Changes {
     let now = freeze(doc);
     let before = doc.published();

@@ -87,8 +87,9 @@ pub(crate) fn kits_in(lib: &Library, own: Option<&str>) -> Vec<KitEntry> {
 
 /// **The file that is the kit `id`** among those carrying a kit mark with it —
 /// [`kits_in`]'s rule, and the dashboard's, asked in one place: the one that is
-/// not a conflict copy (§15 D1011 (10)); if every claimant is one, the first by
-/// path, so the answer does not hang on the scan's order.
+/// not a conflict copy (§15 D1011 (10)); if every claimant is one, a conflict
+/// copy — and among several, the first by path, so the answer does not hang on
+/// the scan's order.
 ///
 /// 🚨 **The dashboard once asked its own question** (the v0.5.0 release review's
 /// `[X3.1-L1-03]`): it ruled out every conflict copy, so a kit whose original
@@ -99,16 +100,13 @@ pub(crate) fn kit_file<'a>(lib: &'a Library, id: &str) -> Option<&'a Entry> {
         .entries
         .iter()
         .filter(|e| e.meta.id.as_deref() == Some(id) && e.meta.kit.is_some());
-    let mut first: Option<&Entry> = None;
-    for e in claimants {
-        if lib.conflict(e).is_none() {
-            return Some(e);
-        }
-        if first.is_none_or(|f| e.path < f.path) {
-            first = Some(e);
-        }
-    }
-    first
+    // Ordinary files before conflict copies, each the first by path — two
+    // ordinary files of one id (a copy made outside the library's own
+    // *Duplicate*, which mints a new one) went by scan order, and the
+    // dashboard took both for the kit (the record's reading of `39fc2e2`).
+    claimants.min_by(|a, b| {
+        (lib.conflict(a).is_some(), &a.path).cmp(&(lib.conflict(b).is_some(), &b.path))
+    })
 }
 
 /// A kit as a list heading names it (4F, 3I).
@@ -195,6 +193,9 @@ struct Shelf {
     /// Whether the tile pictures are still being drawn — after the published
     /// state has landed (`[X3.1-L4-01]`).
     drawing: bool,
+    /// A font the kit names has arrived since it was drawn: read it again on
+    /// the next ask ([`KitShelf::fonts_changed`]).
+    stale: bool,
     /// The rendered pictures not yet uploaded: each is taken out as its
     /// texture is made (`[X3.1-L4-02]`).
     pixels: HashMap<NodeId, Pixels>,
@@ -242,13 +243,16 @@ impl KitShelf {
     /// Ask for `kit`'s published state — read again when its file has changed
     /// since it was last read. Free when it is held and current.
     pub(crate) fn ask(&mut self, kit: &KitEntry) {
-        if self
-            .shelves
-            .get(&kit.id)
-            .is_some_and(|s| s.modified == kit.modified)
-        {
+        let held = self.shelves.get(&kit.id);
+        if held.is_some_and(|s| s.modified == kit.modified && !s.stale) {
             return;
         }
+        // A kit read again for a font keeps its pictures on screen until the
+        // new ones land (`Done::State` keeps them while a drawing follows).
+        let tiles = held
+            .filter(|s| s.modified == kit.modified)
+            .map(|s| s.tiles.clone())
+            .unwrap_or_default();
         self.shelves.insert(
             kit.id.clone(),
             Shelf {
@@ -256,8 +260,9 @@ impl KitShelf {
                 version: None,
                 load: Load::Pending,
                 drawing: false,
+                stale: false,
                 pixels: HashMap::new(),
-                tiles: HashMap::new(),
+                tiles,
             },
         );
         let (tx, _) = self.worker.get_or_insert_with(spawn);
@@ -300,7 +305,11 @@ impl KitShelf {
                     s.version = version;
                     s.drawing = drawing;
                     s.pixels.clear();
-                    s.tiles.clear();
+                    // Pictures still on screen stay until their redraw lands;
+                    // with none to follow, the kit has none.
+                    if !drawing {
+                        s.tiles.clear();
+                    }
                 }
             }
             Done::Tiles {
@@ -344,8 +353,11 @@ impl KitShelf {
             if let Load::Ready(Some(p)) = &s.load
                 && touches(&families_of(p.document()))
             {
-                // Matches no scan's time, so the next ask reads it again.
-                s.modified = u64::MAX;
+                // Read again on the next ask. A flag, not a time no scan has:
+                // that dropped a drawing still in flight as stale, and the
+                // shelf stayed `drawing` for good — a repaint every 50 ms with
+                // the picker closed (the record's reading of `12aafc7`).
+                s.stale = true;
             }
         }
     }
@@ -495,7 +507,8 @@ fn read(path: &std::path::Path) -> (Load, Option<u32>) {
 /// arrival is asked against (`fonts::FontPoll::touches`).
 fn families_of(doc: &ondin_core::Document) -> std::collections::HashSet<String> {
     let mut families = std::collections::HashSet::new();
-    let mut stack = vec![doc.root()];
+    // The vault too: a third kit's main the kit nests is drawn in its tiles.
+    let mut stack: Vec<NodeId> = std::iter::once(doc.root()).chain(doc.vault()).collect();
     while let Some(id) = stack.pop() {
         let Some(node) = doc.get(id) else { continue };
         if let ondin_core::NodeKind::Text { style, spans, .. } = node.kind() {
@@ -531,7 +544,8 @@ pub(crate) fn tile_subject(doc: &ondin_core::Document, top: NodeId) -> NodeId {
 /// moved to the root with its own transform, as `kit::insert` and the picker
 /// place it. Drawn where it sat (the v0.5.0 release review's `[X4.1-L1-02]`,
 /// with `[X4.1-L1-04]`), a main in a frame rotated 90° and scaled 2× dragged
-/// as 40 × 160 and turned and landed 80 × 20 and level; since the ancestor was
+/// turned and twice its size — the review's 80 × 20 main as 40 × 160, the
+/// test's 80 × 30 as 60 × 160 — and landed level at its own; since the ancestor was
 /// no input to `LocalTiles`' comparison, rotating it left the tile as it was;
 /// a variant drew at the size its set's layout gave it, not the one it lands
 /// at; and a vault main, never resolved where it sits, dragged as an empty box.
@@ -740,6 +754,27 @@ mod tests {
         assert!(shelf.busy(), "read again");
         shelf.settle();
         assert!(matches!(shelf.load(&id), Some(Load::Ready(Some(_)))));
+
+        // 🚨 **A font arriving while the pictures are still being drawn**
+        // (the record's reading of `12aafc7`): marking the kit with a time no
+        // scan has made the drawing in flight land as stale and be dropped,
+        // and the shelf stayed `drawing` for good — a repaint every 50 ms with
+        // nothing to ask for it again. Flip, run: `fonts_changed` writing
+        // `modified = u64::MAX` again fails *"the drawing in flight lands"*.
+        let mut shelf = KitShelf::default();
+        shelf.ask(&kit);
+        let wait = std::time::Duration::from_secs(20);
+        let next = |shelf: &KitShelf| shelf.worker.as_ref().unwrap().1.recv_timeout(wait).unwrap();
+        let state = next(&shelf);
+        shelf.land(state);
+        assert!(
+            shelf.shelves[&id].drawing,
+            "fixture: the state landed, the pictures not yet"
+        );
+        shelf.fonts_changed(|f| f.contains("inter"));
+        let tiles = next(&shelf);
+        shelf.land(tiles);
+        assert!(!shelf.busy(), "the drawing in flight lands");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

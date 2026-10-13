@@ -298,7 +298,18 @@ impl OndinApp {
     pub(crate) fn publish_now(&mut self, note: String) {
         // `open_publish` finished it; this is the verb, and any other caller.
         self.finish_text_first();
-        let count = self.kit_changes().map_or(0, |c| c.count());
+        let changes = self.kit_changes();
+        let count = changes.as_ref().map_or(0, |c| c.count());
+        // What a publish of no component carried, for its toast: the zero
+        // arm was written for the name alone, and said *"its new name"* over
+        // a publish of the order (the record's reading of `0d540f8`).
+        let other = changes
+            .as_ref()
+            .map_or("its new name", |c| match (c.renamed, c.reordered) {
+                (true, true) => "its new name and order",
+                (false, true) => "its components' new order",
+                _ => "its new name",
+            });
         let Some(version) = ondin_core::kit::publish(
             &mut self.session.doc,
             Some(note),
@@ -313,7 +324,7 @@ impl OndinApp {
         }
         let name = self.session.document_title();
         self.session.info(match count {
-            0 => format!("Published {name} v{version} · its new name"),
+            0 => format!("Published {name} v{version} · {other}"),
             n => format!("Published {name} v{version} · {n} component{}", plural(n)),
         });
     }

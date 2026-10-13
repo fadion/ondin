@@ -808,7 +808,7 @@ pub fn propagate_structure(
             .map(|id| Operation::SetLink { id, link: None }),
     );
 
-    // Reorders: a parent whose children are the same set in a new order — carried
+    // Reorders: a parent whose kept children are in a new order — carried
     // down the copy chain as the other three arms are, a copy this reorders being
     // a parent reordered in turn for its own copies. Single-level until the
     // release review: a nested copy in an outer main's instance kept the old

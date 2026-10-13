@@ -596,6 +596,89 @@ fn a_reorder_in_the_main_follows() {
     assert_eq!(kids(&f.doc, f.i), vec![f.it, f.ia]);
 }
 
+/// **A child gained and a reorder in one transaction both follow** (the v0.5.0
+/// release review's `[X2-L1-02]`): the main gains *x* at the front and moves
+/// its text before its rect. The reorder arm took only a parent whose children
+/// were the same set, so the instance got *x* and kept the old order.
+///
+/// Flip, run: the arm skipping a parent that gained a child fails with the
+/// instance's links `[a, x, t]` — *x*'s copy anchored after *a*'s counterpart,
+/// and the order never carried.
+#[test]
+fn a_child_gained_with_a_reorder_reaches_the_instance_in_the_new_order() {
+    let mut f = fixture();
+    let (m, a, t) = (f.m, f.a, f.t);
+    let x = f.ids.mint();
+    commit_all(
+        &mut f,
+        vec![
+            Operation::CreateNode {
+                id: x,
+                parent: m,
+                index: 0,
+                kind: rect_kind(),
+                transform: None,
+                name: None,
+            },
+            Operation::Reorder { id: t, index: 1 },
+        ],
+    );
+    assert_eq!(kids(&f.doc, m), vec![x, t, a], "the fixture");
+    let links: Vec<_> = kids(&f.doc, f.i).iter().map(|k| link(&f.doc, *k)).collect();
+    assert_eq!(links, vec![Some(x), Some(t), Some(a)]);
+}
+
+/// **A copy the transaction itself gave its new counterpart is not given a
+/// second** (§15 D1022's `supplied`): the main gains *x*, and the same
+/// transaction puts a node linked to *x* into the instance. Written for a kit
+/// update, where the vault's nested copies once took it; since the v0.5.0
+/// release review's `[X2-L1-01]` the vault follows nothing, and no kit test
+/// reaches the skip — so this pins it on the shape it answers, apart from the
+/// vault.
+///
+/// Flip, run: the `supplied` skip removed fails *"one counterpart, and no
+/// second copy beside it"* with `[a, t, None, x]`. ⚠️ **Its first assertion
+/// counted the children linked to *x* and stayed green under that flip**: the
+/// second copy lands, and a later pass cuts its link, so it is a stray layer
+/// rather than a second counterpart — count the layers, not the links.
+#[test]
+fn a_counterpart_the_edit_supplied_is_not_copied_again() {
+    let mut f = fixture();
+    let (m, i) = (f.m, f.i);
+    let [x, y] = [(); 2].map(|_| f.ids.mint());
+    commit_all(
+        &mut f,
+        vec![
+            Operation::CreateNode {
+                id: x,
+                parent: m,
+                index: 2,
+                kind: rect_kind(),
+                transform: None,
+                name: None,
+            },
+            Operation::CreateNode {
+                id: y,
+                parent: i,
+                index: 2,
+                kind: rect_kind(),
+                transform: None,
+                name: None,
+            },
+            Operation::SetLink {
+                id: y,
+                link: Some(x),
+            },
+        ],
+    );
+    let links: Vec<_> = kids(&f.doc, i).iter().map(|k| link(&f.doc, *k)).collect();
+    assert_eq!(
+        links,
+        vec![Some(f.a), Some(f.t), Some(x)],
+        "one counterpart, and no second copy beside it"
+    );
+}
+
 /// A child gained by an inner main reaches the outer main's instances through
 /// the nested copy, two levels down, each linked one level up.
 #[test]

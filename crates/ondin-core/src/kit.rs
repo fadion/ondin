@@ -1031,6 +1031,15 @@ pub struct Update {
     /// of the document (D1011 (3)). Placing them is the caller's: the vault is
     /// never resolved, so nothing here knows the document's content bounds.
     pub made_local: Vec<NodeId>,
+    /// Of `updated`, the mains whose sync wrote **more than their version** —
+    /// what *"Updated N components"* counts (§15 D1036 (5)): every synced main
+    /// moves to the new version, so counting `updated` named untouched mains,
+    /// and a version-only publish as N components changed.
+    pub changed: Vec<NodeId>,
+    /// The vault mains the update deleted — a variant the kit removed from a
+    /// set it still publishes (§15 D982 (c), D1036 (4)). Their instances are
+    /// detached by the commit, and the caller says so.
+    pub removed: Vec<NodeId>,
 }
 
 /// Bring every main this document vendored from `kit` up to `published`, at
@@ -1075,6 +1084,8 @@ pub fn update_all(
             tx: Transaction(Vec::new()),
             updated: Vec::new(),
             made_local: Vec::new(),
+            changed: Vec::new(),
+            removed: Vec::new(),
         });
     };
     let mut b = Builder {
@@ -1090,6 +1101,7 @@ pub fn update_all(
     };
     let mut updated = Vec::new();
     let mut made_local = Vec::new();
+    let (mut changed, mut removed) = (Vec::new(), Vec::new());
     for (at, &(kit, version, published)) in kits.iter().enumerate() {
         (b.kit, b.version, b.published, b.at) = (kit, version, published, at);
         let src = published.document();
@@ -1185,14 +1197,24 @@ pub fn update_all(
             }
         }
         for (t, x) in syncing {
+            let from = b.ops.len();
             b.vendor_reached(ids, x)?;
             b.sync(ids, t, x)?;
             updated.push(t);
+            if b.ops[from..]
+                .iter()
+                .any(|op| !matches!(op, Operation::SetOrigin { .. }))
+            {
+                changed.push(t);
+            }
         }
         // What a sync dropped and no other sync moved away is gone from the
         // publish; what was moved is where its new parent's sync put it.
         for (n, from) in std::mem::take(&mut b.dropped) {
             if b.scratch.get(n).and_then(|n| n.parent) == Some(from) {
+                if b.scratch.get(n).is_some_and(|n| n.component) {
+                    removed.push(n);
+                }
                 b.push(Operation::DeleteNode { id: n })?;
             }
         }
@@ -1248,6 +1270,8 @@ pub fn update_all(
         tx: Transaction(ops),
         updated,
         made_local,
+        changed,
+        removed,
     })
 }
 

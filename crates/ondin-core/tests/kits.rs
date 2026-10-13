@@ -1299,6 +1299,46 @@ fn make_local_on_a_nested_kit_main_leaves_the_kits_components_the_kits() {
     assert_eq!(d2, before, "one undo");
 }
 
+/// **An update says which mains it changed, and which it removed** (§15 D1036
+/// (4), (5); the v0.5.0 release review's `[X3.2-L1-02]` and `[R3-L5-03]`). D
+/// holds *Icon* and the *Button* set; the kit fades *Icon*'s dot and deletes
+/// the *Small* variant D placed. Every synced main moves to the new version,
+/// so `updated` holds both — the toast counted that, and named a version-only
+/// publish as N components changed. `changed` holds *Icon* alone; `removed`
+/// holds *Small*, whose instance the commit detaches.
+///
+/// Flip, run: `changed` taking every synced top fails *"only Icon changed"*.
+#[test]
+fn an_update_says_what_it_changed_and_what_it_removed() {
+    let mut k = kit();
+    let (mut d, mut ids) = consumer();
+    let icon_inst = insert(&mut d, &mut ids, &k, k.icon);
+    let small_inst = insert(&mut d, &mut ids, &k, k.small);
+    let icon = d.get(icon_inst).unwrap().link().unwrap();
+    let small = d.get(small_inst).unwrap().link().unwrap();
+    let set = d.get(small).unwrap().parent().unwrap();
+    let (dot, gone) = (k.icon_dot, k.small);
+    edit_and_publish(
+        &mut k,
+        vec![
+            Operation::SetOpacity {
+                id: dot,
+                opacity: 0.5,
+            },
+            Operation::DeleteNode { id: gone },
+        ],
+    );
+    let (u, _) = accept(&mut d, &mut ids, &k);
+    assert!(u.updated.contains(&set), "fixture: the set was synced");
+    assert_eq!(u.changed, vec![icon], "only Icon changed");
+    assert_eq!(u.removed, vec![small], "Small was removed");
+    assert_eq!(
+        d.get(small_inst).unwrap().link(),
+        None,
+        "and its instance cut loose"
+    );
+}
+
 /// A picture, and a fill wearing it.
 fn picture(
     key: &str,

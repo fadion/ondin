@@ -366,9 +366,13 @@ impl OndinApp {
             };
             match p {
                 Some((version, p)) => loaded.push((w.kit.id.clone(), version, p)),
+                // Nothing is applied while one waiting kit cannot be read: kits
+                // reach each other's mains (§15 D1022, D1024), so a partial
+                // accept is the riskier answer — and the message says the
+                // others wait too (§15 D1036 (5)).
                 None => {
                     self.session.fail(format!(
-                        "{} could not be read, so its update waits",
+                        "Nothing was updated, because {} could not be read",
                         w.kit.name
                     ));
                     return;
@@ -420,6 +424,20 @@ impl OndinApp {
                 return;
             }
         };
+        // The instances a variant the kit removed takes with it, counted before
+        // the commit detaches them (§15 D982 (c), D1036 (4)).
+        let cut: Vec<(String, usize)> = update
+            .removed
+            .iter()
+            .filter_map(|m| {
+                let n = doc.get(*m)?;
+                let here = ondin_core::component::instances_of(doc, *m)
+                    .into_iter()
+                    .filter(|i| !doc.in_vault(*i))
+                    .count();
+                (here > 0).then(|| (n.name().to_string(), here))
+            })
+            .collect();
         let mut tx = update.tx;
         let placed = stack_local(doc, &tx, &update.made_local, content);
         tx.0.extend(placed);
@@ -428,7 +446,7 @@ impl OndinApp {
         }
         let doc = &self.session.doc;
         let kept = update
-            .updated
+            .changed
             .iter()
             .flat_map(|m| match doc.get(*m) {
                 Some(n) if n.set().is_some() => ondin_core::variant::variants(doc, *m),
@@ -438,14 +456,30 @@ impl OndinApp {
             .filter(|i| ondin_core::reset::drift(doc, *i).any())
             .count();
         let kits = waiting.len();
-        let mut toast = format!(
-            "Updated {} component{} from {kits} kit{} · overrides kept on {kept} instance{} · \
-             Ctrl+Z to undo",
-            update.updated.len(),
-            if update.updated.len() == 1 { "" } else { "s" },
-            if kits == 1 { "" } else { "s" },
-            if kept == 1 { "" } else { "s" },
-        );
+        let plural = |n: usize| if n == 1 { "" } else { "s" };
+        // Only the mains that changed (§15 D1036 (5)): a version-only publish
+        // moves every main's version and changes none of them.
+        let changed = update.changed.len();
+        let mut toast = if changed == 0 {
+            format!(
+                "Updated {kits} kit{} · no component you use changed · Ctrl+Z to undo",
+                plural(kits)
+            )
+        } else {
+            format!(
+                "Updated {changed} component{} from {kits} kit{} · overrides kept on {kept} \
+                 instance{} · Ctrl+Z to undo",
+                plural(changed),
+                plural(kits),
+                plural(kept),
+            )
+        };
+        for (name, n) in &cut {
+            toast = format!(
+                "{toast} · {n} instance{} of {name} detached — the kit removed it",
+                plural(*n)
+            );
+        }
         if let Some(first) = update.made_local.first().and_then(|m| doc.get(*m)) {
             toast = match update.made_local.len() {
                 1 => format!(
@@ -1159,6 +1193,41 @@ mod tests {
             b2.y0 >= b1.y1 + super::LOCAL_GAP - 1e-9,
             "no overlap: {b1:?} {b2:?}"
         );
+    }
+
+    /// **An accept that cannot read a waiting kit applies nothing, and says so**
+    /// (§15 D1036 (5), the v0.5.0 release review's `[X3.2-L1-02]`): the kit
+    /// publishes, and its file is gone before the accept. It said *"Atlas could
+    /// not be read, so its update waits"*, which read as though the others had
+    /// been taken.
+    ///
+    /// Flip, run: the old wording fails *"nothing was updated"*.
+    #[test]
+    fn an_accept_that_cannot_read_a_kit_says_nothing_was_updated() {
+        let ctx = egui::Context::default();
+        let root = temp_root("unreadable");
+        let (path, kit, badge, dot) = file_kit(&root);
+        let (mut app, _) = consumer(&ctx, &root, &kit, badge);
+        republish(
+            &path,
+            vec![Operation::SetOpacity {
+                id: dot,
+                opacity: 0.5,
+            }],
+            "Softer dot",
+        );
+        app.library.refresh();
+        assert_eq!(app.kits_waiting(false).len(), 1, "fixture: one waits");
+        std::fs::remove_file(&path).unwrap();
+        let before = app.session.doc.clone();
+        app.accept_kit_updates(None);
+        assert_eq!(app.session.doc, before);
+        let said = app.session.status().text.clone();
+        assert_eq!(
+            said, "Nothing was updated, because Atlas could not be read",
+            "nothing was updated"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// A text layer reading "hello" under `parent`, committed and saved, and a

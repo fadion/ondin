@@ -2124,10 +2124,15 @@ pub(crate) mod tests {
         // The name sits under the tile's well; aim at the well.
         let tile = find(&text, "Button") - egui::vec2(0.0, 30.0);
 
-        // Back over the panel: a change of mind.
+        // Back over the panel: a change of mind. The frames a placement waits
+        // (§15 D1030) pumped first, and nothing queued — checked on the release
+        // alone it could not tell "not asked" from "asked, not yet run" (the
+        // v0.5.0 release review's `[X4.2-L6-01]`).
         drag(&mut app, tile, tile + egui::vec2(60.0, 0.0));
+        frame_with(&mut app, vec![]);
+        frame_with(&mut app, vec![]);
         assert!(
-            app.session.selection.single().is_none(),
+            app.kit_placing.is_none() && app.session.selection.single().is_none(),
             "let go over the panel, nothing placed"
         );
 
@@ -2844,6 +2849,16 @@ pub(crate) mod tests {
         ctx.memory_mut(|m| m.surrender_focus(field));
         let before = app.session.doc.clone();
         let _ = ctx.run_ui(enter(), |_| app.kit_picker_ui(&ctx));
+        // The frames a placement waits (§15 D1030), then nothing queued or
+        // placed: checked on the `Enter`'s own frame it passed whatever the
+        // guard did (the v0.5.0 release review's `[X4.2-L6-01]`).
+        for _ in 0..2 {
+            let _ = ctx.run_ui(Default::default(), |_| app.kit_picker_ui(&ctx));
+        }
+        assert!(
+            app.kit_placing.is_none(),
+            "not the picker's Enter: nothing queued"
+        );
         assert_eq!(app.session.doc, before, "not the picker's Enter");
 
         ctx.memory_mut(|m| m.request_focus(field));

@@ -621,6 +621,31 @@ fn a_file_that_lost_its_vault_key_is_refused() {
     );
 }
 
+/// **A published state nested in a published state is refused** (§5.11: *the
+/// nesting is one level*; the v0.5.0 release review's `[R2-L6-01]`). A hand-made
+/// file whose kit's published document carries a published state of its own
+/// would otherwise be loaded one level per nesting, and kept with a
+/// `published` every reader assumes is never there. The guard had no test:
+/// deleting it left every suite green.
+///
+/// Flip, run: the guard deleted fails *"the nested published state loaded"*.
+#[test]
+fn a_published_state_inside_a_published_state_is_refused() {
+    let k = kit();
+    let mut v: serde_json::Value = serde_json::from_slice(&io::save(&k.doc).unwrap()).unwrap();
+    let inner = v["published"].clone();
+    assert!(inner.is_object(), "fixture: the kit has published");
+    v["published"]["document"]["published"] = inner;
+    let Err(err) = io::load(&serde_json::to_vec(&v).unwrap()) else {
+        panic!("the nested published state loaded");
+    };
+    assert!(
+        err.to_string()
+            .contains("a published kit state holds a published state of its own"),
+        "{err}"
+    );
+}
+
 /// A v5 file loads as v6 — a number and nothing else.
 #[test]
 fn a_v5_file_loads_as_v6() {

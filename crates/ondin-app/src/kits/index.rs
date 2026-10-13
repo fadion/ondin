@@ -192,6 +192,11 @@ struct Shelf {
     /// the scan's, which may be older (§15 D1023).
     version: Option<u32>,
     load: Load,
+    /// Whether the tile pictures are still being drawn — after the published
+    /// state has landed (`[X3.1-L4-01]`).
+    drawing: bool,
+    /// The rendered pictures not yet uploaded: each is taken out as its
+    /// texture is made (`[X3.1-L4-02]`).
     pixels: HashMap<NodeId, Pixels>,
     tiles: HashMap<NodeId, egui::TextureHandle>,
 }
@@ -202,12 +207,27 @@ struct Job {
     modified: u64,
 }
 
-struct Done {
-    id: String,
-    modified: u64,
-    version: Option<u32>,
-    load: Load,
-    pixels: HashMap<NodeId, Pixels>,
+/// What the worker sends: a kit's published state as soon as it is read, then
+/// its tile pictures once drawn.
+///
+/// 🚨 **Two messages, so nothing waits on the drawing** (the v0.5.0 release
+/// review's `[X3.1-L4-01]`): one message carrying both kept the update pill's
+/// *Accept all* disabled under *"Loading…"* for every second a picture-heavy
+/// kit took to render — tiles the pill never shows.
+enum Done {
+    State {
+        id: String,
+        modified: u64,
+        version: Option<u32>,
+        load: Load,
+        /// Whether a [`Done::Tiles`] follows.
+        drawing: bool,
+    },
+    Tiles {
+        id: String,
+        modified: u64,
+        pixels: HashMap<NodeId, Pixels>,
+    },
 }
 
 /// The published states and tile pictures of the kits the picker has asked for,
@@ -235,6 +255,7 @@ impl KitShelf {
                 modified: kit.modified,
                 version: None,
                 load: Load::Pending,
+                drawing: false,
                 pixels: HashMap::new(),
                 tiles: HashMap::new(),
             },
@@ -256,7 +277,7 @@ impl KitShelf {
         for d in done {
             self.land(d);
         }
-        if self.pending() {
+        if self.busy() {
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
     }
@@ -264,20 +285,57 @@ impl KitShelf {
     fn land(&mut self, d: Done) {
         // A result for a file that has changed again since it was asked for is
         // dropped; the newer ask is on its way.
-        if let Some(s) = self.shelves.get_mut(&d.id)
-            && s.modified == d.modified
-        {
-            s.load = d.load;
-            s.version = d.version;
-            s.pixels = d.pixels;
-            s.tiles.clear();
+        match d {
+            Done::State {
+                id,
+                modified,
+                version,
+                load,
+                drawing,
+            } => {
+                if let Some(s) = self.shelves.get_mut(&id)
+                    && s.modified == modified
+                {
+                    s.load = load;
+                    s.version = version;
+                    s.drawing = drawing;
+                    s.pixels.clear();
+                    s.tiles.clear();
+                }
+            }
+            Done::Tiles {
+                id,
+                modified,
+                pixels,
+            } => {
+                if let Some(s) = self.shelves.get_mut(&id)
+                    && s.modified == modified
+                {
+                    s.drawing = false;
+                    s.pixels = pixels;
+                    s.tiles.clear();
+                }
+            }
         }
     }
 
-    fn pending(&self) -> bool {
+    /// Whether a published state or its pictures are still on their way.
+    fn busy(&self) -> bool {
         self.shelves
             .values()
-            .any(|s| matches!(s.load, Load::Pending))
+            .any(|s| s.drawing || matches!(s.load, Load::Pending))
+    }
+
+    /// Drop every kit `listed` does not name — a kit deleted, moved out of
+    /// the library or no longer shared, whose pictures were otherwise kept for
+    /// the window's life (the v0.5.0 release review's `[X3.1-L4-02]`) — and
+    /// forget every read that failed, so the next ask reads the file again: a
+    /// sync client or an antivirus holding the file once (§15 D716) left the
+    /// kit *Unreadable* until its file changed (`[X3.1-L1-01]`). The picker
+    /// calls it as it opens.
+    pub(crate) fn refresh(&mut self, listed: &[KitEntry]) {
+        self.shelves
+            .retain(|id, s| !matches!(s.load, Load::Failed) && listed.iter().any(|k| &k.id == id));
     }
 
     /// `kit`'s published state **as its file now stands** — `None` when the shelf
@@ -327,9 +385,11 @@ impl KitShelf {
         if let Some(t) = s.tiles.get(&top) {
             return Some(t.clone());
         }
+        // Taken out as it is uploaded: the texture is the picture from here,
+        // and a re-read brings both again (`[X3.1-L4-02]`).
         let t = s
             .pixels
-            .get(&top)?
+            .remove(&top)?
             .texture(ctx, format!("kit-tile-{id}-{}", top.to_wire()));
         s.tiles.insert(top, t.clone());
         Some(t)
@@ -339,7 +399,7 @@ impl KitShelf {
     /// D820): a test that pumped "the next frame" would race the worker.
     #[cfg(test)]
     pub(crate) fn settle(&mut self) {
-        while self.pending() {
+        while self.busy() {
             let Some((_, rx)) = &self.worker else {
                 return;
             };
@@ -358,16 +418,31 @@ fn spawn() -> (mpsc::Sender<Job>, mpsc::Receiver<Done>) {
         .name("ondin-kits".into())
         .spawn(move || {
             for job in job_rx {
-                let (load, version, pixels) = read(&job.path);
-                let sent = done_tx.send(Done {
-                    id: job.id,
+                let (load, version) = read(&job.path);
+                let published = match &load {
+                    Load::Ready(Some(p)) => Some(p.clone()),
+                    _ => None,
+                };
+                let sent = done_tx.send(Done::State {
+                    id: job.id.clone(),
                     modified: job.modified,
                     version,
                     load,
-                    pixels,
+                    drawing: published.is_some(),
                 });
                 if sent.is_err() {
                     return;
+                }
+                if let Some(p) = published {
+                    let pixels = tiles_of(p.document(), p.tops());
+                    let sent = done_tx.send(Done::Tiles {
+                        id: job.id,
+                        modified: job.modified,
+                        pixels,
+                    });
+                    if sent.is_err() {
+                        return;
+                    }
                 }
             }
         })
@@ -375,32 +450,28 @@ fn spawn() -> (mpsc::Sender<Job>, mpsc::Receiver<Done>) {
     (job_tx, done_rx)
 }
 
-/// Load a kit's file and render a tile for every published main and set — with
-/// the version the file says it published, as read. **A set's tile is its
-/// default variant**, the one a click places (§15 D1028): the whole set drew as a
-/// sheet of variants too small to tell apart, and the tile's glyph already says
-/// it is a set.
-fn read(path: &std::path::Path) -> (Load, Option<u32>, HashMap<NodeId, Pixels>) {
+/// Load a kit's file: its published state, with the version the file says it
+/// published, as read. Its tiles are drawn after, by [`tiles_of`], in a
+/// message of their own (`[X3.1-L4-01]`).
+fn read(path: &std::path::Path) -> (Load, Option<u32>) {
     let Some(doc) = std::fs::read(path)
         .ok()
         .and_then(|b| ondin_core::io::load(&b).ok())
     else {
-        return (Load::Failed, None, HashMap::new());
+        return (Load::Failed, None);
     };
     let version = doc.meta().kit.as_ref().map(|k| k.version);
     let Some(published) = doc.published() else {
-        return (Load::Ready(None), version, HashMap::new());
+        return (Load::Ready(None), version);
     };
-    let frozen = published.document();
-    let pixels = tiles_of(frozen, published.tops());
-    (
-        Load::Ready(Some(Arc::new(published.clone()))),
-        version,
-        pixels,
-    )
+    (Load::Ready(Some(Arc::new(published.clone()))), version)
 }
 
 /// What a tile for `top` shows: a set's default variant, anything else itself.
+///
+/// **A set's tile is its default variant**, the one a click places (§15
+/// D1028): the whole set drew as a sheet of variants too small to tell apart,
+/// and the tile's glyph already says it is a set.
 pub(crate) fn tile_subject(doc: &ondin_core::Document, top: NodeId) -> NodeId {
     match doc.get(top) {
         Some(n) if n.set().is_some() => ondin_core::kit::default_variant(doc, top).unwrap_or(top),
@@ -426,16 +497,29 @@ pub(crate) fn tiles_of(doc: &ondin_core::Document, tops: &[NodeId]) -> HashMap<N
     let shown: Vec<NodeId> = tops.iter().map(|t| tile_subject(doc, *t)).collect();
     let doc = &ondin_core::kit::as_placed(doc, &shown);
     let res = ondin_core::Resolved::rebuild(doc);
+    // The pictures decoded once for every tile (`[X3.1-L4-01]`).
+    let images = prepared(doc);
     let mut pixels = HashMap::new();
     for (top, shown) in tops.iter().zip(shown) {
-        if let Some(p) = raster_fit(doc, &res, shown, TILE_W, TILE_H, 4.0) {
+        if let Some(p) = raster_fit(doc, &res, shown, TILE_W, TILE_H, 4.0, &images) {
             pixels.insert(*top, p);
         }
     }
     pixels
 }
 
-/// `id` rendered to fit `w × h` pixels, never scaled past `max_scale`.
+/// `doc`'s pictures, decoded — what [`raster_fit`] draws from, made once per
+/// document however many tiles it draws.
+pub(crate) fn prepared(doc: &ondin_core::Document) -> ondin_render::ImageStore {
+    let mut images = ondin_render::ImageStore::new();
+    images.prepare(doc);
+    images
+}
+
+/// `id` rendered to fit `w × h` pixels, never scaled past `max_scale`, from
+/// `images` — [`prepared`] for `doc` once by the caller: a store made here,
+/// per call, decoded every picture in the document for every tile (the v0.5.0
+/// release review's `[X3.1-L4-01]`, 9.3 s for 200 mains over ten photos).
 pub(crate) fn raster_fit(
     doc: &ondin_core::Document,
     res: &ondin_core::Resolved,
@@ -443,6 +527,7 @@ pub(crate) fn raster_fit(
     w: f64,
     h: f64,
     max_scale: f64,
+    images: &ondin_render::ImageStore,
 ) -> Option<Pixels> {
     let view = ondin_export::extent(res, &[id])?;
     let (vw, vh) = (view.width().max(1.0), view.height().max(1.0));
@@ -451,10 +536,167 @@ pub(crate) fn raster_fit(
         scale,
         ..Default::default()
     };
-    let r = ondin_export::png::raster_of(doc, res, &[id], &opts)?;
+    let r = ondin_export::png::raster_of_with(doc, res, &[id], &opts, images)?;
     Some(Pixels {
         rgba: r.rgba,
         width: r.width,
         height: r.height,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ondin_core::kurbo::Size;
+    use ondin_core::meta::{DocumentMeta, KitMark};
+    use ondin_core::{Document, IdSource, NodeKind, Operation, Transaction};
+
+    /// A kit file with one published main, *Badge*, at `path`; its id and main.
+    fn kit_file(path: &std::path::Path) -> (String, NodeId) {
+        let mut ids = IdSource::new(0xC1);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let badge = ids.mint();
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: badge,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(40.0, 20.0),
+                },
+                transform: None,
+                name: Some("Badge".into()),
+            },
+            Operation::SetComponent {
+                id: badge,
+                component: true,
+            },
+        ]))
+        .unwrap();
+        let id = "5eed00000000000000000000000000c1".to_string();
+        doc.set_meta(DocumentMeta {
+            id: Some(id.clone()),
+            kit: Some(KitMark::default()),
+            ..Default::default()
+        });
+        ondin_core::kit::publish(&mut doc, None, 1).unwrap();
+        crate::library::store::write_document(path, &doc).unwrap();
+        (id, badge)
+    }
+
+    fn entry(id: &str, path: &std::path::Path) -> KitEntry {
+        KitEntry {
+            id: id.into(),
+            name: "Atlas".into(),
+            path: path.to_path_buf(),
+            modified: 7,
+            version: 1,
+            note: None,
+        }
+    }
+
+    fn temp(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ondin-shelf-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// **The published state is sent ahead of the pictures** (the v0.5.0
+    /// release review's `[X3.1-L4-01]`): an accept waits on the state, never on
+    /// the drawing.
+    ///
+    /// Flip, run: one message carrying both fails *"the state first"*.
+    #[test]
+    fn the_worker_sends_the_state_before_the_pictures() {
+        let dir = temp("order");
+        let path = dir.join("atlas.ondin");
+        let (id, badge) = kit_file(&path);
+        let (tx, rx) = spawn();
+        tx.send(Job {
+            id: id.clone(),
+            path,
+            modified: 7,
+        })
+        .unwrap();
+        let wait = std::time::Duration::from_secs(20);
+        match rx.recv_timeout(wait).unwrap() {
+            Done::State { load, drawing, .. } => {
+                assert!(matches!(load, Load::Ready(Some(_))));
+                assert!(drawing, "and the pictures follow");
+            }
+            Done::Tiles { .. } => panic!("the state first"),
+        }
+        match rx.recv_timeout(wait).unwrap() {
+            Done::Tiles { pixels, .. } => assert!(pixels.contains_key(&badge)),
+            Done::State { .. } => panic!("then the pictures"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A tile's pixels go once its texture is made** (the v0.5.0 release
+    /// review's `[X3.1-L4-02]`): each was held twice for the window's life.
+    ///
+    /// Flip, run: `tile` reading the pixels without taking them fails
+    /// *"uploaded, let go"*.
+    #[test]
+    fn a_tiles_pixels_go_once_uploaded() {
+        let ctx = egui::Context::default();
+        let dir = temp("pixels");
+        let path = dir.join("atlas.ondin");
+        let (id, badge) = kit_file(&path);
+        let mut shelf = KitShelf::default();
+        shelf.ask(&entry(&id, &path));
+        shelf.settle();
+        assert!(
+            shelf.shelves[&id].pixels.contains_key(&badge),
+            "fixture: drawn"
+        );
+        let first = shelf.tile(&ctx, &id, badge).expect("a tile");
+        assert!(
+            !shelf.shelves[&id].pixels.contains_key(&badge),
+            "uploaded, let go"
+        );
+        assert_eq!(
+            shelf.tile(&ctx, &id, badge).map(|t| t.id()),
+            Some(first.id())
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A read that failed is tried again when the picker opens, and a kit the
+    /// library no longer lists is let go** (the v0.5.0 release review's
+    /// `[X3.1-L1-01]`, `[X3.1-L4-02]`). The file is missing at the first read,
+    /// then appears with the modification time the scan had — which kept the
+    /// kit *Unreadable* until its file changed again.
+    ///
+    /// Flip, run: `refresh` keeping a failed shelf fails *"read again"*.
+    #[test]
+    fn a_failed_read_is_tried_again_and_an_unlisted_kit_let_go() {
+        let dir = temp("retry");
+        let path = dir.join("atlas.ondin");
+        let kit = entry("5eed00000000000000000000000000c1", &path);
+        let mut shelf = KitShelf::default();
+        shelf.ask(&kit);
+        shelf.settle();
+        assert!(matches!(shelf.load(&kit.id), Some(Load::Failed)), "fixture");
+        kit_file(&path);
+        shelf.ask(&kit);
+        assert!(
+            matches!(shelf.load(&kit.id), Some(Load::Failed)),
+            "fixture: the same time is not asked again"
+        );
+        shelf.refresh(std::slice::from_ref(&kit));
+        shelf.ask(&kit);
+        shelf.settle();
+        assert!(
+            matches!(shelf.load(&kit.id), Some(Load::Ready(Some(_)))),
+            "read again"
+        );
+
+        shelf.refresh(&[]);
+        assert!(shelf.load(&kit.id).is_none(), "an unlisted kit let go");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

@@ -349,6 +349,11 @@ impl OndinApp {
                 // the last one — in this window or synced in — is seen at once
                 // rather than when the dashboard next looks (`kits::index`).
                 self.library.refresh();
+                // And the shelf, against it: kits gone from the library let
+                // go, and a read that failed is tried again (`KitShelf::refresh`).
+                let listed =
+                    super::index::kits_in(&self.library, self.session.doc.meta().id.as_deref());
+                self.kit_shelf.refresh(&listed);
                 Some(Picker {
                     focus: true,
                     ..Picker::default()
@@ -1081,7 +1086,8 @@ impl Ghost {
                 let got = ondin_export::extent(&res, &[subject]).and_then(|view| {
                     let (w, h) = (view.width().max(1.0), view.height().max(1.0));
                     let scale = zoom.min(GHOST_MAX_PX / w.max(h));
-                    raster_fit(doc, &res, subject, w * scale, h * scale, scale)
+                    let images = super::index::prepared(doc);
+                    raster_fit(doc, &res, subject, w * scale, h * scale, scale, &images)
                         .map(|p| (p, egui::vec2(w as f32, h as f32)))
                 });
                 let _ = tx.send(got);
@@ -2177,7 +2183,8 @@ pub(crate) mod tests {
         // v0.5.0 release review's `[X4.1-L1-02]`).
         let placed = ondin_core::kit::as_placed(frozen, &[small]);
         let res = ondin_core::Resolved::rebuild(&placed);
-        let alone = raster_fit(&placed, &res, small, 200.0, 104.0, 4.0).unwrap();
+        let images = super::super::index::prepared(&placed);
+        let alone = raster_fit(&placed, &res, small, 200.0, 104.0, 4.0, &images).unwrap();
         let tile = &tiles[&set];
         assert_eq!(
             (tile.width, tile.height),

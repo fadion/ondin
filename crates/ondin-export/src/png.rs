@@ -144,11 +144,29 @@ pub fn raster_of(
     origins: &[ondin_core::NodeId],
     opts: &RasterOpts,
 ) -> Option<Raster> {
-    let vp = viewport_at(crate::extent(res, origins)?, opts.scale);
     let mut images = ImageStore::new();
     images.prepare(doc);
+    raster_of_with(doc, res, origins, opts, &images)
+}
+
+/// [`raster_of`] with the pictures already decoded — `images` prepared for
+/// `doc` by the caller, once, for as many rasters as it makes.
+///
+/// 🚨 **For anything that rasters more than once over one document**: each
+/// [`raster_of`] decodes every embedded picture the document holds, used or
+/// not, so the kit picker's tiles — one raster per published main — decoded
+/// mains × pictures, 9.3 s for 200 mains over ten photos, with *Accept all*
+/// waiting on it (the v0.5.0 release review's `[X3.1-L4-01]`).
+pub fn raster_of_with(
+    doc: &Document,
+    res: &Resolved,
+    origins: &[ondin_core::NodeId],
+    opts: &RasterOpts,
+    images: &ImageStore,
+) -> Option<Raster> {
+    let vp = viewport_at(crate::extent(res, origins)?, opts.scale);
     let (rgba, width, height) =
-        VelloCpuRenderer::new().render_subtrees_to_rgba(doc, res, &vp, &images, origins);
+        VelloCpuRenderer::new().render_subtrees_to_rgba(doc, res, &vp, images, origins);
     let mut r = Raster {
         rgba,
         width,

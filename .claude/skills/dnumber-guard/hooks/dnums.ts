@@ -9,6 +9,15 @@ export type Block = {
   head: string
   /** When it was reserved, ISO. */
   at: string
+  /**
+   * The worktree it was reserved in (`--show-toplevel`) and the repository
+   * that worktree belongs to (`--git-common-dir`). Absent on a block stored
+   * before blocks were kept per worktree.
+   */
+  root?: string
+  common?: string
+  /** Set at reserve and read back after the write, to see a concurrent reserve. */
+  token?: string
 }
 
 /**

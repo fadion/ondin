@@ -944,6 +944,12 @@ pub fn adopt(
         .filter_map(|t| t.first().map(|top| (t, top)))
         .flat_map(|(t, top)| t.iter().map(move |n| (n.id, top)))
         .collect();
+    // A carried node left out above — no origin, or this kit's own main no
+    // longer here (D1023) — is a source nothing will hold: what links to it
+    // lands detached, the ordinary rule. In a fresh vault copy that has to be
+    // done here, as no `settle_copy` runs on a vault insert (the record's
+    // reading of `adb8e1f`: the dangling link refused the paste whole).
+    let mut cut: FxHashSet<NodeId> = FxHashSet::default();
     for copy in &fresh {
         for r in refs_out(copy.iter()) {
             match map.get(&r) {
@@ -952,8 +958,13 @@ pub fn adopt(
                 }
                 Some(_) => {}
                 None => {
-                    if let Some(held) = top_of_carried.get(&r).and_then(|top| landed(top)) {
-                        return Err(KitError::NeedsUpdate(held));
+                    if let Some(top) = top_of_carried.get(&r) {
+                        match landed(top) {
+                            Some(held) => return Err(KitError::NeedsUpdate(held)),
+                            None => {
+                                cut.insert(r);
+                            }
+                        }
                     }
                 }
             }
@@ -961,6 +972,17 @@ pub fn adopt(
     }
     for copy in &mut fresh {
         relink(copy, &map);
+        for n in copy.iter_mut() {
+            if n.link.is_some_and(|l| cut.contains(&l)) {
+                n.link = None;
+            }
+            if n.swap.is_some_and(|s| cut.contains(&s)) {
+                n.swap = None;
+            }
+            for p in &mut n.props {
+                p.value.bound.retain(|b| !cut.contains(b));
+            }
+        }
     }
     let mut ops = Vec::new();
     if fresh.is_empty() {
@@ -1268,6 +1290,14 @@ pub fn update_all(
             if b.scratch.get(n).and_then(|n| n.parent) == Some(from) {
                 if b.scratch.get(n).is_some_and(|n| n.component) {
                     removed.push(n);
+                } else if let Some(t) = top_of(&b.scratch, from)
+                    && !changed.contains(&t)
+                {
+                    // A deleted layer is a change of the main that held it,
+                    // though it falls outside every top's sync (the record's
+                    // reading of `3b9cfc3`: a main losing its last layer was
+                    // counted unchanged, and the toast said nothing changed).
+                    changed.push(t);
                 }
                 b.push(Operation::DeleteNode { id: n })?;
             }
@@ -1288,12 +1318,20 @@ pub fn update_all(
                 *bnd = b.resolve(*bnd)?;
             }
         }
+        let from = b.ops.len();
         for op in [
             Operation::SetLink { id: d, link },
             Operation::SetSwap { id: d, swap },
             Operation::SetProperties { id: d, props },
         ] {
             b.push(op)?;
+        }
+        // Pointed after every sync, so outside each top's count above.
+        if b.ops.len() > from
+            && let Some(t) = top_of(&b.scratch, d)
+            && !changed.contains(&t)
+        {
+            changed.push(t);
         }
     }
     for op in make_local(&b.scratch, ids, &made_local).0 {

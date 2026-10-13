@@ -903,10 +903,17 @@ fn panel_height(bottom: f32, canvas_top: f32) -> f32 {
 ///
 /// **Nor over anything floating on the canvas** — `under` is the area there
 /// (`Context::layer_id_at`), and only the canvas's own background layer, or
-/// none, takes the drop. The inspector, the status bar and the colour picker
-/// float over the canvas's rect, and a tile let go on one was placed out of
-/// sight beneath it (the v0.5.0 release review's `[X4.1-L1-03]`); aiming at a
-/// panel is the same change of mind as aiming back at the picker.
+/// none, takes the drop. The inspector and the colour picker float over the
+/// canvas's rect, and a tile let go on one was placed out of sight beneath it
+/// (the v0.5.0 release review's `[X4.1-L1-03]`); aiming at a panel is the same
+/// change of mind as aiming back at the picker.
+///
+/// ⚠️ **The floating status bar is not one of them, on purpose**: it is not
+/// interactable, so every click passes through it to the canvas, and
+/// `layer_id_at` skips it — a drop there lands as a click there would. This
+/// comment named it among the panels until the record's reading of `bdabb66`
+/// found egui skipping it; the bar takes nothing from the pointer, so the
+/// comment was overclaiming, not the code.
 fn dropped_on_canvas(
     at: egui::Pos2,
     canvas: egui::Rect,

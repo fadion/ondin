@@ -117,6 +117,56 @@ impl OndinApp {
         }
     }
 
+    /// What *Make local* on the vault top `top` reaches: the instances on the
+    /// page that will follow the revealed main, and how many of the kit's own
+    /// components nest it — which keep the kit's copy (§15 D1036 (1)).
+    ///
+    /// An instance that reaches the main **through** one of those — a page
+    /// *Card*'s nested *Icon*, linked to the vault *Card*'s — is the kit's, not
+    /// the instance count's. `instances_of` never lists a vault node, so the
+    /// first cut, which split its answer by `in_vault`, counted those instances
+    /// and never said the kit kept anything (the record's reading of
+    /// `b50de00`).
+    pub(crate) fn make_local_reach(&self, top: NodeId) -> (usize, usize) {
+        let doc = &self.session.doc;
+        let mains = match doc.get(top) {
+            Some(n) if n.set().is_some() => ondin_core::variant::variants(doc, top),
+            _ => vec![top],
+        };
+        let through_kit = |i: NodeId| {
+            let mut at = doc.get(i).and_then(|n| n.link());
+            for _ in 0..doc.len() {
+                match at {
+                    Some(a) if mains.contains(&a) => return false,
+                    Some(a) if doc.in_vault(a) => return true,
+                    Some(a) => at = doc.get(a).and_then(|n| n.link()),
+                    None => return false,
+                }
+            }
+            false
+        };
+        let instances = mains
+            .iter()
+            .flat_map(|m| ondin_core::component::instances_of(doc, *m))
+            .filter(|i| !through_kit(*i))
+            .count();
+        let own: std::collections::HashSet<NodeId> = doc
+            .capture_subtree(top)
+            .unwrap_or_default()
+            .iter()
+            .map(|n| n.id())
+            .collect();
+        let nested_in_kit = doc
+            .vault()
+            .and_then(|v| doc.capture_subtree(v))
+            .unwrap_or_default()
+            .iter()
+            .filter(|n| !own.contains(&n.id()))
+            .filter(|n| n.link().is_some_and(|l| mains.contains(&l)))
+            .count();
+        (instances, nested_in_kit)
+    }
+
     /// *Make Button local?* (4E): reveal the vendored main as the document's own,
     /// every instance and override as it was, undoable.
     pub(crate) fn make_local_dialog(&mut self, ctx: &egui::Context) {
@@ -132,23 +182,7 @@ impl OndinApp {
             .kit_line(top)
             .map(|k| k.kit_name)
             .unwrap_or_else(|| "its kit".into());
-        let mains = match doc.get(top) {
-            Some(n) if n.set().is_some() => ondin_core::variant::variants(doc, top),
-            _ => vec![top],
-        };
-        // The kit's own components that nest it keep the kit's copy (§15 D1036
-        // (1)), so they are not among the instances it affects, and the card
-        // says so.
-        let (nested_in_kit, instances) = mains
-            .iter()
-            .flat_map(|m| ondin_core::component::instances_of(doc, *m))
-            .fold((0usize, 0usize), |(k, i), n| {
-                if doc.in_vault(n) {
-                    (k + 1, i)
-                } else {
-                    (k, i + 1)
-                }
-            });
+        let (instances, nested_in_kit) = self.make_local_reach(top);
         let mut decision: Option<bool> = None;
         let modal = crate::settings::card("make-local", ctx, |ui| {
             ui.set_width(crate::ui::menu_inner_w(380.0, crate::settings::PAD));

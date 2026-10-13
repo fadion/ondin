@@ -178,7 +178,9 @@ impl OndinApp {
                 "The pasted component uses this kit's {}, so it cannot be pasted here",
                 doc.get(*own).map_or("component", |n| n.name())
             ),
-            other => format!("That paste could not be placed ({other:?})"),
+            // `adopt` answers only the two above; this is for a future one,
+            // worded rather than printed (D1024: no error prints its Debug).
+            _ => "That paste could not be placed — the kit it carries is incomplete".to_string(),
         }
     }
 

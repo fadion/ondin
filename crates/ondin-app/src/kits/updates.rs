@@ -1195,6 +1195,92 @@ mod tests {
         );
     }
 
+    /// ***Make local*'s card counts what follows the revealed main, and says
+    /// what the kit keeps** (§15 D1036 (1)). The page holds an *Icon* and a
+    /// *Card* nesting one; making *Icon* local reaches the page's *Icon* and not
+    /// *Card*'s nested copy, which reaches it through the kit's *Card* and now
+    /// keeps the kit's — and the kit's *Card* is the one component that keeps
+    /// it. The first cut split `instances_of` by `in_vault`, which it never
+    /// lists: it counted both instances, and never drew the sentence.
+    ///
+    /// Flip, run: counting every instance fails *"the page's Icon alone"* with
+    /// 2.
+    #[test]
+    fn make_local_counts_what_follows_and_what_the_kit_keeps() {
+        let ctx = egui::Context::default();
+        let mut ids = IdSource::new(0xA1);
+        let r = ids.mint();
+        let mut kit = Document::new(r);
+        let [icon, dot, card] = [(); 3].map(|_| ids.mint());
+        let frame = |id, parent, index, name: &str| Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind: NodeKind::Artboard {
+                size: Size::new(20.0, 20.0),
+            },
+            transform: None,
+            name: Some(name.into()),
+        };
+        kit.apply(&Transaction(vec![
+            frame(icon, r, 0, "Icon"),
+            frame(dot, icon, 0, "Dot"),
+            Operation::SetComponent {
+                id: icon,
+                component: true,
+            },
+            frame(card, r, 1, "Card"),
+        ]))
+        .unwrap();
+        let (tx, _) = ondin_core::insert_subtrees(
+            &kit,
+            &mut ids,
+            &[ondin_core::Placement {
+                nodes: kit.capture_subtree(icon).unwrap(),
+                parent: card,
+                index: None,
+            }],
+            Default::default(),
+        );
+        kit.apply(&tx).unwrap();
+        kit.apply(&Transaction(vec![Operation::SetComponent {
+            id: card,
+            component: true,
+        }]))
+        .unwrap();
+        let published = ondin_core::kit::freeze(&kit).unwrap();
+        let kit_id = "5eed00000000000000000000000000a1";
+
+        let mut app = OndinApp::headless(&ctx);
+        let root = app.session.doc.root();
+        let mut placed = Vec::new();
+        for main in [icon, card] {
+            let (tx, inst) = ondin_core::kit::insert(
+                &app.session.doc,
+                &mut app.session.ids,
+                kit_id,
+                1,
+                &published,
+                main,
+                root,
+            )
+            .unwrap();
+            assert!(app.session.commit(tx));
+            placed.push(inst);
+        }
+        let vault_icon = app.session.doc.get(placed[0]).unwrap().link().unwrap();
+        assert_eq!(
+            ondin_core::component::instances_of(&app.session.doc, vault_icon).len(),
+            2,
+            "fixture: the page's Icon, and Card's nested one"
+        );
+        assert_eq!(
+            app.make_local_reach(vault_icon),
+            (1, 1),
+            "the page's Icon alone, and the kit's Card"
+        );
+    }
+
     /// **An accept that cannot read a waiting kit applies nothing, and says so**
     /// (§15 D1036 (5), the v0.5.0 release review's `[X3.2-L1-02]`): the kit
     /// publishes, and its file is gone before the accept. It said *"Atlas could

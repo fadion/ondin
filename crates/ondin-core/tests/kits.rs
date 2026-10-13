@@ -815,6 +815,61 @@ fn a_kit_built_on_this_one_is_refused_naming_the_main() {
     );
 }
 
+/// **A carried main left out of the paste leaves its nester detached, not
+/// dangling** (the record's reading of the D1036 (7) build). L deleted its own
+/// *Icon*; D holds M's *Card2*, which nests L's *Icon*; D's *Card2* pasted into
+/// L. *Icon*'s template is L's own main, no longer here — left out (§15 D1023)
+/// — and the fresh *Card2* went into the vault still linking to it, so the
+/// paste was refused as a broken link. Its nested copy now lands detached.
+///
+/// Flip, run: the cut left out fails *"the paste commits"* with
+/// `BadLink(.., Dangling)`.
+#[test]
+fn a_carried_main_left_out_detaches_what_nests_it() {
+    let mut k = kit();
+    let mut mids = IdSource::new(0xAB);
+    let mroot = mids.mint();
+    let mut m = Document::new(mroot);
+    let card2 = mids.mint();
+    m.apply(&Transaction(vec![
+        create(card2, mroot, 0, frame(60.0, 20.0), "Card2"),
+        main_on(card2),
+    ]))
+    .unwrap();
+    let (tx, placed) = kit::insert(&m, &mut mids, L_ID, 4, published(&k), k.icon, mroot).unwrap();
+    m.apply(&tx).unwrap();
+    m.apply(&Transaction(vec![Operation::Reparent {
+        id: placed,
+        new_parent: card2,
+        index: 0,
+    }]))
+    .unwrap();
+    let m1 = kit::freeze(&m).unwrap();
+    let (mut d, mut dids) = consumer();
+    let droot = d.root();
+    let (tx, inst) = kit::insert(&d, &mut dids, K_ID, 1, &m1, card2, droot).unwrap();
+    d.apply(&tx).unwrap();
+
+    // L deletes its own Icon (and Card, which nests it).
+    let mut tx = Transaction(vec![
+        Operation::DeleteNode { id: k.card },
+        Operation::DeleteNode { id: k.icon },
+    ]);
+    let mut lids = IdSource::new(0xA9);
+    ondin_core::propagate::owed(&k.doc, &mut tx, &mut lids);
+    k.doc.apply(&tx).unwrap();
+
+    let (tx, made) = try_paste_across(&d, inst, &k.doc, &mut lids).expect("the paste builds");
+    k.doc.apply(&tx).expect("the paste commits");
+    let card_here = k.doc.get(made[0]).unwrap().link().unwrap();
+    let nested = k.doc.get(card_here).unwrap().children()[0];
+    assert_eq!(
+        k.doc.get(nested).unwrap().link(),
+        None,
+        "detached in the vault"
+    );
+}
+
 /// **A kit never vendors itself.** A kit instance pasted back into the kit, or
 /// one of the kit's own mains inserted from its own published state, links to
 /// the live main — not to a frozen copy in a vault, which would stop following
@@ -1458,6 +1513,18 @@ fn an_update_says_what_it_changed_and_what_it_removed() {
         None,
         "and its instance cut loose"
     );
+
+    // A main whose only change is a layer deleted — dropped after every sync,
+    // outside each top's count — is changed too (the record's reading of
+    // `3b9cfc3`). Flip, run: the drop not counted fails *"a deleted layer is
+    // a change"*.
+    edit_and_publish(&mut k, vec![Operation::DeleteNode { id: dot }]);
+    let (u, _) = accept(&mut d, &mut ids, &k);
+    assert!(
+        d.get(icon).unwrap().children().is_empty(),
+        "fixture: the dot went"
+    );
+    assert_eq!(u.changed, vec![icon], "a deleted layer is a change");
 }
 
 /// A picture, and a fill wearing it.

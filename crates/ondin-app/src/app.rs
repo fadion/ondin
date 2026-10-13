@@ -6458,38 +6458,6 @@ impl OndinApp {
         if self.paste_cut_move(&placements, verb, offset, images) {
             return;
         }
-        // The instances that land **detached**: linked to a main neither here
-        // nor carried with the copy, which §15 D979 (d) cuts loose. Said, not
-        // left silent (§15 D1036 (3), the v0.5.0 release review's
-        // `[X1-L1-03]`): an instance copied inside a kit and pasted into
-        // another document is one — the copy carries only vault mains, and the
-        // kit's own main is no vault's.
-        let detached = {
-            let doc = &self.session.doc;
-            let carried: std::collections::HashSet<NodeId> =
-                kits.iter().flatten().map(|n| n.id()).collect();
-            let lost = |n: &Node| {
-                n.link()
-                    .is_some_and(|l| !doc.contains(l) && !carried.contains(&l))
-            };
-            placements
-                .iter()
-                .map(|p| {
-                    let by_id: std::collections::HashMap<NodeId, &Node> =
-                        p.nodes.iter().map(|n| (n.id(), n)).collect();
-                    p.nodes
-                        .iter()
-                        .filter(|n| lost(n))
-                        // An instance, not each of its members.
-                        .filter(|n| {
-                            !n.parent()
-                                .and_then(|q| by_id.get(&q))
-                                .is_some_and(|q| lost(q))
-                        })
-                        .count()
-                })
-                .sum::<usize>()
-        };
         let (tx, created) = match ondin_core::kit::insert_carrying(
             &self.session.doc,
             &mut self.session.ids,
@@ -6510,6 +6478,7 @@ impl OndinApp {
         ops.extend(tx.0);
         let tx = Transaction(ops);
         if self.session.commit(tx) && !created.is_empty() {
+            let detached = landed_detached(&self.session.doc, &placements, &created);
             let mut said = format!("{verb} {} layer(s)", created.len());
             if detached > 0 {
                 said.push_str(&format!(
@@ -8947,6 +8916,48 @@ const STATUS_DOT_HIT: f32 = 28.0;
 fn width_to_store(width: f32, room: f32, stored: f32, down: bool) -> Option<f32> {
     let user_did_it = !down && width < room - 0.5;
     (user_did_it && (width - stored).abs() >= 0.5).then_some(width)
+}
+
+/// How many instances a paste **landed detached**: linked in what was copied,
+/// with no link where they landed — their main neither in this document nor
+/// carried with the copy, which §15 D979 (d) cuts loose. Said in the paste's
+/// status line rather than left silent (§15 D1036 (3), the v0.5.0 release
+/// review's `[X1-L1-03]`): an instance copied inside a kit and pasted into
+/// another document is one, the kit's own main being in no vault.
+///
+/// **Read off the result, not predicted from the copy**: the first cut counted
+/// links to a main neither here nor carried, and missed the carried mains the
+/// paste then leaves out (§15 D1023's own-kit rule; the record's reading of
+/// `adb8e1f`). Each created subtree is matched to its template node for node —
+/// one preorder, as the insert keeps it — and an instance counts once, not
+/// each of its members.
+fn landed_detached(
+    doc: &ondin_core::Document,
+    placements: &[build::Placement],
+    created: &[NodeId],
+) -> usize {
+    placements
+        .iter()
+        .zip(created)
+        .map(|(p, c)| {
+            let now = doc.capture_subtree(*c).unwrap_or_default();
+            if now.len() != p.nodes.len() {
+                return 0;
+            }
+            let lost: std::collections::HashSet<NodeId> = p
+                .nodes
+                .iter()
+                .zip(&now)
+                .filter(|(t, n)| t.link().is_some() && n.link().is_none())
+                .map(|(t, _)| t.id())
+                .collect();
+            p.nodes
+                .iter()
+                .filter(|t| lost.contains(&t.id()))
+                .filter(|t| !t.parent().is_some_and(|q| lost.contains(&q)))
+                .count()
+        })
+        .sum()
 }
 
 impl OndinApp {

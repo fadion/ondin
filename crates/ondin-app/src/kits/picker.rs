@@ -58,9 +58,6 @@ pub(crate) struct Picker {
     local: LocalTiles,
     /// The dragged component's picture at canvas size (§15 D1029).
     ghost: Option<Ghost>,
-    /// A click or a drop waiting one painted frame — its tile dimmed — before
-    /// the placement runs (§15 D1030).
-    placing: Option<Placing>,
     /// The panel's rect as last drawn: over it, a drag shows the tile.
     panel: Option<egui::Rect>,
 }
@@ -76,8 +73,10 @@ fn key_of(source: &Source) -> Key {
     }
 }
 
-/// A placement asked for and not yet run (§15 D1030).
-struct Placing {
+/// A placement asked for and not yet run (§15 D1030) — held on the app, not on
+/// [`Picker`], so `Escape` closing the picker in the frames it waits does not
+/// lose a click already made (`arch-scribe`'s reading of the first cut).
+pub(crate) struct Placing {
     key: Key,
     source: Source,
     /// Where it lands: a drop's point, or `None` for the viewport's centre.
@@ -237,23 +236,24 @@ impl OndinApp {
     /// Draw the picker, when it is open, and place what it was asked to.
     pub(crate) fn kit_picker_ui(&mut self, ctx: &egui::Context) {
         self.kit_shelf.pass(ctx);
-        if self.kit_picker.is_none() {
-            return;
-        }
         // A placement asked for on an earlier frame, once a frame has shown its
         // tile dimmed (§15 D1030): the placement runs on this thread and the
         // window does not repaint while it does, so the dim has to be on screen
-        // before the work starts or it is never seen.
-        let due = self.kit_picker.as_mut().and_then(|p| {
-            if p.placing.as_ref().is_some_and(|pl| pl.painted) {
-                p.placing.take()
-            } else {
-                None
-            }
-        });
-        if let Some(pl) = due {
+        // before the work starts or it is never seen. **Before the closed
+        // picker's return**: a picker closed in the wait has no tile to dim, and
+        // the click it took still places.
+        let closed = self.kit_picker.is_none();
+        if self
+            .kit_placing
+            .as_ref()
+            .is_some_and(|pl| pl.painted || closed)
+            && let Some(pl) = self.kit_placing.take()
+        {
             let at = pl.at.unwrap_or(self.canvas_rect.center());
             self.place_kit_at(ctx, pl.source, at);
+        }
+        if closed {
+            return;
         }
         // `Escape` is not read here: it is a rung of `OndinApp::escape`, so one
         // press closes one thing — a press inside the search field included,
@@ -282,7 +282,7 @@ impl OndinApp {
                 item.tile = picker.local.tiles.get(&id).cloned();
             }
         }
-        let busy = picker.placing.as_ref().map(|p| p.key.clone());
+        let busy = self.kit_placing.as_ref().map(|p| p.key.clone());
         if !picker.seeded {
             picker.seeded = true;
             if let Some(first) = shown.iter().find(|s| s.used) {
@@ -399,13 +399,13 @@ impl OndinApp {
 
         let ppp = ctx.pixels_per_point();
         let canvas = self.canvas_rect;
+        // The frame just drawn showed the waiting tile dimmed; the next one
+        // places it.
+        if let Some(pl) = self.kit_placing.as_mut() {
+            pl.painted = true;
+            ctx.request_repaint();
+        }
         if let Some(p) = self.kit_picker.as_mut() {
-            // The frame just drawn showed the waiting tile dimmed; the next one
-            // places it.
-            if let Some(pl) = p.placing.as_mut() {
-                pl.painted = true;
-                ctx.request_repaint();
-            }
             p.panel = Some(panel);
             match &dragging {
                 Some(item) => {
@@ -619,8 +619,9 @@ impl OndinApp {
         }
     }
 
-    /// This document's own mains and sets, in document order — 3G's *This
-    /// document*, and search's local results.
+    /// This document's own mains and sets, in document order — the *This
+    /// document* section that leads the picker (§15 D1031, 3G's before it), and
+    /// search's local results.
     fn local_items(&self) -> Vec<Item> {
         let doc = &self.session.doc;
         let mut out = Vec::new();
@@ -661,10 +662,8 @@ impl OndinApp {
     /// thread and nothing repaints while it does. One at a time: a second ask
     /// while one waits is dropped, as a second click on a busy button is.
     fn ask_place(&mut self, source: Source, at: Option<egui::Pos2>) {
-        if let Some(p) = self.kit_picker.as_mut()
-            && p.placing.is_none()
-        {
-            p.placing = Some(Placing {
+        if self.kit_placing.is_none() {
+            self.kit_placing = Some(Placing {
                 key: key_of(&source),
                 source,
                 at,
@@ -830,8 +829,18 @@ fn kits_on_the_page(doc: &Document) -> HashSet<String> {
         }
         let Some(n) = doc.get(id) else { continue };
         for main in [n.link(), n.swap()].into_iter().flatten() {
-            if let Some(kit) = kit_of(main) {
-                out.insert(kit);
+            // **Followed to the end of its chain** (`arch-scribe`'s reading of
+            // the first cut): a link points one level up (§5.3d), so a page copy
+            // of a kit-A main holding a nested kit-B instance links to the
+            // nested copy *inside A's vault main*, and only that copy's own link
+            // reaches B. Every kit on the way is on the page.
+            let mut cur = Some(main);
+            for _ in 0..=doc.len() {
+                let Some(m) = cur else { break };
+                if let Some(kit) = kit_of(m) {
+                    out.insert(kit);
+                }
+                cur = doc.get(m).and_then(|x| x.link());
             }
         }
         stack.extend(n.children().iter().copied());
@@ -1281,7 +1290,8 @@ fn tiles(ui: &mut egui::Ui, items: &[Item], out: &mut Out<'_>) {
     }
 }
 
-/// A tile on any painter — the grid's, or the drag layer's under the pointer.
+/// A tile on the grid's painter, at the opacity the caller set — the drag's
+/// picture is [`draw_ghost`]'s since §15 D1029.
 fn draw_tile_on(p: &egui::Painter, cell: egui::Rect, item: &Item, lit: bool) {
     let well = egui::Rect::from_min_size(cell.min, egui::vec2(cell.width(), TILE_H));
     p.rect_filled(well, egui::CornerRadius::same(5), color::text_a(26));
@@ -1984,6 +1994,33 @@ pub(crate) mod tests {
             (alone.width, alone.height),
             "the set's tile is Small's picture"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A placement waiting its dimmed frame survives the picker closing**
+    /// (§15 D1030, `arch-scribe`'s reading of the first cut): `Escape` in the
+    /// wait used to drop the click with the picker that held it.
+    ///
+    /// Flip, run: the due test without its `|| closed` fails *"the click
+    /// still places"*.
+    #[test]
+    fn a_placement_survives_the_picker_closing_in_its_wait() {
+        let ctx = egui::Context::default();
+        let root = temp_root("close-wait");
+        let (id, _, badge) = file_kit(&root);
+        let mut app = app_on(&ctx, root.clone());
+        app.toggle_kit_picker();
+        let source = kit_source(&mut app, &id, badge);
+        app.ask_place(source, None);
+        app.kit_picker = None;
+        let _ = ctx.run_ui(Default::default(), |_| app.kit_picker_ui(&ctx));
+        let inst = app
+            .session
+            .selection
+            .single()
+            .expect("the click still places");
+        assert!(app.session.doc.get(inst).unwrap().link().is_some());
+        assert!(app.kit_placing.is_none());
         let _ = std::fs::remove_dir_all(&root);
     }
 

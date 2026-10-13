@@ -1335,6 +1335,9 @@ pub struct OndinApp {
     pub(crate) open_menu: TopMenu,
     /// The floating insert picker, while it is open (§5.3e, 3A; §15 D1014).
     pub(crate) kit_picker: Option<crate::kits::picker::Picker>,
+    /// A picker placement waiting one painted frame (§15 D1030) — here rather
+    /// than on the picker, so closing it in the wait keeps the click.
+    pub(crate) kit_placing: Option<crate::kits::picker::Placing>,
     /// The library's kits' published states and tile pictures, loaded off the
     /// frame for the picker (`kits::index`).
     pub(crate) kit_shelf: crate::kits::index::KitShelf,
@@ -2348,6 +2351,7 @@ impl OndinApp {
             per_corner_radius: HashSet::new(),
             open_menu: TopMenu::None,
             kit_picker: None,
+            kit_placing: None,
             kit_shelf: Default::default(),
             kit_watch: Default::default(),
             kit_users: None,
@@ -7558,8 +7562,10 @@ impl OndinApp {
         self.layer_drag = None;
         self.picker = None;
         // The insert picker's open kits and its seeding were the old document's
-        // (`D1014`'s minor note).
+        // (`D1014`'s minor note) — and a placement still waiting names the old
+        // document's mains (§15 D1030).
         self.kit_picker = None;
+        self.kit_placing = None;
         // Leaving a kit ends its link back (D1011 (7)); *Go to main in the kit*
         // sets it again after the open that cleared it.
         self.kit_return = None;

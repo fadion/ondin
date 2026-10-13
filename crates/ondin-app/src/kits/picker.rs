@@ -16,7 +16,7 @@ use crate::theme::{self, color, icon};
 use eframe::egui;
 use ondin_core::kit::Published;
 use ondin_core::kurbo::{Affine, Rect, Vec2};
-use ondin_core::{Document, NodeId, NodeKind, Operation, Transaction};
+use ondin_core::{Document, NodeId, Operation, Transaction};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, mpsc};
 
@@ -927,15 +927,12 @@ fn centred(
 ) -> Option<Operation> {
     let mut scratch = doc.clone();
     scratch.apply(tx).ok()?;
-    let node = scratch.get(instance)?;
-    let at = node.transform();
-    let bounds: Rect = match node.kind() {
-        // A frame's box is its size, with no layout to wait for.
-        NodeKind::Artboard { size } => {
-            at.transform_rect_bbox(Rect::from_origin_size((0.0, 0.0), *size))
-        }
-        _ => ondin_core::Resolved::rebuild(&scratch).world_bounds(instance)?,
-    };
+    let at = scratch.get(instance)?.transform();
+    // The laid-out box for every kind, a frame's too: a frame that hugs its
+    // content stores the size it was drawn at, not the one layout gives it
+    // (§15 D874), and centring the stored box put a hugging main 55 px off the
+    // aim (the v0.5.0 release review's `[R1-L2-01]`).
+    let bounds: Rect = ondin_core::Resolved::rebuild(&scratch).world_bounds(instance)?;
     let shift = centre - bounds.center();
     Some(Operation::SetTransform {
         id: instance,
@@ -2852,5 +2849,68 @@ pub(crate) mod tests {
             !super::dropped_on_canvas(at, canvas, panel, Some(inspector)),
             "over a floating panel"
         );
+    }
+
+    /// **A hugging frame is centred by the box layout gives it** (the v0.5.0
+    /// release review's `[R1-L2-01]`): a flex frame stored at 10×10 that hugs a
+    /// 120×40 rect. Centring its stored box put the real one 55 px right and
+    /// 15 px down of the aim.
+    ///
+    /// Flip, run: measuring a frame by its stored size again fails *"the laid-out
+    /// box is centred on the aim"*, centre (555, 315) against (500, 300) — the
+    /// review's 55 and 15 exactly.
+    #[test]
+    fn a_hugging_frame_is_centred_by_its_laid_out_box() {
+        use ondin_core::container::{Dimension, Display, Flex};
+        let mut ids = IdSource::new(0xDB);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let [f, r] = [(); 2].map(|_| ids.mint());
+        let item = ondin_core::container::LayoutItem {
+            width: Dimension::FitContent,
+            height: Dimension::FitContent,
+            ..Default::default()
+        };
+        doc.apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: f,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Artboard {
+                    size: Size::new(10.0, 10.0),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::CreateNode {
+                id: r,
+                parent: f,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(120.0, 40.0),
+                    corner_radii: Default::default(),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetDisplay {
+                id: f,
+                display: Some(Display::Flex(Flex::default())),
+            },
+            Operation::SetLayoutItem { id: f, item },
+        ]))
+        .unwrap();
+        let laid = ondin_core::Resolved::rebuild(&doc).world_bounds(f).unwrap();
+        assert_eq!(
+            laid.size(),
+            Size::new(120.0, 40.0),
+            "fixture: the frame hugs"
+        );
+
+        let aim = ondin_core::kurbo::Point::new(500.0, 300.0);
+        let op = super::centred(&doc, &Transaction(vec![]), f, aim).unwrap();
+        doc.apply(&Transaction(vec![op])).unwrap();
+        let b = ondin_core::Resolved::rebuild(&doc).world_bounds(f).unwrap();
+        assert_eq!(b.center(), aim, "the laid-out box is centred on the aim");
     }
 }

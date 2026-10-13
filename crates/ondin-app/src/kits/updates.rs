@@ -16,7 +16,7 @@ use crate::app::{OndinApp, TopMenu};
 use crate::theme::{self, color, icon};
 use eframe::egui;
 use ondin_core::kurbo::{Affine, Rect, Vec2};
-use ondin_core::{NodeId, NodeKind, Operation};
+use ondin_core::{NodeId, Operation};
 
 /// The popover's width.
 const POP_W: f32 = 300.0;
@@ -483,13 +483,12 @@ pub(crate) fn stack_local(
     for m in mains {
         let Some(n) = scratch.get(*m) else { continue };
         let at = n.transform();
-        let bounds = match n.kind() {
-            NodeKind::Artboard { size } => {
-                Some(at.transform_rect_bbox(Rect::from_origin_size((0.0, 0.0), *size)))
-            }
-            _ => res.world_bounds(*m),
+        // Laid out, a frame too: a hugging frame's stored size is not its box
+        // (§15 D874), and stacking by it overlapped the mains (the v0.5.0
+        // release review's `[R1-L2-01]`).
+        let Some(b) = res.world_bounds(*m) else {
+            continue;
         };
-        let Some(b) = bounds else { continue };
         let shift = Vec2::new(start.x - b.x0, y - b.y0);
         out.push(Operation::SetTransform {
             id: *m,
@@ -1082,6 +1081,72 @@ mod tests {
         let res = ondin_core::Resolved::rebuild(&doc);
         let (b1, b2) = (res.world_bounds(g1).unwrap(), res.world_bounds(g2).unwrap());
         assert_eq!((b1.x0, b1.y0), (100.0 + super::LOCAL_GAP, 0.0));
+        assert!(
+            b2.y0 >= b1.y1 + super::LOCAL_GAP - 1e-9,
+            "no overlap: {b1:?} {b2:?}"
+        );
+    }
+
+    /// **Hugging frames stack by the boxes layout gives them** (the v0.5.0
+    /// release review's `[R1-L2-01]`): two flex frames stored at 10×10 that each
+    /// hug a 120×40 rect. Stacked by stored height, the second overlapped the
+    /// first by 30.
+    ///
+    /// Flip, run: measuring a frame by its stored size again fails *"no
+    /// overlap"*.
+    #[test]
+    fn hugging_mains_made_local_stack_without_overlapping() {
+        use ondin_core::container::{Dimension, Display, Flex, LayoutItem};
+        let mut ids = IdSource::new(0xDC);
+        let r = ids.mint();
+        let mut doc = Document::new(r);
+        let item = LayoutItem {
+            width: Dimension::FitContent,
+            height: Dimension::FitContent,
+            ..Default::default()
+        };
+        let mut frames = Vec::new();
+        for i in 0..2 {
+            let [f, c] = [(); 2].map(|_| ids.mint());
+            doc.apply(&Transaction(vec![
+                Operation::CreateNode {
+                    id: f,
+                    parent: r,
+                    index: i,
+                    kind: NodeKind::Artboard {
+                        size: Size::new(10.0, 10.0),
+                    },
+                    transform: None,
+                    name: None,
+                },
+                Operation::CreateNode {
+                    id: c,
+                    parent: f,
+                    index: 0,
+                    kind: NodeKind::Rect {
+                        size: Size::new(120.0, 40.0),
+                        corner_radii: Default::default(),
+                    },
+                    transform: None,
+                    name: None,
+                },
+                Operation::SetDisplay {
+                    id: f,
+                    display: Some(Display::Flex(Flex::default())),
+                },
+                Operation::SetLayoutItem { id: f, item },
+            ]))
+            .unwrap();
+            frames.push(f);
+        }
+        let ops = super::stack_local(&doc, &Transaction(vec![]), &frames, None);
+        doc.apply(&Transaction(ops)).unwrap();
+        let res = ondin_core::Resolved::rebuild(&doc);
+        let (b1, b2) = (
+            res.world_bounds(frames[0]).unwrap(),
+            res.world_bounds(frames[1]).unwrap(),
+        );
+        assert_eq!(b1.height(), 40.0, "fixture: the frames hug");
         assert!(
             b2.y0 >= b1.y1 + super::LOCAL_GAP - 1e-9,
             "no overlap: {b1:?} {b2:?}"

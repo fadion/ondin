@@ -63,8 +63,8 @@ pub(crate) struct Picker {
 }
 
 impl Picker {
-    /// Whether a component is being carried out of the panel — the escape
-    /// ladder's and the right-click cancel's question (§15 D1033).
+    /// Whether a component is being carried out of the panel — the right-click
+    /// cancel's question (§15 D1033).
     pub(crate) fn dragging(&self) -> bool {
         self.ghost.is_some()
     }
@@ -126,9 +126,13 @@ struct LocalTiles {
     pending: Option<(u64, std::time::Instant)>,
     /// Each main's subtree as its picture was drawn from it.
     drawn: HashMap<NodeId, Vec<ondin_core::Node>>,
-    job: Option<mpsc::Receiver<HashMap<NodeId, Pixels>>>,
+    /// The render in flight, and the mains it was asked for.
+    job: Option<(TileJob, Vec<NodeId>)>,
     tiles: HashMap<NodeId, egui::TextureHandle>,
 }
+
+/// A local render's answer: each main's picture.
+type TileJob = mpsc::Receiver<HashMap<NodeId, Pixels>>;
 
 /// How long the document has to stand still before its mains are compared.
 const SETTLE: std::time::Duration = std::time::Duration::from_millis(400);
@@ -138,7 +142,7 @@ impl LocalTiles {
     /// compare the mains and render the ones that changed. Old pictures stand
     /// until new ones land; a main gone takes its picture with it.
     fn pass(&mut self, ctx: &egui::Context, doc: &Document, rev: u64, tops: &[NodeId]) {
-        if let Some(rx) = &self.job {
+        if let Some((rx, _)) = &self.job {
             match rx.try_recv() {
                 Ok(pixels) => {
                     self.job = None;
@@ -148,7 +152,11 @@ impl LocalTiles {
                     ctx.request_repaint_after(std::time::Duration::from_millis(50));
                     return;
                 }
-                Err(mpsc::TryRecvError::Disconnected) => self.job = None,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    if let Some((_, asked)) = self.job.take() {
+                        self.forget(&asked);
+                    }
+                }
             }
         }
         if self.rev == Some(rev) {
@@ -188,14 +196,27 @@ impl LocalTiles {
         }
         let (tx, rx) = mpsc::channel();
         let doc = doc.clone();
+        let asked = changed.clone();
         let spawned = std::thread::Builder::new()
             .name("ondin-local-tiles".into())
             .spawn(move || {
-                let _ = tx.send(tiles_of(&doc, &changed));
+                let _ = tx.send(tiles_of(&doc, &asked));
             });
         if spawned.is_ok() {
-            self.job = Some(rx);
+            self.job = Some((rx, changed));
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
+        } else {
+            // Not drawn after all: compared afresh on the next revision rather
+            // than counted as drawn (`arch-scribe`'s reading).
+            self.forget(&changed);
+        }
+    }
+
+    /// Mains whose render never landed: not drawn, so the next revision's
+    /// comparison asks for them again.
+    fn forget(&mut self, mains: &[NodeId]) {
+        for m in mains {
+            self.drawn.remove(m);
         }
     }
 
@@ -209,7 +230,7 @@ impl LocalTiles {
     /// Wait for the job in flight — the tests'.
     #[cfg(test)]
     fn settle(&mut self, ctx: &egui::Context) {
-        if let Some(rx) = self.job.take()
+        if let Some((rx, _)) = self.job.take()
             && let Ok(pixels) = rx.recv_timeout(std::time::Duration::from_secs(20))
         {
             self.land(ctx, pixels);

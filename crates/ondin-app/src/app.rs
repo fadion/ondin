@@ -9426,8 +9426,8 @@ impl OndinApp {
             ViewSwitch::Toolbar => self.show_toolbar = on,
             ViewSwitch::StatusMessages => {
                 self.show_status = on;
-                // Off, the toast would go into the bar it has just silenced,
-                // there to surface — stale — when the bar comes back.
+                // Off, the toast would go into the bar it has just silenced —
+                // read by nothing, since turning it back on writes its own.
                 if !on {
                     return;
                 }
@@ -17075,8 +17075,11 @@ mod library_wiring_tests {
                 _ => None,
             })
             .expect("the row");
+        // The row's own 8 inset on the right, inside the card's padding and
+        // border — what a correctly sized card leaves, and not a point less.
+        let inset = crate::app::MENU_PAD + crate::ui::MENU_BORDER + 8.0;
         assert!(
-            label <= card.right() - crate::app::MENU_PAD,
+            label <= card.right() - inset + 0.5,
             "the label ends at {label}, the card at {}",
             card.right()
         );

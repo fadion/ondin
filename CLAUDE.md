@@ -67,8 +67,11 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1034 index rows, 1034 body headings, next free
-D1035** (measured 2026-10-13, session 64; ⚠️ **its follow-up request reserved D1032–D1039 at
+anywhere cited either. **The live figures: 1035 index rows, 1035 body headings, next free
+D1036** (measured 2026-10-13, session 64; ⚠️ **its third request — the open findings — reserved
+D1035–D1040 at `a41084a` and spent one**, D1035 (the picker's pictures through zoom, fonts and a
+move); **D1036–D1040 found at zero sites and released**; census **933**, arrival D1035, none
+unresolved. ⚠️ **Its second request reserved D1032–D1039 at
 `f9035ce` and spent three** — D1032 (the View and Snap menus fit their widest row), D1033 (a
 right-click cancels a picker drag), D1034 (*This document*'s pictures redraw only a changed main,
 once settled). The closing grep over **D1035–D1039 found zero sites** and they are released.

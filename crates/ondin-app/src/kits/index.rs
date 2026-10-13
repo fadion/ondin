@@ -58,15 +58,11 @@ pub(crate) fn kits_in(lib: &Library, own: Option<&str>) -> Vec<KitEntry> {
         let (Some(id), Some(_)) = (e.meta.id.as_deref(), e.meta.kit.as_ref()) else {
             continue;
         };
-        if Some(id) == own {
+        if Some(id) == own || by_id.contains_key(id) {
             continue;
         }
-        match by_id.get(id) {
-            Some(held) if lib.conflict(held).is_none() => {}
-            Some(_) if lib.conflict(e).is_some() => {}
-            _ => {
-                by_id.insert(id, e);
-            }
+        if let Some(winner) = kit_file(lib, id) {
+            by_id.insert(id, winner);
         }
     }
     // **Sharing is asked of the file that won, not before** (§15 D1024, the
@@ -87,6 +83,32 @@ pub(crate) fn kits_in(lib: &Library, own: Option<&str>) -> Vec<KitEntry> {
         .collect();
     out.sort_by_key(|k| k.name.to_lowercase());
     out
+}
+
+/// **The file that is the kit `id`** among those carrying a kit mark with it —
+/// [`kits_in`]'s rule, and the dashboard's, asked in one place: the one that is
+/// not a conflict copy (§15 D1011 (10)); if every claimant is one, the first by
+/// path, so the answer does not hang on the scan's order.
+///
+/// 🚨 **The dashboard once asked its own question** (the v0.5.0 release review's
+/// `[X3.1-L1-03]`): it ruled out every conflict copy, so a kit whose original
+/// was trashed or renamed away stood in the picker, from its copy, and was
+/// neither listed under *Kits* nor offered *Stop sharing* on its card.
+pub(crate) fn kit_file<'a>(lib: &'a Library, id: &str) -> Option<&'a Entry> {
+    let claimants = lib
+        .entries
+        .iter()
+        .filter(|e| e.meta.id.as_deref() == Some(id) && e.meta.kit.is_some());
+    let mut first: Option<&Entry> = None;
+    for e in claimants {
+        if lib.conflict(e).is_none() {
+            return Some(e);
+        }
+        if first.is_none_or(|f| e.path < f.path) {
+            first = Some(e);
+        }
+    }
+    first
 }
 
 /// A kit as a list heading names it (4F, 3I).

@@ -213,8 +213,17 @@ impl OndinApp {
     /// it; a closed one has its mark written into the file
     /// (`library::store::set_kit`). Stopping is confirmed first (1D) — this is
     /// what the confirmation runs.
+    ///
+    /// 🚨 **On the dashboard every file is closed** (§15 D1036 (6), the v0.5.0
+    /// release review's `[X3.1-L5-01]`), the one the session still holds
+    /// included: that copy is the editor's, behind the library, and saving it
+    /// here wrote it over whatever had reached the disk since — another
+    /// window's or a synced machine's publish — so a re-made kit could publish a
+    /// version its consumers already held. The file is changed on disk, and the
+    /// held copy's mark patched to match, as the dashboard's rename and move
+    /// patch it.
     pub(crate) fn set_kit_at(&mut self, path: &std::path::Path, sharing: bool) {
-        if self.session.path.as_deref() == Some(path) {
+        if self.view != crate::app::View::Dashboard && self.session.path.as_deref() == Some(path) {
             if sharing {
                 self.make_kit();
             } else {
@@ -232,6 +241,14 @@ impl OndinApp {
             return;
         }
         self.library.refresh();
+        if self.session.path.as_deref() == Some(path)
+            && let Some(on_disk) = self.library.entry_at(path).map(|e| e.meta.clone())
+        {
+            let mut meta = self.session.doc.meta().clone();
+            meta.id = on_disk.id;
+            meta.kit = on_disk.kit;
+            self.session.doc.set_meta(meta);
+        }
         let name = entry.display_name();
         self.session.info(if sharing {
             format!("{name} is a kit — nothing is shared until you publish it")
@@ -253,9 +270,12 @@ impl OndinApp {
             self.kit_users = None;
             return;
         };
-        let here = target
-            .as_deref()
-            .is_none_or(|p| self.session.path.as_deref() == Some(p));
+        // The document menu's, or a card's for the file the editor holds — but
+        // on the dashboard every file is read from the library, as
+        // `set_kit_at` writes it there (§15 D1036 (6)).
+        let here = target.as_deref().is_none_or(|p| {
+            self.view != crate::app::View::Dashboard && self.session.path.as_deref() == Some(p)
+        });
         let found = if here {
             self.session
                 .doc
@@ -284,6 +304,14 @@ impl OndinApp {
         if let Some(id) = kit_id
             && self.kit_users.as_ref().is_none_or(|u| u.kit != id)
         {
+            // From the editor the library is as last scanned, and nothing
+            // rescans a kit's own window — a consumer filed since went
+            // uncounted and the card said no document used the kit (the v0.5.0
+            // release review's `[X3.1-L1-02]`). The dashboard refreshed on the
+            // way in.
+            if self.view != crate::app::View::Dashboard {
+                self.library.refresh();
+            }
             // Every library file but the kit's own and its conflict copies,
             // which carry its id and never vendor it.
             let paths = self

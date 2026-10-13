@@ -3864,8 +3864,11 @@ impl OndinApp {
     /// so *Make a kit* made a second kit of that identity, the original's own
     /// `kit::find` then landing pasted origins on its live nodes, and *Stop
     /// sharing* would have turned off a mark on a file that is not the kit.
+    ///
+    /// A conflict copy left as its kit's only file is the kit, and gets the row
+    /// (the v0.5.0 release review's `[X3.1-L1-03]`).
     fn kit_row(&self, entry: &Entry) -> Option<(&'static str, Act)> {
-        if self.library.conflict(entry).is_some() {
+        if !stands_for_its_kit(&self.library, entry) {
             return None;
         }
         Some(if is_kit(&self.library, entry) {
@@ -3966,7 +3969,19 @@ impl OndinApp {
 
     /// What a chosen ⋯ row does: a row that opens a card sets its state and
     /// answers `None`; any other becomes the frame's act.
+    ///
+    /// **A row that opens a card gives up a file still loading too**, as
+    /// [`Self::dashboard_act`] does for the rest (§15 D1027): it never becomes an
+    /// act, so the load landed after a confirmed *Stop sharing*, adopted the
+    /// copy read before it, and the next save shared the kit again — and a
+    /// *Delete* or *Move* card stayed up across the landing (the v0.5.0 release
+    /// review's `[X5-L5-01]`).
     fn file_menu_chose(&mut self, action: Act, trashed: bool) -> Option<Act> {
+        if matches!(action, Act::MoveTo(_, None) | Act::SetKit(_, false))
+            || matches!(action, Act::Trash(_) if !trashed)
+        {
+            self.opening = None;
+        }
         match action {
             // *Move to project*, *Delete* and *Stop sharing as kit* open
             // something rather than doing something, so they set state instead
@@ -6637,8 +6652,27 @@ fn mark_chip(ui: &egui::Ui, at: egui::Pos2, align: egui::Align2, mark: Mark) -> 
 /// carries the kit's id and mark, so the filter counted one kit twice — and the
 /// kit `kits::index::kits_in` lists is the original. The copy's card still wears
 /// the chip beside its conflict mark ([`marks_kit`], 1B).
+///
+/// **Unless it is the kit's only file left** — the question is which file is
+/// the kit, `kits::index::kit_file`'s, the picker's (the v0.5.0 release review's
+/// `[X3.1-L1-03]`).
 fn is_kit(lib: &crate::library::state::Library, entry: &Entry) -> bool {
-    lib.conflict(entry).is_none() && marks_kit(entry)
+    marks_kit(entry) && stands_for_its_kit(lib, entry)
+}
+
+/// Whether `entry` is the file that stands for the kit id it carries (§15
+/// D1011 (10)) — true of any file that is not a conflict copy, and of a
+/// conflict copy left as its kit's only claimant.
+fn stands_for_its_kit(lib: &crate::library::state::Library, entry: &Entry) -> bool {
+    if lib.conflict(entry).is_none() {
+        return true;
+    }
+    entry
+        .meta
+        .id
+        .as_deref()
+        .and_then(|id| crate::kits::index::kit_file(lib, id))
+        .is_some_and(|k| k.path == entry.path)
 }
 
 /// Whether a file carries a sharing kit mark — the card's *Kit* chip, which a
@@ -12098,6 +12132,150 @@ mod tests {
             app.kit_row(&entry(&atlas)).map(|r| r.0),
             Some("Stop sharing as kit"),
             "the original's"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The kit mark in the file at `path`, read from disk.
+    fn mark_on_disk(path: &Path) -> Option<ondin_core::meta::KitMark> {
+        ondin_core::io::load(&std::fs::read(path).unwrap())
+            .unwrap()
+            .meta()
+            .kit
+            .clone()
+    }
+
+    /// A library holding a sharing kit *Atlas*; its path.
+    fn shared_atlas(app: &mut OndinApp, root: &Path) -> PathBuf {
+        let mut a = ondin_core::Document::new(app.session.ids.mint());
+        let atlas = store::file_document(root, None, "Atlas", &mut a).unwrap();
+        app.library.refresh();
+        app.dashboard_act(Act::SetKit(atlas.clone(), true));
+        atlas
+    }
+
+    /// **A kit's conflict copy left as its only file is the kit, on the
+    /// dashboard too** (the v0.5.0 release review's `[X3.1-L1-03]`): with the
+    /// original gone, the picker listed the kit from its copy while the *Kits*
+    /// filter left it out and its card offered no *Stop sharing*.
+    ///
+    /// Flip, run: `stands_for_its_kit` answering false for every conflict copy
+    /// fails *"listed under Kits"*.
+    #[test]
+    fn a_kits_last_conflict_copy_is_the_kit() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, root) = app(&ctx, "kit-last-copy");
+        let atlas = shared_atlas(&mut app, &root);
+        let copy = root.join("atlas (Jon's conflicted copy 2026-10-08).ondin");
+        std::fs::copy(&atlas, &copy).unwrap();
+        std::fs::remove_file(&atlas).unwrap();
+        app.library.refresh();
+        assert_eq!(app.library.entries.len(), 1, "the fixture: the copy alone");
+        let picker = crate::kits::index::kits_in(&app.library, None);
+        assert_eq!(picker.len(), 1, "fixture: the picker lists it");
+
+        assert_eq!(app.nav_count(&Nav::Kits), 1, "listed under Kits");
+        let entry = app.library.entry_at(&copy).unwrap().clone();
+        assert_eq!(
+            app.kit_row(&entry).map(|r| r.0),
+            Some("Stop sharing as kit")
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A card's *Stop sharing* gives up the file still loading** (the v0.5.0
+    /// release review's `[X5-L5-01]`): the row opens a confirmation rather than
+    /// becoming an act, so the load — read before the confirm wrote the file —
+    /// landed afterwards, and the next save shared the kit again.
+    ///
+    /// Flip, run: `file_menu_chose` leaving `opening` fails *"the load is given
+    /// up"*.
+    #[test]
+    fn a_card_rows_card_gives_up_a_pending_open() {
+        let ctx = egui::Context::default();
+        let (mut app, root) = app(&ctx, "kit-pending");
+        let atlas = shared_atlas(&mut app, &root);
+        app.begin_open(&atlas);
+        assert!(app.opening.is_some(), "fixture: the load is pending");
+        assert!(
+            app.file_menu_chose(Act::SetKit(atlas.clone(), false), false)
+                .is_none()
+        );
+        assert!(app.opening.is_none(), "the load is given up");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// 🚨 **On the dashboard the file the editor still holds is closed** (§15
+    /// D1036 (6), the v0.5.0 release review's `[X3.1-L5-01]`). The session holds
+    /// *Atlas* behind the library; another writer publishes v7 to the file.
+    /// *Stop sharing* from the card saved the held copy over it — v4 and no
+    /// publish — and a re-made kit then published a version its consumers
+    /// already held. Now the file on disk is changed, and the held copy's mark
+    /// follows it.
+    ///
+    /// Flip, run: `set_kit_at` taking the editor's verbs for the held file on
+    /// the dashboard too fails *"the newer publish is kept"*.
+    #[test]
+    fn stopping_a_kit_from_the_dashboard_keeps_a_newer_publish_on_disk() {
+        let ctx = egui::Context::default();
+        let (mut app, root) = app(&ctx, "kit-held");
+        let atlas = shared_atlas(&mut app, &root);
+        app.open_path(&atlas);
+        app.go_to_dashboard();
+        assert_eq!(app.view, crate::app::View::Dashboard);
+        assert_eq!(
+            app.session.path.as_deref(),
+            Some(atlas.as_path()),
+            "fixture: held"
+        );
+
+        // Another writer's publish, on disk only.
+        let mut newer = ondin_core::io::load(&std::fs::read(&atlas).unwrap()).unwrap();
+        let mut meta = newer.meta().clone();
+        meta.kit.as_mut().unwrap().version = 7;
+        newer.set_meta(meta);
+        store::write_document(&atlas, &newer).unwrap();
+        app.library.refresh();
+
+        app.set_kit_at(&atlas, false);
+        let mark = mark_on_disk(&atlas).unwrap();
+        assert_eq!(mark.version, 7, "the newer publish is kept");
+        assert!(!mark.sharing, "and only sharing turned off");
+        let held = app.session.doc.meta().kit.clone().unwrap();
+        assert_eq!(
+            (held.version, held.sharing),
+            (7, false),
+            "the held copy follows"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **From the editor, *Stop sharing* counts over a fresh scan** (the v0.5.0
+    /// release review's `[X3.1-L1-02]`): a kit's own window never rescans, so a
+    /// consumer filed since the last look went uncounted and the card said no
+    /// document used the kit.
+    ///
+    /// Flip, run: the dialog's refresh removed fails *"the new file is in the
+    /// count's list"*.
+    #[test]
+    fn stop_sharing_from_the_editor_counts_over_a_fresh_scan() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, root) = app(&ctx, "kit-fresh");
+        let atlas = shared_atlas(&mut app, &root);
+        app.open_path(&atlas);
+        assert_eq!(app.view, crate::app::View::Editor, "fixture: in the editor");
+        let mut other = ondin_core::Document::new(app.session.ids.mint());
+        store::file_document(&root, None, "Landing", &mut other).unwrap();
+        assert_eq!(app.library.entries.len(), 1, "fixture: not scanned yet");
+
+        app.unsharing_kit = Some(None);
+        let _ = ctx.run_ui(Default::default(), |_| app.stop_sharing_dialog(&ctx));
+        assert_eq!(
+            app.library.entries.len(),
+            2,
+            "the new file is in the count's list"
         );
         let _ = std::fs::remove_dir_all(&root);
     }

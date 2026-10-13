@@ -1065,7 +1065,11 @@ impl Ghost {
                     Scene::Kit(p) => p.document(),
                     Scene::Here(d) => d,
                 };
+                // As it will land: no ancestor's transform, and a vault main
+                // resolved (`kit::as_placed`) — the subject chosen first, as
+                // `tiles_of` chooses it.
                 let subject = tile_subject(doc, top);
+                let doc = &ondin_core::kit::as_placed(doc, &[subject]);
                 let res = ondin_core::Resolved::rebuild(doc);
                 let got = ondin_export::extent(&res, &[subject]).and_then(|view| {
                     let (w, h) = (view.width().max(1.0), view.height().max(1.0));
@@ -2149,7 +2153,8 @@ pub(crate) mod tests {
     /// sheet of variants.
     ///
     /// Flip, run: `tile_subject` answering the top fails, the set's 300 × 30
-    /// box rendered at 200 × 20 against *Small*'s 200 × 75.
+    /// box rendered at 200 × 20 against *Small*'s 200 × 75 — measured before
+    /// tiles were drawn as placed; *Small*'s is 200 × 50 since, not re-flipped.
     #[test]
     fn a_sets_tile_is_its_default_variant() {
         let root = temp_root("set-tile");
@@ -2160,8 +2165,12 @@ pub(crate) mod tests {
         let small = ondin_core::kit::default_variant(frozen, set).unwrap();
         assert_eq!(frozen.get(small).unwrap().name(), "Small", "the fixture");
         let tiles = tiles_of(frozen, &[set]);
-        let res = ondin_core::Resolved::rebuild(frozen);
-        let alone = raster_fit(frozen, &res, small, 200.0, 104.0, 4.0).unwrap();
+        // *Small* as an insert lands, out of its set — whose layout stretches
+        // it to 80 × 30 where it sits; it lands at the 80 × 20 it stores (the
+        // v0.5.0 release review's `[X4.1-L1-02]`).
+        let placed = ondin_core::kit::as_placed(frozen, &[small]);
+        let res = ondin_core::Resolved::rebuild(&placed);
+        let alone = raster_fit(&placed, &res, small, 200.0, 104.0, 4.0).unwrap();
         let tile = &tiles[&set];
         assert_eq!(
             (tile.width, tile.height),
@@ -2833,6 +2842,85 @@ pub(crate) mod tests {
         let main = app.session.doc.get(inst).unwrap().link().unwrap();
         assert_eq!(app.session.doc.get(main).unwrap().origin().unwrap().kit, id);
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A main's tile and drag picture are drawn as it lands** (the v0.5.0
+    /// release review's `[X4.1-L1-02]`, with `[X4.1-L1-04]`). *Badge* is 80 ×
+    /// 30 in a frame rotated 90° and scaled 2×. The picture was drawn where it
+    /// sat — 60 × 160, turned — and the placement landed 80 × 30 and level; and
+    /// a vault main, which nothing resolves where it sits, dragged as an empty
+    /// box. Both now draw from `kit::as_placed`.
+    ///
+    /// Flip, run: the ghost drawing from the document as it is fails *"the
+    /// size it lands at"* with 60 × 160 against 80 × 30. The vault half was
+    /// not flipped on its own; the review's probe measured `None` there.
+    #[test]
+    fn a_mains_pictures_are_drawn_as_it_lands() {
+        let ctx = egui::Context::default();
+        let mut ids = IdSource::new(0xDF);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let [p, badge] = [(); 2].map(|_| ids.mint());
+        doc.apply(&Transaction(vec![
+            frame(p, root, 0, 200.0, "Holder"),
+            frame(badge, p, 0, 80.0, "Badge"),
+            Operation::SetComponent {
+                id: badge,
+                component: true,
+            },
+            Operation::SetTransform {
+                id: p,
+                transform: Affine::rotate(std::f64::consts::FRAC_PI_2).then_scale(2.0),
+            },
+        ]))
+        .unwrap();
+        let item = |source| Item {
+            source,
+            name: "Badge".into(),
+            set: false,
+            kit: None,
+            tile: None,
+            aliases: Vec::new(),
+        };
+        let mut ghost = Ghost::start(&item(Source::Local(badge)), &doc, 1.0);
+        ghost.settle(&ctx);
+        let (_, size) = ghost.picture.expect("a picture");
+        let stored = match doc.get(badge).unwrap().kind() {
+            NodeKind::Artboard { size } => *size,
+            _ => unreachable!(),
+        };
+        assert_eq!(
+            (size.x as f64, size.y as f64),
+            (stored.width, stored.height),
+            "the size it lands at"
+        );
+
+        // A vault main: an unavailable kit's copy, listed by itself (3I).
+        let mut d = Document::new(IdSource::new(0xD1).mint());
+        let mut dids = IdSource::new(0xD2);
+        let mut kdoc = doc.clone();
+        kdoc.set_meta(ondin_core::meta::DocumentMeta {
+            id: Some("5eed0000000000000000000000000009".into()),
+            kit: Some(KitMark::default()),
+            ..Default::default()
+        });
+        let published = ondin_core::kit::freeze(&kdoc).unwrap();
+        let droot = d.root();
+        let (tx, inst) = ondin_core::kit::insert(
+            &d,
+            &mut dids,
+            "5eed0000000000000000000000000009",
+            1,
+            &published,
+            badge,
+            droot,
+        )
+        .unwrap();
+        d.apply(&tx).unwrap();
+        let vaulted = d.get(inst).unwrap().link().unwrap();
+        let mut ghost = Ghost::start(&item(Source::Local(vaulted)), &d, 1.0);
+        ghost.settle(&ctx);
+        assert!(ghost.picture.is_some(), "a vault main draws");
     }
 
     /// **A tile let go over a panel floating on the canvas places nothing**

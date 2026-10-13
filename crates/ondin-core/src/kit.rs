@@ -1023,6 +1023,35 @@ pub fn insert_carrying(
     Ok((Transaction(ops), created))
 }
 
+/// **A document for drawing pictures only**: `doc` with each of `nodes` moved
+/// to the root, last, with its own transform — where an insert of it lands,
+/// with no ancestor's transform or layout, and a vault main among them resolved
+/// like any other (the picker's tiles and drag picture; the v0.5.0 release
+/// review's `[X4.1-L1-02]`). A node already at the root stays put.
+///
+/// 🚨 **Not a document anything may keep**: the move is applied unchecked, and
+/// a vault node at the root breaks the vault's rules (§15 D1012). That is
+/// nothing to a renderer, which is all this is for.
+pub fn as_placed(doc: &Document, nodes: &[NodeId]) -> Document {
+    let mut scratch = doc.clone();
+    let root = doc.root();
+    let end = doc.get(root).map_or(0, |r| r.children.len());
+    let ops: Vec<Operation> = nodes
+        .iter()
+        .filter(|n| doc.get(**n).is_some_and(|x| x.parent != Some(root)))
+        .enumerate()
+        .map(|(i, n)| Operation::Reparent {
+            id: *n,
+            new_parent: root,
+            index: end + i,
+        })
+        .collect();
+    if !ops.is_empty() {
+        let _ = scratch.apply_unchecked(&Transaction(ops));
+    }
+    scratch
+}
+
 /// Point every link, swap and bound layer in `nodes` that `map` knows at its
 /// new id — [`adopt`]'s map applied to a pasted subtree, before it is inserted.
 pub fn relink(nodes: &mut [Node], map: &FxHashMap<NodeId, NodeId>) {

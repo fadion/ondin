@@ -411,11 +411,23 @@ pub(crate) fn tile_subject(doc: &ondin_core::Document, top: NodeId) -> NodeId {
 /// A tile picture for each of `tops` in `doc`, keyed by the top — the kits'
 /// published states here, and the document's own mains in the picker's *This
 /// document* (`super::picker`'s `LocalTiles`).
+///
+/// 🚨 **Each drawn as a placement will have it** (`ondin_core::kit::as_placed`):
+/// moved to the root with its own transform, as `kit::insert` and the picker
+/// place it. Drawn where it sat (the v0.5.0 release review's `[X4.1-L1-02]`,
+/// with `[X4.1-L1-04]`), a main in a frame rotated 90° and scaled 2× dragged
+/// as 40 × 160 and turned and landed 80 × 20 and level; since the ancestor was
+/// no input to `LocalTiles`' comparison, rotating it left the tile as it was;
+/// a variant drew at the size its set's layout gave it, not the one it lands
+/// at; and a vault main, never resolved where it sits, dragged as an empty box.
 pub(crate) fn tiles_of(doc: &ondin_core::Document, tops: &[NodeId]) -> HashMap<NodeId, Pixels> {
+    // Each subject chosen before the move: out of its set, a default variant
+    // is no longer the set's, and asking afterwards drew the next variant.
+    let shown: Vec<NodeId> = tops.iter().map(|t| tile_subject(doc, *t)).collect();
+    let doc = &ondin_core::kit::as_placed(doc, &shown);
     let res = ondin_core::Resolved::rebuild(doc);
     let mut pixels = HashMap::new();
-    for top in tops {
-        let shown = tile_subject(doc, *top);
+    for (top, shown) in tops.iter().zip(shown) {
         if let Some(p) = raster_fit(doc, &res, shown, TILE_W, TILE_H, 4.0) {
             pixels.insert(*top, p);
         }

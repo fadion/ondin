@@ -944,9 +944,11 @@ impl OndinApp {
                             // lists. The message was not cleared either — it
                             // surfaced later, out of context, in the editor.
                             //
-                            // Same function as the editor's, so the two screens
+                            // Same colour as the editor's, so the two screens
                             // cannot disagree about what a failure looks like
-                            // (`crate::app::status_label`).
+                            // (`crate::app::status_color`; the editor's sentence
+                            // is the floating `OndinApp::status_bar` since §15
+                            // D1025, the top bar's `status_label` before it).
                             //
                             // 🚨 **A dot with the message on hover, not the message**
                             // (§15 D751). This read

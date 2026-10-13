@@ -651,6 +651,7 @@ impl ViewState {
             // is what the wildcard cost.
             ViewSwitch::Layers
             | ViewSwitch::Toolbar
+            | ViewSwitch::StatusMessages
             | ViewSwitch::Present
             | ViewSwitch::SnapShapes
             | ViewSwitch::SnapGuides
@@ -1167,6 +1168,7 @@ impl Item {
                     // which is the line above.
                     ViewSwitch::Layers
                     | ViewSwitch::Toolbar
+                    | ViewSwitch::StatusMessages
                     | ViewSwitch::Present
                     | ViewSwitch::SnapShapes
                     | ViewSwitch::SnapGuides
@@ -4409,8 +4411,9 @@ mod tests {
         assert!(rows.contains(&Item::ViewSwitch(ViewSwitch::GuideLock)));
     }
 
-    /// **The canvas menu's View rows are the View menu's, less the three §6.1
-    /// keeps out — and present mode dims exactly one of them** (§15 D757, D758).
+    /// **The canvas menu's View rows are the View menu's, less the four §6.1
+    /// keeps out — and present mode dims exactly one of them** (§15 D757, D758;
+    /// three until D1025's *Show status messages*).
     ///
     /// 🚨 **Nothing pinned this set before.** `the_canvas_menu_ignores_the_selection`
     /// asserts *Lock guides* is present and no test asked what else was, so §15
@@ -4419,7 +4422,7 @@ mod tests {
     /// session. The set is derived from `ViewSwitch::VIEW_MENU` rather than typed
     /// out, so the next row added to that array either appears here or fails here.
     ///
-    /// ⚠️ **`Layers`, `Toolbar` and `Present` are the exclusion and it is a real
+    /// ⚠️ **`Layers`, `Toolbar`, `StatusMessages` and `Present` are the exclusion and it is a real
     /// rule, not an omission**: `context-menus.md` §6.1 — *"they are chrome-wide
     /// switches, the View menu is one click away, and Present mode hides the very
     /// chrome the canvas menu sits over"*. Deriving the expectation by subtracting
@@ -4449,13 +4452,16 @@ mod tests {
                 })
                 .collect()
         };
-        // Derived, not typed: the View menu's rows less the three §6.1 excludes.
+        // Derived, not typed: the View menu's rows less the four §6.1 excludes.
         let expected: Vec<ViewSwitch> = ViewSwitch::VIEW_MENU
             .into_iter()
             .filter(|sw| {
                 !matches!(
                     sw,
-                    ViewSwitch::Layers | ViewSwitch::Toolbar | ViewSwitch::Present
+                    ViewSwitch::Layers
+                        | ViewSwitch::Toolbar
+                        | ViewSwitch::StatusMessages
+                        | ViewSwitch::Present
                 )
             })
             .collect();
@@ -4465,7 +4471,7 @@ mod tests {
         assert_eq!(
             got.iter().map(|(sw, _, _)| *sw).collect::<Vec<_>>(),
             expected,
-            "the canvas menu's View rows are not the View menu's, less §6.1's three"
+            "the canvas menu's View rows are not the View menu's, less §6.1's four"
         );
         assert!(
             got.iter().all(|(_, enabled, _)| *enabled),

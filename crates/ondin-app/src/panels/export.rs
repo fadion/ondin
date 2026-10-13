@@ -2115,7 +2115,7 @@ impl OndinApp {
             self.prefs.save();
         }
         // **The count first, the loss next, the path last**, because
-        // `app::status_label` draws this with `.truncate()`: whatever falls off the
+        // `OndinApp::status_bar` draws this with `.truncate()`: whatever falls off the
         // end is what the reader can most afford to lose, and a folder they can
         // re-derive from *Show in folder* beats a replacement count they cannot.
         let head = match (to_folder, replaced) {

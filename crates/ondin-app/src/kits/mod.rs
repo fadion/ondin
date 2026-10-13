@@ -39,7 +39,7 @@ impl OndinApp {
     }
 
     /// The document's title as the **document menu's head** (§5.3e, 1A) — the
-    /// caret beside the name — then the neutral *Kit* tag when it is one (1C).
+    /// caret beside the name.
     ///
     /// ⚠️ **The menu holds only rows whose verbs exist** (§15 D1013): the mockup's
     /// *Rename*, *Duplicate*, *Version history* and *Export…* have no editor verb
@@ -68,9 +68,7 @@ impl OndinApp {
         if head.clicked() {
             self.toggle_menu(TopMenu::Document);
         }
-        if self.shared_kit().is_some() {
-            kit_tag(ui);
-        }
+        // The *Kit* tag is the top bar's, after the save dot (§15 D1025).
         if self.open_menu != TopMenu::Document {
             return;
         }
@@ -334,16 +332,21 @@ impl OndinApp {
     }
 }
 
-/// The neutral *Kit* tag after the document's name (1C): a package glyph and the
-/// word on an 8% chip, 20 tall — so the author always knows this file reaches
-/// others. Neutral rather than the component violet, which belongs to selection
-/// (§15 D1001, D1011 (1)).
-fn kit_tag(ui: &mut egui::Ui) {
-    const H: f32 = 20.0;
-    const PAD: f32 = 7.0;
-    const GAP: f32 = 5.0;
+/// The neutral *Kit* tag after the save dot (1C): a package glyph and the word
+/// on an 8% chip — so the author always knows this file reaches others. Neutral
+/// rather than the component violet, which belongs to selection (§15 D1001,
+/// D1011 (1)).
+///
+/// **Publish's box exactly** (§15 D1025): 26 tall, 10 in from each end, 7
+/// between glyph and word, the same corner — the two sit side by side and a
+/// 20-tall chip against a 26-tall button read as two different sizes of one
+/// thing.
+pub(crate) fn kit_tag(ui: &mut egui::Ui) {
+    const H: f32 = 26.0;
+    const PAD: f32 = 10.0;
+    const GAP: f32 = 7.0;
     let ink = color::text_a(191);
-    let glyph = egui::WidgetText::from(theme::icon_text(icon::PACKAGE, 12.0, ink)).into_galley(
+    let glyph = egui::WidgetText::from(theme::icon_text(icon::PACKAGE, 13.0, ink)).into_galley(
         ui,
         Some(egui::TextWrapMode::Extend),
         f32::INFINITY,
@@ -351,11 +354,11 @@ fn kit_tag(ui: &mut egui::Ui) {
     );
     let word = ui
         .ctx()
-        .fonts_mut(|f| f.layout_no_wrap("Kit".into(), egui::FontId::proportional(10.5), ink));
+        .fonts_mut(|f| f.layout_no_wrap("Kit".into(), egui::FontId::proportional(11.5), ink));
     let w = PAD + glyph.size().x + GAP + word.size().x + PAD;
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, H), egui::Sense::hover());
     let p = ui.painter();
-    p.rect_filled(rect, egui::CornerRadius::same(5), color::text_a(20));
+    p.rect_filled(rect, egui::CornerRadius::same(6), color::text_a(20));
     let mid = rect.center().y;
     p.galley(
         egui::pos2(rect.left() + PAD, mid - glyph.size().y / 2.0),

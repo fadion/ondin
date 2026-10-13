@@ -42,8 +42,13 @@ impl OndinApp {
         Some(c)
     }
 
-    /// *Publish N* in a kit's top bar (2A): neutral, with the count; hovering
-    /// gives the breakdown, and at 0 it stays, disabled, saying why.
+    /// *Publish N* in a kit's top bar (2A), with the count; hovering gives the
+    /// breakdown, and at 0 it stays, disabled, saying why.
+    ///
+    /// **The accent button the library's *New file* is** (§15 D1025, the
+    /// maintainer's call over 2A's neutral): publishing is the one thing a kit's
+    /// bar is for. Disabled, it falls back to the neutral ground, so a kit with
+    /// nothing to send does not wear the colour of an action.
     pub(crate) fn publish_button(&mut self, ui: &mut egui::Ui) {
         let Some(c) = self.kit_changes() else {
             return;
@@ -65,7 +70,7 @@ impl OndinApp {
         };
         let enabled = c.any();
         let ink = if enabled {
-            color::TEXT
+            color::ACCENT_100
         } else {
             theme::text::DISABLED
         };
@@ -96,12 +101,20 @@ impl OndinApp {
             },
         );
         let p = ui.painter();
-        let ground = if enabled && resp.hovered() {
-            color::text_a(26)
-        } else {
-            color::text_a(18)
+        let ground = match (enabled, resp.hovered()) {
+            (true, true) => color::ACCENT_700,
+            (true, false) => color::ACCENT_800,
+            (false, _) => color::text_a(18),
         };
         p.rect_filled(rect, egui::CornerRadius::same(6), ground);
+        if enabled {
+            p.rect_stroke(
+                rect,
+                egui::CornerRadius::same(6),
+                egui::Stroke::new(1.0, color::ACCENT),
+                egui::StrokeKind::Inside,
+            );
+        }
         let y = rect.center().y;
         let mut x = rect.left() + 10.0;
         p.text(
@@ -110,7 +123,7 @@ impl OndinApp {
             icon::UPLOAD_SIMPLE,
             theme::icon_font(13.0),
             if enabled {
-                color::text_a(153)
+                color::ACCENT_200
             } else {
                 theme::text::DISABLED
             },
@@ -120,12 +133,8 @@ impl OndinApp {
         x += label.size().x + 7.0;
         if chip {
             let chip = egui::Rect::from_min_size(egui::pos2(x, y - 9.0), egui::vec2(chip_w, 18.0));
-            p.rect_filled(chip, egui::CornerRadius::same(4), color::text_a(26));
-            p.galley(
-                chip.center() - count.size() / 2.0,
-                count,
-                color::text_a(204),
-            );
+            p.rect_filled(chip, egui::CornerRadius::same(4), color::ACCENT_600);
+            p.galley(chip.center() - count.size() / 2.0, count, color::ACCENT_100);
         }
         let resp = resp.on_hover_text(tip);
         if resp.clicked() {

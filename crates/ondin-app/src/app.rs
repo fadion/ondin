@@ -1398,6 +1398,10 @@ pub struct OndinApp {
     /// tool rail are on screen.
     pub(crate) show_layers: bool,
     pub(crate) show_toolbar: bool,
+    /// *View ▸ Show status messages*: whether the floating status bar at the
+    /// canvas's bottom left reports what just happened (§15 D1025). On by
+    /// default; with it off, a message is still written and read by nothing.
+    pub(crate) show_status: bool,
     /// *View ▸ Present mode*: the app's chrome hidden at once — top bar, layers
     /// pane, tool rail, inspector, picker and the ruler bars — leaving the
     /// artwork **and a canvas that goes on working normally**. Escape comes back.
@@ -2082,7 +2086,7 @@ impl OndinApp {
     /// **A `fail`, not a modal.** All three states are survivable and the app
     /// runs. One sentence in a status line is the whole fix — and it is only a
     /// fix at all since the library screen started painting one
-    /// (`status_label`), which is why the latches and this landed together.
+    /// (`status_dot`), which is why the latches and this landed together.
     pub(crate) fn report_unreadable_records(&mut self) {
         let unreadable: Vec<&str> = [
             (
@@ -2352,6 +2356,7 @@ impl OndinApp {
             show_layout_grids: true,
             show_layers: true,
             show_toolbar: true,
+            show_status: true,
             present: false,
             // Off: a marker on every selection would be permanent chrome for a
             // property most layers never move.
@@ -2816,11 +2821,15 @@ impl eframe::App for OndinApp {
 
         // The canvas takes the whole remaining area; the inspector and the
         // colour picker float over it, so both are shown after it.
-        egui::CentralPanel::default()
+        let canvas = egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(color::BG))
             .show(ui, |ui| {
                 self.canvas_ui(ui);
-            });
+            })
+            .response
+            .rect;
+        // Over the canvas's bottom left, beside the tool rail (§15 D1025).
+        self.status_bar(&ctx, canvas);
 
         // A kit this document uses that published since the library was last
         // read brings the update pill on its own (§15 D1020).
@@ -8623,63 +8632,33 @@ fn top_rule(ui: &mut egui::Ui) {
     ui.add_space(TOP_RULE_GAP);
 }
 
-/// The last status message, in the colour its kind calls for (§15 D426).
-///
-/// ⚠️ **A free function because there are two top bars, and for a long time only
-/// one of them drew this.** `EditorSession::status` is a single slot with a
-/// single production reader — `OndinApp::status_text`, called from the editor's
-/// top bar, which sits *below* `OndinApp::ui`'s `View::Dashboard` return. So the
-/// **22** messages `panels::dashboard` writes were never painted: a *Delete
-/// project* that could not read `projects.json` closed its confirmation, left
-/// the project in the sidebar and said nothing; a *Delete files too* that failed
-/// to trash some members removed the row and left those documents on disk
-/// carrying a project id nothing lists, silently. The message was not even
-/// cleared — it surfaced later, out of context, in the editor's top bar the next
-/// time a document was opened.
-///
-/// **One function rather than two spellings**, so the two screens cannot come to
-/// disagree about what a failure looks like. `max_w` is the only difference
-/// between them: the editor's bar gives it whatever it needs, and the library's
-/// has a search field painted across the middle of the same 46pt strip that a
-/// long message would otherwise run under.
-///
-/// `truncate` rather than a wrap, because the bar is one line tall: a wrapped
-/// message would be clipped mid-sentence with nothing to say it had been, and
-/// an ellipsis says so.
-///
-/// 🚨 **The library draws [`status_dot`] instead, and the two screens differing
-/// is the decision** (§15 D751). This function took a `max_w` for the library's
-/// sake — *"the library's bar has a search field painted across the middle of the
-/// same 46pt strip that a long message would otherwise run under"* — and that
-/// bound is **half the leftover room less the gear**, which is a function of the
-/// window: 382pt at the default 1200, 22pt at 500, and **zero at 436**. There is
-/// no `with_min_inner_size` on the viewport, so all three are reachable by
-/// dragging an edge. A message that disappears when the window gets small is
-/// worst exactly where present mode says the user is working — on a laptop
-/// screen. The parameter is gone with the caller that needed it.
-pub(crate) fn status_label(ui: &mut egui::Ui, status: &crate::session::Status) {
-    if status.text.is_empty() {
-        return;
-    }
-    ui.scope(|ui| {
-        ui.add(
-            egui::Label::new(
-                egui::RichText::new(&status.text)
-                    .size(11.5)
-                    .color(status_color(status)),
-            )
-            .truncate(),
-        );
-    });
+/// How long the floating status bar holds `status` before letting it go (§15
+/// D1025): long enough to read — a base plus a reading allowance per character,
+/// so a one-word report is not held as long as a failure's sentence — and a
+/// failure longer than a report, since it is the one the user has to act on.
+pub(crate) fn status_hold(status: &crate::session::Status) -> std::time::Duration {
+    let chars = status.text.chars().count() as f32;
+    let secs = (2.0 + chars * 0.05).clamp(3.0, 8.0);
+    let secs = if status.kind == StatusKind::Error {
+        (secs * 1.5).max(5.0)
+    } else {
+        secs
+    };
+    std::time::Duration::from_secs_f32(secs)
 }
+
+/// The fade at the end of [`status_hold`], so a message leaves rather than
+/// blinks out.
+const STATUS_FADE: f32 = 0.3;
 
 /// The colour a status is drawn in, for whichever of the two surfaces draws it.
 ///
 /// **One statement, because the surfaces are deliberately different and their
 /// *colour* must not be** (§15 D751). The library shows a dot and the editor
 /// shows the sentence; what a failure looks like is the thing both screens have
-/// to agree about, and it was a local `if` inside `status_label` until the second
-/// surface existed to disagree with it.
+/// to agree about, and it was a local `if` inside the top bar's old
+/// `status_label` until the second surface existed to disagree with it. The
+/// editor's surface is [`OndinApp::status_bar`] since §15 D1025.
 fn status_color(status: &crate::session::Status) -> egui::Color32 {
     if status.kind == StatusKind::Error {
         egui::Color32::from_rgb(226, 138, 138)
@@ -8911,11 +8890,21 @@ impl OndinApp {
                     // Straight after the name, at the row's own 8-point spacing,
                     // so it reads as the name's state (§15 D962).
                     self.save_dot(ui);
+                    // On a kit, its tag after the dot and *Publish N* hard
+                    // against the tag (§15 D1025): the dot is the name's state on
+                    // every document, so it keeps its place beside the name and the
+                    // kit's two pieces follow it as one group.
+                    if self.shared_kit().is_some() {
+                        crate::kits::kit_tag(ui);
+                        ui.add_space(-2.0);
+                        self.publish_button(ui);
+                    }
                     // Beside the save state, in its quiet register (§5.3e, 5A).
                     self.kit_update_pill(ui);
                     // In a kit opened by *Go to main*, the way back (D1011 (7)).
                     self.kit_back_link(ui);
-                    self.status_text(ui);
+                    // ⚠️ **No status text here since §15 D1025**: it is the
+                    // floating bar at the canvas's bottom left, `status_bar`.
 
                     // ⚠️ **No open or save buttons here since §15 D962.** The
                     // folder went to the library, which the brand mark and
@@ -8988,11 +8977,6 @@ impl OndinApp {
                         {
                             self.finish_text_first();
                             self.undo();
-                        }
-                        // *Publish N*, on a kit only, left of undo (§5.3e, 1C).
-                        if self.shared_kit().is_some() {
-                            ui.add_space(6.0);
-                            self.publish_button(ui);
                         }
                     });
                 });
@@ -9284,6 +9268,7 @@ impl OndinApp {
             ViewSwitch::LayoutGrid => self.show_layout_grids,
             ViewSwitch::Layers => self.show_layers,
             ViewSwitch::Toolbar => self.show_toolbar,
+            ViewSwitch::StatusMessages => self.show_status,
             ViewSwitch::Present => self.present,
             ViewSwitch::SnapShapes => self.snap_shapes,
             ViewSwitch::SnapGuides => self.snap_guides,
@@ -9311,6 +9296,7 @@ impl OndinApp {
             ViewSwitch::LayoutGrid => self.show_layout_grids = on,
             ViewSwitch::Layers => self.show_layers = on,
             ViewSwitch::Toolbar => self.show_toolbar = on,
+            ViewSwitch::StatusMessages => self.show_status = on,
             ViewSwitch::Present => {
                 self.present = on;
                 // The menu goes with the chrome it lives in.
@@ -9470,26 +9456,93 @@ impl OndinApp {
         }
     }
 
-    /// Mode (when it is not the default) and the last status message. Kept
-    /// beside the save dot rather than in its tooltip: a failed commit has to be
-    /// visible somewhere, and the dot says one thing only.
+    /// **The floating status bar** at the canvas's bottom left, beside the tool
+    /// rail (§15 D1025): the mode when it is not the default, and the last status
+    /// message for [`status_hold`] after it was written, then a fade and nothing.
     ///
-    /// Nothing is drawn when there is nothing to report. The status line used to
-    /// open on "Ready" and echo the save path, both of which the save dot and the
-    /// title already carry — so the bar's default state is now empty and the
-    /// text only appears when something actually happened.
+    /// It was text in the top bar beside the save dot, standing until the next
+    /// message replaced it — so a report from a minute ago read as current. The
+    /// maintainer moved it here and made it transient. *View ▸ Show status messages* turns it off;
+    /// the mode still shows, being a state rather than a message.
     ///
-    /// The message itself is [`status_label`], shared with the library screen —
-    /// see there for why that is a free function rather than four lines here.
-    fn status_text(&self, ui: &mut egui::Ui) {
-        if self.mode != Mode::Normal {
-            ui.label(
-                egui::RichText::new(self.mode.label())
-                    .size(9.5)
-                    .color(color::ACCENT_300),
-            );
+    /// **Drawn in present mode too**: it is how *"Present mode — Escape to
+    /// leave"* reaches the user at all, the top bar it used to sit in being the
+    /// first thing present mode hides.
+    ///
+    /// Not interactable, so it never takes a click from the canvas under it.
+    /// `truncate` rather than a wrap, bounded by the canvas's width — the
+    /// inspector floats over the canvas's right side — so a long message ends in
+    /// an ellipsis rather than running under it.
+    fn status_bar(&self, ctx: &egui::Context, canvas: egui::Rect) {
+        const MARGIN: f32 = 12.0;
+        let status = self.session.status();
+        let moded = self.mode != Mode::Normal;
+        let age = status.at.elapsed().as_secs_f32();
+        let hold = status_hold(status).as_secs_f32();
+        let message = self.show_status && !status.text.is_empty() && age < hold;
+        if !moded && !message {
+            return;
         }
-        status_label(ui, self.session.status());
+        let fade = if message {
+            ((hold - age) / STATUS_FADE).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        if message {
+            // Wake for the fade, and for the frame the bar goes.
+            ctx.request_repaint_after(std::time::Duration::from_secs_f32(if fade < 1.0 {
+                1.0 / 60.0
+            } else {
+                hold - age - STATUS_FADE
+            }));
+        }
+        let max_w = (canvas.width() * 0.6).min(560.0);
+        egui::Area::new(egui::Id::new("status-bar"))
+            .order(egui::Order::Middle)
+            .interactable(false)
+            // Its own fade is the only one: egui's appear fade would dim the
+            // mode for its first frames, measured at half on the second.
+            .fade_in(false)
+            .pivot(egui::Align2::LEFT_BOTTOM)
+            .fixed_pos(canvas.left_bottom() + egui::vec2(MARGIN, -MARGIN))
+            .show(ctx, |ui| {
+                // The card fades with its message only when the message is all
+                // it holds: with the mode in it, the mode stays whole and the
+                // message fades alone — one opacity for both dipped the mode
+                // through every fade and snapped it back after (`arch-scribe`'s
+                // reading).
+                let message_fade = if moded {
+                    fade
+                } else {
+                    ui.set_opacity(fade);
+                    1.0
+                };
+                crate::ui::menu_frame(0.0)
+                    .inner_margin(egui::Margin::symmetric(10, 6))
+                    .show(ui, |ui| {
+                        ui.set_max_width(max_w);
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 8.0;
+                            if moded {
+                                ui.label(
+                                    egui::RichText::new(self.mode.label())
+                                        .size(9.5)
+                                        .color(color::ACCENT_300),
+                                );
+                            }
+                            if message {
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(&status.text).size(11.5).color(
+                                            status_color(status).gamma_multiply(message_fade),
+                                        ),
+                                    )
+                                    .truncate(),
+                                );
+                            }
+                        });
+                    });
+            });
     }
 
     /// The 46px vertical tool rail.
@@ -16758,6 +16811,201 @@ mod library_wiring_tests {
             "a pre-library kit is found by its id"
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A kit's bar reads name · save dot · *Kit* · *Publish N*, the two kit
+    /// pieces one height, Publish in the accent** (§15 D1025), and the status text
+    /// is not in the bar at all.
+    ///
+    /// Flip, run: the tag's old `H = 20.0` fails the height assertion (20 against
+    /// 26).
+    #[test]
+    fn a_kits_bar_reads_dot_then_tag_then_an_accent_publish() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let root = temp_root("kit-bar");
+        let mut app = app_at(&ctx, root.clone());
+        let main = app.session.ids.mint();
+        let doc_root = app.session.doc.root();
+        assert!(app.session.commit(ondin_core::Transaction(vec![
+            ondin_core::Operation::CreateNode {
+                id: main,
+                parent: doc_root,
+                index: 0,
+                kind: ondin_core::NodeKind::Artboard {
+                    size: ondin_core::kurbo::Size::new(80.0, 30.0),
+                },
+                transform: None,
+                name: Some("Button".into()),
+            },
+            ondin_core::Operation::SetComponent {
+                id: main,
+                component: true,
+            },
+        ])));
+        app.make_kit();
+        assert!(app.shared_kit().is_some());
+        app.session.info("SENTINEL message");
+
+        let mut shapes = Vec::new();
+        for _ in 0..2 {
+            shapes = ctx.run_ui(Default::default(), |ui| app.top_bar(ui)).shapes;
+        }
+        let mut dot = None;
+        let mut tag = None;
+        let mut publish = None;
+        let mut texts = Vec::new();
+        for s in &shapes {
+            match &s.shape {
+                egui::Shape::Circle(c) if c.radius == 3.5 => dot = Some(c.center.x),
+                egui::Shape::Text(t) => {
+                    let text = t.galley.text().to_string();
+                    if text == "Kit" {
+                        tag = Some(t.pos.x);
+                    }
+                    if text == "Publish" {
+                        publish = Some(t.pos.x);
+                    }
+                    texts.push(text);
+                }
+                _ => {}
+            }
+        }
+        let (dot, tag, publish) = (
+            dot.expect("the save dot"),
+            tag.expect("the tag"),
+            publish.expect("Publish"),
+        );
+        assert!(dot < tag, "the dot comes before the tag: {dot} {tag}");
+        assert!(tag < publish, "the tag before Publish: {tag} {publish}");
+        assert!(
+            !texts.iter().any(|t| t.contains("SENTINEL")),
+            "no status text in the bar: {texts:?}"
+        );
+        // The two grounds: the tag's 8% chip and Publish's accent, one height.
+        let grounds: Vec<egui::Rect> = shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Rect(r)
+                    if r.fill == crate::theme::color::text_a(20)
+                        || r.fill == crate::theme::color::ACCENT_800 =>
+                {
+                    Some(r.rect)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            grounds.len(),
+            2,
+            "the tag's and Publish's grounds: {grounds:?}"
+        );
+        assert_eq!(grounds[0].height(), grounds[1].height(), "{grounds:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **The floating status bar shows a message for its hold, then nothing; the
+    /// View switch silences it; the mode shows regardless** (§15 D1025).
+    ///
+    /// Flip, run: dropping the `age < hold` term was predicted to fail *"gone after
+    /// its hold"* and passes it — the fade's opacity is 0 by then, so nothing is
+    /// painted — and fails *"the mode stays"* instead, the zero opacity hiding the
+    /// mode too. That is the defect the term prevents, found at its other end.
+    /// (Run before the card's opacity was the message's alone; with it, a stale
+    /// message beside the mode is painted at zero alpha rather than not at all.)
+    ///
+    /// Flip, run: one opacity for the whole card (`arch-scribe`'s reading of the
+    /// first cut) fails *"the mode does not dip"*, the mode's glyphs at 127.
+    /// ⚠️ **Two probes of this said nothing first**: `opacity_factor` and the
+    /// section colour do not carry a `Ui`'s opacity, and egui's own Area fade-in
+    /// was halving both versions alike until `.fade_in(false)`.
+    #[test]
+    fn the_status_bar_holds_a_message_then_lets_it_go() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        let canvas = egui::Rect::from_min_size(egui::pos2(46.0, 46.0), egui::vec2(900.0, 600.0));
+        let painted = |app: &mut OndinApp| -> Vec<String> {
+            let mut out = Vec::new();
+            for _ in 0..2 {
+                out = ctx
+                    .run_ui(Default::default(), |ui| app.status_bar(ui.ctx(), canvas))
+                    .shapes
+                    .iter()
+                    .filter_map(|s| match &s.shape {
+                        egui::Shape::Text(t) => Some(t.galley.text().to_string()),
+                        _ => None,
+                    })
+                    .collect();
+            }
+            out
+        };
+        assert!(painted(&mut app).is_empty(), "the control: nothing to say");
+        app.session.info("Reordered");
+        assert_eq!(painted(&mut app), vec!["Reordered".to_string()]);
+
+        app.show_status = false;
+        assert!(painted(&mut app).is_empty(), "the switch silences it");
+        app.show_status = true;
+
+        // Age the message past its hold.
+        let hold = crate::app::status_hold(app.session.status());
+        app.session.status_mut().at =
+            std::time::Instant::now() - hold - std::time::Duration::from_millis(10);
+        assert!(painted(&mut app).is_empty(), "gone after its hold");
+
+        app.mode = crate::input::Mode::TextInsert;
+        assert_eq!(
+            painted(&mut app),
+            vec!["INSERT".to_string()],
+            "the mode stays"
+        );
+
+        // And through a message's fade the mode stays whole: only the message
+        // fades.
+        app.session.info("Reordered");
+        app.session.status_mut().at = std::time::Instant::now() - hold
+            + std::time::Duration::from_secs_f32(crate::app::STATUS_FADE * 0.5);
+        let mut faded = Vec::new();
+        for _ in 0..2 {
+            faded = ctx
+                .run_ui(Default::default(), |ui| app.status_bar(ui.ctx(), canvas))
+                .shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::Text(t) => Some((
+                        t.galley.text().to_string(),
+                        t.opacity_factor,
+                        t.galley.rows[0].visuals.mesh.vertices[0].color.a(),
+                    )),
+                    _ => None,
+                })
+                .collect();
+        }
+        let mode = faded
+            .iter()
+            .find(|(t, ..)| t == "INSERT")
+            .expect("the mode is drawn");
+        // An `Ui`'s opacity lands in the galley's mesh colours
+        // (`adjust_colors`), not in `opacity_factor` or the section colour —
+        // measured: one opacity for the card read the mode's glyphs at 127
+        // halfway through the fade, against 255.
+        assert_eq!(
+            mode.2, 255,
+            "the mode does not dip with the message: {faded:?}"
+        );
+        let message = faded
+            .iter()
+            .find(|(t, ..)| t == "Reordered")
+            .expect("the message is drawn while it fades");
+        assert!(message.2 < 255, "and the message does fade: {faded:?}");
+
+        // A failure is held longer than a report of the same length.
+        let mut s = app.session.status().clone();
+        s.text = "x".repeat(40);
+        let info = crate::app::status_hold(&s);
+        s.kind = crate::session::StatusKind::Error;
+        assert!(crate::app::status_hold(&s) > info);
     }
 
     /// **A failed save is not reported as a made kit** (§15 D1013's fix): the

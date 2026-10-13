@@ -48,6 +48,10 @@ pub enum StatusKind {
 pub struct Status {
     pub text: String,
     pub kind: StatusKind,
+    /// When it was written: the editor's floating status bar shows a message for
+    /// a few seconds from here and then lets it go (§15 D1025). Writing the same
+    /// sentence again restarts the clock, which is the point — it happened again.
+    pub at: Instant,
 }
 
 impl Default for Status {
@@ -58,6 +62,7 @@ impl Default for Status {
         Self {
             text: String::new(),
             kind: StatusKind::Info,
+            at: Instant::now(),
         }
     }
 }
@@ -1641,10 +1646,17 @@ impl EditorSession {
         &self.status
     }
 
+    /// The slot itself, so a test can age a message past its hold.
+    #[cfg(test)]
+    pub fn status_mut(&mut self) -> &mut Status {
+        &mut self.status
+    }
+
     pub fn info(&mut self, text: impl Into<String>) {
         self.status = Status {
             text: text.into(),
             kind: StatusKind::Info,
+            at: Instant::now(),
         };
     }
 
@@ -1652,6 +1664,7 @@ impl EditorSession {
         self.status = Status {
             text: text.into(),
             kind: StatusKind::Error,
+            at: Instant::now(),
         };
     }
 }

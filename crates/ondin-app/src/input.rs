@@ -385,6 +385,10 @@ pub enum ViewSwitch {
     Layers,
     /// `Ctrl+Shift+\`, which reaches egui as `Key::Pipe` (§0).
     Toolbar,
+    /// The floating status bar at the canvas's bottom left (§15 D1025), on by
+    /// default. **Deliberately unbound**, on [`Self::SnapBaselines`]'s reasoning:
+    /// no convention to match.
+    StatusMessages,
     /// `Ctrl+\` — Figma's show/hide-UI chord.
     ///
     /// Mapped onto present mode rather than onto a fourth panel toggle, because
@@ -418,6 +422,7 @@ impl ViewSwitch {
             Self::LayoutGrid => "Show layout grid",
             Self::Layers => "Show layers",
             Self::Toolbar => "Show toolbar",
+            Self::StatusMessages => "Show status messages",
             Self::Present => "Present mode",
             Self::SnapShapes => "Snap to shapes",
             Self::SnapGuides => "Snap to guides",
@@ -442,11 +447,12 @@ impl ViewSwitch {
     ///
     /// ⚠️ **This is the menu's *spelling* and `resolve` is the binding**, and
     /// nothing makes them agree — the strings here are read off the chords
-    /// `resolve` tests for, which is a hand check. **Two variants are `None`**:
-    /// `SnapBaselines`, for the reason [`Self::SNAP_MENU`]'s doc gives, and
-    /// `LayoutGrid`, for the reason its own gives (§15 D755). ⚠️ This sentence
-    /// named one of them and said *"`SnapBaselines` is `None`"* in the singular
-    /// until the second arrived; the count is here rather than in a test because
+    /// `resolve` tests for, which is a hand check. **Three variants are `None`**:
+    /// `SnapBaselines`, for the reason [`Self::SNAP_MENU`]'s doc gives,
+    /// `LayoutGrid`, for the reason its own gives (§15 D755), and
+    /// `StatusMessages` on the same (§15 D1025). ⚠️ This sentence named one of
+    /// them and said *"`SnapBaselines` is `None`"* in the singular until the second
+    /// arrived, and *"two"* until the third; the count is here rather than in a test because
     /// `no_two_view_switches_wear_one_chord` asserts only that a chordless switch
     /// stays *expressible*, which is the property that matters and is satisfied
     /// by any number of them above zero.
@@ -462,7 +468,7 @@ impl ViewSwitch {
             Self::SnapShapes => "Ctrl+U",
             Self::SnapGuides => "Ctrl+Shift+;",
             Self::SnapGrid => "Ctrl+Shift+'",
-            Self::LayoutGrid | Self::SnapBaselines => return None,
+            Self::LayoutGrid | Self::StatusMessages | Self::SnapBaselines => return None,
         })
     }
 
@@ -473,7 +479,7 @@ impl ViewSwitch {
     /// on purpose, the question *"which grid did I just hide"* being answered by
     /// reading one row against the other, and the *Show Column Guides* precedent
     /// this sentence first cited could not be corroborated.
-    pub const VIEW_MENU: [Self; 8] = [
+    pub const VIEW_MENU: [Self; 9] = [
         Self::Rulers,
         Self::Guides,
         Self::GuideLock,
@@ -481,6 +487,7 @@ impl ViewSwitch {
         Self::LayoutGrid,
         Self::Layers,
         Self::Toolbar,
+        Self::StatusMessages,
         Self::Present,
     ];
 
@@ -489,13 +496,13 @@ impl ViewSwitch {
     /// ⚠️ **Written by hand, so it cannot police the enum on its own** — the same
     /// admission `Item::ALL`'s doc makes two files over, and `node::kind_fixture`'s
     /// in core. What makes it answerable is that `Self::label` and
-    /// `Self::accel` are exhaustive `match`es in this same `impl`: a **thirteenth**
+    /// `Self::accel` are exhaustive `match`es in this same `impl`: a **fourteenth**
     /// variant does not compile three lines above this, and the author is already
     /// on the screen the list is on.
     ///
     /// ⚠️ **The ordinal here is a count in prose and it has already gone stale
-    /// once** — it read *"a twelfth"* while the enum held eleven, and §15 D755
-    /// made it a twelve. It is kept rather than dropped because it is the one
+    /// twice** — it read *"a twelfth"* while the enum held eleven, and §15 D755
+    /// made it a twelve; D1025 made it thirteen. It is kept rather than dropped because it is the one
     /// sentence that says *why* a hand-written list is answerable at all; the
     /// number itself is checked by `every_view_switch_is_on_exactly_one_menu`,
     /// which is membership rather than cardinality and does not care what the
@@ -506,7 +513,7 @@ impl ViewSwitch {
     /// D672 had to reach for in `theme::icon` after finding that an `#[allow]` on a
     /// list like this keeps every item it names alive.
     #[cfg(test)]
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Rulers,
         Self::Guides,
         Self::GuideLock,
@@ -514,6 +521,7 @@ impl ViewSwitch {
         Self::LayoutGrid,
         Self::Layers,
         Self::Toolbar,
+        Self::StatusMessages,
         Self::Present,
         Self::SnapShapes,
         Self::SnapGuides,

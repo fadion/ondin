@@ -1907,7 +1907,12 @@ counterpart only where it is `untouched` — every field but the locks equal, th
 the same order, recursively, no local additions — and a deleted counterpart is a lost child for its own
 copies; a move within a main and a reorder follow as above, the reorder down the copy chain like the
 other three arms — it was one level deep until 2026-10-07, so a nested copy in an outer main's instance
-kept the old order and then refused every later reorder as its own (`[X3-L2-02]`). **No arm acts on a
+kept the old order and then refused every later reorder as its own (`[X3-L2-02]`); and it took only a
+parent whose children were the same set until 2026-10-13, so an edit that both gained a child and
+reordered the kept ones carried the child and not the order. It compares the kept children's relative
+order now, and lays every linked child of each copy — a counterpart the insert arm just made included —
+in the main's new order in the linked children's slots, reading the copy's children as the arms before it
+left them (§15 D979's amendment). **No arm acts on a
 copy the edit itself deleted** — deleting a main's child together with its counterpart, or with the
 whole instance, deleted the counterpart twice and was refused (`[X2-L1-02]`, until 2026-10-07).
 **Nor is a gained child copied into a copy the edit itself already gave a new node linked to it**
@@ -1915,6 +1920,10 @@ whole instance, deleted the counterpart twice and was refused (`[X2-L1-02]`, unt
 nested in another gains its layer and the nested copy gains that layer's copy in one transaction, and
 copying it in again made a second with no origin, which the vault refused — every update adding a layer
 to a nested kit main failed. That copy's own gain still reaches its instances, as a parent of its own.
+🚨 **And no arm, nor the field pass, writes a copy in the vault** (`propagate::follows_nothing`, §5.3e,
+§15 D1012's amendment): it takes everything from the publish, so for the vault `supplied` is now the
+second defence — kept, being the general rule for any edit that supplies a counterpart itself (§15
+D1022's amendment).
 **Its ops go out inserts → moves → deletes → reorders**, delete decisions made after the moves, `untouched` ignoring the children the pass carries
 out; a parent the edit deleted counts as changed, so the children lifted out of it are moves — which is
 what makes *Ungroup* inside a main work. 🚨 **But its children are lost only where it was itself lost
@@ -3024,7 +3033,12 @@ reaches a second machine through the synced base folder (§5.11a), with no netwo
   vault is a parentless `Root` that is not the root; every node under it carries an origin naming a
   well-formed kit id, and no node outside carries one; each child of the vault is a main or a component
   set. **No rule makes a vendored main read-only** — nothing can tell an edit from an update; read-only
-  is the app's, a vault node being never resolved and so never drawn, picked or selected.
+  is the app's, a vault node being never resolved and so never drawn, picked or selected. 🚨 **And
+  the commit's main-edit passes write no copy in the vault** (`propagate::follows_nothing`, §15
+  D1012's amendment): a copy nested in a vault main takes its values, children and order from the
+  publish alone, through `sync` and `vendor`; followed, it was rewritten after the sync had written the
+  publish, and three update defects came of it. A vault node is still a source — the sync's edits reach
+  the page's instances.
 - **`Operation::OpenVault` / `CloseVault`**, each the other's inverse; a close is refused unless the
   vault is open, is `id` and is empty. The first insert that copies anything in opens it, so its undo
   takes the vault away and a document that never used a kit saves as before.
@@ -3158,7 +3172,9 @@ and the dashboard's 1B §15 D1017).
   on the session's revision and the mark's version.
 - **The dialog** is a modal card: a first publish lists six and *+ N more* with *Publish N components*;
   a later one *Added* / *Changed* / *Removed*, the removed read from the last published state; a note;
-  *Cancel* / *Publish*. Publishing saves, and a failed save keeps its own status.
+  *Cancel* / *Publish*. Publishing saves, and a failed save keeps its own status. A live text session
+  is ended before the dialog counts and again before the verb freezes, so what was typed is published
+  (§9.3, §15 D815's amendment — every kit verb that commits or saves does the same).
 - **_Stop sharing_ asks first** (1D, `OndinApp::stop_sharing_dialog`, one card for the document menu
   and the file card, in `modal_is_up`): that documents using the kit keep their copies and stop
   receiving updates, and that publishing continues from its last version — ~~🚨 **without 1D's count**,
@@ -3187,7 +3203,11 @@ and the dashboard's 1B §15 D1017).
   transaction across every kit accepted. Each op is built against a scratch the ones before it were
   applied to. 🚨 **It never touches an instance**: the commit's main-edit passes carry the change, so
   overrides survive by value comparison and instance-side structure by §5.3d's rules, and an instance
-  root's placement stays its own. A main the publish newly reaches is vendored first. 🚨 **A node new
+  root's placement stays its own. A main the publish newly reaches is vendored first. 🚨 **The pictures
+  it introduces come first in the transaction** (`build::missing_image_ops` over every image the vault
+  shows as the scratch leaves it, entries from the accepted publishes; §15 D1016's amendment): only
+  `vendor` added images until 2026-10-13, so a fill changed to a new picture, or a new layer wearing
+  one, was saved with no bytes behind it, for good. 🚨 **A node new
   to the publish is an empty shell filled by the same sync**, never its published subtree copied whole,
   so a group or a frame the kit made around held layers moves them in rather than minting them again
   (§15 D1024); and a node's own fields are written only where its kind takes them — a group's paint
@@ -9517,7 +9537,13 @@ input event (winit/egui)
   already spelled it. **The seam is `dispatch` and deliberately not the keymap**, because finishing a
   session first is a fact about the *action* rather than about the key; a guard in the keymap would be
   a second copy that the next door onto `Undo` would miss. `Open` needs none of its own —
-  `go_to_dashboard` has finished the session since D466.
+  `go_to_dashboard` has finished the session since D466. 🚨 **But a door that never passes `dispatch`
+  does, and the kits' did not** (§15 D815's amendment, the v0.5.0 release review's Critical): the kit
+  card's back link opened the consumer through `open_path` and lost what was typed in the kit, and
+  *Accept kit updates* and *Publish* acted on a document without it. `may_replace_current_document` —
+  which `open_path`, `begin_open` and `recover` all ask — finishes the session first, and so does the
+  head of each kit verb that commits or saves (`accept_kit_updates`, `make_local_now`, `make_kit`,
+  `stop_sharing_kit`, `open_publish`, `publish_now`).
   **Two `Action`s are resolved from the two signals one paste produces**: `Event::Paste` gives
   `Action::Paste`, and the `Ctrl`-without-Alt `V` **release** gives `Action::PasteRelease`, because
   `egui-winit` swallows the press and emits the event only for non-empty text, so a clipboard holding a
@@ -14825,7 +14851,8 @@ the key being dropped names the snapshot the user recovered a press ago and has 
 deleting that is worse than leaking it. **What makes the drop safe is
 `OndinApp::may_replace_current_document`**, which is `open_path`'s opening four lines — save a filed
 document without asking, then `confirm_discard` for an unfiled one — lifted into a predicate that both
-doors ask. Past it the work has been saved or the user has been asked, which is `open_path`'s own
+doors ask, and which ends a live text session before either, typing being invisible to `is_dirty`
+(§15 D815's amendment). Past it the work has been saved or the user has been asked, which is `open_path`'s own
 *"there is no third way to reach here"* now true of this door too — and of the library's off-frame
 open, which asks in `begin_open`, frames before `adopt_opened` drops (§15 D1027). ⚠️ **The two are one change and
 must not be separated**: a drop without the guard deletes the user's work on the second press.

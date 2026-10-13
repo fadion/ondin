@@ -21026,7 +21026,20 @@ a layer drawn on the canvas and dragged into a main never reached its instances,
 `a_layer_dragged_into_a_main_reaches_its_instances`. *A reorder is carried down the copy chain*
 (`[X3-L2-02]`), the one arm that was single-level, so a nested copy in an outer main's instance kept the
 old order and refused every later reorder as one it had made itself —
-`a_reorder_reaches_through_a_nested_instance`. And **D1003 (2) is built** (`[R3-L5-01]`, High): when
+`a_reorder_reaches_through_a_nested_instance`. 🚨 **Amended 2026-10-13 (`16ebdbe`, the v0.5.0
+review's `[X2-L1-02]` — the id reused, not this ledger's): the reorder arm took only a parent whose
+children were the same set before and after**, so a transaction that both gave a main's parent a
+child and reordered the children it kept carried the child to the copies and never the order. It
+compares now **the relative order of the children kept**, reads each copy's children from `sim` —
+as the insert and move arms left them, less what they delete — and places **every** linked child in
+the main's new order in the slots the linked children occupy, the counterparts the insert arm just
+made among them (anchored against the copy's old order), the copy's own layers staying where they
+are; the instance's-own-reorder test is unchanged, over the kept children. ⚠️ **This is every
+component edit, not only kits** — a kit update does both whenever a publish does, which is how it was
+found, but a hand transaction doing both goes through the same arm, and the one test written for it
+drives a kit: `an_accepted_copy_is_the_publish_order` is the pin, its flip — the arm skipping a
+parent that gained or lost a child — failing *"and the page's"* with `[Dot, Own, Ring]`, as the caller
+reports it. And **D1003 (2) is built** (`[R3-L5-01]`, High): when
 the edit deleted the old parent — an ungroup, a *Release* — a copy of it the instance changed, judged
 by `untouched` ignoring the children being lifted, keeps them, a local wrapper with its children still
 linked; an untouched copy ungroups as the main did. Each kept child gets the copy's **own** value
@@ -21637,6 +21650,19 @@ already clones the whole document per transaction and one more linear pass is th
 vendored main read-only**, because nothing in the model can tell an edit from an update — both are
 transactions writing its fields. Read-only is the app's: a vault node is never resolved, so it is never
 drawn, picked or selected, and no edit reaches it except one a kit verb builds.
+🚨 **Amended 2026-10-13 (`16ebdbe`): that last clause was false of the commit's own passes until
+then.** A kit verb builds the transaction, and `propagate::owed` then extended it: a copy nested in a
+vault main follows the vault main it links to, so the field, structural and reorder arms wrote onto
+it what the sync had just written from the publish — three defects of the v0.5.0 release review,
+D1016's amendment has them. **`propagate::follows_nothing(doc, id)` is `doc.in_vault(id)`**, and
+`followers`, `structural_copies` and `touches_copied` leave such a copy out, so **a vault copy takes
+its values, its children and their order from the publish alone** — through `sync` and `vendor` —
+and no pass writes it. ⚠️ **Only the follower is spared**: a vault node is still a *source*, so the
+sync's edits to a vendored main reach the document's instances of it as a hand edit to a main does.
+Tests `a_layer_the_kit_cut_from_a_nested_copy_stays_cut` and `an_accepted_copy_is_the_publish_value`,
+each failing under `follows_nothing` answering `false` — `Vault(.., NoOrigin)`, and 0.5 against the
+published 1 — and `an_accepted_copy_is_the_publish_order` (D979's amendment); as the caller reports
+them. It is still not a model rule: nothing refuses a hand-built transaction that writes the vault.
 
 **Provenance is per node**: `Node::origin: Option<kit::Origin { kit, node, version }>`, `node` an id in
 the kit's published document — and a fourth field since D1014, `name`, the kit's name on a vault main's
@@ -21756,7 +21782,9 @@ and `KitError::NeedsUpdate`, the record's two readings of the first build, each 
 `architecture.md` §1, invariant 4, §5.3, §5.3d, §5.3e, §5.5, §5.11, §5.11a, §9.4 and §12;
 `roadmap.md` *Next · Shared component libraries* edited down. **Amended 2026-10-08** (D1013, D1014):
 the chrome this paragraph's *Not built* named, and `Origin::name` and `Published::name`; (D1019) the
-*Since built* list brought up to date; (D1023) a deleted main's pasted copy kept out of the kit's vault)*
+*Since built* list brought up to date; (D1023) a deleted main's pasted copy kept out of the kit's vault;
+**2026-10-13** (`16ebdbe`) a vault copy follows nothing, which makes *"no edit reaches it except one a
+kit verb builds"* true of the commit's passes)*
 
 **D1013 — Kits: the document's name becomes the head of a document menu that holds only rows with a verb
 behind them, a neutral *Kit* tag follows the name while the document is shared, and an unfiled document
@@ -22366,6 +22394,27 @@ now, and every dropped child waits. *"`reset::state_ops` of the published node"*
 `SetFills`, which `apply` refuses by kind, so **any update of a main holding a group failed to build**;
 such an op is skipped. And a main made local could lose a layer the kit had moved out of it to another
 main's sync; every top is classified first now.
+🚨 **And two more, from the v0.5.0 release review (2026-10-13).** **An update brought no pictures**
+(`[R3-L5-01]`, High; `f1bc36f`): only `vendor` added images, so a sync that set a fill to a picture
+the consumer lacked, or inserted a layer wearing one, committed a `Brush::Image` with no entry — the
+missing-picture placeholder on every instance, saved so, and **never repaired**, since the next update
+finds the fill equal and writes nothing. `update_all` now puts `build::missing_image_ops` **first in
+its transaction**, for every image the whole vault shows as the scratch leaves it, each entry taken
+from the first accepted kit's publish that holds it. ⚠️ **Asked against the scratch, not the
+document**: the scratch already holds what `vendor_reached` added, so a picture a newly reached main
+brings is not added twice. One undo takes the pictures out with the layers. Test
+`an_update_brings_the_pictures_it_introduces` (a changed fill and a new layer, through a save and a
+load, then one undo back to the document before); its flip, the image ops dropped, fails *"the
+changed fill's picture"*, as the caller reports it. And ***"Instances are not touched"* was true and
+the vault's own copies were** (`[X2-L1-01]`, High; `[X2-L6-01]`; the v0.5.0 `[X2-L1-02]`;
+`16ebdbe`): the commit's main-edit passes treated a copy nested in a vault main — *Card*'s *Icon* —
+as a follower of the vault's *Icon*, so they rewrote what the sync had just written to the publish. A
+layer the kit had cut from the nested copy was copied back with no origin and the vault refused the
+update, for good; a nested value the kit held equal to the main's old one — no op written — was made
+to follow the new one; a nested reorder was applied twice; and a third kit's newer main, accepted
+before the kit nesting it had taken it, refused the same way. **A vault copy now follows nothing**
+(D1012's amendment, §5.3d's structural pass in D979's); a vault node is still a source, so the sync's
+edits reach the page.
 
 ***Make local*** (`kit::make_local(doc, mains) -> Transaction`, `41ff79e`): for each vault child, a
 `SetOrigin None` on every node of it and a `Reparent` last under the root; a node that is not a vault
@@ -22509,7 +22558,8 @@ cap; (D1022) the update's order, its nested-layer refusal and its moves; (D1023)
 and the instance counts — the popover's, *Kits used…*'s, the toast's — leaving out the vault; (D1024)
 a new node a shell and a sync, every dropped child deferred, a group's fields synced by kind, a removed
 main made local whole, and a one-kit accept meeting a third kit's newer main taking every waiting
-update, its other errors no longer printing Debug)*
+update, its other errors no longer printing Debug; **2026-10-13** (`f1bc36f`, `16ebdbe`) an update's
+pictures, and the vault's copies left to the publish)*
 
 **D1017 — Kits: the dashboard's 1B — a *Kits* filter under *Starred*, a *Kit* chip on a sharing kit's
 card, and *Make a kit* / *Stop sharing as kit* in the file card's ⋯ — and 1D's confirmation for both
@@ -22922,6 +22972,18 @@ that fails or a worker that disconnects takes them back out of `drawn` (`LocalTi
 next settled revision asks for them again. Untested; neither failure can be driven from a test. The
 comparison itself is one `capture_subtree` per main on the frame thread, once per settled revision.
 
+🚨 **The wait as first built could crash the app, in every profile** (the v0.5.0 release review's
+`[X4.1-L1-01]`, raised to High; fixed in `f5543b4`). `pass` read the clock twice — `if
+since.elapsed() < SETTLE { ctx.request_repaint_after(SETTLE - since.elapsed()) }` — and on a frame
+landing a hair before the deadline the second read was past it, so the subtraction underflowed a
+`Duration`, which panics in release as in debug. That frame is not rare: it is the one the
+`request_repaint_after` itself asks for. The wait is now **one read**, `SETTLE.saturating_sub(
+since.elapsed())`, rendering when it is zero. ⚠️ **And the crate denies the class**: `main.rs` carries
+`#![cfg_attr(not(test), deny(clippy::unchecked_time_subtraction))]`, which flagged this site and no
+other production one. **`not(test)` is load-bearing** — the lint also flagged eight test sites, each
+back-dating an `Instant` by subtraction on purpose (this entry's own test ages `pending` that way), so
+a plain `deny` would refuse the test build.
+
 *(Built 2026-10-13, `2e3e131`. **Keep.** Test
 `kits::picker::tests::local_pictures_redraw_only_a_changed_main_once_settled`, driving `LocalTiles`
 directly with its own revisions and ageing `pending` past `SETTLE` by hand: the first look busy at once;
@@ -22930,7 +22992,9 @@ settle and one after, and once it lands *B*'s texture id is the one it had. Flip
 them: every main counted as changed fails *"an unrelated edit renders nothing"*; dropping the settle
 wait fails *"not before the edits settle"* — asked on *A*'s edit, because asked on the unrelated edit
 first it passed under the flip, that edit rendering nothing either way. D1031 amended; `architecture.md`
-§5.3e; nothing struck from `roadmap.md`, which held no entry for it)*
+§5.3e; nothing struck from `roadmap.md`, which held no entry for it. **Amended 2026-10-13**
+(`f5543b4`): the wait's clock read once, and the lint denied outside tests — no test drives the
+nanosecond window; the lint is what holds it)*
 
 **D1035 — Kits: a drag's picture is drawn again when the zoom moves, *This document*'s pictures when a
 family the document names arrives, and a main merely moved is not drawn again. *Built 2026-10-13
@@ -23207,6 +23271,15 @@ update that added a layer to a kit main nested in another failed, whatever the o
 the gained node is skipped** (`supplied`). Its own gain still reaches its instances, as a parent of its
 own in the same pass. ⚠️ **The rule is general**: any edit that supplies a copy's counterpart itself is
 owed nothing, a kit update or not — so §5.3d states it with the pass's other arms.
+⚠️ **Amended 2026-10-13 (`16ebdbe`): for the vault, `supplied` is now the second defence, not the
+repair.** A copy in the vault follows nothing (D1012's amendment) — `structural_copies` leaves it out,
+so the structural pass never reaches *Card*'s nested *Icon* to ask whether it was supplied; the
+nested copy's ring comes from the sync alone. **`supplied` stays**: it is the rule for any edit that
+supplies a copy's counterpart itself, and were `follows_nothing` removed it would again be what keeps
+the in-order accept from copying the ring twice. ⚠️ **So the flip below — `supplied` removed failing the
+in-order accept — should no longer bite** while `follows_nothing` stands: read, not re-run. Either
+defence alone holds this test; neither is redundant for that reason, and a test that pins `supplied`
+apart from the vault has not been written.
 
 **Moves** (the review's Medium, reproduced). A sync deleted every child whose origin node was not among
 its published node's children, and made local every top whose origin was no longer a published top. Both
@@ -23245,7 +23318,11 @@ caller reports them.
 *(Fixed 2026-10-08, `9735d72`; the mechanism the session's. **Resolved**; the version-skew answer
 ~~read, not run~~ driven since D1024. Tests as above. D1016 amended; `architecture.md` §5.3d (the
 structural pass) and §5.3e. **Amended 2026-10-08** (D1024): every dropped child deferred, a new node
-inserted as a shell and synced, and the version skew driven)*
+inserted as a shell and synced, and the version skew driven; **2026-10-13** (`16ebdbe`) `supplied` a
+second defence for the vault, its recorded flip no longer expected to bite, and
+`a_third_kits_newer_main_asks_for_its_update` extended — what the two together commit asserted (one
+dot in *Chip*'s *Badge*, linked to *Badge*'s own, `[X2-L6-01]`), and K alone and K with L's v7 now
+committing, *Chip* as L published it)*
 
 **D1023 — Kits: the kits QA review's smaller findings — a main's instances leave out the vault, a kit
 never vendors its own deleted main by paste, the insert picker's keys are its own only while its field
@@ -58730,6 +58807,32 @@ lose its comment"* answers no. ⚠️ **The whole-tree length ranking cannot see
 run is 44 lines against a floor in the fifties. What found it was reading the run *above*
 `finish_text_first` and asking whether its first line describes it, which is the only question that
 catches this shape. The run is split and both items head-describe themselves.
+
+🚨 **Amended 2026-10-13 (`5fa3f2b`): the next door did miss it, as this entry said it would — eight of
+them, all the kits'.** *"`Open` needs nothing of its own"* was true of the chord and of no other way in:
+`open_path` saved `session.doc` and `adopt_opened` dropped the session, so typing into a text layer of
+a kit reached by *Go to main in the kit* and then leaving by its back link lost the typing whole — the
+v0.5.0 release review's Critical, `[X3.2-L5-01]`. Typing does not dirty the document, so nothing asked
+either. And the kit verbs commit or save without passing `dispatch`: *Accept kit updates* committed the
+update under a live session, which then wrote its `SetText` onto a layer the update had deleted;
+*Publish* froze a main without what was typed and spent the version on it (`[X5-L1-02]`). The repair
+is this entry's rule at two more seams rather than a guard per door. **`may_replace_current_document`
+calls `finish_text_first` first** — the one predicate `open_path`, `begin_open` and `recover` ask
+(D768), so the kit card's back link and *Kits used… → Open kit*, which go through `open_path`, are
+covered with every other open; and **each kit verb calls it at its head** — `accept_kit_updates`,
+`make_local_now`, `make_kit`, `stop_sharing_kit`, and both `open_publish` (the button's, the menu
+row's and the chord's one seam, so the dialog's change list counts what was typed) and `publish_now`.
+`finish_text_first` is `pub(crate)` for the `kits` module. ⚠️ **A declined open has still ended the
+session**: the finish comes before the save and the ask, so *No* leaves the typing committed and the
+editor closed — nothing is lost, but the user is no longer typing. And `canvas::finish_text_edit` now
+says *"Text updated"* only when its commit succeeded: the unconditional toast had written over the
+refusal of exactly that `SetText` on a deleted node, so the one sign of the loss was hidden. Three tests
+in `kits::updates::tests`, each flipped by removing the call it pins: `leaving_the_kit_keeps_what_was_typed_in_it`
+(out of `may_replace_current_document`, *"the kit on disk keeps the typing"* reads `Some("hello")`),
+`an_accept_commits_what_was_typed_first` (out of `accept_kit_updates`, *"the session ended before the
+update"*), and `a_publish_holds_what_was_typed` (out of both publish seams, *"the publish holds the
+typing"* reads `Some("hello")`), as the caller reports them. `make_local_now`, `make_kit` and
+`stop_sharing_kit` have no test of their own — read, one line each.
 
 **D465 — A *Mixed* opacity field the user has not moved writes nothing. *Fixed and tested 2026-09-07;
 Fix — the one field that called the valve unconditionally is guarded, and the guard compares a

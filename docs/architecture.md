@@ -3086,7 +3086,9 @@ reaches a second machine through the synced base folder (§5.11a), with no netwo
   (§15 D1028). The update pill and *Kits used…* still read the vault, a vendored main being updated
   either way. Their order is **last use, kept per machine and per document**
   (`library::cache::LocalIndex::kit_use`). **A document's own mains lead as tiles under *This document*
-  whenever it has any**, pictured by a worker per session revision (`LocalTiles`, §15 D1031); with no
+  whenever it has any**, pictured by a worker (`LocalTiles`, §15 D1031) — once a new revision has stood
+  400 ms, and only for a main whose subtree differs from the one its picture was drawn from (§15
+  D1034); with no
   kits the list ends with 3G's *Open library*, which closes the picker for the dashboard's *Kits* filter
   (§15 D1018). **A set's tile is its default variant** (`index::tile_subject`), what a click places, and
   the list draws no scrollbar (§15 D1028). A placement is one transaction: `kit::insert`, or
@@ -3097,7 +3099,8 @@ reaches a second machine through the synced base folder (§5.11a), with no netwo
   resolved. Either way the instance lands at the document's top level, never into a frame under the
   pointer (§15 D1018). **The drag draws the component under the pointer at the size it will land**,
   rendered on a worker at the canvas's zoom and capped at half the canvas, and the tile's picture without
-  its card over the panel or until that arrives (§15 D1029). ⚠️ **Every placement waits one painted
+  its card over the panel or until that arrives (§15 D1029); a right-click takes it away and its
+  release places nothing, as it cancels every drag (§15 D1033). ⚠️ **Every placement waits one painted
   frame** with its tile at half opacity (`ask_place`, `OndinApp::kit_placing`), because it runs on the frame
   thread and nothing repaints during it; a picker closed in the wait places at once rather than losing
   the click (§15 D1030). ⚠️ **The panel is one height whatever it holds** — 460, the mockup's, or less where the
@@ -9587,7 +9590,7 @@ bare Alt has no system menu bar to poke (`shortcuts.md` §9). It reads the raw
 
 **The right button abandons whatever gesture is in flight** — a layer being moved, resized or
 rotated, a shape being drawn, a marquee, a row being dragged in the layers tree, a value field being
-scrubbed in the inspector. The preview is dropped, so the layer returns to what the document already
+scrubbed in the inspector, a component carried out of the insert picker (§15 D1033). The preview is dropped, so the layer returns to what the document already
 says, and nothing is committed, so history never learns the gesture happened. That is the CAD/3D
 convention rather than the drawing-tool one, and the reason to take it is that the alternative is
 finishing an edit you already know is wrong and then undoing it, which leaves a step in the history
@@ -9808,7 +9811,8 @@ contract is the height a menu *paints* at, and a menu is always in `menu_frame`.
 the number went the other way: a card's named width is the width it paints**, so
 `ui::menu_inner_w(card, pad)` takes the padding *and* the border off before `set_width`, and
 `menu_place` is handed a plain `MENU_W` (§15 D307). One rule for every popover in the app — the context
-menu's 210, the top bar's 150 and 160, `app::POPOVER_W`'s 272 — each of which was the content box until
+menu's 210, the top bar's 150 and 160 (since §15 D1032 the View and Snap menus' floor, measured
+wider where a label needs it), `app::POPOVER_W`'s 272 — each of which was the content box until
 2026-08-23 and so painted two points wider than `design/Editor.dc.html` draws it, with every placer that
 reads a card's width (`menu_place`, `OndinApp::popover_left`'s 10pt lane clearance, the right-aligning
 anchors) two points short of the ink.
@@ -12603,8 +12607,10 @@ be whole" is true at every zoom or none.
 (an eye and a caret) and **Snap** (a magnet and a caret). Each head, the zoom readout's too, is one
 `ui::menu_head`, and it answers the pointer as the icon buttons beside it do — the `HOVER` ground on
 its whole 26pt rect at radius 5, mark and caret in `TEXT` — and holds that while its own menu is
-open (§15 D963). Each menu is a 160pt column of `ui::MENU_ITEM_H` checkable rows — 24 since
-2026-08-20, the same constant the context menus allocate against (§15 D262).
+open (§15 D963). Each menu is a column of `ui::MENU_ITEM_H` checkable rows — 24 since
+2026-08-20, the same constant the context menus allocate against (§15 D262) — the design's 160pt
+wide, or as wide as its widest row where a label needs more (`ui::menu_check_width`, the row's 8pt
+inset on the right as on the left; §15 D1032, *Show status messages* having outgrown 160).
 `ui::menu_check` is that row, drawn in the `ui::menu_frame` every floating dropdown shares.
 Its 13pt accent tick keeps its column whether or not it is showing, so labels stay in one line down
 the menu instead of shuffling left as things are switched off, and "off" is a dimmer label as well as
@@ -14278,7 +14284,8 @@ Area takes `.fade_in(false)`, egui's own appear fade having halved its first fra
 is what lets the bar go**: without it a message past its hold is still "showing" at zero — the whole
 card, invisible, when it is alone, and an invisible message in the card beside the mode when it is
 not (in the first cut, one opacity for both, it hid the mode for good). *View ▸ Show status messages*
-silences the messages, never the mode. ⚠️ **So a library message surfacing in the editor out of
+silences the messages, never the mode, and turning it off writes no *"… off"* into the bar it has just
+silenced (D1025's amendment). ⚠️ **So a library message surfacing in the editor out of
 context** (above) now does so only within that message's hold.
 
 ⚠️ **`OndinApp::chrome_focus`'s write sat below that return too, and it is above it now** (§15 D850).

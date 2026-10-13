@@ -1784,6 +1784,14 @@ impl OndinApp {
                 );
                 return;
             }
+            // §15 D1036 (2): a kit built on this one.
+            Err(ondin_core::kit::KitError::Circular(own)) => {
+                let own = self.session.doc.get(own).map_or("component", |n| n.name());
+                self.session.fail(format!(
+                    "That component uses this kit's {own}, so it cannot be swapped in here"
+                ));
+                return;
+            }
             Err(e) => {
                 self.session
                     .fail(format!("That component could not be swapped in ({e:?})"));

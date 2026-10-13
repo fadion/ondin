@@ -403,6 +403,14 @@ impl OndinApp {
                 );
                 return;
             }
+            // §15 D1036 (2): a kit built on this one.
+            Err(ondin_core::kit::KitError::Circular(own)) => {
+                let own = self.session.doc.get(own).map_or("component", |n| n.name());
+                self.session.fail(format!(
+                    "This update uses this kit's own {own}, so it cannot be taken here"
+                ));
+                return;
+            }
             Err(_) => {
                 self.session.fail(
                     "The kit update could not be applied — its published components are \

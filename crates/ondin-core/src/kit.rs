@@ -585,6 +585,29 @@ pub enum KitError {
     /// a variant or a layer a later publish added. Accepting the kit's update
     /// comes first.
     NeedsUpdate(NodeId),
+    /// The kit's components use a main of **this** document — the kit being
+    /// built on is built on it (§15 D1036 (2)): an icons kit whose components
+    /// kit nests its icons, used back in the icons kit. A frozen copy would link
+    /// to the live main, which the vault may not (`VaultRule::LinksOut`), so the
+    /// insert, the update or the paste is refused, naming the main here.
+    Circular(NodeId),
+}
+
+/// The main `id` sits in, or `id` itself when it is one — what a
+/// [`KitError::Circular`] names.
+fn main_holding(doc: &Document, id: NodeId) -> NodeId {
+    let mut at = id;
+    for _ in 0..=doc.node_map().len() {
+        let Some(n) = doc.get(at) else { break };
+        if n.component {
+            return at;
+        }
+        match n.parent {
+            Some(p) => at = p,
+            None => break,
+        }
+    }
+    id
 }
 
 /// The identity of a node of `src` — a kit's published document — as a vendored
@@ -685,6 +708,18 @@ pub fn vendor(
             None => Err(KitError::Incomplete(r)),
         }
     };
+    // 🚨 **A frozen copy never lands on a live node** (§15 D1036 (2), the
+    // v0.5.0 release review's `[X1-L1-02]`): `find`'s own-kit arm answers a
+    // node of `doc` itself when the kit being vendored from was built on this
+    // one — its copy then linked out of the vault, and every structural edit of
+    // that main was refused for good, naming nothing. Refused here, naming it.
+    let into_vault = |r: NodeId| -> Result<NodeId, KitError> {
+        let found = resolve(r)?;
+        if doc.contains(found) && !doc.in_vault(found) {
+            return Err(KitError::Circular(main_holding(doc, found)));
+        }
+        Ok(found)
+    };
     // Dependencies first, so each insert's links already have somewhere to land
     // when the transaction is read in order — the checks run after the last op
     // either way.
@@ -695,17 +730,17 @@ pub fn vendor(
             if let Some(l) = n.link
                 && !inside.contains(&l)
             {
-                n.link = Some(resolve(l)?);
+                n.link = Some(into_vault(l)?);
             }
             if let Some(s) = n.swap
                 && !inside.contains(&s)
             {
-                n.swap = Some(resolve(s)?);
+                n.swap = Some(into_vault(s)?);
             }
             for p in &mut n.props {
                 for b in &mut p.value.bound {
                     if !inside.contains(b) {
-                        *b = resolve(*b)?;
+                        *b = into_vault(*b)?;
                     }
                 }
             }
@@ -822,11 +857,20 @@ pub fn carried(doc: &Document, subtrees: &[Vec<Node>]) -> Vec<Vec<Node>> {
 /// A carried node with no origin, or whose top `doc` holds without it (another
 /// version, which grew or lost a layer), is left out of the map, and whatever
 /// linked to it lands detached by the ordinary rule.
+///
+/// 🚨 **Except a node a fresh copy reaches** (§15 D1036 (7), the v0.5.0 release
+/// review's `[X1-L1-01]`): a kit main carried fresh that nests one `doc` holds
+/// at an older version, without the layer the copy links to, was inserted into
+/// the vault with the link dangling — no `settle_copy` runs on a vault insert —
+/// and the whole paste was refused as a broken link. That is an update owed,
+/// [`KitError::NeedsUpdate`] naming the held main, as the picker answers for the
+/// same main. And a fresh copy reaching a live main of `doc` — a kit built on
+/// this one — is [`KitError::Circular`], as [`vendor`] answers (D1036 (2)).
 pub fn adopt(
     doc: &Document,
     ids: &mut IdSource,
     kits: &[Vec<Node>],
-) -> (Vec<Operation>, FxHashMap<NodeId, NodeId>) {
+) -> Result<(Vec<Operation>, FxHashMap<NodeId, NodeId>), KitError> {
     let held = held_index(doc);
     let key = |n: &Node| n.origin.as_ref().map(|o| (o.kit.clone(), o.node));
     let landed = |n: &Node| key(n).and_then(|k| find(doc, &held, &k));
@@ -869,12 +913,33 @@ pub fn adopt(
         }
         fresh.push(copy);
     }
+    // Where each carried node's top is, for a reference the map cannot point.
+    let top_of_carried: FxHashMap<NodeId, &Node> = kits
+        .iter()
+        .filter_map(|t| t.first().map(|top| (t, top)))
+        .flat_map(|(t, top)| t.iter().map(move |n| (n.id, top)))
+        .collect();
+    for copy in &fresh {
+        for r in refs_out(copy.iter()) {
+            match map.get(&r) {
+                Some(&to) if doc.contains(to) && !doc.in_vault(to) => {
+                    return Err(KitError::Circular(main_holding(doc, to)));
+                }
+                Some(_) => {}
+                None => {
+                    if let Some(held) = top_of_carried.get(&r).and_then(|top| landed(top)) {
+                        return Err(KitError::NeedsUpdate(held));
+                    }
+                }
+            }
+        }
+    }
     for copy in &mut fresh {
         relink(copy, &map);
     }
     let mut ops = Vec::new();
     if fresh.is_empty() {
-        return (ops, map);
+        return Ok((ops, map));
     }
     let vault = match doc.vault() {
         Some(v) => v,
@@ -892,28 +957,29 @@ pub fn adopt(
             index: base + i,
         });
     }
-    (ops, map)
+    Ok((ops, map))
 }
 
 /// `build::insert_subtrees` for a paste carrying kit mains (§15 D1012): adopt
 /// them ([`adopt`]), point the pasted subtrees at the adopted copies, and insert
 /// against the document the adoption leaves — so `component::settle_copy` finds
 /// each link's source present and keeps it. One transaction, the vendoring
-/// first. With nothing carried this is `insert_subtrees` exactly.
+/// first. With nothing carried this is `insert_subtrees` exactly; what
+/// [`adopt`] refuses, it refuses.
 pub fn insert_carrying(
     doc: &Document,
     ids: &mut IdSource,
     kits: &[Vec<Node>],
     placements: &[crate::build::Placement],
     offset: kurbo::Vec2,
-) -> (Transaction, Vec<NodeId>) {
-    let (mut ops, map) = adopt(doc, ids, kits);
+) -> Result<(Transaction, Vec<NodeId>), KitError> {
+    let (mut ops, map) = adopt(doc, ids, kits)?;
     if ops.is_empty() && map.values().zip(map.keys()).all(|(a, b)| a == b) {
-        return crate::build::insert_subtrees(doc, ids, placements, offset);
+        return Ok(crate::build::insert_subtrees(doc, ids, placements, offset));
     }
     let mut scratch = doc.clone();
     if scratch.apply_unchecked(&Transaction(ops.clone())).is_err() {
-        return crate::build::insert_subtrees(doc, ids, placements, offset);
+        return Ok(crate::build::insert_subtrees(doc, ids, placements, offset));
     }
     let placements: Vec<crate::build::Placement> = placements
         .iter()
@@ -929,7 +995,7 @@ pub fn insert_carrying(
         .collect();
     let (tx, created) = crate::build::insert_subtrees(&scratch, ids, &placements, offset);
     ops.extend(tx.0);
-    (Transaction(ops), created)
+    Ok((Transaction(ops), created))
 }
 
 /// Point every link, swap and bound layer in `nodes` that `map` knows at its
@@ -1344,6 +1410,11 @@ impl Builder<'_> {
     /// named as one, as `vendor` names it, rather than as a broken kit.
     fn resolve(&self, r: NodeId) -> Result<NodeId, KitError> {
         if let Some(h) = self.here(r) {
+            // A kit built on this document reaching one of its live mains
+            // (§15 D1036 (2)) — `vendor`'s refusal, for an update.
+            if !self.scratch.in_vault(h) {
+                return Err(KitError::Circular(main_holding(&self.scratch, h)));
+            }
             return Ok(h);
         }
         let src = self.published.document();
@@ -1359,18 +1430,23 @@ impl Builder<'_> {
     /// clear the rest — answering whether any was cleared, to be pointed later
     /// (`later`). `inside` is what needs no pointing: the subtree being
     /// inserted, already remapped.
+    ///
+    /// Only a vault node is pointed at here: a live node of the document — a
+    /// kit built on this one — is deferred, and [`Self::resolve`] refuses it
+    /// once every sync is done (§15 D1036 (2)).
     fn point_or_defer(&self, n: &mut Node, inside: &FxHashSet<NodeId>) -> bool {
+        let frozen = |x: NodeId| self.here(x).filter(|h| self.scratch.in_vault(*h));
         let mut deferred = false;
         if let Some(l) = n.link
             && !inside.contains(&l)
         {
-            n.link = self.here(l);
+            n.link = frozen(l);
             deferred |= n.link.is_none();
         }
         if let Some(s) = n.swap
             && !inside.contains(&s)
         {
-            n.swap = self.here(s);
+            n.swap = frozen(s);
             deferred |= n.swap.is_none();
         }
         for p in &mut n.props {
@@ -1383,7 +1459,7 @@ impl Builder<'_> {
                     if inside.contains(b) {
                         Some(*b)
                     } else {
-                        self.here(*b)
+                        frozen(*b)
                     }
                 })
                 .collect();

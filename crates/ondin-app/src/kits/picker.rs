@@ -826,6 +826,16 @@ impl OndinApp {
                     "This kit has an update to accept before that component can be placed"
                         .to_string()
                 }
+                // §15 D1036 (2): a kit built on this one.
+                ondin_core::kit::KitError::Circular(own) => {
+                    let src = published.document();
+                    format!(
+                        "{} in {} uses this kit's {}, so it cannot be placed here",
+                        src.get(*top).map_or("That component", |n| n.name()),
+                        published.name().unwrap_or("its kit"),
+                        self.session.doc.get(own).map_or("component", |n| n.name()),
+                    )
+                }
                 other => format!("That component could not be placed ({other:?})"),
             }),
             Source::Local(main) => {

@@ -634,6 +634,18 @@ fn a_v5_file_loads_as_v6() {
 /// Copy a kit instance out of `from` through the clipboard's text form — the
 /// door another window reads — and paste it into `to`'s root.
 fn paste_across(from: &Document, inst: NodeId, to: &mut Document, ids: &mut IdSource) -> NodeId {
+    let (tx, made) = try_paste_across(from, inst, to, ids).expect("the paste builds");
+    to.apply(&tx).expect("a carrying paste");
+    made[0]
+}
+
+/// [`paste_across`]'s transaction, or what the carrying paste refuses.
+fn try_paste_across(
+    from: &Document,
+    inst: NodeId,
+    to: &Document,
+    ids: &mut IdSource,
+) -> Result<(Transaction, Vec<NodeId>), kit::KitError> {
     let subtrees = vec![from.capture_subtree(inst).unwrap()];
     let kits = kit::carried(from, &subtrees);
     let text = io::clip::write_carrying(&subtrees, &kits, &[], None, "Icon").unwrap();
@@ -648,9 +660,7 @@ fn paste_across(from: &Document, inst: NodeId, to: &mut Document, ids: &mut IdSo
             index: None,
         })
         .collect();
-    let (tx, made) = kit::insert_carrying(to, ids, &payload.kits, &placements, Default::default());
-    to.apply(&tx).expect("a carrying paste");
-    made[0]
+    kit::insert_carrying(to, ids, &payload.kits, &placements, Default::default())
 }
 
 /// **A kit instance pasted into a document that has never used the kit lands an
@@ -712,6 +722,96 @@ fn a_carrying_paste_reuses_what_the_document_holds() {
         f.get(nested).unwrap().link(),
         f.get(held).unwrap().link(),
         "the vendored Card nests the Icon F already held"
+    );
+}
+
+/// **A carrying paste over an older held main asks for the update** (§15 D1036
+/// (7), the v0.5.0 release review's `[X1-L1-01]`). F holds *Icon* at v4; L
+/// gives *Icon* a *Ring* and publishes v5; D places *Card* at v5. Pasting D's
+/// *Card* into F carried a fresh *Card* whose nested copy links to a *Ring* F's
+/// *Icon* lacks — inserted into the vault dangling, and the whole paste refused
+/// as a broken link. It answers `NeedsUpdate`, naming F's *Icon*, as the picker
+/// does for the same main.
+///
+/// Flip, run: `adopt` without the check fails *"an update owed"* with `Ok`.
+#[test]
+fn a_carrying_paste_over_an_older_held_main_asks_for_the_update() {
+    let mut k = kit();
+    let (mut f, mut fids) = consumer();
+    let f_icon = insert(&mut f, &mut fids, &k, k.icon);
+    let f_held = f.get(f_icon).unwrap().link().unwrap();
+    let (ring, icon) = (IdSource::new(0xAF).mint(), k.icon);
+    edit_and_publish(&mut k, vec![create(ring, icon, 1, rect(), "Ring")]);
+    let version = k.doc.meta().kit.as_ref().unwrap().version;
+    let mut d = Document::new(IdSource::new(0xDD).mint());
+    let mut dids = IdSource::new(0xDE);
+    let root = d.root();
+    let (tx, card) =
+        kit::insert(&d, &mut dids, L_ID, version, published(&k), k.card, root).unwrap();
+    d.apply(&tx).unwrap();
+
+    assert!(
+        matches!(
+            try_paste_across(&d, card, &f, &mut fids),
+            Err(kit::KitError::NeedsUpdate(h)) if h == f_held
+        ),
+        "an update owed, naming the Icon F holds"
+    );
+}
+
+/// 🚨 **A kit built on this one is not used back in it** (§15 D1036 (2), the
+/// v0.5.0 release review's `[X1-L1-02]`). M uses L's *Icon* in its *Card2*;
+/// L inserting *Card2* would vendor a frozen copy linking to L's live *Icon*,
+/// and from then on every structural edit of *Icon* in L was refused,
+/// `Vault(.., NoOrigin)`, naming nothing. The insert answers `Circular`
+/// naming *Icon*, and so does an update of a *Card2* L held before M nested
+/// the *Icon* in it.
+///
+/// Flip, run: `vendor`'s `into_vault` resolving as `resolve` does fails
+/// *"the insert names Icon"*; `Builder::resolve` taking a live node fails
+/// *"and so does the update"*.
+#[test]
+fn a_kit_built_on_this_one_is_refused_naming_the_main() {
+    let mut k = kit();
+    // M: an empty *Card2*, published as v1.
+    let mut mids = IdSource::new(0xAB);
+    let mroot = mids.mint();
+    let mut m = Document::new(mroot);
+    let card2 = mids.mint();
+    m.apply(&Transaction(vec![
+        create(card2, mroot, 0, frame(60.0, 20.0), "Card2"),
+        main_on(card2),
+    ]))
+    .unwrap();
+    let m1 = kit::freeze(&m).unwrap();
+    // L takes *Card2* while it nests nothing.
+    let lroot = k.doc.root();
+    let mut lids = IdSource::new(0xA9);
+    let (tx, _) = kit::insert(&k.doc, &mut lids, K_ID, 1, &m1, card2, lroot).unwrap();
+    k.doc.apply(&tx).unwrap();
+
+    // M puts L's *Icon* in *Card2*, and publishes v2.
+    let (tx, placed) = kit::insert(&m, &mut mids, L_ID, 4, published(&k), k.icon, mroot).unwrap();
+    m.apply(&tx).unwrap();
+    m.apply(&Transaction(vec![Operation::Reparent {
+        id: placed,
+        new_parent: card2,
+        index: 0,
+    }]))
+    .unwrap();
+    let m2 = kit::freeze(&m).unwrap();
+
+    let named =
+        |r: Result<(), kit::KitError>| matches!(r, Err(kit::KitError::Circular(i)) if i == k.icon);
+    // A second L that never took *Card2* — the fixture is the same document.
+    let fresh = kit().doc;
+    assert!(
+        named(kit::insert(&fresh, &mut lids, K_ID, 2, &m2, card2, lroot).map(|_| ())),
+        "the insert names Icon"
+    );
+    assert!(
+        named(kit::update(&k.doc, &mut lids, K_ID, 2, &m2).map(|_| ())),
+        "and so does the update"
     );
 }
 

@@ -6253,13 +6253,16 @@ impl OndinApp {
         }
         // The transaction `insert_all` will commit, kit mains and all (§15
         // D1012) — without them a carried instance would be judged detached.
-        let (tx, _) = ondin_core::kit::insert_carrying(
+        // A carry the kit refuses is `insert_all`'s to say, with its reason.
+        let Ok((tx, _)) = ondin_core::kit::insert_carrying(
             doc,
             &mut self.session.ids,
             kits,
             placements,
             PASTE_OFFSET,
-        );
+        ) else {
+            return true;
+        };
         let mut ops = build::missing_image_ops(doc, images);
         ops.extend(tx.0);
         let mut tx = Transaction(ops);
@@ -6455,13 +6458,51 @@ impl OndinApp {
         if self.paste_cut_move(&placements, verb, offset, images) {
             return;
         }
-        let (tx, created) = ondin_core::kit::insert_carrying(
+        // The instances that land **detached**: linked to a main neither here
+        // nor carried with the copy, which §15 D979 (d) cuts loose. Said, not
+        // left silent (§15 D1036 (3), the v0.5.0 release review's
+        // `[X1-L1-03]`): an instance copied inside a kit and pasted into
+        // another document is one — the copy carries only vault mains, and the
+        // kit's own main is no vault's.
+        let detached = {
+            let doc = &self.session.doc;
+            let carried: std::collections::HashSet<NodeId> =
+                kits.iter().flatten().map(|n| n.id()).collect();
+            let lost = |n: &Node| {
+                n.link()
+                    .is_some_and(|l| !doc.contains(l) && !carried.contains(&l))
+            };
+            placements
+                .iter()
+                .map(|p| {
+                    let by_id: std::collections::HashMap<NodeId, &Node> =
+                        p.nodes.iter().map(|n| (n.id(), n)).collect();
+                    p.nodes
+                        .iter()
+                        .filter(|n| lost(n))
+                        // An instance, not each of its members.
+                        .filter(|n| {
+                            !n.parent()
+                                .and_then(|q| by_id.get(&q))
+                                .is_some_and(|q| lost(q))
+                        })
+                        .count()
+                })
+                .sum::<usize>()
+        };
+        let (tx, created) = match ondin_core::kit::insert_carrying(
             &self.session.doc,
             &mut self.session.ids,
             kits,
             &placements,
             offset,
-        );
+        ) {
+            Ok(built) => built,
+            Err(e) => {
+                let why = self.carry_refused(&e);
+                return self.session.fail(why);
+            }
+        };
         // **First in the transaction, which is `build::missing_image_ops`'s rule
         // and its reason**: one paste is one undo step, and the inverse has to take
         // the table entry out *after* the layers that were using it.
@@ -6469,8 +6510,19 @@ impl OndinApp {
         ops.extend(tx.0);
         let tx = Transaction(ops);
         if self.session.commit(tx) && !created.is_empty() {
-            self.session
-                .info(format!("{verb} {} layer(s)", created.len()));
+            let mut said = format!("{verb} {} layer(s)", created.len());
+            if detached > 0 {
+                said.push_str(&format!(
+                    " · {detached} instance{} detached — {} not in this document",
+                    if detached == 1 { "" } else { "s" },
+                    if detached == 1 {
+                        "its main is"
+                    } else {
+                        "their mains are"
+                    },
+                ));
+            }
+            self.session.info(said);
             self.session.selection.set(created);
         }
     }
@@ -21542,6 +21594,44 @@ mod component_verb_tests {
         let main = app.session.doc.get(pasted).unwrap().link();
         let main = main.expect("still an instance");
         assert!(app.session.doc.in_vault(main));
+    }
+
+    /// **A copy whose main does not come along lands detached, and the paste
+    /// says so** (§15 D1036 (3), the v0.5.0 release review's `[X1-L1-03]`). An
+    /// instance copied inside a kit carries no vault main — the kit's own main
+    /// is in no vault — so pasted into another document it is cut loose by §15
+    /// D979 (d), and the status line said only *"Pasted 1 layer(s)"*. Driven
+    /// with a document's own main, which is the same case to the paste.
+    ///
+    /// Flip, run: `detached` counted as zero fails *"the paste says so"*.
+    #[test]
+    fn a_paste_that_detaches_an_instance_says_so() {
+        let ctx = egui::Context::default();
+        let (mut app, _, i) = main_and_instance(&ctx);
+        app.session.selection.set_one(i);
+        app.copy_selection(&ctx);
+        let mut eids = IdSource::new(0xEB);
+        app.session.adopt_document(Document::new(eids.mint()), None);
+        assert!(app.paste_clipboard());
+        let pasted = app.session.selection.single().expect("the paste selected");
+        assert_eq!(
+            app.session.doc.get(pasted).unwrap().link(),
+            None,
+            "detached"
+        );
+        let said = app.session.status().text.clone();
+        assert!(
+            said.contains("1 instance detached — its main is not in this document"),
+            "the paste says so: {said}"
+        );
+
+        // Back in a document holding the main, nothing is said.
+        app.undo();
+        let (mut home, _, i) = main_and_instance(&ctx);
+        home.session.selection.set_one(i);
+        home.copy_selection(&ctx);
+        assert!(home.paste_clipboard());
+        assert!(!home.session.status().text.contains("detached"));
     }
 
     /// **A cut main moves** (§15 D1003 (1), `[X2-L5-01]`): the cut detaches the

@@ -163,6 +163,25 @@ impl OndinApp {
         ));
     }
 
+    /// What a paste carrying kit mains says when the kit refuses it: an update
+    /// owed for a main this document holds at an older version (§15 D1036 (7)),
+    /// or a kit built on this one (D1036 (2)).
+    pub(crate) fn carry_refused(&self, e: &ondin_core::kit::KitError) -> String {
+        use ondin_core::kit::KitError;
+        let doc = &self.session.doc;
+        match e {
+            KitError::NeedsUpdate(held) => match self.kit_line(*held) {
+                Some(line) => format!("Accept {}'s update first, then paste again", line.kit_name),
+                None => "Accept the kit's update first, then paste again".to_string(),
+            },
+            KitError::Circular(own) => format!(
+                "The pasted component uses this kit's {}, so it cannot be pasted here",
+                doc.get(*own).map_or("component", |n| n.name())
+            ),
+            other => format!("That paste could not be placed ({other:?})"),
+        }
+    }
+
     /// *Stop sharing as kit* (1D): the mark stays, no longer sharing, so its
     /// version carries on if the document is made a kit again. Documents that use
     /// it keep their copies; they read it as no longer a kit. Reached through

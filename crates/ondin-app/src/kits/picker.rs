@@ -190,8 +190,15 @@ impl LocalTiles {
         if self.rev.is_some() {
             match self.pending {
                 Some((r, since)) if r == rev => {
-                    if since.elapsed() < SETTLE {
-                        ctx.request_repaint_after(SETTLE - since.elapsed());
+                    // One clock read: testing `elapsed() < SETTLE` and then
+                    // subtracting a second `elapsed()` underflowed a `Duration`
+                    // — a panic in every profile — on a frame that landed a few
+                    // nanoseconds before the deadline, the very frame the
+                    // `request_repaint_after` below asks for (`[X4.1-L1-01]` of
+                    // the v0.5.0 release review; the crate denies the lint).
+                    let left = SETTLE.saturating_sub(since.elapsed());
+                    if !left.is_zero() {
+                        ctx.request_repaint_after(left);
                         return;
                     }
                 }

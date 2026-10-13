@@ -37,6 +37,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #![deny(rustdoc::broken_intra_doc_links, rustdoc::invalid_html_tags)]
 #![allow(rustdoc::private_intra_doc_links)]
+// `Duration - Duration` panics on underflow in release too, and one in the kit
+// picker's settle wait crashed the UI thread on a frame near its deadline
+// (`[X4.1-L1-01]` of the v0.5.0 release review). Production only: the tests
+// back-date an `Instant` by subtraction on purpose, and a test box has been up
+// longer than any of those offsets.
+#![cfg_attr(not(test), deny(clippy::unchecked_time_subtraction))]
 
 mod app;
 mod atomic;

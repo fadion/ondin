@@ -10,15 +10,15 @@
 //! go over the canvas places it centred there, at the document's top level as a
 //! click does — not into a frame under the pointer (§15 D1018).
 
-use super::index::{KitEntry, Load, kits_in};
+use super::index::{KitEntry, Load, Pixels, kits_in, raster_fit, tile_subject, tiles_of};
 use crate::app::OndinApp;
 use crate::theme::{self, color, icon};
 use eframe::egui;
 use ondin_core::kit::Published;
 use ondin_core::kurbo::{Affine, Rect, Vec2};
 use ondin_core::{Document, NodeId, NodeKind, Operation, Transaction};
-use std::collections::HashSet;
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, mpsc};
 
 /// The panel's width, padding and corner, from the mockup (3A).
 const W: f32 = 340.0;
@@ -54,6 +54,109 @@ pub(crate) struct Picker {
     /// Whether the search field should take the keyboard on the next frame —
     /// once, when the picker opens.
     focus: bool,
+    /// The document's own mains' tile pictures (§15 D1031).
+    local: LocalTiles,
+    /// The dragged component's picture at canvas size (§15 D1029).
+    ghost: Option<Ghost>,
+    /// A click or a drop waiting one painted frame — its tile dimmed — before
+    /// the placement runs (§15 D1030).
+    placing: Option<Placing>,
+    /// The panel's rect as last drawn: over it, a drag shows the tile.
+    panel: Option<egui::Rect>,
+}
+
+/// What names a placeable thing across frames: its kit (empty for this
+/// document) and its top.
+type Key = (String, NodeId);
+
+fn key_of(source: &Source) -> Key {
+    match source {
+        Source::Local(id) => (String::new(), *id),
+        Source::Kit { id, top, .. } => (id.clone(), *top),
+    }
+}
+
+/// A placement asked for and not yet run (§15 D1030).
+struct Placing {
+    key: Key,
+    source: Source,
+    /// Where it lands: a drop's point, or `None` for the viewport's centre.
+    at: Option<egui::Pos2>,
+    /// Whether a frame has been drawn with the tile dimmed since it was asked.
+    painted: bool,
+}
+
+/// The dragged component rendered at the canvas's zoom, off the frame.
+struct Ghost {
+    key: Key,
+    /// The worker's answer: the picture and the component's size in world units.
+    rx: Option<mpsc::Receiver<Option<(Pixels, egui::Vec2)>>>,
+    picture: Option<(egui::TextureHandle, egui::Vec2)>,
+}
+
+/// The tile pictures of this document's own mains, rendered on a worker for
+/// the session revision they were asked at, and asked again when it moves on.
+#[derive(Default)]
+struct LocalTiles {
+    /// The revision the tiles shown, or the job in flight, were asked at.
+    rev: Option<u64>,
+    job: Option<mpsc::Receiver<HashMap<NodeId, Pixels>>>,
+    tiles: HashMap<NodeId, egui::TextureHandle>,
+}
+
+impl LocalTiles {
+    /// Take a finished job, and start one when the document has moved on and
+    /// none is running. The old pictures stand until the new ones land.
+    fn pass(&mut self, ctx: &egui::Context, doc: &Document, rev: u64, tops: &[NodeId]) {
+        if let Some(rx) = &self.job {
+            match rx.try_recv() {
+                Ok(pixels) => {
+                    self.job = None;
+                    self.tiles = pixels
+                        .into_iter()
+                        .map(|(id, p)| {
+                            let t = p.texture(ctx, format!("local-tile-{}", id.to_wire()));
+                            (id, t)
+                        })
+                        .collect();
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(50));
+                    return;
+                }
+                Err(mpsc::TryRecvError::Disconnected) => self.job = None,
+            }
+        }
+        if self.rev == Some(rev) || tops.is_empty() {
+            return;
+        }
+        self.rev = Some(rev);
+        let (tx, rx) = mpsc::channel();
+        let doc = doc.clone();
+        let tops = tops.to_vec();
+        let spawned = std::thread::Builder::new()
+            .name("ondin-local-tiles".into())
+            .spawn(move || {
+                let _ = tx.send(tiles_of(&doc, &tops));
+            });
+        if spawned.is_ok() {
+            self.job = Some(rx);
+            ctx.request_repaint_after(std::time::Duration::from_millis(50));
+        }
+    }
+
+    /// Wait for the job in flight — the tests'.
+    #[cfg(test)]
+    fn settle(&mut self, ctx: &egui::Context) {
+        if let Some(rx) = self.job.take()
+            && let Ok(pixels) = rx.recv_timeout(std::time::Duration::from_secs(20))
+        {
+            self.tiles = pixels
+                .into_iter()
+                .map(|(id, p)| (id, p.texture(ctx, format!("local-tile-{}", id.to_wire()))))
+                .collect();
+        }
+    }
 }
 
 /// Where a placeable component comes from.
@@ -137,6 +240,21 @@ impl OndinApp {
         if self.kit_picker.is_none() {
             return;
         }
+        // A placement asked for on an earlier frame, once a frame has shown its
+        // tile dimmed (§15 D1030): the placement runs on this thread and the
+        // window does not repaint while it does, so the dim has to be on screen
+        // before the work starts or it is never seen.
+        let due = self.kit_picker.as_mut().and_then(|p| {
+            if p.placing.as_ref().is_some_and(|pl| pl.painted) {
+                p.placing.take()
+            } else {
+                None
+            }
+        });
+        if let Some(pl) = due {
+            let at = pl.at.unwrap_or(self.canvas_rect.center());
+            self.place_kit_at(ctx, pl.source, at);
+        }
         // `Escape` is not read here: it is a rung of `OndinApp::escape`, so one
         // press closes one thing — a press inside the search field included,
         // since egui lets go of the field before the keymap reads the key.
@@ -146,9 +264,25 @@ impl OndinApp {
             self.kit_shelf.ask(k);
         }
         let shown = self.shown_kits(ctx, &library);
-        let local = self.local_items();
+        let mut local = self.local_items();
+        let tops: Vec<NodeId> = local
+            .iter()
+            .filter_map(|i| match i.source {
+                Source::Local(id) => Some(id),
+                Source::Kit { .. } => None,
+            })
+            .collect();
+        let rev = self.session.revision();
+        let zoom = self.session.camera.zoom;
 
         let picker = self.kit_picker.as_mut().expect("checked above");
+        picker.local.pass(ctx, &self.session.doc, rev, &tops);
+        for item in &mut local {
+            if let Source::Local(id) = item.source {
+                item.tile = picker.local.tiles.get(&id).cloned();
+            }
+        }
+        let busy = picker.placing.as_ref().map(|p| p.key.clone());
         if !picker.seeded {
             picker.seeded = true;
             if let Some(first) = shown.iter().find(|s| s.used) {
@@ -165,6 +299,8 @@ impl OndinApp {
         };
         let height = panel_height(anchor.y, self.canvas_rect.top());
         let mut act: Option<Act> = None;
+        // The item a tile or a result is being dragged from this frame.
+        let mut dragging: Option<Item> = None;
         let query = picker.query.trim().to_lowercase();
         let results: Vec<Item> = if query.is_empty() {
             Vec::new()
@@ -234,22 +370,57 @@ impl OndinApp {
                         // it stayed at its first height as kits opened. Only
                         // `min_scrolled_height` is taken whatever is available.
                         let list = list_height(height);
+                        let mut out = Out {
+                            act: &mut act,
+                            dragging: &mut dragging,
+                            busy: busy.as_ref(),
+                        };
                         egui::ScrollArea::vertical()
                             .max_height(list)
                             .min_scrolled_height(list)
                             .auto_shrink([false, false])
+                            // No bar, as on the app's other panels (§15 D1028):
+                            // the wheel and a drag still scroll it.
+                            .scroll_bar_visibility(
+                                egui::scroll_area::ScrollBarVisibility::AlwaysHidden,
+                            )
                             .show(ui, |ui| {
                                 ui.spacing_mut().item_spacing.y = 4.0;
                                 if !query.is_empty() {
-                                    results_list(ui, &results, picker.highlight, &mut act);
+                                    results_list(ui, &results, picker.highlight, &mut out);
                                 } else {
-                                    browse(ui, &local, &shown, &picker.open, &mut act);
+                                    browse(ui, &local, &shown, &picker.open, &mut out);
                                 }
                             });
                     });
             })
             .response
             .rect;
+
+        let ppp = ctx.pixels_per_point();
+        let canvas = self.canvas_rect;
+        if let Some(p) = self.kit_picker.as_mut() {
+            // The frame just drawn showed the waiting tile dimmed; the next one
+            // places it.
+            if let Some(pl) = p.placing.as_mut() {
+                pl.painted = true;
+                ctx.request_repaint();
+            }
+            p.panel = Some(panel);
+            match &dragging {
+                Some(item) => {
+                    let ghost = p
+                        .ghost
+                        .get_or_insert_with(|| Ghost::start(item, &self.session.doc, zoom));
+                    if ghost.key != key_of(&item.source) {
+                        *ghost = Ghost::start(item, &self.session.doc, zoom);
+                    }
+                    ghost.pass(ctx);
+                    draw_ghost(ctx, item, ghost, panel, canvas, zoom, ppp);
+                }
+                None => p.ghost = None,
+            }
+        }
 
         match act {
             Some(Act::Toggle(id)) => {
@@ -259,10 +430,10 @@ impl OndinApp {
                     p.open.insert(id);
                 }
             }
-            Some(Act::Place(source)) => self.place_from_picker(ctx, source),
+            Some(Act::Place(source)) => self.ask_place(source, None),
             Some(Act::Drop(source, at)) => {
                 if dropped_on_canvas(at, self.canvas_rect, panel) {
-                    self.place_kit_at(ctx, source, at);
+                    self.ask_place(source, Some(at));
                 }
             }
             Some(Act::OpenLibrary) => {
@@ -276,9 +447,16 @@ impl OndinApp {
 
     /// Every kit the picker lists: the ones this document uses — found in the
     /// library or not — by last use, then the library's others by name.
+    ///
+    /// **Used means an instance of it is on the page** (§15 D1028), not that its
+    /// copies are in the vault: deleting a kit's last instance leaves the
+    /// vendored main behind (it is what an undo or a paste needs), and the kit
+    /// went on reading as used — no *"In your library, not used here"* — however
+    /// long the document had none of it. A kit whose copies are vendored but
+    /// whose file the library cannot find is still listed, by its copies (3I).
     fn shown_kits(&mut self, ctx: &egui::Context, library: &[KitEntry]) -> Vec<Shown> {
         let doc = &self.session.doc;
-        let mut used: Vec<String> = Vec::new();
+        let mut vaulted: Vec<String> = Vec::new();
         if let Some(v) = doc.vault() {
             for c in doc
                 .get(v)
@@ -286,12 +464,13 @@ impl OndinApp {
                 .unwrap_or_default()
             {
                 if let Some(o) = doc.get(c).and_then(|n| n.origin())
-                    && !used.contains(&o.kit)
+                    && !vaulted.contains(&o.kit)
                 {
-                    used.push(o.kit.clone());
+                    vaulted.push(o.kit.clone());
                 }
             }
         }
+        let live = kits_on_the_page(doc);
         let order = doc
             .meta()
             .id
@@ -299,14 +478,26 @@ impl OndinApp {
             .and_then(|d| self.library.local.kit_use.get(d))
             .cloned()
             .unwrap_or_default();
-        used.sort_by_key(|k| order.iter().position(|o| o == k).unwrap_or(usize::MAX));
+        let by_use = |k: &String| order.iter().position(|o| o == k).unwrap_or(usize::MAX);
+        let mut used: Vec<String> = live.iter().cloned().collect();
+        used.sort_by_key(by_use);
+        // Vendored, not on the page, and not in the library: listed after the
+        // used ones, unused, so its copies can still be inserted (3I).
+        let mut lost: Vec<String> = vaulted
+            .into_iter()
+            .filter(|k| !live.contains(k) && !library.iter().any(|e| &e.id == k))
+            .collect();
+        lost.sort_by_key(by_use);
 
         let mut out = Vec::new();
         for id in &used {
             match library.iter().find(|k| &k.id == id) {
                 Some(k) => out.push(self.shown_from_library(ctx, k, true)),
-                None => out.push(self.shown_unavailable(id)),
+                None => out.push(self.shown_unavailable(id, true)),
             }
+        }
+        for id in &lost {
+            out.push(self.shown_unavailable(id, false));
         }
         for k in library.iter().filter(|k| !used.contains(&k.id)) {
             out.push(self.shown_from_library(ctx, k, false));
@@ -377,7 +568,7 @@ impl OndinApp {
 
     /// A kit this document uses that the library does not have (3I) — its
     /// copies here still insert, because they are local.
-    fn shown_unavailable(&self, id: &str) -> Shown {
+    fn shown_unavailable(&self, id: &str, used: bool) -> Shown {
         let doc = &self.session.doc;
         let copies: Vec<NodeId> = doc
             .vault()
@@ -417,7 +608,7 @@ impl OndinApp {
             id: id.to_string(),
             name,
             status: "Unavailable".into(),
-            used: true,
+            used,
             note: Some(format!(
                 "Not found in your library folder. The {} component{} already in this \
                  document keep working, and you can still insert them.",
@@ -456,8 +647,30 @@ impl OndinApp {
 
     /// Place an instance of `source` at the viewport's centre — a tile's click
     /// (3A).
+    ///
+    /// The tests' door: the picker's own clicks go through [`Self::ask_place`],
+    /// which waits a frame for the dim (§15 D1030).
+    #[cfg(test)]
     fn place_from_picker(&mut self, ctx: &egui::Context, source: Source) {
         self.place_kit_at(ctx, source, self.canvas_rect.center());
+    }
+
+    /// A click's, a drop's or `Enter`'s placement, run once a frame has shown
+    /// its tile dimmed (§15 D1030) — the "heard you" the dashboard's card pulse
+    /// is (§15 D1027), held at its low because the placement runs on this
+    /// thread and nothing repaints while it does. One at a time: a second ask
+    /// while one waits is dropped, as a second click on a busy button is.
+    fn ask_place(&mut self, source: Source, at: Option<egui::Pos2>) {
+        if let Some(p) = self.kit_picker.as_mut()
+            && p.placing.is_none()
+        {
+            p.placing = Some(Placing {
+                key: key_of(&source),
+                source,
+                at,
+                painted: false,
+            });
+        }
     }
 
     /// Place an instance of `source` centred on the screen point `at`, at the
@@ -586,6 +799,192 @@ fn centred(
         id: instance,
         transform: Affine::translate(shift) * at,
     })
+}
+
+/// The kits an instance on the page comes from (§15 D1028): every node under
+/// the root whose link — or nested swap — names a vendored main, by the kit its
+/// vault copy records. The vault is a second root, so the walk never enters it
+/// and a vendored main's own nested copies are not counted.
+fn kits_on_the_page(doc: &Document) -> HashSet<String> {
+    let mut out = HashSet::new();
+    let Some(vault) = doc.vault() else {
+        return out;
+    };
+    let kit_of = |main: NodeId| -> Option<String> {
+        let mut top = main;
+        for _ in 0..=doc.len() {
+            let parent = doc.get(top)?.parent()?;
+            if parent == vault {
+                return doc.get(top)?.origin().map(|o| o.kit.clone());
+            }
+            top = parent;
+        }
+        None
+    };
+    let mut stack = vec![doc.root()];
+    let mut seen = 0usize;
+    while let Some(id) = stack.pop() {
+        seen += 1;
+        if seen > doc.len() + 1 {
+            break;
+        }
+        let Some(n) = doc.get(id) else { continue };
+        for main in [n.link(), n.swap()].into_iter().flatten() {
+            if let Some(kit) = kit_of(main) {
+                out.insert(kit);
+            }
+        }
+        stack.extend(n.children().iter().copied());
+    }
+    out
+}
+
+/// What the list's rows hand back to the frame: the act, the item being
+/// dragged, and the item whose placement is waiting — drawn dimmed.
+struct Out<'a> {
+    act: &'a mut Option<Act>,
+    dragging: &'a mut Option<Item>,
+    busy: Option<&'a Key>,
+}
+
+impl Out<'_> {
+    /// A tile's or a result's click and drag (3A, §15 D1028): a click places at
+    /// the viewport's centre, a drag carries the component under the pointer
+    /// and places where it is let go. Returns how opaque the row draws — the
+    /// pulse's low while its placement waits.
+    fn take(&mut self, ui: &egui::Ui, resp: &egui::Response, item: &Item) -> f32 {
+        if resp.clicked() {
+            *self.act = Some(Act::Place(item.source.clone()));
+        }
+        if resp.dragged() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+            *self.dragging = Some(item.clone());
+        }
+        if resp.drag_stopped()
+            && let Some(at) = ui.ctx().pointer_latest_pos()
+        {
+            *self.act = Some(Act::Drop(item.source.clone(), at));
+        }
+        if self.busy == Some(&key_of(&item.source)) {
+            0.5
+        } else {
+            1.0
+        }
+    }
+}
+
+/// The largest side a drag's picture is rendered at, in pixels.
+const GHOST_MAX_PX: f64 = 2048.0;
+
+impl Ghost {
+    /// Render `item`'s component at `zoom` on a worker — the default variant of a
+    /// set, as a placement inserts (§15 D1029).
+    fn start(item: &Item, doc: &Document, zoom: f64) -> Self {
+        enum Scene {
+            Kit(Arc<Published>),
+            Here(Box<Document>),
+        }
+        let (scene, top) = match &item.source {
+            Source::Kit { published, top, .. } => (Scene::Kit(published.clone()), *top),
+            Source::Local(id) => (Scene::Here(Box::new(doc.clone())), *id),
+        };
+        let (tx, rx) = mpsc::channel();
+        let spawned = std::thread::Builder::new()
+            .name("ondin-drag-ghost".into())
+            .spawn(move || {
+                let doc: &Document = match &scene {
+                    Scene::Kit(p) => p.document(),
+                    Scene::Here(d) => d,
+                };
+                let subject = tile_subject(doc, top);
+                let res = ondin_core::Resolved::rebuild(doc);
+                let got = ondin_export::extent(&res, &[subject]).and_then(|view| {
+                    let (w, h) = (view.width().max(1.0), view.height().max(1.0));
+                    let scale = zoom.min(GHOST_MAX_PX / w.max(h));
+                    raster_fit(doc, &res, subject, w * scale, h * scale, scale)
+                        .map(|p| (p, egui::vec2(w as f32, h as f32)))
+                });
+                let _ = tx.send(got);
+            });
+        Ghost {
+            key: key_of(&item.source),
+            rx: spawned.ok().map(|_| rx),
+            picture: None,
+        }
+    }
+
+    /// Take the worker's picture when it lands; keep frames coming meanwhile.
+    fn pass(&mut self, ctx: &egui::Context) {
+        let Some(rx) = &self.rx else { return };
+        match rx.try_recv() {
+            Ok(got) => {
+                self.rx = None;
+                self.picture = got.map(|(p, size)| (p.texture(ctx, "kit-drag-ghost".into()), size));
+            }
+            Err(mpsc::TryRecvError::Empty) => ctx.request_repaint(),
+            Err(mpsc::TryRecvError::Disconnected) => self.rx = None,
+        }
+    }
+
+    /// Wait for the worker's picture — the tests'.
+    #[cfg(test)]
+    fn settle(&mut self, ctx: &egui::Context) {
+        if let Some(rx) = self.rx.take()
+            && let Ok(got) = rx.recv_timeout(std::time::Duration::from_secs(20))
+        {
+            self.picture = got.map(|(p, size)| (p.texture(ctx, "kit-drag-ghost".into()), size));
+        }
+    }
+}
+
+/// The drag's picture under the pointer (§15 D1029): **the component at the
+/// size it will land**, its world size at the canvas's zoom, once the worker has
+/// it — and the tile's picture, without the tile's card, over the panel or
+/// before then. Capped at half the canvas each way, so a page-sized component
+/// does not cover the place it is being aimed at.
+fn draw_ghost(
+    ctx: &egui::Context,
+    item: &Item,
+    ghost: &Ghost,
+    panel: egui::Rect,
+    canvas: egui::Rect,
+    zoom: f64,
+    ppp: f32,
+) {
+    let Some(at) = ctx.pointer_latest_pos() else {
+        return;
+    };
+    let layer = egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("kit-tile-drag"));
+    let painter = ctx.layer_painter(layer);
+    match &ghost.picture {
+        Some((texture, world)) if !panel.contains(at) => {
+            let mut size = *world * (zoom as f32 / ppp);
+            let room = canvas.size() * 0.5;
+            let k = (room.x / size.x).min(room.y / size.y).min(1.0);
+            size *= k;
+            let rect = egui::Rect::from_center_size(at, size);
+            painter.image(
+                texture.id(),
+                rect,
+                crate::thumbs::FULL_UV,
+                egui::Color32::WHITE.gamma_multiply(0.85),
+            );
+        }
+        _ => {
+            let well = egui::Rect::from_center_size(at, egui::vec2(96.0, TILE_H));
+            match &item.tile {
+                Some(t) => {
+                    let size = t.size_vec2();
+                    let k = (well.width() / size.x).min(well.height() / size.y);
+                    let shown = egui::Rect::from_center_size(well.center(), size * k);
+                    painter.image(t.id(), shown, crate::thumbs::FULL_UV, egui::Color32::WHITE);
+                }
+                None => {
+                    painter.rect_filled(well, egui::CornerRadius::same(5), color::text_a(26));
+                }
+            }
+        }
+    }
 }
 
 /// Every name `top` is found by: its own, and for a set each variant's name and
@@ -727,23 +1126,29 @@ fn search_field(ui: &mut egui::Ui, query: &mut String, focus: &mut bool) -> bool
     changed
 }
 
-/// Browsing: this document's mains first when there are no kits (3G), then each
-/// kit, used ones first, then the library's others under their heading (3E).
+/// Browsing: this document's own mains first, then each kit, used ones first,
+/// then the library's others under their heading (3E).
+///
+/// ***This document* leads whenever it has anything** (§15 D1031, the
+/// maintainer's idea, sparred and taken): it was 3G's, shown only when the
+/// library held no kit, so a document with its own components and a kit beside
+/// them had no way to insert its own from here. The picker is the one place to
+/// insert any component now.
 fn browse(
     ui: &mut egui::Ui,
     local: &[Item],
     shown: &[Shown],
     open: &HashSet<String>,
-    act: &mut Option<Act>,
+    out: &mut Out<'_>,
 ) {
+    if !local.is_empty() {
+        section_row(ui, "This document", &local.len().to_string());
+        tiles(ui, local, out);
+        ui.add_space(8.0);
+    }
     if shown.is_empty() {
-        if !local.is_empty() {
-            section_row(ui, "This document", &local.len().to_string());
-            tiles(ui, local, act);
-            ui.add_space(8.0);
-        }
         if empty_note(ui) {
-            *act = Some(Act::OpenLibrary);
+            *out.act = Some(Act::OpenLibrary);
         }
         return;
     }
@@ -756,7 +1161,7 @@ fn browse(
         }
         let is_open = open.contains(&s.id);
         if kit_header(ui, s, is_open).clicked() {
-            *act = Some(Act::Toggle(s.id.clone()));
+            *out.act = Some(Act::Toggle(s.id.clone()));
         }
         if !is_open {
             continue;
@@ -779,7 +1184,7 @@ fn browse(
                         .color(color::text_a(107)),
                 );
             }
-            tiles(ui, items, act);
+            tiles(ui, items, out);
         }
         ui.add_space(4.0);
     }
@@ -838,7 +1243,7 @@ fn kit_header(ui: &mut egui::Ui, s: &Shown, open: bool) -> egui::Response {
 }
 
 /// The tile grid: three to a row, each a picture and a name (3E).
-fn tiles(ui: &mut egui::Ui, items: &[Item], act: &mut Option<Act>) {
+fn tiles(ui: &mut egui::Ui, items: &[Item], out: &mut Out<'_>) {
     let w = ui.available_width();
     let tile_w = (w - GAP_X * (COLS as f32 - 1.0)) / COLS as f32;
     for row in items.chunks(COLS) {
@@ -865,37 +1270,15 @@ fn tiles(ui: &mut egui::Ui, items: &[Item], act: &mut Option<Act>) {
                     Some((kit, _)) => format!("{} · {kit}", item.name),
                     None => item.name.clone(),
                 });
-            draw_tile(ui, cell, item, resp.hovered() || resp.dragged());
-            if resp.clicked() {
-                *act = Some(Act::Place(item.source.clone()));
-            }
-            // A drag carries the tile under the pointer and places where it is
-            // let go (3A) — on the canvas, which `kit_picker_ui` decides.
-            if resp.dragged()
-                && let Some(at) = ui.ctx().pointer_latest_pos()
-            {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-                let ghost = egui::Rect::from_center_size(at, cell.size());
-                let layer =
-                    egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("kit-tile-drag"));
-                let painter = ui.ctx().layer_painter(layer);
-                // On the panel's ground, so the translucent well reads over
-                // the canvas as it does in the grid.
-                painter.rect_filled(ghost.expand(4.0), egui::CornerRadius::same(7), color::CARD);
-                draw_tile_on(&painter, ghost, item, true);
-            }
-            if resp.drag_stopped()
-                && let Some(at) = ui.ctx().pointer_latest_pos()
-            {
-                *act = Some(Act::Drop(item.source.clone(), at));
-            }
+            // A drag's picture is drawn by `kit_picker_ui`, at the component's
+            // own size (§15 D1029); it was this tile, card and all.
+            let alpha = out.take(ui, &resp, item);
+            let mut p = ui.painter().clone();
+            p.multiply_opacity(alpha);
+            draw_tile_on(&p, cell, item, resp.hovered() || resp.dragged());
         }
         ui.add_space(GAP_Y - 4.0);
     }
-}
-
-fn draw_tile(ui: &egui::Ui, cell: egui::Rect, item: &Item, lit: bool) {
-    draw_tile_on(ui.painter(), cell, item, lit);
 }
 
 /// A tile on any painter — the grid's, or the drag layer's under the pointer.
@@ -941,13 +1324,25 @@ fn draw_tile_on(p: &egui::Painter, cell: egui::Rect, item: &Item, lit: bool) {
 }
 
 /// A search result: a small picture, the name, and the kit on the right (3F).
-fn results_list(ui: &mut egui::Ui, items: &[Item], highlight: usize, act: &mut Option<Act>) {
+/// **Dragged as a tile is** (§15 D1028): clicking was the only way, and a drag
+/// is the reach a result invites.
+fn results_list(ui: &mut egui::Ui, items: &[Item], highlight: usize, out: &mut Out<'_>) {
     for (i, item) in items.iter().enumerate() {
-        let (rect, resp) = ui.allocate_exact_size(
+        let (rect, _) = ui.allocate_exact_size(
             egui::vec2(ui.available_width(), ROW_H),
-            egui::Sense::click(),
+            egui::Sense::hover(),
         );
-        let p = ui.painter();
+        // Keyed by what it places, so a list re-ranked under a drag keeps it.
+        let (kit, top) = key_of(&item.source);
+        let resp = ui.interact(
+            rect,
+            ui.id().with(("kit-result", kit, top)),
+            egui::Sense::click_and_drag(),
+        );
+        let alpha = out.take(ui, &resp, item);
+        let mut p = ui.painter().clone();
+        p.multiply_opacity(alpha);
+        let p = &p;
         if i == highlight || resp.hovered() {
             p.rect_filled(rect, egui::CornerRadius::same(5), color::text_a(20));
         }
@@ -999,9 +1394,6 @@ fn results_list(ui: &mut egui::Ui, items: &[Item], highlight: usize, act: &mut O
                 egui::FontId::proportional(10.5),
                 color::text_a(102),
             );
-        }
-        if resp.clicked() {
-            *act = Some(Act::Place(item.source.clone()));
         }
     }
     if items.is_empty() {
@@ -1540,6 +1932,13 @@ pub(crate) mod tests {
 
         let to = egui::pos2(600.0, 300.0);
         drag(&mut app, tile, to);
+        // A frame with the tile dimmed, then the placement (§15 D1030).
+        assert!(
+            app.session.selection.single().is_none(),
+            "not on the release"
+        );
+        frame_with(&mut app, vec![]);
+        frame_with(&mut app, vec![]);
         let inst = app
             .session
             .selection
@@ -1558,6 +1957,216 @@ pub(crate) mod tests {
         assert!(app.kit_picker.is_none(), "the picker closes");
         assert!(app.view == crate::app::View::Dashboard);
         assert_eq!(app.dash.nav, crate::panels::dashboard::Nav::Kits);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A set's tile is its default variant** (§15 D1028): the picture is the
+    /// one a click places — *Small*, first in reading order — not the set's
+    /// sheet of variants.
+    ///
+    /// Flip, run: `tile_subject` answering the top fails, the set's 300 × 30
+    /// box rendered at 200 × 20 against *Small*'s 200 × 75.
+    #[test]
+    fn a_sets_tile_is_its_default_variant() {
+        let root = temp_root("set-tile");
+        let (_, set, _) = file_kit(&root);
+        let doc = ondin_core::io::load(&std::fs::read(root.join("atlas.ondin")).unwrap()).unwrap();
+        let published = doc.published().expect("the fixture published");
+        let frozen = published.document();
+        let small = ondin_core::kit::default_variant(frozen, set).unwrap();
+        assert_eq!(frozen.get(small).unwrap().name(), "Small", "the fixture");
+        let tiles = tiles_of(frozen, &[set]);
+        let res = ondin_core::Resolved::rebuild(frozen);
+        let alone = raster_fit(frozen, &res, small, 200.0, 104.0, 4.0).unwrap();
+        let tile = &tiles[&set];
+        assert_eq!(
+            (tile.width, tile.height),
+            (alone.width, alone.height),
+            "the set's tile is Small's picture"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A kit reads as used only while an instance of it is on the page**
+    /// (§15 D1028): placed, it is used; its instance deleted, it is listed under
+    /// *In your library, not used here* again — though its vendored main stays
+    /// in the vault, which is what the old reading counted.
+    ///
+    /// Flip, run: `shown_kits` reading the vault for `used` again fails
+    /// *"deleted, not used"*.
+    #[test]
+    fn a_kit_is_used_only_while_an_instance_is_on_the_page() {
+        let ctx = egui::Context::default();
+        let root = temp_root("used");
+        let (id, _, badge) = file_kit(&root);
+        let mut app = app_on(&ctx, root.clone());
+        let used = |app: &mut OndinApp| {
+            let kits = kits_in(&app.library, app.session.doc.meta().id.as_deref());
+            app.shown_kits(&ctx, &kits)
+                .iter()
+                .find(|s| s.id == id)
+                .map(|s| s.used)
+        };
+        assert_eq!(used(&mut app), Some(false), "the control: never used");
+        let source = kit_source(&mut app, &id, badge);
+        app.place_from_picker(&ctx, source);
+        assert_eq!(used(&mut app), Some(true), "placed, used");
+        let inst = app.session.selection.single().unwrap();
+        assert!(
+            app.session
+                .commit(Transaction(vec![Operation::DeleteNode { id: inst }]))
+        );
+        assert!(
+            app.session.doc.vault().is_some(),
+            "the fixture: the vendored main stays"
+        );
+        assert_eq!(used(&mut app), Some(false), "deleted, not used");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// ***This document* is listed above the kits, with pictures, and a search
+    /// result drags onto the canvas at the component's own size** (§15 D1028,
+    /// D1029, D1031). The drag's picture is the component's world size at the
+    /// canvas's zoom — *Badge*, 24 × 30, at zoom 2 on a 1-point display, 48 × 60
+    /// — and let go over the canvas, it places after one dimmed frame (D1030).
+    ///
+    /// Flip, run: `draw_ghost` drawing the tile's picture instead (its fallback
+    /// arm) fails *"the ghost is the component at canvas size"*, a 42 × 52 tile
+    /// at the pointer; `Out::take` never dimming fails *"the waiting result
+    /// dims"*, 255 against 251.
+    #[test]
+    fn local_mains_lead_and_a_result_drags_at_the_components_size() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let root = temp_root("result-drag");
+        let (id, _, badge) = file_kit(&root);
+        let mut app = app_on(&ctx, root.clone());
+        let mine = app.session.ids.mint();
+        let doc_root = app.session.doc.root();
+        assert!(app.session.commit(Transaction(vec![
+            frame(mine, doc_root, 0, 50.0, "Mine"),
+            Operation::SetComponent {
+                id: mine,
+                component: true,
+            },
+        ])));
+        app.session.camera.zoom = 2.0;
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let run = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    events,
+                    ..Default::default()
+                },
+                |_| app.kit_picker_ui(&ctx),
+            )
+            .shapes
+        };
+        let text_at = |shapes: &[egui::epaint::ClippedShape], want: &str| {
+            shapes.iter().find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == want => {
+                    Some(t.pos + t.galley.size() / 2.0)
+                }
+                _ => None,
+            })
+        };
+
+        app.toggle_kit_picker();
+        app.library.refresh();
+        let kits = kits_in(&app.library, app.session.doc.meta().id.as_deref());
+        for k in &kits {
+            app.kit_shelf.ask(k);
+        }
+        app.kit_shelf.settle();
+        run(&mut app, vec![]);
+        app.kit_picker.as_mut().unwrap().local.settle(&ctx);
+        let shapes = run(&mut app, vec![]);
+        assert!(
+            text_at(&shapes, "This document").is_some(),
+            "This document is listed beside a kit"
+        );
+        assert!(text_at(&shapes, "Mine").is_some(), "with its main");
+        assert!(
+            app.kit_picker
+                .as_ref()
+                .unwrap()
+                .local
+                .tiles
+                .contains_key(&mine),
+            "and its picture"
+        );
+
+        app.kit_picker.as_mut().unwrap().query = "badge".into();
+        run(&mut app, vec![]);
+        let shapes = run(&mut app, vec![]);
+        let row = text_at(&shapes, "Badge").expect("the result");
+        let press = |at, pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        let to = egui::pos2(600.0, 300.0);
+        run(&mut app, vec![egui::Event::PointerMoved(row)]);
+        run(&mut app, vec![press(row, true)]);
+        for k in 1..=4 {
+            let at = row + (to - row) * (k as f32 / 4.0);
+            run(&mut app, vec![egui::Event::PointerMoved(at)]);
+        }
+        app.kit_picker
+            .as_mut()
+            .unwrap()
+            .ghost
+            .as_mut()
+            .expect("a drag starts a ghost")
+            .settle(&ctx);
+        let shapes = run(&mut app, vec![egui::Event::PointerMoved(to)]);
+        let images: Vec<egui::Rect> = shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Mesh(m) if m.texture_id != egui::TextureId::default() => Some(
+                    egui::Rect::from_points(&m.vertices.iter().map(|v| v.pos).collect::<Vec<_>>()),
+                ),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            images.iter().any(|r| r.center().distance(to) < 0.5
+                && (r.size() - egui::vec2(48.0, 60.0)).length() < 0.5),
+            "the ghost is the component at canvas size: {images:?}"
+        );
+
+        let ink = |shapes: &[egui::epaint::ClippedShape]| {
+            shapes.iter().find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == "Badge" => {
+                    Some(t.galley.rows[0].visuals.mesh.vertices[0].color.a())
+                }
+                _ => None,
+            })
+        };
+        let resting = ink(&shapes).expect("the result's name");
+        run(&mut app, vec![press(to, false)]);
+        let waiting = run(&mut app, vec![]);
+        assert!(
+            app.session.selection.single().is_none(),
+            "the frame that shows the dim places nothing yet"
+        );
+        let dim = ink(&waiting).expect("the result's name");
+        // Half, not a hover's few points: the flip (no dim) reads 255 here.
+        assert!(
+            (dim as f32) < resting as f32 * 0.6,
+            "the waiting result dims: {dim} against {resting}"
+        );
+        run(&mut app, vec![]);
+        let inst = app
+            .session
+            .selection
+            .single()
+            .expect("dropped on the canvas");
+        let main = app.session.doc.get(inst).unwrap().link().unwrap();
+        assert_eq!(app.session.doc.get(main).unwrap().origin().unwrap().kit, id);
+        let _ = badge;
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1667,6 +2276,10 @@ pub(crate) mod tests {
 
         ctx.memory_mut(|m| m.request_focus(field));
         let _ = ctx.run_ui(enter(), |_| app.kit_picker_ui(&ctx));
+        // A frame with the result dimmed, then the placement (§15 D1030).
+        for _ in 0..2 {
+            let _ = ctx.run_ui(Default::default(), |_| app.kit_picker_ui(&ctx));
+        }
         let inst = app.session.selection.single().expect("Enter placed it");
         let main = app.session.doc.get(inst).unwrap().link().unwrap();
         assert_eq!(app.session.doc.get(main).unwrap().origin().unwrap().kit, id);

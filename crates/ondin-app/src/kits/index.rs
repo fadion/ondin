@@ -147,10 +147,21 @@ pub(crate) enum Load {
 }
 
 /// A published main's tile picture, as the worker rendered it.
-struct Pixels {
-    rgba: Vec<u8>,
-    width: u32,
-    height: u32,
+pub(crate) struct Pixels {
+    pub rgba: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl Pixels {
+    /// As an egui texture named `name`.
+    pub(crate) fn texture(&self, ctx: &egui::Context, name: String) -> egui::TextureHandle {
+        let image = egui::ColorImage::from_rgba_unmultiplied(
+            [self.width as usize, self.height as usize],
+            &self.rgba,
+        );
+        ctx.load_texture(name, image, egui::TextureOptions::LINEAR)
+    }
 }
 
 struct Shelf {
@@ -294,16 +305,10 @@ impl KitShelf {
         if let Some(t) = s.tiles.get(&top) {
             return Some(t.clone());
         }
-        let p = s.pixels.get(&top)?;
-        let image = egui::ColorImage::from_rgba_unmultiplied(
-            [p.width as usize, p.height as usize],
-            &p.rgba,
-        );
-        let t = ctx.load_texture(
-            format!("kit-tile-{id}-{}", top.to_wire()),
-            image,
-            egui::TextureOptions::LINEAR,
-        );
+        let t = s
+            .pixels
+            .get(&top)?
+            .texture(ctx, format!("kit-tile-{id}-{}", top.to_wire()));
         s.tiles.insert(top, t.clone());
         Some(t)
     }
@@ -349,7 +354,10 @@ fn spawn() -> (mpsc::Sender<Job>, mpsc::Receiver<Done>) {
 }
 
 /// Load a kit's file and render a tile for every published main and set — with
-/// the version the file says it published, as read.
+/// the version the file says it published, as read. **A set's tile is its
+/// default variant**, the one a click places (§15 D1028): the whole set drew as a
+/// sheet of variants too small to tell apart, and the tile's glyph already says
+/// it is a set.
 fn read(path: &std::path::Path) -> (Load, Option<u32>, HashMap<NodeId, Pixels>) {
     let Some(doc) = std::fs::read(path)
         .ok()
@@ -362,32 +370,57 @@ fn read(path: &std::path::Path) -> (Load, Option<u32>, HashMap<NodeId, Pixels>) 
         return (Load::Ready(None), version, HashMap::new());
     };
     let frozen = published.document();
-    let res = ondin_core::Resolved::rebuild(frozen);
-    let mut pixels = HashMap::new();
-    for top in published.tops() {
-        let Some(view) = ondin_export::extent(&res, &[*top]) else {
-            continue;
-        };
-        let (w, h) = (view.width().max(1.0), view.height().max(1.0));
-        let scale = (TILE_W / w).min(TILE_H / h).min(4.0);
-        let opts = ondin_export::png::RasterOpts {
-            scale,
-            ..Default::default()
-        };
-        if let Some(r) = ondin_export::png::raster_of(frozen, &res, &[*top], &opts) {
-            pixels.insert(
-                *top,
-                Pixels {
-                    rgba: r.rgba,
-                    width: r.width,
-                    height: r.height,
-                },
-            );
-        }
-    }
+    let pixels = tiles_of(frozen, published.tops());
     (
         Load::Ready(Some(Arc::new(published.clone()))),
         version,
         pixels,
     )
+}
+
+/// What a tile for `top` shows: a set's default variant, anything else itself.
+pub(crate) fn tile_subject(doc: &ondin_core::Document, top: NodeId) -> NodeId {
+    match doc.get(top) {
+        Some(n) if n.set().is_some() => ondin_core::kit::default_variant(doc, top).unwrap_or(top),
+        _ => top,
+    }
+}
+
+/// A tile picture for each of `tops` in `doc`, keyed by the top — the kits'
+/// published states here, and the document's own mains in the picker's *This
+/// document* (`super::picker`'s `LocalTiles`).
+pub(crate) fn tiles_of(doc: &ondin_core::Document, tops: &[NodeId]) -> HashMap<NodeId, Pixels> {
+    let res = ondin_core::Resolved::rebuild(doc);
+    let mut pixels = HashMap::new();
+    for top in tops {
+        let shown = tile_subject(doc, *top);
+        if let Some(p) = raster_fit(doc, &res, shown, TILE_W, TILE_H, 4.0) {
+            pixels.insert(*top, p);
+        }
+    }
+    pixels
+}
+
+/// `id` rendered to fit `w × h` pixels, never scaled past `max_scale`.
+pub(crate) fn raster_fit(
+    doc: &ondin_core::Document,
+    res: &ondin_core::Resolved,
+    id: NodeId,
+    w: f64,
+    h: f64,
+    max_scale: f64,
+) -> Option<Pixels> {
+    let view = ondin_export::extent(res, &[id])?;
+    let (vw, vh) = (view.width().max(1.0), view.height().max(1.0));
+    let scale = (w / vw).min(h / vh).min(max_scale);
+    let opts = ondin_export::png::RasterOpts {
+        scale,
+        ..Default::default()
+    };
+    let r = ondin_export::png::raster_of(doc, res, &[id], &opts)?;
+    Some(Pixels {
+        rgba: r.rgba,
+        width: r.width,
+        height: r.height,
+    })
 }

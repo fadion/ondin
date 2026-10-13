@@ -3088,7 +3088,8 @@ reaches a second machine through the synced base folder (§5.11a), with no netwo
   (`library::cache::LocalIndex::kit_use`). **A document's own mains lead as tiles under *This document*
   whenever it has any**, pictured by a worker (`LocalTiles`, §15 D1031) — once a new revision has stood
   400 ms, and only for a main whose subtree differs from the one its picture was drawn from (§15
-  D1034); with no
+  D1034), its own translation left out of the comparison, and every one at once when a family the
+  document names arrives (§15 D1035); with no
   kits the list ends with 3G's *Open library*, which closes the picker for the dashboard's *Kits* filter
   (§15 D1018). **A set's tile is its default variant** (`index::tile_subject`), what a click places, and
   the list draws no scrollbar (§15 D1028). A placement is one transaction: `kit::insert`, or
@@ -3099,7 +3100,8 @@ reaches a second machine through the synced base folder (§5.11a), with no netwo
   resolved. Either way the instance lands at the document's top level, never into a frame under the
   pointer (§15 D1018). **The drag draws the component under the pointer at the size it will land**,
   rendered on a worker at the canvas's zoom and capped at half the canvas, and the tile's picture without
-  its card over the panel or until that arrives (§15 D1029); a right-click takes it away and its
+  its card over the panel or until that arrives (§15 D1029); a zoom moved a tenth renders it again, the
+  old picture stretched meanwhile (§15 D1035); a right-click takes it away and its
   release places nothing, as it cancels every drag (§15 D1033). ⚠️ **Every placement waits one painted
   frame** with its tile at half opacity (`ask_place`, `OndinApp::kit_placing`), because it runs on the frame
   thread and nothing repaints during it; a picker closed in the wait places at once rather than losing

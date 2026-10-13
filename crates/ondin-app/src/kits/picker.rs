@@ -62,6 +62,20 @@ pub(crate) struct Picker {
     panel: Option<egui::Rect>,
 }
 
+impl Picker {
+    /// Whether a component is being carried out of the panel — the escape
+    /// ladder's and the right-click cancel's question (§15 D1033).
+    pub(crate) fn dragging(&self) -> bool {
+        self.ghost.is_some()
+    }
+
+    /// Drop the carried component's picture; the app's `gesture_cancelled`
+    /// keeps the release from placing it (§15 D1033).
+    pub(crate) fn cancel_drag(&mut self) {
+        self.ghost = None;
+    }
+}
+
 /// What names a placeable thing across frames: its kit (empty for this
 /// document) and its top.
 type Key = (String, NodeId);
@@ -93,31 +107,42 @@ struct Ghost {
     picture: Option<(egui::TextureHandle, egui::Vec2)>,
 }
 
-/// The tile pictures of this document's own mains, rendered on a worker for
-/// the session revision they were asked at, and asked again when it moves on.
+/// The tile pictures of this document's own mains, rendered on a worker.
+///
+/// **Only the mains whose own subtree changed are rendered again, once the
+/// edits have settled** (§15 D1034). The first cut rendered every main on every
+/// revision with the picker open — a whole-document clone on the frame and a
+/// layout and raster per main on the worker, for each nudge of an unrelated
+/// layer. Now a new revision waits [`SETTLE`] for the next, then each main's
+/// subtree is compared with the one its picture was drawn from, and the
+/// document is cloned only when one differs. A nested instance's copies are
+/// written into its main's subtree at the commit, so a change to the inner
+/// main shows in the outer's comparison too.
 #[derive(Default)]
 struct LocalTiles {
-    /// The revision the tiles shown, or the job in flight, were asked at.
+    /// The revision last compared against.
     rev: Option<u64>,
+    /// A revision seen and not yet compared, and when it was first seen.
+    pending: Option<(u64, std::time::Instant)>,
+    /// Each main's subtree as its picture was drawn from it.
+    drawn: HashMap<NodeId, Vec<ondin_core::Node>>,
     job: Option<mpsc::Receiver<HashMap<NodeId, Pixels>>>,
     tiles: HashMap<NodeId, egui::TextureHandle>,
 }
 
+/// How long the document has to stand still before its mains are compared.
+const SETTLE: std::time::Duration = std::time::Duration::from_millis(400);
+
 impl LocalTiles {
-    /// Take a finished job, and start one when the document has moved on and
-    /// none is running. The old pictures stand until the new ones land.
+    /// Take a finished job; once the document has settled on a new revision,
+    /// compare the mains and render the ones that changed. Old pictures stand
+    /// until new ones land; a main gone takes its picture with it.
     fn pass(&mut self, ctx: &egui::Context, doc: &Document, rev: u64, tops: &[NodeId]) {
         if let Some(rx) = &self.job {
             match rx.try_recv() {
                 Ok(pixels) => {
                     self.job = None;
-                    self.tiles = pixels
-                        .into_iter()
-                        .map(|(id, p)| {
-                            let t = p.texture(ctx, format!("local-tile-{}", id.to_wire()));
-                            (id, t)
-                        })
-                        .collect();
+                    self.land(ctx, pixels);
                 }
                 Err(mpsc::TryRecvError::Empty) => {
                     ctx.request_repaint_after(std::time::Duration::from_millis(50));
@@ -126,21 +151,58 @@ impl LocalTiles {
                 Err(mpsc::TryRecvError::Disconnected) => self.job = None,
             }
         }
-        if self.rev == Some(rev) || tops.is_empty() {
+        if self.rev == Some(rev) {
             return;
         }
+        // The first look at a document is not waited for: there is nothing to
+        // show until it is drawn.
+        if self.rev.is_some() {
+            match self.pending {
+                Some((r, since)) if r == rev => {
+                    if since.elapsed() < SETTLE {
+                        ctx.request_repaint_after(SETTLE - since.elapsed());
+                        return;
+                    }
+                }
+                _ => {
+                    self.pending = Some((rev, std::time::Instant::now()));
+                    ctx.request_repaint_after(SETTLE);
+                    return;
+                }
+            }
+        }
         self.rev = Some(rev);
+        self.pending = None;
+        self.tiles.retain(|id, _| tops.contains(id));
+        self.drawn.retain(|id, _| tops.contains(id));
+        let mut changed = Vec::new();
+        for top in tops {
+            let now = doc.capture_subtree(*top).unwrap_or_default();
+            if self.drawn.get(top) != Some(&now) {
+                self.drawn.insert(*top, now);
+                changed.push(*top);
+            }
+        }
+        if changed.is_empty() {
+            return;
+        }
         let (tx, rx) = mpsc::channel();
         let doc = doc.clone();
-        let tops = tops.to_vec();
         let spawned = std::thread::Builder::new()
             .name("ondin-local-tiles".into())
             .spawn(move || {
-                let _ = tx.send(tiles_of(&doc, &tops));
+                let _ = tx.send(tiles_of(&doc, &changed));
             });
         if spawned.is_ok() {
             self.job = Some(rx);
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
+        }
+    }
+
+    fn land(&mut self, ctx: &egui::Context, pixels: HashMap<NodeId, Pixels>) {
+        for (id, p) in pixels {
+            let t = p.texture(ctx, format!("local-tile-{}", id.to_wire()));
+            self.tiles.insert(id, t);
         }
     }
 
@@ -150,11 +212,14 @@ impl LocalTiles {
         if let Some(rx) = self.job.take()
             && let Ok(pixels) = rx.recv_timeout(std::time::Duration::from_secs(20))
         {
-            self.tiles = pixels
-                .into_iter()
-                .map(|(id, p)| (id, p.texture(ctx, format!("local-tile-{}", id.to_wire()))))
-                .collect();
+            self.land(ctx, pixels);
         }
+    }
+
+    /// Whether a render is in flight — the tests'.
+    #[cfg(test)]
+    fn busy(&self) -> bool {
+        self.job.is_some()
     }
 }
 
@@ -283,6 +348,9 @@ impl OndinApp {
             }
         }
         let busy = self.kit_placing.as_ref().map(|p| p.key.clone());
+        // Set by `cancel_gesture` on the right-click's press, cleared once no
+        // button is down (§15 D1033).
+        let cancelled = self.gesture_cancelled;
         if !picker.seeded {
             picker.seeded = true;
             if let Some(first) = shown.iter().find(|s| s.used) {
@@ -374,6 +442,7 @@ impl OndinApp {
                             act: &mut act,
                             dragging: &mut dragging,
                             busy: busy.as_ref(),
+                            cancelled,
                         };
                         egui::ScrollArea::vertical()
                             .max_height(list)
@@ -854,22 +923,27 @@ struct Out<'a> {
     act: &'a mut Option<Act>,
     dragging: &'a mut Option<Item>,
     busy: Option<&'a Key>,
+    /// A right-click took the drag away (§15 D1033): until the button is up,
+    /// the drag carries nothing and its release places nothing.
+    cancelled: bool,
 }
 
 impl Out<'_> {
     /// A tile's or a result's click and drag (3A, §15 D1028): a click places at
     /// the viewport's centre, a drag carries the component under the pointer
-    /// and places where it is let go. Returns how opaque the row draws — the
-    /// pulse's low while its placement waits.
+    /// and places where it is let go — unless a right-click cancelled it, as
+    /// every drag in the app is (§15 D1033). Returns how opaque the row draws —
+    /// the pulse's low while its placement waits.
     fn take(&mut self, ui: &egui::Ui, resp: &egui::Response, item: &Item) -> f32 {
         if resp.clicked() {
             *self.act = Some(Act::Place(item.source.clone()));
         }
-        if resp.dragged() {
+        if resp.dragged() && !self.cancelled {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
             *self.dragging = Some(item.clone());
         }
         if resp.drag_stopped()
+            && !self.cancelled
             && let Some(at) = ui.ctx().pointer_latest_pos()
         {
             *self.act = Some(Act::Drop(item.source.clone(), at));
@@ -1994,6 +2068,255 @@ pub(crate) mod tests {
             (alone.width, alone.height),
             "the set's tile is Small's picture"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// ***This document*'s pictures are drawn again only for a main that
+    /// changed, once the edits settle** (§15 D1034): an edit to a layer outside
+    /// every main starts no render at all, and an edit inside one re-renders that
+    /// one, the other's picture kept as it was.
+    ///
+    /// Flip, run: comparing nothing (every main counted as changed) fails *"an
+    /// unrelated edit renders nothing"*; dropping the settle wait fails *"not
+    /// before the edits settle"* — asked on the edit inside A, since asked on the
+    /// unrelated one first it passed under the flip, nothing rendering either way.
+    #[test]
+    fn local_pictures_redraw_only_a_changed_main_once_settled() {
+        let ctx = egui::Context::default();
+        let mut ids = IdSource::new(0xBD);
+        let r = ids.mint();
+        let mut doc = Document::new(r);
+        let [a, b, loose] = [(); 3].map(|_| ids.mint());
+        doc.apply(&Transaction(vec![
+            frame(a, r, 0, 40.0, "A"),
+            frame(b, r, 1, 60.0, "B"),
+            frame(loose, r, 2, 80.0, "Loose"),
+            Operation::SetComponent {
+                id: a,
+                component: true,
+            },
+            Operation::SetComponent {
+                id: b,
+                component: true,
+            },
+        ]))
+        .unwrap();
+        let tops = [a, b];
+        let mut tiles = LocalTiles::default();
+        tiles.pass(&ctx, &doc, 1, &tops);
+        assert!(tiles.busy(), "the first look renders at once");
+        tiles.settle(&ctx);
+        let first_b = tiles.tiles[&b].id();
+        let age = |tiles: &mut LocalTiles| {
+            if let Some((r, _)) = tiles.pending {
+                tiles.pending = Some((r, std::time::Instant::now() - SETTLE * 2));
+            }
+        };
+
+        // An edit outside every main.
+        doc.apply(&Transaction(vec![Operation::SetTransform {
+            id: loose,
+            transform: Affine::translate((5.0, 0.0)),
+        }]))
+        .unwrap();
+        tiles.pass(&ctx, &doc, 2, &tops);
+        age(&mut tiles);
+        tiles.pass(&ctx, &doc, 2, &tops);
+        assert!(!tiles.busy(), "an unrelated edit renders nothing");
+
+        // An edit inside A.
+        doc.apply(&Transaction(vec![Operation::SetName {
+            id: a,
+            name: "A2".into(),
+        }]))
+        .unwrap();
+        tiles.pass(&ctx, &doc, 3, &tops);
+        // Asked here, on an edit that does render: an unrelated one starts
+        // nothing either way, so it cannot tell a wait from no wait.
+        assert!(!tiles.busy(), "not before the edits settle");
+        age(&mut tiles);
+        tiles.pass(&ctx, &doc, 3, &tops);
+        assert!(tiles.busy(), "a changed main renders");
+        tiles.settle(&ctx);
+        assert_eq!(
+            tiles.tiles[&b].id(),
+            first_b,
+            "and only it: B's picture kept"
+        );
+        assert!(tiles.tiles.contains_key(&a));
+    }
+
+    /// **A kit reached through another kit's component counts as used** (§15
+    /// D1028's chain walk): *Beacon*'s main *Card* holds an instance of
+    /// *Atlas*'s *Badge*; placing *Card* puts no link to *Atlas* on the page —
+    /// the nested copy links to the copy inside *Beacon*'s vault main, one level
+    /// up — and *Atlas* is used all the same.
+    ///
+    /// Flip, run: the walk stopping at the first link fails *"Atlas is used
+    /// through Beacon"*.
+    #[test]
+    fn a_kit_nested_in_another_kits_main_counts_as_used() {
+        let ctx = egui::Context::default();
+        let root = temp_root("nested-used");
+        let (atlas, _, badge) = file_kit(&root);
+        let atlas_doc =
+            ondin_core::io::load(&std::fs::read(root.join("atlas.ondin")).unwrap()).unwrap();
+        let atlas_pub = atlas_doc.published().unwrap().clone();
+
+        // *Beacon*: a frame *Card*, a main, holding an Atlas *Badge* instance.
+        let mut ids = IdSource::new(0xBE);
+        let r = ids.mint();
+        let mut doc = Document::new(r);
+        let card = ids.mint();
+        doc.apply(&Transaction(vec![
+            frame(card, r, 0, 200.0, "Card"),
+            Operation::SetComponent {
+                id: card,
+                component: true,
+            },
+        ]))
+        .unwrap();
+        let (tx, _) =
+            ondin_core::kit::insert(&doc, &mut ids, &atlas, 4, &atlas_pub, badge, card).unwrap();
+        doc.apply(&tx).unwrap();
+        let path = crate::library::store::file_document(&root, None, "Beacon", &mut doc).unwrap();
+        let mut meta = doc.meta().clone();
+        meta.kit = Some(KitMark {
+            version: 1,
+            ..KitMark::default()
+        });
+        doc.set_meta(meta);
+        doc.set_published(ondin_core::kit::freeze(&doc));
+        crate::library::store::write_document(&path, &doc).unwrap();
+        let beacon = doc.meta().id.clone().unwrap();
+
+        let mut app = app_on(&ctx, root.clone());
+        let source = kit_source(&mut app, &beacon, card);
+        app.place_from_picker(&ctx, source);
+        let kits = kits_in(&app.library, app.session.doc.meta().id.as_deref());
+        let used: Vec<(String, bool)> = app
+            .shown_kits(&ctx, &kits)
+            .iter()
+            .map(|s| (s.name.clone(), s.used))
+            .collect();
+        assert!(
+            used.contains(&("Beacon".to_string(), true)),
+            "the fixture: Beacon placed: {used:?}"
+        );
+        assert!(
+            used.contains(&("Atlas".to_string(), true)),
+            "Atlas is used through Beacon: {used:?}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A right-click takes a picker drag away** (§15 D1033), as it does every
+    /// drag in the app: the picture goes on the press, and the primary's release
+    /// over the canvas places nothing. Driven the way `OndinApp::ui` drives it —
+    /// `cancel_gesture` on the secondary press, before the panels, and
+    /// `gesture_cancelled` cleared once no button is down.
+    ///
+    /// The right-click is **pressed and released in one frame**, the fast click
+    /// that clears egui's `dragged_id` before `cancel_gesture` reads it.
+    ///
+    /// Flip, run: `Out::take` ignoring `cancelled` fails *"the release places
+    /// nothing"*. `cancel_gesture` without the picker's term **passed** while the
+    /// right-click spanned two frames — `dragged_id` carried it — and fails *"the
+    /// release places nothing"* with the one-frame click, which is why the test
+    /// drives that one.
+    #[test]
+    fn a_right_click_takes_a_picker_drag_away() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let root = temp_root("drag-cancel");
+        let mut app = app_on(&ctx, root.clone());
+        let main = app.session.ids.mint();
+        let doc_root = app.session.doc.root();
+        assert!(app.session.commit(Transaction(vec![
+            frame(main, doc_root, 0, 80.0, "Button"),
+            Operation::SetComponent {
+                id: main,
+                component: true,
+            },
+        ])));
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let run = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            let out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    events,
+                    ..Default::default()
+                },
+                |_| {
+                    if ctx.input(|i| i.pointer.button_pressed(egui::PointerButton::Secondary)) {
+                        app.cancel_gesture(&ctx);
+                    }
+                    app.kit_picker_ui(&ctx);
+                    if ctx.input(|i| !i.pointer.any_down()) {
+                        app.gesture_cancelled = false;
+                    }
+                },
+            );
+            out.shapes
+        };
+        let button = |b, at, pressed| egui::Event::PointerButton {
+            pos: at,
+            button: b,
+            pressed,
+            modifiers: Default::default(),
+        };
+        app.toggle_kit_picker();
+        run(&mut app, vec![]);
+        let shapes = run(&mut app, vec![]);
+        let tile = shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == "Button" => {
+                    Some(t.pos + t.galley.size() / 2.0)
+                }
+                _ => None,
+            })
+            .expect("the tile")
+            - egui::vec2(0.0, 30.0);
+        let to = egui::pos2(600.0, 300.0);
+        run(&mut app, vec![egui::Event::PointerMoved(tile)]);
+        run(
+            &mut app,
+            vec![button(egui::PointerButton::Primary, tile, true)],
+        );
+        for k in 1..=4 {
+            let at = tile + (to - tile) * (k as f32 / 4.0);
+            run(&mut app, vec![egui::Event::PointerMoved(at)]);
+        }
+        assert!(
+            app.kit_picker.as_ref().unwrap().dragging(),
+            "the fixture: a component is being carried"
+        );
+        // Press and release in one frame — a click under ~16 ms, which clears
+        // egui's `dragged_id` before `cancel_gesture` can read it.
+        run(
+            &mut app,
+            vec![
+                button(egui::PointerButton::Secondary, to, true),
+                button(egui::PointerButton::Secondary, to, false),
+            ],
+        );
+        assert!(
+            !app.kit_picker.as_ref().unwrap().dragging(),
+            "the picture goes on the right-click"
+        );
+        run(
+            &mut app,
+            vec![button(egui::PointerButton::Primary, to, false)],
+        );
+        for _ in 0..3 {
+            run(&mut app, vec![]);
+        }
+        assert!(
+            app.session.selection.single().is_none() && app.kit_placing.is_none(),
+            "the release places nothing"
+        );
+        assert!(!app.gesture_cancelled, "and the next drag starts fresh");
         let _ = std::fs::remove_dir_all(&root);
     }
 

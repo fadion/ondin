@@ -3523,7 +3523,10 @@ impl OndinApp {
         // beside it are not fields and cannot move into it.
         let field = ctx.dragged_id().is_some()
             || self.session.has_gesture_preview()
-            || self.in_flight.any();
+            || self.in_flight.any()
+            // A component carried out of the insert picker (§15 D1033): its
+            // drag is egui's, so `dragged_id` blinks for it as for a field.
+            || self.kit_picker.as_ref().is_some_and(|p| p.dragging());
         // ⚠️ **What the chain's own comments recorded, kept because it is evidence
         // about how this failure happens rather than about the code.**
         // `export_quality_scrub` and `guide_position_drag` were missed because
@@ -3552,6 +3555,11 @@ impl OndinApp {
         // reorder its list is the fourth, for the same reason.
         self.layer_drag = None;
         self.in_flight.paint_drag = None;
+        // And a picker component under the pointer: its picture goes now, and
+        // `gesture_cancelled` stops the release placing it (§15 D1033).
+        if let Some(p) = self.kit_picker.as_mut() {
+            p.cancel_drag();
+        }
         // And the copy an Alt-drag was carrying, for the same reason: the
         // release that would have dropped it is not coming, and a stale one left
         // here is what the *next* Alt-drag would silently insert.

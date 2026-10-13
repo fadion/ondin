@@ -133,7 +133,8 @@ struct LocalTiles {
     rev: Option<u64>,
     /// A revision seen and not yet compared, and when it was first seen.
     pending: Option<(u64, std::time::Instant)>,
-    /// Each main's subtree as its picture was drawn from it.
+    /// Each main's [`content_of`] — its subtree, the root's translation zeroed —
+    /// as its picture was drawn from it.
     drawn: HashMap<NodeId, Vec<ondin_core::Node>>,
     /// The render in flight, and the mains it was asked for.
     job: Option<(TileJob, Vec<NodeId>)>,
@@ -2145,7 +2146,9 @@ pub(crate) mod tests {
     /// ***This document*'s pictures are drawn again only for a main that
     /// changed, once the edits settle** (§15 D1034): an edit to a layer outside
     /// every main starts no render at all, and an edit inside one re-renders that
-    /// one, the other's picture kept as it was.
+    /// one, the other's picture kept as it was. And since §15 D1035: a main only
+    /// moved renders nothing, one rotated renders, and `invalidate` — a family
+    /// the document names arriving — renders every picture at once.
     ///
     /// Flip, run: comparing nothing (every main counted as changed) fails *"an
     /// unrelated edit renders nothing"*; dropping the settle wait fails *"not

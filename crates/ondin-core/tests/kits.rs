@@ -1840,5 +1840,172 @@ fn a_third_kits_newer_main_asks_for_its_update() {
         let mut tx = u.tx;
         ondin_core::propagate::owed(&d, &mut tx, &mut ids);
         d.apply(&tx).expect("and commit");
+        // What it commits (`[X2-L6-01]`): one *Dot* in *Chip*'s *Badge*, the
+        // copy of *Badge*'s own.
+        let nested = d.get(held(&d, L_ID, chip)).unwrap().children()[0];
+        let badge_dot = d.get(held(&d, K_ID, badge)).unwrap().children()[0];
+        let dots = d.get(nested).unwrap().children();
+        assert_eq!(dots.len(), 1, "one dot in Chip's Badge");
+        assert_eq!(d.get(dots[0]).unwrap().link(), Some(badge_dot));
     }
+
+    // 🚨 **K's update taken while L's publish is older** (the v0.5.0 release
+    // review's `[X2-L1-01]`, route 2): D's *Badge* gains the dot, and *Chip*'s
+    // nested *Badge* — L's v7, which never saw it — was given a copy of it with
+    // no origin, and the vault refused the commit. K alone, and K with L's v7
+    // again, *Accept all*'s case, both commit, *Chip* as L published it.
+    for kits in [vec![(K_ID, 3, &k3)], vec![(K_ID, 3, &k3), (L_ID, 7, &l7)]] {
+        let mut d = d.clone();
+        let mut tx = kit::update_all(&d, &mut ids, &kits).unwrap().tx;
+        ondin_core::propagate::owed(&d, &mut tx, &mut ids);
+        d.apply(&tx)
+            .expect("K's update commits before L has taken it");
+        let nested = d.get(held(&d, L_ID, chip)).unwrap().children()[0];
+        assert!(
+            d.get(nested).unwrap().children().is_empty(),
+            "Chip as L published it"
+        );
+        assert_eq!(d.get(held(&d, K_ID, badge)).unwrap().children().len(), 1);
+    }
+}
+
+/// The vault node holding `kit`'s `node`.
+fn held(d: &Document, kit: &str, node: NodeId) -> NodeId {
+    let mut stack = vec![d.vault().expect("a vault")];
+    while let Some(id) = stack.pop() {
+        let n = d.get(id).unwrap();
+        if n.origin().is_some_and(|o| o.kit == kit && o.node == node) {
+            return id;
+        }
+        stack.extend(n.children());
+    }
+    panic!("held")
+}
+
+/// 🚨 **A layer the kit deletes from a nested copy stays deleted through the
+/// update** (the v0.5.0 release review's `[X2-L1-01]`, route 1). L gives *Icon*
+/// a *Ring*, then deletes *Ring*'s copy from *Card*'s nested *Icon* — instance
+/// structure is free (§5.3d) — and publishes. D, holding *Card*, accepts: the
+/// commit's structural pass gave the vault's nested copy the ring again, with
+/// no origin, and the vault refused the update every time it was asked.
+///
+/// Flip, run: `follows_nothing` answering `false` fails *"an accepted update
+/// commits"* with `Vault(.., NoOrigin)`.
+#[test]
+fn a_layer_the_kit_cut_from_a_nested_copy_stays_cut() {
+    let mut k = kit();
+    let (mut d, mut ids) = consumer();
+    let inst = insert(&mut d, &mut ids, &k, k.card);
+    let (ring, icon) = (IdSource::new(0xAF).mint(), k.icon);
+    edit_and_publish(&mut k, vec![create(ring, icon, 1, rect(), "Ring")]);
+    let nested = k.doc.get(k.card).unwrap().children()[0];
+    let cut = *k
+        .doc
+        .get(nested)
+        .unwrap()
+        .children()
+        .iter()
+        .find(|c| k.doc.get(**c).unwrap().link() == Some(ring))
+        .expect("fixture: the kit's door copied the ring into Card");
+    edit_and_publish(&mut k, vec![Operation::DeleteNode { id: cut }]);
+
+    accept(&mut d, &mut ids, &k);
+    let vault_nested = d.get(held(&d, L_ID, k.card)).unwrap().children()[0];
+    assert_eq!(
+        shape(&d, vault_nested),
+        shape(published(&k).document(), nested)
+    );
+    assert_eq!(d.get(held(&d, L_ID, k.icon)).unwrap().children().len(), 2);
+    let page_nested = d.get(inst).unwrap().children()[0];
+    assert_eq!(
+        d.get(page_nested).unwrap().children().len(),
+        1,
+        "nor on the page"
+    );
+}
+
+/// **A consumer's copy is the publish, value and order** (the v0.5.0 release
+/// review's `[X2-L1-02]`). The kit changes *Icon*'s dot and holds *Card*'s
+/// nested dot at the old opacity. Accepting wrote the publish into the vault —
+/// no op for the nested dot, already 1 — and then the commit's field pass made
+/// the copy follow its main again: 0.5 against the published 1, so D drew Card
+/// unlike a consumer that inserted the same version fresh.
+///
+/// Flip, run: `follows_nothing` answering `false` fails *"the value is the
+/// publish's"*, 0.5 against 1.
+#[test]
+fn an_accepted_copy_is_the_publish_value() {
+    let mut k = kit();
+    let (mut d, mut ids) = consumer();
+    let inst = insert(&mut d, &mut ids, &k, k.card);
+    let nested = k.doc.get(k.card).unwrap().children()[0];
+    let nested_dot = k.doc.get(nested).unwrap().children()[0];
+    let icon_dot = k.icon_dot;
+    edit_and_publish(
+        &mut k,
+        vec![Operation::SetOpacity {
+            id: icon_dot,
+            opacity: 0.5,
+        }],
+    );
+    edit_and_publish(
+        &mut k,
+        vec![Operation::SetOpacity {
+            id: nested_dot,
+            opacity: 1.0,
+        }],
+    );
+    accept(&mut d, &mut ids, &k);
+    let vault_nested = d.get(held(&d, L_ID, k.card)).unwrap().children()[0];
+    let want = shape(published(&k).document(), nested);
+    assert_eq!(
+        want,
+        vec![("Dot".to_string(), 1.0)],
+        "fixture: the kit kept Card's dot"
+    );
+    assert_eq!(shape(&d, vault_nested), want, "the value is the publish's");
+    let page_nested = d.get(inst).unwrap().children()[0];
+    assert_eq!(shape(&d, page_nested), want, "and the page's");
+}
+
+/// **…and its order** (`[X2-L1-02]`'s second case): with D holding *Icon*
+/// {Dot, Ring}, the kit puts a layer of *Card*'s own at the front of its nested
+/// *Icon* and moves *Ring* before *Dot* in *Icon*. The sync put the nested copy
+/// in the published order and the structural pass's reorder arm then applied
+/// *Icon*'s reorder to it again.
+///
+/// Flip, run: `follows_nothing` answering `false` fails *"the order is the
+/// publish's"* with `[Ring, Dot, Own]` against `[Own, Ring, Dot]`. ⚠️ **Its
+/// first fixture took all three edits in one accept and passed under the
+/// flip**: a consumer gaining *Ring* and the reorder together has no reorder of
+/// its own to replay, so D accepts *Ring* first.
+///
+/// 🚨 **And with the vault fixed, the page was still wrong**: the structural
+/// pass's reorder arm took only a parent whose children were the same set, and
+/// the vault's nested copy had gained *Own* in the same transaction, so the
+/// instance got *Own* and never the new order. Flip, run: the arm skipping a
+/// parent that gained or lost a child again fails *"and the page's"* with
+/// `[Dot, Own, Ring]`.
+#[test]
+fn an_accepted_copy_is_the_publish_order() {
+    let mut k = kit();
+    let (mut d, mut ids) = consumer();
+    let inst = insert(&mut d, &mut ids, &k, k.card);
+    let nested = k.doc.get(k.card).unwrap().children()[0];
+    let icon = k.icon;
+    let vault_nested = d.get(held(&d, L_ID, k.card)).unwrap().children()[0];
+    let page_nested = d.get(inst).unwrap().children()[0];
+    let mut lids = IdSource::new(0xAF);
+    let (ring, own) = (lids.mint(), lids.mint());
+    // D holds *Icon* {Dot, Ring} first, so the reorder is a reorder here too.
+    edit_and_publish(&mut k, vec![create(ring, icon, 1, rect(), "Ring")]);
+    accept(&mut d, &mut ids, &k);
+    edit_and_publish(&mut k, vec![create(own, nested, 0, rect(), "Own")]);
+    edit_and_publish(&mut k, vec![Operation::Reorder { id: ring, index: 0 }]);
+    accept(&mut d, &mut ids, &k);
+    let want = shape(published(&k).document(), nested);
+    let names: Vec<&str> = want.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(names, ["Own", "Ring", "Dot"], "fixture: the kit's order");
+    assert_eq!(shape(&d, vault_nested), want, "the order is the publish's");
+    assert_eq!(shape(&d, page_nested), want, "and the page's");
 }

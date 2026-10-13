@@ -145,9 +145,30 @@ pub fn touches_copied(doc: &Document, tx: &Transaction) -> bool {
     let written: FxHashSet<NodeId> = tx.0.iter().filter_map(Operation::overwrites).collect();
     !written.is_empty()
         && doc.node_map().values().any(|n| {
-            n.link.is_some_and(|l| written.contains(&l))
-                || n.swap.is_some_and(|s| written.contains(&s))
+            (n.link.is_some_and(|l| written.contains(&l))
+                || n.swap.is_some_and(|s| written.contains(&s)))
+                && !follows_nothing(doc, n.id)
         })
+}
+
+/// 🚨 **Whether `id` is a copy no pass may write: one in the vault** (the v0.5.0
+/// release review's `[X2-L1-01]`, `[X2-L1-02]`; §15 D1012's read-only vault).
+/// A vendored main is the kit's publish and nothing else — a kit update writes
+/// every vault node to it, and `vendor` copies it whole — so a copy inside the
+/// vault takes its values, its children and their order **from the publish
+/// alone**, never by following its main here. Followed, it went wrong three
+/// ways: a nested copy the publish leaves without a layer its main gained (free
+/// instance structure in the kit, or a third kit newer than the one that nests
+/// it) was given a fresh copy with no origin and the vault refused the whole
+/// update, for good; a nested value the publish holds equal to the main's old
+/// one — so the sync wrote no op for it — was made to follow the main's new
+/// one; and a sync's reorder of a nested copy was reordered again. Each left
+/// a consumer's copy unlike the publish, or no update at all.
+///
+/// Only the *follower* is spared: a vault node is still a source, so its own
+/// edits — the sync's — reach the document's instances of it.
+fn follows_nothing(doc: &Document, id: NodeId) -> bool {
+    doc.in_vault(id)
 }
 
 /// What of its source's edits a copy takes.
@@ -164,9 +185,14 @@ enum Takes {
 /// Every source → the copies that follow it, and what of it each takes. A copy
 /// follows its link; a **swapped** copy follows its link for the slot's fields
 /// and its swap for the rest (§15 D983, `swap::is_slot_field`). Each list sorted.
+///
+/// 🚨 **A copy in the vault follows nothing** ([`follows_nothing`]).
 fn followers(doc: &Document) -> FxHashMap<NodeId, Vec<(NodeId, Takes)>> {
     let mut out: FxHashMap<NodeId, Vec<(NodeId, Takes)>> = FxHashMap::default();
     for n in doc.node_map().values() {
+        if follows_nothing(doc, n.id) {
+            continue;
+        }
         match (n.link, n.swap) {
             (Some(l), Some(s)) => {
                 out.entry(l).or_default().push((n.id, Takes::Slot));
@@ -184,9 +210,13 @@ fn followers(doc: &Document) -> FxHashMap<NodeId, Vec<(NodeId, Takes)>> {
 
 /// Every source → the copies whose **children** are copies of its children: a
 /// copy of its link's, a swapped copy of its swap's (§15 D983). Each list sorted.
+/// A copy in the vault is none of them ([`follows_nothing`]).
 fn structural_copies(doc: &Document) -> FxHashMap<NodeId, Vec<NodeId>> {
     let mut out: FxHashMap<NodeId, Vec<NodeId>> = FxHashMap::default();
     for n in doc.node_map().values() {
+        if follows_nothing(doc, n.id) {
+            continue;
+        }
         if let Some(src) = n.swap.or(n.link) {
             out.entry(src).or_default().push(n.id);
         }
@@ -784,49 +814,79 @@ pub fn propagate_structure(
     // release review: a nested copy in an outer main's instance kept the old
     // order, and from then on refused every later reorder as one the instance
     // had made itself (`[X3-L2-02]`).
+    //
+    // 🚨 **A parent that also gained or lost children is reordered too** (the
+    // v0.5.0 release review's `[X2-L1-02]`): what is compared is the order of
+    // the children it kept, and each copy's children are read as the arms above
+    // left them (`sim`, less what they delete). The arm once took only a parent
+    // whose children were the same set, so a kit update that gave a nested copy
+    // a layer of its own *and* the main's new order — one transaction — carried
+    // the layer to the instances and not the order. A hand edit rarely does both
+    // at once; an update does it whenever a publish does.
+    let link_now = |k: NodeId| {
+        new_links
+            .get(&k)
+            .copied()
+            .or_else(|| before.get(&k).and_then(|n| n.link))
+    };
     let mut reorders: Vec<(NodeId, Vec<NodeId>, Vec<NodeId>)> = parents
         .iter()
         .filter_map(|p| {
-            let a = &after_nodes.get(p)?.children;
-            Some((*p, before[p].children.clone(), a.clone()))
+            Some((
+                *p,
+                before[p].children.clone(),
+                after_nodes.get(p)?.children.clone(),
+            ))
         })
         .collect();
     while let Some((p, b, a)) = reorders.pop() {
-        let bs: FxHashSet<_> = b.iter().collect();
-        if b.len() != a.len() || !a.iter().all(|c| bs.contains(c)) {
-            continue;
+        let (bs, as_): (FxHashSet<_>, FxHashSet<_>) = (b.iter().collect(), a.iter().collect());
+        // The children the parent kept, in their old order and in their new.
+        let kept: Vec<NodeId> = b.iter().copied().filter(|c| as_.contains(c)).collect();
+        if kept
+            == a.iter()
+                .copied()
+                .filter(|c| bs.contains(c))
+                .collect::<Vec<_>>()
+        {
+            continue; // nothing kept changed its place: the inserts' anchors hold
         }
         for &pc in copies.get(&p).into_iter().flatten() {
-            if !after_nodes.contains_key(&pc) {
+            if !after_nodes.contains_key(&pc) || deleted.contains(&pc) {
                 continue;
             }
-            let kids = &before[&pc].children;
+            let mut kids = children_of(&sim, pc);
+            kids.retain(|k| !deleted.contains(k));
+            let kids = &kids;
             let linked: Vec<NodeId> = kids
                 .iter()
-                .filter_map(|k| before.get(k).and_then(|n| n.link))
-                .filter(|s| bs.contains(s))
+                .filter_map(|k| link_now(*k))
+                .filter(|s| bs.contains(s) && as_.contains(s))
                 .collect();
-            let old: Vec<NodeId> = b.iter().copied().filter(|s| linked.contains(s)).collect();
+            let old: Vec<NodeId> = kept
+                .iter()
+                .copied()
+                .filter(|s| linked.contains(s))
+                .collect();
             if linked != old {
                 continue; // the instance reordered them itself
             }
-            let new: Vec<NodeId> = a.iter().copied().filter(|s| linked.contains(s)).collect();
-            // The copy's linked children take the main's new order in the slots
-            // they occupy; its own layers stay where they are.
+            // The copy's linked children — the counterparts the inserts above just
+            // made among them, which were anchored against the old order — take
+            // the main's new order in the slots they occupy; its own layers stay
+            // where they are.
+            let followed: Vec<NodeId> = kids
+                .iter()
+                .filter_map(|k| link_now(*k))
+                .filter(|s| as_.contains(s))
+                .collect();
+            let new: Vec<NodeId> = a.iter().copied().filter(|s| followed.contains(s)).collect();
             let mut target = kids.clone();
             let slots: Vec<usize> = (0..kids.len())
-                .filter(|&i| {
-                    before
-                        .get(&kids[i])
-                        .and_then(|n| n.link)
-                        .is_some_and(|s| bs.contains(&s))
-                })
+                .filter(|&i| link_now(kids[i]).is_some_and(|s| as_.contains(&s)))
                 .collect();
             for (slot, src) in slots.into_iter().zip(&new) {
-                if let Some(k) = kids
-                    .iter()
-                    .find(|k| before.get(k).and_then(|n| n.link) == Some(*src))
-                {
+                if let Some(k) = kids.iter().find(|k| link_now(**k) == Some(*src)) {
                     target[slot] = *k;
                 }
             }
@@ -836,6 +896,7 @@ pub fn propagate_structure(
             for (i, id) in target.iter().enumerate() {
                 out.push(Operation::Reorder { id: *id, index: i });
             }
+            sim.insert(pc, target.clone());
             reorders.push((pc, kids.clone(), target));
         }
     }

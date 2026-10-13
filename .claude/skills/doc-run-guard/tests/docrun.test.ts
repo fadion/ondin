@@ -42,6 +42,34 @@ group('compare', () => {
     ])
   })
 
+  test('the summary carried off is seen when the insertion is padded with blank lines', async () => {
+    // [X7-L1-09]: rustdoc attaches a `///` across a blank line, so `helper`
+    // carries the victim's summary; docrun.awk's rule drops a run ended by a
+    // blank, and the run holding the summary was never looked at.
+    const before = ['/// Summary of victim.', '/// More about it.', '/// Even more.', 'fn victim() {}', ''].join('\n')
+    const after = [
+      '/// Summary of victim.',
+      '',
+      'fn helper() {}',
+      '',
+      '/// More about it.',
+      '/// Even more.',
+      'fn victim() {}',
+      '',
+    ].join('\n')
+    expect(compare(before, after)).toEqual([
+      { kind: 'summary-moved', item: 'fn victim() {}', summary: '/// Summary of victim.', nowAbove: 'fn helper() {}' },
+    ])
+  })
+
+  test('a whole run left above a blank line is lost to the item below the blank', async () => {
+    const before = ['/// About victim.', '/// More.', 'fn victim() {}', ''].join('\n')
+    const after = ['/// About victim.', '/// More.', '', 'fn helper() {}', '', 'fn victim() {}', ''].join('\n')
+    expect(compare(before, after)).toEqual([
+      { kind: 'lost', item: 'fn victim() {}', lines: 2, nowAbove: 'fn helper() {}' },
+    ])
+  })
+
   test('two runs exchanged are a swap, though neither item lost a doc', async () => {
     const before = ['/// About a.', '#[test]', 'fn a() {}', '', '/// About b.', '#[test]', 'fn b() {}', ''].join('\n')
     const after = ['/// About b.', '#[test]', 'fn a() {}', '', '/// About a.', '#[test]', 'fn b() {}', ''].join('\n')
@@ -53,6 +81,14 @@ group('compare', () => {
     const before = [...doc, 'fn a() {}', ''].join('\n')
     const after = [...doc, 'fn a() {}', '', ...doc, 'fn b() {}', ''].join('\n')
     expect(compare(before, after)).toEqual([{ kind: 'duplicated', item: 'fn a() {}', lines: 3 }])
+  })
+
+  test('a two-line run copied beside the original is a duplication too', async () => {
+    // [X7-L1-09]: the tally counted runs of three lines or more.
+    const doc = ['/// One.', '/// Two.']
+    const before = [...doc, 'fn a() {}', ''].join('\n')
+    const after = [...doc, 'fn a() {}', '', ...doc, 'fn b() {}', ''].join('\n')
+    expect(compare(before, after)).toEqual([{ kind: 'duplicated', item: 'fn a() {}', lines: 2 }])
   })
 
   test('rewriting a doc is not a theft', async () => {
@@ -104,6 +140,21 @@ test('an Edit that takes a doc comes back with a reminder for the model', async 
   })
   expect(ran.context?.length).toBe(1)
   expect(ran.context?.[0]).toContain('lost its 2-line `///` run, which now sits above `fn helper() {}`')
+})
+
+test('the check fails open: when it throws, the Edit runs once and comes back plain', async ($, on) => {
+  // [X7-L6-01]: the `.catch` in register.ts is a decision, so it is pinned.
+  // A read that answers no text makes `compare` throw after the Edit ran.
+  let applied = 0
+  on('fs.read', () => ({ value: 42 as never }))
+  on('tool.call', { tool: 'Edit' }, (_$, e) => {
+    applied++
+    return { result: { filePath: e.tool === 'Edit' ? e.file_path : '' } as never }
+  })
+  const ran = await $.tool.call({ tool: 'Edit', file_path: 'C:/repo/src/lib.rs', old_string: 'a', new_string: 'b' })
+  expect(ran.deny).toBeUndefined()
+  expect(ran.context).toBeUndefined()
+  expect(applied).toBe(1)
 })
 
 test('a clean Edit and a non-Rust file come back untouched', async ($, on) => {

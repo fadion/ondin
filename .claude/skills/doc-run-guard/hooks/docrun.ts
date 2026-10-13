@@ -74,6 +74,41 @@ export function docRuns(text: string): Run[] {
   return out
 }
 
+/**
+ * The `///` runs `docRuns` drops, each ended by a blank line, with the item
+ * rustdoc gives them anyway: it attaches a doc across blank lines, to the next
+ * line that is neither blank, a doc line, an attribute nor a plain comment.
+ *
+ * `docRuns` keeps `docrun.awk`'s rule, so these are looked at only to find
+ * where a victim's doc went: an insertion padded with blank lines and anchored
+ * inside or below a run leaves the run stranded above the blank, on the new
+ * item ([X7-L1-09] in the v0.5.0 release review).
+ */
+export function strandedRuns(text: string): Run[] {
+  const out: Run[] = []
+  const ls = lines(text)
+  const attr = attributeLines(ls)
+  let doc: string[] = []
+  let stranded: string[] | undefined
+  for (const [i, line] of ls.entries()) {
+    if (DOC.test(line)) {
+      doc.push(line.trim())
+      continue
+    }
+    if (attr[i] || COMMENT.test(line)) continue
+    const item = line.trim()
+    if (item === '') {
+      if (doc.length > 0) stranded ??= doc
+      doc = []
+      continue
+    }
+    if (stranded) out.push({ item, doc: stranded })
+    stranded = undefined
+    doc = []
+  }
+  return out
+}
+
 /** How many times each trimmed line occurs, so a key is used only where unique. */
 function counts(ls: string[]): Map<string, number> {
   const m = new Map<string, number>()
@@ -119,6 +154,7 @@ export function compare(before: string, after: string): Finding[] {
   const aCount = counts(al)
   const bRuns = docRuns(before)
   const aRuns = docRuns(after)
+  const aStranded = strandedRuns(after)
   const bItems = new Set(bl.map(l => l.trim()))
   const aIndex = new Map<string, number>()
   al.forEach((l, i) => aIndex.set(l.trim(), i))
@@ -135,7 +171,9 @@ export function compare(before: string, after: string): Finding[] {
     const head = was[0] ?? ''
 
     if (now.length === 0) {
-      const holder = aRuns.find(r => r.item !== item && r.doc.includes(head))
+      const holder =
+        aRuns.find(r => r.item !== item && r.doc.includes(head)) ??
+        aStranded.find(r => r.item !== item && r.doc.includes(head))
       findings.push({ kind: 'lost', item, lines: was.length, nowAbove: holder?.item })
       continue
     }
@@ -147,14 +185,18 @@ export function compare(before: string, after: string): Finding[] {
       continue
     }
     if (now[0] !== head) {
-      const holder = aRuns.find(r => !bItems.has(r.item) && r.doc[0] === head)
+      const holder =
+        aRuns.find(r => !bItems.has(r.item) && r.doc[0] === head) ??
+        aStranded.find(r => !bItems.has(r.item) && r.doc[0] === head)
       if (holder) findings.push({ kind: 'summary-moved', item, summary: head, nowAbove: holder.item })
     }
   }
 
   const tally = (runs: Run[]) => {
     const m = new Map<string, number>()
-    for (const r of runs) if (r.doc.length >= 3) m.set(join(r.doc), (m.get(join(r.doc)) ?? 0) + 1)
+    // Two lines and up: a one-line doc (`/// The width.`) is repeated honestly
+    // often enough to be noise, a two-line one is not ([X7-L1-09]).
+    for (const r of runs) if (r.doc.length >= 2) m.set(join(r.doc), (m.get(join(r.doc)) ?? 0) + 1)
     return m
   }
   const bTally = tally(bRuns)

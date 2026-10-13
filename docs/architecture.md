@@ -314,7 +314,9 @@ permission.
    §5.3e, §15 D1010, D1012): a vendored kit main is a stored copy of another document's main at a
    published version, rewritten only by the commit that accepts an update. **A kit's own published
    state is not a fourth member**: it is the tree as it stood at the publish, which the document no
-   longer holds once edited, so there is nothing to derive it from (§15 D1011 (2)).
+   longer holds once edited, so there is nothing to derive it from (§15 D1011 (2)). ⚠️ **Variables
+   add no member** (§5.3f, §15 D1037, ruled, not built): a bound field stores its binding and resolves
+   it at read; a kit's variables and styles carried into a consumer would be the third member's kind.
 5. **Uncommitted state never enters the Document.** Interactive gestures (drag, resize, pen preview,
    text-in-progress) live in app-side preview state and reach the renderer as `RenderOverrides`
    (§6.2) — per-node patches projected from the very transaction the gesture will commit. Exactly
@@ -1748,6 +1750,9 @@ content, and content must not follow while overridden spans stay behind. What fo
 exist, there being no override record to fall out of step with the values; *reset* copies the
 source's value back; and the inspector shows a field as overridden by comparing it with its source.
 **The accepted catch**: setting a copy's value equal to the main's makes it follow again.
+⚠️ **A bound field compares its binding, not what it resolves to** (§5.3f, §15 D1037, ruled, not
+built): a main rebinding *brand* → *accent* reaches a copy still bound to *brand*, and a copy bound
+elsewhere keeps its binding as an override.
 
 Three rules the session adds to it:
 
@@ -2950,6 +2955,10 @@ named (§15 D1014).
 Reusing L's ids would make two documents vendoring the same
 kit collide when one is pasted into the other.
 
+⚠️ **Kits are to carry the variables and styles a vendored main uses** (§5.3f, §15 D1037 — the
+session's proposal, not objected to; not built), under this section's provenance and update flow,
+read-only in D as the main is. What a kit's modes mean in a consumer whose modes differ is open.
+
 **Publishing** (1C, 2A–2D). A kit's top bar carries a neutral *Kit* tag after the document's save dot and,
 hard against it in the same 26-tall box, *Publish N* (§15 D1025: the mockups put it on the right, and
 2A neutral where the maintainer made it the accent), counting the components changed since the last
@@ -3307,6 +3316,55 @@ and the dashboard's 1B §15 D1017).
   waits; no *Locate…*.
 - **Mains made local are placed by their laid-out boxes**, a frame's too, measured on the document the
   transaction leaves, stacked down the right of the content 80 apart.
+
+### 5.3f Styles and variables (ruled 2026-10-11; not built; §15 D1037)
+
+> **Design ahead of code, all of it.** Ruled with the maintainer on 2026-10-11, in conversation, on a
+> design the session put: §15 D1037 says which part is whose. **Nothing is built**; the build order and
+> what is open are `roadmap.md`'s *Next · Styles and variables*, and a Claude Design pass on the chrome
+> comes first. **When a step lands, this section is rewritten in the present tense** and the pointers
+> to it from invariant 4, §5.3d, §5.3e, §5.9, §5.11, §7 and §12 go.
+
+**A variable** is a named, typed value — **colour, number, string or boolean** — or an **alias** naming
+another variable, with **one value per mode**. CSS custom properties are the model. **A mode is set on a
+frame and inherited by its descendants** (the maintainer's ruling), so what a variable resolves to
+depends on where it is read. Variables bind **layout fields from the start** (§5.3c's padding, gap and
+the rest), not only paint.
+
+🚨 **A bindable field stores its binding and resolves it at read** (the session's, accepted): it holds
+`Literal(T) | Bound(VarId)`, and the value it draws is found against the mode in force at that node.
+Three things follow. **Overrides compare the binding** (§5.3d): a main rebinding *brand* → *accent*
+reaches a copy still bound to *brand*, and a copy bound elsewhere keeps it as an override. **Editing a
+variable writes no node**, so nothing propagates. And **§12's fourth property holds as written** — the
+resolved value is in no node — where §5.3d's copies bend it. ⚠️ **The cost is every reader**:
+`container::lay_out`, `scene::build`, the SVG writer, the snapshot and the inspector must each resolve,
+and one that skips it draws the fallback in silence. The proposed guard is a `Bindable<T>` reachable only
+through `resolve`, so the compiler lists the readers. **There is no resolve step today** — §5.9's
+`Resolved` holds none, and the scene build reads a node's fields as stored.
+
+**Deleting a variable in use detaches** every field bound to it to the value it resolved to, as ops in
+the deleting transaction — §5.3d's rule for a deleted main.
+
+**A style** is one slot's isolated set of values — an isolated CSS class, not the cascade. **The slots
+are fills, strokes, effects, text and layout**; a node holds at most one style per slot, and styles do
+not stack. **A card is styled or not, as a whole**: editing any field of a styled card detaches it, with
+no partial override and no inheritance (the maintainer's ruling). A style's values may be variables.
+Text styles come last, text storing its character attributes per span (§5.4).
+
+**The chrome** (the maintainer's rulings, §15 D1037 in full). A bound field is a **chip with the
+variable's name at the field's own width**, its resolved value in the tooltip; a typed literal or
+`Backspace` detaches; disagreeing bindings show *Mixed*; it is marked by shape, never by hue, beside
+§5.3d's override dot. **Binding is by typing `--`** into the field, which takes the whole field —
+`--x * 2` is refused, `expr.rs` being a calculator with no names (§13 decision 1). A field's right-click
+offers *Bind to variable…*, *Extract into variable* (its value into every mode) and *Detach*; a colour's
+swatch popup gains a *Variables* tab; a styled card is one row with *Detach* on hover. **The browser** is a
+floating panel on §5.3e's insert picker's model, its button at the toolbar's foot, taking turns with the
+picker, with *Variables* and *Styles* tabs, modes as columns, and a usage count that selects.
+
+**Kits carry the variables and styles a vendored main uses** (the session's, not objected to), under
+§5.3e's provenance and update flow. **The export as CSS custom properties** is the session's and not
+ruled; §7 writes paint as presentation attributes today, so where a `var()` would go is part of the
+question.
 
 ### 5.4 Text node
 
@@ -5786,6 +5844,11 @@ impl Resolved {
   `a_shadow_moves_the_ink_box_up_the_tree_and_leaves_the_editing_box_alone` states the split directly.
 - Known cost: `update` rebuilds the whole R-tree (`bulk_load`) rather than patching entries. Fine
   at current scale, and the first thing to fix when node counts grow — parked in §14.
+- ⚠️ **Variables owe this layer a resolve step it does not have** (§5.3f, §15 D1037, ruled, not
+  built). A bound field's value depends on the variable's value in the mode in force at the node, and
+  a variable's edit or a frame's mode change targets no bound node, so `DirtySet` — node ids — has
+  nothing to name; `update` must learn which nodes read a variable, and the property test above must
+  author those operations.
 
 ### 5.10 Queries
 
@@ -6252,6 +6315,11 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   a whole document of the same version, and the ladder does not descend into it**: a later migration
   that reshapes a document owes the nested one too (`PublishedDto`'s doc). The loader refuses a
   published state that carries one of its own, so the nesting is one level.
+- ⚠️ **Variables and styles owe v7** (§5.3f, §15 D1037, ruled, not built): a document-level table of
+  variables and styles, and a bindable field becoming `Literal | Bound` — a change of an existing
+  field's shape, so a bump with a migration under the rule above, v6 being the version the v0.6.0
+  release commit (`51b4550`) carries. The
+  nested published document is owed the same step.
 
 ### 5.11a The library block (§15 D362)
 
@@ -7603,6 +7671,10 @@ other were right, which is why both exist.
   export the document, rewrite a copy by hand into the shape being replaced, serve both over HTTP,
   draw them into canvases and difference the pixels. That is what said the `<use>` hoist above is
   identical and not merely valid — 10,800 opaque pixels, 0 channels differing (§15 D595).
+  ⚠️ **Variables are not in this writer, and the writer's paint has no place for them yet** (§5.3f,
+  §15 D1037, ruled, not built). Paint is written as presentation attributes (`fill="#…"`,
+  `stroke="…"`), a `style` attribute appearing only for an alpha mask's `mask-type`; an export as CSS
+  custom properties is the session's proposal, not ruled, and its shape is open.
 - **PNG** — `png(doc, res, vp) -> Vec<u8>` via `VelloCpuRenderer` + PNG encoder. No GPU anywhere in
   this path. It shares the walk, so it needs no rule of its own about a picture that cannot be drawn:
   the placeholder is ink and lands on the pixels, which is where a hole would do the most damage and
@@ -15452,7 +15524,9 @@ What v1 locks in so a future sync layer is possible without re-architecting:
    racing an instance's creation on two peers would need a resync on merge. **Kits
    (§5.3e, §15 D1010, ~~designed, not built~~ vendoring built, updates not — D1012) bend it no further**: a vendored library main changes only
    by the commit that accepts an update, so replay converges, and an accept racing an instance's
-   creation is the same resync.
+   creation is the same resync. **Variables (§5.3f, §15 D1037, ruled, not built) do not bend it**: a
+   bound field stores the binding and the value it draws is resolved at read, so no resolved value is
+   in the document; a kit's vendored variables and styles are the kits' bend above, not a new one.
 
 Explicitly *not* designed now: conflict resolution, causality/ordering metadata, presence, network
 protocol. Ops are the unit of change; everything else is future work that these four properties

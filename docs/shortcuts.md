@@ -350,6 +350,7 @@ and deepest convention of the five apps.
 | `Ctrl+\` | ✅ present mode (hide all chrome) | Figma's show/hide-UI chord |
 | `Ctrl+Alt+\` | ✅ show / hide layers panel | |
 | `Ctrl+Shift+\` | ✅ show / hide toolbar | both spellings accepted |
+| — | show status messages | **deliberately unbound** (§15 D1025) |
 
 **Snap to baselines has no chord and that is the decision, not an omission** (§15 D355). The
 other three snap switches earned theirs by being Illustrator's; no application has baseline
@@ -362,7 +363,12 @@ reaching for a free chord and calling it parity.
 column and row bands got a workspace switch on 2026-09-15 — *View ▸ Show layout grid*, the row
 after *Show grid* — and no chord, there being no convention to match: ⚠️ **this file was grepped
 before the switch was built and had never reserved or declined one for it**, which is what the row
-above records so nobody has to grep again. `ViewSwitch::accel` answers `None` for exactly these two.
+above records so nobody has to grep again. `ViewSwitch::accel` answered `None` for exactly these two.
+
+**Show status messages is the third** (§15 D1025): *View ▸ Show status messages* silences the
+floating status bar's messages, and no convention asks for a chord. `ViewSwitch::accel` answers `None`
+for these three now; this file reserved nothing and declined nothing for it before (grepped for
+*status* on 2026-10-13).
 
 `Ctrl+\` maps onto present mode rather than a new toggle: present mode already *is* "hide
 every piece of chrome at once and restore what the user had on leaving", which is what

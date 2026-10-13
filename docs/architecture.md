@@ -2939,10 +2939,11 @@ named (§15 D1014).
 Reusing L's ids would make two documents vendoring the same
 kit collide when one is pasted into the other.
 
-**Publishing** (1C, 2A–2D). A kit's top bar carries a neutral *Kit* tag after the document's name and, on
-the right, *Publish N* — the components changed since the last publish, the working document against the
-published state; on hover *1 added, 2 changed, 1 removed*; at zero disabled, *Nothing to publish · no
-changes since v8*; never published, every component. *Publish kit…* is the document menu's row and
+**Publishing** (1C, 2A–2D). A kit's top bar carries a neutral *Kit* tag after the document's save dot and,
+hard against it in the same 26-tall box, *Publish N* (§15 D1025: the mockups put it on the right, and
+2A neutral where the maintainer made it the accent), counting the components changed since the last
+publish, the working document against the published state; on hover *1 added, 2 changed, 1
+removed*; at zero disabled, *Nothing to publish · no changes since v8*; never published, every component. *Publish kit…* is the document menu's row and
 `Ctrl+Alt+P`, disabled with *No changes* when nothing is new. The dialog, *Publish Atlas · v9*: *N
 components changed since v8 (date)*, grouped *Added* / *Changed* / *Removed*, each item with its glyph
 (set, main, variant) and a set with its variant count, a removed one *kept as copy where used*; an
@@ -2970,8 +2971,8 @@ Browsing lists the kits D uses first, by last use, each opening to its sets and 
 listed once and inserts its default variant; then *In your library, not used here*, with component
 counts; a kit's header reads *v8 · 24*. Search runs across every kit, used or not, as a flat list with the
 kit on the right, best match first, `Enter` placing the highlighted one; a variant matches through its
-set. With no kits the picker shows **D's own mains first** (*This document*) and says how a kit comes to
-exist. A kit never published is listed *not published*, with nothing to insert; a kit not found is
+set. **D's own mains lead** (*This document*) whenever it has any — not only with no kits (§15 D1031) —
+and with no kits the picker says how a kit comes to exist. A kit never published is listed *not published*, with nothing to insert; a kit not found is
 *Unavailable* and offers only the copies D already holds, which still insert. **A conflict copy of a kit**
 — a second file carrying its `meta.id` — loses to the file that is not one, recognised by filename (§15
 D375); the rest are ignored.
@@ -3067,24 +3068,39 @@ reaches a second machine through the synced base folder (§5.11a), with no netwo
   one: a pre-library file has a path and nothing else would mint it, and a kit with no id is one the
   scan can never find. Marking saves; it is not undoable. A save that fails leaves its own status, and
   the verb says nothing over it (`save_file` answers whether it wrote).
-- **The *Kit* tag** (`kit_tag`) after the name while the kit is sharing — neutral, `theme::icon::PACKAGE`.
+- **The *Kit* tag** (`kit_tag`) after the save dot while the kit is sharing — neutral,
+  `theme::icon::PACKAGE`, in *Publish N*'s own box: 26 tall, 10 in, 7 between glyph and word, radius 6
+  (§15 D1025). `top_bar` draws it, not `document_menu`, so the dot stays beside the name on a kit as on
+  every document (§15 D962).
 - **The insert picker** (`kits/picker.rs`) opens from the hexagon at the tool rail's foot or `Shift+I`,
   an `Area` beside the button, closed by `Escape` — a rung of `OndinApp::escape` after the colour
   picker's, so one press closes one thing (§9.4) — or the button. Its search field takes the keyboard
   **once**, on opening, and gives it back for good; `Shift+I` closes the picker only while the field
   does not hold it, and ↑, ↓ and `Enter` move and place the highlighted result **only while it does**
   — read from anywhere, `Enter` stepping into a group or committing a field also placed one, and the
-  arrows nudged and moved the highlight at once (§15 D1023). Opening it rescans the library. *Used* means a kit among the `origin.kit`s
-  of the vault's children; their order is **last use, kept per machine and per document**
-  (`library::cache::LocalIndex::kit_use`). A document's own mains are tiles only when there are no kits,
-  and otherwise only in search; that empty state ends with 3G's *Open library*, which closes the picker
-  for the dashboard's *Kits* filter (§15 D1018). A placement is one transaction: `kit::insert`, or
+  arrows nudged and moved the highlight at once (§15 D1023). Opening it rescans the library. *Used* means
+  **an instance on the page links or swaps to one of the kit's vault mains** (`kits_on_the_page`, a walk
+  from the root that never enters the vault, each link followed to the end of its chain so a kit nested
+  in another kit's main counts) — not that the vault holds its copies, which outlive the
+  last instance; a vendored kit neither used nor in the library is still listed, unused, for 3I's copies
+  (§15 D1028). The update pill and *Kits used…* still read the vault, a vendored main being updated
+  either way. Their order is **last use, kept per machine and per document**
+  (`library::cache::LocalIndex::kit_use`). **A document's own mains lead as tiles under *This document*
+  whenever it has any**, pictured by a worker per session revision (`LocalTiles`, §15 D1031); with no
+  kits the list ends with 3G's *Open library*, which closes the picker for the dashboard's *Kits* filter
+  (§15 D1018). **A set's tile is its default variant** (`index::tile_subject`), what a click places, and
+  the list draws no scrollbar (§15 D1028). A placement is one transaction: `kit::insert`, or
   `build::insert_subtrees` for a local main or an unavailable kit's vault copy, then a `SetTransform`
-  centring the instance on the viewport — or, for a **tile dragged out and let go over the canvas**, on
-  the point of release (`OndinApp::place_kit_at`; a release back over the panel places nothing) —
-  measured on a scratch document with the transaction applied, because the vault is never resolved.
-  Either way the instance lands at the document's top level, never into a frame under the pointer, and
-  only tiles drag, not search rows (§15 D1018). ⚠️ **The panel is one height whatever it holds** — 460, the mockup's, or less where the
+  centring the instance on the viewport — or, for a **tile or search result dragged out and let go over
+  the canvas**, on the point of release (`OndinApp::place_kit_at`; a release back over the panel places
+  nothing) — measured on a scratch document with the transaction applied, because the vault is never
+  resolved. Either way the instance lands at the document's top level, never into a frame under the
+  pointer (§15 D1018). **The drag draws the component under the pointer at the size it will land**,
+  rendered on a worker at the canvas's zoom and capped at half the canvas, and the tile's picture without
+  its card over the panel or until that arrives (§15 D1029). ⚠️ **Every placement waits one painted
+  frame** with its tile at half opacity (`ask_place`, `OndinApp::kit_placing`), because it runs on the frame
+  thread and nothing repaints during it; a picker closed in the wait places at once rather than losing
+  the click (§15 D1030). ⚠️ **The panel is one height whatever it holds** — 460, the mockup's, or less where the
   canvas above the button is shorter (`panel_height`) — and that is not the default: an `Area` lays its
   content out in *last* frame's rect, so a list asking only for a `max_height` never grows past the
   panel's first height. The list asks `min_scrolled_height` and does not shrink, and the area is placed
@@ -3130,7 +3146,9 @@ and the dashboard's 1B §15 D1017).
 - **`kit::publish`** bumps the version, stamps the caller's date and a non-blank note, and stores the
   frozen copy. Not an operation and not undoable; the date is the user's act, never a save's. A kit that
   has published and now holds no main publishes an empty state, so its consumers learn of the removal.
-- ***Publish N*** sits left of undo in a kit's top bar, disabled at 0 with its reason; *Publish kit…* in
+- ***Publish N*** sits after the *Kit* tag in a kit's top bar, 6 from it (§15 D1025), the accent button
+  the library's *New file* is — `ACCENT_800`, `ACCENT_700` hovered, a 1px `ACCENT` stroke — and disabled
+  at 0 on the neutral ground with its reason; *Publish kit…* in
   the document menu and `Ctrl+Alt+P` open the same dialog, or say by status why not. The count is cached
   on the session's revision and the mark's version.
 - **The dialog** is a modal card: a first publish lists six and *+ N more* with *Publish N components*;
@@ -8354,7 +8372,8 @@ colouring the ink says the same thing without adding one.
 **The tree scrolls to a selection it did not make, and every door that makes one has to say so**
 (`sync_tree_to_selection`, `layers_synced_selection`, §15 D581). A selection arriving from the canvas
 is news: the chain is un-collapsed and `scroll_layers_to_selection` recentres the row, which is the
-whole point of the field. A selection the *panel* just made is not, or the row under the pointer moves
+whole point of the field — in one step, `ScrollAnimation::none()`, since §15 D1026: egui's eased
+`scroll_to_rect` was pleasant on a small document and distracting on a large one. A selection the *panel* just made is not, or the row under the pointer moves
 out from under the hand that clicked it. **Three doors change the selection from inside the row
 walk** — the click arm, the right-click arm and the `drag_started()` arm's `set_one` for a row that
 was not already selected — and each owes the same line. ⚠️ **The drag arm did not carry it until
@@ -9646,7 +9665,8 @@ five switches and `None` for seven — the four-field figure above is D675's, as
 `ViewState`'s own doc keeps those numbers in the past tense for that reason. **Nothing pinned the
 canvas menu's row set until D757**, which is how a switch came to be on one menu and not the other for
 a session with every gate green; the test that closes it derives the expected set from `VIEW_MENU`
-less `context-menus.md` §6.1's three deliberate excludes rather than listing it.
+less `context-menus.md` §6.1's deliberate excludes rather than listing it — three until §15 D1025's
+*Show status messages* made them four, and with it `get` answers `None` for eight.
 
 **No region opens a menu it did not claim** (R2). There is no global "any right-click opens
 something": three responses read `secondary_clicked()` — the canvas, a layers row and the layers
@@ -12590,7 +12610,7 @@ Its 13pt accent tick keeps its column whether or not it is showing, so labels st
 the menu instead of shuffling left as things are switched off, and "off" is a dimmer label as well as
 a missing tick — which is what lets the state be read at a glance rather than row by row. View holds
 *Show rulers*, *Show guides*, *Lock guides*, *Show grid*, *Show layout grid*, *Show layers*, *Show
-toolbar* and *Present
+toolbar*, *Show status messages* (§15 D1025, the floating status bar, §9.5) and *Present
 mode*; Snap holds *Snap to shapes*, *Snap to guides*, *Snap to grid* and *Snap to baselines*. The last
 is fourth deliberately: it is the only one of the four with no accelerator and the only one that is not
 Illustrator's, so it reads as the addition it is rather than displacing a row whose position someone
@@ -12599,7 +12619,7 @@ from `input::ViewSwitch`** — the same enum a chord names — so a row's label,
 drives all come out of one place and cannot drift from the keyboard's reading of the same switch
 (§15 D208). All of them are **view state**, following
 `show_rulers`'s precedent rather than `canvas_background`'s (§15 D28), because none of them has
-persisted geometric meaning; ten of the eleven switches default on, and present mode is off and not a
+persisted geometric meaning; eleven of the twelve switches default on, and present mode is off and not a
 peer of the others anyway. The exception is **Lock guides**, which is off because locking guides
 nobody has placed yet is a mode with nothing in it. The two guide rows sit straight after the rulers
 they are pulled out of — rulers, guides, lock, grid — which is Illustrator's order.
@@ -12607,7 +12627,8 @@ they are pulled out of — rulers, guides, lock, grid — which is Illustrator's
 objects — the pixel lattice against a frame's own column and row bands — and the question *"which
 grid did I just hide"* is answered by reading one row against the other. It is **unbound**, on
 *Snap to baselines*' reasoning (§15 D355): a chord is spent to match a convention and there is none
-here to match, so `ViewSwitch::accel` answers `None` for two of the twelve.
+here to match, so `ViewSwitch::accel` answers `None` for two of the twelve — three of the thirteen
+since *Show status messages*, unbound on the same reasoning (§15 D1025).
 
 **Rightmost in that cluster is the Settings button** — Phosphor's upright `sliders`, 28pt, ten points
 clear of everything to its left because everything to its left is *this document's* and this is the
@@ -12644,7 +12665,10 @@ enumeration is exhaustive and is the whole of the ruling** (§15 D750): guides, 
 selection box, the handles, the size badge, the hover outline and the frame name tags all stay, being
 things you edit *with* rather than parts of the app around them, and the mode exists for editing a
 large design with the panels out of the way or on a laptop screen the panels eat half of. The ruler
-**bars** go because they are window furniture at the edge of the frame. ⚠️ **On Windows and Linux
+**bars** go because they are window furniture at the edge of the frame. ⚠️ **The floating status bar
+stays, deliberately** (§15 D1025): it is not in that list, and it is how *"Present mode — Escape to
+leave"* reaches the user at all — the sentence lived in the top bar until then, the first thing the
+mode hides. ⚠️ **On Windows and Linux
 the top bar is the window's title bar too** (§15 D952), so its caption buttons and drag strip go with
 it — and come back on hover (§15 D958): `chrome::present_strip` shows them in a 32pt strip once the
 pointer reaches the window's top edge with no button held, keeps it while the pointer is on it or a
@@ -12655,8 +12679,9 @@ buttons and not out of the mode. *A reader tempted to fold
 arguing at length that present mode *"hides every other overlay"*, and neither was true even of the
 code. It is *not* a fourth view switch beside the others: it
 **overrides** the ones it reads for as long as it is on and leaves them untouched, so leaving it
-restores the workspace the user had rather than a default one. ⚠️ **It reads three of the other seven
-View rows** — rulers, layers and toolbar — and never touched *Show grid*, *Show layout grid* or *Lock guides* at all. ⚠️ **The canvas menu says so since §15 D758**: that menu opens in present mode now
+restores the workspace the user had rather than a default one. ⚠️ **It reads three of the other eight
+View rows** — rulers, layers and toolbar — and never touched *Show grid*, *Show layout grid* or *Lock guides* at all, nor *Show status messages*
+since it arrived. ⚠️ **The canvas menu says so since §15 D758**: that menu opens in present mode now
 (D756), and its *Show rulers* row is **dimmed** there — *"Present mode hides the rulers"* — while the
 other four View rows stay live. **One row and not the group**, which is this paragraph's asymmetry
 reaching a control: a repair that dimmed the group would be wrong about four of them, and a test that
@@ -14219,14 +14244,17 @@ selection, no canvas*, which is an argument about the editor's own machinery; it
 the window, and the ordering is unchanged for everything except the close.
 
 ⚠️ **That early return is also what left this screen with no voice, and it has a status line now**
-(`app::status_label`, §15 D426). `EditorSession::status` is one slot, and its only reader sat below the
+(`app::status_label` at first, §15 D426 — deleted by §15 D1025, the library drawing `app::status_dot`
+since D751). `EditorSession::status` is one slot, and its only reader sat below the
 return — so the **22** messages `panels::dashboard` writes were painted nowhere: a *Delete project*
 that could not read `projects.json` closed its confirmation, left the project in the sidebar and said
 nothing. The message was not even cleared; it surfaced later, out of context, in the editor's top bar
 the next time a document was opened. 🚨 **The two screens draw it differently on purpose, and only
-the *colour* is shared** (§15 D751). The editor's bar draws the sentence (`app::status_label`); the
-library draws `app::status_dot`, a fixed 8pt mark in a 28pt hit box with the whole message on hover.
-It was one function with a `max_w` until 2026-09-10, and the library passed
+the *colour* is shared** (§15 D751). The editor draws the sentence — in its top bar through
+`app::status_label` until §15 D1025, and since then in **the floating status bar**,
+`OndinApp::status_bar`; the library draws `app::status_dot`, a fixed 8pt mark in a 28pt hit box with
+the whole message on hover, untimed.
+`app::status_label` was one function for both screens, with a `max_w`, until 2026-09-10, and the library passed
 `(bar width − SEARCH_W) / 2 − 48` — half the leftover room beside a **painted** search field, which
 is a function of the window: 382pt at the default 1200, 22pt at 500, **zero at 436**, and there is no
 `with_min_inner_size` on the viewport. So the report faded out exactly where present mode says the
@@ -14236,6 +14264,22 @@ library's bar that separates a failure from a report. ⚠️ **A dot cannot be a
 sentence was** — a tooltip's ink never reaches `.shapes` — so the three tests watching this split
 their assertions: the dot and its colour for the surface, `session.status().text` for the wording.
 *Asserting the text alone is the bug this whole passage is about.*
+
+**The editor's status bar** (§15 D1025) is a non-interactable `Area` 12 points in from the central
+panel's bottom-left corner — beside the tool rail, the rail and the layers pane being side panels
+outside that rect — drawn after the canvas, in present mode too. A `ui::menu_frame` card truncating at
+the smaller of 60% of the canvas and 560, so a long message ends in an ellipsis short of the floating
+inspector. It shows the mode whenever it is not `Normal`, and the last message for `app::status_hold`
+after `Status::at` — `clamp(2 + 0.05 × chars, 3, 8)` seconds, a failure ×1.5 and at least 5 — then
+fades over `STATUS_FADE` and is gone; `info` and `fail` stamp `at`, so a message written again is held
+again. The fade is the card's opacity when the message is all it holds, and the message label's colour
+alone when the mode is beside it, so the mode never dips with a message (D1025's amendment); the
+Area takes `.fade_in(false)`, egui's own appear fade having halved its first frames. 🚨 **`age < hold`
+is what lets the bar go**: without it a message past its hold is still "showing" at zero — the whole
+card, invisible, when it is alone, and an invisible message in the card beside the mode when it is
+not (in the first cut, one opacity for both, it hid the mode for good). *View ▸ Show status messages*
+silences the messages, never the mode. ⚠️ **So a library message surfacing in the editor out of
+context** (above) now does so only within that message's hold.
 
 ⚠️ **`OndinApp::chrome_focus`'s write sat below that return too, and it is above it now** (§15 D850).
 The flag is §15 D821's record of whether anything held focus at the end of the frame, and its only write
@@ -14632,7 +14676,8 @@ still differs from its file, which is the only thing the dot answers (two colour
 the pill's were amber and accent). ⚠️ **`Ctrl+S`, the walk to the
 dashboard, an open and the close-and-save arm stay synchronous, and that is a decision rather than a
 remainder** — a pin is a *copy of the file*, so deferring only moves the cost, and the three
-transitions each read the result on the next line.
+transitions each read the result on the next line. (An open's *save* is meant: the library's read and
+load of the document being opened are off the frame since §15 D1027, behind a save that is not.)
 
 **Every record the app keeps is written atomically (§15 D378).** `atomic::write` creates the parent
 directory, writes `<path>.<pid>-<counter>.writing`, `sync_all`s it and renames it over the target, so
@@ -14758,7 +14803,8 @@ is a constant rather than a preference, because `autosave_secs = 0` means **off*
 crash costs the most.
 ⚠️ **The tick only runs on an editor frame**, so `close_confirmation`'s two closing
 arms, `open_path`, `go_to_dashboard` and `recover` each drop the snapshot themselves — **five call
-sites across four functions** — `go_to_dashboard` only
+sites across four functions**, `open_path`'s inside `adopt_opened` since §15 D1027, which the library's
+off-frame open reaches too — `go_to_dashboard` only
 when the session is clean, or the unfiled document would lose the only copy of itself there is, and
 only *after* committing the live text session (§9.3, §15 D415).
 🚨 **`recover` is the second door that replaces the session's document, and it is guarded before it
@@ -14771,7 +14817,8 @@ deleting that is worse than leaking it. **What makes the drop safe is
 `OndinApp::may_replace_current_document`**, which is `open_path`'s opening four lines — save a filed
 document without asking, then `confirm_discard` for an unfiled one — lifted into a predicate that both
 doors ask. Past it the work has been saved or the user has been asked, which is `open_path`'s own
-*"there is no third way to reach here"* now true of this door too. ⚠️ **The two are one change and
+*"there is no third way to reach here"* now true of this door too — and of the library's off-frame
+open, which asks in `begin_open`, frames before `adopt_opened` drops (§15 D1027). ⚠️ **The two are one change and
 must not be separated**: a drop without the guard deletes the user's work on the second press.
 ⚠️ **The guard runs before `recovery_modal` pops `pending`**, so a declined discard leaves the card
 exactly as it was — **a *Recover* the user backed out of is not a *Later***.
@@ -14886,6 +14933,18 @@ a point: the cards each claim a piece on top of it, and what is left over is the
 to land on to mean *nothing, thanks*. ⚠️ **The cursor is a path and can name a file that is gone** —
 every action here writes to disk and re-scans — so `OndinApp::dashboard_body` clears one that matches no
 *visible* entry, a cursor filtered off screen being one the user cannot dismiss either.
+
+**The open is read off the frame, and the card pulses until it lands (§15 D1027).** Every `Act::Open` —
+the click, `Enter`, the ⋮ menu's *Open*, the search overlay — goes to `OndinApp::begin_open`, which asks
+`may_replace_current_document` first and hands `fs::read` and `io::load` to an `ondin-open` thread;
+`poll_open`, above the dashboard's early return, adopts the answer through `adopt_opened` (the tail
+`open_path` shares) or reports it with `session.fail`, so a file that will not load still leaves its card
+there to be tried again. Until then `file_card` and `file_row` draw that entry at `ui::pulse_alpha` —
+down to half and back, a one-second period, starting on a ramp so a fast load barely dims it. ⚠️
+**`open_path` clears a pending open before its own**, or a slow card's answer would land over a *New
+file* made meanwhile. ⚠️ **`dashboard_act` clears it before every act but `Act::Open`**, or a card
+trashed, renamed or moved while it loads would be adopted at the path it was clicked at; `recover` clears
+it too, after its `drop_recovery`.
 
 **The library answers its own keys (§15 D374, `shortcuts.md` §8a).** `OndinApp::dashboard_keys` runs at
 the top of `dashboard_body`: arrows move the selection, `Enter` opens it, `Delete`/`Backspace` opens the

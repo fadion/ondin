@@ -802,7 +802,9 @@ Figma's page menu, trimmed to what this app has.
 | Show layout grid ✓ | — | wiring | ✅ **added 2026-09-15** (§15 D757), a session after the switch itself (§15 D755). *Show grid* was in both menus and this one in the View menu alone; the maintainer closed it with *"keep it consistent"*. **Unbound on purpose** (§15 D355's reasoning), so the chord column is empty rather than pending. It wears `icon::COLUMNS`, the glyph the inspector's Layout grid card already draws for `GridAxis::Columns`, so the row and the panel it is about are one picture |
 
 *Show layers*, *Show toolbar* and *Present mode* stay out: they are chrome-wide switches, the View
-menu is one click away, and *Present mode* hides the very chrome the canvas menu sits over.
+menu is one click away, and *Present mode* hides the very chrome the canvas menu sits over. *Show
+status messages* (§15 D1025, the floating status bar) stays out with them, on the same first two
+grounds.
 
 ⚠️ *A ⚠️ stood here for one day, naming a fifth View row the app had and this table did not* (§15
 D755). It is the last row above now (§15 D757) — the maintainer's answer was *"keep it consistent"* —
@@ -811,7 +813,7 @@ written into a spec table is one somebody can settle in a sentence, where the sa
 `menu::view_rows` is one nobody meets until they open two menus in a row. 🚨 **Nothing in the suite
 pinned this table's row set before D757**, so D755 could add a switch to the View menu and leave this
 one short with every gate green; the test derives the set from `ViewSwitch::VIEW_MENU` less the three
-excluded below, which is why a sixth View row cannot land in one menu only.
+excluded below — four since §15 D1025 — which is why a sixth View row cannot land in one menu only.
 
 *Canvas background…* is a candidate rather than a row. The inspector already shows it when nothing
 is selected (`SetCanvasBackground`), so this would be a second door to a control that has one — no

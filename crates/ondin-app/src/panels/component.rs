@@ -5559,10 +5559,16 @@ mod tests {
     /// the maintainer's design). On a main and on a set: *1 instance* on the line
     /// of the name it follows, no *Select all* anywhere, and a click on the count
     /// selects the instances — the main's one, and every variant's on the set.
-    /// The set's variant count is its card's title, *VARIANTS 2*.
+    /// The set's variant count is its card's title, *VARIANTS 2*. And on a
+    /// variant, *Small*'s face: the count after its derived name selects *Small*'s
+    /// instance (the v0.5.0 release review's `[X6-L6-01]` — the third face had no
+    /// assertion, and its click could go with every test green).
     ///
     /// **Flip run**: `count_link` answering `false` (its `.clicked()` dropped)
-    /// fails *"the main's count selects its instance"*.
+    /// fails *"the main's count selects its instance"*. Flip, run: the
+    /// `Face::Variant` arm's `act = Some(Act::SelectAllInstances)` made a no-op
+    /// fails *"the variant's count selects its instances"*, the selection left on
+    /// *Small* itself.
     #[test]
     fn the_count_after_a_faces_name_selects_its_instances() {
         let ctx = egui::Context::default();
@@ -5609,6 +5615,16 @@ mod tests {
             v.app.session.selection.ids(),
             &[v.i],
             "the set's count selects every variant's instances"
+        );
+        // The variant's face, the third the count went on (the v0.5.0 release
+        // review's `[X6-L6-01]`): its derived name, then the count.
+        let painted = texts(&settled(&mut v.app, &ctx, v.small));
+        let count = on_one_line(&painted, "Small", "COMPONENT");
+        click(&mut v.app, &ctx, count);
+        assert_eq!(
+            v.app.session.selection.ids(),
+            &[v.i],
+            "the variant's count selects its instances"
         );
     }
 

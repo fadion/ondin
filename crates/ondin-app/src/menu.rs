@@ -6474,3 +6474,200 @@ mod restore_children_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod kit_rows_tests {
+    use super::*;
+    use crate::app::OndinApp;
+    use crate::kits::picker::tests::{app_on, temp_root};
+    use ondin_core::kurbo::Size;
+    use ondin_core::meta::KitMark;
+    use ondin_core::variant::{VariantProp, VariantSet};
+    use ondin_core::{Document, IdSource, NodeId, NodeKind, Operation, Transaction};
+
+    /// The canvas menu opened on `id`: what `menu_context` computed for its kit,
+    /// and the rows' labels — the menu a user opens, not a synthetic `Context`.
+    fn kit_on(
+        app: &mut OndinApp,
+        ctx: &egui::Context,
+        id: NodeId,
+    ) -> (Option<(String, bool)>, Vec<String>) {
+        app.session.selection.set_one(id);
+        let door = Door::Canvas;
+        app.open_context_menu(ctx, Target::Layer { id, door }, None);
+        let kinds: Vec<Kind> = app
+            .session
+            .selection
+            .ids()
+            .iter()
+            .filter_map(|id| app.session.doc.get(*id).map(|n| Kind::of(n.kind())))
+            .collect();
+        let kit = app
+            .menu_context(app.context_menu.as_ref().expect("a menu"), &kinds)
+            .kit;
+        let labels = app
+            .open_menu_rows()
+            .iter()
+            .flatten()
+            .map(|r| r.label.to_string())
+            .collect();
+        app.context_menu = None;
+        (kit, labels)
+    }
+
+    /// **The canvas menu's kit rows belong to a kit instance's root, and do
+    /// what they say** (§5.3e, 7A; §15 D1016; the v0.5.0 release review's
+    /// `[X3.2-L6-03]`, which found `cbe165c`'s only test building its rows from a
+    /// hand-set `Context::kit`). Kit *Atlas* publishes a set *Button* of *Small*
+    /// — holding a *Dot* — and *Large*; the page holds an instance of *Small*.
+    ///
+    /// - On the instance, `Context::kit` is *Atlas*, nothing waiting, and the
+    ///   rows read *Go to main in Atlas* and *Make local…*; on its *Dot* — a
+    ///   copy of a vault node, inside the instance — the kit is `None` and
+    ///   neither row is offered.
+    /// - *Make local…* arms the dialog with the vault **top** the main sits in,
+    ///   the set *Button*, not the variant.
+    /// - *Go to main* on a kit instance opens the kit with *Small* selected.
+    ///
+    /// Flip, run: the two arms of the `AcceptKitUpdates | MakeLocal` dispatch
+    /// swapped (`item != Item::MakeLocal`) fails *"the set, not the variant"*
+    /// with `None`. Flip, run: *Go to main*'s two arms swapped (`if !kit`) fails
+    /// *"into the kit"*, the consumer still open.
+    ///
+    /// ⚠️ **Flip, run, and it does not bite: `menu_context` without its
+    /// `instance_root == id` filter leaves this test, and every test matching
+    /// `kit`, green.** The filter is redundant with `main_of` itself:
+    /// `swap::shown_main` answers only for a main, a swapped copy, or a node whose
+    /// chain of links ends at a main — which is `is_instance_root`'s own test, so
+    /// a member (the *Dot*) gets `None` either way and every node it answers for
+    /// is already its own instance root. And the rows read `cx.kit` only in the
+    /// `Role::Instance` arm, chosen by the same `instance_root == id`. No
+    /// selection can tell the filter's presence from its absence today.
+    #[test]
+    fn the_kit_rows_are_an_instance_roots_and_go_where_they_say() {
+        let ctx = egui::Context::default();
+        let root = temp_root("menu-kit");
+        let mut ids = IdSource::new(0xAE);
+        let r = ids.mint();
+        let mut kit = Document::new(r);
+        let [set, small, dot, large] = [(); 4].map(|_| ids.mint());
+        let frame = |id, parent, index, name: &str| Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind: NodeKind::Artboard {
+                size: Size::new(40.0, 30.0),
+            },
+            transform: None,
+            name: Some(name.into()),
+        };
+        kit.apply(&Transaction(vec![
+            frame(set, r, 0, "Button"),
+            frame(small, set, 0, "Small"),
+            frame(dot, small, 0, "Dot"),
+            frame(large, set, 1, "Large"),
+            Operation::SetComponent {
+                id: small,
+                component: true,
+            },
+            Operation::SetComponent {
+                id: large,
+                component: true,
+            },
+            Operation::SetVariantSet {
+                id: set,
+                set: Some(VariantSet {
+                    props: vec![VariantProp {
+                        name: "Size".into(),
+                        values: vec!["Small".into(), "Large".into()],
+                    }],
+                }),
+            },
+            Operation::SetVariant {
+                id: small,
+                values: vec!["Small".into()],
+            },
+            Operation::SetVariant {
+                id: large,
+                values: vec!["Large".into()],
+            },
+        ]))
+        .unwrap();
+        let kit_path =
+            crate::library::store::file_document(&root, None, "Atlas", &mut kit).unwrap();
+        let mut meta = kit.meta().clone();
+        meta.kit = Some(KitMark {
+            version: 3,
+            ..KitMark::default()
+        });
+        kit.set_meta(meta);
+        ondin_core::kit::publish(&mut kit, None, 1).unwrap();
+        crate::library::store::write_document(&kit_path, &kit).unwrap();
+        let kit_id = kit.meta().id.clone().unwrap();
+        let published = kit.published().unwrap().clone();
+
+        let mut app = app_on(&ctx, root.clone());
+        let consumer = app.session.path.clone().unwrap();
+        let page = app.session.doc.root();
+        let (tx, inst) = ondin_core::kit::insert(
+            &app.session.doc,
+            &mut app.session.ids,
+            &kit_id,
+            4,
+            &published,
+            set,
+            page,
+        )
+        .unwrap();
+        assert!(app.session.commit(tx));
+        let doc = &app.session.doc;
+        let main = doc.get(inst).unwrap().link().unwrap();
+        let vault_set = doc.get(main).unwrap().parent();
+        let child = doc.get(inst).unwrap().children()[0];
+        assert!(
+            doc.get(child)
+                .unwrap()
+                .link()
+                .is_some_and(|l| doc.in_vault(l)),
+            "the fixture: the Dot is a copy of a vault node"
+        );
+
+        let (on_root, labels) = kit_on(&mut app, &ctx, inst);
+        assert_eq!(on_root, Some(("Atlas".to_string(), false)));
+        assert!(
+            labels.contains(&"Go to main in Atlas".to_string())
+                && labels.contains(&"Make local…".to_string()),
+            "{labels:?}"
+        );
+        let (on_child, labels) = kit_on(&mut app, &ctx, child);
+        assert_eq!(
+            on_child, None,
+            "a layer inside it is not the kit's instance"
+        );
+        assert!(
+            !labels
+                .iter()
+                .any(|l| l.starts_with("Go to main in") || l == "Make local…"),
+            "{labels:?}"
+        );
+
+        app.session.selection.set_one(inst);
+        let target = Target::Layer {
+            id: inst,
+            door: Door::Canvas,
+        };
+        app.perform_menu_item(&ctx, Item::MakeLocal, target, None);
+        assert_eq!(app.making_local, vault_set, "the set, not the variant");
+        app.making_local = None;
+
+        app.perform_menu_item(&ctx, Item::GoToMain, target, None);
+        assert_eq!(
+            app.session.path.as_deref(),
+            Some(kit_path.as_path()),
+            "into the kit"
+        );
+        assert_eq!(app.session.selection.ids(), &[small], "its main selected");
+        app.open_path(&consumer);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}

@@ -1316,6 +1316,289 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// **One kit's accept that reaches a newer main of another kit takes every
+    /// waiting update, or says why it cannot** (§15 D1024 — *"the retry is not
+    /// driven by a test"*; the v0.5.0 release review's `[X3.2-L6-03]`). Kit
+    /// *Cards* nests kit *Icons*' *Icon* in its *Card*; the consumer places
+    /// *Card*, so it holds both at v1. *Icons* publishes v2 — a *Ring* added to
+    /// *Icon*, which v1 lacks — and *Cards*' author takes it, through a commit so
+    /// the nested copy gains the ring, and publishes v2 too. *Cards*' v2 alone
+    /// cannot be applied — it reaches *Icons*' ring and the document holds *Icon*
+    /// at v1 — so accepting *Cards* from its card or the canvas menu (`only`)
+    /// accepts both, as *Accept all* does, in one undo step. With *Icons*' file
+    /// gone there is nothing to accept it from: nothing is applied, and the
+    /// message says what is missing.
+    ///
+    /// ⚠️ **A version-only or a field-only publish of *Icons* does not make the
+    /// case**: `update_all` refuses only a node the held version lacks. The first
+    /// cut softened the dot, and *Cards*' v2 alone applied cleanly.
+    ///
+    /// Flip, run: the retry arm deleted (its guard `false && …`) fails *"the
+    /// retry took both"*, the fallback message read instead. Flip, run: the
+    /// fallback arm's `session.fail` dropped fails *"says why"*, the status still
+    /// the undo's *"Undo"*.
+    #[test]
+    fn one_kits_accept_needing_another_kits_update_takes_both_or_says_why() {
+        let ctx = egui::Context::default();
+        let root = temp_root("retry");
+        let frame = |id, parent, index, name: &str| Operation::CreateNode {
+            id,
+            parent,
+            index,
+            kind: NodeKind::Artboard {
+                size: Size::new(20.0, 20.0),
+            },
+            transform: None,
+            name: Some(name.into()),
+        };
+        let file = |doc: &mut Document, name: &str| {
+            let path = crate::library::store::file_document(&root, None, name, doc).unwrap();
+            let mut meta = doc.meta().clone();
+            meta.kit = Some(KitMark::default());
+            doc.set_meta(meta);
+            ondin_core::kit::publish(doc, None, 1).unwrap();
+            crate::library::store::write_document(&path, doc).unwrap();
+            (path, doc.meta().id.clone().unwrap())
+        };
+        // *Icons*: a main *Icon* holding a dot.
+        let mut ids = IdSource::new(0xB1);
+        let mut icons = Document::new(ids.mint());
+        let [icon, dot] = [(); 2].map(|_| ids.mint());
+        let r = icons.root();
+        icons
+            .apply(&Transaction(vec![
+                frame(icon, r, 0, "Icon"),
+                frame(dot, icon, 0, "Dot"),
+                Operation::SetComponent {
+                    id: icon,
+                    component: true,
+                },
+            ]))
+            .unwrap();
+        let (icons_path, icons_id) = file(&mut icons, "Icons");
+        let icons_v1 = icons.published().unwrap().clone();
+        // *Cards*: a main *Card* nesting an *Icon* of *Icons* v1.
+        let mut aids = IdSource::new(0xA2);
+        let mut cards = Document::new(aids.mint());
+        let card = aids.mint();
+        let r = cards.root();
+        cards
+            .apply(&Transaction(vec![
+                frame(card, r, 0, "Card"),
+                Operation::SetComponent {
+                    id: card,
+                    component: true,
+                },
+            ]))
+            .unwrap();
+        let (tx, _) =
+            ondin_core::kit::insert(&cards, &mut aids, &icons_id, 1, &icons_v1, icon, card)
+                .unwrap();
+        cards.apply(&tx).unwrap();
+        let (cards_path, cards_id) = file(&mut cards, "Cards");
+        let cards_v1 = cards.published().unwrap().clone();
+
+        let mut app = crate::kits::picker::tests::app_on(&ctx, root.clone());
+        let page = app.session.doc.root();
+        let (tx, inst) = ondin_core::kit::insert(
+            &app.session.doc,
+            &mut app.session.ids,
+            &cards_id,
+            1,
+            &cards_v1,
+            card,
+            page,
+        )
+        .unwrap();
+        assert!(app.session.commit(tx));
+        assert!(
+            app.kits_waiting(false).is_empty(),
+            "the fixture: up to date"
+        );
+
+        // *Icons* v2 — a layer added, which v1 lacks — then *Cards* v2 built on it.
+        let ring = ids.mint();
+        republish(&icons_path, vec![frame(ring, icon, 1, "Ring")], "A ring");
+        // Its author takes the update — through a commit, so *Card*'s nested
+        // copy gains the ring — and publishes.
+        let mut author = OndinApp::headless(&ctx);
+        author.prefs.base_folder = Some(root.clone());
+        author.library = Library::open(root.clone());
+        author.open_path(&cards_path);
+        author.accept_kit_updates(None);
+        assert!(
+            author.kits_waiting(false).is_empty(),
+            "the fixture: Cards took Icons v2"
+        );
+        author.open_publish();
+        author.publish_now("On the ringed icon".into());
+        let f = std::fs::File::options()
+            .write(true)
+            .open(&cards_path)
+            .unwrap();
+        f.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(4))
+            .unwrap();
+        let cards = ondin_core::io::load(&std::fs::read(&cards_path).unwrap()).unwrap();
+        assert_eq!(
+            cards.meta().kit.as_ref().map(|k| k.version),
+            Some(2),
+            "the fixture: Cards v2 on disk"
+        );
+        let cards_v2 = cards.published().unwrap().clone();
+        app.library.refresh();
+        assert_eq!(app.kits_waiting(false).len(), 2, "the fixture: both wait");
+        let mut scratch_ids = IdSource::new(0xA4);
+        assert!(
+            matches!(
+                ondin_core::kit::update_all(
+                    &app.session.doc,
+                    &mut scratch_ids,
+                    &[(&cards_id, 2, &cards_v2)]
+                ),
+                Err(ondin_core::kit::KitError::NeedsUpdate(_))
+            ),
+            "the fixture: Cards' v2 alone needs Icons' v2"
+        );
+
+        let before = app.session.doc.clone();
+        app.accept_kit_updates(Some(&cards_id));
+        assert!(
+            app.kits_waiting(false).is_empty(),
+            "the retry took both: {}",
+            app.session.status().text
+        );
+        let doc = &app.session.doc;
+        let nested = doc.get(inst).unwrap().children()[0];
+        assert_eq!(
+            doc.get(nested).unwrap().children().len(),
+            2,
+            "Icons' v2 arrived: the ring"
+        );
+        app.undo();
+        assert_eq!(app.session.doc, before, "in one undo step");
+
+        // *Icons* gone from the library: Cards waits alone, and cannot be taken.
+        std::fs::remove_file(&icons_path).unwrap();
+        app.library.refresh();
+        assert_eq!(app.kits_waiting(false).len(), 1, "the fixture: Cards alone");
+        app.accept_kit_updates(Some(&cards_id));
+        assert_eq!(app.session.doc, before, "nothing applied");
+        assert_eq!(
+            app.session.status().text,
+            "This update needs a newer version of another kit it uses, which is not in your \
+             library",
+            "says why"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// ***Make all local* reveals a set and a main as one undo step, stacked**
+    /// (§5.3e, 6B — *"undoable"*; the v0.5.0 release review's `[X3.2-L6-03]`).
+    /// The page holds an instance of *Atlas*' set *Button* and one of its
+    /// *Badge*, so the kit's vault holds two tops. The dialog is driven — its
+    /// *Make all local* clicked — and both tops leave the vault for the page,
+    /// stacked down the right without overlapping, the toast counting two; one
+    /// undo puts the document back whole.
+    ///
+    /// Flip, run: `make_local_now` calling itself once per top when handed
+    /// several — two commits — fails before the undo is reached, at the toast:
+    /// *"Badge is now a local main, at the top right of the canvas"*, the second
+    /// commit's own (each stacked against the content the first left, so the
+    /// overlap assertion passes it). Flip, run: the `stack_local` placements left
+    /// out fails *"stacked, not overlapping"*, both at the origin.
+    #[test]
+    fn make_all_local_reveals_a_set_and_a_main_in_one_step() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let root = temp_root("all-local");
+        let (kit, set, badge) = crate::kits::picker::tests::file_kit(&root);
+        let mut app = crate::kits::picker::tests::app_on(&ctx, root.clone());
+        let published = ondin_core::io::load(&std::fs::read(root.join("atlas.ondin")).unwrap())
+            .unwrap()
+            .published()
+            .unwrap()
+            .clone();
+        let page = app.session.doc.root();
+        for top in [set, badge] {
+            let (tx, _) = ondin_core::kit::insert(
+                &app.session.doc,
+                &mut app.session.ids,
+                &kit,
+                4,
+                &published,
+                top,
+                page,
+            )
+            .unwrap();
+            assert!(app.session.commit(tx));
+        }
+        let tops = app.kits_used()[0].tops.clone();
+        assert_eq!(tops.len(), 2, "the fixture: a set and a main in the vault");
+        let before = app.session.doc.clone();
+
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0));
+        let run = |app: &mut OndinApp, events: Vec<egui::Event>| {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    events,
+                    ..Default::default()
+                },
+                |_| app.make_all_local_dialog(&ctx),
+            )
+        };
+        app.making_all_local = Some(kit.clone());
+        run(&mut app, vec![]);
+        let out = run(&mut app, vec![]);
+        let at = out
+            .shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == "Make all local" => {
+                    Some(t.pos + t.galley.size() / 2.0)
+                }
+                _ => None,
+            })
+            .expect("the dialog's button");
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        run(&mut app, vec![egui::Event::PointerMoved(at)]);
+        run(&mut app, vec![press(true)]);
+        run(&mut app, vec![press(false)]);
+        assert!(app.making_all_local.is_none(), "the dialog closed");
+
+        let doc = &app.session.doc;
+        for t in &tops {
+            assert_eq!(
+                doc.get(*t).unwrap().parent(),
+                Some(doc.root()),
+                "both revealed"
+            );
+        }
+        assert!(app.kits_used().is_empty(), "the kit is off the list");
+        let res = ondin_core::Resolved::rebuild(doc);
+        let (a, b) = (
+            res.world_bounds(tops[0]).unwrap(),
+            res.world_bounds(tops[1]).unwrap(),
+        );
+        assert!(
+            a.x1 <= b.x0 || b.x1 <= a.x0 || a.y1 <= b.y0 || b.y1 <= a.y0,
+            "stacked, not overlapping: {a:?} {b:?}"
+        );
+        let toast = app.session.status().text.clone();
+        assert!(
+            toast.starts_with("2 components are now local mains"),
+            "{toast}"
+        );
+        app.undo();
+        assert_eq!(app.session.doc, before, "one undo step");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// A text layer reading "hello" under `parent`, committed and saved, and a
     /// live session over it holding "TYPED" the document does not.
     fn typing_into(app: &mut OndinApp, parent: NodeId) -> NodeId {

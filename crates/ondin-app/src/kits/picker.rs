@@ -1800,6 +1800,17 @@ pub(crate) mod tests {
         }
     }
 
+    /// Whether the picker lists `kit` as used by this document, or `None` when
+    /// it lists no such kit — `shown_kits`' answer, for the tests of the doors
+    /// outside this module that make a kit used (a swap, §15 D1019).
+    pub(crate) fn kit_used(app: &mut OndinApp, ctx: &egui::Context, kit: &str) -> Option<bool> {
+        let kits = kits_in(&app.library, app.session.doc.meta().id.as_deref());
+        app.shown_kits(ctx, &kits)
+            .iter()
+            .find(|s| s.id == kit)
+            .map(|s| s.used)
+    }
+
     /// **A kit's conflict copy loses, and a document is never its own kit**
     /// (§15 D1011 (10)): a sync client's `Atlas (conflicted copy …)` carries the
     /// same id, and the listing keeps the original whichever the scan met first.
@@ -3040,5 +3051,377 @@ pub(crate) mod tests {
         doc.apply(&Transaction(vec![op])).unwrap();
         let b = ondin_core::Resolved::rebuild(&doc).world_bounds(f).unwrap();
         assert_eq!(b.center(), aim, "the laid-out box is centred on the aim");
+    }
+
+    /// **A kit the library lost is still listed by its copies, and its set
+    /// places its default variant** (3I; the v0.5.0 release review's
+    /// `[X4.2-L6-04]` — no picker test made a kit unavailable). *Atlas*' set and
+    /// *Badge* are placed, both instances deleted — the copies stay in the vault
+    /// — and the kit's file is removed. With no instance on the page and no file,
+    /// only `shown_kits`' lost list keeps it: *Unavailable*, not used, its note
+    /// counting the two copies, its tiles the vault's own. Placed from there, the
+    /// set inserts *Small*, its default variant, as a kit placement does.
+    ///
+    /// Flip, run: the lost list left empty fails *"listed by its copies"*. Flip,
+    /// run: `place_kit_at`'s `Source::Local` placing a set as itself (its
+    /// `default_variant` arm dropped) fails *"the default variant"* with `None`:
+    /// a copy of the set itself, a plain frame linked to nothing.
+    #[test]
+    fn a_kit_the_library_lost_is_listed_by_its_copies() {
+        let ctx = egui::Context::default();
+        let root = temp_root("lost");
+        let (id, set, badge) = file_kit(&root);
+        let mut app = app_on(&ctx, root.clone());
+        for top in [set, badge] {
+            let source = kit_source(&mut app, &id, top);
+            app.place_from_picker(&ctx, source);
+            let inst = app.session.selection.single().unwrap();
+            assert!(
+                app.session
+                    .commit(Transaction(vec![Operation::DeleteNode { id: inst }]))
+            );
+        }
+        std::fs::remove_file(root.join("atlas.ondin")).unwrap();
+        app.library.refresh();
+        let kits = kits_in(&app.library, app.session.doc.meta().id.as_deref());
+        assert!(kits.is_empty(), "the fixture: the library has no kit");
+
+        let shown = app.shown_kits(&ctx, &kits);
+        let lost = shown
+            .iter()
+            .find(|s| s.id == id)
+            .expect("listed by its copies");
+        assert_eq!(
+            (lost.name.as_str(), lost.status.as_str(), lost.used),
+            ("Atlas", "Unavailable", false)
+        );
+        assert_eq!(
+            lost.note.as_deref(),
+            Some(
+                "Not found in your library folder. The 2 components already in this document \
+                 keep working, and you can still insert them."
+            )
+        );
+        let items: Vec<(String, bool)> = lost
+            .groups
+            .iter()
+            .flat_map(|(_, i)| i)
+            .map(|i| (i.name.clone(), i.set))
+            .collect();
+        assert_eq!(
+            items,
+            vec![("Button".to_string(), true), ("Badge".to_string(), false)]
+        );
+
+        let vault_set = match lost.groups[0].1[0].source {
+            Source::Local(v) => v,
+            Source::Kit { .. } => panic!("a lost kit's copies are local"),
+        };
+        app.place_from_picker(&ctx, Source::Local(vault_set));
+        let inst = app.session.selection.single().expect("placed");
+        let doc = &app.session.doc;
+        let main = doc.get(inst).unwrap().link();
+        assert_eq!(
+            main.and_then(|m| doc.get(m)).map(|n| n.name()),
+            Some("Small"),
+            "the default variant"
+        );
+        assert!(main.is_some_and(|m| doc.in_vault(m)));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A kit that never published, and one whose file cannot be read, say so**
+    /// (3H; the v0.5.0 release review's `[X4.2-L6-04]` — no fixture had either).
+    /// *Beacon* is marked a kit and has published nothing; *Atlas*' file is
+    /// overwritten with bytes no document parses after the library listed it.
+    /// Each kit's header reads its status and the open kit its note instead of
+    /// tiles.
+    ///
+    /// Flip, run: the two arms' statuses swapped fails *"never published"* with
+    /// *Unreadable*.
+    #[test]
+    fn a_kit_not_published_and_one_unreadable_say_so() {
+        let ctx = egui::Context::default();
+        let root = temp_root("states");
+        let (atlas, _, _) = file_kit(&root);
+        let mut ids = IdSource::new(0xBC);
+        let mut doc = Document::new(ids.mint());
+        let path = crate::library::store::file_document(&root, None, "Beacon", &mut doc).unwrap();
+        let mut meta = doc.meta().clone();
+        meta.kit = Some(KitMark::default());
+        doc.set_meta(meta);
+        crate::library::store::write_document(&path, &doc).unwrap();
+        let beacon = doc.meta().id.clone().unwrap();
+        let mut app = app_on(&ctx, root.clone());
+        std::fs::write(root.join("atlas.ondin"), b"not a document").unwrap();
+
+        let kits = kits_in(&app.library, app.session.doc.meta().id.as_deref());
+        assert_eq!(kits.len(), 2, "the fixture: both listed");
+        for k in &kits {
+            app.kit_shelf.ask(k);
+        }
+        app.kit_shelf.settle();
+        let shown = app.shown_kits(&ctx, &kits);
+        let read = |id: &str| {
+            let s = shown.iter().find(|s| s.id == id).unwrap();
+            (s.status.clone(), s.note.clone(), s.groups.len())
+        };
+        assert_eq!(
+            read(&beacon),
+            (
+                "not published".to_string(),
+                Some(
+                    "Nothing published yet. Its author publishes from the top bar of Beacon."
+                        .to_string()
+                ),
+                0
+            ),
+            "never published"
+        );
+        assert_eq!(
+            read(&atlas),
+            (
+                "Unreadable".to_string(),
+                Some("This kit's file could not be read.".to_string()),
+                0
+            ),
+            "unreadable"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **Search ranks a name that starts with the query, then one that holds
+    /// it, then a set found through its variants — this document's own first
+    /// among equal names — and stops at `MAX_RESULTS`** (3F; §15 D1031; the
+    /// v0.5.0 release review's `[X4.2-L6-04]`, which found the only search test
+    /// holding a single result). Asked of `search` itself, over items built here.
+    ///
+    /// Flip, run: every match scored 0 fails *"ranked"*, the five sorted by name
+    /// alone. Flip, run: the kits chained before this document's own fails
+    /// *"ranked"* too, the kit's *Badge* first. Flip, run: the `take(MAX_RESULTS)`
+    /// dropped fails *"capped"* with 45.
+    #[test]
+    fn search_ranks_prefix_then_substring_then_variant_and_caps() {
+        let any = IdSource::new(0xEA).mint();
+        let item = |name: &str, aliases: &[&str], here: bool| Item {
+            source: Source::Local(any),
+            name: name.into(),
+            set: false,
+            kit: Some((if here { "This document" } else { "Atlas" }.into(), here)),
+            tile: None,
+            aliases: std::iter::once(name.to_lowercase())
+                .chain(aliases.iter().map(|a| a.to_string()))
+                .collect(),
+        };
+        let shown = |items: Vec<Item>| Shown {
+            id: "k".into(),
+            name: "Atlas".into(),
+            status: String::new(),
+            used: true,
+            groups: vec![("Atlas".into(), items)],
+            note: None,
+        };
+        let local = vec![item("Bar", &[], true), item("Badge", &[], true)];
+        let kit = shown(vec![
+            item("Kebab", &[], false),
+            item("Button", &["basic"], false),
+            item("Badge", &[], false),
+            item("Card", &[], false),
+        ]);
+        let got: Vec<(String, bool)> = search("ba", &local, std::slice::from_ref(&kit))
+            .iter()
+            .map(|i| (i.name.clone(), i.kit.as_ref().unwrap().1))
+            .collect();
+        let want = |n: &str, here: bool| (n.to_string(), here);
+        assert_eq!(
+            got,
+            vec![
+                want("Badge", true),
+                want("Badge", false),
+                want("Bar", true),
+                want("Kebab", false),
+                want("Button", false),
+            ],
+            "ranked"
+        );
+
+        let many = shown(
+            (0..45)
+                .map(|i| item(&format!("Icon {i:02}"), &[], false))
+                .collect(),
+        );
+        assert_eq!(
+            search("icon", &[], std::slice::from_ref(&many)).len(),
+            MAX_RESULTS,
+            "capped"
+        );
+    }
+
+    /// **`↓` moves the highlight and `Enter` places what it lit** (3F; the
+    /// v0.5.0 release review's `[X4.2-L6-04]`: the arrows were never pressed).
+    /// *b* finds *Badge* and *Button*, both by their names' start, in that
+    /// order; one `↓` with the field focused, then `Enter`, places *Button* —
+    /// its default variant, *Small*.
+    ///
+    /// Flip, run: `ArrowDown` not moving the highlight (its `+ 1` dropped) fails
+    /// *"the lit result placed"* with *Badge*.
+    #[test]
+    fn arrow_down_lights_the_next_result_and_enter_places_it() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let root = temp_root("arrows");
+        let (_, _, _) = file_kit(&root);
+        let mut app = app_on(&ctx, root.clone());
+        let key = |key| {
+            let mut input = egui::RawInput::default();
+            input.events.push(egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Default::default(),
+            });
+            input
+        };
+        app.toggle_kit_picker();
+        let _ = ctx.run_ui(Default::default(), |_| app.kit_picker_ui(&ctx));
+        app.kit_shelf.settle();
+        app.kit_picker.as_mut().unwrap().query = "b".into();
+        let out = ctx.run_ui(Default::default(), |_| app.kit_picker_ui(&ctx));
+        let _ = out;
+        let out = ctx.run_ui(Default::default(), |_| app.kit_picker_ui(&ctx));
+        let rows: Vec<String> = out
+            .shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Text(t) if ["Badge", "Button"].contains(&t.galley.text()) => {
+                    Some(t.galley.text().to_string())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(rows, ["Badge", "Button"], "the fixture: two results");
+        ctx.memory_mut(|m| m.request_focus(egui::Id::new(SEARCH_ID)));
+        let _ = ctx.run_ui(Default::default(), |_| app.kit_picker_ui(&ctx));
+        let _ = ctx.run_ui(key(egui::Key::ArrowDown), |_| app.kit_picker_ui(&ctx));
+        let _ = ctx.run_ui(key(egui::Key::Enter), |_| app.kit_picker_ui(&ctx));
+        for _ in 0..2 {
+            let _ = ctx.run_ui(Default::default(), |_| app.kit_picker_ui(&ctx));
+        }
+        let inst = app.session.selection.single().expect("Enter placed one");
+        let doc = &app.session.doc;
+        let main = doc.get(inst).unwrap().link().unwrap();
+        assert_eq!(
+            doc.get(main).unwrap().name(),
+            "Small",
+            "the lit result placed"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A second placement asked while one waits is dropped** (§15 D1030 — *"as
+    /// a second click on a busy button is"*; the v0.5.0 release review's
+    /// `[X4.2-L6-04]`: only the `cfg(test)` door, which bypasses the wait, had
+    /// ever placed twice). *Badge* is asked, then the set, before a frame; the
+    /// frames that follow place *Badge* alone.
+    ///
+    /// Flip, run: `ask_place` replacing the waiting ask (its `is_none` guard
+    /// dropped) fails *"the first ask places"* with *Small*.
+    #[test]
+    fn a_second_ask_while_one_waits_is_dropped() {
+        let ctx = egui::Context::default();
+        let root = temp_root("second-ask");
+        let (id, set, badge) = file_kit(&root);
+        let mut app = app_on(&ctx, root.clone());
+        app.toggle_kit_picker();
+        let first = kit_source(&mut app, &id, badge);
+        let second = kit_source(&mut app, &id, set);
+        app.ask_place(first, None);
+        app.ask_place(second, None);
+        for _ in 0..3 {
+            let _ = ctx.run_ui(Default::default(), |_| app.kit_picker_ui(&ctx));
+        }
+        let doc = &app.session.doc;
+        let page: Vec<NodeId> = doc.get(doc.root()).unwrap().children().to_vec();
+        assert_eq!(page.len(), 1, "one placement: {page:?}");
+        let main = doc.get(page[0]).unwrap().link().unwrap();
+        assert_eq!(
+            doc.get(main).unwrap().name(),
+            "Badge",
+            "the first ask places"
+        );
+        assert!(app.kit_placing.is_none(), "and nothing waits after it");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A drag's picture is capped at half the canvas each way** (§15 D1029 —
+    /// *"so a page-sized component does not cover the place it is being aimed
+    /// at"*; the v0.5.0 release review's `[X4.2-L6-04]`: the ghost tests used a
+    /// 24 × 30 *Badge*, far under it). A 2000 × 30 main at zoom 1 over an 800 ×
+    /// 600 canvas draws 400 × 6 — scaled whole, its proportions kept.
+    ///
+    /// Flip, run: the cap deleted (`k` fixed at 1) fails *"half the canvas"*
+    /// with 2000 × 30.
+    #[test]
+    fn a_drags_picture_is_capped_at_half_the_canvas() {
+        let ctx = egui::Context::default();
+        let mut ids = IdSource::new(0xCA);
+        let root = ids.mint();
+        let mut doc = Document::new(root);
+        let wide = ids.mint();
+        doc.apply(&Transaction(vec![
+            frame(wide, root, 0, 2000.0, "Hero"),
+            Operation::SetComponent {
+                id: wide,
+                component: true,
+            },
+        ]))
+        .unwrap();
+        let item = Item {
+            source: Source::Local(wide),
+            name: "Hero".into(),
+            set: false,
+            kit: None,
+            tile: None,
+            aliases: Vec::new(),
+        };
+        let mut ghost = Ghost::start(&item, &doc, 1.0);
+        ghost.settle(&ctx);
+        assert_eq!(
+            ghost.picture.as_ref().map(|(_, s)| *s),
+            Some(egui::vec2(2000.0, 30.0)),
+            "the fixture: the picture's world size"
+        );
+        let canvas = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        let panel = egui::Rect::from_min_size(egui::pos2(0.0, 500.0), egui::vec2(100.0, 100.0));
+        let at = egui::pos2(400.0, 300.0);
+        let mut sizes = Vec::new();
+        for _ in 0..2 {
+            let out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(canvas),
+                    events: vec![egui::Event::PointerMoved(at)],
+                    ..Default::default()
+                },
+                |_| draw_ghost(&ctx, &item, &ghost, panel, canvas, 1.0, 1.0),
+            );
+            sizes = out
+                .shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    egui::Shape::Mesh(m) if m.texture_id != egui::TextureId::default() => Some(
+                        egui::Rect::from_points(
+                            &m.vertices.iter().map(|v| v.pos).collect::<Vec<_>>(),
+                        )
+                        .size(),
+                    ),
+                    _ => None,
+                })
+                .collect();
+        }
+        assert!(
+            sizes.len() == 1 && (sizes[0] - egui::vec2(400.0, 6.0)).length() < 0.5,
+            "half the canvas: {sizes:?}"
+        );
     }
 }

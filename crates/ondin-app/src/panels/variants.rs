@@ -2802,6 +2802,393 @@ mod tests {
         assert!(app.session.doc.vault().is_none(), "one undo, again");
     }
 
+    /// **A kit reached only through a swap reads as used** (§15 D1028 (4): *an
+    /// instance on the page links or swaps to* it; the v0.5.0 release review's
+    /// `[X4.2-L6-02]`). The nested copy is swapped to the kit's *Badge*, which the
+    /// document never used: its `link` still names the slot — *Glyph*, the
+    /// document's own — and *Badge* is an empty frame, so no child's link reaches
+    /// the vault either. Only `swap` names the vendored main, and since D1019 made
+    /// a swap a door into a kit, `kits_on_the_page`'s swap arm is the one thing
+    /// that keeps the picker from listing the kit under *In your library, not
+    /// used here* while an instance shows its component.
+    ///
+    /// Flip, run: `kits_on_the_page` reading `n.link()` alone (the `n.swap()`
+    /// dropped from its pair) fails *"used through a swap"*, `Some(false)`.
+    #[test]
+    fn a_kit_reached_only_through_a_swap_reads_as_used() {
+        use crate::kits::picker::tests::{app_on, file_kit, kit_used, temp_root};
+        let ctx = egui::Context::default();
+        let dir = temp_root("swap-used");
+        let (kit_id, _, badge) = file_kit(&dir);
+        let mut app = app_on(&ctx, dir.clone());
+        let Slotted { nested, .. } = slotted(&mut app);
+        let k = crate::kits::index::kits_in(&app.library, app.session.doc.meta().id.as_deref())
+            .into_iter()
+            .find(|k| k.id == kit_id)
+            .expect("the kit is listed");
+        app.kit_shelf.ask(&k);
+        app.kit_shelf.settle();
+        let published = app.kit_shelf.current(&k).expect("its publish loads");
+        assert_eq!(
+            kit_used(&mut app, &ctx, &kit_id),
+            Some(false),
+            "the control: never used"
+        );
+
+        app.swap_to_kit(KitSwap {
+            kit: k,
+            published,
+            main: badge,
+            roots: vec![nested],
+            prop: None,
+        });
+        let doc = &app.session.doc;
+        let n = doc.get(nested).unwrap();
+        assert!(
+            n.link().is_some_and(|l| !doc.in_vault(l)),
+            "the fixture: the link names the document's own slot"
+        );
+        assert!(
+            n.swap().is_some_and(|s| doc.in_vault(s)),
+            "the fixture: the swap names the vendored Badge"
+        );
+        assert!(n.children().is_empty(), "the fixture: no child to follow");
+        assert_eq!(
+            kit_used(&mut app, &ctx, &kit_id),
+            Some(true),
+            "used through a swap"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// One frame of the inspector, then the kit picker's pass — `OndinApp::ui`'s
+    /// order, and the picker's pass is what lands the shelf's reads with the
+    /// picker closed.
+    fn drawn(
+        app: &mut OndinApp,
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+    ) -> Vec<(String, egui::Rect)> {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1400.0, 2400.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        let out = ctx.run_ui(input, |ui| {
+            ui.set_max_width(280.0);
+            app.inspector_ui(ui);
+            app.kit_picker_ui(ui.ctx());
+        });
+        let mut painted = Vec::new();
+        fn walk(shape: &egui::Shape, out: &mut Vec<(String, egui::Rect)>) {
+            match shape {
+                egui::Shape::Text(t) => {
+                    out.push((t.galley.text().to_string(), t.visual_bounding_rect()))
+                }
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+                _ => {}
+            }
+        }
+        for s in &out.shapes {
+            walk(&s.shape, &mut painted);
+        }
+        painted
+    }
+
+    /// Press and release at `at`, the pointer moved there first; the painted
+    /// text of the frame after.
+    fn click_at(
+        app: &mut OndinApp,
+        ctx: &egui::Context,
+        at: egui::Pos2,
+    ) -> Vec<(String, egui::Rect)> {
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        drawn(app, ctx, vec![egui::Event::PointerMoved(at)]);
+        drawn(app, ctx, vec![press(true)]);
+        drawn(app, ctx, vec![press(false)]);
+        drawn(app, ctx, vec![])
+    }
+
+    /// Type `text` into an open swap list's search field — found by its hint in
+    /// `open`, the list's painted frame — and the frame after. The list shows
+    /// what fits its scroll area, and the kit's group comes after the
+    /// document's own, so a search is how its rows are reached, as a user's
+    /// would be.
+    fn search_for(
+        app: &mut OndinApp,
+        ctx: &egui::Context,
+        open: &[(String, egui::Rect)],
+        text: &str,
+    ) -> Vec<(String, egui::Rect)> {
+        let field = open
+            .iter()
+            .find(|(t, _)| t == "Search…")
+            .unwrap_or_else(|| panic!("the list's search field: {open:?}"))
+            .1
+            .center();
+        click_at(app, ctx, field);
+        drawn(app, ctx, vec![egui::Event::Text(text.into())]);
+        drawn(app, ctx, vec![]);
+        drawn(app, ctx, vec![])
+    }
+
+    /// **Swap to a kit main through the Component card itself** (§15 D1019; the
+    /// v0.5.0 release review's `[X4.2-L6-03]`, which found every swap test
+    /// calling `swap_list` and `swap_to_kit` underneath the rows). The inspector
+    /// is drawn with the nested copy selected and the library's kit **never
+    /// asked for** — no picker opened, no pill — and the *Swap* row's dropdown is
+    /// clicked open: the open list asks the shelf, and once the read lands the
+    /// kit's *Badge* is offered. Picked, the copy shows the vendored *Badge* in
+    /// one undo step, and the kit is first in this document's last-use order.
+    /// Then a swap property *Icon* on *Row*, picked on *Row*'s instance: its
+    /// row's pick reaches the copy too.
+    ///
+    /// Flip, run: the `if swap_open` ask made dead (`false && swap_open`) fails
+    /// *"offered once the open list has asked"* — nothing else asks in a fresh
+    /// session, so the shelf has nothing to settle. Flip, run: the `kit_use`
+    /// reorder after the commit deleted fails *"first in the last-use order"*,
+    /// `None`. Flip, run: the property row's `Kit` arm writing `prop: None` —
+    /// the nested row's swap, made on *Row*'s instance — fails *"the property's
+    /// pick reaches the copy"*, the status reading *"That component cannot be
+    /// swapped in here"*: the instance is no nested copy to take a swap.
+    #[test]
+    fn the_cards_swap_rows_offer_and_swap_to_an_unasked_kit() {
+        use crate::kits::picker::tests::{app_on, file_kit, temp_root};
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let dir = temp_root("swap-drawn");
+        let (kit_id, _, badge) = file_kit(&dir);
+        let mut app = app_on(&ctx, dir.clone());
+        let Slotted {
+            glyph,
+            row,
+            slot,
+            row_copy,
+            nested,
+        } = slotted(&mut app);
+        let shows_badge = |app: &OndinApp| {
+            let doc = &app.session.doc;
+            component::main_of(doc, nested).is_some_and(|m| {
+                doc.in_vault(m)
+                    && doc.get(m).and_then(|n| n.origin()).map(|o| o.node) == Some(badge)
+            })
+        };
+        // The dropdown beside a row's label: the shown main's name on its line.
+        let combo = |painted: &[(String, egui::Rect)], label: &str| {
+            let at = painted
+                .iter()
+                .find(|(t, _)| t == label)
+                .unwrap_or_else(|| panic!("the {label} row: {painted:?}"))
+                .1;
+            painted
+                .iter()
+                .find(|(t, r)| {
+                    t == "Glyph"
+                        && (r.center().y - at.center().y).abs() < 4.0
+                        && r.left() > at.right()
+                })
+                .map(|(_, r)| r.center())
+                .unwrap_or_else(|| panic!("the {label} row's dropdown: {painted:?}"))
+        };
+        let offer = |painted: &[(String, egui::Rect)]| {
+            painted
+                .iter()
+                .find(|(t, _)| t == "Badge")
+                .map(|(_, r)| r.center())
+        };
+
+        app.session.selection.set_one(nested);
+        let mut painted = Vec::new();
+        for _ in 0..4 {
+            painted = drawn(&mut app, &ctx, vec![]);
+        }
+        assert!(
+            app.kit_shelf.load(&kit_id).is_none(),
+            "the fixture: nothing has asked for the kit"
+        );
+        let at = combo(&painted, "Swap");
+        let open = click_at(&mut app, &ctx, at);
+        assert!(
+            open.iter().any(|(t, _)| t == "Row"),
+            "the fixture: the list is open: {open:?}"
+        );
+        app.kit_shelf.settle();
+        drawn(&mut app, &ctx, vec![]);
+        let painted = search_for(&mut app, &ctx, &open, "Bad");
+        let pick = offer(&painted)
+            .unwrap_or_else(|| panic!("offered once the open list has asked: {painted:?}"));
+        click_at(&mut app, &ctx, pick);
+        assert!(
+            shows_badge(&app),
+            "the copy shows the kit's Badge: {}",
+            app.session.status().text
+        );
+        let doc_id = app.session.doc.meta().id.clone().unwrap();
+        assert_eq!(
+            app.library.local.kit_use.get(&doc_id),
+            Some(&vec![kit_id.clone()]),
+            "first in the last-use order"
+        );
+        assert!(app.session.undo());
+        assert!(app.session.doc.vault().is_none(), "one undo step");
+        assert_eq!(component::main_of(&app.session.doc, nested), Some(glyph));
+
+        // A swap property on *Row*, bound to its slot, picked on the instance.
+        let (tx, _) = variant::define(
+            &app.session.doc,
+            &mut app.session.ids,
+            row,
+            "Icon",
+            PropKind::Swap,
+            vec![slot],
+        )
+        .unwrap();
+        assert!(app.session.commit(tx));
+        app.session.selection.set_one(row_copy);
+        let mut painted = Vec::new();
+        for _ in 0..4 {
+            painted = drawn(&mut app, &ctx, vec![]);
+        }
+        let at = combo(&painted, "Icon");
+        let open = click_at(&mut app, &ctx, at);
+        let painted = search_for(&mut app, &ctx, &open, "Bad");
+        let pick = offer(&painted).unwrap_or_else(|| panic!("the kit offered: {painted:?}"));
+        click_at(&mut app, &ctx, pick);
+        assert!(
+            shows_badge(&app),
+            "the property's pick reaches the copy: {}",
+            app.session.status().text
+        );
+        assert!(app.session.undo());
+        assert!(app.session.doc.vault().is_none(), "one undo step, again");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A swap to a variant the held set lacks is refused, with a status**
+    /// (§15 D1019 names `NeedsUpdate`; the v0.5.0 release review's
+    /// `[X4.2-L6-03]`: `the_swap_list_offers_…` builds a waiting update and never
+    /// picks under it). The page holds *Atlas*' set *Button* at v4; v5 adds a
+    /// variant *Huge*. *Huge* is offered — the shelf reads v5 — and picked, the
+    /// set would have to move to v5 first: nothing is committed, and the status
+    /// says the update comes first.
+    ///
+    /// Flip, run: the `NeedsUpdate` arm's `session.fail` dropped (`drop(..)`)
+    /// fails *"says the update comes first"*, the status empty.
+    #[test]
+    fn a_swap_to_a_variant_the_held_set_lacks_waits_for_the_update() {
+        use crate::kits::picker::tests::{app_on, file_kit, temp_root};
+        use ondin_core::variant::{VariantProp, VariantSet};
+        let ctx = egui::Context::default();
+        let dir = temp_root("swap-needs-update");
+        let (kit_id, set, _) = file_kit(&dir);
+        let path = dir.join("atlas.ondin");
+        let mut app = app_on(&ctx, dir.clone());
+        let Slotted { nested, .. } = slotted(&mut app);
+        let v4 = ondin_core::io::load(&std::fs::read(&path).unwrap()).unwrap();
+        let page = app.session.doc.root();
+        let (tx, _) = ondin_core::kit::insert(
+            &app.session.doc,
+            &mut app.session.ids,
+            &kit_id,
+            4,
+            v4.published().unwrap(),
+            set,
+            page,
+        )
+        .unwrap();
+        assert!(app.session.commit(tx));
+
+        // v5: a third variant, *Huge*.
+        let mut kit = v4.clone();
+        let huge = IdSource::new(0xAF).mint();
+        kit.apply(&Transaction(vec![
+            ondin_core::Operation::CreateNode {
+                id: huge,
+                parent: set,
+                index: 2,
+                kind: ondin_core::NodeKind::Artboard {
+                    size: ondin_core::kurbo::Size::new(160.0, 30.0),
+                },
+                transform: None,
+                name: Some("Huge".into()),
+            },
+            ondin_core::Operation::SetComponent {
+                id: huge,
+                component: true,
+            },
+            ondin_core::Operation::SetVariantSet {
+                id: set,
+                set: Some(VariantSet {
+                    props: vec![VariantProp {
+                        name: "Size".into(),
+                        values: vec!["Small".into(), "Primary".into(), "Huge".into()],
+                    }],
+                }),
+            },
+            ondin_core::Operation::SetVariant {
+                id: huge,
+                values: vec!["Huge".into()],
+            },
+        ]))
+        .unwrap();
+        let mut meta = kit.meta().clone();
+        meta.kit.as_mut().unwrap().version = 5;
+        kit.set_meta(meta);
+        kit.set_published(ondin_core::kit::freeze(&kit));
+        crate::library::store::write_document(&path, &kit).unwrap();
+        let f = std::fs::File::options().write(true).open(&path).unwrap();
+        f.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(2))
+            .unwrap();
+        app.library.refresh();
+        let k = crate::kits::index::kits_in(&app.library, app.session.doc.meta().id.as_deref())
+            .into_iter()
+            .find(|k| k.id == kit_id)
+            .unwrap();
+        assert_eq!(k.version, 5, "the fixture: the library reads v5");
+        app.kit_shelf.ask(&k);
+        app.kit_shelf.settle();
+        let published = app.kit_shelf.current(&k).expect("v5 loads");
+        let shelves = [(k.clone(), published.clone())];
+        let offered = swap_list(
+            &app.session.doc,
+            std::slice::from_ref(&k),
+            &shelves,
+            nested,
+            "",
+            "",
+        );
+        assert!(
+            offered
+                .iter()
+                .any(|(t, _, _)| matches!(t, SwapTarget::Kit { main, .. } if *main == huge)),
+            "the fixture: Huge is offered"
+        );
+
+        let before = app.session.doc.clone();
+        app.swap_to_kit(KitSwap {
+            kit: k,
+            published,
+            main: huge,
+            roots: vec![nested],
+            prop: None,
+        });
+        assert_eq!(app.session.doc, before, "nothing committed");
+        assert_eq!(
+            app.session.status().text,
+            "This kit has an update to accept before that component can be swapped in",
+            "says the update comes first"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// The swap fixture: *Row* nests an instance of *Glyph* (`slot`), and an
     /// instance of *Row* (`row_copy`) sits at the top, its copy of the slot
     /// (`nested`) the one that takes a swap.

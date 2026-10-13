@@ -1079,6 +1079,92 @@ fn make_local_reveals_the_copy_and_promotes_no_instance() {
     assert_eq!(d, before, "one undo");
 }
 
+/// A picture, and a fill wearing it.
+fn picture(
+    key: &str,
+) -> (
+    ondin_core::ImageId,
+    ondin_core::ImageEntry,
+    ondin_core::Fill,
+) {
+    use ondin_core::{Fill, ImageEntry, ImageFormat, ImageId, ImageSource, image_brush};
+    let id = ImageId(key.into());
+    let entry = ImageEntry {
+        source: ImageSource::Embedded(vec![1, 2, 3, 4].into()),
+        format: ImageFormat::Png,
+        width: 20,
+        height: 10,
+    };
+    let fill = Fill {
+        brush: image_brush(id.clone()),
+        visible: true,
+    };
+    (id, entry, fill)
+}
+
+/// **An update brings the pictures it introduces** (the v0.5.0 release review's
+/// `[R3-L5-01]`): the kit puts a picture on Icon's dot and adds a layer wearing
+/// a second one. Accepting it adds both to the consumer's image table, in the
+/// update's own transaction — so they survive a save and a load, and one undo
+/// takes them out with the layers. Before, only `vendor` added images: the
+/// instance showed the missing-picture placeholder and the file kept a
+/// reference with no bytes, for good.
+///
+/// Flip, run: `update_all` without its image ops fails *"the changed fill's
+/// picture"*.
+#[test]
+fn an_update_brings_the_pictures_it_introduces() {
+    use ondin_core::keyed_by_position;
+    let mut k = kit();
+    let (mut d, mut ids) = consumer();
+    let inst = insert(&mut d, &mut ids, &k, k.icon);
+    let before = d.clone();
+
+    let (on_dot, dot_entry, dot_fill) = picture("hash-of-the-dot");
+    let (on_ring, ring_entry, ring_fill) = picture("hash-of-the-ring");
+    let ring = IdSource::new(0xAD).mint();
+    k.doc
+        .apply(&Transaction(vec![
+            Operation::AddImage {
+                id: on_dot.clone(),
+                entry: dot_entry,
+            },
+            Operation::AddImage {
+                id: on_ring.clone(),
+                entry: ring_entry,
+            },
+            Operation::SetFills {
+                id: k.icon_dot,
+                fills: keyed_by_position([dot_fill]),
+            },
+            create(ring, k.icon, 1, rect(), "Ring"),
+            Operation::SetFills {
+                id: ring,
+                fills: keyed_by_position([ring_fill]),
+            },
+        ]))
+        .unwrap();
+    assert_eq!(kit::publish(&mut k.doc, None, 1), Some(5));
+
+    let (_, undo) = accept(&mut d, &mut ids, &k);
+    assert!(d.has_image(&on_dot), "the changed fill's picture");
+    assert!(d.has_image(&on_ring), "the new layer's picture");
+    assert_eq!(
+        d.get(inst).unwrap().children().len(),
+        2,
+        "fixture: the ring arrived"
+    );
+
+    let loaded = io::load(&io::save(&d).unwrap()).unwrap();
+    assert!(
+        loaded.has_image(&on_dot) && loaded.has_image(&on_ring),
+        "through a file"
+    );
+
+    d.apply(&undo).unwrap();
+    assert_eq!(d, before, "one undo, the pictures with it");
+}
+
 /// **A kit's rename arrives with its update** (§15 D1016's fix (b)): the kit is
 /// renamed and publishes nothing else; accepting moves the vendored top's
 /// recorded name to the new one — what the picker calls the kit once it is

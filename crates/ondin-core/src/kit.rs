@@ -1137,8 +1137,29 @@ pub fn update_all(
     for op in make_local(&b.scratch, &made_local).0 {
         b.push(op)?;
     }
+    // 🚨 **The pictures the update brings, first in the transaction** (the
+    // v0.5.0 release review's `[R3-L5-01]`). Only `vendor` added images, so a
+    // fill a sync set to a new picture, or a layer it inserted wearing one, left
+    // the document with a reference and no bytes — saved that way, and never
+    // repaired, since the next update finds the fill equal. Asked of the whole
+    // vault as the scratch leaves it, against the scratch, so what `vendor`
+    // already added is not added twice; an id is taken from the first accepted
+    // kit's publish that holds it.
+    let held = b
+        .scratch
+        .vault()
+        .and_then(|v| b.scratch.capture_subtree(v))
+        .unwrap_or_default();
+    let mut images: Vec<(crate::ImageId, crate::ImageEntry)> = Vec::new();
+    for id in crate::build::image_ids_in(&held) {
+        if let Some(e) = kits.iter().find_map(|(_, _, p)| p.document().image(&id)) {
+            images.push((id, e.clone()));
+        }
+    }
+    let mut ops = crate::build::missing_image_ops(&b.scratch, &images);
+    ops.append(&mut b.ops);
     Ok(Update {
-        tx: Transaction(b.ops),
+        tx: Transaction(ops),
         updated,
         made_local,
     })

@@ -136,10 +136,19 @@ impl OndinApp {
             Some(n) if n.set().is_some() => ondin_core::variant::variants(doc, top),
             _ => vec![top],
         };
-        let instances: usize = mains
+        // The kit's own components that nest it keep the kit's copy (§15 D1036
+        // (1)), so they are not among the instances it affects, and the card
+        // says so.
+        let (nested_in_kit, instances) = mains
             .iter()
-            .map(|m| ondin_core::component::instances_of(doc, *m).len())
-            .sum();
+            .flat_map(|m| ondin_core::component::instances_of(doc, *m))
+            .fold((0usize, 0usize), |(k, i), n| {
+                if doc.in_vault(n) {
+                    (k + 1, i)
+                } else {
+                    (k, i + 1)
+                }
+            });
         let mut decision: Option<bool> = None;
         let modal = crate::settings::card("make-local", ctx, |ui| {
             ui.set_width(crate::ui::menu_inner_w(380.0, crate::settings::PAD));
@@ -169,6 +178,16 @@ impl OndinApp {
                 .size(12.0)
                 .color(theme::text::DIM),
             );
+            if nested_in_kit > 0 {
+                ui.add_space(6.0);
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{kit}'s own components that use {name} keep {kit}'s {name}."
+                    ))
+                    .size(12.0)
+                    .color(theme::text::DIM),
+                );
+            }
             ui.add_space(crate::settings::FOOTER_GAP);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
@@ -203,7 +222,7 @@ impl OndinApp {
         self.finish_text_first();
         let doc = &self.session.doc;
         let content = self.session.preview_world_bounds(doc.root());
-        let mut tx = ondin_core::kit::make_local(doc, tops);
+        let mut tx = ondin_core::kit::make_local(doc, &mut self.session.ids, tops);
         if tx.0.is_empty() {
             return;
         }

@@ -91,6 +91,9 @@ pub enum VaultRule {
     /// The vault was opened twice, or closed while it held something or was not
     /// open.
     State,
+    /// A node inside the vault links, swaps or binds to a node outside it (§15
+    /// D1036 (1)).
+    LinksOut,
 }
 
 impl std::fmt::Display for VaultRule {
@@ -102,6 +105,7 @@ impl std::fmt::Display for VaultRule {
             Self::NotAMain => "is in the vault and is neither a main nor a component set",
             Self::KitId => "names a kit whose id is malformed",
             Self::State => "opens a vault that is open, or closes one that is not empty",
+            Self::LinksOut => "is in the vault and refers to a node outside it",
         })
     }
 }
@@ -112,7 +116,11 @@ impl std::fmt::Display for VaultRule {
 /// - the vault, when there is one, is a parentless `Root` that is not `root`;
 /// - every node under it carries an [`Origin`] whose kit is a well-formed id, and
 ///   no other node carries one;
-/// - each of its children is a main or a component set — what a kit publishes.
+/// - each of its children is a main or a component set — what a kit publishes;
+/// - **nothing in it links, swaps or binds to a node outside it** (§15 D1036
+///   (1)): a frozen copy that pointed at a live node of the document was written
+///   by every edit of that node, and reverted by the next update. A reference to
+///   a node the document lacks is `crate::component::check`'s to refuse.
 ///
 /// **No rule says a vendored main is read-only**, because nothing here can tell an
 /// edit from an update: both are transactions writing its fields. Read-only is
@@ -164,13 +172,25 @@ pub fn check(
         }
         stack.extend(n.children.iter().copied());
     }
-    match nodes
+    if let Some(n) = nodes
         .values()
         .find(|n| n.origin.is_some() && !inside.contains(&n.id))
     {
-        Some(n) => Err((n.id, VaultRule::OutsideVault)),
-        None => Ok(()),
+        return Err((n.id, VaultRule::OutsideVault));
     }
+    for id in &inside {
+        let n = &nodes[id];
+        let bound = n.props.iter().flat_map(|p| p.value.bound.iter());
+        if n.link
+            .iter()
+            .chain(&n.swap)
+            .chain(bound)
+            .any(|r| nodes.contains_key(r) && !inside.contains(r))
+        {
+            return Err((*id, VaultRule::LinksOut));
+        }
+    }
+    Ok(())
 }
 
 /// A kit's **published state** (§5.3e, §15 D1011 (2)): the frozen copy consumers
@@ -1134,7 +1154,7 @@ pub fn update_all(
             b.push(op)?;
         }
     }
-    for op in make_local(&b.scratch, &made_local).0 {
+    for op in make_local(&b.scratch, ids, &made_local).0 {
         b.push(op)?;
     }
     // 🚨 **The pictures the update brings, first in the transaction** (the
@@ -1176,17 +1196,100 @@ pub fn update_all(
 /// one nests stays vendored; it is still that kit's. Placing the revealed main
 /// is the caller's (the vault is never resolved). A node that is not a vault
 /// child is skipped.
-pub fn make_local(doc: &Document, mains: &[NodeId]) -> Transaction {
+///
+/// 🚨 **And a kit main that nests this one keeps the kit's** (§15 D1036 (1),
+/// the v0.5.0 release review's `[R1-L2-02]`): revealing *Icon* while the vault's
+/// *Card* still nests it left *Card*'s nested copy linked to the now-local main
+/// — a vault node linking out, so an edit of the local *Icon* reached the kit's
+/// *Card*, deleting it detached it, and the next update of the kit vendored a
+/// fresh *Icon* and silently reverted *Card*'s instances. So in the same
+/// transaction every revealed main a remaining vault node reaches is copied back
+/// into the vault, origins kept, and those references are pointed at the copy:
+/// the kit's components keep the kit's version, and the revealed one is the
+/// user's own fork.
+pub fn make_local(doc: &Document, ids: &mut IdSource, mains: &[NodeId]) -> Transaction {
     let mut ops = Vec::new();
     let Some(vault) = doc.vault() else {
         return Transaction(ops);
     };
     let root = doc.root();
-    let mut end = doc.get(root).map_or(0, |r| r.children.len());
-    for m in mains {
-        if doc.get(*m).and_then(|n| n.parent) != Some(vault) {
+    let mains: Vec<NodeId> = mains
+        .iter()
+        .copied()
+        .filter(|m| doc.get(*m).and_then(|n| n.parent) == Some(vault))
+        .collect();
+    let revealed: FxHashSet<NodeId> = mains
+        .iter()
+        .flat_map(|m| doc.capture_subtree(*m).unwrap_or_default())
+        .map(|n| n.id)
+        .collect();
+    // The revealed mains the rest of the vault reaches — and, through their
+    // copies, the ones those reach — copied back in under fresh ids.
+    let staying: Vec<Node> = doc
+        .capture_subtree(vault)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|n| n.id != vault && !revealed.contains(&n.id))
+        .collect();
+    let mut map: FxHashMap<NodeId, NodeId> = FxHashMap::default();
+    let mut fresh: Vec<Vec<Node>> = Vec::new();
+    let mut pending: Vec<NodeId> = refs_out(&staying)
+        .into_iter()
+        .filter(|r| revealed.contains(r))
+        .collect();
+    while let Some(r) = pending.pop() {
+        let Some(t) = top_of(doc, r) else { continue };
+        if map.contains_key(&t) {
             continue;
         }
+        let template = doc.capture_subtree(t).unwrap_or_default();
+        let Some((mut copy, _)) = crate::document::remap_subtree(&template, ids) else {
+            continue;
+        };
+        for (c, s) in copy.iter_mut().zip(&template) {
+            c.origin = s.origin.clone();
+            map.insert(s.id, c.id);
+        }
+        pending.extend(
+            refs_out(&template)
+                .into_iter()
+                .filter(|r| revealed.contains(r)),
+        );
+        fresh.push(copy);
+    }
+    let base = doc.get(vault).map_or(0, |v| v.children.len());
+    for (i, mut copy) in fresh.into_iter().enumerate() {
+        relink(&mut copy, &map);
+        ops.push(Operation::InsertSubtree {
+            nodes: copy,
+            parent: vault,
+            index: base + i,
+        });
+    }
+    for n in &staying {
+        let mut moved = n.clone();
+        relink(std::slice::from_mut(&mut moved), &map);
+        if moved.link != n.link {
+            ops.push(Operation::SetLink {
+                id: n.id,
+                link: moved.link,
+            });
+        }
+        if moved.swap != n.swap {
+            ops.push(Operation::SetSwap {
+                id: n.id,
+                swap: moved.swap,
+            });
+        }
+        if moved.props != n.props {
+            ops.push(Operation::SetProperties {
+                id: n.id,
+                props: moved.props,
+            });
+        }
+    }
+    let end = doc.get(root).map_or(0, |r| r.children.len());
+    for (i, m) in mains.iter().enumerate() {
         for n in doc.capture_subtree(*m).unwrap_or_default() {
             ops.push(Operation::SetOrigin {
                 id: n.id,
@@ -1196,9 +1299,8 @@ pub fn make_local(doc: &Document, mains: &[NodeId]) -> Transaction {
         ops.push(Operation::Reparent {
             id: *m,
             new_parent: root,
-            index: end,
+            index: end + i,
         });
-        end += 1;
     }
     Transaction(ops)
 }

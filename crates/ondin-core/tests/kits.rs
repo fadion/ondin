@@ -545,6 +545,35 @@ fn the_vault_keeps_its_rules() {
         refused(&mut d, vec![Operation::CloseVault { id: vault }]),
         VaultRule::State
     );
+    // A vault node pointed at a node of the document (§15 D1036 (1)).
+    // An instance nested in the vault's copy, of a main of the document's own.
+    let [local, nest] = [(); 2].map(|_| ids.mint());
+    d.apply(&Transaction(vec![
+        create(local, root, 0, frame(10.0, 10.0), "Local"),
+        main_on(local),
+    ]))
+    .unwrap();
+    let origin = Origin {
+        node: nest,
+        ..d.get(copy).unwrap().origin().unwrap().clone()
+    };
+    assert_eq!(
+        refused(
+            &mut d,
+            vec![
+                create(nest, copy, 1, frame(10.0, 10.0), "Nest"),
+                Operation::SetOrigin {
+                    id: nest,
+                    origin: Some(origin),
+                },
+                Operation::SetLink {
+                    id: nest,
+                    link: Some(local),
+                },
+            ]
+        ),
+        VaultRule::LinksOut
+    );
 }
 
 /// A consumer and a kit both save and load byte-identically (invariant 9): the
@@ -1060,7 +1089,7 @@ fn make_local_reveals_the_copy_and_promotes_no_instance() {
     .unwrap();
     let before = d.clone();
 
-    let tx = kit::make_local(&d, &[card]);
+    let tx = kit::make_local(&d, &mut ids, &[card]);
     let undo = d.apply(&tx).expect("make local commits").inverse;
     assert_eq!(d.get(card).unwrap().parent(), Some(d.root()));
     assert!(d.get(card).unwrap().component());
@@ -1077,6 +1106,97 @@ fn make_local_reveals_the_copy_and_promotes_no_instance() {
 
     d.apply(&undo).unwrap();
     assert_eq!(d, before, "one undo");
+}
+
+/// 🚨 ***Make local* on a main the kit's own components nest leaves them the
+/// kit's** (§15 D1036 (1), the v0.5.0 release review's `[R1-L2-02]`, with
+/// `[R3-L5-02]`'s probe). D holds *Card*, so the vault holds *Card* and the
+/// *Icon* it nests; D makes *Icon* local. Before, the vault's *Card* went on
+/// linking to the revealed *Icon*: an edit of the local *Icon* reached the
+/// kit's *Card* and its instances, and the next update — even one changing
+/// only *Card*'s name — vendored a fresh *Icon* and put them back, while the
+/// toast said overrides were kept. Now the same transaction copies *Icon* back
+/// into the vault for *Card*, so the local *Icon* is the user's own fork.
+///
+/// Flip, run — **two defences**: `make_local` leaving the vault's references as
+/// they were is refused at the commit by `kit::check`'s `LinksOut` (*"make local
+/// commits"*); with that rule off too it fails *"Card's Icon is the kit's"*.
+#[test]
+fn make_local_on_a_nested_kit_main_leaves_the_kits_components_the_kits() {
+    let mut k = kit();
+    let (mut d, mut ids) = consumer();
+    let card_inst = insert(&mut d, &mut ids, &k, k.card);
+    let card = d.get(card_inst).unwrap().link().unwrap();
+    let nested = d.get(card).unwrap().children()[0];
+    let icon = d.get(nested).unwrap().link().unwrap();
+    let before = d.clone();
+
+    let mut tx = kit::make_local(&d, &mut ids, &[icon]);
+    ondin_core::propagate::owed(&d, &mut tx, &mut ids);
+    d.apply(&tx).expect("make local commits");
+    assert_eq!(
+        d.get(icon).unwrap().parent(),
+        Some(d.root()),
+        "Icon revealed"
+    );
+    let kits_icon = d.get(nested).unwrap().link().unwrap();
+    assert!(
+        kits_icon != icon && d.in_vault(kits_icon),
+        "Card's Icon is the kit's"
+    );
+    assert_eq!(
+        d.get(kits_icon).unwrap().origin().map(|o| o.node),
+        Some(k.icon),
+        "a copy of the kit's Icon, origin and all"
+    );
+
+    // An edit of the local Icon is the user's alone.
+    let local_dot = d.get(icon).unwrap().children()[0];
+    let mut tx = Transaction(vec![Operation::SetOpacity {
+        id: local_dot,
+        opacity: 0.25,
+    }]);
+    ondin_core::propagate::owed(&d, &mut tx, &mut ids);
+    d.apply(&tx).unwrap();
+    let page_dot = d
+        .get(d.get(card_inst).unwrap().children()[0])
+        .unwrap()
+        .children()[0];
+    assert_eq!(
+        d.get(page_dot).unwrap().opacity(),
+        1.0,
+        "Card's instances keep the kit's"
+    );
+
+    // And an update of Card changes nothing of that.
+    let card_id = k.card;
+    edit_and_publish(
+        &mut k,
+        vec![Operation::SetName {
+            id: card_id,
+            name: "Card 2".into(),
+        }],
+    );
+    accept(&mut d, &mut ids, &k);
+    assert_eq!(
+        d.get(nested).unwrap().link(),
+        Some(kits_icon),
+        "nothing re-vendored"
+    );
+    assert_eq!(d.get(page_dot).unwrap().opacity(), 1.0);
+    assert_eq!(
+        d.get(local_dot).unwrap().opacity(),
+        0.25,
+        "the fork is kept"
+    );
+
+    // One undo of the make-local is the state before it.
+    let mut d2 = before.clone();
+    let mut tx = kit::make_local(&d2, &mut ids, &[icon]);
+    ondin_core::propagate::owed(&d2, &mut tx, &mut ids);
+    let undo2 = d2.apply(&tx).unwrap().inverse;
+    d2.apply(&undo2).unwrap();
+    assert_eq!(d2, before, "one undo");
 }
 
 /// A picture, and a fill wearing it.

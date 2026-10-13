@@ -3149,8 +3149,9 @@ reaches a second machine through the synced base folder (§5.11a), with no netwo
   by its top-left, a bottom pivot also reading last frame's size (§15 D1014).
 - **The library's kits** (`kits/index.rs`): `kits_in` lists them from the scan's `meta.kit`, a conflict
   copy losing in either order, and **whether a kit is sharing asked of the file that won** — asked
-  first, a kit that stopped sharing was listed through its conflict copy (§15 D1024); if every
-  claimant is a conflict copy, the first by path stands — **one answer, `kits::index::kit_file`, which
+  first, a kit that stopped sharing was listed through its conflict copy (§15 D1024); among several
+  claimants an ordinary file stands before a conflict copy, and the first by path among either — **one
+  answer, `kits::index::kit_file`, which
   the dashboard's *Kits* filter and its ⋯ kit row ask too** (§15 D1024's amendment). `KitShelf` loads each whole file and renders its tile pictures on a worker,
   keyed by the mtime the scan read, and recording the version the file said when it was read — a
   placement records that, not the scan's, which a publish between the two has passed (§15 D1023).
@@ -3158,8 +3159,9 @@ reaches a second machine through the synced base folder (§5.11a), with no netwo
   pictures are decoded once per kit, not per tile (`index::prepared`, `png::raster_of_with`); a tile's
   pixels are let go once uploaded; and opening the picker drops the shelves of kits the library no
   longer lists and every read that failed (`KitShelf::refresh`), so a kit held unreadable once is read
-  again (§15 D1014's amendment). A font family a kit's published text names arriving marks that kit for
-  a fresh read, so its tiles are drawn again in the face (`KitShelf::fonts_changed`, §15 D1036 (8)).
+  again (§15 D1014's amendment). A font family a kit's published text names arriving — its vault's
+  included — marks that kit for a fresh read, so its tiles are drawn again in the face, the old ones
+  shown until the new land (`KitShelf::fonts_changed`, §15 D1036 (8)).
   Opening the picker loads every kit in the library.
 - **A vault main's top carries the kit's name** (`Origin::name`, from `Published::name`), additive within
   v6, for the *Unavailable* heading — written only where the top's origin is the kit being vendored, so a
@@ -3225,7 +3227,8 @@ and the dashboard's 1B §15 D1017).
   card only, not the list, and on a conflict copy too, which wears both; and the file card's ⋯ *Make a
   kit*, acting at once, or *Stop sharing as kit*, asking first — **no kit row on a conflict copy**,
   which carries the original's id and would make a second kit of it (§15 D1024) — unless it is the
-  kit's only file left, which is the kit. 🚨 **On the dashboard every file is closed**, the one the
+  kit's only file left, which is the kit; the row goes to whichever file `kit_file` answers, so of two
+  ordinary files carrying one id only the first by path has it. 🚨 **On the dashboard every file is closed**, the one the
   session still holds behind it included: its mark is written into the file
   (`library::store::set_kit`), the held copy's id and mark patched to match, and 1D's confirmation
   reads the name and version from disk (§15 D1036 (6)); only the editor's own document menu goes

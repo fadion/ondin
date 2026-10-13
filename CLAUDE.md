@@ -67,8 +67,18 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1024 index rows, 1024 body headings, next free
-D1025** (measured 2026-10-08, session 63; ⚠️ **the Kits QA request reserved D1019–D1032 at
+anywhere cited either. **The live figures: 1031 index rows, 1031 body headings, next free
+D1032** (measured 2026-10-13, session 64; ⚠️ **the kits and components polish request reserved
+D1025–D1036 at `864de59` through the `dnumber-guard` mod and spent seven** — D1025 (the floating
+status bar and a kit's top bar), D1026 (the layers panel's one-step follow), D1027 (the
+library's off-frame open and card pulse), D1028–D1031 (the insert picker: set tiles, *used* by
+instances, draggable results, the real-size drag, the dimmed wait, *This document* leading).
+The closing negative grep over **D1032–D1036 found zero sites** and they are released. Census
+**929**, arrivals D1025–D1031 against `864de59`, no departures, none unresolved. ⚠️ **`arch-scribe`
+found a real defect in every batch again** — the mode label dipping with a message's fade, a file
+moved mid-load adopted at its old path, a placement lost to `Escape` in its wait, and a kit
+nested in another kit's main read as unused — each fixed before the record was committed. Before
+that, session 63; ⚠️ **the Kits QA request reserved D1019–D1032 at
 `8dab0f6` as its first act and spent six** — D1019 (a swap to a kit main never used), D1020 (the
 update pill's 45-second watch, the maintainer's ruling), D1021 (1D's count on a worker, the
 maintainer's ruling), D1022–D1024 (two QA review passes over the whole kits range and their

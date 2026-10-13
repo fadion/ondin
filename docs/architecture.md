@@ -2178,8 +2178,9 @@ a set into or under a main or an instance, a set under a set, a main into a set 
 mixed set the loader admitted would leave its set on a nudge. Membership is not asked: a linked layer
 moved out of its instance is cut loose by `settle_links`, the commit's answer rather than a refusal.
 
-**The save format is v5** (the session's), on two counts. **The item-id half is built** (§15 D980,
-`a83adc8`): `CURRENT_SCHEMA_VERSION` is 5, and it is §5.11's own case — a v4 list item has no id, so
+**The save format went to v5** (the session's), on two counts — and has been **v6** since 2026-10-08,
+the vault's bump, a number and nothing else to what follows (§5.11, §15 D1012). **The item-id half is
+built** (§15 D980, `a83adc8`): `CURRENT_SCHEMA_VERSION` became 5, and it is §5.11's own case — a v4 list item has no id, so
 the five keyed lists change shape and an old file needs a real step. **`migrate_4_to_5` gives each
 existing item `"id": "0:<index>"`**, `ItemId::positional`'s wire form, keeping an id an item already
 has — deterministic, so a re-save is byte-identical (invariant 9), and unique within its list; a v4
@@ -3080,7 +3081,11 @@ reaches a second machine through the synced base folder (§5.11a), with no netwo
   paste's status saying *"N instance(s) detached — its main is not in this document"* (§15 D1036 (3)).
   A carried main that nests one the target holds at an **older** version, without a layer it links to,
   is refused `NeedsUpdate` — *"Accept ‹kit›'s update first"*, as the picker answers — and one reaching a
-  live main here is refused `Circular` (§15 D1036 (7), (2)).
+  live main here is refused `Circular` (§15 D1036 (7), (2)). A carried main `adopt` leaves out — no
+  origin, or this kit's own main since deleted — leaves the fresh vault copies that nest it with that
+  reference cut, detached as §5.3d's rule would, since no `settle_copy` runs on a vault insert; and the
+  status's count is read off what landed, so a pasted instance of a main left out is counted too (§15
+  D1036's amendment).
 
 **Step 2 as built** (`kits/`, §15 D1013, D1014; a swap to an unused kit main §15 D1019).
 
@@ -3117,12 +3122,17 @@ reaches a second machine through the synced base folder (§5.11a), with no netwo
   document names arrives (§15 D1035); with no
   kits the list ends with 3G's *Open library*, which closes the picker for the dashboard's *Kits* filter
   (§15 D1018). **A set's tile is its default variant** (`index::tile_subject`), what a click places, and
-  the list draws no scrollbar (§15 D1028). A placement is one transaction: `kit::insert`, or
+  the list draws no scrollbar (§15 D1028). 🚨 **Every picture — a kit's tile, *This document*'s, the
+  drag's — is drawn as the main lands** (`ondin_core::kit::as_placed`, a throwaway copy with the subject
+  moved to the root): no ancestor's transform or layout, a variant at its stored size rather than the
+  one its set's layout gives it, and a vault main resolved; the subject is chosen before the move
+  (§15 D1029's amendment). A placement is one transaction: `kit::insert`, or
   `build::insert_subtrees` for a local main or an unavailable kit's vault copy, then a `SetTransform`
   centring the instance on the viewport — or, for a **tile or search result dragged out and let go over
   the canvas**, on the point of release (`OndinApp::place_kit_at`; a release back over the panel, or
-  over a panel floating on the canvas, places nothing, §15 D1018's amendment — the status bar, not
-  interactable, excepted, a ***Fix*** there) — measured on a scratch document with the transaction
+  over a panel floating on the canvas, places nothing, §15 D1018's amendment — the status bar excepted
+  on purpose: it takes no click from the canvas under it, so a drop there lands as a click there
+  would) — measured on a scratch document with the transaction
   applied, because the vault is never resolved, and by the laid-out box for every kind: a hugging frame
   stores another size (§5.3c, §15 D1014's amendment). Either way the instance lands at the document's top level, never into a frame under the
   pointer (§15 D1018). **The drag draws the component under the pointer at the size it will land**,
@@ -3139,9 +3149,17 @@ reaches a second machine through the synced base folder (§5.11a), with no netwo
   by its top-left, a bottom pivot also reading last frame's size (§15 D1014).
 - **The library's kits** (`kits/index.rs`): `kits_in` lists them from the scan's `meta.kit`, a conflict
   copy losing in either order, and **whether a kit is sharing asked of the file that won** — asked
-  first, a kit that stopped sharing was listed through its conflict copy (§15 D1024); `KitShelf` loads each whole file and renders its tile pictures on a worker,
+  first, a kit that stopped sharing was listed through its conflict copy (§15 D1024); if every
+  claimant is a conflict copy, the first by path stands — **one answer, `kits::index::kit_file`, which
+  the dashboard's *Kits* filter and its ⋯ kit row ask too** (§15 D1024's amendment). `KitShelf` loads each whole file and renders its tile pictures on a worker,
   keyed by the mtime the scan read, and recording the version the file said when it was read — a
   placement records that, not the scan's, which a publish between the two has passed (§15 D1023).
+  **The published state is sent ahead of the pictures**, so an accept never waits on a drawing; the
+  pictures are decoded once per kit, not per tile (`index::prepared`, `png::raster_of_with`); a tile's
+  pixels are let go once uploaded; and opening the picker drops the shelves of kits the library no
+  longer lists and every read that failed (`KitShelf::refresh`), so a kit held unreadable once is read
+  again (§15 D1014's amendment). A font family a kit's published text names arriving marks that kit for
+  a fresh read, so its tiles are drawn again in the face (`KitShelf::fonts_changed`, §15 D1036 (8)).
   Opening the picker loads every kit in the library.
 - **A vault main's top carries the kit's name** (`Origin::name`, from `Published::name`), additive within
   v6, for the *Unavailable* heading — written only where the top's origin is the kit being vendored, so a
@@ -3171,10 +3189,14 @@ and the dashboard's 1B §15 D1017).
 
 - **The change count is the kit frozen now against the kit frozen at its last publish**, each top by
   id — added, changed, removed; never published, everything added. A top is compared with the vault mains
-  it reaches, and 🚨 **every reached top's own place — transform and parent — is left out**: a consumer's
-  copy sits in a vault where neither means anything, so moving a main, or a main another nests, is no
-  change. **A move into another top-level frame is**, the frame being a consumer's picker grouping, and
-  a rename of the kit is worth a publish though no component changed (`Changes::renamed`, `any()`).
+  it reaches, and 🚨 **every reached top's own place is left out** — transform, parent, insets, layout
+  item and visibility, an instance root's own (`propagate::is_placement`) — and every origin's
+  **version**: a consumer's copy sits in a vault where none of it reaches an instance, so moving,
+  pinning or hiding a main, or a main another nests, and accepting a third kit's update, are no change
+  (§15 D1015's amendment). **A move into another top-level frame is**, the frame being a consumer's
+  picker grouping; and a rename of the kit, or a new order of its published mains — the order a
+  consumer's picker lists them in — is worth a publish though no component changed
+  (`Changes::renamed`, `reordered`, counted by `any()` and not by `count()`).
 - **`kit::publish`** bumps the version, stamps the caller's date and a non-blank note, and stores the
   frozen copy. Not an operation and not undoable; the date is the user's act, never a save's. A kit that
   has published and now holds no main publishes an empty state, so its consumers learn of the removal.
@@ -3202,8 +3224,13 @@ and the dashboard's 1B §15 D1017).
   counted once; a *Kit* chip at the cover's bottom-left, after a conflict or unreadable mark — on the
   card only, not the list, and on a conflict copy too, which wears both; and the file card's ⋯ *Make a
   kit*, acting at once, or *Stop sharing as kit*, asking first — **no kit row on a conflict copy**,
-  which carries the original's id and would make a second kit of it (§15 D1024). A closed file's mark is written into the file
-  (`library::store::set_kit`), the open document's by the editor's own verbs. *Duplicate* leaves the
+  which carries the original's id and would make a second kit of it (§15 D1024) — unless it is the
+  kit's only file left, which is the kit. 🚨 **On the dashboard every file is closed**, the one the
+  session still holds behind it included: its mark is written into the file
+  (`library::store::set_kit`), the held copy's id and mark patched to match, and 1D's confirmation
+  reads the name and version from disk (§15 D1036 (6)); only the editor's own document menu goes
+  through the editor's verbs. A ⋯ row that opens a card — *Stop sharing*, *Delete*, *Move to project*
+  — gives up a file still loading, as every other act does (§15 D1027's amendment). *Duplicate* leaves the
   mark and the published state behind (`library::store::duplicate`): the copy is no kit until it is
   made one, and a kept publish made its first one compare against a dead copy (§15 D1023).
 
@@ -3241,15 +3268,16 @@ and the dashboard's 1B §15 D1017).
   main moved last under the root and placed right of the content; 🚨 no instance promoted; a kit main it
   nests stays vendored; and 🚨 **a vault main that nests it keeps the kit's** — the same transaction
   copies the revealed main back into the vault, origins kept, and points the nesting copy there, so the
-  revealed one is the user's own fork and the vault never links out (§15 D1036 (1)). 4E's dialog says so
-  — though as built its sentence is never drawn (D1036's amendment, a ***Fix***). An update makes the kit's removed mains local the same way, and **whole**: every
+  revealed one is the user's own fork and the vault never links out (§15 D1036 (1)). 4E's dialog says so,
+  and counts only the instances that will follow the revealed main — not a page instance's nested copy,
+  which reaches it through a vault main that stays (`OndinApp::make_local_reach`). An update makes the kit's removed mains local the same way, and **whole**: every
   top is classified before any is synced, and no sync moves a layer out of one being made local
   (`Builder::keep_out`, §15 D1024).
 - **The notice**: a pill after the save dot when the library says a kit published past the version D
   holds; its popover lists each kit, *Later* (kept per machine, per document, per version) and *Accept
   all*, one step, a text toast naming `Ctrl+Z`. The toast counts **the mains whose sync changed more
-  than their version** (`Update::changed`) — *"no component you use changed"* at zero; ⚠️ a main whose
-  only change is a deleted last layer is missed, a ***Fix*** in D1036's amendment — and names each
+  than their version** (`Update::changed`) — *"no component you use changed"* at zero — a layer deleted
+  after every sync, or a reference pointed after them, counted to the main it lies in — and names each
   variant the kit removed whose instances detach (`Update::removed`, §5.3d's *deleting a main*); a
   waiting kit that cannot be read applies nothing and says so (§15 D1036 (4), (5)). ~~⚠️ It appears when the library next rescans, not the
   moment a kit publishes (§15 D1016, unruled).~~ **A publish while D is open is noticed by a look**
@@ -9352,11 +9380,15 @@ input event (winit/egui)
   ⚠️ **And a field that is drawn and commits can still be dropped by its card** (§15 D1008): the click
   that takes its focus is often a click on another control of the same card, on the same frame, so a
   card that keeps one write per frame keeps the later row's. An instance's Component card commits each
-  row's write in turn (`own_rows`). The Variants and Properties cards' writes rewrite a whole list, so
+  row's write in turn (`own_rows`), and where two writes are one field — a text row's ↺ clicked over
+  its own typed field — drops the field's commit, so the ↺, the later act, wins (§15 D1008's
+  amendment). The Variants and Properties cards' writes rewrite a whole list, so
   committing both in turn is not the repair there: they defer each write and build it once the card is
   drawn, against the document the frame's earlier writes left (`OndinApp::run_edits`, §15 D1009) —
   a component property named by its item id, a set's property or value, which has none, by the name
-  it was drawn with, followed through the frame's renames.
+  it was drawn with, followed through the frame's renames — which `run_edits` hands back, so a used
+  value's delete confirmation, opened on the frame its name was typed, names it as renamed (§15
+  D1009's amendment).
   🚨 **And the gate above does not cover that class, which is a fact about its *name* rather than a
   defect in it** (§15 D841). It reports a `lost_focus()` only where `changed()` is within 160
   characters; at the picker's hex field the two are ~700 apart in two separate conditions, so a
@@ -15008,7 +15040,9 @@ there to be tried again. Until then `file_card` and `file_row` draw that entry a
 down to half and back, a one-second period, starting on a ramp so a fast load barely dims it. ⚠️
 **`open_path` clears a pending open before its own**, or a slow card's answer would land over a *New
 file* made meanwhile. ⚠️ **`dashboard_act` clears it before every act but `Act::Open`**, or a card
-trashed, renamed or moved while it loads would be adopted at the path it was clicked at; `recover` clears
+trashed, renamed or moved while it loads would be adopted at the path it was clicked at — **and
+`file_menu_chose` for the ⋯ rows that open a card instead of acting** (*Stop sharing as kit*,
+*Delete*, *Move to project*), which never reach `dashboard_act` (§15 D1027's amendment); `recover` clears
 it too, after its `drop_recovery`.
 
 **The library answers its own keys (§15 D374, `shortcuts.md` §8a).** `OndinApp::dashboard_keys` runs at

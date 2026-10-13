@@ -2592,6 +2592,11 @@ impl eframe::App for OndinApp {
                     p.fonts_changed();
                 }
             }
+            // And the kits' pictures, asked of their own text (§15 D1036 (8)):
+            // a kit's components can name a family this document holds only
+            // through an instance of them.
+            self.kit_shelf
+                .fonts_changed(|families| fonts.touches(families));
             // **The retry is not narrowed, and that is deliberate.** A picker miss
             // is a family whose *preview strip* could not be drawn, and a preview
             // face arriving is precisely the thing it was waiting for — whether or

@@ -326,6 +326,30 @@ impl KitShelf {
             .any(|s| s.drawing || matches!(s.load, Load::Pending))
     }
 
+    /// A font has arrived: every kit whose published components name one of
+    /// the families `touches` answers for is read and drawn again on its next
+    /// ask.
+    ///
+    /// 🚨 **D1035's open question, measured: they were never redrawn** (§15
+    /// D1036 (8)). The local tiles had the hook (`Picker::fonts_changed`); the
+    /// shelf had none, and asks only when a kit's file changes — so a kit tile
+    /// laid out before a web font it names had arrived (a document holding an
+    /// instance of it asks for that font, which is how it arrives) kept the
+    /// fallback face until the kit published again.
+    pub(crate) fn fonts_changed(
+        &mut self,
+        touches: impl Fn(&std::collections::HashSet<String>) -> bool,
+    ) {
+        for s in self.shelves.values_mut() {
+            if let Load::Ready(Some(p)) = &s.load
+                && touches(&families_of(p.document()))
+            {
+                // Matches no scan's time, so the next ask reads it again.
+                s.modified = u64::MAX;
+            }
+        }
+    }
+
     /// Drop every kit `listed` does not name — a kit deleted, moved out of
     /// the library or no longer shared, whose pictures were otherwise kept for
     /// the window's life (the v0.5.0 release review's `[X3.1-L4-02]`) — and
@@ -465,6 +489,26 @@ fn read(path: &std::path::Path) -> (Load, Option<u32>) {
         return (Load::Ready(None), version);
     };
     (Load::Ready(Some(Arc::new(published.clone()))), version)
+}
+
+/// Every font family `doc`'s text names, lowercased — the question a font's
+/// arrival is asked against (`fonts::FontPoll::touches`).
+fn families_of(doc: &ondin_core::Document) -> std::collections::HashSet<String> {
+    let mut families = std::collections::HashSet::new();
+    let mut stack = vec![doc.root()];
+    while let Some(id) = stack.pop() {
+        let Some(node) = doc.get(id) else { continue };
+        if let ondin_core::NodeKind::Text { style, spans, .. } = node.kind() {
+            families.insert(style.font_family.to_lowercase());
+            for span in spans.as_slice() {
+                if let ondin_core::CharAttr::Family(name) = &span.attr {
+                    families.insert(name.to_lowercase());
+                }
+            }
+        }
+        stack.extend(node.children().iter().copied());
+    }
+    families
 }
 
 /// What a tile for `top` shows: a set's default variant, anything else itself.
@@ -632,6 +676,70 @@ mod tests {
             Done::Tiles { pixels, .. } => assert!(pixels.contains_key(&badge)),
             Done::State { .. } => panic!("then the pictures"),
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// **A font arriving that a kit names redraws its tiles** (§15 D1036 (8),
+    /// D1035's open question). The kit's text is set in *Inter*; a family it does
+    /// not name arriving leaves the shelf alone, *Inter* arriving makes the next
+    /// ask read and draw the kit again. Driven at the shelf's seam: the app's hook
+    /// hands it `FontPoll::touches`, and a font's arrival cannot be faked
+    /// headlessly (D1035).
+    ///
+    /// Flip, run: `fonts_changed` doing nothing fails *"read again"*.
+    #[test]
+    fn a_font_a_kit_names_arriving_redraws_its_tiles() {
+        let dir = temp("fonts");
+        let path = dir.join("atlas.ondin");
+        let (id, badge) = kit_file(&path);
+        // The kit's Badge gets a text layer in Inter, published again.
+        let mut doc = ondin_core::io::load(&std::fs::read(&path).unwrap()).unwrap();
+        let label = IdSource::new(0xC2).mint();
+        doc.apply(&Transaction(vec![Operation::CreateNode {
+            id: label,
+            parent: badge,
+            index: 0,
+            kind: NodeKind::Text {
+                content: "Go".into(),
+                style: Box::new(ondin_core::TextStyle {
+                    font_family: "Inter".into(),
+                    font_size: 12.0,
+                    ..Default::default()
+                }),
+                spans: Default::default(),
+                para_spans: Default::default(),
+                paragraph: Default::default(),
+                block: Default::default(),
+                sizing: ondin_core::TextSizing::Auto,
+                on_path: None,
+                on_path_flip: false,
+                on_path_offset: 0.0,
+            },
+            transform: None,
+            name: None,
+        }]))
+        .unwrap();
+        ondin_core::kit::publish(&mut doc, None, 2).unwrap();
+        crate::library::store::write_document(&path, &doc).unwrap();
+
+        let kit = entry(&id, &path);
+        let mut shelf = KitShelf::default();
+        shelf.ask(&kit);
+        shelf.settle();
+        assert!(
+            matches!(shelf.load(&id), Some(Load::Ready(Some(_)))),
+            "fixture"
+        );
+
+        shelf.fonts_changed(|f| f.contains("roboto"));
+        shelf.ask(&kit);
+        assert!(!shelf.busy(), "a family it does not name changes nothing");
+
+        shelf.fonts_changed(|f| f.contains("inter"));
+        shelf.ask(&kit);
+        assert!(shelf.busy(), "read again");
+        shelf.settle();
+        assert!(matches!(shelf.load(&id), Some(Load::Ready(Some(_)))));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

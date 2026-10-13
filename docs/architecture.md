@@ -1923,7 +1923,8 @@ to a nested kit main failed. That copy's own gain still reaches its instances, a
 🚨 **And no arm, nor the field pass, writes a copy in the vault** (`propagate::follows_nothing`, §5.3e,
 §15 D1012's amendment): it takes everything from the publish, so for the vault `supplied` is now the
 second defence — kept, being the general rule for any edit that supplies a counterpart itself (§15
-D1022's amendment).
+D1022's amendment) — and, measured, no kit test bites on its removal any more; a hand transaction with
+no vault in it pins it (`a_counterpart_the_edit_supplied_is_not_copied_again`).
 **Its ops go out inserts → moves → deletes → reorders**, delete decisions made after the moves, `untouched` ignoring the children the pass carries
 out; a parent the edit deleted counts as changed, so the children lifted out of it are moves — which is
 what makes *Ungroup* inside a main work. 🚨 **But its children are lost only where it was itself lost
@@ -3032,7 +3033,9 @@ reaches a second machine through the synced base folder (§5.11a), with no netwo
 - **The vault's rules** (`kit::check`, after `component::check` in `apply` and in the loader): the
   vault is a parentless `Root` that is not the root; every node under it carries an origin naming a
   well-formed kit id, and no node outside carries one; each child of the vault is a main or a component
-  set. **No rule makes a vendored main read-only** — nothing can tell an edit from an update; read-only
+  set; and **no node in it links, swaps or binds to a node of the document outside it** (`LinksOut`, §15
+  D1036 (1)) — a vault copy pointing at a live node was written by every edit of that node and reverted
+  by the next update. **No rule makes a vendored main read-only** — nothing can tell an edit from an update; read-only
   is the app's, a vault node being never resolved and so never drawn, picked or selected. 🚨 **And
   the commit's main-edit passes write no copy in the vault** (`propagate::follows_nothing`, §15
   D1012's amendment): a copy nested in a vault main takes its values, children and order from the
@@ -3062,14 +3065,22 @@ reaches a second machine through the synced base folder (§5.11a), with no netwo
   lookup `vendor` and `adopt` share, lands an origin naming the document's own `meta.id` on the live
   node, so a kit's own main inserted or pasted into the kit links to the main and opens no vault — and
   a pasted copy of one the kit has since **deleted**, which `find` cannot land, is left out by `adopt`
-  and the paste lands detached (§15 D1023); a main the kit itself vendored keeps the
-  third kit's origin; images added if missing; and an instance placed under the given parent at the
+  and the paste lands detached (§15 D1023); 🚨 **nor does it land another kit's reference on a live
+  main**: a kit built on this one — M's *Card2* nesting this kit's *Icon* — is refused by `vendor`, an
+  update and a paste alike, `KitError::Circular` naming the main here (§15 D1036 (2)); a main the kit
+  itself vendored keeps the third kit's origin; images added if missing; and an instance placed under the given parent at the
   main's own transform, one transaction. Centring it is the app's.
 - **A set inserts its first variant in reading order** (`kit::default_variant`), topmost then leftmost,
   ties to the earlier child — the build's ruling, §5.3d defining no default.
 - **A kit instance pasted into another document stays an instance**: the clipboard carries the vault
   mains a copy reaches (`kit::carried`, `io::clip`'s `kits`), and `kit::insert_carrying` vendors what
-  the target lacks before inserting the paste (§5.3d's paste rule, §9.4).
+  the target lacks before inserting the paste (§5.3d's paste rule, §9.4). ⚠️ **A *kit instance* is one
+  of a vendored main**: an instance of the kit's own **live** main, copied inside the kit, carries
+  nothing — that main is in no vault — and pasted into a consumer it detaches by §5.3d's rule, the
+  paste's status saying *"N instance(s) detached — its main is not in this document"* (§15 D1036 (3)).
+  A carried main that nests one the target holds at an **older** version, without a layer it links to,
+  is refused `NeedsUpdate` — *"Accept ‹kit›'s update first"*, as the picker answers — and one reaching a
+  live main here is refused `Circular` (§15 D1036 (7), (2)).
 
 **Step 2 as built** (`kits/`, §15 D1013, D1014; a swap to an unused kit main §15 D1019).
 
@@ -3109,9 +3120,11 @@ reaches a second machine through the synced base folder (§5.11a), with no netwo
   the list draws no scrollbar (§15 D1028). A placement is one transaction: `kit::insert`, or
   `build::insert_subtrees` for a local main or an unavailable kit's vault copy, then a `SetTransform`
   centring the instance on the viewport — or, for a **tile or search result dragged out and let go over
-  the canvas**, on the point of release (`OndinApp::place_kit_at`; a release back over the panel places
-  nothing) — measured on a scratch document with the transaction applied, because the vault is never
-  resolved. Either way the instance lands at the document's top level, never into a frame under the
+  the canvas**, on the point of release (`OndinApp::place_kit_at`; a release back over the panel, or
+  over a panel floating on the canvas, places nothing, §15 D1018's amendment — the status bar, not
+  interactable, excepted, a ***Fix*** there) — measured on a scratch document with the transaction
+  applied, because the vault is never resolved, and by the laid-out box for every kind: a hugging frame
+  stores another size (§5.3c, §15 D1014's amendment). Either way the instance lands at the document's top level, never into a frame under the
   pointer (§15 D1018). **The drag draws the component under the pointer at the size it will land**,
   rendered on a worker at the canvas's zoom and capped at half the canvas, and the tile's picture without
   its card over the panel or until that arrives (§15 D1029); a zoom moved a tenth renders it again, the
@@ -3226,12 +3239,19 @@ and the dashboard's 1B §15 D1017).
   take the layers it lifted out with it (§15 D1024).
 - ***Make local*** (`kit::make_local`, `Operation::SetOrigin`): every origin in the main cleared, the
   main moved last under the root and placed right of the content; 🚨 no instance promoted; a kit main it
-  nests stays vendored. An update makes the kit's removed mains local the same way, and **whole**: every
+  nests stays vendored; and 🚨 **a vault main that nests it keeps the kit's** — the same transaction
+  copies the revealed main back into the vault, origins kept, and points the nesting copy there, so the
+  revealed one is the user's own fork and the vault never links out (§15 D1036 (1)). 4E's dialog says so
+  — though as built its sentence is never drawn (D1036's amendment, a ***Fix***). An update makes the kit's removed mains local the same way, and **whole**: every
   top is classified before any is synced, and no sync moves a layer out of one being made local
   (`Builder::keep_out`, §15 D1024).
 - **The notice**: a pill after the save dot when the library says a kit published past the version D
   holds; its popover lists each kit, *Later* (kept per machine, per document, per version) and *Accept
-  all*, one step, a text toast naming `Ctrl+Z`. ~~⚠️ It appears when the library next rescans, not the
+  all*, one step, a text toast naming `Ctrl+Z`. The toast counts **the mains whose sync changed more
+  than their version** (`Update::changed`) — *"no component you use changed"* at zero; ⚠️ a main whose
+  only change is a deleted last layer is missed, a ***Fix*** in D1036's amendment — and names each
+  variant the kit removed whose instances detach (`Update::removed`, §5.3d's *deleting a main*); a
+  waiting kit that cannot be read applies nothing and says so (§15 D1036 (4), (5)). ~~⚠️ It appears when the library next rescans, not the
   moment a kit publishes (§15 D1016, unruled).~~ **A publish while D is open is noticed by a look**
   (`watch_kits`, §15 D1020): while the vault holds anything, every 45 seconds and on the frame the
   window regains the focus, each used kit's file is `stat`ed against what the library scan read of it —
@@ -3254,8 +3274,8 @@ and the dashboard's 1B §15 D1017).
   location, instance count and status (*v9 waiting*, *Up to date · v16*, *Unavailable*), each with *Open
   kit*, *Accept update* and *Make all local…* (6B, a confirmation, one undo); *Accept all* when any
   waits; no *Locate…*.
-- **Mains made local are placed by their laid-out boxes**, measured on the document the transaction
-  leaves, stacked down the right of the content 80 apart.
+- **Mains made local are placed by their laid-out boxes**, a frame's too, measured on the document the
+  transaction leaves, stacked down the right of the content 80 apart.
 
 ### 5.4 Text node
 
@@ -12730,7 +12750,12 @@ undocumented second, and it was invisible**: the popover arm (§9.4's one-press-
 the popovers' flags, present mode draws none of the five, and a Type popover open when the mode was
 entered left its flag set — so every `Escape` was spent on a popover that was not there and the mode's
 own toast named a key that did nothing. The arm now asks for a popover heard last frame, and present mode
-draws none, so the menu is again the only thing that precedes this rung. §1 carries it as scope, and §15 D37 has why it is a View row at all when the
+draws none, so the menu was again the only thing that preceded this rung — 🚨 **until a kit dialog,
+which has the same shape**: `Ctrl+Alt+P` and the canvas menu's *Make local…* open one in present mode,
+and the four kit dialogs were drawn only behind the `!present` guard while `modal_is_up` counted them,
+so an undrawn card held every key, `Escape` included (`[X5-L1-01]`). They are drawn outside the guard
+since §15 D1036's amendment, so the first `Escape` cancels the card and the second leaves the mode.
+**Every flag `modal_is_up` reads has to be a card that is drawn whenever it is set.** §1 carries it as scope, and §15 D37 has why it is a View row at all when the
 design's menu has no such thing.
 
 **The rulers are two 20pt bars; the guides pulled out of them are document state.** The bars
@@ -13515,7 +13540,11 @@ D1012): `copy_selection` adds `kit::carried`'s vault mains to `Clip::kits` and t
 with the pictures they show, and `insert_all` and `paste_is_held` both build the paste through
 `kit::insert_carrying`, which vendors what the target lacks — so an instance of a kit main lands linked
 in a document that has never used the kit, where §5.3d's paste rule alone would cut it. Back in its own
-document the carry adds nothing.
+document the carry adds nothing. A carry the kit refuses (`NeedsUpdate`, `Circular`) is said by
+`insert_all` through `OndinApp::carry_refused`, `paste_is_held` answering it as held so the one that
+speaks is `insert_all`; and an instance that does land cut loose is counted on the paste's status line,
+*"· N instance(s) detached — its main is not in this document"*, whatever document it came from (§15
+D1036 (3), (7)).
 ⚠️ **`go_to_dashboard`'s clear list is the second one of the same class and it had the same kind of
 hole** (§15 D526): it clears `picker`, `context_menu`, `open_menu` and `rename_entry` and did not clear
 `confirming_close`, so walking to the library under the *Unsaved changes* card left the flag stuck

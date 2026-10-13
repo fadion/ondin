@@ -2869,6 +2869,9 @@ impl OndinApp {
             egui::vec2(w, CARD_THUMB_H + CARD_CAPTION_H),
             egui::Sense::click(),
         );
+        // Pulsing while it opens (§15 D1027), put back at the end.
+        let opacity = ui.opacity();
+        ui.multiply_opacity(self.opening_alpha(entry));
         let lit = resp.hovered();
         let picked = self.dash.selected.as_deref() == Some(entry.path.as_path());
         self.follow_selection(ui, picked, rect);
@@ -3034,6 +3037,18 @@ impl OndinApp {
             egui::pos2(rect.right() - 20.0, thumb.bottom() + 22.0),
             act,
         );
+        ui.set_opacity(opacity);
+    }
+
+    /// How opaque `entry`'s card or row draws: the open pulse's value while
+    /// [`OndinApp::begin_open`] is reading it, and whole otherwise (§15 D1027).
+    fn opening_alpha(&self, entry: &Entry) -> f32 {
+        self.opening
+            .as_ref()
+            .filter(|o| o.path == entry.path)
+            .map_or(1.0, |o| {
+                crate::ui::pulse_alpha(o.at.elapsed().as_secs_f32())
+            })
     }
 
     /// What a click on a card or a row means: **it opens the document** (§15 D381).
@@ -3586,6 +3601,8 @@ impl OndinApp {
             egui::vec2(ui.available_width(), ROW_H),
             egui::Sense::click(),
         );
+        let opacity = ui.opacity();
+        ui.multiply_opacity(self.opening_alpha(entry));
         let lit = resp.hovered();
         let picked = self.dash.selected.as_deref() == Some(entry.path.as_path());
         self.follow_selection(ui, picked, rect);
@@ -3683,6 +3700,7 @@ impl OndinApp {
             egui::pos2(rect.right() - 16.0, rect.center().y),
             act,
         );
+        ui.set_opacity(opacity);
     }
 
     /// Draw the inline rename field, if this is the document being renamed.
@@ -3964,8 +3982,18 @@ impl OndinApp {
     /// Apply what the frame decided. See [`Act`] for why this is deferred.
     fn dashboard_act(&mut self, act: Act) {
         let root = self.library.root.clone();
+        // **Any other act gives up a file still loading** (§15 D1027, the
+        // stale-path window `arch-scribe` read): a trash, rename or move of the
+        // file being read would otherwise see it adopted at the path it had when
+        // it was clicked, and its next save written back where the library had
+        // just moved it from. Broader than the acts that name its path, and that
+        // is the cheap side — a click elsewhere mid-load is a change of mind.
+        if !matches!(act, Act::Open(_)) {
+            self.opening = None;
+        }
         match act {
-            Act::Open(path) => self.open_path(&path),
+            // Off the frame, the card pulsing until it lands (§15 D1027).
+            Act::Open(path) => self.begin_open(&path),
             Act::NewFile => {
                 let project = self.nav_project();
                 self.new_library_document(project);
@@ -7388,6 +7416,9 @@ mod tests {
         frame(app, vec![button(true)]);
         frame(app, vec![button(false)]);
         frame(app, vec![]);
+        // An open is read off the frame now (§15 D1027); wait for it, so a
+        // click's assertions read what the click did.
+        app.settle_open();
     }
 
     /// The centre of the card or row whose name is `name`, from the last frame.
@@ -7611,6 +7642,96 @@ mod tests {
             "control: and the New file card still creates one"
         );
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A clicked card pulses until its document lands, and only that card**
+    /// (§15 D1027): the read is off the frame, so the library is still drawn while
+    /// it works, and the card being opened is drawn at the pulse's opacity.
+    ///
+    /// Flip, run: `opening_alpha` answering `1.0` fails *"the clicked card
+    /// dims"*.
+    #[test]
+    fn a_card_pulses_while_its_document_opens() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, root) = app(&ctx, "pulse");
+        let mut a = ondin_core::Document::new(app.session.ids.mint());
+        let path = store::file_document(&root, None, "Pulsing", &mut a).unwrap();
+        let mut b = ondin_core::Document::new(app.session.ids.mint());
+        store::file_document(&root, None, "Resting", &mut b).unwrap();
+        app.library.refresh();
+        app.dash.nav = Nav::All;
+
+        // The card grounds: `color::CARD` at whatever opacity they drew at.
+        let grounds = |app: &mut OndinApp| -> Vec<u8> {
+            let out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::pos2(0.0, 0.0), SCREEN)),
+                    ..Default::default()
+                },
+                |ui| app.dashboard_ui(ui),
+            );
+            let mut alphas: Vec<u8> = out
+                .shapes
+                .iter()
+                .filter_map(|s| match &s.shape {
+                    // Premultiplied: an opacity scales every channel, so the
+                    // card is the ground whose red is `CARD`'s at its alpha.
+                    egui::Shape::Rect(r)
+                        if r.corner_radius == egui::CornerRadius::same(9)
+                            && r.fill.a() > 0
+                            && (r.fill.r() as i32
+                                - (color::CARD.r() as i32 * r.fill.a() as i32 / 255))
+                                .abs()
+                                <= 1 =>
+                    {
+                        Some(r.fill.a())
+                    }
+                    _ => None,
+                })
+                .collect();
+            alphas.sort();
+            alphas
+        };
+        assert_eq!(grounds(&mut app), vec![255, 255], "the control: both whole");
+
+        app.begin_open(&path);
+        assert!(app.opening.is_some(), "the read is off the frame");
+        // Into the held half of the pulse.
+        app.opening.as_mut().unwrap().at =
+            std::time::Instant::now() - std::time::Duration::from_secs_f32(0.4);
+        let dimmed = grounds(&mut app);
+        assert_eq!(dimmed.len(), 2, "{dimmed:?}");
+        assert!(dimmed[0] < 160, "the clicked card dims: {dimmed:?}");
+        assert_eq!(dimmed[1], 255, "and only it: {dimmed:?}");
+
+        app.settle_open();
+        assert_eq!(app.session.path.as_deref(), Some(path.as_path()));
+        assert!(app.opening.is_none());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A library act made while a file loads gives the load up** (§15 D1027's
+    /// stale-path window): moved to another project mid-read, the file would
+    /// have been adopted at the path it was clicked at, and saved back there.
+    ///
+    /// Flip, run: dropping `dashboard_act`'s clear fails *"the move gave the
+    /// open up"*.
+    #[test]
+    fn a_library_act_mid_load_gives_the_open_up() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let (mut app, root) = app(&ctx, "stale-open");
+        let mut a = ondin_core::Document::new(app.session.ids.mint());
+        let path = store::file_document(&root, None, "Moving", &mut a).unwrap();
+        app.library.refresh();
+        app.begin_open(&path);
+        assert!(app.opening.is_some(), "the fixture: a load in flight");
+        app.dashboard_act(Act::MoveTo(path.clone(), None));
+        assert!(app.opening.is_none(), "the move gave the open up");
+        app.settle_open();
+        assert_ne!(app.session.path.as_deref(), Some(path.as_path()));
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -8483,6 +8604,8 @@ mod tests {
             ..Default::default()
         };
         let _ = ctx.run_ui(input, |ui| app.dashboard_ui(ui));
+        // `Enter` opens off the frame (§15 D1027); see `click_at`.
+        app.settle_open();
     }
 
     /// The arithmetic behind the arrow keys, on its own.

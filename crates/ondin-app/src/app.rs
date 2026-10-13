@@ -574,6 +574,14 @@ pub(crate) struct FrameIndex {
     walks: u64,
 }
 
+/// A library file on its way in ([`OndinApp::begin_open`]): which one, the
+/// worker's answer, and when it was asked for — the pulse's clock.
+pub(crate) struct Opening {
+    pub path: std::path::PathBuf,
+    rx: std::sync::mpsc::Receiver<Result<ondin_core::Document, String>>,
+    pub at: std::time::Instant,
+}
+
 pub struct OndinApp {
     pub(crate) session: EditorSession,
     /// See [`FrameIndex`]. `RefCell` because every reader is `&self` and the whole
@@ -899,6 +907,9 @@ pub struct OndinApp {
     pub(crate) layers_synced_selection: Vec<NodeId>,
     /// Whether the tree still owes the selection a scroll into view.
     pub(crate) scroll_layers_to_selection: bool,
+    /// A library file being read and loaded off the frame, its card pulsing
+    /// meanwhile ([`OndinApp::begin_open`], §15 D1027).
+    pub(crate) opening: Option<Opening>,
     /// The row a Shift-click measures its range from: the last one clicked
     /// *without* Shift. Deliberately not moved by a Shift-click itself, so a
     /// range can be stretched and shrunk from one end.
@@ -2301,6 +2312,7 @@ impl OndinApp {
             renaming_layer: None,
             layers_synced_selection: Vec::new(),
             scroll_layers_to_selection: false,
+            opening: None,
             layers_range_anchor: None,
             layer_filter: None,
             layer_drag: None,
@@ -2537,6 +2549,9 @@ impl eframe::App for OndinApp {
         // ticks, one of which `go_to_dashboard` compensates by hand and says
         // so. ⚠️ **The close interception used to be a fourth and was not
         // deliberate** — it is above this return now (§15 D526).
+        // A library file read off the frame lands here, before the screen it
+        // switches to is drawn (§15 D1027).
+        self.poll_open(ui.ctx());
         if self.view == View::Dashboard {
             self.dashboard_ui(ui);
             // Last of the library's frame, after every card: see the editor's
@@ -7211,6 +7226,9 @@ impl OndinApp {
         // above are a save and a confirmed discard, and there is no third way to
         // reach here"* — now true of this door too.
         self.drop_recovery();
+        // A library file still loading loses to the recovered one (§15 D1027):
+        // landing later it would replace this unsaved document without asking.
+        self.opening = None;
         self.session.adopt_document(doc, pending.target.clone());
         // **After `adopt_document`, which sets it clean.** A just-opened document
         // matches its file and that is the right default everywhere else; this one
@@ -7237,7 +7255,9 @@ impl OndinApp {
     /// ([`Self::recovery_tick`]'s clean branch is the sixth and is the ordinary
     /// case): [`Self::close_confirmation`]'s *Save* and *Discard* arms, which end
     /// the process and have no next frame; [`Self::go_to_dashboard`], gated on the
-    /// session being clean; [`Self::open_path`]; and [`Self::recover`].
+    /// session being clean; [`Self::adopt_opened`], which [`Self::open_path`] and
+    /// the off-frame [`Self::poll_open`] both reach (§15 D1027); and
+    /// [`Self::recover`].
     ///
     /// ⚠️ **The last of those is the only one with a precondition** (§15 D768).
     /// `recover` may drop **only** because [`Self::may_replace_current_document`]
@@ -7303,12 +7323,13 @@ impl OndinApp {
     /// *without* what the user has typed, and the `drop_recovery` below then
     /// takes away the last copy of it. `self.text` survives the walk — this
     /// function does not call [`Self::reset_transient_state`] — only to be
-    /// thrown away by [`Self::open_path`], which does, on the way back in.
+    /// thrown away by [`Self::adopt_opened`], which does, on the way back in —
+    /// `open_path`'s tail until §15 D1027 split it out.
     ///
     /// ⚠️ **That used to read "thrown away by the `adopt_document`", and it was
     /// wrong in a way worth leaving a mark on**: `adopt_document` is an
     /// `EditorSession` method and cannot see `OndinApp::text` at all. The two
-    /// are *adjacent lines* in `open_path`, not a call chain, so the sentence
+    /// are *adjacent lines* in `adopt_opened` (then `open_path`), not a call chain, so the sentence
     /// read as coherent and named a function that could not have done it. It
     /// came in from the review finding's own evidence, which spelled the pair
     /// with an arrow between them. This is the same guard
@@ -7383,6 +7404,9 @@ impl OndinApp {
         if !self.may_replace_current_document("opening another document") {
             return;
         }
+        // A card still loading loses to this one: its answer, landing later,
+        // would otherwise replace the document opened here (§15 D1027).
+        self.opening = None;
         let bytes = match std::fs::read(path) {
             Ok(b) => b,
             Err(e) => return self.session.fail(format!("Read failed: {e}")),
@@ -7391,6 +7415,88 @@ impl OndinApp {
             Ok(d) => d,
             Err(e) => return self.session.fail(format!("Load error: {e}")),
         };
+        self.adopt_opened(path, doc);
+    }
+
+    /// Open `path` with the read and the load on a worker, the library's card
+    /// pulsing until it lands (§15 D1027) — the dashboard's door, where a large
+    /// file took a second with nothing on screen saying the click had been heard.
+    /// [`Self::poll_open`] adopts it on the frame it arrives; a second click
+    /// replaces the first, and the answer of the one replaced is dropped.
+    ///
+    /// The *may I replace* question is asked here, before the work starts, as
+    /// [`Self::open_path`] asks it: the library has saved the document behind it
+    /// on the way in, so this is almost always a yes with nothing to show.
+    pub(crate) fn begin_open(&mut self, path: &std::path::Path) {
+        if self.opening.as_ref().is_some_and(|o| o.path == path) {
+            return;
+        }
+        if !self.may_replace_current_document("opening another document") {
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let at = path.to_path_buf();
+        let spawned = std::thread::Builder::new()
+            .name("ondin-open".into())
+            .spawn(move || {
+                let loaded = std::fs::read(&at)
+                    .map_err(|e| format!("Read failed: {e}"))
+                    .and_then(|b| ondin_core::io::load(&b).map_err(|e| format!("Load error: {e}")));
+                let _ = tx.send(loaded);
+            });
+        match spawned {
+            Ok(_) => {
+                self.opening = Some(Opening {
+                    path: path.to_path_buf(),
+                    rx,
+                    at: std::time::Instant::now(),
+                });
+            }
+            // No thread to be had: open on this one, as before.
+            Err(_) => self.open_path(path),
+        }
+    }
+
+    /// Adopt a document [`Self::begin_open`] finished loading, or report why it
+    /// could not — and keep frames coming while it works, for the pulse.
+    pub(crate) fn poll_open(&mut self, ctx: &egui::Context) {
+        let Some(o) = &self.opening else {
+            return;
+        };
+        match o.rx.try_recv() {
+            Ok(loaded) => {
+                let path = o.path.clone();
+                self.opening = None;
+                match loaded {
+                    Ok(doc) => self.adopt_opened(&path, doc),
+                    Err(why) => self.session.fail(why),
+                }
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => ctx.request_repaint(),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.opening = None;
+                self.session.fail("Load error: the reader stopped");
+            }
+        }
+    }
+
+    /// Wait for [`Self::begin_open`]'s worker and adopt what it read — the
+    /// tests', `Covers::settle`'s shape (§15 D820).
+    #[cfg(test)]
+    pub(crate) fn settle_open(&mut self) {
+        let Some(o) = self.opening.take() else {
+            return;
+        };
+        match o.rx.recv_timeout(std::time::Duration::from_secs(20)) {
+            Ok(Ok(doc)) => self.adopt_opened(&o.path, doc),
+            Ok(Err(why)) => self.session.fail(why),
+            Err(_) => self.session.fail("Load error: the reader stopped"),
+        }
+    }
+
+    /// The half of an open after the bytes are a document: the library's
+    /// bookkeeping, the session, and the editor.
+    fn adopt_opened(&mut self, path: &std::path::Path, doc: ondin_core::Document) {
         if let Some(id) = doc.meta().id.clone() {
             // **Before `adopt_document`, because that moves the document.** The
             // Recent list is per-machine and lives in the cache, so this is the
@@ -7402,8 +7508,10 @@ impl OndinApp {
         // replaced.** Past this line the app is holding a different document and
         // has no way to name the old one's snapshot, so the file would sit in
         // `.recovery/` until the next launch asked about it. The work it held is
-        // already on disk — the two branches above are a save and a confirmed
-        // discard, and there is no third way to reach here.
+        // already on disk: both doors here asked `may_replace_current_document`
+        // first — `open_path` straight above, `begin_open` frames earlier, before
+        // the read went off the frame (§15 D1027) — and its two answers are a
+        // save and a confirmed discard; there is no third way to reach here.
         self.drop_recovery();
         // `adopt_document` re-seeds the id source from the loaded document;
         // without that, the next create would collide.

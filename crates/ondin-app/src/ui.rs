@@ -122,6 +122,30 @@ pub fn menu_frame(pad: f32) -> egui::Frame {
         .inner_margin(egui::Margin::same(pad as i8))
 }
 
+/// The "heard you, working on it" pulse, as an opacity `t` seconds after the
+/// click (§15 D1027, the maintainer's shape): down to 50% over [`PULSE_RAMP`],
+/// held for [`PULSE_HOLD`], back to whole, held, and again. It starts on a ramp
+/// rather than a step, so a load that lands in a frame or two barely flickers.
+pub(crate) fn pulse_alpha(t: f32) -> f32 {
+    let period = 2.0 * (PULSE_RAMP + PULSE_HOLD);
+    let t = t.max(0.0) % period;
+    let ease = |x: f32| x * x * (3.0 - 2.0 * x);
+    let low = 0.5;
+    if t < PULSE_RAMP {
+        1.0 - (1.0 - low) * ease(t / PULSE_RAMP)
+    } else if t < PULSE_RAMP + PULSE_HOLD {
+        low
+    } else if t < 2.0 * PULSE_RAMP + PULSE_HOLD {
+        low + (1.0 - low) * ease((t - PULSE_RAMP - PULSE_HOLD) / PULSE_RAMP)
+    } else {
+        1.0
+    }
+}
+
+/// [`pulse_alpha`]'s fade and its rest, in seconds.
+pub(crate) const PULSE_RAMP: f32 = 0.3;
+pub(crate) const PULSE_HOLD: f32 = 0.2;
+
 /// One row of a dropdown menu: an icon, a label, and a hover ground across the
 /// whole width.
 ///
@@ -5275,6 +5299,28 @@ pub(crate) fn logo(ui: &egui::Ui, rect: egui::Rect, lit: bool) {
     let uv = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
     ui.painter()
         .image(texture.id(), rect, uv, egui::Color32::WHITE);
+}
+
+#[cfg(test)]
+mod pulse_tests {
+    use super::{PULSE_HOLD, PULSE_RAMP, pulse_alpha};
+
+    /// **`pulse_alpha` is the maintainer's shape** (§15 D1027): whole at the
+    /// click, down to half, held, back to whole, held, and round again — sampled a
+    /// hair either side of each edge, so a step in the wrong place is seen.
+    #[test]
+    fn the_pulse_dips_to_half_holds_and_comes_back() {
+        let e = 0.01;
+        assert_eq!(pulse_alpha(0.0), 1.0, "whole at the click");
+        assert!(pulse_alpha(PULSE_RAMP * 0.5) < 1.0 && pulse_alpha(PULSE_RAMP * 0.5) > 0.5);
+        assert_eq!(pulse_alpha(PULSE_RAMP + e), 0.5, "held at half");
+        assert_eq!(pulse_alpha(PULSE_RAMP + PULSE_HOLD - e), 0.5);
+        let back = 2.0 * PULSE_RAMP + PULSE_HOLD;
+        assert!(pulse_alpha(back - PULSE_RAMP * 0.5) > 0.5, "coming back");
+        assert_eq!(pulse_alpha(back + e), 1.0, "held whole");
+        let period = 2.0 * (PULSE_RAMP + PULSE_HOLD);
+        assert_eq!(pulse_alpha(period + PULSE_RAMP + e), 0.5, "and again");
+    }
 }
 
 #[cfg(test)]

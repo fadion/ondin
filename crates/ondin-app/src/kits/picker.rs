@@ -74,6 +74,13 @@ impl Picker {
     pub(crate) fn cancel_drag(&mut self) {
         self.ghost = None;
     }
+
+    /// A family the document names has arrived: every picture of its own mains
+    /// was laid out without it, and nothing in the document changed to say so
+    /// (§15 D1035).
+    pub(crate) fn fonts_changed(&mut self) {
+        self.local.invalidate();
+    }
 }
 
 /// What names a placeable thing across frames: its kit (empty for this
@@ -105,6 +112,8 @@ struct Ghost {
     /// The worker's answer: the picture and the component's size in world units.
     rx: Option<mpsc::Receiver<Option<(Pixels, egui::Vec2)>>>,
     picture: Option<(egui::TextureHandle, egui::Vec2)>,
+    /// The canvas zoom the picture is (or is being) rendered at.
+    zoom: f64,
 }
 
 /// The tile pictures of this document's own mains, rendered on a worker.
@@ -129,6 +138,19 @@ struct LocalTiles {
     /// The render in flight, and the mains it was asked for.
     job: Option<(TileJob, Vec<NodeId>)>,
     tiles: HashMap<NodeId, egui::TextureHandle>,
+}
+
+/// What a main's picture is drawn from, as [`LocalTiles`] compares it: its
+/// subtree, **its own translation taken out** (§15 D1035). A main moved on the
+/// canvas draws the same picture, so it is not drawn again; one rotated or
+/// scaled does not, and its transform's other terms stay in the comparison.
+fn content_of(doc: &Document, top: NodeId) -> Vec<ondin_core::Node> {
+    let mut nodes = doc.capture_subtree(top).unwrap_or_default();
+    if let Some(root) = nodes.first_mut() {
+        let [a, b, c, d, _, _] = root.transform().as_coeffs();
+        *root = root.with_transform(Affine::new([a, b, c, d, 0.0, 0.0]));
+    }
+    nodes
 }
 
 /// A local render's answer: each main's picture.
@@ -185,7 +207,7 @@ impl LocalTiles {
         self.drawn.retain(|id, _| tops.contains(id));
         let mut changed = Vec::new();
         for top in tops {
-            let now = doc.capture_subtree(*top).unwrap_or_default();
+            let now = content_of(doc, *top);
             if self.drawn.get(top) != Some(&now) {
                 self.drawn.insert(*top, now);
                 changed.push(*top);
@@ -210,6 +232,14 @@ impl LocalTiles {
             // than counted as drawn (`arch-scribe`'s reading).
             self.forget(&changed);
         }
+    }
+
+    /// Draw every main again, now: forgotten, and compared on the next pass
+    /// without the settle wait, as the first look is (§15 D1035).
+    fn invalidate(&mut self) {
+        self.drawn.clear();
+        self.rev = None;
+        self.pending = None;
     }
 
     /// Mains whose render never landed: not drawn, so the next revision's
@@ -506,6 +536,7 @@ impl OndinApp {
                         *ghost = Ghost::start(item, &self.session.doc, zoom);
                     }
                     ghost.pass(ctx);
+                    ghost.follow_zoom(item, &self.session.doc, zoom);
                     draw_ghost(ctx, item, ghost, panel, canvas, zoom, ppp);
                 }
                 None => p.ghost = None,
@@ -980,6 +1011,11 @@ impl Out<'_> {
 /// The largest side a drag's picture is rendered at, in pixels.
 const GHOST_MAX_PX: f64 = 2048.0;
 
+/// How far the zoom may move from the one a drag's picture was drawn at before
+/// it is drawn again — a tenth, so a wheel tick re-renders and the jitter of a
+/// pinch does not render every frame.
+const GHOST_REZOOM: f64 = 0.1;
+
 impl Ghost {
     /// Render `item`'s component at `zoom` on a worker — the default variant of a
     /// set, as a placement inserts (§15 D1029).
@@ -1014,7 +1050,21 @@ impl Ghost {
             key: key_of(&item.source),
             rx: spawned.ok().map(|_| rx),
             picture: None,
+            zoom,
         }
+    }
+
+    /// Render again for a zoom changed mid-drag past [`GHOST_REZOOM`] of the one
+    /// the picture was drawn at, keeping the old picture — drawn at the new size,
+    /// so stretched — until the new one lands (§15 D1035). One render at a time.
+    fn follow_zoom(&mut self, item: &Item, doc: &Document, zoom: f64) {
+        let off = (zoom / self.zoom - 1.0).abs();
+        if self.rx.is_some() || off < GHOST_REZOOM {
+            return;
+        }
+        let old = self.picture.take();
+        *self = Ghost::start(item, doc, zoom);
+        self.picture = old;
     }
 
     /// Take the worker's picture when it lands; keep frames coming meanwhile.
@@ -2100,7 +2150,10 @@ pub(crate) mod tests {
     /// Flip, run: comparing nothing (every main counted as changed) fails *"an
     /// unrelated edit renders nothing"*; dropping the settle wait fails *"not
     /// before the edits settle"* — asked on the edit inside A, since asked on the
-    /// unrelated one first it passed under the flip, nothing rendering either way.
+    /// unrelated one first it passed under the flip, nothing rendering either way;
+    /// `content_of` keeping the translation fails *"a moved main renders
+    /// nothing"* (§15 D1035). The app's font hook that calls `invalidate` is not
+    /// driven — a font's arrival cannot be faked headlessly.
     #[test]
     fn local_pictures_redraw_only_a_changed_main_once_settled() {
         let ctx = egui::Context::default();
@@ -2165,6 +2218,39 @@ pub(crate) mod tests {
             "and only it: B's picture kept"
         );
         assert!(tiles.tiles.contains_key(&a));
+
+        // A moved on the canvas draws the same picture (§15 D1035) …
+        let mut rev = 3;
+        let mut edit = |doc: &mut Document, tiles: &mut LocalTiles, t: Affine| {
+            rev += 1;
+            doc.apply(&Transaction(vec![Operation::SetTransform {
+                id: a,
+                transform: t,
+            }]))
+            .unwrap();
+            tiles.pass(&ctx, doc, rev, &tops);
+            age(tiles);
+            tiles.pass(&ctx, doc, rev, &tops);
+            rev
+        };
+        edit(&mut doc, &mut tiles, Affine::translate((300.0, 40.0)));
+        assert!(!tiles.busy(), "a moved main renders nothing");
+        // … and one rotated does not.
+        let rev = edit(
+            &mut doc,
+            &mut tiles,
+            Affine::translate((300.0, 40.0)) * Affine::rotate(0.5),
+        );
+        assert!(tiles.busy(), "a rotated main renders");
+        tiles.settle(&ctx);
+
+        // A family the document names arriving redraws every picture, at once.
+        let before_b = tiles.tiles[&b].id();
+        tiles.invalidate();
+        tiles.pass(&ctx, &doc, rev, &tops);
+        assert!(tiles.busy(), "a font arriving renders, without the wait");
+        tiles.settle(&ctx);
+        assert_ne!(tiles.tiles[&b].id(), before_b, "B's picture too");
     }
 
     /// **A kit reached through another kit's component counts as used** (§15
@@ -2244,7 +2330,8 @@ pub(crate) mod tests {
     /// nothing"*. `cancel_gesture` without the picker's term **passed** while the
     /// right-click spanned two frames — `dragged_id` carried it — and fails *"the
     /// release places nothing"* with the one-frame click, which is why the test
-    /// drives that one.
+    /// drives that one; since the menu assertion joined (§15 D1035) it fails
+    /// earlier, at *"the cancelling right-click opens no menu"*.
     #[test]
     fn a_right_click_takes_a_picker_drag_away() {
         let ctx = egui::Context::default();
@@ -2325,6 +2412,14 @@ pub(crate) mod tests {
         assert!(
             !app.kit_picker.as_ref().unwrap().dragging(),
             "the picture goes on the right-click"
+        );
+        // The right-click spends itself on the cancel, opening no canvas menu
+        // over the drop point — asked of the door the canvas's own release goes
+        // through (§15 D1035; the gate is R1's, §15 D168).
+        app.open_context_menu(&ctx, crate::menu::Target::Canvas, None);
+        assert!(
+            app.context_menu.is_none(),
+            "the cancelling right-click opens no menu"
         );
         run(
             &mut app,
@@ -2516,6 +2611,48 @@ pub(crate) mod tests {
             images.iter().any(|r| r.center().distance(to) < 0.5
                 && (r.size() - egui::vec2(48.0, 60.0)).length() < 0.5),
             "the ghost is the component at canvas size: {images:?}"
+        );
+
+        // A zoom mid-drag renders it again, the old picture standing meanwhile
+        // (§15 D1035).
+        fn ghost_of(app: &OndinApp) -> &Ghost {
+            app.kit_picker.as_ref().unwrap().ghost.as_ref().unwrap()
+        }
+        let first = ghost_of(&app).picture.as_ref().unwrap().0.id();
+        app.session.camera.zoom = 3.0;
+        run(&mut app, vec![egui::Event::PointerMoved(to)]);
+        assert!(
+            ghost_of(&app).rx.is_some() && ghost_of(&app).picture.is_some(),
+            "a re-render asked, the old picture kept meanwhile"
+        );
+        app.kit_picker
+            .as_mut()
+            .unwrap()
+            .ghost
+            .as_mut()
+            .unwrap()
+            .settle(&ctx);
+        let zoomed = run(&mut app, vec![egui::Event::PointerMoved(to)]);
+        assert_ne!(
+            ghost_of(&app).picture.as_ref().unwrap().0.id(),
+            first,
+            "a new picture"
+        );
+        let sizes: Vec<egui::Vec2> = zoomed
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Mesh(m) if m.texture_id != egui::TextureId::default() => Some(
+                    egui::Rect::from_points(&m.vertices.iter().map(|v| v.pos).collect::<Vec<_>>())
+                        .size(),
+                ),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            sizes
+                .iter()
+                .any(|s| (*s - egui::vec2(72.0, 90.0)).length() < 0.5),
+            "drawn at the new zoom: {sizes:?}"
         );
 
         let ink = |shapes: &[egui::epaint::ClippedShape]| {

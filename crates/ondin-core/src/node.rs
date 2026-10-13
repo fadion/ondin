@@ -301,6 +301,15 @@ impl Node {
     pub fn transform(&self) -> Affine {
         self.transform
     }
+    /// This node with `transform` in place of its own, everything else the same
+    /// — for comparing a node's content wherever it sits (the app's picker
+    /// pictures, §15 D1035). Not a write: the document is changed by ops only.
+    pub fn with_transform(&self, transform: Affine) -> Node {
+        Node {
+            transform,
+            ..self.clone()
+        }
+    }
     pub fn name(&self) -> &str {
         &self.name
     }

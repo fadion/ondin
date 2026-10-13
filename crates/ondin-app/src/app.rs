@@ -2586,6 +2586,11 @@ impl eframe::App for OndinApp {
             // *list* (§15 D352) needed one more step.
             if fonts.touches(&self.document_families()) {
                 self.session.fonts_changed();
+                // The picker's pictures of this document's mains were laid out
+                // in the fallback too, and no revision says so (§15 D1035).
+                if let Some(p) = self.kit_picker.as_mut() {
+                    p.fonts_changed();
+                }
             }
             // **The retry is not narrowed, and that is deliberate.** A picker miss
             // is a family whose *preview strip* could not be drawn, and a preview

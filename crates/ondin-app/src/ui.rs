@@ -679,10 +679,7 @@ pub fn menu_head(ui: &mut egui::Ui, lead: egui::RichText, gap: f32, open: bool) 
 /// design draws it at 72% against full strength, which is what lets the state be
 /// read at a glance rather than by inspecting each row for a glyph.
 pub fn menu_check(ui: &mut egui::Ui, label: &str, on: bool, height: f32) -> bool {
-    /// The design's row: 8px inset, a 13px glyph column, 7px to the label.
-    const PAD_X: f32 = 8.0;
-    const TICK_W: f32 = 13.0;
-    const GAP: f32 = 7.0;
+    use menu_check_row::{GAP, PAD_X, TICK_W};
 
     let (rect, resp) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), height),
@@ -714,6 +711,37 @@ pub fn menu_check(ui: &mut egui::Ui, label: &str, on: bool, height: f32) -> bool
         },
     );
     resp.clicked()
+}
+
+/// [`menu_check`]'s row geometry, shared with [`menu_check_width`].
+mod menu_check_row {
+    /// The design's row: 8px inset, a 13px glyph column, 7px to the label.
+    pub const PAD_X: f32 = 8.0;
+    pub const TICK_W: f32 = 13.0;
+    pub const GAP: f32 = 7.0;
+}
+
+/// The painted width a dropdown of [`menu_check`] rows needs so its widest
+/// label fits — `floor` or more, the row's inset on the right as on the left
+/// (§15 D1032). *Show status messages* ran past the View menu's fixed 160.
+pub fn menu_check_width(ctx: &egui::Context, labels: &[&str], pad: f32, floor: f32) -> f32 {
+    use menu_check_row::{GAP, PAD_X, TICK_W};
+    let widest = labels
+        .iter()
+        .map(|l| {
+            ctx.fonts_mut(|f| {
+                f.layout_no_wrap(
+                    (*l).to_string(),
+                    egui::FontId::proportional(11.5),
+                    egui::Color32::WHITE,
+                )
+                .size()
+                .x
+            })
+        })
+        .fold(0.0, f32::max);
+    let row = PAD_X + TICK_W + GAP + widest + PAD_X;
+    (row + 2.0 * pad + 2.0 * MENU_BORDER).ceil().max(floor)
 }
 
 /// A small-caps section eyebrow (`LAYERS`, `TRANSFORM`, …).

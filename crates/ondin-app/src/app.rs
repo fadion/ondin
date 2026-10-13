@@ -9301,6 +9301,12 @@ impl OndinApp {
                 head.rect.left() - 8.0,
                 head.rect.bottom() + crate::ui::MENU_GAP,
             );
+            // The design's 160, or wider when a label needs it (§15 D1032).
+            let labels: Vec<&str> = match which {
+                TopMenu::View => ViewSwitch::VIEW_MENU.iter().map(|s| s.label()).collect(),
+                _ => ViewSwitch::SNAP_MENU.iter().map(|s| s.label()).collect(),
+            };
+            let width = crate::ui::menu_check_width(&ctx, &labels, MENU_PAD, MENU_W);
             self.dropdown(
                 &ctx,
                 match which {
@@ -9308,7 +9314,7 @@ impl OndinApp {
                     _ => "snap-menu",
                 },
                 anchor,
-                MENU_W,
+                width,
                 &head,
                 |app, ui| {
                     // The two guide rows sit straight after the rulers they are
@@ -9410,7 +9416,14 @@ impl OndinApp {
             ViewSwitch::LayoutGrid => self.show_layout_grids = on,
             ViewSwitch::Layers => self.show_layers = on,
             ViewSwitch::Toolbar => self.show_toolbar = on,
-            ViewSwitch::StatusMessages => self.show_status = on,
+            ViewSwitch::StatusMessages => {
+                self.show_status = on;
+                // Off, the toast would go into the bar it has just silenced,
+                // there to surface — stale — when the bar comes back.
+                if !on {
+                    return;
+                }
+            }
             ViewSwitch::Present => {
                 self.present = on;
                 // The menu goes with the chrome it lives in.
@@ -17016,6 +17029,49 @@ mod library_wiring_tests {
         );
         assert_eq!(grounds[0].height(), grounds[1].height(), "{grounds:?}");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **The View menu is wide enough for its widest row** (§15 D1032): *Show
+    /// status messages* ran past the fixed 160-point card.
+    ///
+    /// Flip, run: the menu back at `MENU_W` fails, the label ending at 990.9
+    /// against a card edge of 992 — inside the card's padding, as reported.
+    #[test]
+    fn the_view_menu_fits_its_widest_label() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut app = OndinApp::headless(&ctx);
+        app.open_menu = TopMenu::View;
+        let mut shapes = Vec::new();
+        let input = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1200.0, 800.0),
+            )),
+            ..Default::default()
+        };
+        for _ in 0..2 {
+            shapes = ctx.run_ui(input(), |ui| app.top_bar(ui)).shapes;
+        }
+        // The card's frame is not a plain `Rect` shape (it paints with its
+        // shadow), so its box is egui's own record of the area.
+        let card = ctx
+            .memory(|m| m.area_rect(egui::Id::new("view-menu")))
+            .expect("the View menu's area");
+        let label = shapes
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == "Show status messages" => {
+                    Some(t.pos.x + t.galley.size().x)
+                }
+                _ => None,
+            })
+            .expect("the row");
+        assert!(
+            label <= card.right() - crate::app::MENU_PAD,
+            "the label ends at {label}, the card at {}",
+            card.right()
+        );
     }
 
     /// **The floating status bar shows a message for its hold, then nothing; the

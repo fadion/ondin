@@ -336,6 +336,11 @@ impl OndinApp {
     /// top right of the content (D1011 (3)); the toast says what changed and that
     /// overrides were kept, and names `Ctrl+Z` (D981 (d): toasts are text).
     pub(crate) fn accept_kit_updates(&mut self, only: Option<&str>) {
+        // The typing is committed before the update, so a layer being typed
+        // into is touched — cut loose rather than deleted under the session,
+        // which then committed onto a node that was gone and said "Text
+        // updated" (`[X3.2-L5-01]`).
+        self.finish_text_first();
         let waiting: Vec<Waiting> = self
             .kits_waiting(false)
             .into_iter()
@@ -1081,5 +1086,155 @@ mod tests {
             b2.y0 >= b1.y1 + super::LOCAL_GAP - 1e-9,
             "no overlap: {b1:?} {b2:?}"
         );
+    }
+
+    /// A text layer reading "hello" under `parent`, committed and saved, and a
+    /// live session over it holding "TYPED" the document does not.
+    fn typing_into(app: &mut OndinApp, parent: NodeId) -> NodeId {
+        let id = app.session.ids.mint();
+        let parts = crate::fonts::FontService::default_text_parts();
+        assert!(app.session.commit(Transaction(vec![Operation::CreateNode {
+            id,
+            parent,
+            index: 0,
+            kind: NodeKind::Text {
+                content: "hello".into(),
+                style: Box::new(parts.style),
+                spans: parts.spans,
+                para_spans: parts.para_spans,
+                paragraph: parts.paragraph,
+                block: parts.block,
+                sizing: parts.sizing,
+                on_path: None,
+                on_path_flip: false,
+                on_path_offset: 0.0,
+            },
+            transform: None,
+            name: Some("Label".into()),
+        }])));
+        assert!(app.save_file(false));
+        app.begin_edit_text(Some(id), None);
+        app.text
+            .as_mut()
+            .expect("the session is live")
+            .editor
+            .insert("TYPED");
+        assert_eq!(
+            text_of(&app.session.doc, id).as_deref(),
+            Some("hello"),
+            "fixture: the typing is the session's alone"
+        );
+        id
+    }
+
+    fn text_of(doc: &Document, id: NodeId) -> Option<String> {
+        match doc.get(id)?.kind() {
+            NodeKind::Text { content, .. } => Some(content.clone()),
+            _ => None,
+        }
+    }
+
+    /// **The kit doors end a live text session first** (`[X3.2-L5-01]`, the
+    /// v0.5.0 release review's Critical). Typing into a text layer of the kit
+    /// opened by *Go to main in the kit*, then leaving by the back link, lost the
+    /// typing: `open_path` saved `session.doc`, which holds none of it, and
+    /// `adopt_opened` dropped the session. The back link and *Kits used… → Open
+    /// kit* both call `open_path`, which is where this drives it — the seam the
+    /// fix is at, `may_replace_current_document`.
+    ///
+    /// Flip, run: the `finish_text_first` line out of
+    /// `may_replace_current_document` fails *"the kit on disk keeps the typing"*
+    /// with `Some("hello")`.
+    #[test]
+    fn leaving_the_kit_keeps_what_was_typed_in_it() {
+        let ctx = egui::Context::default();
+        let root = temp_root("text-leave");
+        let (path, kit, badge, _) = file_kit(&root);
+        let (mut app, inst) = consumer(&ctx, &root, &kit, badge);
+        let consumer_path = app.session.path.clone().unwrap();
+        app.session.selection.set_one(inst);
+        app.go_to_kit_main();
+        assert_eq!(app.session.path.as_deref(), Some(path.as_path()));
+        let label = typing_into(&mut app, badge);
+
+        app.open_path(&consumer_path);
+        assert_eq!(app.session.path.as_deref(), Some(consumer_path.as_path()));
+        let on_disk = ondin_core::io::load(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(
+            text_of(&on_disk, label).as_deref(),
+            Some("TYPED"),
+            "the kit on disk keeps the typing"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// ***Accept all* under a live text session commits the typing first**
+    /// (`[X3.2-L5-01]`'s second route): the update is applied to a document that
+    /// holds what is on screen, and no session is left over a document the
+    /// update rewrote.
+    ///
+    /// Flip, run: the `finish_text_first` line out of `accept_kit_updates`
+    /// fails *"the session ended before the update"* — the session still live
+    /// after the accept.
+    #[test]
+    fn an_accept_commits_what_was_typed_first() {
+        let ctx = egui::Context::default();
+        let root = temp_root("text-accept");
+        let (path, kit, badge, dot) = file_kit(&root);
+        let (mut app, _) = consumer(&ctx, &root, &kit, badge);
+        let page = app.session.doc.root();
+        let label = typing_into(&mut app, page);
+        republish(
+            &path,
+            vec![Operation::SetOpacity {
+                id: dot,
+                opacity: 0.5,
+            }],
+            "Softer dot",
+        );
+        app.library.refresh();
+        settle_for_accept(&mut app);
+        app.accept_kit_updates(None);
+        assert!(app.text.is_none(), "the session ended before the update");
+        assert_eq!(text_of(&app.session.doc, label).as_deref(), Some("TYPED"));
+        assert!(app.kits_waiting(false).is_empty(), "and the update landed");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// ***Publish* under a live text session publishes what is on screen**
+    /// (`[X5-L1-02]`): the published main's text reads the typing, and the kit
+    /// has nothing left to publish after. Before, the frozen state read "hello",
+    /// the version was spent, and ending the session left one change behind.
+    ///
+    /// Flip, run: the `finish_text_first` lines out of both `open_publish` and
+    /// `publish_now` fail *"the publish holds the typing"* with `Some("hello")`.
+    #[test]
+    fn a_publish_holds_what_was_typed() {
+        let ctx = egui::Context::default();
+        let root = temp_root("text-publish");
+        let (path, _, badge, _) = file_kit(&root);
+        let mut app = OndinApp::headless(&ctx);
+        app.prefs.base_folder = Some(root.clone());
+        app.library = Library::open(root.clone());
+        app.open_path(&path);
+        app.make_kit();
+        let label = typing_into(&mut app, badge);
+
+        app.open_publish();
+        assert!(app.publishing.is_some(), "the dialog opened");
+        app.publish_now("Words".into());
+        let published = app.session.doc.published().expect("published");
+        assert_eq!(
+            text_of(published.document(), label).as_deref(),
+            Some("TYPED"),
+            "the publish holds the typing"
+        );
+        app.finish_text_first();
+        assert_eq!(
+            app.kit_changes().map(|c| c.count()),
+            Some(0),
+            "nothing left"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

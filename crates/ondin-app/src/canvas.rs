@@ -8251,13 +8251,17 @@ impl OndinApp {
             self.session.info("Removed empty text");
             return;
         }
-        if session.changed() {
-            self.session.commit(Transaction(vec![Operation::SetText {
+        // A refused commit keeps its own message: an unconditional "Text
+        // updated" here once wrote over the failure of a `SetText` on a node an
+        // update had deleted under the session (`[X3.2-L5-01]`).
+        if session.changed()
+            && self.session.commit(Transaction(vec![Operation::SetText {
                 id: session.id,
                 content: session.editor.content().to_string(),
                 spans: session.editor.spans().clone(),
                 para_spans: session.editor.para_spans().clone(),
-            }]));
+            }]))
+        {
             self.session.info("Text updated");
         }
     }

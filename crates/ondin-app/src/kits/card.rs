@@ -199,6 +199,8 @@ impl OndinApp {
     /// Reveal `tops` and place them down the right of the content (D1011 (3)),
     /// one step; the selection does not move.
     pub(crate) fn make_local_now(&mut self, tops: &[NodeId]) {
+        // A commit under a live text session (`[X3.2-L5-01]`).
+        self.finish_text_first();
         let doc = &self.session.doc;
         let content = self.session.preview_world_bounds(doc.root());
         let mut tx = ondin_core::kit::make_local(doc, tops);

@@ -7621,7 +7621,13 @@ impl OndinApp {
     /// native dialog on top of an `egui::Modal` — the only place in the app that
     /// happens. Its window-close ✕ answers `No`, which is the safe arm, so the
     /// reflex gesture does not destroy anything (§15 D621's rule).
+    ///
+    /// **A live text session is finished first**, so its typed text is in the
+    /// document this saves, or asks about: typing does not dirty the document,
+    /// and `adopt_opened` drops the session, so a door through here lost it
+    /// whole (`[X3.2-L5-01]`, the kit card's back link).
     fn may_replace_current_document(&mut self, what: &str) -> bool {
+        self.finish_text_first();
         if self.session.is_dirty() && self.session.path.is_some() {
             self.save_file(false);
         }
@@ -8921,7 +8927,17 @@ impl OndinApp {
     /// **bare** key resolves to an `Action` there"*, so the four dead chords fall
     /// out by omission rather than by a decision. That is a gap for the
     /// maintainer; the damage above is not.
-    fn finish_text_first(&mut self) {
+    ///
+    /// 🚨 **The kits range met this rule at some doors and not at others**
+    /// (`[X3.2-L5-01]`, the v0.5.0 release review's Critical, and `[X5-L1-02]`):
+    /// the kit card's back link and *Kits used… → Open kit* left the document
+    /// through [`Self::open_path`] and lost what was typed, *Accept* / *Accept
+    /// all* and *Make local* committed under the session, and *Publish* froze the
+    /// main without the typed text. So the call is now at the seams rather than
+    /// the buttons: [`Self::may_replace_current_document`], which every door that
+    /// replaces the document asks first, and the head of each kit verb that
+    /// commits, saves or publishes.
+    pub(crate) fn finish_text_first(&mut self) {
         if self.text.is_some() {
             self.finish_text_edit();
         }

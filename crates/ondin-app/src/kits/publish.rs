@@ -145,6 +145,11 @@ impl OndinApp {
     /// Open the publish dialog — *Publish N*, *Publish kit…*, `Ctrl+Alt+P`. With
     /// nothing to publish it says so instead (2D).
     pub(crate) fn open_publish(&mut self) {
+        // The one seam for the button, the menu row and the chord: a publish
+        // under a live text session froze the main without what was typed and
+        // spent the version on it (`[X5-L1-02]`), and the dialog's change list
+        // has to be counted from the committed text too.
+        self.finish_text_first();
         let Some(c) = self.kit_changes() else {
             self.session
                 .info("Make this document a kit first, from the menu on its name");
@@ -282,6 +287,8 @@ impl OndinApp {
 
     /// Publish: freeze, bump, stamp, save — and say so (2D).
     pub(crate) fn publish_now(&mut self, note: String) {
+        // `open_publish` finished it; this is the verb, and any other caller.
+        self.finish_text_first();
         let count = self.kit_changes().map_or(0, |c| c.count());
         let Some(version) = ondin_core::kit::publish(
             &mut self.session.doc,

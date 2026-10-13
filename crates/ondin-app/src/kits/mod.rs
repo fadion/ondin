@@ -141,6 +141,9 @@ impl OndinApp {
     /// stopped sharing is turned back on with its version kept, so a re-made kit
     /// continues from its last publish (1D).
     pub(crate) fn make_kit(&mut self) {
+        // The save below is of `session.doc`, which holds no typed text until
+        // the session ends (`[X3.2-L5-01]`).
+        self.finish_text_first();
         let mut meta = self.session.doc.meta().clone();
         if meta.id.is_none() {
             meta.id = Some(crate::library::ids::mint());
@@ -165,6 +168,8 @@ impl OndinApp {
     /// it keep their copies; they read it as no longer a kit. Reached through
     /// [`OndinApp::stop_sharing_dialog`], which asks first.
     pub(crate) fn stop_sharing_kit(&mut self) {
+        // As `make_kit`: the save holds no typed text until the session ends.
+        self.finish_text_first();
         let mut meta = self.session.doc.meta().clone();
         let Some(kit) = meta.kit.as_mut() else {
             return;

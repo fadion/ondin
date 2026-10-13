@@ -664,7 +664,7 @@ fn paste_across(from: &Document, inst: NodeId, to: &mut Document, ids: &mut IdSo
     made[0]
 }
 
-/// [`paste_across`]'s transaction, or what the carrying paste refuses.
+/// `paste_across`'s transaction, or what the carrying paste refuses.
 fn try_paste_across(
     from: &Document,
     inst: NodeId,

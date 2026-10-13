@@ -783,8 +783,9 @@ impl OndinApp {
     /// Place an instance of `source` at the viewport's centre — a tile's click
     /// (3A).
     ///
-    /// The tests' door: the picker's own clicks go through [`Self::ask_place`],
-    /// which waits a frame for the dim (§15 D1030).
+    /// The tests' door: the picker's own clicks go through `Self::ask_place`,
+    /// which waits a frame for the dim (§15 D1030). Plain backticks: a
+    /// `cfg(test)` item's doc is one `cargo doc` never builds (§15 D319).
     #[cfg(test)]
     fn place_from_picker(&mut self, ctx: &egui::Context, source: Source) {
         self.place_kit_at(ctx, source, self.canvas_rect.center());

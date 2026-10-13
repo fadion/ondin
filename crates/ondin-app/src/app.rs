@@ -7530,8 +7530,9 @@ impl OndinApp {
         }
     }
 
-    /// Wait for [`Self::begin_open`]'s worker and adopt what it read — the
-    /// tests', `Covers::settle`'s shape (§15 D820).
+    /// Wait for `Self::begin_open`'s worker and adopt what it read — the
+    /// tests', `Covers::settle`'s shape (§15 D820). Plain backticks: a
+    /// `cfg(test)` item's doc is one `cargo doc` never builds (§15 D319).
     #[cfg(test)]
     pub(crate) fn settle_open(&mut self) {
         let Some(o) = self.opening.take() else {

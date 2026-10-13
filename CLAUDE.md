@@ -67,8 +67,13 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1031 index rows, 1031 body headings, next free
-D1032** (measured 2026-10-13, session 64; ⚠️ **the kits and components polish request reserved
+anywhere cited either. **The live figures: 1034 index rows, 1034 body headings, next free
+D1035** (measured 2026-10-13, session 64; ⚠️ **its follow-up request reserved D1032–D1039 at
+`f9035ce` and spent three** — D1032 (the View and Snap menus fit their widest row), D1033 (a
+right-click cancels a picker drag), D1034 (*This document*'s pictures redraw only a changed main,
+once settled). The closing grep over **D1035–D1039 found zero sites** and they are released.
+Census **932**, arrivals D1032–D1034 against `f9035ce`, none unresolved. Before that, ⚠️ **the kits
+and components polish request reserved
 D1025–D1036 at `864de59` through the `dnumber-guard` mod and spent seven** — D1025 (the floating
 status bar and a kit's top bar), D1026 (the layers panel's one-step follow), D1027 (the
 library's off-frame open and card pulse), D1028–D1031 (the insert picker: set tiles, *used* by

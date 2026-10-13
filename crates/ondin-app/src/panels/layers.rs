@@ -2431,8 +2431,17 @@ impl OndinApp {
                 // Only when it is actually off screen. Recentring a row that is
                 // already in view moves the whole tree under the pointer for no
                 // reason, which is worse than not scrolling at all.
+                //
+                // **A jump, not a glide** (§15 D1026). egui's `scroll_to_rect`
+                // eases over several frames, which reads well across a short tree
+                // and as the panel lurching on every canvas click across a long one
+                // — the maintainer asked for it to follow without animation.
                 if !ui.clip_rect().contains_rect(rect) {
-                    ui.scroll_to_rect(rect, Some(egui::Align::Center));
+                    ui.scroll_to_rect_animation(
+                        rect,
+                        Some(egui::Align::Center),
+                        egui::style::ScrollAnimation::none(),
+                    );
                 }
             }
 
@@ -6115,7 +6124,8 @@ mod drag_start_sync_tests {
         max: egui::Pos2::new(300.0, 120.0),
     };
 
-    /// A headless app holding `n` rects at the root, and their ids top to bottom.
+    /// A headless app holding `n` rects at the root, and their ids in model
+    /// order — bottom of the stack first, which the panel draws last.
     fn app_with_rows(ctx: &egui::Context, n: usize) -> (OndinApp, Vec<NodeId>) {
         theme::install(ctx);
         let mut app = OndinApp::headless(ctx);
@@ -6141,8 +6151,9 @@ mod drag_start_sync_tests {
         }
         doc.apply(&Transaction(ops)).expect("the rows");
         app.session.adopt_document(doc, None);
-        // The tree draws children in list order and the root is not a row, so the
-        // deepest child is the *last* row. `made` is in that order already.
+        // `made` is in model order, bottom of the stack first. The panel draws
+        // children reversed — the top row is the layer on top — so `ids[0]` is
+        // the *last* row and `ids.last()` the first; the root is not a row.
         (app, made)
     }
 
@@ -6241,9 +6252,10 @@ mod drag_start_sync_tests {
     /// this mechanism and not the fixture.
     ///
     /// ⚠️ **The number is not the 20.7 the finding measured, and the difference
-    /// is the assertion's whole shape.** `scroll_to_rect` is animated, so the
-    /// 20.7 arrives over several frames and the fourth reads the first slice of
-    /// it. A test written to assert the *magnitude* would have to know how many
+    /// is the assertion's whole shape.** `scroll_to_rect` was animated then, so the
+    /// 20.7 arrived over several frames and the fourth read the first slice of
+    /// it (the follow is a jump since §15 D1026, which leaves this test's
+    /// all-zero assertion exactly as true). A test written to assert the *magnitude* would have to know how many
     /// frames egui's easing takes; asserting that it is **zero on every frame**
     /// needs no such number and is what the fix actually promises.
     #[test]
@@ -6302,6 +6314,33 @@ mod drag_start_sync_tests {
             (c0, c1, c2),
             (0.0, 0.0, 0.0),
             "the control moved, so the fixture is what is being measured"
+        );
+    }
+
+    /// **A selection made off the panel scrolls its row into view in one step**
+    /// (§15 D1026): the offset reaches its value and holds it, rather than
+    /// easing toward it across frames.
+    ///
+    /// Flip, run: putting back `ui.scroll_to_rect` fails *"no glide"* with the
+    /// offset easing `0, 7.9, 30.2, 65.3, …` across the eight frames.
+    #[test]
+    fn a_canvas_selection_jumps_the_tree_to_its_row() {
+        let ctx = egui::Context::default();
+        let (mut app, ids) = app_with_rows(&ctx, 30);
+        let (start, _) = frame(&ctx, &mut app, Vec::new());
+        assert_eq!(start, 0.0, "the fixture: the tree starts at its top");
+        // Picked on the canvas: the selection changes behind the panel's back.
+        // `ids[0]` is the bottom of the stack, which the panel draws last.
+        app.session.selection.set_one(ids[0]);
+        let offsets: Vec<f32> = (0..8)
+            .map(|_| frame(&ctx, &mut app, Vec::new()).0)
+            .collect();
+        let first = offsets.iter().position(|o| *o > 0.0).unwrap_or_else(|| {
+            panic!("the fixture: the row is off screen, so the tree scrolls: {offsets:?}")
+        });
+        assert!(
+            offsets[first..].iter().all(|o| *o == offsets[first]),
+            "no glide: {offsets:?}"
         );
     }
 

@@ -4949,6 +4949,145 @@ mod tests {
         );
     }
 
+    /// **A used value renamed in its menu and then *Delete value* clicked asks
+    /// about the renamed value** (the v0.5.0 release review's `[X6-L1-01]`,
+    /// D1009's ⚠️, run). *Small* typed to *Small2*, *Delete value* clicked with
+    /// the field focused: the confirmation was built from the name as drawn, so
+    /// it named *Small*, and its *Delete* found no value of that name and deleted
+    /// nothing, silently.
+    ///
+    /// Flip, run: the confirmation stored as drawn fails *"the modal names
+    /// Small2"* with *Small*.
+    #[test]
+    fn a_used_value_renamed_then_deleted_is_asked_about_by_its_new_name() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut v = variants_fixture(&ctx);
+        let painted = texts(&settled(&mut v.app, &ctx, v.set));
+        let chip = painted
+            .iter()
+            .find(|(t, _)| t == "Small")
+            .unwrap()
+            .1
+            .center();
+        click(&mut v.app, &ctx, chip);
+        let painted = texts(&settle(&mut v.app, &ctx));
+        let field = painted
+            .iter()
+            .rev()
+            .find(|(t, _)| t == "Small")
+            .unwrap()
+            .1
+            .center();
+        click(&mut v.app, &ctx, field);
+        frame(
+            &mut v.app,
+            &ctx,
+            vec![egui::Event::Key {
+                key: egui::Key::End,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Default::default(),
+            }],
+        );
+        frame(&mut v.app, &ctx, vec![egui::Event::Text("2".into())]);
+        let painted = texts(&settle(&mut v.app, &ctx));
+        let delete = painted
+            .iter()
+            .find(|(t, _)| t == "Delete value")
+            .unwrap_or_else(|| panic!("the chip's menu: {painted:?}"))
+            .1
+            .center();
+        click(&mut v.app, &ctx, delete);
+        settle(&mut v.app, &ctx);
+        let values = v.app.session.doc.get(v.set).unwrap().set().unwrap().props[0]
+            .values
+            .clone();
+        assert_eq!(values, ["Small2", "Large"], "fixture: the rename landed");
+        let asked = v
+            .app
+            .deleting_value
+            .as_ref()
+            .expect("a used value is asked about");
+        assert_eq!(asked.name, "Small2", "the modal names Small2");
+        assert_eq!((asked.prop, asked.value), (0, 0), "and points at it");
+    }
+
+    /// **A text property's ↺ clicked with text typed into its field resets
+    /// it** (the v0.5.0 release review's `[X6-L1-02]`). The instance's *Label
+    /// text* overridden to *Hi*; *!* typed into the field; the row's label — its
+    /// ↺ — clicked. The field committed on the same frame, after the reset, and
+    /// the property ended *Hi!*: the click the user made last was lost.
+    ///
+    /// Flip, run: the field's commit kept on a reset frame fails *"the reset
+    /// wins"* with *Hi!*.
+    #[test]
+    fn a_text_rows_reset_wins_over_its_own_typed_field() {
+        use ondin_core::variant::{PropValue, property_state, set_property};
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let mut v = variants_fixture(&ctx);
+        let prop = |v: &V| {
+            let doc = &v.app.session.doc;
+            let p = doc
+                .get(v.set)
+                .unwrap()
+                .props()
+                .iter()
+                .find(|p| p.name == "Label text")
+                .unwrap()
+                .clone();
+            (p.clone(), property_state(doc, v.i, &p).unwrap().0)
+        };
+        let (p, main_value) = prop(&v);
+        let tx = set_property(
+            &v.app.session.doc,
+            &[v.i],
+            &p,
+            &PropValue::Text("Hi".into()),
+        );
+        assert!(v.app.session.commit(Transaction(tx)));
+        assert_eq!(
+            prop(&v).1,
+            PropValue::Text("Hi".into()),
+            "fixture: overridden"
+        );
+
+        let out = settled(&mut v.app, &ctx, v.i);
+        let painted = texts(&out);
+        let label = painted
+            .iter()
+            .find(|(t, _)| t == "Label text")
+            .unwrap_or_else(|| panic!("the row: {painted:?}"))
+            .1;
+        let rects: Vec<egui::Rect> = fills(&out).into_iter().map(|(r, _)| r).collect();
+        let field = *rects
+            .iter()
+            .find(|r| {
+                r.height() == ui::CONTROL_H
+                    && r.left() > label.right()
+                    && (r.center().y - label.center().y).abs() < 4.0
+            })
+            .expect("the Label text field");
+        click(&mut v.app, &ctx, field.center());
+        frame(
+            &mut v.app,
+            &ctx,
+            vec![egui::Event::Key {
+                key: egui::Key::End,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Default::default(),
+            }],
+        );
+        frame(&mut v.app, &ctx, vec![egui::Event::Text("!".into())]);
+        click(&mut v.app, &ctx, label.center());
+        settle(&mut v.app, &ctx);
+        assert_eq!(prop(&v).1, main_value, "the reset wins");
+    }
+
     /// **A component property renamed and left focused survives a click on another
     /// property's ×** (§15 D1009, D1008's *Fix* on the Properties card). The
     /// Button's *Shown* typed to *Shown2*, then *Words*' × clicked: *Words* is gone

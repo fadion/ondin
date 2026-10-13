@@ -712,7 +712,10 @@ impl OndinApp {
     /// Build and commit a card's [`Deferred`] edits in the order it asked for
     /// them, each against the document the one before left and each its own undo
     /// step; a refusal says why on the status line (§15 D1009).
-    fn run_edits(&mut self, edits: Vec<Deferred>) {
+    ///
+    /// Answers the names the frame's edits changed, for what the card keeps
+    /// past the frame to follow ([`ValueDelete`]).
+    fn run_edits(&mut self, edits: Vec<Deferred>) -> Renames {
         let mut renamed = Renames::default();
         for edit in edits {
             let mut cx = EditCx {
@@ -728,6 +731,7 @@ impl OndinApp {
                 Err(why) => self.session.info(why),
             }
         }
+        renamed
     }
 
     /// The **Variants** card's body for the set `set` (3A–3C): its name and
@@ -748,7 +752,8 @@ impl OndinApp {
         let mut edits: Vec<Deferred> = Vec::new();
         let mut select_all = false;
         let mut add_variant = false;
-        let mut confirm: Option<ValueDelete> = None;
+        // With the property's name as drawn, for the frame's renames to follow.
+        let mut confirm: Option<(String, ValueDelete)> = None;
 
         // **One line, the set's name alone** (§15 D1000, the maintainer's look):
         // the *Component set* caption over it went as a main's and an instance's
@@ -901,17 +906,20 @@ impl OndinApp {
                                         }))
                                     }));
                                 } else {
-                                    confirm = Some(ValueDelete {
-                                        set,
-                                        prop: pi,
-                                        value: vi,
-                                        name: v.clone(),
-                                        variants: using.len(),
-                                        instances: using
-                                            .iter()
-                                            .map(|u| component::instances_of(doc, *u).len())
-                                            .sum(),
-                                    });
+                                    confirm = Some((
+                                        pname.clone(),
+                                        ValueDelete {
+                                            set,
+                                            prop: pi,
+                                            value: vi,
+                                            name: v.clone(),
+                                            variants: using.len(),
+                                            instances: using
+                                                .iter()
+                                                .map(|u| component::instances_of(doc, *u).len())
+                                                .sum(),
+                                        },
+                                    ));
                                 }
                                 ui.close();
                             }
@@ -991,9 +999,30 @@ impl OndinApp {
                 add_variant = true;
             }
         });
-        self.run_edits(edits);
-        if confirm.is_some() {
-            self.deleting_value = confirm;
+        let renamed = self.run_edits(edits);
+        // 🚨 **The confirmation follows the frame's renames** (the v0.5.0
+        // release review's `[X6-L1-01]`, D1009's ⚠️ run): a used value's name
+        // typed in its menu commits on the frame *Delete value* is clicked, after
+        // this was built from the name as drawn — so the modal named a value
+        // that no longer existed, and *Delete* found no value of that name and
+        // deleted nothing, silently. It takes the value's name and place now.
+        if let Some((drawn_prop, mut c)) = confirm {
+            let prop = renamed.prop(&drawn_prop);
+            let value = renamed.value(&drawn_prop, &c.name);
+            let at = self
+                .session
+                .doc
+                .get(set)
+                .and_then(|s| s.set())
+                .and_then(|vs| {
+                    let pi = vs.props.iter().position(|p| p.name == prop)?;
+                    let vi = vs.props[pi].values.iter().position(|v| *v == value)?;
+                    Some((pi, vi))
+                });
+            if let Some((pi, vi)) = at {
+                (c.prop, c.value, c.name) = (pi, vi, value);
+                self.deleting_value = Some(c);
+            }
         }
         if select_all {
             self.select_all_instances();
@@ -1379,7 +1408,8 @@ impl OndinApp {
         // report): a text field commits on the frame it loses focus, which is the
         // frame a click on the switch below it lands, and one `Option` here kept
         // the switch's write and dropped the text typed into the field. Each is
-        // committed in turn, its own undo step — the two touch different fields.
+        // committed in turn, its own undo step — the two touch different fields,
+        // but for a text row's ↺ and its own field, where the ↺ wins (below).
         let mut out: Vec<Transaction> = Vec::new();
         let name_of = |id: NodeId| {
             doc.get(id)
@@ -1659,7 +1689,15 @@ impl OndinApp {
                 PropKind::Text => {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 0.0;
-                        if row_label(ui, &p.name, mark.as_ref()) {
+                        // 🚨 **The ↺ is the user's last act, and wins** (the
+                        // v0.5.0 release review's `[X6-L1-02]`): clicking it
+                        // with text typed into this row's own field commits
+                        // that field on the same frame, after the reset, and
+                        // put the typing back over it — two undo steps whose
+                        // sum was the reset lost. The two are one field, the
+                        // case D1008's "different fields" left out.
+                        let reset_clicked = row_label(ui, &p.name, mark.as_ref());
+                        if reset_clicked {
                             out.extend(reset());
                         }
                         let text = match &value {
@@ -1683,7 +1721,8 @@ impl OndinApp {
                             egui::vec2(w, ui::CONTROL_H),
                             12.0,
                             rules,
-                        ) {
+                        ) && !reset_clicked
+                        {
                             out.push(Transaction(variant::set_property(
                                 doc,
                                 roots,

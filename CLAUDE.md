@@ -67,8 +67,12 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1036 index rows, 1036 body headings, next free
-D1037** (measured 2026-10-13, session 65, at `a6d81ed`; ⚠️ **the `v0.5.0..fb90943` review's fix phase
+anywhere cited either. **The live figures: 1037 index rows, 1037 body headings, next free
+D1038** (measured 2026-10-13 at `a82346f`; ⚠️ **the styles-and-variables design request reserved
+D1037–D1042 at `51b4550` through the `dnumber-guard` mod and spent one** — D1037, the design,
+record-only like D1010: **no code cites it yet**, the first build commit owes the citation.
+**D1038–D1042 found at zero sites and released.** Census unchanged, no arrivals. Before that,
+session 65, at `a6d81ed`; ⚠️ **the `v0.5.0..fb90943` review's fix phase
 reserved D1036–D1050 at `fb90943` through the `dnumber-guard` mod as its first act and spent one** —
 D1036, the maintainer's ten rulings, then built and recorded as amendments; every one of the 50
 findings went into amendments too. **D1037–D1050 found at zero sites and released.** Census **934**,

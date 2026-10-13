@@ -2862,11 +2862,18 @@ impl eframe::App for OndinApp {
             self.inspector_panel(&ctx);
             self.picker_ui(&ctx);
             self.kit_picker_ui(&ctx);
-            self.publish_dialog(&ctx);
-            self.make_local_dialog(&ctx);
-            self.kits_used_dialog(&ctx);
-            self.stop_sharing_dialog(&ctx);
         }
+        // 🚨 **The kit dialogs are outside the `!present` guard**, because two
+        // of their doors are not hidden by present mode: `Ctrl+Alt+P` opens the
+        // publish card and the canvas menu's *Make local…* the make-local one. A
+        // card held in its slot and never drawn made `modal_is_up` true, so the
+        // keyboard arm swallowed every key — Escape, the one way out of present
+        // mode, included (the v0.5.0 release review's `[X5-L1-01]`). Every flag
+        // `modal_is_up` reads has to be a card that is drawn whenever it is set.
+        self.publish_dialog(&ctx);
+        self.make_local_dialog(&ctx);
+        self.kits_used_dialog(&ctx);
+        self.stop_sharing_dialog(&ctx);
         // **After every door has had its say**, so a right-click that *replaced*
         // the open menu has already written the slot by the time the click-away
         // test would otherwise have run on the release that opened it (R4).
@@ -18267,6 +18274,84 @@ mod library_wiring_tests {
             !app.present,
             "the second Escape leaves the mode, which is the rung underneath"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// **A kit dialog opened in present mode is drawn, so Escape still gets
+    /// out** (the v0.5.0 release review's `[X5-L1-01]`). `Ctrl+Alt+P` is not a
+    /// door present mode hides, and the publish card it opens was drawn only
+    /// behind `!self.present` — so `modal_is_up` held every key for a card that
+    /// did not exist, Escape included, and present mode could be left only by
+    /// closing the window. Driven through whole frames with the real chord.
+    ///
+    /// Flip, run: the four kit dialogs back inside the `!present` guard fails
+    /// *"the first Escape closed the card"*.
+    #[test]
+    fn a_kit_dialog_in_present_mode_is_drawn_and_escape_leaves() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let root = temp_root("present-publish");
+        let mut app = app_at(&ctx, root.clone());
+        let main = app.session.ids.mint();
+        let page = app.session.doc.root();
+        assert!(app.session.commit(ondin_core::Transaction(vec![
+            ondin_core::Operation::CreateNode {
+                id: main,
+                parent: page,
+                index: 0,
+                kind: ondin_core::NodeKind::Artboard {
+                    size: ondin_core::kurbo::Size::new(40.0, 20.0),
+                },
+                transform: None,
+                name: Some("Badge".into()),
+            },
+            ondin_core::Operation::SetComponent {
+                id: main,
+                component: true,
+            },
+        ])));
+        app.make_kit();
+        app.publish_now("First".into());
+        assert!(app.session.commit(ondin_core::Transaction(vec![
+            ondin_core::Operation::SetOpacity {
+                id: main,
+                opacity: 0.5,
+            }
+        ])));
+        app.present = true;
+
+        let chord = egui::Modifiers {
+            alt: true,
+            ..egui::Modifiers::COMMAND
+        };
+        let mut frame = eframe::Frame::_new_kittest();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(1320.0, 820.0),
+            )),
+            modifiers: chord,
+            events: vec![egui::Event::Key {
+                key: egui::Key::P,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: chord,
+            }],
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input, |ui| eframe::App::ui(&mut app, ui, &mut frame));
+        assert!(
+            app.publishing.is_some(),
+            "fixture: the chord opened the card"
+        );
+
+        whole_frame(&ctx, &mut app, Vec::new());
+        whole_frame(&ctx, &mut app, vec![escape()]);
+        whole_frame(&ctx, &mut app, Vec::new());
+        assert!(app.publishing.is_none(), "the first Escape closed the card");
+        whole_frame(&ctx, &mut app, vec![escape()]);
+        assert!(!app.present, "and the second left present mode");
         let _ = std::fs::remove_dir_all(&root);
     }
 

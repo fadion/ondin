@@ -1433,6 +1433,7 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D1033** — **Kits: a right-click takes a picker drag away, and its release places nothing.** The maintainer: *"a pattern we use everywhere"* (§9.4). `cancel_gesture`'s `field` gains `kit_picker … dragging()` (`Picker::dragging`, a ghost present) and calls `Picker::cancel_drag`; `kit_picker_ui` hands `gesture_cancelled` to `Out::cancelled`, and `Out::take` neither carries the item nor emits `Act::Drop` while it is set; the flag clears once no button is down, and `open_context_menu` refuses while it is up. 🚨 The picker's term is load-bearing: a one-frame right-click has already cleared egui's `dragged_id` (D168, D588, D785), and a two-frame one hides that. ⚠️ `cancel_drag` is a belt — in `ui`'s order the frame's own pass drops the ghost — read, not run. *(Built 2026-10-13, `2e3e131`. **Keep.** Test `a_right_click_takes_a_picker_drag_away`, the right-click pressed and released in one frame; flips, `Out::take` ignoring `cancelled` and `cancel_gesture` without the picker's term (which passed with a two-frame click), each failing *"the release places nothing"*, as the caller reports them; ~~the menu's refusal undriven~~ the menu's refusal asserted since D1035, the term's flip failing there first. `architecture.md` §5.3e and §9.4; nothing struck from `roadmap.md`)*
 - **D1034** — **Kits: *This document*'s pictures are drawn again only for a main whose subtree changed, once the edits have settled.** D1031's noticed item, the maintainer asking for it fixed. `LocalTiles`: `rev`, `pending` (revision, first seen), `drawn` (each main's `capture_subtree` as drawn), `job`, `tiles`. The first look renders at once; afterwards a new revision waits `SETTLE` 400 ms, restarted by the next; then `tiles` and `drawn` are pruned to the tops, each subtree compared with `drawn`, and the document cloned for `tiles_of(doc, changed)` only when one differs; a landing merges, the others kept. A nested instance's copies are in its main's subtree (D978), so an inner main's edit redraws the outer. ⚠️ Read: ~~a moved main redraws to the same picture; a late font redraws nothing, as before~~ both fixed by D1035; ~~`drawn` is written at the ask, so a failed spawn or a dead worker leaves a main recorded as drawn until it next changes~~ fixed the same day, `LocalTiles::forget` (`13ea7e3`). *(Built 2026-10-13, `2e3e131`. **Keep.** Test `local_pictures_redraw_only_a_changed_main_once_settled`; flips, every main changed failing *"an unrelated edit renders nothing"* and no settle wait failing *"not before the edits settle"* (asked on the edit inside *A*; asked on the unrelated one it passed), as the caller reports them. D1031 amended; `architecture.md` §5.3e; nothing struck from `roadmap.md`)*
 - **D1035** — **Kits: a drag's picture is drawn again when the zoom moves, *This document*'s pictures when a family the document names arrives, and a main merely moved is not drawn again.** The maintainer taking the four items left open after D1032–D1034. `Ghost::zoom` and `follow_zoom`, each drag frame after `pass`: no render in flight and the zoom a tenth (`GHOST_REZOOM`) off the one asked, `Ghost::start` again with the old picture kept, drawn stretched at `world × zoom / ppp` until the new lands. The font poll's `fonts.touches(document_families())` arm, whose `session.fonts_changed()` bumps no revision, also calls `Picker::fonts_changed()` → `LocalTiles::invalidate()` (`drawn` cleared, `rev`, `pending` `None`): the next pass is a first look, every main rendered without `SETTLE`. `drawn` holds `content_of` — the subtree, its root's translation zeroed through the new core `Node::with_transform` (a copy, not a write), rotation, scale and skew kept; a reparented main still compares changed, deliberately. The right-click test now asks `open_context_menu` and finds no menu. ⚠️ Read: a local re-render clones the document on the frame, once per tenth; past `GHOST_MAX_PX`'s cap a zoom re-renders identical pixels; the font hook is undriven; neither the drag's picture nor a kit's tiles are redrawn for a late font. *(Built 2026-10-13, `b130f2b`. **Keep.** Tests, as the caller reports them: the result-drag test's zoom 2 → 3, a 72×90 texture — flip, never re-rendering, failing *"a re-render asked, the old picture kept meanwhile"*; the local-pictures test's move and 0.5 rad rotate — flip, the translation kept, failing *"a moved main renders nothing"* — and `invalidate`, *B* replaced, no flip; the right-click test's term flip now failing at *"the cancelling right-click opens no menu"*. D1029, D1033, D1034 amended; `architecture.md` §5.3e; nothing struck from `roadmap.md`)*
+- **D1036** — **Ten rulings from the `v0.5.0..fb90943` release review, each the review's recommendation; not built.** The maintainer accepted every recommendation of `review/release-v0.5.0/triage.md` §5 as presented, and asked that its two backlog findings be fixed too. (1) *Make local* on a vault main another vault main nests reveals it as the user's own fork and, in the same transaction, vendors a fresh copy for the nesting main, so the vault never links out and the kit's components keep the kit's version — the dialog says so; plus a `kit::check` rule that a vault node's link, swap and bound targets lie inside the vault (`[R1-L2-02]` + `[R3-L5-02]`; extends D1016, D1012). (2) `vendor` refuses another kit's main that nests one of this kit's own, a named `KitError` (*"Card2 in M uses this kit's Icon"*), keeping D1019's *"a kit main reaches only kit mains"*; a frozen own-copy left for later (`[X1-L1-02]`). (3) An instance copied inside the kit itself and pasted into a consumer detaches, D979 (d), and the paste's status says so; carrying the published copy declined (`[X1-L1-03]`). (4) A variant the kit deletes from a published set detaches its instances, D982 (c), and the accept's toast names them; lifting it out as a local main declined, a variant outside its set not being a model shape (`[R3-L5-03]`). (5) *Updated N* counts only mains whose sync changed more than the version; one unreadable kit and *Accept all* applies nothing — as the code already does — saying *"Nothing was updated, because ‹kit› could not be read"* (`[X3.2-L1-02]`; D1016, D1022, D1024). (6) On the dashboard every file is closed for D1017's routing, the session's included: `store::set_kit`, the session's meta patched, the dialog reading disk (`[X3.1-L5-01]`). (7) A carrying paste of a kit main nesting a main held at an older version is refused `NeedsUpdate`-shaped, *"accept ‹kit›'s update first"*, the picker's answer (`[X1-L1-01]`; D1012, D1014). (8) D1035's late-font question measured and closed in §15 — ⚠️ D1035 says a font's arrival cannot be faked headlessly, and a kit's tiles are the shelf worker's (`kits/index.rs`), not `LocalTiles`'. (9) The X7 tooling findings fixed in this phase, `[X7-L1-03]` first. (10) The backlog's `[X3.1-L1-03]` and `[X7-L1-09]` fixed. The session's two calls, not objected to: the kit dialogs drawn outside present mode's guard (`[X5-L1-01]`); a ↺ clicked over typed text wins (`[X6-L1-02]`) — which D1008 already claims, its *"drawn later"* backwards of the code. *(Ruled 2026-10-13 by the maintainer. **Keep**; **not built** — each recorded as built by amendment, `triage.md` §7 the order. Record-only, no citation in `crates/` yet. No entry amended; `architecture.md` untouched; nothing struck from `roadmap.md`)*
 
 ---
 
@@ -23419,6 +23420,146 @@ and *"no kit row on the copy"*. All as the caller reports them.
 session's. **Resolved**; the noticed items left as they are, unruled. Tests as above; the two flex
 skips, the app's retry and the worker's stop undriven. D1016, D1017, D1021 and D1022 amended;
 `architecture.md` §5.3c and §5.3e)*
+
+**D1036 — Ten rulings from the `v0.5.0..fb90943` release review: *Make local* on a vault main another
+vault main nests re-vendors a fresh copy for it, and no vault node links out; a circular kit is refused;
+a copy out of the kit itself detaches; a variant the kit deletes detaches and is named; *Accept all*
+counts what changed and applies nothing while a kit cannot be read; the dashboard treats every file as
+closed; a carrying paste over an older held main asks for the update — and D1035's late-font question
+measured, the tooling fixed, the backlog taken. *Ruled by the maintainer 2026-10-13; not built.***
+🚨 **Nothing here is built.** Each ruling is a rule the code does not yet follow; each will be recorded
+as built by an amendment to this entry, and the entries it touches below are **not** amended yet — they
+carry no pointer to it until the build does. The release review of `v0.5.0..fb90943`
+(`review/release-v0.5.0/`, gitignored — `triage.md` §5 holds the questions as asked, each with its
+recommendation, and `passes/` the blocks with the evidence) found 50 distinct findings after three
+merges, four of them blocking the tag; none of the four needed a ruling, and none is here. The
+maintainer **accepted every recommendation as presented**, and asked that the two findings triage had
+put in its backlog be fixed as well. So each ruling below is the maintainer's in the recommendation's
+terms, names the finding it answers, and says which entry it narrows or extends.
+
+**(1) *Make local* on a vault main another vault main still nests re-vendors a fresh copy for the
+nesting main, in the same transaction** (`[R1-L2-02]`, absorbing `[R3-L5-02]`; extends D1016's *Make
+local*, adds a rule to D1012's `kit::check`). The review's probe: a consumer inserts the kit's *Card*,
+which nests *Icon*, so the vault holds both; *Make local* on *Icon* reveals it, and vault *Card*'s nested
+copy **still links to it** — a vault node linking outside the vault. An edit of the local *Icon* then
+writes vault *Card*'s nested copy through the field pass, and deleting it detaches that copy; and the
+next accept of any update finds no held *Icon* by origin, vendors a fresh one through
+`Builder::vendor_reached` and repoints the link, so every *Card* instance's nested *Icon* snaps back to
+the kit's, silently, under a toast that says overrides were kept. D1016 recorded only the other
+direction — *"a kit main it nests is a separate vault child and **stays vendored**"*. Ruled, of four
+options (refuse; reveal the chain together; re-vendor; keep the link and teach the update to preserve
+it): the revealed *Icon* becomes the user's own fork, and the same transaction vendors a fresh *Icon*
+for vault *Card* and points its nested copy there, so **the vault never links out** and the kit's
+components keep the kit's *Icon* — what the next accept already did, moved to the moment the user asked
+and made visible. **The dialog says so.** And a new `kit::check` rule beside D1012's `VaultRule`s:
+**a vault node's link, swap and bound-layer targets lie inside the vault**, so the state cannot be
+reached by any other door. ⚠️ It is a rule about links, not D1012's absent read-only rule — the model
+still cannot tell an edit from an update. The commit passes' vault skip that triage's cluster K2 owes
+(`[X2-L1-01]`) needed no ruling and is not this one.
+
+**(2) A kit may not vendor another kit's main that nests one of the kit's own mains** (`[X1-L1-02]`;
+keeps D1019's premise, and bounds D1012's `kit::find` own-kit arm). Kit L publishes *Icon*; kit M uses
+it in *Card2* and publishes; L then inserts *Card2* from M. `find`'s second arm lands *Card2*'s nested
+reference on L's **live** *Icon*, so L's vault links straight to a live main — and from then on every
+structural edit to *Icon* in L is refused at the commit, `Vault(…, NoOrigin)`, nothing naming why.
+D1019's *"there is no cycle check here … a kit main reaches only kit mains, never one of the document's
+own"* is false exactly here. Ruled: `vendor` **refuses**, with a `KitError` naming the main — *"Card2 in
+M uses this kit's Icon"* — which keeps D1019's premise true. ⚠️ **The arm itself stays**: it is what
+lands a kit instance pasted back into its own kit on the live main (D1012's *a kit never vendors
+itself*). The alternative — the own-kit arm vendoring a **frozen copy** of L's own *Icon*, so the vault
+stays closed — is the better long-term answer and is **left for later**, with team publishing; it is
+not carried in `roadmap.md` by this entry.
+
+**(3) An instance copied inside the kit itself and pasted into a consumer detaches, and the paste's
+status line says so** (`[X1-L1-03]`; D979 (d) applied, and narrows `architecture.md` §5.3e's *"A kit
+instance pasted into another document stays an instance"*). `kit::carried` follows only references into
+the document's vault, so an instance of the kit's own live main carries nothing; in the consumer its link
+names an id the target lacks and `settle_copy` drops it — the ordinary rule, and silent. Read, not
+probed. Ruled: that **is** the rule — an instance of a kit's live main is not yet a kit instance — and
+the silence is the defect. Declined: carrying the kit's **published** copy, vendored as a consumer would
+hold it, because the paste could then differ from what was copied, the live main having moved since the
+publish.
+
+**(4) A variant the kit deletes from a set it still publishes detaches its instances, and the accept's
+toast names them** (`[R3-L5-03]`; D982 (c) stands for a kit-side delete, D1011 (3) stays the rule for a
+removed top-level main only, and D1016's toast grows a clause). The probe: the variant's vault copy is
+deleted by `update_all`, `settle_links` detaches the consumer's instance, its layers and override kept
+as plain layers — under *"Updated 1 component · overrides kept on 0 instances"*. Declined: lifting the
+dropped variant out as a local main, as a removed top-level main is made local — **a variant outside its
+set is not a shape the model has**. So the asymmetry with D1011 (3) is kept, and only the silence goes.
+
+**(5) What *Accept all* reports** (`[X3.2-L1-02]`; defines D1016's N, and keeps D1024's retry). (i)
+*"Updated N components"* counts only the mains whose sync **changed something other than the version** —
+today `update.updated` is every synced top, so a publish that changed one main toasted two (measured).
+(ii) When one waiting kit cannot be read, **nothing is applied**, and the message says *"Nothing was
+updated, because ‹kit› could not be read"*. ⚠️ **The all-or-nothing is not new**: `accept_kit_updates`
+already `return`s on the first unreadable kit before `update_all` (`kits/updates.rs`), saying only
+*"‹kit› could not be read, so its update waits"*, which says nothing of the others. The ruling makes the
+behaviour deliberate and the message true. The reason it is not the partial accept: kits depend on each
+other across an update — D1022's `resolve` answering `NeedsUpdate` for a third kit's newer main, D1024's
+retry taking every waiting update together — so applying the readable ones is the riskier answer.
+
+**(6) On the dashboard every file is closed, the one the session still holds included** (`[X3.1-L5-01]`;
+narrows D1017's routing). D1017 sends *"the open document through the editor's own `make_kit` /
+`stop_sharing_kit` … and a closed file to `library::store::set_kit`"*, and `set_kit_at` read "open" as
+`session.path == path` — which is still true behind the dashboard after `go_to_dashboard`. So *Make a
+kit* and *Stop sharing as kit* on that card saved the **session's copy** over the file, and the
+confirmation read its name and version from it, while every other dashboard door on a file reads it
+from disk; with a second writer (a synced folder, a second window) a newer publish was overwritten, and
+its version spent twice. Read, not driven. Ruled: on the dashboard both go through
+`library::store::set_kit`, the session's meta patched as `open_document_follows` does for a rename or a
+move, and the dialog reads name and version **from disk**. "Open" in D1017 means open in the editor.
+
+**(7) A carrying paste of a kit main nesting a main the target holds at an older version is refused
+with a `NeedsUpdate`-shaped answer**, which the app words *"accept ‹kit›'s update first"* (`[X1-L1-01]`;
+replaces, for that case, `adopt`'s *"lands detached by the ordinary rule"* — D1012's carrying paste —
+and matches D1014's picker answer). The probe: *Card*@5 pasted into a document holding *Icon*@4 is
+refused whole at the commit, `BadLink(…, Dangling)` — *Card*'s fresh vault copy keeps a link to *Ring*,
+which v4 lacks, and that copy never passes `settle_copy`. Declined: skipping the template so the
+placement lands detached — the picker route already answers the same main in the same document with
+`NeedsUpdate` (*"This kit has an update to accept before that component can be placed"*, D1014), and
+§5.3e promises a kit instance pasted into another document stays one.
+
+**(8) D1035's open question is measured and closed here, not parked** (`[R2-L8-03]`'s D1035 half) —
+whether a kit tile laid out before a font family it names arrives is ever drawn again. Triage
+recommended *"one headless test over `LocalTiles` with a font arriving late"*. ⚠️ **Two things in the
+record stand in the way of that test as worded, and the build must settle both rather than read past
+them**: D1035 says *"a font's arrival cannot be faked headlessly"*, which is why its own font hook is
+undriven; and a **kit's** tiles are not `LocalTiles`' — they are rendered by the shelf worker from the
+kit's file (`kits/index.rs`, `tiles_of`), which D1035 says it did not touch. A `LocalTiles` test answers
+*This document*'s pictures, which D1035 already fixed.
+
+**(9) The tooling findings are fixed in this phase** (`[X7-L1-01]` to `[X7-L1-08]` and `[X7-L6-01]`;
+`[X7-L1-09]`, triage's backlog, is (10)): the
+three Claude Code mods in `.claude/skills/` — edit-guard, dnumber-guard and doc-run-guard — which are
+not compiled into or shipped with Ondin, so none could block the tag. `[X7-L1-03]` first: after a
+release that reports an owed entry, dnumber-guard refuses the edit writing that entry **and** refuses
+the reserve, each half's advice the other's refusal — a deadlock in exactly the state this project
+records most often, a number typed and its entry owed.
+
+**(10) Triage's two backlog findings are fixed, not backlogged**: `[X3.1-L1-03]` — a kit whose every
+file is a conflict copy is listed by the picker, by D1014's *"the first stands"*, and neither listed nor
+stoppable from the dashboard, by D1024's exclusion of conflict copies from the *Kits* filter — and
+`[X7-L1-09]`, doc-run-guard missing D805's summary-carried-off theft when the insertion is padded by blank
+lines. The mechanisms are the fix's.
+
+**Two calls the session made, not objected to.** `[X5-L1-01]`: the four kit dialogs are drawn **outside**
+present mode's guard, as `settings_ui` is — two of them have doors present mode does not hide (`Ctrl+Alt+P`,
+the canvas menu's *Make local…*), and `modal_is_up` counted the undrawn card, so every key, `Escape`
+included, was dead. `[X6-L1-02]`: a ↺ clicked while its text field holds typed text **wins** over the
+typed text. ⚠️ **D1008 already says so, and is false of the code**: its *"the reset, drawn later, wins, as
+the click asked"* has the order backwards — `own_rows`' text arm draws `row_label`, the ↺, **before**
+`committed_field`, so the field's commit lands second and the typed text wins (measured by the review;
+`variants.rs`' comment *"the two touch different fields"* excludes the case outright). The fix makes
+D1008's sentence true; its amendment owes the order.
+
+*(Ruled 2026-10-13 by the maintainer — every recommendation of `triage.md` §5 accepted as presented, the
+backlog added, (9)'s scope and order theirs; the two calls the session's. **Keep**; **not built** — the
+fix phase follows `triage.md` §7, and each ruling is recorded as built by an amendment here. Record-only:
+no citation in `crates/` yet, so the first build commit owes one at each site it changes. D979, D982,
+D1008, D1011, D1012, D1014, D1016, D1017, D1019, D1022, D1024 and D1035 not amended — the build's
+amendments will; `architecture.md` untouched, §5.3e's paste sentence owed with (3); nothing struck from
+`roadmap.md`)*
 
 **D980 — The five item lists carry ids, in a wrapper beside each item rather than a field inside it,
 and an instance's items follow its main's item by item. *Decided 2026-10-04 by the maintainer — per

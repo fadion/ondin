@@ -969,6 +969,127 @@ fn the_change_count_is_what_consumers_would_receive() {
     assert!(k.doc.published().unwrap().tops().contains(&fresh));
 }
 
+/// **The count leaves out a main's whole place, and counts its order** (the
+/// v0.5.0 release review's `[X2-L1-03]`, `[X2-L1-04]`). Hiding *Icon* on the
+/// kit's page, pinning the *Button* set inside its frame and then moving it,
+/// and giving it a layout item each changed something only the main's own
+/// place holds — an instance root keeps its own (`propagate::is_placement`) —
+/// and each was counted, an update for nothing. Putting *Icon* after *Card*
+/// changes no node and does change the order a consumer's picker lists them
+/// in, and was not counted, so it could not be published.
+///
+/// Flip, run: `reach` blanking the transform alone fails *"hiding a main is
+/// not a change"*; `reordered` left false fails *"the order is"*.
+#[test]
+fn a_mains_place_is_not_a_change_and_its_order_is() {
+    use ondin_core::container::{Insets, LayoutItem, LengthPct};
+    let mut k = kit();
+    k.doc
+        .apply(&Transaction(vec![Operation::SetVisible {
+            id: k.icon,
+            visible: false,
+        }]))
+        .unwrap();
+    assert_eq!(
+        kit::changes(&k.doc).count(),
+        0,
+        "hiding a main is not a change"
+    );
+    let pinned = Insets {
+        right: Some(LengthPct::Px(12.0)),
+        ..Default::default()
+    };
+    k.doc
+        .apply(&Transaction(vec![
+            Operation::SetInsets {
+                id: k.set,
+                insets: pinned,
+            },
+            Operation::SetLayoutItem {
+                id: k.set,
+                item: LayoutItem {
+                    grow: 1.0,
+                    ..Default::default()
+                },
+            },
+        ]))
+        .unwrap();
+    assert_eq!(
+        kit::changes(&k.doc).count(),
+        0,
+        "nor pinning one, nor its item"
+    );
+    let c = kit::changes(&k.doc);
+    assert!(!c.any(), "nothing to publish");
+
+    let root = k.doc.root();
+    let last = k.doc.get(root).unwrap().children().len() - 1;
+    k.doc
+        .apply(&Transaction(vec![Operation::Reorder {
+            id: k.icon,
+            index: last,
+        }]))
+        .unwrap();
+    let c = kit::changes(&k.doc);
+    assert_eq!(c.count(), 0, "no component changed");
+    assert!(c.reordered && c.any(), "the order is");
+}
+
+/// **A third kit's version alone is not a change** (the v0.5.0 release
+/// review's `[X2-L1-03]`): L's *Chip* nests K's *Badge*; K publishes a change
+/// to another main, and L takes K's update — which moves *Badge*'s recorded
+/// version and nothing else. L counted *Chip* changed, and every consumer of L
+/// got an update that drew nothing new.
+///
+/// Flip, run: `reach` comparing the origin's version fails *"nothing L draws
+/// changed"*.
+#[test]
+fn a_third_kits_version_alone_is_not_a_change() {
+    let mut kids = IdSource::new(0xAB);
+    let kroot = kids.mint();
+    let mut kdoc = Document::new(kroot);
+    let [badge, star] = [(); 2].map(|_| kids.mint());
+    kdoc.apply(&Transaction(vec![
+        create(badge, kroot, 0, frame(16.0, 16.0), "Badge"),
+        main_on(badge),
+        create(star, kroot, 1, frame(16.0, 16.0), "Star"),
+        main_on(star),
+    ]))
+    .unwrap();
+    let k2 = kit::freeze(&kdoc).unwrap();
+
+    let mut lids = IdSource::new(0xAC);
+    let lroot = lids.mint();
+    let mut ldoc = Document::new(lroot);
+    let (tx, placed) = kit::insert(&ldoc, &mut lids, K_ID, 2, &k2, badge, lroot).unwrap();
+    ldoc.apply(&tx).unwrap();
+    let chip = lids.mint();
+    ldoc.apply(&Transaction(vec![
+        create(chip, lroot, 0, frame(60.0, 20.0), "Chip"),
+        Operation::Reparent {
+            id: placed,
+            new_parent: chip,
+            index: 0,
+        },
+        main_on(chip),
+    ]))
+    .unwrap();
+    ldoc.set_published(kit::freeze(&ldoc));
+    assert_eq!(kit::changes(&ldoc).count(), 0, "fixture: just published");
+
+    kdoc.apply(&Transaction(vec![Operation::SetOpacity {
+        id: star,
+        opacity: 0.5,
+    }]))
+    .unwrap();
+    let k3 = kit::freeze(&kdoc).unwrap();
+    let u = kit::update(&ldoc, &mut lids, K_ID, 3, &k3).unwrap();
+    let mut tx = u.tx;
+    ondin_core::propagate::owed(&ldoc, &mut tx, &mut lids);
+    ldoc.apply(&tx).unwrap();
+    assert_eq!(kit::changes(&ldoc).count(), 0, "nothing L draws changed");
+}
+
 /// **A regroup and a rename are worth a publish** (§15 D1015's fix): moving
 /// the Button set out of its *Buttons* frame changes no node a consumer copies,
 /// but it changes the picker's grouping downstream, so the set counts as

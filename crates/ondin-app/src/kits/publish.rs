@@ -57,8 +57,8 @@ impl OndinApp {
         let n = c.count();
         let tip = if version == 0 {
             "Never published: the count is every component".to_string()
-        } else if n == 0 && c.renamed {
-            format!("The kit's name changed since v{version}")
+        } else if n == 0 && (c.renamed || c.reordered) {
+            format!("{} changed since v{version}", not_a_component(&c))
         } else if n == 0 {
             format!("Nothing to publish · no changes since v{version}")
         } else {
@@ -198,13 +198,22 @@ impl OndinApp {
                     .date
                     .map(|d| format!(" ({})", crate::library::clock::date_label(d)))
                     .unwrap_or_default();
-                match (c.count(), c.renamed) {
-                    (0, _) => format!("The kit's name changed since v{}{when}.", mark.version),
-                    (n, renamed) => format!(
+                match c.count() {
+                    0 => format!(
+                        "{} changed since v{}{when}.",
+                        not_a_component(&c),
+                        mark.version
+                    ),
+                    n => format!(
                         "{n} component{} changed since v{}{when}{}.",
                         plural(n),
                         mark.version,
-                        if renamed { ", and the kit's name" } else { "" }
+                        match (c.renamed, c.reordered) {
+                            (false, false) => "",
+                            (true, false) => ", and the kit's name",
+                            (false, true) => ", and their order",
+                            (true, true) => ", the kit's name and their order",
+                        }
                     ),
                 }
             };
@@ -307,6 +316,17 @@ impl OndinApp {
             0 => format!("Published {name} v{version} · its new name"),
             n => format!("Published {name} v{version} · {n} component{}", plural(n)),
         });
+    }
+}
+
+/// What changed that is not a component — the kit's name, the order of its
+/// components (the v0.5.0 release review's `[X2-L1-04]`), or both — as the
+/// subject of *"… changed since v4"*.
+fn not_a_component(c: &Changes) -> &'static str {
+    match (c.renamed, c.reordered) {
+        (true, true) => "The kit's name and the order of its components",
+        (false, true) => "The order of the kit's components",
+        _ => "The kit's name",
     }
 }
 

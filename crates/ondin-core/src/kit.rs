@@ -435,6 +435,10 @@ pub struct Changes {
     /// The kit's name changed since its last publish — what a consumer calls it
     /// once the kit is lost (3I), so worth a publish though no component changed.
     pub renamed: bool,
+    /// The published mains' order changed — the order a consumer's picker lists
+    /// them in, so worth a publish as the name is: §15 D1015 counts what changes
+    /// downstream (the v0.5.0 release review's `[X2-L1-04]`).
+    pub reordered: bool,
 }
 
 impl Changes {
@@ -443,9 +447,10 @@ impl Changes {
         self.added.len() + self.changed.len() + self.removed.len()
     }
 
-    /// Whether a publish would carry anything: a component, or the kit's name.
+    /// Whether a publish would carry anything: a component, the kit's name, or
+    /// the order of its components.
     pub fn any(&self) -> bool {
-        self.count() > 0 || self.renamed
+        self.count() > 0 || self.renamed || self.reordered
     }
 }
 
@@ -476,6 +481,11 @@ pub fn changes(doc: &Document) -> Changes {
             out.changed.push(*t);
         }
     }
+    // The order of the mains published both times.
+    let kept = |of: &[NodeId], other: &[NodeId]| -> Vec<NodeId> {
+        of.iter().copied().filter(|t| other.contains(t)).collect()
+    };
+    out.reordered = kept(&tops_now, &tops_before) != kept(&tops_before, &tops_now);
     out.removed = tops_before
         .into_iter()
         .filter(|t| !tops_now.contains(t))
@@ -505,10 +515,25 @@ fn reach(frozen: &Document, top: NodeId) -> std::collections::BTreeMap<NodeId, N
         // and moving the nested one across the canvas changes neither for a
         // consumer — the first cut blanked `top` alone and counted Card changed
         // when Icon moved.
+        //
+        // 🚨 **And all of a top's place, not only its transform** (the v0.5.0
+        // release review's `[X2-L1-03]`): an instance root's insets, its layout
+        // item and its visibility are its own as its transform is
+        // (`propagate::is_placement`), so hiding a main on the kit's page, or
+        // moving one pinned in a frame, reached no consumer's instance — and was
+        // counted, an update for nothing. Nor is an origin's **version** a change
+        // anyone draws: accepting a third kit's update moves it on every main
+        // that nests it, and counted each as changed.
         for mut n in captured {
             if n.id == t {
                 n.transform = kurbo::Affine::IDENTITY;
                 n.parent = None;
+                n.insets = Default::default();
+                n.item = Default::default();
+                n.visible = true;
+            }
+            if let Some(o) = &mut n.origin {
+                o.version = 0;
             }
             out.insert(n.id, n);
         }

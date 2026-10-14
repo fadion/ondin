@@ -1658,16 +1658,70 @@ impl OndinApp {
             }
         };
         let open = self.mode_menu.is_some_and(|(n, _)| n == id);
+        // **On an instance a mode the copy sets is an override** (D1038 (a), §15
+        // D1048, D1042's *Fix*): the label bright with D981's dot, ↺ in its place
+        // while the pointer is on the row, a click on it the main's mode back —
+        // a field's mark, the label being this row's.
+        let mark = self.sub_mark(
+            &[id],
+            |op| match op {
+                ondin_core::Operation::SetMode { mode, .. } => Some(*mode),
+                _ => None,
+            },
+            |n| Some(n.mode()),
+            |v| *v,
+            |c, v| *c = v,
+            |id, mode| ondin_core::Operation::SetMode { id, mode },
+            |v| match v.and_then(|m| table.mode(m)) {
+                Some(m) => m.name.clone(),
+                None => "Inherit".into(),
+            },
+        );
+        let mut reset = false;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 10.0;
-            let (label, _) = ui.allocate_exact_size(egui::vec2(48.0, 28.0), egui::Sense::hover());
-            ui.painter().text(
-                label.left_center(),
-                egui::Align2::LEFT_CENTER,
-                "Mode",
-                egui::FontId::proportional(10.5),
-                theme::text::DIM,
-            );
+            let over = ui.rect_contains_pointer(egui::Rect::from_min_size(
+                ui.cursor().min,
+                egui::vec2(ui.available_width(), 28.0),
+            ));
+            let sense = match mark {
+                Some(_) => egui::Sense::click(),
+                None => egui::Sense::hover(),
+            };
+            let (label, lresp) = ui.allocate_exact_size(egui::vec2(48.0, 28.0), sense);
+            match &mark {
+                Some(_) if over => {
+                    ui.painter().text(
+                        label.left_center() + egui::vec2(6.0, 0.0),
+                        egui::Align2::CENTER_CENTER,
+                        icon::ARROW_COUNTER_CLOCKWISE,
+                        theme::icon_font(13.0),
+                        color::TEXT,
+                    );
+                }
+                Some(_) => {
+                    let g = ui.painter().text(
+                        label.left_center(),
+                        egui::Align2::LEFT_CENTER,
+                        "Mode",
+                        egui::FontId::proportional(10.5),
+                        theme::text::STRONG,
+                    );
+                    ui::override_dot(ui.painter(), egui::pos2(g.right() + 5.0, g.center().y));
+                }
+                None => {
+                    ui.painter().text(
+                        label.left_center(),
+                        egui::Align2::LEFT_CENTER,
+                        "Mode",
+                        egui::FontId::proportional(10.5),
+                        theme::text::DIM,
+                    );
+                }
+            }
+            if let Some(m) = &mark {
+                reset = lresp.on_hover_text(&m.tip).clicked();
+            }
             let w = ui.available_width();
             let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 28.0), egui::Sense::click());
             let p = ui.painter();
@@ -1719,6 +1773,7 @@ impl OndinApp {
                 self.mode_menu = if open { None } else { Some((id, rect)) };
             }
         });
+        self.reset_marked(reset, &mark);
     }
 
     /// The *Mode* menu: *Inherit* with the mode it would inherit, then every

@@ -330,6 +330,17 @@ impl Corner {
         };
         *slot = v;
     }
+    /// This corner's slot in a `CornerVars` — **TL, TR, BR, BL**, `kurbo`'s
+    /// clockwise order, which is not [`Corner::ALL`]'s reading order: a cast of
+    /// the variant would swap the bottom two (§15 D1048).
+    fn var_slot(self) -> usize {
+        match self {
+            Corner::TopLeft => 0,
+            Corner::TopRight => 1,
+            Corner::BottomRight => 2,
+            Corner::BottomLeft => 3,
+        }
+    }
 }
 /// What a vertex-counted shape puts in the Appearance panel. Only these two
 /// kinds have one, so the panel takes it as an option rather than re-matching
@@ -5654,6 +5665,24 @@ impl OndinApp {
             id,
             geometry: GeometryPatch::CornerRadii(r),
         };
+        let vars_of = |op: &Operation| match op {
+            Operation::SetCornerVars { vars, .. } => Some(*vars),
+            _ => None,
+        };
+        let my_vars = |n: &ondin_core::Node| Some(n.corner_vars());
+        let write_vars = |id, vars| Operation::SetCornerVars { id, vars };
+        // The main's binding as the tip names it: the variable shared, *per
+        // corner* where they differ, *unbound* where there is none.
+        let table = self.session.doc.variables();
+        let say_vars = |v: &[Option<ondin_core::VarId>]| match v {
+            [first, rest @ ..] if rest.iter().all(|x| x == first) => match first {
+                Some(var) => table
+                    .get(*var)
+                    .map_or_else(|| "a variable".to_owned(), |x| x.name.clone()),
+                None => "unbound".to_owned(),
+            },
+            _ => "per corner".to_owned(),
+        };
         let patch = |want: fn(&GeometryPatch) -> Option<f64>| {
             move |op: &Operation| match op {
                 Operation::SetGeometry { geometry, .. } => want(geometry),
@@ -5690,24 +5719,55 @@ impl OndinApp {
                 |id, opacity| Operation::SetOpacity { id, opacity },
                 |v| format!("{}%", mark_num(f64::from(*v) * 100.0)),
             ),
-            radius: self.sub_mark(
-                s,
-                radii_of,
-                my_radii,
-                |r| *r,
-                |c, v| *c = v,
-                write_radii,
-                |r| uniform(*r).map_or_else(|| "per corner".to_owned(), mark_num),
-            ),
-            corners: Corner::ALL.map(|c| {
+            // **A corner's binding is the radius field's too** (D1038 A6, §15
+            // D1048, D1041's *Fix*): a copy bound to another variable than its
+            // main's — or bound where the main is not — is an override, both
+            // literals 0 and so invisible to the literal comparison. Its mark comes
+            // first, so the tip names the main's variable, and its ↺ writes the
+            // main's `SetCornerVars` beside the literal's `CornerRadii`; the
+            // commit's `keep_corner_bindings` skips a node the transaction binds,
+            // so the two land as the main has them.
+            radius: Mark::and(
+                self.sub_mark(
+                    s,
+                    vars_of,
+                    my_vars,
+                    |v| *v,
+                    |c, v| *c = v,
+                    write_vars,
+                    |v| say_vars(&v[..]),
+                ),
                 self.sub_mark(
                     s,
                     radii_of,
                     my_radii,
-                    |r| c.get(r),
-                    |r, v| c.set(r, v),
+                    |r| *r,
+                    |c, v| *c = v,
                     write_radii,
-                    |v| mark_num(*v),
+                    |r| uniform(*r).map_or_else(|| "per corner".to_owned(), mark_num),
+                ),
+            ),
+            corners: Corner::ALL.map(|c| {
+                let k = c.var_slot();
+                Mark::and(
+                    self.sub_mark(
+                        s,
+                        vars_of,
+                        my_vars,
+                        |v| v[k],
+                        |v, x| v[k] = x,
+                        write_vars,
+                        |x| say_vars(std::slice::from_ref(x)),
+                    ),
+                    self.sub_mark(
+                        s,
+                        radii_of,
+                        my_radii,
+                        |r| c.get(r),
+                        |r, v| c.set(r, v),
+                        write_radii,
+                        |v| mark_num(*v),
+                    ),
                 )
             }),
             count: self.sub_mark(
@@ -5808,7 +5868,8 @@ impl OndinApp {
                 let key = super::binding::FieldKey::Radius { id };
                 let retyping = app.var_retype.as_ref().filter(|r| r.key == key).cloned();
                 if let Some(var) = app.field_var(key).filter(|_| retyping.is_none()) {
-                    app.radius_chip(ui, key, var, fw);
+                    let hit = app.radius_chip(ui, key, var, fw, marks.radius.as_ref());
+                    app.reset_marked(hit, &marks.radius);
                 } else if let Some(rt) = retyping {
                     app.radius_retype(ui, key, rt, fw);
                 } else {
@@ -5963,8 +6024,26 @@ impl OndinApp {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = ui::CARD_COL_GAP;
                     for (glyph, corner, tip) in pair {
-                        let mut v = corner.get(&corners);
                         let mark = &marks.corners[corner as usize];
+                        // **A bound corner's field is a chip of its own** (§15
+                        // D1049): the radius field's chip, retype and `--` at
+                        // one corner's width, keyed by that corner, so binding
+                        // or detaching it leaves the other three alone.
+                        let key = super::binding::FieldKey::Corner {
+                            id,
+                            slot: corner.var_slot(),
+                        };
+                        let retyping = app.var_retype.as_ref().filter(|r| r.key == key).cloned();
+                        if let Some(var) = app.field_var(key).filter(|_| retyping.is_none()) {
+                            let hit = app.radius_chip(ui, key, var, fw, mark.as_ref());
+                            app.reset_marked(hit, mark);
+                            continue;
+                        }
+                        if let Some(rt) = retyping {
+                            app.radius_retype(ui, key, rt, fw);
+                            continue;
+                        }
+                        let mut v = corner.get(&corners);
                         let (resp, hit) = ui::value_field_marked(
                             ui,
                             egui::vec2(fw, 28.0),
@@ -5985,6 +6064,25 @@ impl OndinApp {
                                 geometry: GeometryPatch::CornerRadii(next),
                             }]),
                         );
+                        // `--` and the field menu as on the radius field — the
+                        // text handed to the retype buffer (§15 D1044).
+                        if resp.has_focus()
+                            && let Some(text) = ui.ctx().data(|d| d.get_temp::<String>(resp.id))
+                        {
+                            app.bind_typing(ui.ctx(), key, &text, resp.rect);
+                            if text.starts_with("--") {
+                                app.var_retype = Some(super::binding::Retype {
+                                    key,
+                                    text,
+                                    focus: true,
+                                });
+                            }
+                        }
+                        if resp.secondary_clicked()
+                            && let Some(at) = resp.interact_pointer_pos()
+                        {
+                            app.field_menu = Some((key, at, resp.rect));
+                        }
                     }
                 });
             }

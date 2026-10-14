@@ -9955,9 +9955,23 @@ impl OndinApp {
                 egui::TextFormat::simple(egui::FontId::proportional(PT), ink),
             );
         };
+        // **A mode the frame sets is named after its name, on every tag** (D1038
+        // (a), H5; §15 D1042 for a plain frame, D1051 for a set's tab, a main's
+        // chip and an instance's tag), in the tag's own dim ink; an inherited one
+        // stays off the canvas. ⚠️ **H5's elision is not built, by decision**:
+        // no tag in the app elides — a frame's name runs past its edge — so the
+        // mode follows the name the same way rather than being the one tag that
+        // cuts (D1051).
+        let mode = node.mode().and_then(|m| doc.variables().mode(m));
+        let mode_word = |job: &mut egui::text::LayoutJob, ink| {
+            if let Some(m) = mode {
+                words(job, &format!("· {}", m.name), 4.0, ink);
+            }
+        };
         if is_set {
             glyph(&mut job, icon::SQUARES_FOUR, egui::Color32::PLACEHOLDER);
             words(&mut job, node.name(), 4.0, egui::Color32::PLACEHOLDER);
+            mode_word(&mut job, theme::text::DIM);
             if let Some(clash) = crate::panels::clash_text(doc, id) {
                 job.append(
                     icon::WARNING,
@@ -9984,6 +9998,7 @@ impl OndinApp {
             }
             glyph(&mut job, icon::HEXAGON, egui::Color32::TRANSPARENT);
             words(&mut job, node.name(), 4.0, egui::Color32::PLACEHOLDER);
+            mode_word(&mut job, color::COMPONENT_INK_DIM);
             if self.session.selection.contains(id) {
                 let n = ondin_core::component::instances_of(doc, id).len();
                 let count = match n {
@@ -10023,6 +10038,7 @@ impl OndinApp {
                 }
                 None => {
                     words(&mut job, node.name(), 4.0, egui::Color32::PLACEHOLDER);
+                    mode_word(&mut job, color::COMPONENT_DIM);
                     if !main_name.is_empty() && main_name != node.name() {
                         words(&mut job, &main_name, 6.0, color::COMPONENT_DIM);
                     }
@@ -10038,12 +10054,8 @@ impl OndinApp {
                 if clashing { 4.0 } else { 0.0 },
                 egui::Color32::PLACEHOLDER,
             );
-            // **A mode the frame sets is named after it**, *Hero / Desktop ·
-            // Dark* (D1038 (a), H5; §15 D1042); an inherited one stays off the
-            // canvas.
-            if let Some(m) = node.mode().and_then(|m| doc.variables().mode(m)) {
-                words(&mut job, &format!("· {}", m.name), 4.0, color::text_a(179));
-            }
+            // *Hero / Desktop · Dark* (§15 D1042).
+            mode_word(&mut job, color::text_a(179));
         }
         let galley = ui.painter().layout_job(job);
         let size = galley.size();
@@ -21494,6 +21506,20 @@ mod frame_menu_door_tests {
             mode: Some(dark),
         }])));
         assert!(tag(&app).ends_with("· Dark"), "{:?}", tag(&app));
+        // **A main's chip names it too** (§15 D1051), after the name.
+        // Flip, run: the main's arm without `mode_word` fails here.
+        assert!(
+            app.session
+                .commit(Transaction(vec![Operation::SetComponent {
+                    id: frame,
+                    component: true,
+                }]))
+        );
+        assert!(
+            tag(&app).contains("· Dark"),
+            "a main's chip: {:?}",
+            tag(&app)
+        );
     }
 
     /// **A main's tag is a chip with the filled hexagon, an instance's names its

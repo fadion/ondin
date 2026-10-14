@@ -4023,3 +4023,65 @@ fn a_pinned_layer_resized_or_moved_previews_as_it_commits() {
         "re-pinned where it was moved"
     );
 }
+
+/// **A corner bound to a number variable previews as the radius it will draw**
+/// (§15 D1050): the `--` list's highlight on a radius field, `bind_corners_ops`
+/// over two of four corners, drawn as overrides and as committed — the fill's
+/// path carries the corners, so a preview drawing the zeroed literal, or every
+/// corner, is a different call. Until D1050 `absorb` refused `SetCornerVars` and
+/// the list previewed nothing for a radius.
+///
+/// Flip, run: resolving no slot (the literal left as `bind_corners_ops` zeroed
+/// it) fails *"preview diverged from commit"*.
+#[test]
+fn a_corner_binding_previews_as_the_radius_it_will_draw() {
+    use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+    let mut ids = IdSource::new(0xC7);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (rect, mode, var) = (ids.mint(), ids.mint_mode(), ids.mint_var());
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: rect,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(80.0, 40.0),
+                corner_radii: RoundedRectRadii::from_single_radius(2.0),
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::SetFills {
+            id: rect,
+            fills: keyed_by_position([Fill {
+                brush: Brush::Solid(Color::from_rgba8(200, 30, 30, 255)).into(),
+                visible: true,
+            }]),
+        },
+        Operation::AddMode {
+            mode: Mode {
+                id: mode,
+                name: "Default".into(),
+            },
+            index: 0,
+            cells: vec![],
+        },
+        Operation::AddVariable {
+            var: Variable {
+                id: var,
+                name: "radius/lg".into(),
+                kind: VarKind::Number,
+                cells: [(mode, Cell::Number(14.0))].into(),
+            },
+        },
+    ]))
+    .unwrap();
+    let tx = Transaction(ondin_core::bind_corners_ops(
+        &doc,
+        rect,
+        [Some(var), None, Some(var), None],
+    ));
+    assert!(!tx.0.is_empty(), "the fixture binds something");
+    assert_preview_matches_commit(&doc, &tx, "two corners bound");
+}

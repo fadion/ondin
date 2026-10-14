@@ -1563,11 +1563,42 @@ impl RenderOverrides {
             | Operation::AddMode { .. }
             | Operation::RemoveMode { .. }
             | Operation::SetModeName { .. } => {}
-            // A frame's mode and a corner's binding change what a whole subtree,
-            // or a used kind, resolves to — read through the document and
-            // `Resolved`, neither of which an override patches. Both are a click
-            // or a typed `--`, committed rather than dragged.
-            Operation::SetMode { .. } | Operation::SetCornerVars { .. } => return None,
+            // **A corner's binding previews as the radii it will draw** (§15
+            // D1050): the `--` list's highlight on a radius field, which D1039
+            // refused here. The bound corners are resolved through the document —
+            // the mode in force is not previewed — over the literal kind the ops
+            // before this one left (`bind_corners_ops` zeroes the bound literals
+            // first), and the rect's kind is patched as a `SetGeometry` would be.
+            // `vars` is the whole binding, so every bound slot is resolved.
+            Operation::SetCornerVars { id, vars } => {
+                let NodeKind::Rect {
+                    size,
+                    mut corner_radii,
+                } = self.current_kind(doc, *id)?
+                else {
+                    return None;
+                };
+                let slots = [
+                    &mut corner_radii.top_left,
+                    &mut corner_radii.top_right,
+                    &mut corner_radii.bottom_right,
+                    &mut corner_radii.bottom_left,
+                ];
+                for (slot, var) in slots.into_iter().zip(vars) {
+                    if let Some(var) = var {
+                        let Some(ondin_core::Value::Number(n)) = doc.resolve_var(*id, *var) else {
+                            return None;
+                        };
+                        *slot = n;
+                    }
+                }
+                self.set_kind(doc, res, *id, NodeKind::Rect { size, corner_radii });
+                self.moved.insert(*id);
+            }
+            // A frame's mode changes what a whole subtree resolves to — read
+            // through the document and `Resolved`, neither of which an override
+            // patches. It is a click, committed rather than dragged.
+            Operation::SetMode { .. } => return None,
             // **Structural in the sense that matters here**: a mask changes which
             // *other* nodes the walk clips, and an override is a patch on one
             // node. Nothing sets it mid-gesture — it is a click on the identity

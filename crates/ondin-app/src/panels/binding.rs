@@ -30,13 +30,29 @@ pub(crate) enum FieldKey {
     Paint { id: NodeId, slot: PaintSlot },
     /// A rectangle's corner radius, all four corners, on node `id`.
     Radius { id: NodeId },
+    /// One corner of a rectangle's radius, `slot` its place in a `CornerVars`
+    /// (TL, TR, BR, BL) — a per-corner field (§15 D1049).
+    Corner { id: NodeId, slot: usize },
 }
 
 impl FieldKey {
+    /// The glyph a radius field's badge carries: the corners icon for all four,
+    /// the elbow pointing into its corner for one — the per-corner fields' own
+    /// (§15 D1049). `CORNERS_OUT` for a paint, which draws no badge.
+    pub(crate) fn badge(self) -> &'static str {
+        match self {
+            FieldKey::Corner { slot: 0, .. } => icon::ARROW_ELBOW_LEFT_DOWN,
+            FieldKey::Corner { slot: 1, .. } => icon::ARROW_ELBOW_RIGHT_DOWN,
+            FieldKey::Corner { slot: 2, .. } => icon::ARROW_ELBOW_RIGHT_UP,
+            FieldKey::Corner { .. } => icon::ARROW_ELBOW_LEFT_UP,
+            FieldKey::Radius { .. } | FieldKey::Paint { .. } => icon::CORNERS_OUT,
+        }
+    }
+
     pub(crate) fn kind(self) -> VarKind {
         match self {
             FieldKey::Paint { .. } => VarKind::Color,
-            FieldKey::Radius { .. } => VarKind::Number,
+            FieldKey::Radius { .. } | FieldKey::Corner { .. } => VarKind::Number,
         }
     }
 }
@@ -365,7 +381,9 @@ impl OndinApp {
                 slot: PaintSlot::Selection(..),
                 ..
             } => self.session.selection.ids().to_vec(),
-            FieldKey::Paint { id, .. } | FieldKey::Radius { id } => vec![id],
+            FieldKey::Paint { id, .. } | FieldKey::Radius { id } | FieldKey::Corner { id, .. } => {
+                vec![id]
+            }
         }
     }
 
@@ -383,6 +401,12 @@ impl OndinApp {
             FieldKey::Radius { id } => {
                 Transaction(ondin_core::bind_corners_ops(doc, id, [Some(var); 4]))
             }
+            // One corner: `bind_corners_ops` leaves a `None` slot as it is.
+            FieldKey::Corner { id, slot } => {
+                let mut vars = [None; 4];
+                vars[slot] = Some(var);
+                Transaction(ondin_core::bind_corners_ops(doc, id, vars))
+            }
         }
     }
 
@@ -396,6 +420,9 @@ impl OndinApp {
                 None => Transaction::default(),
             },
             FieldKey::Radius { id } => Transaction(ondin_core::detach_corners_ops(doc, id)),
+            FieldKey::Corner { id, slot } => {
+                Transaction(ondin_core::detach_corner_ops(doc, id, slot))
+            }
         }
     }
 
@@ -518,6 +545,7 @@ impl OndinApp {
                 let first = vars[0]?;
                 vars.iter().all(|v| *v == Some(first)).then_some(first)
             }
+            FieldKey::Corner { id, slot } => doc.get(id)?.corner_vars().get(slot).copied()?,
         }
     }
 
@@ -650,7 +678,9 @@ impl OndinApp {
         }
         // The mode the values read in: the selected layer's (B1's footer).
         let at = match c.key {
-            FieldKey::Paint { id, .. } | FieldKey::Radius { id } => id,
+            FieldKey::Paint { id, .. } | FieldKey::Radius { id } | FieldKey::Corner { id, .. } => {
+                id
+            }
         };
         let mode = doc.mode_at(at).and_then(|m| table.mode(m)).cloned();
         let mut chosen: Option<VarId> = None;
@@ -767,15 +797,15 @@ impl OndinApp {
             self.session.clear_gesture_preview();
             return;
         }
-        // The highlighted row previews live on the canvas (B1) — a paint's: a
-        // corner binding has no override to carry it (`absorb` refuses
-        // `SetCornerVars`, §15 D1039).
-        match (c.key, list.get(c.highlight)) {
-            (FieldKey::Paint { .. }, Some(v)) => {
+        // The highlighted row previews live on the canvas (B1) — a paint's, and
+        // since §15 D1050 a radius's: `absorb` draws a `SetCornerVars` as the
+        // radii it will resolve to, where D1039 refused it.
+        match list.get(c.highlight) {
+            Some(v) => {
                 let tx = self.bind_tx(c.key, v.id);
                 self.session.set_preview(&tx);
             }
-            _ => self.session.clear_gesture_preview(),
+            None => self.session.clear_gesture_preview(),
         }
         self.var_complete = Some(c);
     }
@@ -910,7 +940,9 @@ impl OndinApp {
         let doc = &self.session.doc;
         let table = doc.variables();
         let at = match key {
-            FieldKey::Paint { id, .. } | FieldKey::Radius { id } => id,
+            FieldKey::Paint { id, .. } | FieldKey::Radius { id } | FieldKey::Corner { id, .. } => {
+                id
+            }
         };
         let name = table.get(var).map(|v| v.name.clone()).unwrap_or_default();
         let mode = doc.mode_at(at).and_then(|m| table.mode(m));
@@ -927,20 +959,63 @@ impl OndinApp {
         }
     }
 
-    /// The corner-radius field while bound: its icon, then the chip.
-    pub(crate) fn radius_chip(&mut self, ui: &mut egui::Ui, key: FieldKey, var: VarId, w: f32) {
+    /// The corner-radius field while bound: its icon, then the chip. `mark` is the
+    /// field's override mark on an instance; the answer is whether its ↺ was
+    /// clicked.
+    pub(super) fn radius_chip(
+        &mut self,
+        ui: &mut egui::Ui,
+        key: FieldKey,
+        var: VarId,
+        w: f32,
+        mark: Option<&super::component::OverrideMark>,
+    ) -> bool {
         let mut chip_rect = egui::Rect::NOTHING;
+        let mut reset = false;
         ui::field_row(ui, egui::vec2(w, 28.0), |ui| {
-            // **The badge says the field will not scrub** (D1038 (3), §15 D1046):
-            // unbound it is the scrub handle; bound, a drag would detach by
-            // accident, so it does not scrub and its cursor refuses. The glyph is
-            // the session's — D1038 names no cursor.
-            ui.label(theme::icon_text(
-                icon::CORNERS_OUT,
-                14.0,
-                theme::text::FAINT,
-            ))
-            .on_hover_cursor(egui::CursorIcon::NotAllowed);
+            let (slot, resp) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::click());
+            let p = ui.painter();
+            match mark {
+                // **The badge is the mark's place, as a field's label is** (§15
+                // D1048, D981): bright with the dot at rest, ↺ while the pointer
+                // is on the row, and a click on it the reset — the chip having no
+                // label of its own to carry one.
+                Some(m) => {
+                    if ui.rect_contains_pointer(ui.max_rect()) {
+                        p.text(
+                            slot.center(),
+                            egui::Align2::CENTER_CENTER,
+                            icon::ARROW_COUNTER_CLOCKWISE,
+                            theme::icon_font(13.0),
+                            color::TEXT,
+                        );
+                    } else {
+                        p.text(
+                            slot.center(),
+                            egui::Align2::CENTER_CENTER,
+                            key.badge(),
+                            theme::icon_font(14.0),
+                            color::TEXT,
+                        );
+                        ui::override_dot(p, slot.right_top() + egui::vec2(1.0, 2.0));
+                    }
+                    reset = resp.on_hover_text(&m.tip).clicked();
+                }
+                // **The badge says the field will not scrub** (D1038 (3), §15
+                // D1046): unbound it is the scrub handle; bound, a drag would
+                // detach by accident, so it does not scrub and its cursor
+                // refuses. The glyph is the session's — D1038 names no cursor.
+                None => {
+                    p.text(
+                        slot.center(),
+                        egui::Align2::CENTER_CENTER,
+                        key.badge(),
+                        theme::icon_font(14.0),
+                        theme::text::FAINT,
+                    );
+                    resp.on_hover_cursor(egui::CursorIcon::NotAllowed);
+                }
+            }
             let (rect, _) = ui.allocate_exact_size(
                 egui::vec2(ui.available_width() + 5.0, 28.0),
                 egui::Sense::hover(),
@@ -948,6 +1023,7 @@ impl OndinApp {
             chip_rect = rect;
         });
         self.field_chip(ui, key, var, chip_rect);
+        reset
     }
 
     /// The corner-radius field typed over (A3): the buffer the chip's first key
@@ -959,17 +1035,15 @@ impl OndinApp {
         mut rt: Retype,
         w: f32,
     ) {
-        let FieldKey::Radius { id } = key else { return };
+        let (FieldKey::Radius { id } | FieldKey::Corner { id, .. }) = key else {
+            return;
+        };
         let edit_id = egui::Id::new(("var-retype", format!("{key:?}")));
         let mut field = None;
         let table = self.session.doc.variables();
         let font = egui::FontId::proportional(12.0);
         ui::field_row(ui, egui::vec2(w, 28.0), |ui| {
-            ui.label(theme::icon_text(
-                icon::CORNERS_OUT,
-                14.0,
-                theme::text::FAINT,
-            ));
+            ui.label(theme::icon_text(key.badge(), 14.0, theme::text::FAINT));
             // B4's refused tail dims as it is typed (§15 D1044).
             let mut layouter = |ui: &egui::Ui, buf: &dyn egui::TextBuffer, _wrap: f32| {
                 let at = refused(table, VarKind::Number, buf.as_str()).map(|r| r.1);
@@ -1017,13 +1091,31 @@ impl OndinApp {
                 // commit's `keep_corner_bindings` must judge each corner as it
                 // would the `DragValue`'s edit, not see them all detached.
                 let mut ops = match self.field_var(key) {
-                    Some(_) => ondin_core::detach_corners_ops(&self.session.doc, id),
+                    Some(_) => self.detach_tx(key).0,
                     None => Vec::new(),
                 };
-                ops.push(Operation::SetGeometry {
-                    id,
-                    geometry: ondin_core::GeometryPatch::CornerRadius(r.max(0.0)),
-                });
+                let r = r.max(0.0);
+                let geometry = match key {
+                    // One corner: the other three keep their literals, the same
+                    // `CornerRadii` the per-corner field writes (§15 D1049).
+                    FieldKey::Corner { slot, .. } => {
+                        match self.session.doc.get(id).map(|n| n.kind()) {
+                            Some(ondin_core::NodeKind::Rect { corner_radii, .. }) => {
+                                let mut c = *corner_radii;
+                                match slot {
+                                    0 => c.top_left = r,
+                                    1 => c.top_right = r,
+                                    2 => c.bottom_right = r,
+                                    _ => c.bottom_left = r,
+                                }
+                                ondin_core::GeometryPatch::CornerRadii(c)
+                            }
+                            _ => return,
+                        }
+                    }
+                    _ => ondin_core::GeometryPatch::CornerRadius(r),
+                };
+                ops.push(Operation::SetGeometry { id, geometry });
                 self.commit_edit(Transaction(ops));
             }
             return;
@@ -1055,6 +1147,15 @@ impl OndinApp {
                 ondin_core::NodeKind::Rect { corner_radii, .. } => {
                     Some(Cell::Number(corner_radii.top_left))
                 }
+                _ => None,
+            },
+            FieldKey::Corner { id, slot } => match self.session.resolved.used_kind(doc, id)? {
+                ondin_core::NodeKind::Rect { corner_radii, .. } => Some(Cell::Number(match slot {
+                    0 => corner_radii.top_left,
+                    1 => corner_radii.top_right,
+                    2 => corner_radii.bottom_right,
+                    _ => corner_radii.bottom_left,
+                })),
                 _ => None,
             },
         }
@@ -1093,7 +1194,9 @@ impl OndinApp {
         h: f32,
     ) {
         let at = match key {
-            FieldKey::Paint { id, .. } | FieldKey::Radius { id } => id,
+            FieldKey::Paint { id, .. } | FieldKey::Radius { id } | FieldKey::Corner { id, .. } => {
+                id
+            }
         };
         let Some(p) = self.picker.as_mut() else {
             return;
@@ -1968,7 +2071,7 @@ mod tests {
             };
             let out = ctx.run_ui(input, |ui| {
                 ui.set_min_width(180.0);
-                app.radius_chip(ui, k, radius, 160.0);
+                app.radius_chip(ui, k, radius, 160.0, None);
             });
             cursor = out.platform_output.cursor_icon;
         }
@@ -2105,6 +2208,75 @@ mod tests {
             Some(radius),
             "the bound corner written 6 stays bound"
         );
+    }
+
+    /// **One corner binds, detaches and is typed over alone** (§15 D1049): the
+    /// bottom right (`CornerVars` slot 2) bound to *radius/md* leaves the other
+    /// three literal; its detach leaves 6, what it drew, with the top left — bound
+    /// too by then — still bound; and a number typed over its chip writes that
+    /// corner and no other.
+    ///
+    /// Flips, run: binding every slot in `bind_tx`'s `Corner` arm fails *"only the
+    /// bottom right is bound"*; `detach_corners_ops` in `detach_tx`'s `Corner` arm
+    /// fails *"the top left stays bound"* — and was green until the top left was
+    /// bound, a detach of four unbound-but-one corners writing what each draws,
+    /// which for a literal corner is its literal.
+    #[test]
+    fn one_corner_binds_detaches_and_retypes_alone() {
+        let (ctx, mut app, rect, _, radius) = fixture();
+        crate::theme::install(&ctx);
+        let br = FieldKey::Corner { id: rect, slot: 2 };
+        app.bind_field(br, radius);
+        let vars = app.session.doc.get(rect).unwrap().corner_vars();
+        assert_eq!(
+            vars,
+            [None, None, Some(radius), None],
+            "only the bottom right is bound"
+        );
+        assert_eq!(app.field_var(br), Some(radius));
+        assert_eq!(app.field_var(FieldKey::Corner { id: rect, slot: 3 }), None);
+        let radii = |app: &OndinApp| match app.session.doc.get(rect).unwrap().kind() {
+            NodeKind::Rect { corner_radii, .. } => *corner_radii,
+            _ => unreachable!(),
+        };
+        let tl = FieldKey::Corner { id: rect, slot: 0 };
+        app.bind_field(tl, radius);
+        app.detach_field(br);
+        assert_eq!(app.field_var(br), None);
+        assert_eq!(app.field_var(tl), Some(radius), "the top left stays bound");
+        let r = radii(&app);
+        assert_eq!(
+            (r.top_right, r.bottom_right, r.bottom_left),
+            (2.0, 6.0, 2.0),
+            "the corner keeps what it drew, the others their own"
+        );
+        app.detach_field(tl);
+
+        app.bind_field(br, radius);
+        app.var_retype = Some(Retype {
+            key: br,
+            text: "9".into(),
+            focus: true,
+        });
+        for events in [vec![], vec![], vec![key(egui::Key::Enter)]] {
+            let input = egui::RawInput {
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| {
+                if let Some(rt) = app.var_retype.clone() {
+                    app.radius_retype(ui, br, rt, 80.0);
+                }
+            });
+        }
+        let r = radii(&app);
+        assert_eq!(
+            (r.top_left, r.top_right, r.bottom_right, r.bottom_left),
+            // The top left kept the 6 it drew when it was detached above.
+            (6.0, 2.0, 9.0, 2.0),
+            "the number typed lands on that corner alone"
+        );
+        assert_eq!(app.field_var(br), None, "and detaches it");
     }
 
     /// The field's refused tail is laid out at 40%, the rest as `TextEdit` would

@@ -2445,6 +2445,136 @@ mod tests {
         assert_eq!(f.app.session.doc.get(f.ir).unwrap().opacity(), 1.0);
     }
 
+    /// **A copy's corner binding is a radius override** (D1038 A6, §15 D1048,
+    /// D1041's *Fix*): the main's rect bound to *radius/md*, the copy's rebound to
+    /// *radius/lg* — both literals 0 — marks the radius field, its tip naming the
+    /// main's variable and its ↺ putting that binding back. One corner rebound
+    /// marks that corner alone, the bottom right and not the bottom left.
+    ///
+    /// Flip, run: `Corner::var_slot` as the variant's cast (`self as usize`, the
+    /// reading order) fails *"the bottom right is the corner rebound"* — the two
+    /// bottom corners swap.
+    #[test]
+    fn a_copys_corner_binding_marks_the_radius_and_its_reset_rebinds() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let doc = &f.app.session.doc;
+        let r = doc.get(f.m).unwrap().children()[0];
+        let mode = f.app.session.ids.mint_mode();
+        let (md, lg) = (f.app.session.ids.mint_var(), f.app.session.ids.mint_var());
+        let number = |id, name: &str, n| ondin_core::variable::Variable {
+            id,
+            name: name.into(),
+            kind: ondin_core::variable::VarKind::Number,
+            cells: [(mode, ondin_core::variable::Cell::Number(n))].into(),
+        };
+        let mut ops = vec![
+            Operation::AddMode {
+                mode: ondin_core::variable::Mode {
+                    id: mode,
+                    name: "Default".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: number(md, "radius/md", 6.0),
+            },
+            Operation::AddVariable {
+                var: number(lg, "radius/lg", 12.0),
+            },
+        ];
+        ops.extend(ondin_core::bind_corners_ops(doc, r, [Some(md); 4]));
+        assert!(f.app.session.commit(Transaction(ops)));
+        assert_eq!(
+            f.app.session.doc.get(f.ir).unwrap().corner_vars(),
+            [Some(md); 4],
+            "the copy follows its main's binding"
+        );
+        let rebind = ondin_core::bind_corners_ops(&f.app.session.doc, f.ir, [Some(lg); 4]);
+        assert!(f.app.session.commit(Transaction(rebind)));
+        f.app.session.selection.set_one(f.ir);
+        f.app.gather_card_overrides();
+        let marks = f.app.appearance_marks(f.ir);
+        let radius = marks.radius.expect("the binding is an override");
+        assert_eq!(radius.tip, "Reset to main · radius/md");
+        assert!(f.app.session.commit(radius.tx));
+        assert_eq!(
+            f.app.session.doc.get(f.ir).unwrap().corner_vars(),
+            [Some(md); 4],
+            "the reset puts the main's binding back"
+        );
+
+        let one = ondin_core::bind_corners_ops(
+            &f.app.session.doc,
+            f.ir,
+            [Some(md), Some(md), Some(lg), Some(md)],
+        );
+        assert!(f.app.session.commit(Transaction(one)));
+        f.app.gather_card_overrides();
+        let marks = f.app.appearance_marks(f.ir);
+        // `marks.corners` is in the inspector's reading order, TL TR BL BR,
+        // while the binding above is `CornerVars`' TL TR BR BL.
+        let (bl, br) = (2, 3);
+        assert!(
+            marks.corners[br].is_some(),
+            "the bottom right is the corner rebound"
+        );
+        assert!(marks.corners[bl].is_none(), "the bottom left follows");
+    }
+
+    /// **A copy's own mode is an override, marked on its *Mode* row** (D1038 (a),
+    /// §15 D1048, D1042's *Fix*): the instance sets *Dark* where its main
+    /// inherits, so the row's label is bright with a dot beside it and its tip
+    /// says *Reset to main · Inherit*; a click on the label puts the copy back to
+    /// inheriting.
+    ///
+    /// Flip, run: `frame_mode_row` without its `reset_marked` fails *"the reset
+    /// puts the copy back to inheriting"*.
+    #[test]
+    fn a_copys_own_mode_is_marked_on_its_mode_row() {
+        let ctx = egui::Context::default();
+        let mut f = fixture(&ctx);
+        let (light, dark) = (f.app.session.ids.mint_mode(), f.app.session.ids.mint_mode());
+        let add = |id, name: &str, index| Operation::AddMode {
+            mode: ondin_core::variable::Mode {
+                id,
+                name: name.into(),
+            },
+            index,
+            cells: vec![],
+        };
+        assert!(f.app.session.commit(Transaction(vec![
+            add(light, "Light", 0),
+            add(dark, "Dark", 1),
+            Operation::SetMode {
+                id: f.i,
+                mode: Some(dark),
+            },
+        ])));
+        f.app.session.selection.set_one(f.i);
+        f.app.gather_card_overrides();
+        let out = settle(&mut f.app, &ctx);
+        let (label, ink) = inks(&out)
+            .into_iter()
+            .find(|(t, ..)| t == "Mode")
+            .map(|(_, r, c)| (r, c))
+            .expect("the Mode row is drawn");
+        assert_eq!(ink, theme::text::STRONG, "the label is bright");
+        assert!(
+            dots(&out)
+                .iter()
+                .any(|d| (d.y - label.center().y).abs() < 4.0),
+            "with a dot on its line"
+        );
+        click(&mut f.app, &ctx, label.center());
+        assert_eq!(
+            f.app.session.doc.get(f.i).unwrap().mode(),
+            None,
+            "the reset puts the copy back to inheriting"
+        );
+    }
+
     /// The centre of every override dot the frame painted — the tests' one
     /// detector, `ui::painted_override_dots` (`[X8.2-L3-01]`).
     fn dots(out: &egui::FullOutput) -> Vec<egui::Pos2> {

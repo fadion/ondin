@@ -3236,6 +3236,41 @@ pub fn detach_corners_ops(doc: &Document, id: NodeId) -> Vec<Operation> {
     ]
 }
 
+/// [`detach_corners_ops`] for the one corner at `slot` of a `CornerVars` (TL,
+/// TR, BR, BL) — a per-corner chip's detach (§15 D1049): that corner's literal
+/// becomes the radius it draws and its binding goes, the other three as they
+/// are. Empty when that corner is not bound.
+pub fn detach_corner_ops(doc: &Document, id: NodeId, slot: usize) -> Vec<Operation> {
+    let Some(node) = doc.get(id) else {
+        return Vec::new();
+    };
+    let NodeKind::Rect { corner_radii, .. } = node.kind() else {
+        return Vec::new();
+    };
+    let mut vars = node.corner_vars();
+    if vars.get(slot).copied().flatten().is_none() {
+        return Vec::new();
+    }
+    let Some(drawn) = doc.resolve_corners(id, *corner_radii) else {
+        return Vec::new();
+    };
+    vars[slot] = None;
+    let mut radii = *corner_radii;
+    match slot {
+        0 => radii.top_left = drawn.top_left,
+        1 => radii.top_right = drawn.top_right,
+        2 => radii.bottom_right = drawn.bottom_right,
+        _ => radii.bottom_left = drawn.bottom_left,
+    }
+    vec![
+        Operation::SetGeometry {
+            id,
+            geometry: GeometryPatch::CornerRadii(radii),
+        },
+        Operation::SetCornerVars { id, vars },
+    ]
+}
+
 /// Item `index` of every target's fill (or stroke) list, given what `brush_of`
 /// makes of it — handed the node it sits on, so a binding can resolve there.
 /// The binding verbs' one write (§15 D1041): bind, detach, and a literal typed

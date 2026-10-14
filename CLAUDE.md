@@ -67,8 +67,17 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1060 index rows, 1060 body headings, next free
-D1061** (measured 2026-10-14 at `787d968`; ⚠️ **the step-2 leftovers request reserved D1060–D1069 at
+anywhere cited either. **The live figures: 1061 index rows, 1061 body headings, next free
+D1062** (measured 2026-10-14 at `376d130`; ⚠️ **the W-and-H request reserved D1061–D1070 at
+`6db3079` and spent one** — D1061, a layer's width and height bound to number variables (the
+maintainer's ruling: literal 0, any resize detaches, only a hand-set size binds), step 2 closed;
+**D1062–D1070 found at zero sites and released.** Census **960**, arrival D1061, none unresolved.
+⚠️ **A reader sweep (an `Explore` agent) found seven readers of the stored size** that a bound
+axis's 0 would have broken, six fixed; and a preview test found `apply_laid` drawing a bound flex
+item 0 wide. 🚨 **A staged-tree test build in its own target dir filled the disk** — 11 GB, C:
+at 858 MB free and rustc panicking — and was deleted; the staged tree was checked
+(`cargo check --all-targets`, 1.2 GB) instead, its core and render files identical to the
+fully gated working tree. Before that, measured at `787d968`; ⚠️ **the step-2 leftovers request reserved D1060–D1069 at
 `185f04a` through the `dnumber-guard` mod and spent one** — D1060, the bound visibility's chrome
 (the Properties card's capsule, A4's rule; the layers panel's resting bound eye; a worded badge
 clear of a resting eye); **D1061–D1069 found at zero sites and released.** Census **959**, arrival

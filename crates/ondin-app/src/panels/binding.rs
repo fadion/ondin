@@ -521,6 +521,64 @@ impl OndinApp {
         }
     }
 
+    /// The variables `key`'s targets are bound to, in name order and each once,
+    /// when **every** target is bound and they are not all one — A4's *Mixed*
+    /// capsule (§15 D1045). `None` when one is unbound (the plain grey *Mixed*,
+    /// D130's), or all share one (`field_var`'s chip).
+    pub(crate) fn field_mixed_vars(&self, key: FieldKey) -> Option<Vec<VarId>> {
+        let FieldKey::Paint { slot, .. } = key else {
+            return None;
+        };
+        let (target, index) = paint_item(slot)?;
+        let doc = &self.session.doc;
+        let mut vars = Vec::new();
+        for n in self.field_ids(key) {
+            let node = doc.get(n)?;
+            let b = match target {
+                PaintTarget::Fill => &node.paint().fills.get(index)?.brush,
+                PaintTarget::Stroke => &node.paint().strokes.get(index)?.brush,
+            };
+            let v = b.var()?;
+            if !vars.contains(&v) {
+                vars.push(v);
+            }
+        }
+        let table = doc.variables();
+        vars.sort_by(|a, b| {
+            let name = |v: &VarId| table.get(*v).map(|x| x.name.as_str()).unwrap_or("");
+            name(a).cmp(name(b))
+        });
+        (vars.len() > 1).then_some(vars)
+    }
+
+    /// A4's *Mixed* capsule in `rect`: the selected layers bound to different
+    /// variables, its tooltip listing them (§15 D1045). D1038 rules the look and
+    /// not the keys, so they are the chip's: `Backspace` detaches every layer to
+    /// what it draws, another key starts a literal for them all, `--` rebinds them
+    /// all to one. No hover × — the chip's own rule for a mixed row — and no
+    /// field menu, as on the plain *Mixed* row (`context-menus.md` §6.7).
+    pub(crate) fn mixed_chip(
+        &mut self,
+        ui: &mut egui::Ui,
+        key: FieldKey,
+        vars: &[VarId],
+        rect: egui::Rect,
+    ) {
+        let table = self.session.doc.variables();
+        let tip = vars
+            .iter()
+            .filter_map(|v| table.get(*v).map(|x| x.name.as_str()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let id = egui::Id::new(("var-chip", format!("{key:?}")));
+        let out = chip(ui, rect, id, "Mixed", &tip, false);
+        if out.detach {
+            self.detach_field(key);
+        } else if let Some(text) = out.typed {
+            self.chip_typed(key, text);
+        }
+    }
+
     /// A bound paint field's own `%` — the binding's alpha, when every target is
     /// bound to one variable at one alpha. `None` for anything else.
     pub(crate) fn field_alpha(&self, key: FieldKey) -> Option<f32> {
@@ -1789,6 +1847,100 @@ mod tests {
         run(&mut app, vec![key(egui::Key::Enter)]);
         assert_eq!(radius(&app), 12.0, "a number typed back writes");
         assert_eq!(app.field_var(k), None);
+    }
+
+    /// **A4: two layers bound to different variables read *Mixed* in a capsule**,
+    /// its tooltip the two names; one unbound, or both on one variable, is not
+    /// that case (§15 D1045). Focused, `Backspace` detaches both, each to what it
+    /// draws.
+    ///
+    /// Flip, run: letting `field_mixed_vars` answer with one variable (`> 0` for
+    /// `> 1`) fails *"one variable is the chip's"*.
+    #[test]
+    fn layers_bound_to_different_variables_read_mixed_in_a_capsule() {
+        let (ctx, mut app, rect, brand, _) = fixture();
+        crate::theme::install(&ctx);
+        let mode = app.session.doc.variables().modes()[0].id;
+        let (other, accent) = (app.session.ids.mint(), app.session.ids.mint_var());
+        let root = app.session.doc.root();
+        assert!(app.commit_edit(Transaction(vec![
+            Operation::CreateNode {
+                id: other,
+                parent: root,
+                index: 1,
+                kind: NodeKind::Rect {
+                    size: Size::new(10.0, 10.0),
+                    corner_radii: RoundedRectRadii::from_single_radius(0.0),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetFills {
+                id: other,
+                fills: keyed_by_position([Fill {
+                    brush: RED.into(),
+                    visible: true,
+                }]),
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: accent,
+                    name: "accent/400".into(),
+                    kind: VarKind::Color,
+                    cells: [(mode, Cell::Color(Color::BLACK))].into(),
+                },
+            },
+        ])));
+        app.session.selection.set(vec![rect, other]);
+        let row = FieldKey::Paint {
+            id: rect,
+            slot: PaintSlot::Selection(PaintTarget::Fill, 0),
+        };
+        let one = |id| FieldKey::Paint {
+            id,
+            slot: PaintSlot::Fill(0),
+        };
+        app.bind_field(one(rect), brand);
+        assert_eq!(
+            app.field_mixed_vars(row),
+            None,
+            "one unbound is the grey Mixed"
+        );
+        app.bind_field(one(other), brand);
+        assert_eq!(
+            app.field_mixed_vars(row),
+            None,
+            "one variable is the chip's"
+        );
+        app.bind_field(one(other), accent);
+        assert_eq!(
+            app.field_mixed_vars(row),
+            Some(vec![accent, brand]),
+            "both, in name order"
+        );
+        let id = egui::Id::new(("var-chip", format!("{row:?}")));
+        let at = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(140.0, 28.0));
+        let draw = |app: &mut OndinApp, events| {
+            let input = egui::RawInput {
+                events,
+                ..Default::default()
+            };
+            ctx.run_ui(input, |ui| app.mixed_chip(ui, row, &[accent, brand], at))
+                .shapes
+        };
+        let shapes = draw(&mut app, vec![]);
+        assert!(
+            text_at(&shapes, "Mixed").is_some(),
+            "the capsule reads Mixed"
+        );
+        ctx.memory_mut(|m| m.request_focus(id));
+        draw(&mut app, vec![]);
+        draw(&mut app, vec![key(egui::Key::Backspace)]);
+        assert_eq!(
+            fill0(&app, rect),
+            BrushSource::from(Color::WHITE.multiply_alpha(0.5))
+        );
+        assert_eq!(fill0(&app, other), BrushSource::from(Color::BLACK));
     }
 
     /// **`Enter` on a refused `--` leaves either field as typed, the list still

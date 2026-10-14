@@ -9752,15 +9752,26 @@ impl OndinApp {
                     // (`Spread::base`) — and "Linear" is precisely the claim a mixed
                     // row must not make about a set that is not all linear. The hex
                     // says "Mixed" instead, which is true of both cases.
+                    let key = super::binding::FieldKey::Paint { id, slot };
+                    let typing = matches!(&self.paint_hex, Some((n, s, _)) if *n == id && *s == slot)
+                        || self.var_retype.as_ref().is_some_and(|r| r.key == key);
+                    // **Every layer bound, not all to one: A4's *Mixed* capsule**
+                    // (§15 D1045), ahead of the plain grey *Mixed* — which is the
+                    // row's when only some are bound, D130's dash rule.
+                    let mixed_vars = self.field_mixed_vars(key).filter(|_| !typing);
                     match paint::kind_of(brush) {
+                        _ if let Some(vars) = &mixed_vars => {
+                            let reserve = if item.is_some() { 106.0 } else { 82.0 };
+                            let w = (ui.available_width() - reserve).max(40.0);
+                            let (rect, _) =
+                                ui.allocate_exact_size(egui::vec2(w, 28.0), egui::Sense::hover());
+                            self.mixed_chip(ui, key, vars, rect);
+                        }
                         _ if unknown => self.paint_hex_field(ui, id, slot, brush, true),
                         // **Bound, the chip replaces the hex** and the swatch beside
                         // it shows the resolved colour (§15 D1041, D1038 A1) — until
                         // a key typed onto it turns it back into the hex buffer.
                         PaintKind::Solid => {
-                            let key = super::binding::FieldKey::Paint { id, slot };
-                            let typing = matches!(&self.paint_hex, Some((n, s, _)) if *n == id && *s == slot)
-                                || self.var_retype.as_ref().is_some_and(|r| r.key == key);
                             match self.field_var(key).filter(|_| !typing) {
                                 Some(var) => {
                                     // The row's right-hand run — the `%`, the ×

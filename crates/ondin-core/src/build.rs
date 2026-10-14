@@ -3345,6 +3345,40 @@ pub fn detach_brush_at_all(
     })
 }
 
+/// The corner bindings rectangle `id` keeps when its radii are written `written`
+/// (TL, TR, BR, BL) — [`keep_corner_bindings`]' judgement, corner by corner: a
+/// bound corner written what it draws, or its own literal, keeps its variable;
+/// any other comes back `None`. **Shared with the preview** (`absorb`'s
+/// `SetGeometry` arm), which had drawn a write that keeps a bound corner at its
+/// literal 0 — the Scale tool's drag, a per-corner ↺ — as that 0, the corner
+/// square until the commit put it back (found beside §15 D1058's spacing
+/// preview, by a probe).
+pub fn kept_corner_vars(doc: &Document, id: NodeId, written: [f64; 4]) -> crate::CornerVars {
+    let Some(node) = doc.get(id) else {
+        return Default::default();
+    };
+    let NodeKind::Rect { corner_radii, .. } = node.kind() else {
+        return Default::default();
+    };
+    let bound = node.corner_vars();
+    let drawn = doc
+        .resolve_corners(id, *corner_radii)
+        .unwrap_or(*corner_radii);
+    let drawn = [
+        drawn.top_left,
+        drawn.top_right,
+        drawn.bottom_right,
+        drawn.bottom_left,
+    ];
+    let literal = [
+        corner_radii.top_left,
+        corner_radii.top_right,
+        corner_radii.bottom_right,
+        corner_radii.bottom_left,
+    ];
+    std::array::from_fn(|k| bound[k].filter(|_| written[k] == drawn[k] || written[k] == literal[k]))
+}
+
 /// **A radius written over a bound corner detaches it** (D1038 (2)) — the
 /// commit-time half of the binding's rule, so no writer of a radius has to know
 /// about bindings: the inspector's field, its per-corner fields and every bulk
@@ -3403,21 +3437,13 @@ pub fn keep_corner_bindings(doc: &Document, mut tx: Transaction) -> Transaction 
             }
             _ => continue,
         };
-        let drawn = doc
-            .resolve_corners(*id, *corner_radii)
-            .unwrap_or(*corner_radii);
-        let drawn = [
-            drawn.top_left,
-            drawn.top_right,
-            drawn.bottom_right,
-            drawn.bottom_left,
-        ];
         let literal = [
             corner_radii.top_left,
             corner_radii.top_right,
             corner_radii.bottom_right,
             corner_radii.bottom_left,
         ];
+        let kept = kept_corner_vars(doc, *id, written);
         let vars = detached.entry(*id).or_insert(bound);
         for k in 0..4 {
             if vars[k].is_none() {
@@ -3426,7 +3452,7 @@ pub fn keep_corner_bindings(doc: &Document, mut tx: Transaction) -> Transaction 
             // Its drawn value (a field's write), or its own literal (a writer that
             // built the radii from the document's kind — the Scale tool's
             // photographic scale of a 0, a per-corner ↺), leaves it bound.
-            if written[k] == drawn[k] || written[k] == literal[k] {
+            if kept[k].is_some() {
                 written[k] = literal[k];
             } else {
                 vars[k] = None;
@@ -3525,12 +3551,41 @@ pub fn detach_spacing_ops(doc: &Document, id: NodeId, which: [bool; 6]) -> Vec<O
     ]
 }
 
+/// The bindings container `id` keeps when its layout is written `written` —
+/// [`keep_spacing_bindings`]' judgement, slot by slot (§15 D1058): a bound slot
+/// written what it lays out at, or its own literal, keeps its variable; any
+/// other slot comes back `None`. **Shared with the preview** (`absorb`'s
+/// `SetDisplay` arm), so a scrub over a partly bound field draws the slot where
+/// the commit will put it — it had drawn the variable's number and then jumped
+/// to the written one on release (`arch-scribe`'s reading of D1058's first cut).
+pub fn kept_spacing_vars(
+    doc: &Document,
+    id: NodeId,
+    written: &crate::container::Display,
+) -> crate::SpacingVars {
+    let Some(node) = doc.get(id) else {
+        return Default::default();
+    };
+    let bound = node.spacing_vars();
+    let Some(was) = node.display() else {
+        return Default::default();
+    };
+    let literal = was.spacing();
+    let drawn = doc
+        .spacing_drawn_in(doc.variables(), id, was, bound)
+        .spacing();
+    let w = written.spacing();
+    std::array::from_fn(|k| bound[k].filter(|_| w[k] == drawn[k] || w[k] == literal[k]))
+}
+
 /// **A gap or a padding written over a bound slot detaches it** (D1038 (2), §15
 /// D1058) — [`keep_corner_bindings`]' rule for a container's spacing, so no
 /// writer of a layout has to know about bindings: the Container card's fields,
-/// the display switch, the Scale tool and every propagation write `SetDisplay`
-/// as they did, and this adds the `SetSpacingVars` that lets the written value
-/// be the one laid out.
+/// the display switch and the Scale tool write `SetDisplay` as they did, and
+/// this adds the `SetSpacingVars` that lets the written value be the one laid
+/// out. Propagation runs after it (`propagate::owed`), so a copy follows a
+/// detach through the main's `SetSpacingVars`, which propagates whole, rather
+/// than being judged here.
 ///
 /// **The same two halves, for the same two kinds of writer.** A bound slot
 /// written **what it lays out at** stays bound — a field over the layout as
@@ -3573,20 +3628,14 @@ pub fn keep_spacing_bindings(doc: &Document, mut tx: Transaction) -> Transaction
             *vars = Default::default();
             continue;
         };
-        let (literal, drawn) = match node.display() {
-            Some(was) => (
-                was.spacing(),
-                doc.spacing_drawn_in(doc.variables(), *id, was, bound)
-                    .spacing(),
-            ),
-            None => ([0.0; 6], [0.0; 6]),
-        };
+        let kept = kept_spacing_vars(doc, *id, display);
+        let literal = node.display().map_or([0.0; 6], |w| w.spacing());
         let mut written = display.spacing();
         for k in 0..6 {
             if vars[k].is_none() {
                 continue;
             }
-            if written[k] == drawn[k] || written[k] == literal[k] {
+            if kept[k].is_some() {
                 written[k] = literal[k];
             } else {
                 vars[k] = None;

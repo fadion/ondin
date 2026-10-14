@@ -1226,7 +1226,29 @@ impl RenderOverrides {
             },
             Operation::SetGeometry { id, geometry } => {
                 let base = self.current_kind(doc, *id)?;
-                let patched = geometry.applied_to(&base)?;
+                let mut patched = geometry.applied_to(&base)?;
+                // **A radius write over bound corners draws the ones the commit
+                // keeps at their variables** (`build::kept_corner_vars`): the
+                // Scale tool's drag writes a bound corner its literal 0, which
+                // `keep_corner_bindings` keeps bound, and this drew it square.
+                if let (
+                    ondin_core::GeometryPatch::CornerRadius(_)
+                    | ondin_core::GeometryPatch::CornerRadii(_),
+                    NodeKind::Rect { corner_radii, .. },
+                ) = (geometry, &mut patched)
+                    && doc
+                        .get(*id)
+                        .is_some_and(|n| n.corner_vars().iter().any(Option::is_some))
+                {
+                    let w = [
+                        corner_radii.top_left,
+                        corner_radii.top_right,
+                        corner_radii.bottom_right,
+                        corner_radii.bottom_left,
+                    ];
+                    let kept = ondin_core::build::kept_corner_vars(doc, *id, w);
+                    *corner_radii = doc.corners_drawn_in(doc.variables(), *id, *corner_radii, kept);
+                }
                 self.set_kind(doc, res, *id, patched);
                 // A geometry change can move the node's own painted area but
                 // not its children's frame of reference, so only it is dirty.
@@ -1260,12 +1282,15 @@ impl RenderOverrides {
                 }
                 // **Stored resolved** (§15 D1058): `PreviewView` answers an
                 // override's layout as it is, so a bound gap's 0 is laid out at its
-                // variable's number, the node's bindings as committed.
+                // variable's number. Resolved with the bindings the commit will
+                // **keep** (`build::kept_spacing_vars`), so a slot a scrub writes
+                // past its drawn number is drawn at the written one, as
+                // `keep_spacing_bindings` will detach it to.
                 if self.ghost(*id).is_none() {
-                    let vars = doc.get(*id).map(|n| n.spacing_vars()).unwrap_or_default();
-                    let drawn = display
-                        .as_ref()
-                        .map(|d| doc.spacing_drawn_in(doc.variables(), *id, d, vars));
+                    let drawn = display.as_ref().map(|d| {
+                        let vars = ondin_core::build::kept_spacing_vars(doc, *id, d);
+                        doc.spacing_drawn_in(doc.variables(), *id, d, vars)
+                    });
                     self.entry(*id).display = Some(drawn);
                     self.mark_moved(doc, *id);
                 }

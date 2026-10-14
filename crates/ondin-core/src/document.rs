@@ -487,6 +487,20 @@ impl Document {
         if n.corner_vars.iter().all(Option::is_none) {
             return None;
         }
+        Some(self.corners_drawn_in(t, id, radii, n.corner_vars))
+    }
+
+    /// `radii` with the corners `vars` binds read from table `t` in the mode in
+    /// force at `id` — [`Self::resolve_corners_in`] with the bindings named, so a
+    /// preview can resolve the ones a write keeps (§15 D1058's sibling, the
+    /// corners' *Fix*).
+    pub fn corners_drawn_in(
+        &self,
+        t: &crate::variable::Variables,
+        id: NodeId,
+        radii: RoundedRectRadii,
+        vars: crate::variable::CornerVars,
+    ) -> RoundedRectRadii {
         let read = |var: Option<crate::variable::VarId>, lit: f64| match var {
             Some(v) => match self.resolve_var_in(t, id, v) {
                 Some(crate::variable::Value::Number(x)) => x.max(0.0),
@@ -494,13 +508,13 @@ impl Document {
             },
             None => lit,
         };
-        let [tl, tr, br, bl] = n.corner_vars;
-        Some(RoundedRectRadii {
+        let [tl, tr, br, bl] = vars;
+        RoundedRectRadii {
             top_left: read(tl, radii.top_left),
             top_right: read(tr, radii.top_right),
             bottom_right: read(br, radii.bottom_right),
             bottom_left: read(bl, radii.bottom_left),
-        })
+        }
     }
 
     /// `display` with the slots `vars` binds read from table `t`, in the mode in

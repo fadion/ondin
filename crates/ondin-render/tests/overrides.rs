@@ -4082,6 +4082,35 @@ fn a_corner_binding_previews_as_the_radius_it_will_draw() {
     ));
     assert!(!tx.0.is_empty(), "the fixture binds something");
     assert_preview_matches_commit(&doc, &tx, "two corners bound");
+
+    // **A radius write keeping the bound corners at their literal 0 previews
+    // them at their variable** — the Scale tool's drag, which the commit's
+    // `keep_corner_bindings` keeps bound (`build::kept_corner_vars`). Measured
+    // before the fix: the preview drew the two bound corners square, *"a write
+    // keeping bound corners"* failing here.
+    doc.apply(&tx).unwrap();
+    let scaled = Transaction(vec![Operation::SetGeometry {
+        id: rect,
+        geometry: ondin_core::GeometryPatch::CornerRadii(RoundedRectRadii {
+            top_left: 0.0,
+            top_right: 6.0,
+            bottom_right: 0.0,
+            bottom_left: 6.0,
+        }),
+    }]);
+    let res = Resolved::rebuild(&doc);
+    let ov = RenderOverrides::from_transaction(&doc, &res, &scaled).expect("representable");
+    let previewed = record(&doc, &res, &ov);
+    let mut committed = doc.clone();
+    committed
+        .apply(&ondin_core::keep_corner_bindings(&doc, scaled))
+        .unwrap();
+    let committed_res = Resolved::rebuild(&committed);
+    assert_eq!(
+        previewed,
+        record(&committed, &committed_res, &RenderOverrides::default()),
+        "a write keeping bound corners: preview diverged from commit"
+    );
 }
 
 /// **A gap or a padding bound to a number variable previews as the layout it
@@ -4179,6 +4208,39 @@ fn a_spacing_binding_previews_as_the_layout_it_will_lay_out() {
         cell: Cell::Number(30.0),
     }]);
     assert_preview_matches_commit(&doc, &cell, "the bound slots' cell edited");
+
+    // **A write past a bound slot previews where the commit puts it** (§15
+    // D1058's *Fix*): the plain *Mixed* pair field over a left padding bound and
+    // a right one not writes 9 to both — the commit's `keep_spacing_bindings`
+    // detaches the left to 9, and the preview had drawn it at the variable's 30.
+    // Flip, run: the `SetDisplay` arm resolving with the node's committed
+    // bindings rather than `kept_spacing_vars` fails *"a scrub past a bound
+    // slot"*.
+    let mut d = doc.get(frame).unwrap().display().unwrap().clone();
+    d.padding_mut()[1] = 9.0;
+    d.padding_mut()[3] = 9.0;
+    let scrub = Transaction(vec![Operation::SetDisplay {
+        id: frame,
+        display: Some(d),
+    }]);
+    let res = Resolved::rebuild(&doc);
+    let ov = RenderOverrides::from_transaction(&doc, &res, &scrub).expect("representable");
+    let previewed = record(&doc, &res, &ov);
+    let mut committed = doc.clone();
+    committed
+        .apply(&ondin_core::keep_spacing_bindings(&doc, scrub))
+        .unwrap();
+    assert_eq!(
+        committed.get(frame).unwrap().spacing_vars()[5],
+        None,
+        "the fixture detaches"
+    );
+    let committed_res = Resolved::rebuild(&committed);
+    assert_eq!(
+        previewed,
+        record(&committed, &committed_res, &RenderOverrides::default()),
+        "a scrub past a bound slot: preview diverged from commit"
+    );
 }
 
 /// **A variable's cell previews on everything that reads it** (§15 D1056, D1037's

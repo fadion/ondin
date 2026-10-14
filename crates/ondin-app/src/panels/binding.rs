@@ -2370,4 +2370,41 @@ mod tests {
             assert!(elide_groups(ui, full, &font, 30.0).ends_with('…'));
         });
     }
+
+    /// **Every face of the colour popup is one height** (E1: *"the popup keeps
+    /// its height on every tab, so nothing jumps under the pointer"*; §15 D1057),
+    /// measured as the bounds of everything the popup paints, shadow included,
+    /// on each tab in turn.
+    ///
+    /// Flip, run: the gradient plane back at 84 fails on *Linear*, 8 points
+    /// taller than *Solid* — the height D1043 left.
+    #[test]
+    fn every_face_of_the_colour_popup_is_one_height() {
+        let (ctx, mut app, rect, _, _) = fixture();
+        crate::theme::install(&ctx);
+        app.session.selection.set(vec![rect]);
+        app.picker = Some(crate::panels::picker::Picker::new(
+            rect,
+            PaintSlot::Fill(0),
+            egui::pos2(400.0, 100.0),
+        ));
+        let h = |ctx: &egui::Context, app: &mut OndinApp| {
+            let s = picker_frame(ctx, app, vec![]);
+            s.iter()
+                .map(|c| c.shape.visual_bounding_rect())
+                .filter(|r| r.is_finite())
+                .fold(egui::Rect::NOTHING, |a, b| a.union(b))
+        };
+        for _ in 0..3 {
+            picker_frame(&ctx, &mut app, vec![]);
+        }
+        let solid = h(&ctx, &mut app);
+        for t in ["Linear", "Radial", "Variables", "Solid"] {
+            click_text(&ctx, &mut app, t);
+            for _ in 0..3 {
+                picker_frame(&ctx, &mut app, vec![]);
+            }
+            assert_eq!(h(&ctx, &mut app), solid, "{t} is the Solid face's height");
+        }
+    }
 }

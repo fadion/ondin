@@ -544,10 +544,14 @@ impl OndinApp {
             .unwrap_or(0)
             .min(stops.len() - 1);
         let current = stops[index].1;
+        // A gradient face's plane is shorter by what its geometry row and stop
+        // bar add over the Solid face's alpha slider and swatches, so all four
+        // faces are one height (E1: *"the popup keeps its height on every tab"*;
+        // §15 D1057) — 84 had the gradient faces 8 points taller.
         let plane_h = if kind == PaintKind::Solid {
             104.0
         } else {
-            84.0
+            76.0
         };
         self.sv_plane(ui, node, slot, brush, index, current, inner_w, plane_h);
         self.hue_slider(ui, node, slot, brush, index, current, inner_w);

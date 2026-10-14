@@ -67,8 +67,15 @@ of one day, not a rule**, and the moment a number is typed into a comment ahead 
 entry it stops being true again. Not the file's own header prose, which has gone stale
 three times and twice *self-contradictory* — one version read *"D689 and D690 are reserved
 and unspent, so the next free number is D689"*, both halves in one sentence, while nothing
-anywhere cited either. **The live figures: 1059 index rows, 1059 body headings, next free
-D1060** (measured 2026-10-14 at `a7b13df`; ⚠️ **the step-2 request reserved D1057–D1068 at
+anywhere cited either. **The live figures: 1060 index rows, 1060 body headings, next free
+D1061** (measured 2026-10-14 at `787d968`; ⚠️ **the step-2 leftovers request reserved D1060–D1069 at
+`185f04a` through the `dnumber-guard` mod and spent one** — D1060, the bound visibility's chrome
+(the Properties card's capsule, A4's rule; the layers panel's resting bound eye; a worded badge
+clear of a resting eye); **D1061–D1069 found at zero sites and released.** Census **959**, arrival
+D1060, none unresolved. ⚠️ **`arch-scribe` read two defects in the first cut** — the capsule drawn
+over one variable only, where A4 draws it over several, and a *Mixed* row's tooltip promising a
+detach its click does not make — each fixed and the first flip-checked before commit. Before that,
+measured at `a7b13df`; ⚠️ **the step-2 request reserved D1057–D1068 at
 `5ac22b7` and spent three** — D1057 (step 1's leftovers closed: the gradient faces' height, a
 `Path`'s radii unbindable by decision), D1058 (gaps and padding bound to number variables,
 schema v8), D1059 (boolean variables bound to visibility); **D1060–D1068 found at zero sites

@@ -383,6 +383,18 @@ impl<'de> Deserialize<'de> for BrushSource {
 /// carries the resolved radius, and every geometry reader already reads that.
 pub type CornerVars = [Option<VarId>; 4];
 
+/// A layout's gap and padding bindings (§15 D1058), in
+/// [`crate::container::Display::spacing`]'s order — column gap, row gap, then
+/// padding top, right, bottom, left.
+///
+/// **On the node beside `display`, as [`CornerVars`] sits beside the radii**:
+/// a bound slot's literal is written 0 by the verb that binds it
+/// (`crate::build::bind_spacing_ops`) and never laid out — every layout view
+/// reads the display through [`crate::Document::resolved_display`]. Inert on a
+/// node with no layout; taking the layout away clears it
+/// (`crate::build::keep_spacing_bindings`).
+pub type SpacingVars = [Option<VarId>; 6];
+
 /// `node` — a node of `doc`, or a copy of one still carrying its id — with every
 /// binding **detached to the value it draws** in `doc` (D1038's detach): a bound
 /// paint becomes a solid of its variable's colour times its `%`, a bound corner
@@ -409,6 +421,10 @@ pub fn detached(doc: &crate::Document, mut node: crate::Node) -> crate::Node {
         *corner_radii = drawn;
     }
     node.corner_vars = Default::default();
+    if let Some(d) = &node.display {
+        node.display = Some(doc.spacing_drawn_in(doc.variables(), id, d, node.spacing_vars));
+    }
+    node.spacing_vars = Default::default();
     node.mode = None;
     node
 }
@@ -454,7 +470,8 @@ pub fn carried(doc: &crate::Document, subtrees: &[Vec<crate::Node>]) -> Carried 
             .iter()
             .filter_map(|f| f.brush.var())
             .chain(n.paint.strokes.iter().filter_map(|s| s.brush.var()))
-            .chain(n.corner_vars.iter().flatten().copied());
+            .chain(n.corner_vars.iter().flatten().copied())
+            .chain(n.spacing_vars.iter().flatten().copied());
         for v in vars {
             if out.vars.iter().any(|c| c.id == v) {
                 continue;
@@ -569,6 +586,23 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
                 }
                 n.corner_vars = vars;
             }
+            // A gap's or a padding's binding the same way, slot by slot, its
+            // fallback the twin's laid-out number (§15 D1058).
+            if n.spacing_vars.iter().any(Option::is_some)
+                && let Some(d) = n.display.as_mut()
+            {
+                let fallback = twin.and_then(|t| t.display.as_ref()).map(|t| t.spacing());
+                let mut s = d.spacing();
+                for (k, slot) in n.spacing_vars.iter_mut().enumerate() {
+                    if let Some(v) = *slot {
+                        *slot = rebind(v);
+                        if slot.is_none() {
+                            s[k] = fallback.map_or(s[k], |f| f[k]);
+                        }
+                    }
+                }
+                d.set_spacing(s);
+            }
             if let Some(m) = n.mode
                 && t.mode(m).is_none()
             {
@@ -604,6 +638,7 @@ fn reads(n: &crate::Node, vars: &[VarId]) -> bool {
     n.paint.fills.iter().any(|f| hit(f.brush.var()))
         || n.paint.strokes.iter().any(|s| hit(s.brush.var()))
         || n.corner_vars.iter().any(|v| hit(*v))
+        || n.spacing_vars.iter().any(|v| hit(*v))
 }
 
 /// The operations that delete `vars` (D1038): **every field bound to one detaches
@@ -685,6 +720,26 @@ pub fn remove_ops(doc: &crate::Document, vars: &[VarId]) -> Vec<crate::Operation
                 geometry: crate::GeometryPatch::CornerRadii(radii),
             });
             ops.push(O::SetCornerVars { id, vars: kept });
+        }
+        if let Some(d) = &n.display
+            && n.spacing_vars.iter().flatten().any(|v| vars.contains(v))
+        {
+            let drawn = doc.spacing_drawn_in(t, id, d, n.spacing_vars).spacing();
+            let mut s = d.spacing();
+            let mut kept = n.spacing_vars;
+            for k in 0..6 {
+                if kept[k].is_some_and(|v| vars.contains(&v)) {
+                    s[k] = drawn[k];
+                    kept[k] = None;
+                }
+            }
+            let mut display = d.clone();
+            display.set_spacing(s);
+            ops.push(O::SetDisplay {
+                id,
+                display: Some(display),
+            });
+            ops.push(O::SetSpacingVars { id, vars: kept });
         }
     }
     for v in t.iter().filter(|v| !vars.contains(&v.id)) {
@@ -924,6 +979,13 @@ pub(crate) fn check<'a>(
             {
                 return Err(VarRule::BadBinding(n.id));
             }
+        }
+        if n.spacing_vars
+            .iter()
+            .flatten()
+            .any(|v| t.kind_of(*v) != Some(VarKind::Number))
+        {
+            return Err(VarRule::BadBinding(n.id));
         }
         if let Some(m) = n.mode
             && (t.mode(m).is_none() || !matches!(n.kind, crate::NodeKind::Artboard { .. }))

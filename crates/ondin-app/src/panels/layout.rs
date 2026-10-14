@@ -1510,16 +1510,30 @@ impl OndinApp {
                     let (c, r) = d.gaps();
                     if is_column_gap { c } else { r }
                 };
-                let shown = shared(laid, get);
-                // An instance's overridden gap (§15 D981).
-                let mark = self.display_mark(
-                    subjects,
-                    |d| Some(get(d)),
-                    |d, v| {
-                        let (c, r) = d.gaps_mut();
-                        *(if is_column_gap { c } else { r }) = v;
-                    },
-                    |v| super::component::mark_num(*v),
+                let slots = if is_column_gap {
+                    super::binding::COLUMN_GAP
+                } else {
+                    super::binding::ROW_GAP
+                };
+                let key = super::binding::FieldKey::Spacing {
+                    id: subjects[0],
+                    slots,
+                };
+                let shown =
+                    shared(laid, get).filter(|_| !self.spacing_partly_bound(subjects, slots));
+                // An instance's overridden gap (§15 D981) — its binding first
+                // (§15 D1058).
+                let mark = OverrideMark::and(
+                    self.spacing_vars_mark(subjects, slots),
+                    self.display_mark(
+                        subjects,
+                        |d| Some(get(d)),
+                        |d, v| {
+                            let (c, r) = d.gaps_mut();
+                            *(if is_column_gap { c } else { r }) = v;
+                        },
+                        |v| super::component::mark_num(*v),
+                    ),
                 );
                 // **Live while it carries a mark**, inert or not: the ↺ is the
                 // prefix strip's own press (`ui::value_field_marked`), which a
@@ -1530,6 +1544,11 @@ impl OndinApp {
                 // then too, which the model holds and a wrap later lays out.
                 let live = is_first || second_live || mark.is_some();
                 ui::disable_unless(ui, live, |ui| {
+                    // **Bound, the field is a chip** (§15 D1058, D1038 A1): the
+                    // CSS name trailing it gives way, the glyph naming the field.
+                    if self.spacing_bound_ui(ui, key, half.x, &mark) {
+                        return;
+                    }
                     let mut v = shown.unwrap_or_else(|| get(first));
                     let start = v;
                     let (resp, _, hit) = ui::value_field_unit_marked(
@@ -1556,6 +1575,7 @@ impl OndinApp {
                         })
                     };
                     self.edit_valve(&resp, tx);
+                    self.spacing_doors(ui, key, &resp);
                 });
             }
         });
@@ -1580,9 +1600,24 @@ impl OndinApp {
         const LEFT: usize = 3;
         let gap = ui::CARD_COL_GAP;
         let side = ui::CONTROL_H;
-        let uneven = paddings
-            .iter()
-            .any(|p| p[LEFT] != p[RIGHT] || p[TOP] != p[BOTTOM]);
+        // A side's bit in a `FieldKey::Spacing` — padding follows the two gaps in
+        // a `SpacingVars` (§15 D1058).
+        let bit = |side: usize| 1u8 << (2 + side);
+        // **Opposite sides bound apart are uneven too** (§15 D1058): the pair's
+        // one field could only say *Mixed* for them, and the sides say what each is.
+        let unpaired = subjects.iter().any(|id| {
+            let v = self
+                .session
+                .doc
+                .get(*id)
+                .map(|n| n.spacing_vars())
+                .unwrap_or_default();
+            v[2 + LEFT] != v[2 + RIGHT] || v[2 + TOP] != v[2 + BOTTOM]
+        });
+        let uneven = unpaired
+            || paddings
+                .iter()
+                .any(|p| p[LEFT] != p[RIGHT] || p[TOP] != p[BOTTOM]);
         let key = egui::Id::new(("flex-padding-sides", subjects.first().copied()));
         let asked = ui.ctx().data(|d| d.get_temp::<bool>(key).unwrap_or(false));
         let open = asked || uneven;
@@ -1601,31 +1636,44 @@ impl OndinApp {
                     "Top and bottom padding",
                 ),
             ] {
+                let slots = bit(sides[0]) | bit(sides[1]);
+                let key = super::binding::FieldKey::Spacing {
+                    id: subjects[0],
+                    slots,
+                };
                 let shown = shared(&paddings, |p| {
                     (p[sides[0]] == p[sides[1]]).then_some(p[sides[0]])
                 })
-                .flatten();
+                .flatten()
+                .filter(|_| !self.spacing_partly_bound(subjects, slots));
                 let mut v = shown.unwrap_or(first_or_zero(&paddings, sides[0]));
                 let start = v;
                 // An instance's overridden padding on either of the pair's sides
-                // (§15 D981); the reset puts back both.
-                let mark = self.display_mark(
-                    subjects,
-                    |d| Some(sides.map(|s| d.padding()[s])),
-                    |d, v| {
-                        for (s, x) in sides.into_iter().zip(v) {
-                            d.padding_mut()[s] = x;
-                        }
-                    },
-                    |v| match v {
-                        [a, b] if a == b => super::component::mark_num(*a),
-                        [a, b] => format!(
-                            "{} · {}",
-                            super::component::mark_num(*a),
-                            super::component::mark_num(*b)
-                        ),
-                    },
+                // (§15 D981) — its binding first (§15 D1058); the reset puts back
+                // both.
+                let mark = OverrideMark::and(
+                    self.spacing_vars_mark(subjects, slots),
+                    self.display_mark(
+                        subjects,
+                        |d| Some(sides.map(|s| d.padding()[s])),
+                        |d, v| {
+                            for (s, x) in sides.into_iter().zip(v) {
+                                d.padding_mut()[s] = x;
+                            }
+                        },
+                        |v| match v {
+                            [a, b] if a == b => super::component::mark_num(*a),
+                            [a, b] => format!(
+                                "{} · {}",
+                                super::component::mark_num(*a),
+                                super::component::mark_num(*b)
+                            ),
+                        },
+                    ),
                 );
+                if self.spacing_bound_ui(ui, key, pair.x, &mark) {
+                    continue;
+                }
                 let (resp, hit) = ui::value_field_marked(
                     ui,
                     pair,
@@ -1647,6 +1695,7 @@ impl OndinApp {
                     })
                 };
                 self.edit_valve(&resp, tx);
+                self.spacing_doors(ui, key, &resp);
             }
             let state = if uneven {
                 ui::FieldButton::Set
@@ -1675,15 +1724,26 @@ impl OndinApp {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = gap;
                 for (s, letter) in pair {
-                    let shown = shared(&paddings, |p| p[s]);
+                    let key = super::binding::FieldKey::Spacing {
+                        id: subjects[0],
+                        slots: bit(s),
+                    };
+                    let shown = shared(&paddings, |p| p[s])
+                        .filter(|_| !self.spacing_partly_bound(subjects, bit(s)));
                     let mut v = shown.unwrap_or(first_or_zero(&paddings, s));
                     let start = v;
-                    let mark = self.display_mark(
-                        subjects,
-                        |d| Some(d.padding()[s]),
-                        |d, v| d.padding_mut()[s] = v,
-                        |v| super::component::mark_num(*v),
+                    let mark = OverrideMark::and(
+                        self.spacing_vars_mark(subjects, bit(s)),
+                        self.display_mark(
+                            subjects,
+                            |d| Some(d.padding()[s]),
+                            |d, v| d.padding_mut()[s] = v,
+                            |v| super::component::mark_num(*v),
+                        ),
                     );
+                    if self.spacing_bound_ui(ui, key, half.x, &mark) {
+                        continue;
+                    }
                     let (resp, hit) = ui::value_field_marked(
                         ui,
                         half,
@@ -1700,6 +1760,7 @@ impl OndinApp {
                         self.display_tx(subjects, |d| d.padding_mut()[s] = v.max(0.0))
                     };
                     self.edit_valve(&resp, tx);
+                    self.spacing_doors(ui, key, &resp);
                 }
             });
         }
@@ -1905,6 +1966,143 @@ impl OndinApp {
             |id, display| Operation::SetDisplay { id, display },
             |v| v.as_ref().map(&say).unwrap_or_default(),
         )
+    }
+
+    /// An instance's overridden **binding** on a spacing field's slots (D1038 A6,
+    /// §15 D1058) — a copy bound to another variable than its main's, or bound
+    /// where the main is not: both literals 0, so invisible to
+    /// [`Self::display_mark`]. Joined to that mark by the caller, binding first,
+    /// so the tip names the main's variable — the radius field's arrangement
+    /// (§15 D1048).
+    fn spacing_vars_mark(&self, subjects: &[NodeId], slots: u8) -> Option<OverrideMark> {
+        use super::binding::spacing_slots;
+        let table = self.session.doc.variables();
+        let name = |v: Option<ondin_core::VarId>| match v {
+            Some(v) => table
+                .get(v)
+                .map_or_else(|| "a variable".to_owned(), |x| x.name.clone()),
+            None => "unbound".to_owned(),
+        };
+        self.sub_mark(
+            subjects,
+            |op| match op {
+                Operation::SetSpacingVars { vars, .. } => Some(*vars),
+                _ => None,
+            },
+            |n| Some(n.spacing_vars()),
+            move |v: &ondin_core::SpacingVars| {
+                let mut m = [None; 6];
+                for k in spacing_slots(slots) {
+                    m[k] = v[k];
+                }
+                m
+            },
+            move |v, m| {
+                for k in spacing_slots(slots) {
+                    v[k] = m[k];
+                }
+            },
+            |id, vars| Operation::SetSpacingVars { id, vars },
+            move |m| {
+                let mut names: Vec<String> = spacing_slots(slots).map(|k| name(m[k])).collect();
+                names.dedup();
+                names.join(" · ")
+            },
+        )
+    }
+
+    /// A spacing field while bound or typed over (§15 D1058): the chip, A4's
+    /// *Mixed* capsule, or the buffer a key on either began — `true` when it drew
+    /// one, and the caller's plain field is not drawn. `mark` is the field's whole
+    /// override mark, binding and literal.
+    fn spacing_bound_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        key: super::binding::FieldKey,
+        w: f32,
+        mark: &Option<OverrideMark>,
+    ) -> bool {
+        let retyping = self.var_retype.as_ref().filter(|r| r.key == key).cloned();
+        if let Some(rt) = retyping {
+            self.number_retype(ui, key, rt, w);
+            return true;
+        }
+        if let Some(var) = self.field_var(key) {
+            let hit = self.number_chip(ui, key, var, w, mark.as_ref());
+            self.reset_marked(hit, mark);
+            return true;
+        }
+        if let Some(vars) = self.field_mixed_vars(key) {
+            let mut rect = egui::Rect::NOTHING;
+            ui::field_row(ui, egui::vec2(w, ui::CONTROL_H), |ui| {
+                let glyph = key.badge();
+                if key.badge_is_icon() {
+                    ui.label(theme::icon_text(glyph, 14.0, theme::text::FAINT));
+                } else {
+                    ui.label(
+                        egui::RichText::new(glyph)
+                            .size(11.5)
+                            .color(theme::text::FAINT),
+                    );
+                }
+                rect = ui
+                    .allocate_exact_size(
+                        egui::vec2(ui.available_width() + 5.0, ui::CONTROL_H),
+                        egui::Sense::hover(),
+                    )
+                    .0;
+            });
+            self.mixed_chip(ui, key, &vars, rect);
+            return true;
+        }
+        false
+    }
+
+    /// Whether some of a spacing field's places are bound and some are not —
+    /// D1038 A4's second case, which reads the plain grey *Mixed* whatever the
+    /// numbers laid out (§15 D1058): a number there would stand for a binding on
+    /// one layer and a literal on another.
+    fn spacing_partly_bound(&self, subjects: &[NodeId], slots: u8) -> bool {
+        let doc = &self.session.doc;
+        let mut any = false;
+        let mut all = true;
+        for id in subjects {
+            let v = doc.get(*id).map(|n| n.spacing_vars()).unwrap_or_default();
+            for k in super::binding::spacing_slots(slots) {
+                any |= v[k].is_some();
+                all &= v[k].is_some();
+            }
+        }
+        any && !all
+    }
+
+    /// An unbound spacing field's two doors to a binding (§15 D1058, D1038 B1 and
+    /// C1): `--` typed into it opens the list — and hands the text to the retype
+    /// buffer, which can draw B4's refused tail where a `DragValue` cannot (§15
+    /// D1044) — and a right-click opens the field menu. The radius field's wiring.
+    fn spacing_doors(
+        &mut self,
+        ui: &egui::Ui,
+        key: super::binding::FieldKey,
+        resp: &egui::Response,
+    ) {
+        if resp.has_focus()
+            && let Some(text) = ui.ctx().data(|d| d.get_temp::<String>(resp.id))
+        {
+            self.bind_typing(ui.ctx(), key, &text, resp.rect);
+            if text.starts_with("--") {
+                self.var_retype = Some(super::binding::Retype {
+                    key,
+                    text,
+                    focus: true,
+                });
+            }
+        }
+        if resp.secondary_clicked()
+            && let Some(at) = resp.interact_pointer_pos()
+        {
+            self.field_menu = Some((key, at, resp.rect));
+        }
     }
 
     /// [`Self::display_mark`] for one field of a flex layout.
@@ -5661,5 +5859,118 @@ mod tests {
             (Some(AlignItems::End), Some(AlignItems::Center)),
             "align-self takes its own"
         );
+    }
+
+    /// **A gap binds through the Container card, and a number typed over its chip
+    /// detaches it** (§15 D1058): `--` typed into the *Column gap* field opens
+    /// the list for that field; bound to `space/4` (8), the row lays `b` out 8
+    /// after `a` and the field is the chip, its CSS name gone; a 6 typed over the
+    /// chip and `Enter` leave the gap 6 and unbound.
+    ///
+    /// Flip, run: `gap_row` without its `spacing_bound_ui` arm fails at
+    /// `p.run("space/4")` — *no run reads "space/4"*, the plain field drawn over a
+    /// 0 literal.
+    #[test]
+    fn a_gap_binds_through_the_container_card_and_detaches_when_typed_over() {
+        use super::super::binding::{COLUMN_GAP, FieldKey, Retype};
+        use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+        let mut s = scene();
+        let (mode, var) = (s.app.session.ids.mint_mode(), s.app.session.ids.mint_var());
+        assert!(s.app.commit_edit(Transaction(vec![
+            Operation::AddMode {
+                mode: Mode {
+                    id: mode,
+                    name: "Mode 1".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: var,
+                    name: "space/4".into(),
+                    kind: VarKind::Number,
+                    cells: [(mode, Cell::Number(8.0))].into(),
+                },
+            },
+        ])));
+        let (frame, a, b) = (s.frame, s.a, s.b);
+        let mut p = Panel::new(s.app, OndinApp::inspector_container);
+        p.app.session.selection.set(vec![frame]);
+        let key = FieldKey::Spacing {
+            id: frame,
+            slots: COLUMN_GAP,
+        };
+        // `--` typed into the field opens its list.
+        let label = p.run("Column gap");
+        let value = p
+            .runs("10")
+            .into_iter()
+            .find(|r| (r.y - label.y).abs() < 6.0 && r.x < label.x)
+            .expect("the column gap's 10");
+        p.click(value);
+        p.frame(vec![egui::Event::Text("--".into())]);
+        p.frame(Vec::new());
+        assert_eq!(
+            p.app.var_complete.as_ref().map(|c| c.key),
+            Some(key),
+            "`--` opens the list under the field"
+        );
+        p.app.var_complete = None;
+        p.app.var_retype = None;
+        p.frame(vec![key_event(egui::Key::Escape)]);
+
+        p.app.bind_field(key, var);
+        assert_eq!(
+            p.app.session.doc.get(frame).unwrap().spacing_vars()[0],
+            Some(var)
+        );
+        assert_eq!(
+            drawn(&p.app, b).min_x() - drawn(&p.app, a).max_x(),
+            8.0,
+            "the gap lays out at the variable's 8"
+        );
+        p.run("space/4");
+        assert!(
+            p.runs("Column gap").is_empty(),
+            "the field is the chip, its CSS name gone"
+        );
+
+        p.app.var_retype = Some(Retype {
+            key,
+            text: "6".into(),
+            focus: true,
+        });
+        p.frame(Vec::new());
+        p.frame(Vec::new());
+        p.frame(vec![key_event(egui::Key::Enter)]);
+        p.frame(Vec::new());
+        assert_eq!(
+            p.app.session.doc.get(frame).unwrap().spacing_vars()[0],
+            None,
+            "a number typed over the chip detaches"
+        );
+        assert_eq!(
+            p.app
+                .session
+                .doc
+                .get(frame)
+                .unwrap()
+                .display()
+                .unwrap()
+                .gaps()
+                .0,
+            6.0
+        );
+    }
+
+    fn key_event(key: egui::Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        }
     }
 }

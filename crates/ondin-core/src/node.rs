@@ -224,6 +224,9 @@ pub struct Node {
     /// The variables this rectangle's corners are bound to (§15 D1039), all
     /// `None` on every other layer.
     pub(crate) corner_vars: crate::variable::CornerVars,
+    /// The variables this container's gaps and padding are bound to (§15 D1058),
+    /// all `None` on a layer with no layout.
+    pub(crate) spacing_vars: crate::variable::SpacingVars,
 }
 
 impl Node {
@@ -281,12 +284,18 @@ impl Node {
     pub fn corner_vars(&self) -> crate::variable::CornerVars {
         self.corner_vars
     }
-    /// Whether any field of this node reads a variable — a bound fill, stroke or
-    /// corner. What a variable's edit dirties (`Document::bound_nodes`).
+    /// The variables this container's gaps and padding are bound to (§15 D1058).
+    pub fn spacing_vars(&self) -> crate::variable::SpacingVars {
+        self.spacing_vars
+    }
+    /// Whether any field of this node reads a variable — a bound fill, stroke,
+    /// corner, gap or padding. What a variable's edit dirties
+    /// (`Document::bound_nodes`).
     pub fn reads_variables(&self) -> bool {
         self.paint.fills.iter().any(|f| f.brush.is_bound())
             || self.paint.strokes.iter().any(|s| s.brush.is_bound())
             || self.corner_vars.iter().any(Option::is_some)
+            || self.spacing_vars.iter().any(Option::is_some)
     }
     /// Refuse a node whose keyed lists repeat an item id within one list (§15
     /// D980) — `Document::apply`'s post-condition and the loader's check. Across

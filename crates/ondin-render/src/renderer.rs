@@ -1258,8 +1258,31 @@ impl RenderOverrides {
                 {
                     return None;
                 }
+                // **Stored resolved** (§15 D1058): `PreviewView` answers an
+                // override's layout as it is, so a bound gap's 0 is laid out at its
+                // variable's number, the node's bindings as committed.
                 if self.ghost(*id).is_none() {
-                    self.entry(*id).display = Some(display.clone());
+                    let vars = doc.get(*id).map(|n| n.spacing_vars()).unwrap_or_default();
+                    let drawn = display
+                        .as_ref()
+                        .map(|d| doc.spacing_drawn_in(doc.variables(), *id, d, vars));
+                    self.entry(*id).display = Some(drawn);
+                    self.mark_moved(doc, *id);
+                }
+            }
+            // **A gap's or a padding's binding previews as the numbers it will lay
+            // out at** (§15 D1058) — the `--` list's highlight on a spacing field,
+            // as D1050 previews a corner's. Over the layout the ops before this one
+            // left (resolved, `SetDisplay`'s arm above), else the document's as
+            // laid out; a slot `vars` leaves unbound keeps what that answer holds,
+            // which for a detach is the number it drew.
+            Operation::SetSpacingVars { id, vars } => {
+                let pending = self.get(*id).and_then(|o| o.display.clone()).flatten();
+                let base = pending
+                    .or_else(|| doc.resolved_display(*id).map(std::borrow::Cow::into_owned))?;
+                if self.ghost(*id).is_none() {
+                    let drawn = doc.spacing_drawn_in(doc.variables(), *id, &base, *vars);
+                    self.entry(*id).display = Some(Some(drawn));
                     self.mark_moved(doc, *id);
                 }
             }
@@ -1593,6 +1616,19 @@ impl RenderOverrides {
                         );
                         self.moved.insert(n);
                     }
+                    // A bound gap or padding the same way, against the table with
+                    // the cell changed, over the layout pending or committed
+                    // (§15 D1058) — and the layout pass lays the chain again.
+                    if let Some(node) = doc.get(n)
+                        && node.spacing_vars().iter().any(Option::is_some)
+                    {
+                        let pending = self.get(n).and_then(|o| o.display.clone()).flatten();
+                        if let Some(base) = pending.or_else(|| node.display().cloned()) {
+                            let drawn = doc.spacing_drawn_in(&t, n, &base, node.spacing_vars());
+                            self.entry(n).display = Some(Some(drawn));
+                            self.mark_moved(doc, n);
+                        }
+                    }
                 }
             }
             // **The rest of the table has no override** (§15 D1039): the walk
@@ -1835,10 +1871,13 @@ impl ondin_core::container::LayoutView for PreviewView<'_> {
     fn kind(&self, id: NodeId) -> Option<NodeKind> {
         self.ov.current_kind(self.doc, id)
     }
-    fn display(&self, id: NodeId) -> Option<&ondin_core::container::Display> {
+    /// An override's layout is stored **resolved** — its bound gaps and padding
+    /// already the numbers they draw (`SetDisplay`'s and `SetSpacingVars`' absorb,
+    /// §15 D1058) — so it is answered as it is; the document's is resolved here.
+    fn display(&self, id: NodeId) -> Option<std::borrow::Cow<'_, ondin_core::container::Display>> {
         match self.ov.get(id).and_then(|o| o.display.as_ref()) {
-            Some(d) => d.as_ref(),
-            None => self.doc.get(id).and_then(|n| n.display()),
+            Some(d) => d.as_ref().map(std::borrow::Cow::Borrowed),
+            None => self.doc.resolved_display(id),
         }
     }
     fn item(&self, id: NodeId) -> ondin_core::container::LayoutItem {

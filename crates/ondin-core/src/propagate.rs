@@ -70,7 +70,8 @@ fn mode(op: &Operation) -> Mode {
         // A copy's mode is an override like any field (§5.3f), and so is a
         // corner's binding: overrides compare the binding (§5.3d).
         | Operation::SetMode { .. }
-        | Operation::SetCornerVars { .. } => Mode::Whole,
+        | Operation::SetCornerVars { .. }
+        | Operation::SetSpacingVars { .. } => Mode::Whole,
         Operation::SetTextStyle { .. }
         | Operation::SetParagraphStyle { .. }
         | Operation::SetBlockStyle { .. }

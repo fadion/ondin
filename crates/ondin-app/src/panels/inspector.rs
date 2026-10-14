@@ -5868,10 +5868,10 @@ impl OndinApp {
                 let key = super::binding::FieldKey::Radius { id };
                 let retyping = app.var_retype.as_ref().filter(|r| r.key == key).cloned();
                 if let Some(var) = app.field_var(key).filter(|_| retyping.is_none()) {
-                    let hit = app.radius_chip(ui, key, var, fw, marks.radius.as_ref());
+                    let hit = app.number_chip(ui, key, var, fw, marks.radius.as_ref());
                     app.reset_marked(hit, &marks.radius);
                 } else if let Some(rt) = retyping {
-                    app.radius_retype(ui, key, rt, fw);
+                    app.number_retype(ui, key, rt, fw);
                 } else {
                     // The single field edits all four at once, and shows the shared
                     // value — or the largest, when they differ, so dragging it from
@@ -5930,7 +5930,7 @@ impl OndinApp {
                     //
                     // **And hands the text to the retype buffer** (§15 D1044): a
                     // `DragValue` lays its own text out, so B4's dimmed tail cannot be
-                    // drawn in it, and `radius_retype`'s `TextEdit` can. From the next
+                    // drawn in it, and `number_retype`'s `TextEdit` can. From the next
                     // frame that buffer is the field, caret at the end; `Enter` there
                     // writes a number typed back over the `--` as this field would.
                     if rr.has_focus()
@@ -6035,12 +6035,12 @@ impl OndinApp {
                         };
                         let retyping = app.var_retype.as_ref().filter(|r| r.key == key).cloned();
                         if let Some(var) = app.field_var(key).filter(|_| retyping.is_none()) {
-                            let hit = app.radius_chip(ui, key, var, fw, mark.as_ref());
+                            let hit = app.number_chip(ui, key, var, fw, mark.as_ref());
                             app.reset_marked(hit, mark);
                             continue;
                         }
                         if let Some(rt) = retyping {
-                            app.radius_retype(ui, key, rt, fw);
+                            app.number_retype(ui, key, rt, fw);
                             continue;
                         }
                         let mut v = corner.get(&corners);

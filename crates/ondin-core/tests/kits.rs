@@ -597,7 +597,7 @@ fn a_consumer_and_a_kit_round_trip_through_a_file() {
     let back = io::load(&bytes).unwrap();
     assert_eq!(back, d);
     assert_eq!(io::save(&back).unwrap(), bytes);
-    assert_eq!(back.schema_version(), 7);
+    assert_eq!(back.schema_version(), 8);
 }
 
 /// A file whose `vault` key went missing — what a v5 build would make of a v6

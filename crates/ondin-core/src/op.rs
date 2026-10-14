@@ -454,6 +454,13 @@ pub enum Operation {
         id: NodeId,
         vars: crate::variable::CornerVars,
     },
+    /// The variables a container's gaps and padding are bound to (§15 D1058).
+    /// Writes the bindings alone, as `SetCornerVars` does — the verbs that bind
+    /// write the bound slots' literals 0 beside it (`build::bind_spacing_ops`).
+    SetSpacingVars {
+        id: NodeId,
+        vars: crate::variable::SpacingVars,
+    },
 }
 
 impl Operation {
@@ -515,6 +522,7 @@ impl Operation {
             | Operation::SetProperties { id, .. }
             | Operation::SetMode { id, .. }
             | Operation::SetCornerVars { id, .. }
+            | Operation::SetSpacingVars { id, .. }
             | Operation::SetOrigin { id, .. } => Some(*id),
             Operation::CreateNode { .. }
             | Operation::DeleteNode { .. }
@@ -586,7 +594,8 @@ impl Operation {
             | Operation::SetVariant { id, .. }
             | Operation::SetProperties { id, .. }
             | Operation::SetMode { id, .. }
-            | Operation::SetCornerVars { id, .. } => id,
+            | Operation::SetCornerVars { id, .. }
+            | Operation::SetSpacingVars { id, .. } => id,
             _ => return None,
         };
         *id = to;
@@ -807,7 +816,8 @@ impl Operation {
             | Operation::AddMode { .. }
             | Operation::RemoveMode { .. }
             | Operation::SetMode { .. }
-            | Operation::SetCornerVars { .. } => true,
+            | Operation::SetCornerVars { .. }
+            | Operation::SetSpacingVars { .. } => true,
         }
     }
 
@@ -872,6 +882,9 @@ impl Operation {
             Operation::SetMode { id, mode } => node(id).is_some_and(|n| n.mode() == *mode),
             Operation::SetCornerVars { id, vars } => {
                 node(id).is_some_and(|n| n.corner_vars() == *vars)
+            }
+            Operation::SetSpacingVars { id, vars } => {
+                node(id).is_some_and(|n| n.spacing_vars() == *vars)
             }
 
             // **The index is read the way `apply` writes it** — the child is

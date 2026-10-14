@@ -348,9 +348,17 @@ pub(crate) struct NodeDto {
     /// New in v7.
     #[serde(default, skip_serializing_if = "no_corner_vars")]
     pub corner_vars: crate::variable::CornerVars,
+    /// A container's gap and padding bindings (§15 D1058), absent when none is
+    /// bound. New in v8.
+    #[serde(default, skip_serializing_if = "no_spacing_vars")]
+    pub spacing_vars: crate::variable::SpacingVars,
 }
 
 fn no_corner_vars(v: &crate::variable::CornerVars) -> bool {
+    v.iter().all(Option::is_none)
+}
+
+fn no_spacing_vars(v: &crate::variable::SpacingVars) -> bool {
     v.iter().all(Option::is_none)
 }
 
@@ -448,6 +456,7 @@ impl NodeDto {
             }),
             mode: n.mode(),
             corner_vars: n.corner_vars(),
+            spacing_vars: n.spacing_vars(),
         }
     }
 
@@ -560,6 +569,7 @@ impl NodeDto {
                 .transpose()?,
             mode: self.mode,
             corner_vars: self.corner_vars,
+            spacing_vars: self.spacing_vars,
         })
     }
 }

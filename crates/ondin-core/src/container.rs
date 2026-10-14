@@ -1174,6 +1174,21 @@ impl Display {
             Display::Grid(g) => (g.column_gap, g.row_gap),
         }
     }
+
+    /// The six numbers a variable can bind (§15 D1058), in a `SpacingVars`'
+    /// order: column gap, row gap, then padding top, right, bottom, left.
+    pub fn spacing(&self) -> [f64; 6] {
+        let (c, r) = self.gaps();
+        let [t, rt, b, l] = self.padding();
+        [c, r, t, rt, b, l]
+    }
+
+    /// Write [`Self::spacing`]'s six numbers back, in its order.
+    pub fn set_spacing(&mut self, s: [f64; 6]) {
+        let (c, r) = self.gaps_mut();
+        (*c, *r) = (s[0], s[1]);
+        *self.padding_mut() = [s[2], s[3], s[4], s[5]];
+    }
 }
 
 /// A CSS size: `auto`, a length, a percentage of the container, or `fit-content`
@@ -1383,9 +1398,12 @@ pub trait LayoutView {
     fn parent(&self, id: crate::NodeId) -> Option<crate::NodeId>;
     fn children(&self, id: crate::NodeId) -> Vec<crate::NodeId>;
     fn kind(&self, id: crate::NodeId) -> Option<NodeKind>;
-    /// Borrowed, since grid (§15 D914): a grid's track list is a `Vec`, and most
-    /// callers only ask whether there is a layout at all.
-    fn display(&self, id: crate::NodeId) -> Option<&Display>;
+    /// Borrowed where it can be, since grid (§15 D914): a grid's track list is a
+    /// `Vec`, and most callers only ask whether there is a layout at all. **Owned
+    /// where a gap or a padding is bound** (§15 D1058): the answer is the layout
+    /// as it is laid out, its bound slots resolved
+    /// (`crate::Document::resolved_display`), never the literal 0 they hold.
+    fn display(&self, id: crate::NodeId) -> Option<std::borrow::Cow<'_, Display>>;
     fn item(&self, id: crate::NodeId) -> LayoutItem;
     fn insets(&self, id: crate::NodeId) -> Insets;
     fn visible(&self, id: crate::NodeId) -> bool;
@@ -1779,7 +1797,9 @@ pub struct LaidGrid {
 /// above it along an unbroken chain of in-flow items, which is where its size is
 /// decided. `None` if `id` is not a container with a grid.
 pub fn laid_grid(view: &dyn LayoutView, id: crate::NodeId) -> Option<LaidGrid> {
-    if !matches!(view.display(id), Some(Display::Grid(_))) || !is_container(&view.kind(id)?) {
+    if !matches!(view.display(id).as_deref(), Some(Display::Grid(_)))
+        || !is_container(&view.kind(id)?)
+    {
         return None;
     }
     let mut root = id;
@@ -1919,7 +1939,7 @@ impl<'v> FlexTree<'v> {
         let index = self.ids.len();
         self.ids.push(id);
         self.children.push(Vec::new());
-        self.styles.push(style_of(&kind, display, &item));
+        self.styles.push(style_of(&kind, display.as_deref(), &item));
         self.caches.push(taffy::Cache::new());
         self.layouts.push(taffy::Layout::with_order(index as u32));
         let leaf = match (&display, &kind) {
@@ -1939,7 +1959,7 @@ impl<'v> FlexTree<'v> {
                     && let Some(c) = self.push(child)
                 {
                     self.children[index].push(taffy::NodeId::from(c));
-                    match display {
+                    match &*display {
                         Display::Flex(flex) => {
                             if fit_content_across(&self.view.item(child), flex) {
                                 self.styles[c].align_self = Some(taffy::AlignItems::FLEX_START);
@@ -3038,8 +3058,11 @@ mod flex_tests {
         fn kind(&self, id: NodeId) -> Option<NodeKind> {
             self.nodes.get(&id).map(|n| n.kind.clone())
         }
-        fn display(&self, id: NodeId) -> Option<&Display> {
-            self.nodes[&id].display.as_ref()
+        fn display(&self, id: NodeId) -> Option<std::borrow::Cow<'_, Display>> {
+            self.nodes[&id]
+                .display
+                .as_ref()
+                .map(std::borrow::Cow::Borrowed)
         }
         fn item(&self, id: NodeId) -> LayoutItem {
             self.nodes[&id].item

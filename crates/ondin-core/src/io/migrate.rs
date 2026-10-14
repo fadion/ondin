@@ -42,6 +42,7 @@ pub(crate) fn migrate(mut value: Value) -> Result<Value, IoError> {
             4 => migrate_4_to_5(&mut value),
             5 => migrate_5_to_6(&mut value),
             6 => migrate_6_to_7(&mut value),
+            7 => migrate_7_to_8(&mut value),
             other => return Err(IoError::UnsupportedVersion(other)),
         }
     }
@@ -268,5 +269,23 @@ fn migrate_6_to_7(value: &mut Value) {
         .filter(|d| d.is_object())
     {
         inner["schema_version"] = Value::from(7u32);
+    }
+}
+
+/// v7 → v8: step 2's bindings (§15 D1058) — a container's gaps and padding
+/// bound to number variables. **A number and nothing else** again: a v7 file
+/// binds none, which is what v8 reads the absent key as. The bump is for the
+/// older build, and here it is not a wrong complaint it saves but a **silent**
+/// one: a v7 reader would drop `spacing_vars` without a word and lay every bound
+/// gap and padding out at the 0 its literal holds. The published document's
+/// number moves with the outer one's, `migrate_6_to_7`'s rule.
+fn migrate_7_to_8(value: &mut Value) {
+    value["schema_version"] = Value::from(8u32);
+    if let Some(inner) = value
+        .get_mut("published")
+        .and_then(|p| p.get_mut("document"))
+        .filter(|d| d.is_object())
+    {
+        inner["schema_version"] = Value::from(8u32);
     }
 }

@@ -3450,6 +3450,161 @@ pub fn keep_corner_bindings(doc: &Document, mut tx: Transaction) -> Transaction 
     tx
 }
 
+/// Bind container `id`'s gaps and padding to `vars` — `None` leaving a slot as
+/// it is (§15 D1058), [`bind_corners_ops`]' shape: the bound slots' literals are
+/// written **0**, so a main and its copy bound to one variable compare equal, and
+/// the literal is never laid out while bound. Empty when `id` has no layout or
+/// nothing would change.
+pub fn bind_spacing_ops(doc: &Document, id: NodeId, vars: crate::SpacingVars) -> Vec<Operation> {
+    let Some(node) = doc.get(id) else {
+        return Vec::new();
+    };
+    let Some(display) = node.display() else {
+        return Vec::new();
+    };
+    let mut next = node.spacing_vars();
+    for (k, v) in vars.iter().enumerate() {
+        if v.is_some() {
+            next[k] = *v;
+        }
+    }
+    let mut s = display.spacing();
+    for k in 0..6 {
+        if next[k].is_some() {
+            s[k] = 0.0;
+        }
+    }
+    let mut ops = Vec::new();
+    if s != display.spacing() {
+        let mut d = display.clone();
+        d.set_spacing(s);
+        ops.push(Operation::SetDisplay {
+            id,
+            display: Some(d),
+        });
+    }
+    if next != node.spacing_vars() {
+        ops.push(Operation::SetSpacingVars { id, vars: next });
+    }
+    ops
+}
+
+/// Detach the slots of container `id` that `which` names to the numbers they
+/// lay out at (D1038's detach, §15 D1058): each literal becomes its variable's
+/// number and the binding goes, the other slots as they are. Empty when none of
+/// them is bound.
+pub fn detach_spacing_ops(doc: &Document, id: NodeId, which: [bool; 6]) -> Vec<Operation> {
+    let Some(node) = doc.get(id) else {
+        return Vec::new();
+    };
+    let Some(display) = node.display() else {
+        return Vec::new();
+    };
+    let mut vars = node.spacing_vars();
+    if !(0..6).any(|k| which[k] && vars[k].is_some()) {
+        return Vec::new();
+    }
+    let drawn = doc
+        .spacing_drawn_in(doc.variables(), id, display, vars)
+        .spacing();
+    let mut s = display.spacing();
+    for k in 0..6 {
+        if which[k] && vars[k].is_some() {
+            s[k] = drawn[k];
+            vars[k] = None;
+        }
+    }
+    let mut d = display.clone();
+    d.set_spacing(s);
+    vec![
+        Operation::SetDisplay {
+            id,
+            display: Some(d),
+        },
+        Operation::SetSpacingVars { id, vars },
+    ]
+}
+
+/// **A gap or a padding written over a bound slot detaches it** (D1038 (2), §15
+/// D1058) — [`keep_corner_bindings`]' rule for a container's spacing, so no
+/// writer of a layout has to know about bindings: the Container card's fields,
+/// the display switch, the Scale tool and every propagation write `SetDisplay`
+/// as they did, and this adds the `SetSpacingVars` that lets the written value
+/// be the one laid out.
+///
+/// **The same two halves, for the same two kinds of writer.** A bound slot
+/// written **what it lays out at** stays bound — a field over the layout as
+/// drawn, writing a sibling slot, hands that one back — and so does one written
+/// **its own literal**, 0, which is what every writer that builds the layout
+/// from the document's own does: the Container card's `display_tx` changing one
+/// slot carries the others forward, the flex↔grid switch keeps the padding and
+/// gaps it finds, the Scale tool scales a 0 to 0. Either way the literal goes
+/// back to 0 in the patch. Anything else detaches the slot to the number written.
+/// The price is corners' too: **a 0 typed over a bound slot keeps the binding**,
+/// and the chip's retype, which detaches first, is that value's door.
+///
+/// A layout taken away (`SetDisplay` to `None`) clears every binding with it,
+/// so none is left inert on a layer with nothing to bind. A transaction that
+/// sets a node's spacing bindings itself — a bind, a detach, a reset — is left
+/// to say what it means.
+pub fn keep_spacing_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
+    let sets_vars: FxHashSet<NodeId> =
+        tx.0.iter()
+            .filter_map(|op| match op {
+                Operation::SetSpacingVars { id, .. } => Some(*id),
+                _ => None,
+            })
+            .collect();
+    let mut detached: FxHashMap<NodeId, crate::SpacingVars> = FxHashMap::default();
+    for op in tx.0.iter_mut() {
+        let Operation::SetDisplay { id, display } = op else {
+            continue;
+        };
+        if sets_vars.contains(id) {
+            continue;
+        }
+        let Some(node) = doc.get(*id) else { continue };
+        let bound = node.spacing_vars();
+        if bound.iter().all(Option::is_none) {
+            continue;
+        }
+        let vars = detached.entry(*id).or_insert(bound);
+        let Some(display) = display.as_mut() else {
+            *vars = Default::default();
+            continue;
+        };
+        let (literal, drawn) = match node.display() {
+            Some(was) => (
+                was.spacing(),
+                doc.spacing_drawn_in(doc.variables(), *id, was, bound)
+                    .spacing(),
+            ),
+            None => ([0.0; 6], [0.0; 6]),
+        };
+        let mut written = display.spacing();
+        for k in 0..6 {
+            if vars[k].is_none() {
+                continue;
+            }
+            if written[k] == drawn[k] || written[k] == literal[k] {
+                written[k] = literal[k];
+            } else {
+                vars[k] = None;
+            }
+        }
+        display.set_spacing(written);
+    }
+    let mut ids: Vec<NodeId> = detached.keys().copied().collect();
+    ids.sort();
+    for id in ids {
+        let vars = detached[&id];
+        if doc.get(id).is_some_and(|n| n.spacing_vars() != vars) {
+            tx.0.push(Operation::SetSpacingVars { id, vars });
+        }
+    }
+    tx
+}
+
 /// [`edit_brushes_all`] for the one item at `index` of each target's list — a row
 /// of the shared list, written in place so every target keeps its own item ids
 /// (§15 D980).
@@ -4682,7 +4837,7 @@ pub fn flex_holds(doc: &Document, res: &Resolved, tx: &Transaction) -> Vec<Opera
             let was = res.used_local(doc, *id).unwrap_or(Affine::IDENTITY);
             let to = written_transform(tx, *id).unwrap_or(was);
             let edges = resized_edges((was, now), (to, then));
-            item = match display {
+            item = match &*display {
                 // **Only a kind whose drawn size follows the layout is held**
                 // (§15 D935): a path's points edited, a boolean's operator
                 // switched or a line's end moved on a growing item stopped its
@@ -5040,7 +5195,7 @@ pub fn sized_flex_item(
                 kurbo::Rect::from_origin_size(kurbo::Point::ZERO, size),
             ),
         );
-        item = match display {
+        item = match &*display {
             Display::Flex(flex) => held(
                 flex,
                 item,

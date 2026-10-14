@@ -3,6 +3,7 @@
 //! corners, the paste rule and an instance's binding as an override.
 
 use ondin_core::Brush;
+use ondin_core::container::{Display, Flex};
 use ondin_core::kurbo::{RoundedRectRadii, Size};
 use ondin_core::peniko::Color;
 use ondin_core::{
@@ -384,7 +385,7 @@ fn the_table_and_its_bindings_round_trip_through_a_save() {
     assert_eq!(back, f.doc);
     assert_eq!(ondin_core::io::save(&back).unwrap(), bytes);
     let text = String::from_utf8(bytes).unwrap();
-    assert!(text.contains("\"schema_version\": 7"), "written as v7");
+    assert!(text.contains("\"schema_version\": 8"), "written as v8");
     assert!(
         text.contains("\"alpha\": 0.25"),
         "the `%` rides in the binding"
@@ -818,6 +819,180 @@ fn a_radius_written_over_a_bound_corner_detaches_that_corner() {
     assert_eq!(corners(&f.doc).top_left, 18.0);
 }
 
+/// `f`'s frame made a flex row — gap 5, no padding — holding its rect and a
+/// second one beside it, which is returned.
+fn flex_frame(f: &mut F) -> NodeId {
+    let second = f.ids.mint();
+    f.doc
+        .apply(&Transaction(vec![
+            Operation::CreateNode {
+                id: second,
+                parent: f.frame,
+                index: 1,
+                kind: NodeKind::Rect {
+                    size: Size::new(40.0, 20.0),
+                    corner_radii: RoundedRectRadii::from_single_radius(0.0),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetDisplay {
+                id: f.frame,
+                display: Some(Display::Flex(Flex {
+                    column_gap: 5.0,
+                    ..Flex::default()
+                })),
+            },
+        ]))
+        .expect("a flex row of two");
+    second
+}
+
+fn spacing(doc: &Document, id: NodeId) -> [f64; 6] {
+    doc.get(id).unwrap().display().unwrap().spacing()
+}
+
+/// **A bound gap and padding are laid out at their variable's number, in the
+/// mode in force** (§15 D1058), never at the 0 their literals hold: bound to
+/// `radius/md` (4 in Light, 12 in Dark), the column gap and the left padding
+/// place the first rect at 4 and the second at 4 + 40 + 4, then at 12 and 64
+/// once the frame sets Dark; a cell's edit moves them again.
+///
+/// Flip, run: `UsedView::display` and `CommittedView::display` answering the
+/// stored layout (`n.display()`) rather than `resolved_display` fails *"the
+/// padding is Light's 4"* at 0 — the literal laid out.
+#[test]
+fn a_bound_gap_and_padding_lay_out_at_the_variables_number() {
+    let mut f = fixture();
+    let second = flex_frame(&mut f);
+    let mut vars = [None; 6];
+    vars[0] = Some(f.radius);
+    vars[5] = Some(f.radius);
+    let ops = ondin_core::bind_spacing_ops(&f.doc, f.frame, vars);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    assert_eq!(
+        spacing(&f.doc, f.frame),
+        [0.0; 6],
+        "the bound literals are 0"
+    );
+    let x = |doc: &Document, id| Resolved::rebuild(doc).world_bounds(id).unwrap().min_x();
+    assert_eq!(x(&f.doc, f.rect), 4.0, "the padding is Light's 4");
+    assert_eq!(x(&f.doc, second), 48.0, "and so is the gap");
+    f.doc
+        .apply(&Transaction(vec![Operation::SetMode {
+            id: f.frame,
+            mode: Some(f.dark),
+        }]))
+        .unwrap();
+    assert_eq!(x(&f.doc, f.rect), 12.0, "Dark's 12");
+    assert_eq!(x(&f.doc, second), 64.0);
+    f.doc
+        .apply(&Transaction(vec![Operation::SetVariableCell {
+            id: f.radius,
+            mode: f.dark,
+            cell: Cell::Number(2.0),
+        }]))
+        .unwrap();
+    assert_eq!(x(&f.doc, second), 44.0, "a cell's edit lays it out again");
+}
+
+/// **A gap or a padding written over a bound slot detaches it, with
+/// `keep_corner_bindings`' two halves** (§15 D1058): written what it lays out
+/// at, or its own 0 literal, it stays bound; written anything else it detaches
+/// to that number; a layout taken away clears every binding.
+///
+/// Flip, run: dropping the literal half (`|| written[k] == literal[k]`) fails
+/// *"a write from the document's own layout keeps the binding"* — the Container
+/// card's `display_tx` changing the row gap carries the bound column gap's 0
+/// forward, which then read as an edit and detached it.
+#[test]
+fn a_spacing_written_over_a_bound_slot_detaches_it() {
+    let mut f = fixture();
+    flex_frame(&mut f);
+    let mut vars = [None; 6];
+    vars[0] = Some(f.radius);
+    vars[2] = Some(f.radius);
+    let bind = Transaction(ondin_core::bind_spacing_ops(&f.doc, f.frame, vars));
+    f.doc
+        .apply(&ondin_core::keep_spacing_bindings(&f.doc, bind))
+        .unwrap();
+    let write = |doc: &Document, s: [f64; 6]| {
+        let mut d = doc.get(f.frame).unwrap().display().unwrap().clone();
+        d.set_spacing(s);
+        ondin_core::keep_spacing_bindings(
+            doc,
+            Transaction(vec![Operation::SetDisplay {
+                id: f.frame,
+                display: Some(d),
+            }]),
+        )
+    };
+    // The document's own layout with the row gap changed: both bound slots
+    // written their 0.
+    let tx = write(&f.doc, [0.0, 7.0, 0.0, 0.0, 0.0, 0.0]);
+    f.doc.apply(&tx).unwrap();
+    assert_eq!(
+        f.doc.get(f.frame).unwrap().spacing_vars(),
+        vars,
+        "a write from the document's own layout keeps the binding"
+    );
+    // A field's write over the layout as drawn: the gap's Light 4 handed back,
+    // the top padding written 9.
+    let tx = write(&f.doc, [4.0, 7.0, 9.0, 0.0, 0.0, 0.0]);
+    f.doc.apply(&tx).unwrap();
+    let now = f.doc.get(f.frame).unwrap().spacing_vars();
+    assert_eq!(
+        now[0],
+        Some(f.radius),
+        "the gap written as drawn stays bound"
+    );
+    assert_eq!(now[2], None, "the padding written 9 detaches");
+    assert_eq!(spacing(&f.doc, f.frame)[..3], [0.0, 7.0, 9.0]);
+    let tx = ondin_core::keep_spacing_bindings(
+        &f.doc,
+        Transaction(vec![Operation::SetDisplay {
+            id: f.frame,
+            display: None,
+        }]),
+    );
+    f.doc.apply(&tx).unwrap();
+    assert_eq!(
+        f.doc.get(f.frame).unwrap().spacing_vars(),
+        [None; 6],
+        "a layout taken away takes its bindings"
+    );
+}
+
+/// Detaching a slot keeps the number it laid out at; deleting the variable
+/// detaches every slot bound to it the same way; and the bindings survive a save.
+#[test]
+fn spacing_bindings_detach_to_what_they_draw_and_round_trip() {
+    let mut f = fixture();
+    flex_frame(&mut f);
+    let mut vars = [None; 6];
+    vars[1] = Some(f.radius);
+    vars[3] = Some(f.radius);
+    let ops = ondin_core::bind_spacing_ops(&f.doc, f.frame, vars);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    let bytes = ondin_core::io::save(&f.doc).unwrap();
+    let back = ondin_core::io::load(&bytes).unwrap();
+    assert_eq!(back, f.doc, "the bindings round-trip");
+    let mut which = [false; 6];
+    which[1] = true;
+    let ops = ondin_core::detach_spacing_ops(&f.doc, f.frame, which);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    assert_eq!(f.doc.get(f.frame).unwrap().spacing_vars()[1], None);
+    assert_eq!(
+        spacing(&f.doc, f.frame)[1],
+        4.0,
+        "the row gap keeps Light's 4"
+    );
+    let tx = Transaction(ondin_core::variable::remove_ops(&f.doc, &[f.radius]));
+    f.doc.apply(&tx).expect("detach, then remove");
+    assert_eq!(f.doc.get(f.frame).unwrap().spacing_vars(), [None; 6]);
+    assert_eq!(spacing(&f.doc, f.frame)[3], 4.0, "the right padding too");
+}
+
 /// Binding a paint keeps its `%`; detaching it leaves the colour it drew.
 #[test]
 fn binding_a_paint_keeps_its_percent_and_detaching_keeps_its_colour() {
@@ -894,13 +1069,15 @@ fn incremental_update_equals_rebuild_over_random_variable_ops() {
             }]))
             .unwrap();
         let frames = [f.frame, other];
-        let mut rects = vec![f.rect];
+        // A flex row, so a bound gap or padding moves its items (§15 D1058).
+        let second = flex_frame(&mut f);
+        let mut rects = vec![f.rect, second];
         let mut hist = ondin_core::History::new();
         let mut res = Resolved::rebuild(&f.doc);
         for step in 0..50 {
             let modes: Vec<ModeId> = f.doc.variables().modes().iter().map(|m| m.id).collect();
             let rect = rects[rng.below(rects.len())];
-            let tx = match rng.below(8) {
+            let tx = match rng.below(10) {
                 0 => {
                     let id = f.ids.mint();
                     rects.push(id);
@@ -963,6 +1140,17 @@ fn incremental_update_equals_rebuild_over_random_variable_ops() {
                         index: 0,
                         cells,
                     }])
+                }
+                // Bind a gap or a padding of the flex frame, or detach one.
+                7 => {
+                    let mut vars = [None; 6];
+                    vars[rng.below(6)] = Some(f.radius);
+                    Transaction(ondin_core::bind_spacing_ops(&f.doc, f.frame, vars))
+                }
+                8 => {
+                    let mut which = [false; 6];
+                    which[rng.below(6)] = true;
+                    Transaction(ondin_core::detach_spacing_ops(&f.doc, f.frame, which))
                 }
                 // Remove a mode (never the last), returning its frames to Inherit.
                 _ if modes.len() > 1 => {

@@ -341,6 +341,10 @@ pub struct DisplayNode<'a> {
     /// `None` for [`EditorSession::committed_node`], whose one job is to report
     /// the value a commit is about to overwrite, which is the specified one.
     used: Option<&'a NodeKind>,
+    /// The layout as laid out where a gap or a padding is bound — its bound slots
+    /// their variables' numbers (§15 D1058) — `None` where nothing is bound, or
+    /// for [`EditorSession::committed_node`], `used`'s reason.
+    drawn: Option<ondin_core::container::Display>,
 }
 
 impl<'a> DisplayNode<'a> {
@@ -405,10 +409,14 @@ impl<'a> DisplayNode<'a> {
     /// The layer's layout as a container (§15 D869), a live Container-card scrub's
     /// included — [`Self::insets`]' rule, so a gap or a padding being dragged reads
     /// the value it is dragging (§15 D878).
+    ///
+    /// **As laid out** (§15 D1058): a bound gap or padding reads its variable's
+    /// number, never the 0 its literal holds — the override's layout is stored
+    /// resolved by the preview, the document's is resolved in `drawn`.
     pub fn display(&self) -> Option<ondin_core::container::Display> {
         self.over
             .and_then(|o| o.display.clone())
-            .unwrap_or_else(|| self.node.display().cloned())
+            .unwrap_or_else(|| self.drawn.clone().or_else(|| self.node.display().cloned()))
     }
     /// The layer's layout-item properties (§15 D875, D914), a live Item-card scrub's
     /// included — [`Self::insets`]' rule again.
@@ -687,6 +695,10 @@ impl EditorSession {
             node,
             over: self.overrides.get(id),
             used: Some(self.resolved.used_kind_of(node)),
+            drawn: match self.doc.resolved_display(id) {
+                Some(std::borrow::Cow::Owned(d)) => Some(d),
+                _ => None,
+            },
         })
     }
 
@@ -705,6 +717,7 @@ impl EditorSession {
             node: self.doc.get(id)?,
             over: None,
             used: None,
+            drawn: None,
         })
     }
 
@@ -1238,6 +1251,9 @@ impl EditorSession {
         // (2)) — before `propagate`, so a copy bound as its main was follows the
         // detach as well as the radius.
         let tx = ondin_core::build::keep_corner_bindings(&self.doc, tx);
+        // And a gap or a padding written over a bound slot the same way (§15
+        // D1058), at the same place for the same reason.
+        let tx = ondin_core::build::keep_spacing_bindings(&self.doc, tx);
         let mut tx = tx;
         // What the components owe the edit — a swap's rewrite, a main's structure
         // and fields reaching its instances, the links and variant names settled —

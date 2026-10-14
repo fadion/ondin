@@ -142,6 +142,7 @@ impl Document {
             origin: None,
             mode: None,
             corner_vars: Default::default(),
+            spacing_vars: Default::default(),
         };
         let mut nodes = FxHashMap::default();
         nodes.insert(root_id, root);
@@ -500,6 +501,57 @@ impl Document {
             bottom_right: read(br, radii.bottom_right),
             bottom_left: read(bl, radii.bottom_left),
         })
+    }
+
+    /// `display` with the slots `vars` binds read from table `t`, in the mode in
+    /// force at `id` (§15 D1058) — each a variable's number, never below 0 (the
+    /// floor the layout engine puts on a literal), the other slots as they are.
+    /// `vars` is named rather than read off the node so a preview can resolve a
+    /// binding it has not committed (`SetSpacingVars`' absorb).
+    pub fn spacing_drawn_in(
+        &self,
+        t: &crate::variable::Variables,
+        id: NodeId,
+        display: &crate::container::Display,
+        vars: crate::variable::SpacingVars,
+    ) -> crate::container::Display {
+        let mut out = display.clone();
+        if vars.iter().all(Option::is_none) {
+            return out;
+        }
+        let mut s = display.spacing();
+        for (k, var) in vars.iter().enumerate() {
+            if let Some(v) = var {
+                s[k] = match self.resolve_var_in(t, id, *v) {
+                    Some(crate::variable::Value::Number(x)) => x.max(0.0),
+                    _ => 0.0,
+                };
+            }
+        }
+        out.set_spacing(s);
+        out
+    }
+
+    /// `id`'s layout as it is laid out: its bound gaps and padding resolved
+    /// ([`Self::spacing_drawn_in`] against this document's table), borrowed when
+    /// nothing is bound. **What every layout view answers `display` with**, so a
+    /// bound gap is laid at its variable's number and never at the 0 its literal
+    /// holds (§15 D1058).
+    pub fn resolved_display(
+        &self,
+        id: NodeId,
+    ) -> Option<std::borrow::Cow<'_, crate::container::Display>> {
+        let n = self.nodes.get(&id)?;
+        let d = n.display.as_ref()?;
+        if n.spacing_vars.iter().all(Option::is_none) {
+            return Some(std::borrow::Cow::Borrowed(d));
+        }
+        Some(std::borrow::Cow::Owned(self.spacing_drawn_in(
+            &self.variables,
+            id,
+            d,
+            n.spacing_vars,
+        )))
     }
 
     /// Every node whose fields read a variable — what an edit to the table
@@ -971,6 +1023,12 @@ impl Document {
                 dirty.0.insert(*id);
                 Ok(Operation::SetCornerVars { id: *id, vars: old })
             }
+            Operation::SetSpacingVars { id, vars } => {
+                let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
+                let old = std::mem::replace(&mut node.spacing_vars, *vars);
+                dirty.0.insert(*id);
+                Ok(Operation::SetSpacingVars { id: *id, vars: old })
+            }
         }
     }
 
@@ -1214,6 +1272,7 @@ impl Document {
             origin: None,
             mode: None,
             corner_vars: Default::default(),
+            spacing_vars: Default::default(),
         };
         self.nodes.insert(id, node);
         self.nodes
@@ -2641,6 +2700,7 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
             // into the template, so nothing is remapped.
             mode: n.mode,
             corner_vars: n.corner_vars,
+            spacing_vars: n.spacing_vars,
         });
     }
     Some((out, new_root?))
@@ -2864,6 +2924,7 @@ mod tests {
             origin: None,
             mode: None,
             corner_vars: Default::default(),
+            spacing_vars: Default::default(),
         }
     }
 

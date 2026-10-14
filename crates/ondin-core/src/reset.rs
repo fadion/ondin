@@ -83,6 +83,7 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
         origin: _,
         mode,
         corner_vars,
+        spacing_vars,
     } = node;
     let id = *id;
     use Operation as O;
@@ -149,6 +150,13 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
         O::SetCornerVars {
             id,
             vars: *corner_vars,
+        },
+        // And a gap's or a padding's (§15 D1058), after the `SetDisplay` above,
+        // so the transaction states the binding and the commit's
+        // `keep_spacing_bindings` leaves it as written.
+        O::SetSpacingVars {
+            id,
+            vars: *spacing_vars,
         },
     ];
     ops.extend(kind_ops(id, kind));

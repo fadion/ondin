@@ -33,6 +33,25 @@ pub(crate) enum FieldKey {
     /// One corner of a rectangle's radius, `slot` its place in a `CornerVars`
     /// (TL, TR, BR, BL) — a per-corner field (§15 D1049).
     Corner { id: NodeId, slot: usize },
+    /// A container's gaps or padding (§15 D1058): `slots` a bit per place in a
+    /// `SpacingVars` — column gap, row gap, padding top, right, bottom, left — so
+    /// one key is a gap field, a side's field or a pair's (L and R, T and B). `id`
+    /// is the card's first subject; the binding writes every container the card
+    /// edits (`field_ids`).
+    Spacing { id: NodeId, slots: u8 },
+}
+
+/// [`FieldKey::Spacing`]'s bits, in a `SpacingVars`' order.
+pub(crate) const COLUMN_GAP: u8 = 1 << 0;
+pub(crate) const ROW_GAP: u8 = 1 << 1;
+pub(crate) const PAD_TOP: u8 = 1 << 2;
+pub(crate) const PAD_RIGHT: u8 = 1 << 3;
+pub(crate) const PAD_BOTTOM: u8 = 1 << 4;
+pub(crate) const PAD_LEFT: u8 = 1 << 5;
+
+/// The `SpacingVars` places `slots` names, in order.
+pub(crate) fn spacing_slots(slots: u8) -> impl Iterator<Item = usize> {
+    (0..6).filter(move |k| slots & (1 << k) != 0)
 }
 
 impl FieldKey {
@@ -40,15 +59,18 @@ impl FieldKey {
     /// in force there.
     pub(crate) fn at(self) -> NodeId {
         match self {
-            FieldKey::Paint { id, .. } | FieldKey::Radius { id } | FieldKey::Corner { id, .. } => {
-                id
-            }
+            FieldKey::Paint { id, .. }
+            | FieldKey::Radius { id }
+            | FieldKey::Corner { id, .. }
+            | FieldKey::Spacing { id, .. } => id,
         }
     }
 
-    /// The glyph a radius field's badge carries: the corners icon for all four,
+    /// The glyph a number field's badge carries: the corners icon for all four,
     /// the elbow pointing into its corner for one — the per-corner fields' own
-    /// (§15 D1049). `CORNERS_OUT` for a paint, which draws no badge.
+    /// (§15 D1049) — and a spacing field's own prefix, a side's letter included
+    /// (§15 D1058; [`Self::badge_is_icon`] says which). `CORNERS_OUT` for a
+    /// paint, which draws no badge.
     pub(crate) fn badge(self) -> &'static str {
         match self {
             FieldKey::Corner { slot: 0, .. } => icon::ARROW_ELBOW_LEFT_DOWN,
@@ -56,13 +78,36 @@ impl FieldKey {
             FieldKey::Corner { slot: 2, .. } => icon::ARROW_ELBOW_RIGHT_UP,
             FieldKey::Corner { .. } => icon::ARROW_ELBOW_LEFT_UP,
             FieldKey::Radius { .. } | FieldKey::Paint { .. } => icon::CORNERS_OUT,
+            FieldKey::Spacing { slots, .. } => match slots {
+                COLUMN_GAP => icon::ARROWS_OUT_LINE_HORIZONTAL,
+                ROW_GAP => icon::ARROWS_OUT_LINE_VERTICAL,
+                PAD_TOP => "T",
+                PAD_RIGHT => "R",
+                PAD_BOTTOM => "B",
+                PAD_LEFT => "L",
+                s if s == PAD_TOP | PAD_BOTTOM => icon::ARROWS_IN_LINE_VERTICAL,
+                _ => icon::ARROWS_IN_LINE_HORIZONTAL,
+            },
         }
+    }
+
+    /// Whether [`Self::badge`] is an icon glyph rather than a letter.
+    pub(crate) fn badge_is_icon(self) -> bool {
+        !matches!(
+            self,
+            FieldKey::Spacing {
+                slots: PAD_TOP | PAD_RIGHT | PAD_BOTTOM | PAD_LEFT,
+                ..
+            }
+        )
     }
 
     pub(crate) fn kind(self) -> VarKind {
         match self {
             FieldKey::Paint { .. } => VarKind::Color,
-            FieldKey::Radius { .. } | FieldKey::Corner { .. } => VarKind::Number,
+            FieldKey::Radius { .. } | FieldKey::Corner { .. } | FieldKey::Spacing { .. } => {
+                VarKind::Number
+            }
         }
     }
 }
@@ -391,6 +436,11 @@ impl OndinApp {
                 slot: PaintSlot::Selection(..),
                 ..
             } => self.session.selection.ids().to_vec(),
+            // Every container the card edits, as its fields write them all.
+            FieldKey::Spacing { id, .. } => {
+                let all = self.container_subjects();
+                if all.contains(&id) { all } else { vec![id] }
+            }
             FieldKey::Paint { id, .. } | FieldKey::Radius { id } | FieldKey::Corner { id, .. } => {
                 vec![id]
             }
@@ -417,6 +467,17 @@ impl OndinApp {
                 vars[slot] = Some(var);
                 Transaction(ondin_core::bind_corners_ops(doc, id, vars))
             }
+            FieldKey::Spacing { slots, .. } => {
+                let mut vars = [None; 6];
+                for k in spacing_slots(slots) {
+                    vars[k] = Some(var);
+                }
+                Transaction(
+                    ids.iter()
+                        .flat_map(|id| ondin_core::bind_spacing_ops(doc, *id, vars))
+                        .collect(),
+                )
+            }
         }
     }
 
@@ -432,6 +493,14 @@ impl OndinApp {
             FieldKey::Radius { id } => Transaction(ondin_core::detach_corners_ops(doc, id)),
             FieldKey::Corner { id, slot } => {
                 Transaction(ondin_core::detach_corner_ops(doc, id, slot))
+            }
+            FieldKey::Spacing { slots, .. } => {
+                let which = std::array::from_fn(|k| slots & (1 << k) != 0);
+                Transaction(
+                    ids.iter()
+                        .flat_map(|id| ondin_core::detach_spacing_ops(doc, *id, which))
+                        .collect(),
+                )
             }
         }
     }
@@ -556,6 +625,15 @@ impl OndinApp {
                 vars.iter().all(|v| *v == Some(first)).then_some(first)
             }
             FieldKey::Corner { id, slot } => doc.get(id)?.corner_vars().get(slot).copied()?,
+            // Every slot of every container the card edits, one variable.
+            FieldKey::Spacing { slots, .. } => {
+                let mut vars = self.field_ids(key).into_iter().flat_map(|n| {
+                    let v = doc.get(n).map(|n| n.spacing_vars()).unwrap_or_default();
+                    spacing_slots(slots).map(move |k| v[k])
+                });
+                let first = vars.next()??;
+                vars.all(|v| v == Some(first)).then_some(first)
+            }
         }
     }
 
@@ -564,22 +642,36 @@ impl OndinApp {
     /// capsule (§15 D1045). `None` when one is unbound (the plain grey *Mixed*,
     /// D130's), or all share one (`field_var`'s chip).
     pub(crate) fn field_mixed_vars(&self, key: FieldKey) -> Option<Vec<VarId>> {
-        let FieldKey::Paint { slot, .. } = key else {
-            return None;
-        };
-        let (target, index) = paint_item(slot)?;
         let doc = &self.session.doc;
         let mut vars = Vec::new();
-        for n in self.field_ids(key) {
-            let node = doc.get(n)?;
-            let b = match target {
-                PaintTarget::Fill => &node.paint().fills.get(index)?.brush,
-                PaintTarget::Stroke => &node.paint().strokes.get(index)?.brush,
-            };
-            let v = b.var()?;
+        let mut add = |v: VarId| {
             if !vars.contains(&v) {
                 vars.push(v);
             }
+        };
+        match key {
+            FieldKey::Paint { slot, .. } => {
+                let (target, index) = paint_item(slot)?;
+                for n in self.field_ids(key) {
+                    let node = doc.get(n)?;
+                    let b = match target {
+                        PaintTarget::Fill => &node.paint().fills.get(index)?.brush,
+                        PaintTarget::Stroke => &node.paint().strokes.get(index)?.brush,
+                    };
+                    add(b.var()?);
+                }
+            }
+            // A pair's two sides count as two bindings, so L and R bound apart
+            // read *Mixed* too (§15 D1058).
+            FieldKey::Spacing { slots, .. } => {
+                for n in self.field_ids(key) {
+                    let v = doc.get(n)?.spacing_vars();
+                    for k in spacing_slots(slots) {
+                        add(v[k]?);
+                    }
+                }
+            }
+            FieldKey::Radius { .. } | FieldKey::Corner { .. } => return None,
         }
         let table = doc.variables();
         vars.sort_by(|a, b| {
@@ -687,11 +779,7 @@ impl OndinApp {
             c.highlight = c.highlight.saturating_sub(1);
         }
         // The mode the values read in: the selected layer's (B1's footer).
-        let at = match c.key {
-            FieldKey::Paint { id, .. } | FieldKey::Radius { id } | FieldKey::Corner { id, .. } => {
-                id
-            }
-        };
+        let at = c.key.at();
         let mode = doc.mode_at(at).and_then(|m| table.mode(m)).cloned();
         let mut chosen: Option<VarId> = None;
         let pos = ui::menu_place(
@@ -949,11 +1037,7 @@ impl OndinApp {
     ) {
         let doc = &self.session.doc;
         let table = doc.variables();
-        let at = match key {
-            FieldKey::Paint { id, .. } | FieldKey::Radius { id } | FieldKey::Corner { id, .. } => {
-                id
-            }
-        };
+        let at = key.at();
         let name = table.get(var).map(|v| v.name.clone()).unwrap_or_default();
         let mode = doc.mode_at(at).and_then(|m| table.mode(m));
         let tip = chip_tip(&name, doc.resolve_var(at, var), mode);
@@ -969,10 +1053,10 @@ impl OndinApp {
         }
     }
 
-    /// The corner-radius field while bound: its icon, then the chip. `mark` is the
-    /// field's override mark on an instance; the answer is whether its ↺ was
-    /// clicked.
-    pub(super) fn radius_chip(
+    /// A number field while bound — a corner radius, or a gap or a padding (§15
+    /// D1058): its badge, then the chip. `mark` is the field's override mark on an
+    /// instance; the answer is whether its ↺ was clicked.
+    pub(super) fn number_chip(
         &mut self,
         ui: &mut egui::Ui,
         key: FieldKey,
@@ -982,6 +1066,13 @@ impl OndinApp {
     ) -> bool {
         let mut chip_rect = egui::Rect::NOTHING;
         let mut reset = false;
+        let badge_font = |size: f32| {
+            if key.badge_is_icon() {
+                theme::icon_font(size)
+            } else {
+                egui::FontId::proportional(11.5)
+            }
+        };
         ui::field_row(ui, egui::vec2(w, 28.0), |ui| {
             let (slot, resp) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::click());
             let p = ui.painter();
@@ -1004,7 +1095,7 @@ impl OndinApp {
                             slot.center(),
                             egui::Align2::CENTER_CENTER,
                             key.badge(),
-                            theme::icon_font(14.0),
+                            badge_font(14.0),
                             color::TEXT,
                         );
                         ui::override_dot(p, slot.right_top() + egui::vec2(1.0, 2.0));
@@ -1020,7 +1111,7 @@ impl OndinApp {
                         slot.center(),
                         egui::Align2::CENTER_CENTER,
                         key.badge(),
-                        theme::icon_font(14.0),
+                        badge_font(14.0),
                         theme::text::FAINT,
                     );
                     resp.on_hover_cursor(egui::CursorIcon::NotAllowed);
@@ -1036,24 +1127,33 @@ impl OndinApp {
         reset
     }
 
-    /// The corner-radius field typed over (A3): the buffer the chip's first key
-    /// began. `Enter` writes the radius and detaches; `--` reopens the list.
-    pub(crate) fn radius_retype(
+    /// A number field typed over (A3) — a radius, a gap or a padding: the buffer
+    /// the chip's first key began. `Enter` writes the number and detaches; `--`
+    /// reopens the list.
+    pub(crate) fn number_retype(
         &mut self,
         ui: &mut egui::Ui,
         key: FieldKey,
         mut rt: Retype,
         w: f32,
     ) {
-        let (FieldKey::Radius { id } | FieldKey::Corner { id, .. }) = key else {
+        if matches!(key, FieldKey::Paint { .. }) {
             return;
-        };
+        }
         let edit_id = egui::Id::new(("var-retype", format!("{key:?}")));
         let mut field = None;
         let table = self.session.doc.variables();
         let font = egui::FontId::proportional(12.0);
         ui::field_row(ui, egui::vec2(w, 28.0), |ui| {
-            ui.label(theme::icon_text(key.badge(), 14.0, theme::text::FAINT));
+            if key.badge_is_icon() {
+                ui.label(theme::icon_text(key.badge(), 14.0, theme::text::FAINT));
+            } else {
+                ui.label(
+                    egui::RichText::new(key.badge())
+                        .size(11.5)
+                        .color(theme::text::FAINT),
+                );
+            }
             // B4's refused tail dims as it is typed (§15 D1044).
             let mut layouter = |ui: &egui::Ui, buf: &dyn egui::TextBuffer, _wrap: f32| {
                 let at = refused(table, VarKind::Number, buf.as_str()).map(|r| r.1);
@@ -1105,27 +1205,53 @@ impl OndinApp {
                     None => Vec::new(),
                 };
                 let r = r.max(0.0);
-                let geometry = match key {
+                let doc = &self.session.doc;
+                match key {
                     // One corner: the other three keep their literals, the same
                     // `CornerRadii` the per-corner field writes (§15 D1049).
-                    FieldKey::Corner { slot, .. } => {
-                        match self.session.doc.get(id).map(|n| n.kind()) {
-                            Some(ondin_core::NodeKind::Rect { corner_radii, .. }) => {
-                                let mut c = *corner_radii;
-                                match slot {
-                                    0 => c.top_left = r,
-                                    1 => c.top_right = r,
-                                    2 => c.bottom_right = r,
-                                    _ => c.bottom_left = r,
-                                }
-                                ondin_core::GeometryPatch::CornerRadii(c)
+                    FieldKey::Corner { id, slot } => match doc.get(id).map(|n| n.kind()) {
+                        Some(ondin_core::NodeKind::Rect { corner_radii, .. }) => {
+                            let mut c = *corner_radii;
+                            match slot {
+                                0 => c.top_left = r,
+                                1 => c.top_right = r,
+                                2 => c.bottom_right = r,
+                                _ => c.bottom_left = r,
                             }
-                            _ => return,
+                            ops.push(Operation::SetGeometry {
+                                id,
+                                geometry: ondin_core::GeometryPatch::CornerRadii(c),
+                            });
+                        }
+                        _ => return,
+                    },
+                    FieldKey::Radius { id } => ops.push(Operation::SetGeometry {
+                        id,
+                        geometry: ondin_core::GeometryPatch::CornerRadius(r),
+                    }),
+                    // The key's slots on every container the card edits, the
+                    // others' literals as they are — the Container card's own
+                    // write (§15 D1058). After a detach the bindings are this
+                    // transaction's, so `keep_spacing_bindings` leaves them.
+                    FieldKey::Spacing { slots, .. } => {
+                        for n in self.field_ids(key) {
+                            let Some(was) = doc.get(n).and_then(|n| n.display()) else {
+                                continue;
+                            };
+                            let mut s = was.spacing();
+                            for k in spacing_slots(slots) {
+                                s[k] = r;
+                            }
+                            let mut display = was.clone();
+                            display.set_spacing(s);
+                            ops.push(Operation::SetDisplay {
+                                id: n,
+                                display: Some(display),
+                            });
                         }
                     }
-                    _ => ondin_core::GeometryPatch::CornerRadius(r),
-                };
-                ops.push(Operation::SetGeometry { id, geometry });
+                    FieldKey::Paint { .. } => return,
+                }
                 self.commit_edit(Transaction(ops));
             }
             return;
@@ -1159,6 +1285,11 @@ impl OndinApp {
                 }
                 _ => None,
             },
+            // The first slot's number as the first container lays it out.
+            FieldKey::Spacing { id, slots } => {
+                let d = doc.resolved_display(id)?;
+                Some(Cell::Number(d.spacing()[spacing_slots(slots).next()?]))
+            }
             FieldKey::Corner { id, slot } => match self.session.resolved.used_kind(doc, id)? {
                 ondin_core::NodeKind::Rect { corner_radii, .. } => Some(Cell::Number(match slot {
                     0 => corner_radii.top_left,
@@ -1965,7 +2096,7 @@ mod tests {
 
     /// **The radius buffer a `--` is handed to writes a number typed back over it,
     /// on an unbound rect too, and `Escape` writes nothing** (§15 D1044): the
-    /// corner field's `DragValue` passes `--` text to `radius_retype` so B4's tail
+    /// corner field's `DragValue` passes `--` text to `number_retype` so B4's tail
     /// can be drawn, which makes that buffer the unbound field's as well as a
     /// chip's.
     #[test]
@@ -1980,7 +2111,7 @@ mod tests {
             };
             let _ = ctx.run_ui(input, |ui| {
                 if let Some(rt) = app.var_retype.clone() {
-                    app.radius_retype(ui, k, rt, 160.0);
+                    app.number_retype(ui, k, rt, 160.0);
                 }
             });
         };
@@ -2122,7 +2253,7 @@ mod tests {
             };
             let out = ctx.run_ui(input, |ui| {
                 ui.set_min_width(180.0);
-                app.radius_chip(ui, k, radius, 160.0, None);
+                app.number_chip(ui, k, radius, 160.0, None);
             });
             cursor = out.platform_output.cursor_icon;
         }
@@ -2136,7 +2267,7 @@ mod tests {
     /// Flip, run: without the hex field's `refused_enter` arm it fails *"the hex
     /// buffer is kept"* — the `TextEdit` gave the keyboard up on `Enter` and
     /// `lost_focus` dropped the text, the defect `arch-scribe` read. And without
-    /// `radius_retype`'s arm it fails *"the radius buffer is kept"*.
+    /// `number_retype`'s arm it fails *"the radius buffer is kept"*.
     #[test]
     fn enter_on_a_refusal_leaves_the_field_as_typed() {
         let (ctx, mut app, rect, _, _) = fixture();
@@ -2195,7 +2326,7 @@ mod tests {
             };
             let _ = ctx.run_ui(input, |ui| {
                 if let Some(rt) = app.var_retype.clone() {
-                    app.radius_retype(ui, radius, rt, 160.0);
+                    app.number_retype(ui, radius, rt, 160.0);
                 }
                 app.var_complete_ui(&ctx);
             });
@@ -2246,7 +2377,7 @@ mod tests {
             };
             let _ = ctx.run_ui(input, |ui| {
                 if let Some(rt) = app.var_retype.clone() {
-                    app.radius_retype(ui, k, rt, 160.0);
+                    app.number_retype(ui, k, rt, 160.0);
                 }
             });
         }
@@ -2316,7 +2447,7 @@ mod tests {
             };
             let _ = ctx.run_ui(input, |ui| {
                 if let Some(rt) = app.var_retype.clone() {
-                    app.radius_retype(ui, br, rt, 80.0);
+                    app.number_retype(ui, br, rt, 80.0);
                 }
             });
         }

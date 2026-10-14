@@ -165,8 +165,8 @@ impl crate::container::LayoutView for DocView<'_> {
     fn kind(&self, id: NodeId) -> Option<NodeKind> {
         self.0.get(id).map(|n| n.kind().clone())
     }
-    fn display(&self, id: NodeId) -> Option<&crate::container::Display> {
-        self.0.get(id).and_then(|n| n.display())
+    fn display(&self, id: NodeId) -> Option<std::borrow::Cow<'_, crate::container::Display>> {
+        self.0.resolved_display(id)
     }
     fn item(&self, id: NodeId) -> crate::container::LayoutItem {
         self.0.get(id).map(|n| *n.item()).unwrap_or_default()
@@ -207,8 +207,8 @@ impl crate::container::LayoutView for UsedView<'_> {
     fn kind(&self, id: NodeId) -> Option<NodeKind> {
         DocView(self.doc).kind(id)
     }
-    fn display(&self, id: NodeId) -> Option<&crate::container::Display> {
-        self.doc.get(id).and_then(|n| n.display())
+    fn display(&self, id: NodeId) -> Option<std::borrow::Cow<'_, crate::container::Display>> {
+        self.doc.resolved_display(id)
     }
     fn item(&self, id: NodeId) -> crate::container::LayoutItem {
         DocView(self.doc).item(id)
@@ -297,8 +297,8 @@ impl crate::container::LayoutView for CommittedView<'_> {
     fn kind(&self, id: NodeId) -> Option<NodeKind> {
         DocView(self.doc).kind(id)
     }
-    fn display(&self, id: NodeId) -> Option<&crate::container::Display> {
-        self.doc.get(id).and_then(|n| n.display())
+    fn display(&self, id: NodeId) -> Option<std::borrow::Cow<'_, crate::container::Display>> {
+        self.doc.resolved_display(id)
     }
     fn item(&self, id: NodeId) -> crate::container::LayoutItem {
         DocView(self.doc).item(id)

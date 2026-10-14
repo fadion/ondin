@@ -4084,6 +4084,103 @@ fn a_corner_binding_previews_as_the_radius_it_will_draw() {
     assert_preview_matches_commit(&doc, &tx, "two corners bound");
 }
 
+/// **A gap or a padding bound to a number variable previews as the layout it
+/// will lay out** (§15 D1058): the `--` list's highlight on a spacing field,
+/// `bind_spacing_ops` over a flex frame's column gap and left padding, drawn as
+/// overrides and as committed — then the frame's bound slots previewed under a
+/// cell's new number, D1056's preview reaching a layout. The two rects' fills
+/// carry their places, so a preview laying out the zeroed literal is a different
+/// call.
+///
+/// Flip, run: `SetSpacingVars`' arm storing the base layout unresolved (`base`
+/// for `drawn`) fails *"gap and padding bound: preview diverged from commit"*.
+#[test]
+fn a_spacing_binding_previews_as_the_layout_it_will_lay_out() {
+    use ondin_core::container::{Display, Flex};
+    use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+    let mut ids = IdSource::new(0xCB);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (frame, a, b, mode, var) = (
+        ids.mint(),
+        ids.mint(),
+        ids.mint(),
+        ids.mint_mode(),
+        ids.mint_var(),
+    );
+    let rect = |id, index| Operation::CreateNode {
+        id,
+        parent: frame,
+        index,
+        kind: NodeKind::Rect {
+            size: Size::new(30.0, 20.0),
+            corner_radii: RoundedRectRadii::default(),
+        },
+        transform: None,
+        name: None,
+    };
+    let fill = |id| Operation::SetFills {
+        id,
+        fills: keyed_by_position([Fill {
+            brush: Brush::Solid(Color::from_rgba8(200, 30, 30, 255)).into(),
+            visible: true,
+        }]),
+    };
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: frame,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Artboard {
+                size: Size::new(200.0, 60.0),
+            },
+            transform: None,
+            name: None,
+        },
+        rect(a, 0),
+        rect(b, 1),
+        fill(a),
+        fill(b),
+        Operation::SetDisplay {
+            id: frame,
+            display: Some(Display::Flex(Flex {
+                column_gap: 4.0,
+                ..Flex::default()
+            })),
+        },
+        Operation::AddMode {
+            mode: Mode {
+                id: mode,
+                name: "Default".into(),
+            },
+            index: 0,
+            cells: vec![],
+        },
+        Operation::AddVariable {
+            var: Variable {
+                id: var,
+                name: "space/lg".into(),
+                kind: VarKind::Number,
+                cells: [(mode, Cell::Number(16.0))].into(),
+            },
+        },
+    ]))
+    .unwrap();
+    let mut vars = [None; 6];
+    vars[0] = Some(var);
+    vars[5] = Some(var);
+    let tx = Transaction(ondin_core::bind_spacing_ops(&doc, frame, vars));
+    assert!(!tx.0.is_empty(), "the fixture binds something");
+    assert_preview_matches_commit(&doc, &tx, "gap and padding bound");
+    doc.apply(&tx).unwrap();
+    let cell = Transaction(vec![Operation::SetVariableCell {
+        id: var,
+        mode,
+        cell: Cell::Number(30.0),
+    }]);
+    assert_preview_matches_commit(&doc, &cell, "the bound slots' cell edited");
+}
+
 /// **A variable's cell previews on everything that reads it** (§15 D1056, D1037's
 /// premise (vi)): a rect whose fill reads *accent* — an alias of *brand* — and
 /// whose corners read *radius*, previewed under a new *brand* colour and a new

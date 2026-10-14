@@ -1565,6 +1565,7 @@ mod tests {
             origin: None,
             mode: None,
             corner_vars: Default::default(),
+            spacing_vars: Default::default(),
         }
     }
 

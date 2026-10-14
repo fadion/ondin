@@ -931,11 +931,16 @@ impl OndinApp {
     pub(crate) fn radius_chip(&mut self, ui: &mut egui::Ui, key: FieldKey, var: VarId, w: f32) {
         let mut chip_rect = egui::Rect::NOTHING;
         ui::field_row(ui, egui::vec2(w, 28.0), |ui| {
+            // **The badge says the field will not scrub** (D1038 (3), §15 D1046):
+            // unbound it is the scrub handle; bound, a drag would detach by
+            // accident, so it does not scrub and its cursor refuses. The glyph is
+            // the session's — D1038 names no cursor.
             ui.label(theme::icon_text(
                 icon::CORNERS_OUT,
                 14.0,
                 theme::text::FAINT,
-            ));
+            ))
+            .on_hover_cursor(egui::CursorIcon::NotAllowed);
             let (rect, _) = ui.allocate_exact_size(
                 egui::vec2(ui.available_width() + 5.0, 28.0),
                 egui::Sense::hover(),
@@ -1941,6 +1946,33 @@ mod tests {
             BrushSource::from(Color::WHITE.multiply_alpha(0.5))
         );
         assert_eq!(fill0(&app, other), BrushSource::from(Color::BLACK));
+    }
+
+    /// **A bound radius field's badge refuses the scrub cursor** (D1038 (3), §15
+    /// D1046): the pointer over the corner icon asks for `NotAllowed`.
+    ///
+    /// Flip, run: removing the `on_hover_cursor` fails with the default cursor.
+    #[test]
+    fn a_bound_radius_badge_says_it_will_not_scrub() {
+        let (ctx, mut app, rect, _, radius) = fixture();
+        crate::theme::install(&ctx);
+        let k = FieldKey::Radius { id: rect };
+        app.bind_field(k, radius);
+        // The badge's centre, measured: it draws at (10, 7)–(24, 21) here.
+        let over = egui::pos2(17.0, 14.0);
+        let mut cursor = egui::CursorIcon::Default;
+        for events in [vec![], vec![egui::Event::PointerMoved(over)], vec![]] {
+            let input = egui::RawInput {
+                events,
+                ..Default::default()
+            };
+            let out = ctx.run_ui(input, |ui| {
+                ui.set_min_width(180.0);
+                app.radius_chip(ui, k, radius, 160.0);
+            });
+            cursor = out.platform_output.cursor_icon;
+        }
+        assert_eq!(cursor, egui::CursorIcon::NotAllowed);
     }
 
     /// **`Enter` on a refused `--` leaves either field as typed, the list still

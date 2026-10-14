@@ -1605,7 +1605,7 @@ edited down to this the same day.*
 
 **Ruled 2026-10-11 and 2026-10-13; step 1 built 2026-10-14, and step 2's gaps, padding and visibility
 the same day** — §15 D1037 is the design and says whose each part is, §15 D1038 the accepted chrome and the
-maintainer's rulings on D1037's open questions, and §15 D1039–D1059 what is built; `architecture.md` §5.3f is the section. Variables are typed
+maintainer's rulings on D1037's open questions, and §15 D1039–D1060 what is built; `architecture.md` §5.3f is the section. Variables are typed
 (colour, number, string, boolean) with aliases and a value per mode, one mode list per document and a
 mode set per frame; a bindable field stores its binding and resolves at read; a style is one slot's
 whole set of values, read-only in the inspector and detached by any other door's edit.
@@ -1626,11 +1626,8 @@ accepted (D1038):
    one height and a `Path`'s radii left unbindable by decision (§15 D1057). **Step 1 owes nothing.**
 2. Number variables in layout fields, and boolean variables bound to visibility (D1038 (d)). **A
    container's gaps and padding are built** (§15 D1058), **and a layer's visibility binds to a
-   boolean** (§15 D1059). **What is left**:
-   - W and H, the layout numbers of D1038's addition (7) not yet bound;
-   - the Properties card's Boolean property row draws no chip for a bound layer — D1038 (d), *"the
-     property is a view over the field, so it shows the chip"* — and the layers panel's eye carries no
-     bound mark (§15 D1059).
+   boolean** (§15 D1059), its chrome on the Properties card and the layers panel too (§15 D1060).
+   **What is left**: W and H, the layout numbers of D1038's addition (7) not yet bound.
 3. Styles for fills, strokes and effects.
 4. Kits carrying both (the session's proposal, not objected to), with D1038 (b)'s per-kit mode mapping,
    and the swatch popup's kit group, E1's (§15 D1043).
@@ -1673,7 +1670,8 @@ left, and the rest of D1038's numbers and (2)'s canvas half opened in the list a
 struck the same day, fixed in its amendment, and the bound resize's preview opened in its place; the
 booleans struck the same day, built in §15 D1059, its owed chrome and its *Fix* list opened; the *Fix*
 list and the bound resize's preview struck the same day, fixed in the amendments to §15 D1058 and
-D1059, the relayout item withdrawn there as a wrong premise.*
+D1059, the relayout item withdrawn there as a wrong premise; the booleans' owed chrome — the
+Properties card's chip and the layers panel's bound eye — struck the same day, built in §15 D1060.*
 
 ## Next · The polishing pass over the accepted calls
 

@@ -2728,7 +2728,9 @@ card's content edge, the labels right-aligned against their control (`component:
 `MARK_ROOM` kept for the mark, a long one cut with `…` and its whole name in a tooltip only when cut —
 asked of `Galley::elided` through `component::fitted_label`, the tooltip never attached until §15
 D1006), and a boolean's row `variants::toggle_row` —
-its name in the label column and the switch where the fields begin, not the features' toggle-list row. **The drift summary counts
+its name in the label column and the switch where the fields begin, not the features' toggle-list row;
+over layers all bound to boolean variables the switch sits in a variable's capsule (§15 D1060,
+§5.3f). **The drift summary counts
 properties apart**, a property's field units subtracted from the overrides (`PropDrift`, *2 properties ·
 1 override*), the overflow gains *Reset properties N*, and *Reset fields* leaves the property-driven
 fields alone; several instances' summary reads *K with changes*. **A lone main or a set** gets a
@@ -3336,7 +3338,7 @@ and the dashboard's 1B §15 D1017).
 - **Mains made local are placed by their laid-out boxes**, a frame's too, measured on the document the
   transaction leaves, stacked down the right of the content 80 apart.
 
-### 5.3f Styles and variables (ruled 2026-10-11 and 2026-10-13; step 1 built, and step 2's gaps, padding and visibility; §15 D1037–D1059)
+### 5.3f Styles and variables (ruled 2026-10-11 and 2026-10-13; step 1 built, and step 2's gaps, padding and visibility; §15 D1037–D1060)
 
 > **Design ahead of code, nearly all of it.** Ruled with the maintainer on 2026-10-11, in conversation,
 > on a design the session put: §15 D1037 says which part is whose. The Claude Design pass on the chrome
@@ -3355,7 +3357,8 @@ and the dashboard's 1B §15 D1017).
 > D1052–D1055) — **and a cell's preview on every layer that reads it** (2026-10-14, §15 D1056), **and
 > the popup's faces one height, a `Path`'s radii left unbound by decision** (2026-10-14, §15 D1057), so
 > step 1 owes nothing. **Of step 2, a container's gaps and padding bind** (2026-10-14, §15 D1058), **and
-> a layer's visibility binds to a boolean variable** (2026-10-14, §15 D1059). The
+> a layer's visibility binds to a boolean variable** (2026-10-14, §15 D1059), **its chrome on the
+Properties card and the layers panel too** (2026-10-14, §15 D1060). The
 > build order and what is open are `roadmap.md`'s
 > *Next · Styles and variables*. The rest of this section is the design, and it is rewritten in the
 > present tense as each step lands.
@@ -3580,8 +3583,14 @@ never typed into (`FieldKey::typed`), so it has no retype buffer and its menu na
 Bound, the eye sits in a 22×18 capsule with the chip's tooltip and *Click to toggle and detach*; a click
 writes the other value, which the commit detaches; a right-click is the field menu either way, *Bind to
 variable…* opening the `--` list with a search of its own under the eye. The bound eye is the session's
-chrome — D1038 draws none. ⚠️ **Owed**: the Properties card's Boolean row shows no chip for a bound
-layer, and the layers panel's eye no bound mark.
+chrome — D1038 draws none. **The other two places a visibility shows wear the same capsule** (§15
+D1060, the session's chrome too): the Properties card's Boolean row sets its switch in a 38×22 one when
+every layer the property views, over every selected root, is bound — to one variable or several, A4's
+rule as the fields keep it (§15 D1045), the property a view over the field (D1038 (d)) — with the chip's
+tooltip, *name · Mixed* where modes part the values, or the variables' names listed, and a click that
+detaches through `keep_visible_bindings`, its tooltip saying so — on a *Mixed* row, which shows all,
+that only the hidden detach; bound on some and not others, it is the plain switch. The layers panel keeps a bound layer's eye drawn at rest in a 22×18 one, as a hidden
+layer's eye already rested, with no tooltip; a worded row badge ends before a resting eye.
 
 **A frame's mode** (§15 D1042 in full) is `OndinApp::frame_mode_row`, in the identity card under the
 name row, drawn on an `Artboard` only and only in a document that has a mode: set, the mode's name
@@ -8684,7 +8693,8 @@ standing drift risk rather than a solved one.
 **A row's three controls — caret, eye, lock — are painted, not widgets, so one function answers both
 "which is under the pointer" and "which did the press hit"** (`layers::RowTargets::at`, §15 D246). The
 row is a single `Sense::click_and_drag()` region, so `Response::hovered` is about the *row* — it is what
-makes the eye and lock appear at all — and nothing in it says where inside the row the pointer is. Each
+makes the eye and lock appear at all, but for a hidden layer's eye, a bound layer's (§15 D1060) and a
+locked layer's lock, which rest drawn — and nothing in it says where inside the row the pointer is. Each
 control's x goes into a `RowTargets` as an `Option`, `None` where the row is not drawing it, and
 `CONTROL_HIT` is the one band either side. Both questions going through that is the property worth
 naming: **what lights up is what a click acts on**, where two hand-written comparisons are how a control

@@ -1456,7 +1456,8 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D1056** — **Styles and variables, build step 1's cell preview: a variable's previewed cell draws on every layer that reads it, `RenderOverrides::absorb` resolving each bound node against the table with that one cell changed.** D1037's premise (vi), the session's call under the maintainer's delegation of 2026-10-14. `Variables::with_cell` a clone with one cell changed; 🚨 `Document::resolve_var_in`, `resolve_brush_in`, `resolved_paint_in`, `resolve_corners_in` take the table, and the four public readers delegate to them — one rule for drawing and preview; `bound_nodes` public. `SetVariableCell`'s own arm: each non-ghost bound node's pending paint resolved against `t` as literals, a bound rect's pending kind set to the resolved radii and marked moved; a missing variable or mode refuses. ⚠️ One cell per transaction — a second finds literals. ⚠️ Every bound node is patched each frame, not only this variable's readers. The no-op fixture's table group is six. `has_gesture_preview` now true for such a preview, so a right-click cancel takes it. *(Built 2026-10-14, uncommitted when recorded. **Keep**. Test `a_variable_cell_previews_on_what_reads_it`, through `assert_preview_matches_commit`, an alias and a corner included, its flip run. D1037, D1039, D1052 amended; `architecture.md` §5.3f, §6.2; `roadmap.md` premise (vi) struck)*
 - **D1057** — **Styles and variables, build step 1's leftovers closed: the colour popup's gradient faces are the *Solid* face's height, and a `Path`'s per-anchor radii stay unbindable, now by decision.** Measured headlessly, *Solid* and *Variables* 297, *Linear* and *Radial* 305; `picker_body`'s gradient `plane_h` 84 → 76. The path the session's call under the maintainer's delegation of 2026-10-14: radii indexed by anchor, which point editing inserts and deletes, and no per-anchor field to bind. E1's kit group to step 4. ⚠️ The equality is arithmetic in the plane's height, not a layout rule. *(Built 2026-10-14, `716e9c6`. **Keep**; D1043's limit **Resolved**. Test `every_face_of_the_colour_popup_is_one_height`, its flip run. D1039, D1043 amended; `architecture.md` §5.3f; `roadmap.md` step 1's leftovers struck)*
 - **D1058** — **Styles and variables, build step 2's first half: a container's gaps and padding bind to number variables — a sidecar of six beside the layout, resolved at read by every layout view, detached at the commit when written over; schema v8.** D1038's addition (7). `Node::spacing_vars: SpacingVars` in `Display::spacing`'s order; `SetSpacingVars`; `bind_spacing_ops` writes the bound literals 0, `detach_spacing_ops` the numbers drawn. 🚨 `LayoutView::display` a `Cow` (`Document::resolved_display`, `spacing_drawn_in`); an override's layout stored resolved. 🚨 `keep_spacing_bindings` after `keep_corner_bindings`, D1041's two halves, the literal half carrying the Container card's own writes, the flex↔grid switch and the Scale tool. `FieldKey::Spacing { id, slots }`; `radius_chip`/`radius_retype` renamed `number_chip`/`number_retype`. ~~⚠️ A partly bound field's scrub previews the variable's number and commits a detach (*Fix*).~~ Fixed in `b613a7b`: the pass's judgement is `build::kept_spacing_vars`, which `absorb`'s `SetDisplay` arm shares; the corner write's sibling, measured, fixed the same way (`kept_corner_vars`, `Document::corners_drawn_in`). ~~🚨 A resize (`Size` patch) of a rectangle with bound corners still previews them at the literal 0 — read, not reproduced (*Fix*).~~ The bound rect's resize preview, read in the code, fixed in `79ae5eb`: `SetGeometry`'s arm runs `kept_corner_vars` on any patch over bound corners. ⚠️ No canvas handle writes a gap. *(Built 2026-10-14, `34df81f`. **Keep**; the partly bound preview and the bound resize's **Resolved**. Five tests and the random incremental test's spacing ops, four flips run as reported; two preview halves since. D914 amended; `architecture.md` §5.3c, §5.3f, §5.7, §5.11, §6.2; `context-menus.md` §6.7; `roadmap.md` step 2 edited down. **Amended 2026-10-14**, `b613a7b` and `79ae5eb`)*
-- **D1059** — **Styles and variables, build step 2's second half: a layer's visibility binds to a boolean variable — a sidecar beside the literal, resolved by `Document::shown` for every reader that draws, picks, lays out or exports, detached at the commit when written over, by one half of the corners' rule.** D1038 (d). `VarKind::Boolean`, `Cell::Boolean`, `Value::Boolean`; `Node::visible_var` beside the literal `visible`; `SetVisibleVar`; schema field in the unreleased v8. `bind_visible_ops` writes the literal `true`, canonical. 🚨 `shown`/`shown_in` read by every drawing, picking, layout and export reader — a hidden bound item leaves its flow. 🚨 `keep_visible_bindings` after `keep_spacing_bindings`: written what it shows stays bound, else detaches — **no literal half**, which would keep a layer the eye shows bound and hidden. `absorb`'s `SetVisibleVar` arm and D1056's cell arm patch a bound visibility; ~~⚠️ no visibility arm marks a node moved, so the eye's `--` preview over an in-flow item does not re-lay its layout (*Fix*)~~ — corrected: `flex_relayout` lays from every overridden node, not from `moved`, so the preview already re-lays an in-flow item's siblings (measured, test added). `FieldKey::Visible`, `typed()` false; the bound eye a 22×18 capsule, the browser's boolean box — the session's chrome. 🚨 Read, not reproduced, and **fixed in `79ae5eb`**: `is_placement` omitted `SetVisibleVar`, so a main root's binding followed to every instance root (tested, flip run); the layer menu's *Show*/*Hide* label read the literal; a ghost read the literal (now `ghost_shown`, the default mode); a Boolean property's reset and drift ignored the binding; `propagate::untouched` compared no binding — the last four untested. ⚠️ Owed: the Properties card's chip, the layers panel's bound mark, a detach's status message. *(Built 2026-10-14, `bf347f9`. **Keep**, the one-half pass and `shown` above all; the five read defects and the stale comments **Resolved** in `79ae5eb`; the relayout *Fix* **withdrawn**, a wrong premise. Eight tests and the random incremental test's visibility ops, six flips run as reported. D1058 amended; `architecture.md` §5.3d, §5.3f, §5.7, §5.9, §5.11, §6.2; `context-menus.md` §6.7; `roadmap.md` step 2 edited down. **Amended 2026-10-14**, `79ae5eb`)*
+- **D1059** — **Styles and variables, build step 2's second half: a layer's visibility binds to a boolean variable — a sidecar beside the literal, resolved by `Document::shown` for every reader that draws, picks, lays out or exports, detached at the commit when written over, by one half of the corners' rule.** D1038 (d). `VarKind::Boolean`, `Cell::Boolean`, `Value::Boolean`; `Node::visible_var` beside the literal `visible`; `SetVisibleVar`; schema field in the unreleased v8. `bind_visible_ops` writes the literal `true`, canonical. 🚨 `shown`/`shown_in` read by every drawing, picking, layout and export reader — a hidden bound item leaves its flow. 🚨 `keep_visible_bindings` after `keep_spacing_bindings`: written what it shows stays bound, else detaches — **no literal half**, which would keep a layer the eye shows bound and hidden. `absorb`'s `SetVisibleVar` arm and D1056's cell arm patch a bound visibility; ~~⚠️ no visibility arm marks a node moved, so the eye's `--` preview over an in-flow item does not re-lay its layout (*Fix*)~~ — corrected: `flex_relayout` lays from every overridden node, not from `moved`, so the preview already re-lays an in-flow item's siblings (measured, test added). `FieldKey::Visible`, `typed()` false; the bound eye a 22×18 capsule, the browser's boolean box — the session's chrome. 🚨 Read, not reproduced, and **fixed in `79ae5eb`**: `is_placement` omitted `SetVisibleVar`, so a main root's binding followed to every instance root (tested, flip run); the layer menu's *Show*/*Hide* label read the literal; a ghost read the literal (now `ghost_shown`, the default mode); a Boolean property's reset and drift ignored the binding; `propagate::untouched` compared no binding — the last four untested. ⚠️ Owed: ~~the Properties card's chip, the layers panel's bound mark~~ (D1060), a detach's status message. *(Built 2026-10-14, `bf347f9`. **Keep**, the one-half pass and `shown` above all; the five read defects and the stale comments **Resolved** in `79ae5eb`; the relayout *Fix* **withdrawn**, a wrong premise. Eight tests and the random incremental test's visibility ops, six flips run as reported. D1058 amended; `architecture.md` §5.3d, §5.3f, §5.7, §5.9, §5.11, §6.2; `context-menus.md` §6.7; `roadmap.md` step 2 edited down. **Amended 2026-10-14**, `79ae5eb`; **again**, the card's chip and the panel's bound eye built in D1060)*
+- **D1060** — **Styles and variables, build step 2's owed chrome: a Boolean property row over layers all bound sets its switch in a variable's capsule, A4's rule, a bound layer's eye rests in the capsule in the layers panel, and a worded row badge ends before a resting eye.** D1038 (d)'s *"the property is a view over the field (D982), so it shows the chip"*; D1038 draws neither shape, both borrowed from D1059's bound eye. `toggle_row(…, bound)`: a 38×22 capsule (`BOUND_SWITCH_PAD` 6×3), `text_a(28)`/44; drawn when every counterpart over every root is bound, to one variable or several (A4, D1045), partly bound the plain row; cached in `PropCache::chips`. Tooltip `chip_tip`, *name · Mixed* where modes part the values, or the names listed; the verb *Click to toggle and detach*, or on a *Mixed* row *Click to show all; the hidden ones detach*. The click detaches through `set_property` and `keep_visible_bindings`, no door of its own. The first cut's one-variable rule and its overstated tooltip read and fixed before commit. `layers_row`: `show_eye` also while bound, `BOUND_EYE` 22×18, no tooltip. A worded badge (*W × H*, *N variants*) drew under a resting eye — measured *40 × 40* over the eye-slash — and now ends at `eye_x − 15`. *(Built 2026-10-14, uncommitted when recorded. **Keep**; the chrome the session's, not looked at. Four tests, four flips run as reported; no test reads the tooltips. D1059 amended; `architecture.md` §5.3d, §5.3f, §9.2; `roadmap.md` step 2's owed chrome struck)*
 
 ---
 
@@ -26257,7 +26258,7 @@ the session's too — the mockup draws no boolean cell. ⚠️ Neither the capsu
    leaves the binding; and the `SetVisibleVar` override is counted as a plain override, not the
    property's. ~~*Fix with* `SetVisibleVar` beside `SetVisible` in both filters — part of the Properties
    card's owed chrome (below).~~ **Fixed**: both filters count `SetVisibleVar` with `SetVisible` for a
-   Boolean property. ⚠️ Untested. The row's chip is still owed (below).
+   Boolean property. ⚠️ Untested. The row's chip ~~is still owed (below)~~ is built in D1060.
 5. **`propagate::untouched` compares none of the bindings** — `visible_var`, nor `corner_vars`,
    `spacing_vars` or `mode`, the last three since D1039 and D1058. It is the structural pass's *"an item
    the main loses goes from a copy only if it still equals its source"*, so a copy whose only difference
@@ -26279,11 +26280,12 @@ the session's too — the mockup draws no boolean cell. ⚠️ Neither the capsu
    `detached` names spacing and visibility; `committed_node` fills `shown` with `self.doc.shown(id)` —
    a binding is not a preview — and `DisplayNode::shown`'s doc no longer names it the literal there.
 
-**Not built, and open** (`roadmap.md`): **the Properties card's Boolean property row draws no chip for
+**Not built, and open** (`roadmap.md`): ~~**the Properties card's Boolean property row draws no chip for
 a bound layer** — D1038 (d), *"the property is a view over the field, so it shows the chip"* — though it
 reads and writes what shows and an edit detaches; **the layers panel's eye carries no bound mark**,
-showing what the layer shows; and, as for corners and spacing, **no detach says anything on the floating
-status**.
+showing what the layer shows;~~ **both built 2026-10-14 in D1060** — the row's switch and the panel's
+eye each in the capsule; and, as for corners and spacing, **no detach says anything on the floating
+status**, still open.
 
 **Tests**, as the caller reports them. Core, `tests/variables.rs`:
 `a_bound_visibility_shows_by_its_variable_in_the_mode_in_force` — a flex row whose bound rect, hidden in
@@ -26305,7 +26307,80 @@ all; ~~***Fix*** (1)–(5) and the preview's relayout; the comments in (7) and `
 corrected~~ (1)–(5) and (7) **Resolved** in `79ae5eb`, (2)–(5) untested; the preview's relayout
 **withdrawn**, a wrong premise. D1058 amended; `architecture.md` §5.3d, §5.3f, §5.7, §5.9, §5.11 and §6.2; `context-menus.md` §6.7;
 `roadmap.md` *Next · Styles and variables* step 2 edited down. **Amended 2026-10-14** (`79ae5eb`): the
-read defects fixed, the relayout claim corrected, the roadmap's *Fix* list struck)*
+read defects fixed, the relayout claim corrected, the roadmap's *Fix* list struck. **Amended again
+2026-10-14**: the Properties card's chip and the layers panel's bound eye built in D1060; the floating
+status's detach message still owed)*
+
+**D1060 — Styles and variables, build step 2's owed chrome: a Boolean property row over layers all
+bound sets its switch in a variable's capsule, A4's rule, a bound layer's eye rests in the
+capsule in the layers panel, and a worded row badge ends before a resting eye. *Built 2026-10-14;
+uncommitted when recorded; the chrome the session's, not looked at by the maintainer.*** D1059 left two
+pieces of chrome owed. The Properties card's Boolean row drew no chip over a bound layer, though D1038
+(d) rules that *"the property is a view over the field (D982), so it shows the chip, and an edit
+through the property detaches like any edit"*; and the layers panel's eye showed what a bound layer
+shows and nothing of why. **D1038 draws neither** — no bound switch and no bound eye — so both shapes
+are borrowed from the identity card's bound eye (D1059), itself the session's, and these are too.
+
+**The property row.** `variants::toggle_row` takes `bound: bool`. Bound, the switch sits in a 38×22
+capsule — `BOUND_SWITCH_PAD` 6×3 around `ui::SWITCH_SIZE`'s 26×16, a chip's height — at `text_a(28)`,
+its left edge on the fields' edge and the switch (or *Mixed*) inset by the pad. It lights to 44 with the
+pointer anywhere along the row's field side, not only on the capsule — kept, because the switch's own
+hot state (`paint_switch(…, resp.hovered())`) reads that whole side too, so the capsule agrees with the
+switch it holds.
+**Bound means every counterpart — D1038 A4, as the fields keep it (D1045)**: the reading walks
+`variant::counterparts` over every selected root and draws the capsule when every one of them is bound,
+to one variable or several; bound on some and not others, it draws the plain row, A4's second case and
+D130's *Mixed*. The tooltip says which: one variable and one value, `binding::chip_tip` (*name · value ·
+Mode*); one variable whose layers show different values, the modes they sit in differing, *name ·
+Mixed*; several, their names one per line, as `mixed_chip`'s. Under it the click's verb, and the
+override mark's tip under that when the row is marked as well. The reading is cached in
+`component::PropCache::chips`, keyed by the roots and the property id as `marks` is and emptied by the
+revision with `states` and `marks` — uncached, a walk of every root every frame, which is what the cache
+exists to stop. **The click needs no door of its own**: `variant::set_property` writes `SetVisible`
+against what each counterpart *shows* (`Document::shown`), and `build::keep_visible_bindings` detaches a
+bound layer written anything but what it shows — D1059's one half — so the toggle detaches as the
+identity card's eye does. **And the verb says what that does**: on a row reading one value, *Click to
+toggle and detach*; on a *Mixed* row, whose click writes `true` and so changes only the hidden layers,
+*Click to show all; the hidden ones detach*, the shown keeping their binding.
+
+**Two defects in the first cut, read by `arch-scribe` and fixed before commit.** It drew the capsule only
+over **one** variable, so a row bound to two drew the plain switch where A4 draws the *Mixed* capsule;
+and its tooltip read *Click to toggle and detach* on a *Mixed* row whose click leaves every layer
+already shown still bound, and gave the first counterpart's value and mode as the variable's.
+
+**The layers panel's eye.** `layers_row` keeps a bound layer's eye drawn at rest — `show_eye = hovered
+|| !visible || bound_eye`, the binding being a fact about the layer no other row states, as a hidden
+layer's eye already was — in a 22×18 capsule (`layers::BOUND_EYE`, the identity card's size, clear of
+the lock glyph by 4.5 at `EYE_PITCH`), `text_a(28)`, 44 when the eye itself is under the pointer
+(`RowHit::Eye`). The glyph is what shows, eye or eye-slash, as before, and a click commits `SetVisible` of
+the opposite of `shown`, which `keep_visible_bindings` detaches. **No tooltip on the row**: which variable is the
+identity card's to say.
+
+**A worded badge ends before a resting eye** — a defect found on the way, and older than this entry: a
+hidden layer's eye has rested at the row's right since before D1059, and a frame's *W × H* or a set's
+*N variants* was still drawn right-aligned at the row's edge, under it. Measured in a 300-wide panel, as
+the caller reports it: *40 × 40* spanning x 256.3–296.0 over the eye-slash glyph's 255.5–270.5. A
+`RowBadge::Text` now ends at `eye_x − BOUND_EYE.x / 2 − 4` whenever the eye is shown — 4 clear of where
+a capsule would end, bound or not; a glyph badge (the `Subtract` base mark, D244) stays at the edge,
+which clears it. ⚠️ A badge is drawn only where the lock is not, and `show_lock` is the row hovered or
+locked, so the moved badge is a hidden or bound row's at rest; a hovered row draws none, as before.
+
+**Tests**, as the caller reports them, each flip run.
+`panels::layers::bound_eye_tests::a_bound_layers_eye_rests_in_the_capsule` — flip: `show_eye` without
+its `|| bound_eye` fails *"bound: the capsule"* at 0; `a_worded_badge_ends_before_a_resting_eye`, over a
+hidden frame — flip: the badge's right back at `rect.right() - edge` fails *"the size ends before the
+eye"* with the spans above; `panels::component::tests::a_boolean_property_over_a_bound_layer_shows_the_chip`
+— unbound no capsule, bound one, its click hiding the layer and detaching it; flip: `toggle_row` handed
+`false` for `bound` fails *"bound: the capsule"* at 0;
+`panels::component::tests::a_boolean_property_over_layers_bound_apart_follows_a4` — the property viewing
+the label and a new `Dot` in *Small*, one bound and one not drawing no capsule, bound to two variables
+drawing it; flip: the first cut's one-variable rule (`[] | [_, _, ..] => return None`) fails *"two
+variables: the capsule"* at 0. ⚠️ **No test reads the tooltips** — the *name · Mixed* or listed names,
+nor the *Mixed* row's verb — **nor a worded badge beside a *bound* eye**: the badge test's frame is
+hidden and unbound, the same `show_eye` arm. *(Built 2026-10-14 by the session; uncommitted when
+recorded. **Keep**; the two capsules the session's chrome, not looked at by the maintainer; the first
+cut's one-variable rule and its tooltip **Resolved** before commit. D1059 amended; `architecture.md`
+§5.3d, §5.3f and §9.2; `roadmap.md` *Next · Styles and variables* step 2's owed chrome struck)*
 
 **D980 — The five item lists carry ids, in a wrapper beside each item rather than a field inside it,
 and an instance's items follow its main's item by item. *Decided 2026-10-04 by the maintainer — per

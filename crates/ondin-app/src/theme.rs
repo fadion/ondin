@@ -766,6 +766,14 @@ pub mod icon {
     /// Phosphor's `package`, read off the mockups' own stylesheet beside
     /// `ph-hexagon`, which gives this file's `HEXAGON` and so vouches for the font.
     pub const PACKAGE: &str = "\u{e390}";
+    /// The styles and variables browser's button (§5.3f, H3) — Phosphor
+    /// `swatches`, its codepoint from `Phosphor.codepoints.txt`.
+    pub const SWATCHES: &str = "\u{e5b8}";
+    /// The browser's `+` menu (G5): *Colour variable* and *Number variable*.
+    pub const PALETTE: &str = "\u{e6c8}";
+    pub const HASH: &str = "\u{e2a2}";
+    /// *New mode* (G5).
+    pub const COLUMNS_PLUS_RIGHT: &str = "\u{e542}";
     /// *Publish* (§5.3e, 2A) — Phosphor `upload-simple`, read off the mockups'
     /// stylesheet as [`PACKAGE`] was.
     pub const UPLOAD_SIMPLE: &str = "\u{e4c0}";
@@ -1077,6 +1085,10 @@ pub mod icon {
         ("clipboard", CLIPBOARD),
         ("hexagon", HEXAGON),
         ("package", PACKAGE),
+        ("swatches", SWATCHES),
+        ("palette", PALETTE),
+        ("hash", HASH),
+        ("columns-plus-right", COLUMNS_PLUS_RIGHT),
         ("upload-simple", UPLOAD_SIMPLE),
         ("arrow-circle-down", ARROW_CIRCLE_DOWN),
         ("link-break", LINK_BREAK),

@@ -546,6 +546,90 @@ fn a_main_rebinding_reaches_a_copy_bound_as_it_was() {
     assert_eq!(bound(own), Some(red), "the copy bound elsewhere keeps it");
 }
 
+/// **Deleting a variable detaches every user and every alias to it** — the fill
+/// to the colour it drew, the bound corner to its number, an alias to the value
+/// it resolved to — and one undo restores the lot (`variable::remove_ops`, D1038).
+#[test]
+fn deleting_a_variable_detaches_its_fields_and_its_aliases() {
+    let mut f = fixture();
+    bind_fill(&mut f.doc, f.rect, f.brand, 1.0);
+    let ops = ondin_core::bind_corners_ops(&f.doc, f.rect, [Some(f.radius), None, None, None]);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    let alias = f.ids.mint_var();
+    f.doc
+        .apply(&Transaction(vec![Operation::AddVariable {
+            var: var(
+                alias,
+                "button/bg",
+                VarKind::Color,
+                [(f.light, Cell::Alias(f.brand)), (f.dark, Cell::Color(RED))],
+            ),
+        }]))
+        .unwrap();
+    assert_eq!(ondin_core::variable::users(&f.doc, f.brand), vec![f.rect]);
+    let before = f.doc.clone();
+    let tx = Transaction(ondin_core::variable::remove_ops(
+        &f.doc,
+        &[f.brand, f.radius],
+    ));
+    let out = f.doc.apply(&tx).expect("detach, then remove");
+    assert_eq!(drawn(&f.doc, f.rect), Brush::Solid(WHITE));
+    let node = f.doc.get(f.rect).unwrap();
+    assert_eq!(node.corner_vars(), [None; 4]);
+    assert!(matches!(
+        node.kind(),
+        NodeKind::Rect { corner_radii, .. } if corner_radii.top_left == 4.0 && corner_radii.top_right == 2.0
+    ));
+    assert_eq!(
+        f.doc.variables().get(alias).unwrap().cells[&f.light],
+        Cell::Color(WHITE),
+        "the alias became the value it read"
+    );
+    f.doc.apply(&out.inverse).unwrap();
+    assert_eq!(f.doc, before);
+}
+
+/// Deleting a mode returns its frames to *Inherit*; renaming a group moves its
+/// members and refuses a name already taken (G14).
+#[test]
+fn deleting_a_mode_and_renaming_a_group() {
+    let mut f = fixture();
+    f.doc
+        .apply(&Transaction(vec![Operation::SetMode {
+            id: f.frame,
+            mode: Some(f.dark),
+        }]))
+        .unwrap();
+    assert_eq!(ondin_core::variable::frames_set_to(&f.doc, f.dark), 1);
+    let tx = Transaction(ondin_core::variable::remove_mode_ops(&f.doc, f.dark));
+    f.doc.apply(&tx).unwrap();
+    assert_eq!(f.doc.get(f.frame).unwrap().mode(), None);
+
+    let ops = ondin_core::variable::rename_group_ops(&f.doc, "brand", "ink").unwrap();
+    f.doc.apply(&Transaction(ops)).unwrap();
+    assert_eq!(f.doc.variables().get(f.brand).unwrap().name, "ink/500");
+    let ops = ondin_core::variable::rename_group_ops(&f.doc, "ink", "").unwrap();
+    f.doc.apply(&Transaction(ops)).unwrap();
+    assert_eq!(f.doc.variables().get(f.brand).unwrap().name, "500");
+    // `radius/md` → `md` is free; then `radius` again over a taken `md`.
+    let clash = f.ids.mint_var();
+    f.doc
+        .apply(&Transaction(vec![Operation::AddVariable {
+            // One cell: Dark went above.
+            var: Variable {
+                id: clash,
+                name: "md".into(),
+                kind: VarKind::Number,
+                cells: [(f.light, Cell::Number(1.0))].into(),
+            },
+        }]))
+        .unwrap();
+    assert_eq!(
+        ondin_core::variable::rename_group_ops(&f.doc, "radius", ""),
+        Err("md".to_string())
+    );
+}
+
 /// A small deterministic PRNG — `tests/resolve.rs`'s shape.
 struct Lcg(u64);
 

@@ -847,15 +847,15 @@ Agreed with the *Kits* design (`decisions.md` §15 D1011, ruling (5); `architect
 until it exists these two rows are the keyboard's whole route. ⚠️ `Ctrl+Alt+P` is one more chord for §12's
 `AltGr` question, which is about the whole keymap.
 
-## 14. Styles and variables — agreed 2026-10-13, not built
+## 14. Styles and variables — agreed 2026-10-13, built 2026-10-14
 
 Agreed with the *Styles and Variables* design (`decisions.md` §15 D1038, ruling (c); `architecture.md`
-§5.3f). Nothing is bound: the browser it opens does not exist yet. Not counted in the header's line,
-which is §8's and §10's.
+§5.3f), and bound with the browser it opens (§15 D1040). Not counted in the header's line, which is
+§8's and §10's.
 
 | Key | Action | |
 |---|---|---|
-| `Shift+S` | ➕ open the styles and variables browser | Beside §13's `Shift+I`, and for the same reason: the browser and the insert picker are panels at the foot of the vertical toolbar that swap in place, one open at a time, so the two chords are a pair. Free in the editor: §1's `S` is the Star tool and the tool letters are read with no Shift (`plain && !m.shift`); `Alt+S` (§5's align bottom) and `Ctrl+Alt+S` (§11's subtract) both require Alt; `Ctrl+S` is §8's save, and `Ctrl+Shift+S` is deliberately inert there. ⚠️ **Expect `Shift+I`'s caveat**: if the browser's search takes the keyboard on opening, as the design has it, the chord pressed straight after opening is a capital *S* in the search |
+| `Shift+S` | ✅ open the styles and variables browser | Beside §13's `Shift+I`, and for the same reason: the browser and the insert picker are panels at the foot of the vertical toolbar that swap in place, one open at a time, so the two chords are a pair. `Action::VariablesBrowser` (`plain && m.shift && S`), bound 2026-10-14 (§15 D1040); it and the rail's swatches button, directly above the hexagon, both toggle the browser. Free in the editor: §1's `S` is the Star tool and the tool letters are read with no Shift (`plain && !m.shift`); `Alt+S` (§5's align bottom) and `Ctrl+Alt+S` (§11's subtract) both require Alt; `Ctrl+S` is §8's save, and `Ctrl+Shift+S` is deliberately inert there. `input::tests::shift_s_opens_the_variables_browser_and_leaves_s_alone` pins it beside plain `S`, `Ctrl+S` and `Ctrl+Alt+S`. ⚠️ **`Shift+I`'s caveat holds**: the browser's search takes the keyboard once, on opening, so the chord pressed straight after opening is a capital *S* in the search; `Escape` and the button close it either way |
 
 ---
 

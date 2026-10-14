@@ -1354,6 +1354,12 @@ pub struct OndinApp {
     /// Where the rail's insert button was drawn last frame — the picker hangs
     /// beside it, bottom-aligned (3A). `NOTHING` until the rail has drawn.
     pub(crate) kit_button: egui::Rect,
+    /// The styles and variables browser, while it is open (§5.3f, D1038 G; §15
+    /// D1040) — it and the insert picker share a place, one open at a time.
+    pub(crate) var_browser: Option<crate::panels::variables::Browser>,
+    /// Where the rail's swatches button was drawn last frame, directly above the
+    /// hexagon (G11). `NOTHING` until the rail has drawn.
+    pub(crate) var_button: egui::Rect,
     /// The publish dialog, while it is open (§5.3e, 2B; §15 D1015).
     pub(crate) publishing: Option<crate::kits::publish::PublishDraft>,
     /// This kit's changes since its last publish, with the session revision and
@@ -2360,6 +2366,8 @@ impl OndinApp {
             kit_watch: Default::default(),
             kit_users: None,
             kit_button: egui::Rect::NOTHING,
+            var_browser: None,
+            var_button: egui::Rect::NOTHING,
             publishing: None,
             kit_changes: None,
             making_local: None,
@@ -2871,6 +2879,7 @@ impl eframe::App for OndinApp {
             self.inspector_panel(&ctx);
             self.picker_ui(&ctx);
             self.kit_picker_ui(&ctx);
+            self.var_browser_ui(&ctx);
         }
         // 🚨 **The kit dialogs are outside the `!present` guard**, because two
         // of their doors are not hidden by present mode: `Ctrl+Alt+P` opens the
@@ -3105,6 +3114,7 @@ impl OndinApp {
             Action::ExportAll => self.export_all(crate::panels::ExportAll::Asking),
             Action::PlaceImage => self.place_image_action(),
             Action::InsertPicker => self.toggle_kit_picker(),
+            Action::VariablesBrowser => self.toggle_var_browser(),
             Action::PublishKit => self.open_publish(),
             Action::Copy => {
                 self.copy_selection(ctx);
@@ -3710,6 +3720,13 @@ impl OndinApp {
             // further in: a rung of its own, so one press closes one thing
             // (`D1014`'s fix (a) — it read `Escape` itself and closed beside
             // whatever else the press was spent on).
+        } else if let Some(b) = self.var_browser.as_mut() {
+            // The variables browser, in the picker's place (G11) — and one rung
+            // at a time inside it: a cell being typed into or an open menu
+            // goes first, the browser on the next press (§15 D1040).
+            if !b.escape() {
+                self.var_browser = None;
+            }
         } else if self.text.is_some() {
             self.finish_text_edit();
         } else if self.pen.is_some() {
@@ -7625,6 +7642,8 @@ impl OndinApp {
         // document's mains (§15 D1030).
         self.kit_picker = None;
         self.kit_placing = None;
+        // The browser's edits and menus name the old document's variables.
+        self.var_browser = None;
         // Leaving a kit ends its link back (D1011 (7)); *Go to main in the kit*
         // sets it again after the open that cleared it.
         self.kit_return = None;
@@ -9905,6 +9924,15 @@ impl OndinApp {
                     if resp.clicked() {
                         self.toggle_kit_picker();
                     }
+                    // The styles and variables browser's, directly above it
+                    // (§5.3f, G11): the two panels swap in place.
+                    let open = self.var_browser.is_some();
+                    let resp = icon_button(ui, icon::SWATCHES, 30.0, 20.0, open, true)
+                        .on_hover_text("Styles and variables (Shift+S)");
+                    self.var_button = resp.rect;
+                    if resp.clicked() {
+                        self.toggle_var_browser();
+                    }
                 });
             });
     }
@@ -11051,7 +11079,7 @@ mod tests {
     /// fails naming `inspector.rs`. Predicted correctly.
     #[test]
     fn only_the_layers_panel_commits_without_the_committer() {
-        let panels: [(&str, &str); 11] = [
+        let panels: [(&str, &str); 12] = [
             ("component.rs", include_str!("panels/component.rs")),
             ("dashboard.rs", include_str!("panels/dashboard.rs")),
             ("export.rs", include_str!("panels/export.rs")),
@@ -11062,6 +11090,7 @@ mod tests {
             ("paint.rs", include_str!("panels/paint.rs")),
             ("picker.rs", include_str!("panels/picker.rs")),
             ("typography.rs", include_str!("panels/typography.rs")),
+            ("variables.rs", include_str!("panels/variables.rs")),
             ("variants.rs", include_str!("panels/variants.rs")),
         ];
         let committing: Vec<&str> = panels

@@ -3333,7 +3333,7 @@ and the dashboard's 1B §15 D1017).
 - **Mains made local are placed by their laid-out boxes**, a frame's too, measured on the document the
   transaction leaves, stacked down the right of the content 80 apart.
 
-### 5.3f Styles and variables (ruled 2026-10-11 and 2026-10-13; step 1's core built; §15 D1037–D1039)
+### 5.3f Styles and variables (ruled 2026-10-11 and 2026-10-13; step 1's core and browser built; §15 D1037–D1040)
 
 > **Design ahead of code, nearly all of it.** Ruled with the maintainer on 2026-10-11, in conversation,
 > on a design the session put: §15 D1037 says which part is whose. The Claude Design pass on the chrome
@@ -3341,7 +3341,9 @@ and the dashboard's 1B §15 D1017).
 > which carries the chrome's substance — `design/` is regenerated). **Build step 1's core half is built**
 > (2026-10-14, §15 D1039): colour and number variables with aliases and modes, bound to paint and a
 > rectangle's corners, saved, resolved by every reader and carried by a paste — *What is built*, at the
-> end of this section. **None of the chrome is**; the build order and what is open are `roadmap.md`'s
+> end of this section. **Of the chrome, the browser is** (2026-10-14, §15 D1040), and none of the
+> inspector's half — the chip, the `--` list, the field menu, the swatch popup's segment, *Extract*, the
+> *Mode* row; the build order and what is open are `roadmap.md`'s
 > *Next · Styles and variables*. The rest of this section is the design, and it is rewritten in the
 > present tense as each step lands.
 
@@ -3447,6 +3449,23 @@ The operations, the save format's v7, invalidation, the paste rule and the reade
 §5.9 and §15 D1039. **A ghost resolves in the default mode**, being in no frame yet; **the snapshot
 reports the resolved value**, not the binding; **a kit's frozen copy detaches every binding** until step
 4 carries variables.
+
+**The browser** (§15 D1040 in full) is `panels/variables.rs`: `Shift+S` or the rail's swatches button
+directly above the hexagon opens it, and **opening either it or the insert picker closes the other**, the
+two anchored alike so they swap in place; `Escape` takes an open menu or a field first and the browser on
+the next press. Its width is the rule above; its height is the picker's fixed 460, so the swap does not
+jump; past three modes the columns scroll sideways under the name column by the wheel, no bar drawn. **A
+group is everything before a name's last `/`** (`variable::split_name`), each distinct path one flat
+header, so a subgroup is a header of its own. A usage count is the layers whose own fields read the
+variable, **not through an alias** (`variable::users`). Cells edit in place — `Enter` or a defocus
+commits, `Escape` abandons, `Tab` moves to the next mode — and **an alias is typed as `--name`**, the
+session's call while the swatch popup's segment is unbuilt. **Deleting goes through core verbs that put
+the detaches in the deleting transaction**, the commit refusing a bare removal: `variable::remove_ops`
+detaches each bound field to what it drew and each alias to what it resolved to, `remove_mode_ops`
+returns the frames to *Inherit*. A first variable brings the document's first mode with it. ⚠️ **Not
+yet D1038's**: refusals are a plain sentence rather than B4's dotted underline, a colour cell does not
+open the colour popup, and the `+` menu leaves out *Boolean variable* until step 2, as it does *String*
+until step 6.
 
 ### 5.4 Text node
 

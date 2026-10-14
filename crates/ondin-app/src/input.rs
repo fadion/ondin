@@ -187,6 +187,9 @@ pub enum Action {
     /// Open or close the insert picker (`Shift+I`, and the rail's hexagon — §5.3e,
     /// §15 D1011 (5)).
     InsertPicker,
+    /// Open or close the styles and variables browser (`Shift+S`, and the rail's
+    /// swatches button — §5.3f, D1038 (c)).
+    VariablesBrowser,
     /// *Publish kit…* (`Ctrl+Alt+P` — §5.3e, §15 D1011 (5)).
     PublishKit,
     /// Move the selection by a world-space delta (arrow keys).
@@ -1473,6 +1476,14 @@ fn normal_mode(ctx: &egui::Context, nudge: NudgeStep) -> Vec<Action> {
             Action::InsertPicker,
             &mut out,
         );
+        // The styles and variables browser, on `Shift+S` beside it (D1038 (c),
+        // `docs/shortcuts.md` §14) — off `S` itself, the star tool's, by the
+        // tool block's `!m.shift`.
+        on(
+            plain && m.shift && i.key_pressed(egui::Key::S),
+            Action::VariablesBrowser,
+            &mut out,
+        );
         // *Publish kit…*, on the maintainer's `Ctrl+Alt+P` (§15 D1011 (5)) — in
         // the `Ctrl+Alt` namespace beside the booleans' `U/S/I/X`, and clear of
         // them and of `Ctrl+P`, which nothing binds.
@@ -2560,6 +2571,32 @@ mod tests {
                 .contains(&Action::InsertPicker),
             "plain I is not this"
         );
+    }
+
+    /// **`Shift+S` opens the styles and variables browser** (D1038 (c)), and
+    /// leaves `S` the star tool's, `Ctrl+S` the save's and `Ctrl+Alt+S` the
+    /// boolean Subtract's.
+    #[test]
+    fn shift_s_opens_the_variables_browser_and_leaves_s_alone() {
+        let shift = egui::Modifiers::SHIFT;
+        assert_eq!(
+            actions(Mode::Normal, vec![key(egui::Key::S, shift)], shift),
+            vec![Action::VariablesBrowser]
+        );
+        for m in [
+            egui::Modifiers::NONE,
+            egui::Modifiers::COMMAND,
+            egui::Modifiers {
+                alt: true,
+                ..egui::Modifiers::COMMAND
+            },
+        ] {
+            assert!(
+                !actions(Mode::Normal, vec![key(egui::Key::S, m)], m)
+                    .contains(&Action::VariablesBrowser),
+                "{m:?}+S is not this"
+            );
+        }
     }
 
     /// **`Ctrl+Alt+G` frames the selection, and `G`'s three neighbours are

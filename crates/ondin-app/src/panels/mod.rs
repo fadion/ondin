@@ -14,6 +14,7 @@ mod layout;
 pub(crate) mod paint;
 mod picker;
 mod typography;
+pub(crate) mod variables;
 pub(crate) mod variants;
 
 /// The Component card's property readings, cached per revision (`[X8.1-L4-02]`).

@@ -566,6 +566,235 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
         .collect()
 }
 
+/// Every layer whose own fields read `var` — the browser's usage count and its
+/// *Select n layers* (D1038 G), in id order. Not through an alias: a layer bound
+/// to *button/bg* uses *button/bg*, whatever that names.
+pub fn users(doc: &crate::Document, var: VarId) -> Vec<NodeId> {
+    let mut out: Vec<NodeId> = doc
+        .node_map()
+        .values()
+        .filter(|n| reads(n, &[var]))
+        .map(|n| n.id)
+        .collect();
+    out.sort();
+    out
+}
+
+/// Whether any field of `n` is bound to one of `vars`.
+fn reads(n: &crate::Node, vars: &[VarId]) -> bool {
+    let hit = |v: Option<VarId>| v.is_some_and(|v| vars.contains(&v));
+    n.paint.fills.iter().any(|f| hit(f.brush.var()))
+        || n.paint.strokes.iter().any(|s| hit(s.brush.var()))
+        || n.corner_vars.iter().any(|v| hit(*v))
+}
+
+/// The operations that delete `vars` (D1038): **every field bound to one detaches
+/// to the value it drew**, every other variable's alias to one becomes the value
+/// it resolved to in that mode, and then the variables go — one transaction, so
+/// one `Ctrl+Z` brings back the variables and every binding. The commit refuses
+/// a bare `RemoveVariable` of a variable in use (`check`), so this is the only
+/// shape a delete of one can take.
+pub fn remove_ops(doc: &crate::Document, vars: &[VarId]) -> Vec<crate::Operation> {
+    use crate::Operation as O;
+    let t = doc.variables();
+    let mut ops = Vec::new();
+    let mut ids: Vec<NodeId> = doc
+        .node_map()
+        .values()
+        .filter(|n| reads(n, vars))
+        .map(|n| n.id)
+        .collect();
+    ids.sort();
+    for id in ids {
+        let n = doc.get(id).expect("listed from the document");
+        let gone = |b: &BrushSource| b.var().is_some_and(|v| vars.contains(&v));
+        if n.paint.fills.iter().any(|f| gone(&f.brush)) {
+            let fills = n
+                .paint
+                .fills
+                .iter()
+                .map(|f| {
+                    f.map(|f| crate::Fill {
+                        brush: if gone(&f.brush) {
+                            doc.resolve_brush(id, &f.brush).into_owned().into()
+                        } else {
+                            f.brush.clone()
+                        },
+                        ..f.clone()
+                    })
+                })
+                .collect();
+            ops.push(O::SetFills { id, fills });
+        }
+        if n.paint.strokes.iter().any(|s| gone(&s.brush)) {
+            let strokes = n
+                .paint
+                .strokes
+                .iter()
+                .map(|s| {
+                    s.map(|s| crate::Stroke {
+                        brush: if gone(&s.brush) {
+                            doc.resolve_brush(id, &s.brush).into_owned().into()
+                        } else {
+                            s.brush.clone()
+                        },
+                        ..s.clone()
+                    })
+                })
+                .collect();
+            ops.push(O::SetStrokes { id, strokes });
+        }
+        if let crate::NodeKind::Rect { corner_radii, .. } = &n.kind
+            && n.corner_vars.iter().flatten().any(|v| vars.contains(v))
+            && let Some(drawn) = doc.resolve_corners(id, *corner_radii)
+        {
+            let mut radii = *corner_radii;
+            let mut kept = n.corner_vars;
+            let slots = [
+                (&mut radii.top_left, drawn.top_left),
+                (&mut radii.top_right, drawn.top_right),
+                (&mut radii.bottom_right, drawn.bottom_right),
+                (&mut radii.bottom_left, drawn.bottom_left),
+            ];
+            for (k, (slot, value)) in slots.into_iter().enumerate() {
+                if kept[k].is_some_and(|v| vars.contains(&v)) {
+                    *slot = value;
+                    kept[k] = None;
+                }
+            }
+            ops.push(O::SetGeometry {
+                id,
+                geometry: crate::GeometryPatch::CornerRadii(radii),
+            });
+            ops.push(O::SetCornerVars { id, vars: kept });
+        }
+    }
+    for v in t.iter().filter(|v| !vars.contains(&v.id)) {
+        for (mode, cell) in &v.cells {
+            if let Cell::Alias(target) = cell
+                && vars.contains(target)
+            {
+                let cell = match t.resolve(v.id, *mode) {
+                    Some(Value::Color(c)) => Cell::Color(c),
+                    Some(Value::Number(x)) => Cell::Number(x),
+                    None => continue,
+                };
+                ops.push(O::SetVariableCell {
+                    id: v.id,
+                    mode: *mode,
+                    cell,
+                });
+            }
+        }
+    }
+    ops.extend(vars.iter().map(|id| O::RemoveVariable { id: *id }));
+    ops
+}
+
+/// The operations that delete `mode` (D1038): every frame set to it returns to
+/// *Inherit*, then the mode and its column go. Refused at the commit when it is
+/// the last mode and variables remain.
+pub fn remove_mode_ops(doc: &crate::Document, mode: ModeId) -> Vec<crate::Operation> {
+    let mut frames: Vec<NodeId> = doc
+        .node_map()
+        .values()
+        .filter(|n| n.mode == Some(mode))
+        .map(|n| n.id)
+        .collect();
+    frames.sort();
+    let mut ops: Vec<crate::Operation> = frames
+        .into_iter()
+        .map(|id| crate::Operation::SetMode { id, mode: None })
+        .collect();
+    ops.push(crate::Operation::RemoveMode { id: mode });
+    ops
+}
+
+/// The frames set to `mode` — what *Delete mode…* counts in its confirmation.
+pub fn frames_set_to(doc: &crate::Document, mode: ModeId) -> usize {
+    doc.node_map()
+        .values()
+        .filter(|n| n.mode == Some(mode))
+        .count()
+}
+
+/// A copy of mode `from` with its every cell, added at `index` of the list —
+/// *Duplicate mode* (after its source) and *New mode* (which copies the first
+/// mode and goes last, D1038 G). `None` when `from` is not a mode.
+pub fn copy_mode_ops(
+    doc: &crate::Document,
+    from: ModeId,
+    id: ModeId,
+    name: &str,
+    index: usize,
+) -> Option<crate::Operation> {
+    let t = doc.variables();
+    t.mode(from)?;
+    let cells = t
+        .iter()
+        .filter_map(|v| v.cells.get(&from).map(|c| (v.id, *c)))
+        .collect();
+    Some(crate::Operation::AddMode {
+        mode: Mode {
+            id,
+            name: name.into(),
+        },
+        index,
+        cells,
+    })
+}
+
+/// The group a variable's name puts it in — everything before its last `/` —
+/// and its leaf. *brand/primary/500* is in *brand/primary*, named *500*; a name
+/// with no slash is in the unnamed top group.
+pub fn split_name(name: &str) -> (&str, &str) {
+    match name.rsplit_once('/') {
+        Some((group, leaf)) => (group, leaf),
+        None => ("", name),
+    }
+}
+
+/// The renames that move every variable in group `from` (and its subgroups) to
+/// `to` — *Rename group*, the bindings following because they name ids. `Err`
+/// with the first name that would land on a variable already there: G13's merge
+/// is not ruled, and G14's refusal of a taken name is the answer taken here.
+pub fn rename_group_ops(
+    doc: &crate::Document,
+    from: &str,
+    to: &str,
+) -> Result<Vec<crate::Operation>, String> {
+    let t = doc.variables();
+    let moved = |name: &str| -> Option<String> {
+        if name.starts_with(&format!("{from}/")) {
+            let rest = &name[from.len() + 1..];
+            Some(if to.is_empty() {
+                rest.to_string()
+            } else {
+                format!("{to}/{rest}")
+            })
+        } else {
+            None
+        }
+    };
+    let mut ops = Vec::new();
+    let moving: Vec<VarId> = t
+        .iter()
+        .filter(|v| moved(&v.name).is_some())
+        .map(|v| v.id)
+        .collect();
+    for v in t.iter() {
+        let Some(next) = moved(&v.name) else { continue };
+        if t.iter().any(|o| o.name == next && !moving.contains(&o.id)) {
+            return Err(next);
+        }
+        ops.push(crate::Operation::SetVariableName {
+            id: v.id,
+            name: next,
+        });
+    }
+    Ok(ops)
+}
+
 /// Why the variables table or a binding was refused ([`check`]).
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
 pub enum VarRule {

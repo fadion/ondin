@@ -345,6 +345,8 @@ impl OndinApp {
         self.kit_picker = match self.kit_picker {
             Some(_) => None,
             None => {
+                // The variables browser shares the place (§5.3f, G11).
+                self.var_browser = None;
                 // A rescan reads each file's first 4 KB, so a kit published since
                 // the last one — in this window or synced in — is seen at once
                 // rather than when the dashboard next looks (`kits::index`).

@@ -1436,7 +1436,8 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D1036** — **Ten rulings from the `v0.5.0..fb90943` release review, each the review's recommendation; ~~(1)–(8), (10)'s `[X3.1-L1-03]` and both calls~~ every ruling and both calls built since, and the review's fix phase closed.** The maintainer accepted every recommendation of `review/release-v0.5.0/triage.md` §5 as presented, and asked that its two backlog findings be fixed too. (1) *Make local* on a vault main another vault main nests reveals it as the user's own fork and, in the same transaction, vendors a fresh copy for the nesting main, so the vault never links out and the kit's components keep the kit's version — the dialog says so; plus a `kit::check` rule that a vault node's link, swap and bound targets lie inside the vault (`[R1-L2-02]` + `[R3-L5-02]`; extends D1016, D1012). (2) `vendor` refuses another kit's main that nests one of this kit's own, a named `KitError` (*"Card2 in M uses this kit's Icon"*), keeping D1019's *"a kit main reaches only kit mains"*; a frozen own-copy left for later (`[X1-L1-02]`). (3) An instance copied inside the kit itself and pasted into a consumer detaches, D979 (d), and the paste's status says so; carrying the published copy declined (`[X1-L1-03]`). (4) A variant the kit deletes from a published set detaches its instances, D982 (c), and the accept's toast names them; lifting it out as a local main declined, a variant outside its set not being a model shape (`[R3-L5-03]`). (5) *Updated N* counts only mains whose sync changed more than the version; one unreadable kit and *Accept all* applies nothing — as the code already does — saying *"Nothing was updated, because ‹kit› could not be read"* (`[X3.2-L1-02]`; D1016, D1022, D1024). (6) On the dashboard every file is closed for D1017's routing, the session's included: `store::set_kit`, the session's meta patched, the dialog reading disk (`[X3.1-L5-01]`). (7) A carrying paste of a kit main nesting a main held at an older version is refused `NeedsUpdate`-shaped, *"accept ‹kit›'s update first"*, the picker's answer (`[X1-L1-01]`; D1012, D1014). (8) D1035's late-font question measured and closed in §15 — ⚠️ D1035 says a font's arrival cannot be faked headlessly, and a kit's tiles are the shelf worker's (`kits/index.rs`), not `LocalTiles`'. (9) The X7 tooling findings fixed in this phase, `[X7-L1-03]` first. (10) The backlog's `[X3.1-L1-03]` and `[X7-L1-09]` fixed. The session's two calls, not objected to: the kit dialogs drawn outside present mode's guard (`[X5-L1-01]`); a ↺ clicked over typed text wins (`[X6-L1-02]`) — which D1008 already claims, its *"drawn later"* backwards of the code. *(Ruled 2026-10-13 by the maintainer. **Keep**; ~~**not built**~~ each recorded as built by amendment, `triage.md` §7 the order. ~~Record-only, no citation in `crates/` yet. No entry amended; `architecture.md` untouched;~~ nothing struck from `roadmap.md`. **Amended 2026-10-13**: (1)–(5), (7) and the dialogs' call built — `make_local` copying back what the vault still nests, `VaultRule::LinksOut`, `KitError::Circular`, the paste's detach count, `Update::changed`/`removed` and the toast, `adopt` refusing `NeedsUpdate`/`Circular`, the kit dialogs outside the `!present` guard; two defects read, ~~***Fix***~~ each — the make-local card's vault sentence never drawn and its count taking nested copies, and `changed` missing a deleted last layer — **Resolved** in `4974d79`. **Amended again 2026-10-13**: (6) built — `set_kit_at` through `store::set_kit` on the dashboard, the held copy's id and mark patched from disk (`39fc2e2`); (8) measured, a kit's tiles never redrawn for a late font, and fixed — `KitShelf::fonts_changed` re-reading a kit whose text names an arriving family (`12aafc7`), three edges read, one an idle 20 Hz repaint; (10)'s `[X3.1-L1-03]` through `kits::index::kit_file`; the ↺ call built (`e53a48f`); the paste's detach count read off the result, and `adopt` cutting a fresh copy's reference to a carried main it leaves out (`4974d79`). **Amended a third time 2026-10-13 — D1036 built whole**: (9) and (10)'s `[X7-L1-09]` built in the three Claude Code mods, not shipped — dnumber-guard letting an owed entry be written, skipping ignored files, keeping blocks per worktree with an overlap refusal and a high-water mark; doc-run-guard seeing a run stranded by a blank line and a duplicated pair; edit-guard judging the command as the shell parses it, two risks left (`git add` of a new directory refused; a scratchpad splice copied back later passes) (`c34f092`, `b3fa054`, `85f8c2e`); (8)'s three edges, two ordinary kit files' tie, the order-only toast and `changes`' doc fixed (`9b1af2f`); `[R2-L8-01]` (`ad23f6b`); twelve tests for the review's coverage findings, `menu_context`'s `instance_root == id` filter found redundant and kept (`c304532`); four coverage gaps and two edges kept as known limits; all 50 findings closed, `triage.md`'s FIX PHASE table the status)*
 - **D1037** — **Styles and variables: a variable is a typed, named value with one value per mode, a bindable field stores its binding and resolves it at read, and a style is one slot's isolated set of values — applied whole, detached by any edit, never stacked.** Ruled 2026-10-11 by the maintainer, in conversation; reverses `roadmap.md` §0's *styles/variables* non-goal. **Variables** (≈ CSS custom properties): colour, number, string and boolean, and aliases; **modes set per frame**, inherited by descendants — the maintainer's, over once per document; usable in layout fields from the start. **Storage**, the session's proposal and the ground every later ruling stood on: a bindable field holds `Literal(T) | Bound(VarId)`, resolved at read — so D979 (a)'s comparison compares the **binding** (a main rebinding *brand* → *accent* reaches a copy still bound to *brand*; a copy bound elsewhere keeps it as an override), a variable's edit writes no node and propagates nothing, and §12's fourth property holds as written, where D978 bent it; the cost, every reader of a bindable field must resolve and one that skips it draws the fallback in silence, `Bindable<T>` reachable only through `resolve` the proposed guard. Deleting a used variable **detaches** its fields to the resolved value, D979 (c)'s rule. **Styles** (≈ an isolated CSS class): **one per slot** — fills, strokes, effects, text, layout — at most one per slot per node, no stacking; **a card is styled or not, as a whole**, any edit to its fields detaching it, no partial override and no inheritance — *"Styles are much simpler and it's not an issue to have a Body style, plus a Body Large"*; a style's values may be variables; text styles last (§5.4's spans). **The inspector**: a bound field is a **chip with the variable's name at the field's own width**, the resolved value in its tooltip, a typed literal or `Backspace` detaching, *Mixed* across disagreeing bindings, marked by shape and not hue (D981, D1001), beside the override dot; binding by typing **`--`** — `ui::parse_hex` takes `bad` and `facade` as colours, token names open with digits, and `expr.rs` has no names by design — a binding taking the whole field, `--x * 2` refused (§13 decision 1); never on the label badge (the maintainer's refusal); a field's right-click *Bind to variable…*, *Extract into variable* (its value into every mode, the maintainer's) and *Detach*; a *Variables* tab in the swatch popup; a styled card one row, *Detach* on hover, its menu in the header (D1005's precedent). **The browser**: a floating panel on the insert picker's model (D1014), its button at the toolbar's foot, taking turns with the picker, *Variables* / *Styles* tabs, modes as columns up to a capped width, an *In selection* filter, a usage count that selects (D1007), kit variables read-only. The session's, not ruled: kits carry what a vendored main uses (D1010, D1016, not objected to); a CSS export. **Open**: a frame's mode in the UI; the mode list's scope, and a kit's modes in a consumer; the shortcut; what string and boolean variables bind beyond text content and visibility, D982's properties being views over those fields; text styles over spans; a layout style's item-side properties; the export's CSS. *(Ruled 2026-10-11 by the maintainer; **not built**, so no code cites this number — the first build commit plants it. **Keep.** `architecture.md` §5.3f written; invariant 4, §5.3d, §5.3e, §5.9, §5.11, §7 and §12's fourth property pointed; `roadmap.md` §0's non-goal struck, *Next · Styles and variables* opened, the rebinding offer added to *Later · Components and layout, past the first build*. **Amended 2026-10-14** (D1038): the design pass done and accepted; (a), (b), (c), (d), (f) and premise (iv) ruled 2026-10-13, (e) and (g) still open; a styled card's menu a `⋯`, not D1005's `+`, and the card read-only in the inspector, any other door's edit still detaching it)*
 - **D1038** — **Styles and variables: the accepted chrome — a fully rounded capsule means a reference and nothing else in the inspector is round, a styled card is read-only there and edited in the browser alone, a field's right-click binds, extracts and detaches, and the browser swaps in place with the insert picker at a width its modes set — with the maintainer's rulings on D1037's open questions.** `design/Styles and Variables.dc.html` (Claude Design, revised 2026-10-14), its substance written here because `design/` is regenerated; the maintainer's *"Agree with all"* on the session's recommendations, 2026-10-13. **Overruling the mockup**, D982's precedent: H2's per-kit *Mode* row (a frame carries one mode), G5's *String variable* (hidden until step 6), and C1's always-three-row field menu (*Detach variable* omitted on an unbound field, `context-menus.md` §3's exception; 2026-10-14). **Rulings**: (a) a *Mode* row in a frame's identity card — inherited dim, naming the nearest ancestor frame that sets one or the document's default, its first mode; set bright and appended to the canvas label; *Inherit* first; frames only, not groups; a mode set on a copy an override; (b) one mode list per document, a per-kit mapping at document level edited in the kit's browser row, by name, else the kit's first mode; (c) `Shift+S`, agreed and unbound; (d) booleans bind visibility (step 2), strings text content and font family (step 6); (f) a layout style the container's fields only; (e), (g) open. A colour variable binds a whole solid paint, never a gradient stop, and carries its own alpha, the fill's `%` separate and unbindable; a paste into another document rebinds by name and type or detaches, within one keeps its binding; deleting a mode returns its frames to *Inherit*, confirmed with their count. **Additions accepted**: a styled card read-only in the inspector, its values edited only in the browser, any other door's edit still detaching; a canvas gesture on a bound or styled value detaches, the floating status naming it; no scrubbing on a bound field; a hover × in the chip; a header `⋯` on the five slot cards, after the `+`; deleting a style detaches its users; bindable numbers W, H, corner radius, layer opacity, stroke width, effect X/Y/blur/spread, gaps and padding — not X, Y or rotation. **Chrome**: the capsule rule (a reference, no hue); the bound field, two *Mixed* cases, left-eliding by group; the `--` list and B4's refusal manner; the field menu's three fixed rows; *Extract*'s dashed capsule; the swatch popup's *Variables* segment; the styled card; the browser above the hexagon, 340/436/532 wide by mode count, aliases per-mode cell values, *In selection* never falling back, groups, refusals, empty states, kit updates. ⚠️ G13's merge of two groups holding one leaf name is the design's, unruled. *(Ruled 2026-10-13 by the maintainer; **not built**, record-only, no code cites this number. **Keep.** D1037 amended; `architecture.md` §5.3e, §5.3f and §5.11 amended; `shortcuts.md` §14; `context-menus.md` §6.7; `roadmap.md` *Next · Styles and variables* edited down, its *Later* rebinding row's attribution corrected)*
-- **D1039** — **Styles and variables, build step 1's core: a variables table, the binding stored in three shapes rather than D1037's one `Literal | Bound` — a paint's `BrushSource` carrying the fill's `%` beside its variable, a rectangle's corners bound from `Node::corner_vars` and drawn from `Resolved`'s used kind, a frame's `Node::mode` — schema v7, and a paste that keeps, rebinds or detaches per field.** `variable.rs`: `VarId`/`ModeId` minted like `GuideId`, colour and number kinds, a cell a value or an alias, the first mode the default; `variable::check` a commit post-condition and a load check, **a dangling binding refused on load**. The `%` rides in the binding because a literal solid's `%` is its colour's alpha; no `Deref`, so the compiler listed every reader; `drawn()` answers transparent and is called only below `resolved_paint`. Corners on a sidecar for ~250 `Rect` sites (the caller's reason), literals written 0, every geometry reader following the used kind — **but the inspector's radius field and the canvas handle write a literal nobody draws**. Seven table ops and two node ops; table ops dirty every bound node by a scan and propagate nothing; `absorb` no-ops the seven table ops — pinned by `overrides.rs`' fixture since a same-day fix — and refuses `SetMode`/`SetCornerVars`. A fourth `update` ≡ `rebuild` run. Ghosts in the default mode; the snapshot the resolved value; Group Colors literal only; an edit as drawn keeps a binding for a `%` alone. v7 a number, the published document's too; `kit::freeze` detaches; *Paste properties* across documents refused at the commit. *(Built 2026-10-14, uncommitted. **Keep**; the fixture and four docs **Fixed** before commit; ***Fix with* the chip commit** the corner writes and `edited_brush`'s three edges; `architecture.md` §5.3, §5.3b, §5.3d, §5.3f, §5.7, §5.9, §5.11, §6.2, invariant 4 and §12 amended; `roadmap.md` step 1 edited down)*
+- **D1039** — **Styles and variables, build step 1's core: a variables table, the binding stored in three shapes rather than D1037's one `Literal | Bound` — a paint's `BrushSource` carrying the fill's `%` beside its variable, a rectangle's corners bound from `Node::corner_vars` and drawn from `Resolved`'s used kind, a frame's `Node::mode` — schema v7, and a paste that keeps, rebinds or detaches per field.** `variable.rs`: `VarId`/`ModeId` minted like `GuideId`, colour and number kinds, a cell a value or an alias, the first mode the default; `variable::check` a commit post-condition and a load check, **a dangling binding refused on load**. The `%` rides in the binding because a literal solid's `%` is its colour's alpha; no `Deref`, so the compiler listed every reader; `drawn()` answers transparent and is called only below `resolved_paint`. Corners on a sidecar for ~250 `Rect` sites (the caller's reason), literals written 0, every geometry reader following the used kind — **but the inspector's radius field and the canvas handle write a literal nobody draws**. Seven table ops and two node ops; table ops dirty every bound node by a scan and propagate nothing; `absorb` no-ops the seven table ops — pinned by `overrides.rs`' fixture since a same-day fix — and refuses `SetMode`/`SetCornerVars`. A fourth `update` ≡ `rebuild` run. Ghosts in the default mode; the snapshot the resolved value; Group Colors literal only; an edit as drawn keeps a binding for a `%` alone. v7 a number, the published document's too; `kit::freeze` detaches; *Paste properties* across documents refused at the commit. *(Built 2026-10-14, `a23b53a`. **Keep**; the fixture and four docs **Fixed** before commit; ***Fix with* the chip commit** the corner writes and `edited_brush`'s three edges; `architecture.md` §5.3, §5.3b, §5.3d, §5.3f, §5.7, §5.9, §5.11, §6.2, invariant 4 and §12 amended; `roadmap.md` step 1 edited down. **Amended 2026-10-14** (D1040): the browser, `Shift+S` and the delete verbs built)*
+- **D1040** — **Styles and variables, build step 1's browser: a floating panel above the hexagon swapping in place with the insert picker, a fixed name column and a column per mode, variables grouped by the slash path in their names, cells edited in place — an alias typed as `--name` — and the delete verbs detaching in the deleting transaction.** `panels/variables.rs`; `Shift+S` (`Action::VariablesBrowser`) or `icon::SWATCHES`; either panel's toggle closes the other; `Escape` a rung after the picker's, a menu or a field first. Width `24 + 220 + 96·min(n,3)`, *Value* with one mode, sideways scrolling past three by wheel with no drawn bar; height 460, the picker's, so the swap does not jump (the session's). Flat headers per distinct group path; usage counts direct, not through an alias, selecting on a click; *In selection* direct bindings in the selection's subtrees. `Enter`/defocus commits, `Escape` abandons, `Tab` to the next mode; a hex with alpha, a number by `expr::eval`, **`--name` an alias — the session's call**, D1038 giving the cell no route until the popup's segment; refusals a plain sentence, not B4's manner. A first variable creates *Mode 1*; *Boolean variable* left out of `+` with *String* (the session's reading); *Delete mode…* confirms with its frames; a group rename refuses a clash (G14 over unruled G13). Core: `users`, `remove_ops`, `remove_mode_ops`, `frames_set_to`, `copy_mode_ops`, `split_name`, `rename_group_ops`. The delete status names a value only when every user read the same one in its own mode. ⚠️ *Delete group* takes the subgroups under a count that is the group's alone. 🚨 A refused `Tab` dropped the typed cell, two acts applied in order; now one, `Act::Cell` carrying the next cell, opened only when `var_cell` lands. *(Built 2026-10-14, uncommitted. **Keep**; ~~***Fix*** the refused `Tab`~~ **Fixed** before commit, with the delete status's value — test `a_refused_tab_keeps_the_typed_cell`, its flip failing *"the refused field is kept"*. Still owed: a colour cell opening the colour popup, G3's bar, B4's manner, Alt-click and the per-document collapse, and the inspector's half. D1039 amended; `architecture.md` §5.3f; `shortcuts.md` §14; `roadmap.md` step 1 edited down)*
 
 ---
 
@@ -24747,8 +24748,9 @@ mode; setting one off a frame is refused at the commit, where a transaction is j
 **`RemoveVariable` and `RemoveMode` are refused at the commit while anything uses them**, so D1038's
 *"deleting a variable detaches its users"* and *"deleting a mode returns its frames to Inherit"* are ops
 the deleting verb puts in the same transaction — as `removing_a_variable_in_use_needs_its_users_detached`
-and `removing_a_mode_carries_its_column_in_the_inverse` compose them by hand. **No such verb is built**:
-the browser that would call it is not. The classification: `SetMode` and `SetCornerVars` name a node
+and `removing_a_mode_carries_its_column_in_the_inverse` compose them by hand. ~~**No such verb is
+built**: the browser that would call it is not.~~ Built since, `variable::remove_ops` and
+`remove_mode_ops`, the browser calling them (D1040). The classification: `SetMode` and `SetCornerVars` name a node
 for `overwrites` and `retargeted`; `changes_ink` is false for the two renames and for `AddVariable` and
 `RemoveVariable` (a new variable is read by nothing, and a removal is refused while anything reads it,
 so the detaches beside it are the ink) and true for a cell, a mode added or removed — either can move
@@ -24846,13 +24848,14 @@ code, not run; reachable only from a file that carries a binding. Whether *Paste
 paste's rule is `roadmap.md`'s open question, D1038 having put the ruling for a paste.
 
 **Not built**, the chrome's half of step 1, each owed by the UI commits: the chip and its `--`, the field
-menu, the swatch popup's *Variables* segment, the browser and `Shift+S`, the *Mode* row and the canvas
-label's suffix, the delete-variable and delete-mode verbs, and the canvas radius handle's detach — plus
+menu, the swatch popup's *Variables* segment, ~~the browser and `Shift+S`,~~ the *Mode* row and the canvas
+label's suffix, ~~the delete-variable and delete-mode verbs,~~ and the canvas radius handle's detach — plus
 string and boolean variables, steps 2 and 6. ⚠️ **The `--` list's live preview (D1038 B) meets
 `absorb`'s refusal for a corner**: a highlighted row binding a fill is a `SetFills`, which previews, but
 one binding a radius is a `SetCornerVars`, which `absorb` refuses — so that half of the preview is owed
 too, by a patch carrying the radius or by a preview of the used kind. *(Built 2026-10-14 by the session, the storage's three
-shapes, the snapshot's resolved value and the scan the session's calls; uncommitted when recorded.
+shapes, the snapshot's resolved value and the scan the session's calls; uncommitted when recorded,
+committed as `a23b53a`.
 **Keep** the shapes, the scan and the refusal on load; ~~***Fix*** `overrides.rs`' fixture to list the
 seven~~ **Fixed** before commit, with `op.rs`'s `changes_ink` doc, `renderer.rs`'s count comment,
 `Document::resolved_paint`'s doc (a ghost passes its own id and reads in the default mode — it had said
@@ -24861,7 +24864,120 @@ number"*); ***Fix with* the chip commit** the inspector's and the canvas's write
 `edited_brush`'s three edges. Cites D1037 and D1038 from `variable.rs`. `architecture.md` §5.3, §5.3b,
 §5.3d's v6 line, §5.3f, §5.7, §5.9, §5.11, §6.2, invariant 4 and §12's fourth property amended;
 `roadmap.md` *Next · Styles and variables* step 1 edited to what the UI owes, premises (i), (ii) and
-(v) struck from its owed list and (vi) edited down to the preview)*
+(v) struck from its owed list and (vi) edited down to the preview. **Amended 2026-10-14** (D1040): the
+browser, `Shift+S` and the delete-variable and delete-mode verbs built, struck from the lists above)*
+
+**D1040 — Styles and variables, build step 1's browser: a floating panel above the hexagon that swaps
+in place with the insert picker, a fixed name column and a column per mode, variables grouped by the
+slash path in their names, every cell edited in place — an alias typed as `--name` — and the delete
+verbs that detach in the deleting transaction. *Built 2026-10-14, uncommitted when recorded; the
+inspector's half of the chrome not.*** The second build commit of D1037's order, drawing D1038's G1–G22
+(`panels/variables.rs`, its module doc citing both). **The panel**: `Browser` is the app's
+`var_browser`, opened by `toggle_var_browser` — `Shift+S` (`Action::VariablesBrowser`, D1038 (c)) or the
+rail's new `icon::SWATCHES` button, drawn by `bottom_up` directly above the hexagon — and **opening either
+panel closes the other** (`toggle_kit_picker` clears `var_browser`, `toggle_var_browser` clears
+`kit_picker`), anchored as the picker is, at the button's right and the lower of the two buttons'
+bottoms, so they swap in place (G11). Drawn after `kit_picker_ui` inside `!present`; cleared by a
+document switch beside the picker, its edits and menus naming the old document's variables. **`Escape`
+is a rung of `OndinApp::escape` after the insert picker's**, and inside it one thing at a time:
+`Browser::escape` takes an open menu or a field being typed into first, the browser on the next press.
+⚠️ **The search takes the keyboard once, on opening**, as D1014's does, so `Shift+S` pressed straight
+after opening is a capital *S* in the search — `Shift+I`'s caveat (`shortcuts.md` §13–§14).
+
+**Width is D1038's**, `2·12 + 220 + 96·min(n, 3)` — 340, 436, 532 — the one mode's column headed
+*Value*. **Past three the mode columns scroll sideways under the fixed name column**, by a horizontal
+wheel or `Shift` and the wheel over the panel, with **no drawn scrollbar** — G3's bar is not built.
+**The height is fixed at 460**, the insert picker's `H`, shorter only when the canvas has less room
+above the button: the mockup's frames vary in height, and **the session chose the picker's** so that two
+panels swapping in one place do not jump. Ground `#282828` (G1); *Variables* and *Styles* tabs, the
+*Styles* tab an empty state, *No styles yet*, until step 3.
+
+**The table.** A variable's **group is everything before its last `/`** (`variable::split_name`), and
+**each distinct group path is one flat header** — caret, path, count — so *brand* and *brand/primary*
+are two headers side by side, and collapsing *brand* leaves *brand/primary* open; the unnamed top group
+has no header. A search, a case-blind substring of the full name, opens the groups it matches. A row is
+its leaf name, its **usage count** — `variable::users`, the layers whose own fields read it, **not
+through an alias** — which selects those layers on a click (*Select n layers* its tooltip, D1007's
+precedent), and a cell per mode: a swatch and hex (eight digits when the alpha is below 1), a bare
+number, or **an alias's capsule naming its target**, *uses ‹name›* in its tooltip — the capsule rule's
+reference. ***In selection*** keeps the variables some layer in the selection's subtrees binds
+directly, the group counts reading *n of m* and the line under the search naming the selection (*Used by
+Card · 2 variables*, *Nothing selected*); pressed, it stays pressed across selection changes and never
+falls back (G4). ⚠️ **Under a search alone the counts read the group's total**, *n of m* being *In
+selection*'s.
+
+**Editing.** A double-click renames a variable, a mode or a group; a click opens a cell. **`Enter` or a
+defocus commits through `ui::defocus_commits`, so `Escape` abandons**; `Tab` commits and opens the next
+mode's cell. A colour cell takes a hex, its alpha too — a colour variable carries its own (D1038) —
+where the inspector's hex field drops the last pair; a number cell `expr::eval`'s answer, finite.
+🚨 **An alias is typed as `--name`, the session's call**: D1038 makes an alias only through the colour
+popup's *Variables* segment, which is not built, and gives a number alias no route at all, so the cell
+borrows the field binding's spelling (D1037). **A refusal is one plain sentence under the search, the
+field kept open and given the keyboard back** — a taken name (G14's natural answer), an empty name or
+group part, an alias that would loop, of the wrong kind or to no variable, an unparsable value. ⚠️
+**Not in B4's manner**: no dotted underline under the offending text, which D1038 gives every refusal —
+a known gap. A new variable is *colour n* or *number n*, the first free, white or 0 in every mode — and
+**a first variable creates the document's first mode, *Mode 1*, in the same transaction**, a variable
+needing a cell per mode — its name field opened for typing; D1038's pending row is *Extract*'s and is
+not built. *New mode* copies the first mode's cells and goes last (D1038 G); *Duplicate mode* goes after
+its source; *Duplicate* names *‹name› copy*, then *‹name› copy 2*.
+
+**The menus** (`ui::menu_frame`, `menu_row`). The `+`: *Colour variable*, *Number variable*, a rule,
+*New mode* — *String variable* hidden by D1038 (d), and ⚠️ ***Boolean variable* left out too, the
+session's reading**: D1038's G lists it, but booleans bind visibility in step 2 and `VarKind` has no
+boolean yet. A row's right-click: *Rename*, *Duplicate*, *Select n layers*, *Delete*. A mode header's:
+*Rename mode*, *Duplicate mode*, *Delete mode…*, which confirms in the menu's place with the frames it
+returns to *Inherit* (*Delete Dark? 3 frames return to Inherit.*) and is disabled for the last mode while
+variables remain, every variable needing a value in one. A group's: *Rename group* — **a clash refused,
+G14's answer taken where G13's merge is unruled** (`roadmap.md`) — *Select n layers* and *Delete group*.
+
+**The verbs** (`variable.rs`, core, since the commit refuses either removal alone, D1039).
+**`remove_ops`** detaches every field bound to a deleted variable to the value it drew at that node, and
+every other variable's alias to one to the value it resolved to in that mode, then removes — one
+transaction, one `Ctrl+Z`. **`remove_mode_ops`** returns the frames set to a mode to *Inherit*, then
+removes it; `frames_set_to` is the confirmation's count. `copy_mode_ops` is *New mode* and *Duplicate
+mode*; `rename_group_ops` renames every member, subgroups included, the bindings following because they
+name ids. **The floating status says what a delete did** — *Deleted brand/500. 3 layers now use #8BA5E0
+directly.*, G10's wording, or *… layers were detached.* for a group. **It names a value only when
+every user read the same one in its own mode** (`Document::resolve_var` over the users), else it says
+the layers were detached: each detaches to what it drew where it stands, and two frames in two modes
+leave two values. ~~⚠️ The value it names is the default mode's~~ — as first built it named the default
+mode's value under a frame set to another, the wrong hex; fixed the same day, before commit.
+
+🚨 **A refused `Tab` lost the typed cell**, read in the code when this was first recorded. `Tab` pushed
+`Act::Cell` and then `Act::StartEdit` for the next mode, applied in that order: the refusal kept the
+field and set its sentence, and the `StartEdit` behind it then replaced the field with the next cell's
+and cleared the sentence — so a mistyped value was dropped with nothing said, the opposite of *"the
+field kept open"* above. ~~***Fix***~~ **Fixed the same day, before commit**: **one act, not two** —
+`Act::Cell` carries the next cell as an `Option<Edit>`, and `var_act` opens it only when `var_cell`,
+now answering whether the value landed or was unchanged, says so. *Do not* split it back into a commit
+and an edit: the order of two acts is what lost the text. Pinned by `a_refused_tab_keeps_the_typed_cell`;
+flip, opening the next cell whatever `var_cell` answered, failing *"the refused field is kept"*, as
+predicted, as the caller reports it. ⚠️ A click on another cell while a refused field is open may lose
+the text the same way, through that cell's `StartEdit` — it turns on when egui moves the focus, and is
+unmeasured. ⚠️ **And *Delete group* takes the
+subgroups**: `in_group` is a prefix, so on *brand* it deletes *brand/primary*'s members too, with no
+confirmation, under a header whose count is *brand*'s alone — the flat headers' cost; *Rename group*
+and its *Select n layers* reach the subgroups the same way, which for a rename is D1038's *"the members
+moving"*. One `Ctrl+Z` restores; read, not ruled.
+
+**Not built**, still owed by step 1: the chip and its `--` list, `--` in the inspector's fields, the
+field menu, the swatch popup's *Variables* segment, *Extract*, the *Mode* row and the canvas label's
+suffix — and in the browser itself, **a colour cell opening the colour popup beside the panel** (D1038:
+the popup's *Variables* segment is where it makes an alias), G3's scrollbar, B4's refusal manner,
+Alt-click on a caret and the collapsed state kept per document (`collapsed` lives as long as the panel
+is open). *(Built 2026-10-14 by the session; the 460 height, `--name` in a cell, the flat group headers,
+Boolean's absence and G14's refusal on a group rename the session's calls; uncommitted when recorded.
+**Keep**; ~~***Fix*** the refused `Tab`~~ **Fixed** before commit, with the delete status's value.
+Tests, as the caller reports them: `panels::variables::tests`'
+`a_first_variable_brings_a_mode_and_opens_its_name`, `the_browser_and_the_insert_picker_take_turns`,
+`a_cell_takes_a_hex_an_alias_and_refuses_a_loop`, `deleting_a_used_variable_detaches_and_says_so`,
+`escape_closes_the_field_then_the_browser`, `the_panel_is_as_wide_as_its_modes` and
+`a_refused_tab_keeps_the_typed_cell`; `input::tests::
+shift_s_opens_the_variables_browser_and_leaves_s_alone`; and in `tests/variables.rs`,
+`deleting_a_variable_detaches_its_fields_and_its_aliases` and `deleting_a_mode_and_renaming_a_group`.
+One flip reported, the refused `Tab`'s. D1039 amended; `architecture.md` §5.3f; `shortcuts.md` §14's `Shift+S` bound;
+`roadmap.md` *Next · Styles and variables* step 1 edited down)*
 
 **D980 — The five item lists carry ids, in a wrapper beside each item rather than a field inside it,
 and an instance's items follow its main's item by item. *Decided 2026-10-04 by the maintainer — per

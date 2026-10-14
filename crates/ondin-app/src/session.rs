@@ -1234,6 +1234,10 @@ impl EditorSession {
         // And a resized flex item keeps the size it was dragged to (§15 D875), and
         // an in-flow item its stored translation (§15 D877).
         let tx = ondin_core::build::keep_flex_sizes(&self.doc, &self.resolved, tx);
+        // And a radius written over a bound corner detaches it (§15 D1041, D1038
+        // (2)) — before `propagate`, so a copy bound as its main was follows the
+        // detach as well as the radius.
+        let tx = ondin_core::build::keep_corner_bindings(&self.doc, tx);
         let mut tx = tx;
         // What the components owe the edit — a swap's rewrite, a main's structure
         // and fields reaching its instances, the links and variant names settled —

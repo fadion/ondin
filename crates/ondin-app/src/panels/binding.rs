@@ -1,0 +1,1215 @@
+//! Binding an inspector field to a variable (§5.3f, D1038 A1–D3; §15 D1041).
+//!
+//! **The chip** — a bound field's value is a capsule naming its variable at the
+//! field's own width, the only fully round thing in the inspector (*the capsule
+//! rule*), with no hue of its own: the accent only while it holds the keyboard.
+//! Its tooltip is the resolved value and the mode it resolved in; a hover ×
+//! detaches; focused, `Backspace` detaches and any other key replaces it.
+//!
+//! **The `--` list** — typing `--` into a bindable field opens a list of the
+//! variables of the field's kind under it, filtered by what follows; `↑`/`↓`
+//! move the highlight, which previews on the canvas, `Enter` binds and `Escape`
+//! restores. One list in the whole app, keyed by the field it is under.
+//!
+//! **The field menu** (`context-menus.md` §6.7) — *Bind to variable…*, *Extract
+//! into variable…* (disabled when bound), *Detach variable* (omitted when not).
+
+use crate::app::OndinApp;
+use crate::panels::PaintSlot;
+use crate::theme::{self, color, icon};
+use crate::ui;
+use eframe::egui;
+use ondin_core::variable::{Cell, Mode, Value, VarId, VarKind, Variable};
+use ondin_core::{NodeId, Operation, PaintTarget, Transaction};
+
+/// A field that can be bound, and where its binding writes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum FieldKey {
+    /// A fill's or a stroke's colour: `slot` on node `id` — one of its own
+    /// (`Fill`/`Stroke`) or a row of the selection's shared list (`Selection`).
+    Paint { id: NodeId, slot: PaintSlot },
+    /// A rectangle's corner radius, all four corners, on node `id`.
+    Radius { id: NodeId },
+}
+
+impl FieldKey {
+    pub(crate) fn kind(self) -> VarKind {
+        match self {
+            FieldKey::Paint { .. } => VarKind::Color,
+            FieldKey::Radius { .. } => VarKind::Number,
+        }
+    }
+}
+
+/// The `--` list while it is open.
+#[derive(Clone, Debug)]
+pub(crate) struct Complete {
+    pub(crate) key: FieldKey,
+    /// What follows the `--`.
+    pub(crate) query: String,
+    pub(crate) highlight: usize,
+    /// The field it hangs under, as last drawn.
+    pub(crate) under: egui::Rect,
+    /// Whether it was opened from the field menu rather than by typing — then the
+    /// list carries a search field of its own, the field itself not being typed
+    /// into.
+    pub(crate) own_search: bool,
+    /// Whether the search should take the keyboard next frame.
+    pub(crate) focus: bool,
+    /// The frame this list was last asked for. A typing field asks every frame it
+    /// holds `--`; a list nobody asked for since the frame before closes.
+    pub(crate) seen: u64,
+}
+
+/// A bound field's chip text, re-typed: what replaces the chip once a key other
+/// than `Backspace` or `--` lands on it (D1038 A3).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Retype {
+    pub(crate) key: FieldKey,
+    pub(crate) text: String,
+    pub(crate) focus: bool,
+}
+
+/// What a chip was asked this frame.
+#[derive(Debug, Default, PartialEq)]
+pub(crate) struct ChipOut {
+    pub(crate) detach: bool,
+    /// A key typed onto the focused chip — the start of a literal, or of `--`.
+    pub(crate) typed: Option<String>,
+    pub(crate) menu: Option<egui::Pos2>,
+}
+
+/// The chip's capsule: 20 tall, fully round (D1038 A1).
+const CHIP_H: f32 = 20.0;
+const LIST_ROW_H: f32 = 26.0;
+const LIST_W: f32 = 256.0;
+
+/// Draw a bound field's chip in `rect` — the field's value area — and read what
+/// it is asked. `name` is the variable's full name, `tip` the resolved value and
+/// mode, `x` whether the hover × is offered (a chip in a mixed row has none).
+pub(crate) fn chip(
+    ui: &mut egui::Ui,
+    rect: egui::Rect,
+    id: egui::Id,
+    name: &str,
+    tip: &str,
+    x: bool,
+) -> ChipOut {
+    let mut out = ChipOut::default();
+    let cap = egui::Rect::from_min_max(
+        egui::pos2(rect.left(), rect.center().y - CHIP_H / 2.0),
+        egui::pos2(rect.right(), rect.center().y + CHIP_H / 2.0),
+    );
+    let resp = ui.interact(cap, id, egui::Sense::click());
+    let focused = resp.has_focus();
+    if resp.clicked() {
+        resp.request_focus();
+    }
+    let hovered = resp.hovered();
+    let p = ui.painter();
+    let (fill, ink) = if focused {
+        (color::ACCENT.gamma_multiply(0.28), color::ACCENT_100)
+    } else if hovered {
+        (color::text_a(43), color::TEXT)
+    } else {
+        (color::text_a(28), color::TEXT)
+    };
+    p.rect_filled(cap, CHIP_H / 2.0, fill);
+    // The hover ×, in the chip's last 14 points (A7).
+    let xr = egui::Rect::from_center_size(
+        egui::pos2(cap.right() - 3.0 - 7.0, cap.center().y),
+        egui::vec2(14.0, 14.0),
+    );
+    let show_x = x && (hovered || ui.rect_contains_pointer(xr));
+    let text_right = if show_x {
+        xr.left() - 4.0
+    } else {
+        cap.right() - 8.0
+    };
+    let font = egui::FontId::proportional(11.5);
+    let shown = elide_groups(ui, name, &font, text_right - (cap.left() + 8.0));
+    p.with_clip_rect(egui::Rect::from_x_y_ranges(
+        cap.left()..=text_right,
+        cap.y_range(),
+    ))
+    .text(
+        egui::pos2(cap.left() + 8.0, cap.center().y + 1.0),
+        egui::Align2::LEFT_CENTER,
+        shown,
+        font,
+        ink,
+    );
+    if show_x {
+        let xresp = ui.interact(xr, id.with("x"), egui::Sense::click());
+        ui.painter().circle_filled(
+            xr.center(),
+            7.0,
+            if xresp.hovered() {
+                color::text_a(70)
+            } else {
+                color::text_a(46)
+            },
+        );
+        ui.painter().text(
+            xr.center(),
+            egui::Align2::CENTER_CENTER,
+            icon::X,
+            egui::FontId::new(9.0, egui::FontFamily::Name("phosphor".into())),
+            color::TEXT,
+        );
+        if xresp.on_hover_text("Detach variable").clicked() {
+            out.detach = true;
+        }
+    }
+    if resp.secondary_clicked() {
+        out.menu = resp.interact_pointer_pos();
+    }
+    resp.on_hover_text(tip);
+    if focused {
+        // The keys a focused chip takes for itself — read and consumed here, so
+        // the keymap never sees a `Backspace` that would delete the layer (an
+        // egui focus also holds the keymap off, `input::resolve`).
+        let (back, typed) = ui.input_mut(|i| {
+            let back = i.consume_key(egui::Modifiers::NONE, egui::Key::Backspace)
+                || i.consume_key(egui::Modifiers::NONE, egui::Key::Delete);
+            let mut typed = String::new();
+            i.events.retain(|e| match e {
+                egui::Event::Text(t) => {
+                    typed.push_str(t);
+                    false
+                }
+                _ => true,
+            });
+            (back, typed)
+        });
+        if back {
+            out.detach = true;
+        } else if !typed.is_empty() {
+            out.typed = Some(typed);
+        }
+    }
+    out
+}
+
+/// `name` fitted to `width`: whole groups cut from the left first —
+/// `…/width-collapsed` — then the leaf, with an ellipsis (D1038 A5).
+pub(crate) fn elide_groups(ui: &egui::Ui, name: &str, font: &egui::FontId, width: f32) -> String {
+    let fits = |s: &str| {
+        ui.fonts_mut(|f| {
+            f.layout_no_wrap(s.to_string(), font.clone(), color::TEXT)
+                .size()
+                .x
+        }) <= width
+    };
+    if fits(name) {
+        return name.to_string();
+    }
+    let parts: Vec<&str> = name.split('/').collect();
+    for cut in 1..parts.len() {
+        let s = format!("…/{}", parts[cut..].join("/"));
+        if fits(&s) {
+            return s;
+        }
+    }
+    let leaf = parts.last().copied().unwrap_or(name);
+    let mut chars: Vec<char> = leaf.chars().collect();
+    while !chars.is_empty() {
+        chars.pop();
+        let s = format!("{}…", chars.iter().collect::<String>());
+        if fits(&s) {
+            return s;
+        }
+    }
+    "…".into()
+}
+
+/// A resolved value and the mode it resolved in, for a chip's tooltip:
+/// `16 · Dark`, `8BA5E0 · Light` — the full name first when the chip elides it.
+pub(crate) fn chip_tip(name: &str, value: Option<Value>, mode: Option<&Mode>) -> String {
+    let v = match value {
+        Some(Value::Color(c)) => ui::hex_of(c),
+        Some(Value::Number(x)) => trim_number(x),
+        None => "—".into(),
+    };
+    match mode {
+        Some(m) => format!("{name} · {v} · {}", m.name),
+        None => format!("{name} · {v}"),
+    }
+}
+
+fn trim_number(x: f64) -> String {
+    let r = (x * 100.0).round() / 100.0;
+    if r.fract() == 0.0 {
+        format!("{r:.0}")
+    } else {
+        format!("{r}")
+    }
+}
+
+/// The variables `--query` lists for a field of `kind`: a substring match on the
+/// full name, grouped by group in name order (B1).
+pub(crate) fn matches<'a>(
+    table: &'a ondin_core::Variables,
+    kind: VarKind,
+    query: &str,
+) -> Vec<&'a Variable> {
+    let q = query.trim().to_lowercase();
+    let mut out: Vec<&Variable> = table
+        .iter()
+        .filter(|v| v.kind == kind && (q.is_empty() || v.name.to_lowercase().contains(&q)))
+        .collect();
+    out.sort_by(|a, b| {
+        let (ga, _) = ondin_core::variable::split_name(&a.name);
+        let (gb, _) = ondin_core::variable::split_name(&b.name);
+        ga.cmp(gb).then(a.name.cmp(&b.name))
+    });
+    out
+}
+
+impl OndinApp {
+    /// The nodes a field's binding writes to.
+    fn field_ids(&self, key: FieldKey) -> Vec<NodeId> {
+        match key {
+            FieldKey::Paint {
+                slot: PaintSlot::Selection(..),
+                ..
+            } => self.session.selection.ids().to_vec(),
+            FieldKey::Paint { id, .. } | FieldKey::Radius { id } => vec![id],
+        }
+    }
+
+    /// The transaction that binds `key` to `var`.
+    pub(crate) fn bind_tx(&self, key: FieldKey, var: VarId) -> Transaction {
+        let doc = &self.session.doc;
+        let ids = self.field_ids(key);
+        match key {
+            FieldKey::Paint { slot, .. } => match paint_item(slot) {
+                Some((target, index)) => {
+                    ondin_core::bind_brush_at_all(doc, &ids, target, index, var)
+                }
+                None => Transaction::default(),
+            },
+            FieldKey::Radius { id } => {
+                Transaction(ondin_core::bind_corners_ops(doc, id, [Some(var); 4]))
+            }
+        }
+    }
+
+    /// The transaction that detaches `key` to the value it draws.
+    pub(crate) fn detach_tx(&self, key: FieldKey) -> Transaction {
+        let doc = &self.session.doc;
+        let ids = self.field_ids(key);
+        match key {
+            FieldKey::Paint { slot, .. } => match paint_item(slot) {
+                Some((target, index)) => ondin_core::detach_brush_at_all(doc, &ids, target, index),
+                None => Transaction::default(),
+            },
+            FieldKey::Radius { id } => Transaction(ondin_core::detach_corners_ops(doc, id)),
+        }
+    }
+
+    /// Bind `key` to `var`, closing the list.
+    pub(crate) fn bind_field(&mut self, key: FieldKey, var: VarId) {
+        self.var_complete = None;
+        self.var_retype = None;
+        self.session.clear_gesture_preview();
+        let tx = self.bind_tx(key, var);
+        self.commit_edit(tx);
+    }
+
+    /// Detach `key`, which then reads the value it resolved to.
+    pub(crate) fn detach_field(&mut self, key: FieldKey) {
+        let tx = self.detach_tx(key);
+        self.commit_edit(tx);
+    }
+
+    /// A key typed onto a focused chip (A3): `-` starts the `--` list, anything
+    /// else starts a literal that replaces the binding when it is committed.
+    pub(crate) fn chip_typed(&mut self, key: FieldKey, text: String) {
+        self.var_retype = Some(Retype {
+            key,
+            text,
+            focus: true,
+        });
+    }
+
+    /// Called by a bindable field every frame it holds the keyboard, with what is
+    /// typed in it: text opening with `--` opens (or narrows) the list under it.
+    pub(crate) fn bind_typing(
+        &mut self,
+        ctx: &egui::Context,
+        key: FieldKey,
+        text: &str,
+        under: egui::Rect,
+    ) {
+        let frame = ctx.cumulative_pass_nr();
+        match text.strip_prefix("--") {
+            Some(q) => {
+                let reset = self
+                    .var_complete
+                    .as_ref()
+                    .is_none_or(|c| c.key != key || c.query != q);
+                let c = self.var_complete.get_or_insert(Complete {
+                    key,
+                    query: String::new(),
+                    highlight: 0,
+                    under,
+                    own_search: false,
+                    focus: false,
+                    seen: frame,
+                });
+                if reset {
+                    c.highlight = 0;
+                }
+                c.key = key;
+                c.query = q.to_string();
+                c.under = under;
+                c.own_search = false;
+                c.seen = frame;
+            }
+            None => {
+                if self
+                    .var_complete
+                    .as_ref()
+                    .is_some_and(|c| c.key == key && !c.own_search)
+                {
+                    self.close_complete();
+                }
+            }
+        }
+    }
+
+    /// Open the list from the field menu (*Bind to variable…*), with a search of
+    /// its own, the current variable highlighted.
+    pub(crate) fn open_complete(&mut self, ctx: &egui::Context, key: FieldKey, under: egui::Rect) {
+        let current = self.field_var(key);
+        let table = self.session.doc.variables();
+        let list = matches(table, key.kind(), "");
+        let highlight = current
+            .and_then(|v| list.iter().position(|x| x.id == v))
+            .unwrap_or(0);
+        self.var_complete = Some(Complete {
+            key,
+            query: String::new(),
+            highlight,
+            under,
+            own_search: true,
+            focus: true,
+            seen: ctx.cumulative_pass_nr(),
+        });
+    }
+
+    fn close_complete(&mut self) {
+        if self.var_complete.take().is_some() {
+            self.session.clear_gesture_preview();
+        }
+    }
+
+    /// The variable `key` is bound to, when all of it is bound to one.
+    pub(crate) fn field_var(&self, key: FieldKey) -> Option<VarId> {
+        let doc = &self.session.doc;
+        match key {
+            FieldKey::Paint { slot, .. } => {
+                let (target, index) = paint_item(slot)?;
+                let mut vars = self.field_ids(key).into_iter().map(|n| {
+                    let node = doc.get(n)?;
+                    let list = match target {
+                        PaintTarget::Fill => node.paint().fills.get(index).map(|f| &f.brush),
+                        PaintTarget::Stroke => node.paint().strokes.get(index).map(|s| &s.brush),
+                    };
+                    list.and_then(|b| b.var())
+                });
+                let first = vars.next()??;
+                vars.all(|v| v == Some(first)).then_some(first)
+            }
+            FieldKey::Radius { id } => {
+                let vars = doc.get(id)?.corner_vars();
+                let first = vars[0]?;
+                vars.iter().all(|v| *v == Some(first)).then_some(first)
+            }
+        }
+    }
+
+    /// A bound paint field's own `%` — the binding's alpha, when every target is
+    /// bound to one variable at one alpha. `None` for anything else.
+    pub(crate) fn field_alpha(&self, key: FieldKey) -> Option<f32> {
+        let FieldKey::Paint { slot, .. } = key else {
+            return None;
+        };
+        let (target, index) = paint_item(slot)?;
+        self.field_var(key)?;
+        let doc = &self.session.doc;
+        let mut alphas = self.field_ids(key).into_iter().map(|n| {
+            let node = doc.get(n)?;
+            let b = match target {
+                PaintTarget::Fill => &node.paint().fills.get(index)?.brush,
+                PaintTarget::Stroke => &node.paint().strokes.get(index)?.brush,
+            };
+            match b {
+                ondin_core::BrushSource::Bound { alpha, .. } => Some(*alpha),
+                ondin_core::BrushSource::Literal(_) => None,
+            }
+        });
+        let first = alphas.next()??;
+        alphas.all(|a| a == Some(first)).then_some(first)
+    }
+
+    /// The transaction that sets a bound paint field's `%` to `alpha`, keeping
+    /// each target's binding.
+    pub(crate) fn rebind_alpha_tx(&self, id: NodeId, slot: PaintSlot, alpha: f32) -> Transaction {
+        let key = FieldKey::Paint { id, slot };
+        let Some((target, index)) = paint_item(slot) else {
+            return Transaction::default();
+        };
+        let ids = self.field_ids(key);
+        ondin_core::set_brush_at_all(&self.session.doc, &ids, target, index, |_, b| match b {
+            ondin_core::BrushSource::Bound { var, .. } => {
+                ondin_core::BrushSource::Bound { var: *var, alpha }
+            }
+            other => other.clone(),
+        })
+    }
+
+    /// The `--` list, drawn once a frame under the field it belongs to.
+    pub(crate) fn var_complete_ui(&mut self, ctx: &egui::Context) {
+        let Some(mut c) = self.var_complete.take() else {
+            return;
+        };
+        // A typing field asks for its list every frame; one that stopped asking
+        // (it lost the keyboard, its text lost the `--`) has closed it.
+        if !c.own_search && c.seen + 1 < ctx.cumulative_pass_nr() {
+            self.session.clear_gesture_preview();
+            return;
+        }
+        let doc = &self.session.doc;
+        let table = doc.variables();
+        let list = matches(table, c.key.kind(), &c.query);
+        c.highlight = c.highlight.min(list.len().saturating_sub(1));
+        let (down, up, enter, escape) = ctx.input(|i| {
+            (
+                i.key_pressed(egui::Key::ArrowDown),
+                i.key_pressed(egui::Key::ArrowUp),
+                i.key_pressed(egui::Key::Enter),
+                i.key_pressed(egui::Key::Escape),
+            )
+        });
+        if down && !list.is_empty() {
+            c.highlight = (c.highlight + 1).min(list.len() - 1);
+        }
+        if up {
+            c.highlight = c.highlight.saturating_sub(1);
+        }
+        // The mode the values read in: the selected layer's (B1's footer).
+        let at = match c.key {
+            FieldKey::Paint { id, .. } | FieldKey::Radius { id } => id,
+        };
+        let mode = doc.mode_at(at).and_then(|m| table.mode(m)).cloned();
+        let mut chosen: Option<VarId> = None;
+        let pos = ui::menu_place(
+            ctx,
+            c.under.left_bottom() + egui::vec2(0.0, 6.0),
+            egui::vec2(LIST_W, (list.len().clamp(1, 8) as f32) * LIST_ROW_H + 40.0),
+        );
+        let rect = egui::Area::new(egui::Id::new("var-complete"))
+            .order(egui::Order::Tooltip)
+            .fixed_pos(pos)
+            .show(ctx, |ui| {
+                ui::menu_frame(4.0).show(ui, |ui| {
+                    ui.set_width(LIST_W - 8.0);
+                    ui.spacing_mut().item_spacing.y = 1.0;
+                    if c.own_search {
+                        let resp = ui::text_field(
+                            ui,
+                            egui::vec2(LIST_W - 8.0, 26.0),
+                            &mut c.query,
+                            "Search variables",
+                            11.5,
+                        );
+                        if c.focus {
+                            c.focus = false;
+                            resp.request_focus();
+                        }
+                        ui.add_space(3.0);
+                    }
+                    if list.is_empty() {
+                        ui.label(
+                            egui::RichText::new(if table.iter().any(|v| v.kind == c.key.kind()) {
+                                "No variable matches"
+                            } else {
+                                match c.key.kind() {
+                                    VarKind::Color => {
+                                        "No colour variables yet — Shift+S to add one"
+                                    }
+                                    VarKind::Number => {
+                                        "No number variables yet — Shift+S to add one"
+                                    }
+                                }
+                            })
+                            .size(11.5)
+                            .color(theme::text::DIM),
+                        );
+                    }
+                    egui::ScrollArea::vertical()
+                        .max_height(8.0 * (LIST_ROW_H + 1.0))
+                        .show(ui, |ui| {
+                            for (i, v) in list.iter().enumerate() {
+                                let value = mode.as_ref().and_then(|m| table.resolve(v.id, m.id));
+                                if list_row(ui, v, value, &c.query, i == c.highlight).clicked() {
+                                    chosen = Some(v.id);
+                                }
+                            }
+                        });
+                    if let Some(m) = &mode {
+                        ui.add_space(2.0);
+                        ui.label(
+                            egui::RichText::new(format!("{} · ↑↓ preview · ↵ bind", m.name))
+                                .size(10.0)
+                                .color(theme::text::FAINT),
+                        );
+                    }
+                });
+            })
+            .response
+            .rect;
+        if enter && chosen.is_none() {
+            chosen = list.get(c.highlight).map(|v| v.id);
+        }
+        if let Some(var) = chosen {
+            self.bind_field(c.key, var);
+            return;
+        }
+        if escape {
+            self.session.clear_gesture_preview();
+            return;
+        }
+        // A press anywhere else closes a list opened from the menu.
+        let away = ctx.input(|i| {
+            i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !rect.contains(p))
+        });
+        if c.own_search && away {
+            self.session.clear_gesture_preview();
+            return;
+        }
+        // The highlighted row previews live on the canvas (B1) — a paint's: a
+        // corner binding has no override to carry it (`absorb` refuses
+        // `SetCornerVars`, §15 D1039).
+        match (c.key, list.get(c.highlight)) {
+            (FieldKey::Paint { .. }, Some(v)) => {
+                let tx = self.bind_tx(c.key, v.id);
+                self.session.set_preview(&tx);
+            }
+            _ => self.session.clear_gesture_preview(),
+        }
+        self.var_complete = Some(c);
+    }
+
+    /// *Extract into variable…* (D1038 D1–D3): a new variable holding `key`'s
+    /// value in every mode, the field bound to it, in one transaction — then the
+    /// browser opens on its name. A first variable brings the first mode.
+    pub(crate) fn extract_field(&mut self, key: FieldKey, value: Cell) {
+        let table = self.session.doc.variables();
+        let mut ops = Vec::new();
+        let modes: Vec<ondin_core::ModeId> = match table.modes() {
+            [] => {
+                let m = self.session.ids.mint_mode();
+                ops.push(Operation::AddMode {
+                    mode: Mode {
+                        id: m,
+                        name: "Mode 1".into(),
+                    },
+                    index: 0,
+                    cells: vec![],
+                });
+                vec![m]
+            }
+            modes => modes.iter().map(|m| m.id).collect(),
+        };
+        let stem = match key.kind() {
+            VarKind::Color => "colour",
+            VarKind::Number => "number",
+        };
+        let taken: Vec<&str> = table.iter().map(|v| v.name.as_str()).collect();
+        let name = (1..)
+            .map(|n| format!("{stem} {n}"))
+            .find(|c| !taken.contains(&c.as_str()))
+            .expect("an unbounded range has a free name");
+        let id = self.session.ids.mint_var();
+        ops.push(Operation::AddVariable {
+            var: Variable {
+                id,
+                name: name.clone(),
+                kind: key.kind(),
+                cells: modes.into_iter().map(|m| (m, value)).collect(),
+            },
+        });
+        // The bind names the variable by id and reads only the field, so it is
+        // built against the document as it stands; the commit judges the two
+        // together.
+        ops.extend(self.bind_tx(key, id).0);
+        if self.commit_edit(Transaction(ops)) {
+            if self.var_browser.is_none() {
+                self.toggle_var_browser();
+            }
+            if let Some(b) = self.var_browser.as_mut() {
+                b.start_rename(id, name);
+            }
+        }
+    }
+
+    /// The field menu (§6.7), open at a point on a bindable field.
+    pub(crate) fn field_menu_ui(&mut self, ctx: &egui::Context) {
+        let Some((key, at, under)) = self.field_menu else {
+            return;
+        };
+        let bound = self.field_var(key).is_some();
+        let mut close = false;
+        let size = egui::vec2(220.0, if bound { 3.0 } else { 2.0 } * 26.0 + 8.0);
+        let pos = ui::menu_place(ctx, at, size);
+        let mut act: Option<u8> = None;
+        let rect = egui::Area::new(egui::Id::new("field-menu"))
+            .order(egui::Order::Tooltip)
+            .fixed_pos(pos)
+            .show(ctx, |ui| {
+                ui::menu_frame(4.0).show(ui, |ui| {
+                    ui.set_width(220.0 - 8.0);
+                    ui.spacing_mut().item_spacing.y = 1.0;
+                    let r =
+                        ui::MenuRow::new(icon::LINK_SIMPLE, "Bind to variable…").accel(Some("--"));
+                    if ui::menu_row(ui, r, 26.0).clicked() {
+                        act = Some(0);
+                    }
+                    let r =
+                        ui::MenuRow::new(icon::EXPORT, "Extract into variable…").enabled(!bound);
+                    if ui::menu_row(ui, r, 26.0).clicked() {
+                        act = Some(1);
+                    }
+                    // Omitted unbound — §3's one exception, a row that only undoes.
+                    if bound {
+                        let r = ui::MenuRow::new(icon::LINK_BREAK, "Detach variable")
+                            .accel(Some("Backspace"));
+                        if ui::menu_row(ui, r, 26.0).clicked() {
+                            act = Some(2);
+                        }
+                    }
+                });
+            })
+            .response
+            .rect;
+        match act {
+            Some(0) => {
+                self.field_menu = None;
+                self.open_complete(ctx, key, under);
+                return;
+            }
+            Some(1) => {
+                close = true;
+                if let Some(value) = self.field_value(key) {
+                    self.extract_field(key, value);
+                }
+            }
+            Some(2) => {
+                close = true;
+                self.detach_field(key);
+            }
+            _ => {}
+        }
+        let away = ctx.input(|i| {
+            i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !rect.contains(p))
+        });
+        if close || away || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.field_menu = None;
+        }
+    }
+
+    /// A bound field's chip in `rect`, and what it was asked: detach, a key typed
+    /// onto it, its menu. Shared by every bindable field.
+    pub(crate) fn field_chip(
+        &mut self,
+        ui: &mut egui::Ui,
+        key: FieldKey,
+        var: VarId,
+        rect: egui::Rect,
+    ) {
+        let doc = &self.session.doc;
+        let table = doc.variables();
+        let at = match key {
+            FieldKey::Paint { id, .. } | FieldKey::Radius { id } => id,
+        };
+        let name = table.get(var).map(|v| v.name.clone()).unwrap_or_default();
+        let mode = doc.mode_at(at).and_then(|m| table.mode(m));
+        let tip = chip_tip(&name, doc.resolve_var(at, var), mode);
+        let id = egui::Id::new(("var-chip", format!("{key:?}")));
+        let out = chip(ui, rect, id, &name, &tip, true);
+        if out.detach {
+            self.detach_field(key);
+        } else if let Some(text) = out.typed {
+            self.chip_typed(key, text);
+        }
+        if let Some(at) = out.menu {
+            self.field_menu = Some((key, at, rect));
+        }
+    }
+
+    /// The corner-radius field while bound: its icon, then the chip.
+    pub(crate) fn radius_chip(&mut self, ui: &mut egui::Ui, key: FieldKey, var: VarId, w: f32) {
+        let mut chip_rect = egui::Rect::NOTHING;
+        ui::field_row(ui, egui::vec2(w, 28.0), |ui| {
+            ui.label(theme::icon_text(
+                icon::CORNERS_OUT,
+                14.0,
+                theme::text::FAINT,
+            ));
+            let (rect, _) = ui.allocate_exact_size(
+                egui::vec2(ui.available_width() + 5.0, 28.0),
+                egui::Sense::hover(),
+            );
+            chip_rect = rect;
+        });
+        self.field_chip(ui, key, var, chip_rect);
+    }
+
+    /// The corner-radius field typed over (A3): the buffer the chip's first key
+    /// began. `Enter` writes the radius and detaches; `--` reopens the list.
+    pub(crate) fn radius_retype(
+        &mut self,
+        ui: &mut egui::Ui,
+        key: FieldKey,
+        mut rt: Retype,
+        w: f32,
+    ) {
+        let FieldKey::Radius { id } = key else { return };
+        let edit_id = egui::Id::new(("var-retype", format!("{key:?}")));
+        let mut field = None;
+        ui::field_row(ui, egui::vec2(w, 28.0), |ui| {
+            ui.label(theme::icon_text(
+                icon::CORNERS_OUT,
+                14.0,
+                theme::text::FAINT,
+            ));
+            field = Some(
+                ui.add(
+                    egui::TextEdit::singleline(&mut rt.text)
+                        .id(edit_id)
+                        .frame(egui::Frame::NONE)
+                        .desired_width(f32::INFINITY)
+                        .font(egui::FontId::proportional(12.0)),
+                ),
+            );
+        });
+        let Some(field) = field else { return };
+        if rt.focus {
+            rt.focus = false;
+            field.request_focus();
+            caret_to_end(ui.ctx(), edit_id, &rt.text);
+        }
+        self.bind_typing(ui.ctx(), key, &rt.text, field.rect);
+        if field.lost_focus() {
+            self.var_retype = None;
+            if ui::defocus_commits(&field)
+                && !rt.text.starts_with("--")
+                && let Some(r) = crate::expr::eval(&rt.text).filter(|r| r.is_finite())
+            {
+                // Detached first, so the radius written is the literal drawn
+                // whatever it is — 0 included, which changes no bound literal.
+                let mut ops = ondin_core::detach_corners_ops(&self.session.doc, id);
+                ops.push(Operation::SetGeometry {
+                    id,
+                    geometry: ondin_core::GeometryPatch::CornerRadius(r.max(0.0)),
+                });
+                self.commit_edit(Transaction(ops));
+            }
+            return;
+        }
+        self.var_retype = Some(rt);
+    }
+
+    /// `key`'s value as a cell — what *Extract* files.
+    fn field_value(&self, key: FieldKey) -> Option<Cell> {
+        let doc = &self.session.doc;
+        match key {
+            FieldKey::Paint { id, slot } => {
+                let (target, index) = paint_item(slot)?;
+                let node = doc.get(id)?;
+                let b = match target {
+                    PaintTarget::Fill => &node.paint().fills.get(index)?.brush,
+                    PaintTarget::Stroke => &node.paint().strokes.get(index)?.brush,
+                };
+                match doc.resolve_brush(id, b).into_owned() {
+                    // **The colour without its `%`**: the `%` stays the fill's own
+                    // field, which the bind keeps (`bind_brush_at_all`), so filing
+                    // the alpha too drew a 50% fill at 25% (`arch-scribe`'s
+                    // reading of the first cut).
+                    ondin_core::Brush::Solid(c) => Some(Cell::Color(c.with_alpha(1.0))),
+                    _ => None,
+                }
+            }
+            FieldKey::Radius { id } => match self.session.resolved.used_kind(doc, id)? {
+                ondin_core::NodeKind::Rect { corner_radii, .. } => {
+                    Some(Cell::Number(corner_radii.top_left))
+                }
+                _ => None,
+            },
+        }
+    }
+}
+
+/// Put a just-focused field's caret after its text rather than selecting it —
+/// the chip's first key is the start of what is typed, not something to replace.
+pub(crate) fn caret_to_end(ctx: &egui::Context, id: egui::Id, text: &str) {
+    let mut state = egui::TextEdit::load_state(ctx, id).unwrap_or_default();
+    let end = egui::text::CCursor::new(text.chars().count());
+    state
+        .cursor
+        .set_char_range(Some(egui::text::CCursorRange::one(end)));
+    state.store(ctx, id);
+}
+
+/// A paint slot's list and index, for the slots a binding can write.
+fn paint_item(slot: PaintSlot) -> Option<(PaintTarget, usize)> {
+    match slot {
+        PaintSlot::Fill(i) => Some((PaintTarget::Fill, i)),
+        PaintSlot::Stroke(i) => Some((PaintTarget::Stroke, i)),
+        PaintSlot::Selection(t, i) => Some((t, i)),
+        _ => None,
+    }
+}
+
+/// One row of the `--` list: a colour's swatch, the full name — the match
+/// bright, the rest at 60% — and the value in the footer's mode (B1, B2).
+fn list_row(
+    ui: &mut egui::Ui,
+    v: &Variable,
+    value: Option<Value>,
+    query: &str,
+    lit: bool,
+) -> egui::Response {
+    let w = LIST_W - 8.0;
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, LIST_ROW_H), egui::Sense::click());
+    let p = ui.painter();
+    if lit || resp.hovered() {
+        p.rect_filled(rect, 4, color::text_a(23));
+    }
+    let mut x = rect.left() + 8.0;
+    let y = rect.center().y;
+    if let Some(Value::Color(c)) = value {
+        let sw = egui::Rect::from_center_size(egui::pos2(x + 6.0, y), egui::vec2(12.0, 12.0));
+        ui::paint_checkerboard(p, sw, 3.0);
+        p.rect_filled(sw, 0, ui::color_to_egui(c));
+        x = sw.right() + 8.0;
+    }
+    let font = egui::FontId::proportional(11.5);
+    let mut job = egui::text::LayoutJob::default();
+    let lower = v.name.to_lowercase();
+    let q = query.trim().to_lowercase();
+    let hit = (!q.is_empty()).then(|| lower.find(&q)).flatten();
+    let dim = egui::TextFormat::simple(font.clone(), color::text_a(153));
+    let bright = egui::TextFormat::simple(font.clone(), color::TEXT);
+    match hit {
+        Some(at) if v.name.is_char_boundary(at) && v.name.is_char_boundary(at + q.len()) => {
+            job.append(&v.name[..at], 0.0, dim.clone());
+            job.append(&v.name[at..at + q.len()], 0.0, bright);
+            job.append(&v.name[at + q.len()..], 0.0, dim);
+        }
+        _ => job.append(&v.name, 0.0, if q.is_empty() { bright } else { dim }),
+    }
+    let galley = ui.fonts_mut(|f| f.layout_job(job));
+    p.galley(
+        egui::pos2(x, y - galley.size().y / 2.0),
+        galley,
+        color::TEXT,
+    );
+    let value = match value {
+        Some(Value::Color(c)) => ui::hex_of(c),
+        Some(Value::Number(n)) => trim_number(n),
+        None => String::new(),
+    };
+    p.text(
+        egui::pos2(rect.right() - 8.0, y),
+        egui::Align2::RIGHT_CENTER,
+        value,
+        egui::FontId::proportional(10.5),
+        theme::text::FAINT,
+    );
+    resp
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ondin_core::kurbo::{RoundedRectRadii, Size};
+    use ondin_core::peniko::Color;
+    use ondin_core::{BrushSource, Fill, NodeKind, keyed_by_position};
+
+    const RED: Color = Color::from_rgba8(200, 30, 30, 255);
+
+    /// A headless app on a canvas, holding a red rect and a white colour
+    /// variable `brand/500` and a number variable `radius/md` at 6.
+    fn fixture() -> (egui::Context, OndinApp, NodeId, VarId, VarId) {
+        let ctx = egui::Context::default();
+        let mut app = OndinApp::headless(&ctx);
+        app.canvas_rect =
+            egui::Rect::from_min_max(egui::pos2(300.0, 40.0), egui::pos2(900.0, 780.0));
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let (rect, mode, brand, radius) = (
+            app.session.ids.mint(),
+            app.session.ids.mint_mode(),
+            app.session.ids.mint_var(),
+            app.session.ids.mint_var(),
+        );
+        let root = app.session.doc.root();
+        assert!(app.commit_edit(Transaction(vec![
+            Operation::CreateNode {
+                id: rect,
+                parent: root,
+                index: 0,
+                kind: NodeKind::Rect {
+                    size: Size::new(40.0, 20.0),
+                    corner_radii: RoundedRectRadii::from_single_radius(2.0),
+                },
+                transform: None,
+                name: None,
+            },
+            Operation::SetFills {
+                id: rect,
+                fills: keyed_by_position([Fill {
+                    brush: RED.with_alpha(0.5).into(),
+                    visible: true,
+                }]),
+            },
+            Operation::AddMode {
+                mode: Mode {
+                    id: mode,
+                    name: "Light".into(),
+                },
+                index: 0,
+                cells: vec![],
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: brand,
+                    name: "brand/500".into(),
+                    kind: VarKind::Color,
+                    cells: [(mode, Cell::Color(Color::WHITE))].into(),
+                },
+            },
+            Operation::AddVariable {
+                var: Variable {
+                    id: radius,
+                    name: "radius/md".into(),
+                    kind: VarKind::Number,
+                    cells: [(mode, Cell::Number(6.0))].into(),
+                },
+            },
+        ])));
+        (ctx, app, rect, brand, radius)
+    }
+
+    fn fill0(app: &OndinApp, rect: NodeId) -> BrushSource {
+        app.session.doc.get(rect).unwrap().paint().fills[0]
+            .brush
+            .clone()
+    }
+
+    fn key(k: egui::Key) -> egui::Event {
+        egui::Event::Key {
+            key: k,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        }
+    }
+
+    /// **Typing `--br` and `Enter` binds the fill to the one match, keeping its
+    /// `%`**; the list previews the highlighted variable on the canvas while it is
+    /// open (B1, B2).
+    #[test]
+    fn typing_dashes_and_enter_binds_the_highlighted_variable() {
+        let (ctx, mut app, rect, brand, _) = fixture();
+        let k = FieldKey::Paint {
+            id: rect,
+            slot: PaintSlot::Fill(0),
+        };
+        let under = egui::Rect::from_min_size(egui::pos2(960.0, 200.0), egui::vec2(200.0, 28.0));
+        let _ = ctx.run_ui(Default::default(), |_| {
+            app.bind_typing(&ctx, k, "--br", under);
+            app.var_complete_ui(&ctx);
+        });
+        assert!(app.var_complete.is_some(), "the list is open");
+        assert!(app.session.has_gesture_preview(), "the highlight previews");
+        let input = egui::RawInput {
+            events: vec![key(egui::Key::Enter)],
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input, |_| app.var_complete_ui(&ctx));
+        assert_eq!(
+            fill0(&app, rect),
+            BrushSource::Bound {
+                var: brand,
+                alpha: 0.5
+            }
+        );
+        assert!(app.var_complete.is_none() && !app.session.has_gesture_preview());
+        assert_eq!(app.field_var(k), Some(brand));
+        assert_eq!(
+            app.field_alpha(k),
+            Some(0.5),
+            "the `%` is the binding's own"
+        );
+    }
+
+    /// A list nobody typed into since the frame before closes, and takes its
+    /// preview with it — the field lost the keyboard, or its `--`.
+    #[test]
+    fn a_list_its_field_stopped_asking_for_closes() {
+        let (ctx, mut app, rect, _, _) = fixture();
+        let k = FieldKey::Paint {
+            id: rect,
+            slot: PaintSlot::Fill(0),
+        };
+        let under = egui::Rect::from_min_size(egui::pos2(960.0, 200.0), egui::vec2(200.0, 28.0));
+        let _ = ctx.run_ui(Default::default(), |_| {
+            app.bind_typing(&ctx, k, "--", under);
+            app.var_complete_ui(&ctx);
+        });
+        for _ in 0..3 {
+            let _ = ctx.run_ui(Default::default(), |_| app.var_complete_ui(&ctx));
+        }
+        assert!(app.var_complete.is_none());
+        assert!(!app.session.has_gesture_preview());
+        assert_eq!(
+            fill0(&app, rect),
+            BrushSource::from(RED.with_alpha(0.5)),
+            "nothing written"
+        );
+    }
+
+    /// **Detaching leaves the colour drawn**, its `%` folded in; the radius the
+    /// same, through `detach_corners_ops`.
+    #[test]
+    fn detaching_leaves_what_the_field_drew() {
+        let (_ctx, mut app, rect, brand, radius) = fixture();
+        let paint = FieldKey::Paint {
+            id: rect,
+            slot: PaintSlot::Fill(0),
+        };
+        app.bind_field(paint, brand);
+        app.detach_field(paint);
+        assert_eq!(
+            fill0(&app, rect),
+            BrushSource::from(Color::WHITE.multiply_alpha(0.5))
+        );
+        let corners = FieldKey::Radius { id: rect };
+        app.bind_field(corners, radius);
+        assert_eq!(app.field_var(corners), Some(radius));
+        app.detach_field(corners);
+        assert_eq!(app.field_var(corners), None);
+        assert!(matches!(
+            app.session.doc.get(rect).unwrap().kind(),
+            NodeKind::Rect { corner_radii, .. } if corner_radii.top_left == 6.0
+        ));
+    }
+
+    /// **Extracting a translucent fill draws what it drew**: the variable takes
+    /// the colour opaque and the fill keeps its `%`. The first cut filed the
+    /// alpha into the variable as well, and the bind kept it as the `%` too — a
+    /// 50% fill drew at 25%.
+    ///
+    /// Flip, run: filing the resolved colour with its alpha fails *"drawn as
+    /// before"*.
+    #[test]
+    fn extracting_a_translucent_fill_draws_what_it_drew() {
+        let (_ctx, mut app, rect, _, _) = fixture();
+        let k = FieldKey::Paint {
+            id: rect,
+            slot: PaintSlot::Fill(0),
+        };
+        let value = app.field_value(k).unwrap();
+        app.extract_field(k, value);
+        let doc = &app.session.doc;
+        let drawn = doc.resolve_brush(rect, &fill0(&app, rect)).into_owned();
+        assert_eq!(
+            drawn,
+            ondin_core::Brush::Solid(RED.with_alpha(0.5)),
+            "drawn as before"
+        );
+    }
+
+    /// *Extract into variable…* files the value as a new variable, binds the
+    /// field to it in the same transaction — one undo takes both — and opens the
+    /// browser on its name (D1–D3).
+    #[test]
+    fn extract_files_the_value_and_binds_the_field() {
+        let (_ctx, mut app, rect, _, _) = fixture();
+        let k = FieldKey::Radius { id: rect };
+        let before = app.session.doc.clone();
+        app.extract_field(k, Cell::Number(2.0));
+        let var = app.field_var(k).expect("bound to the new variable");
+        let v = app.session.doc.variables().get(var).unwrap();
+        assert_eq!(v.name, "number 1");
+        assert!(v.cells.values().all(|c| *c == Cell::Number(2.0)));
+        assert!(app.var_browser.is_some(), "the browser opens on it");
+        app.session.undo();
+        assert_eq!(
+            app.session.doc, before,
+            "one undo takes the variable and the binding"
+        );
+    }
+
+    /// **A focused chip takes `Backspace` for itself** — the detach, not the
+    /// keymap's delete — and hands any other key on as the start of a retype.
+    ///
+    /// Flip, run: reading `Backspace` with `key_pressed` rather than consuming it
+    /// fails *"and is consumed"* — the key would reach the keymap too, where an
+    /// egui focus is the only other thing holding *Delete selection* off.
+    #[test]
+    fn a_focused_chip_takes_backspace_and_hands_on_a_key() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let id = egui::Id::new("chip-under-test");
+        let rect = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(120.0, 28.0));
+        let run = |events: Vec<egui::Event>| {
+            let mut out = ChipOut::default();
+            let input = egui::RawInput {
+                events,
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |ui| {
+                out = chip(ui, rect, id, "brand/500", "tip", true);
+            });
+            out
+        };
+        let _ = run(vec![]);
+        ctx.memory_mut(|m| m.request_focus(id));
+        let _ = run(vec![]);
+        let out = run(vec![key(egui::Key::Backspace)]);
+        assert!(out.detach, "Backspace detaches");
+        assert!(
+            !ctx.input(|i| i.key_pressed(egui::Key::Backspace)),
+            "and is consumed, so the keymap does not delete the layer"
+        );
+        ctx.memory_mut(|m| m.request_focus(id));
+        let out = run(vec![egui::Event::Text("8".into())]);
+        assert_eq!(out.typed.as_deref(), Some("8"));
+    }
+
+    /// Long names elide from the left by whole groups, then the leaf (A5).
+    #[test]
+    fn a_long_name_elides_from_the_left_by_groups() {
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        let _ = ctx.run_ui(Default::default(), |_| {});
+        let font = egui::FontId::proportional(11.5);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            let full = "layout/sidebar/width-collapsed";
+            assert_eq!(elide_groups(ui, full, &font, 1000.0), full);
+            let w = ui.fonts_mut(|f| {
+                f.layout_no_wrap("…/width-collapsed".into(), font.clone(), color::TEXT)
+                    .size()
+                    .x
+            });
+            assert_eq!(elide_groups(ui, full, &font, w + 1.0), "…/width-collapsed");
+            assert!(elide_groups(ui, full, &font, 30.0).ends_with('…'));
+        });
+    }
+}

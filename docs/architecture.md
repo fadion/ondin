@@ -3333,7 +3333,7 @@ and the dashboard's 1B §15 D1017).
 - **Mains made local are placed by their laid-out boxes**, a frame's too, measured on the document the
   transaction leaves, stacked down the right of the content 80 apart.
 
-### 5.3f Styles and variables (ruled 2026-10-11 and 2026-10-13; step 1's core and browser built; §15 D1037–D1040)
+### 5.3f Styles and variables (ruled 2026-10-11 and 2026-10-13; step 1's core, browser and field binding built; §15 D1037–D1041)
 
 > **Design ahead of code, nearly all of it.** Ruled with the maintainer on 2026-10-11, in conversation,
 > on a design the session put: §15 D1037 says which part is whose. The Claude Design pass on the chrome
@@ -3341,9 +3341,9 @@ and the dashboard's 1B §15 D1017).
 > which carries the chrome's substance — `design/` is regenerated). **Build step 1's core half is built**
 > (2026-10-14, §15 D1039): colour and number variables with aliases and modes, bound to paint and a
 > rectangle's corners, saved, resolved by every reader and carried by a paste — *What is built*, at the
-> end of this section. **Of the chrome, the browser is** (2026-10-14, §15 D1040), and none of the
-> inspector's half — the chip, the `--` list, the field menu, the swatch popup's segment, *Extract*, the
-> *Mode* row; the build order and what is open are `roadmap.md`'s
+> end of this section. **Of the chrome, the browser is** (2026-10-14, §15 D1040), and **so is binding a
+> field** — the chip, the `--` list, the field menu and *Extract* (2026-10-14, §15 D1041) — but not the
+> swatch popup's segment, the *Mixed* capsule or the *Mode* row; the build order and what is open are `roadmap.md`'s
 > *Next · Styles and variables*. The rest of this section is the design, and it is rewritten in the
 > present tense as each step lands.
 
@@ -3440,8 +3440,16 @@ a dangling binding rather than repairing it. The binding's three shapes:
   for use only below a resolve.
 - **Corners**: `Node::corner_vars: [Option<VarId>; 4]` beside `NodeKind::Rect`'s literal radii, not inside
   the kind. A bound corner's literal is written 0 and **drawn from `Resolved`'s used kind** (§5.9), which
-  every geometry reader already asks. ⚠️ A reader of the document's own kind reads that 0 — the
-  inspector's radius field among them (§15 D1039's *Fix with*). Only a `Rect`'s corners bind; a `Path`'s
+  every geometry reader already asks. ⚠️ A reader of the document's own kind reads that 0 — ~~the
+  inspector's radius field among them (§15 D1039's *Fix with*)~~ the inspector's radius fields read the
+  corners as drawn since §15 D1041 (`resolve_corners`). **A radius written over a bound corner detaches
+  it at the commit** (`build::keep_corner_bindings`, in `commit_inner` before `propagate::owed`), so no
+  door has to know: 🚨 **a bound corner written what it draws or its own literal stays bound**, the
+  literal put back to 0; written anything else, it detaches to that. Both halves are load-bearing — a
+  field reads the corners as drawn and writes them back so, and the Scale tool or a per-corner ↺
+  builds the radii from the literals — and either alone detaches corners nobody edited. ⚠️ **The price
+  is a 0 typed into a field**, which is the bound corner's literal and detaches nothing; the chip's
+  retype, detaching first, is 0's door (§15 D1041). Only a `Rect`'s corners bind; a `Path`'s
   per-anchor radii do not.
 - **A frame's mode**: `Node::mode: Option<ModeId>`, `None` to inherit; set only on an `Artboard`.
 
@@ -3466,6 +3474,24 @@ returns the frames to *Inherit*. A first variable brings the document's first mo
 yet D1038's**: refusals are a plain sentence rather than B4's dotted underline, a colour cell does not
 open the colour popup, and the `+` menu leaves out *Boolean variable* until step 2, as it does *String*
 until step 6.
+
+**Binding a field** (§15 D1041 in full) is `panels/binding.rs`, for the two fields step 1 binds: a solid
+paint row's colour and a rectangle's corner radius (`FieldKey`). **Bound, the field is a chip** — a
+20-pt capsule at the value area's width, no hue unless focused, the name elided by whole groups from the
+left, its tooltip *name · value · Mode*, a hover × detaching. Focused, **it consumes `Backspace` and
+`Delete` as the detach**, so the keymap never deletes the layer, and hands any other key back to the
+field's own buffer as the start of a literal. A paint row's swatch shows the resolved colour and **its `%`
+is the binding's alpha**; **a hex typed over a binding writes the literal outright** (`build::set_brush_at_all`),
+never through `edited_brush`'s *as drawn* reading. A selection row is a chip only when every target
+shares one variable. **`--` typed into either field opens the one list the app has**, which the field
+re-asks for every pass and which closes a pass after it stops; it lists the field's kind by substring,
+previews a paint's highlight live (a corner's cannot, `absorb` refusing `SetCornerVars`), and is a rung of
+`Escape`. **A field's right-click is §6.7 of `context-menus.md`**; *Extract* is one transaction — the
+variable, a first mode if the document has none, and the bind — and then the browser renames it, with
+no pending row or dashed capsule. ⚠️ **Not yet D1038's**: the swatch popup's *Variables* segment, the
+*Mixed* capsule across different bindings, B4's refusal manner, per-corner chips and the *Mode* row.
+*Extract* files a solid at full alpha, the `%` staying the bind's. ⚠️ **Read and owed** (§15 D1041's
+*Fix*): the radius field's override mark compares literals only, its ↺ dropping a main's binding.
 
 ### 5.4 Text node
 
@@ -5766,7 +5792,11 @@ impl Resolved {
   draws, measures or hit-tests from the used kind follows a binding with no line of its own — and a
   reader of the document's kind reads the bound corner's literal, 0. ⚠️ **An edit made from the used
   kind is not covered by that**: a radius written from it lands on the literal nobody draws unless the
-  write detaches the corner beside it (`build::detach_corners_ops`), which no door does yet (D1039). `used_local_of` and
+  write detaches the corner beside it — ~~which no door does yet (D1039)~~ which the commit does for every
+  door since D1041, `build::keep_corner_bindings` keeping a bound corner bound when written what it
+  **draws** — the used kind's radius — **or its own literal**, so an edit made from either kind leaves
+  the untouched corners bound, and anything else written detaches. ⚠️ A 0 typed into a field is the
+  literal and detaches nothing (§15 D1041's stated price). `used_local_of` and
   `used_kind_of` are the same two questions for a caller holding a `&Node` and no document — the SVG
   writer's helpers — and ⚠️ **the node must be this document's own**: the map is keyed by id, so a
   captured copy or a ghost would be answered with the original's layout. **Draw, measure, hit-test

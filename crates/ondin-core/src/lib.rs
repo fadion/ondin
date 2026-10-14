@@ -59,11 +59,12 @@ pub use peniko;
 pub use boolean::evaluate as evaluate_boolean;
 pub use build::{
     ColorUse, GradientUse, PaintAt, PaintShown, PaintTarget, Placement, any_paint_in, any_rect_in,
-    bind_corners_ops, boolean, can_parent, colors_in, detach_corners_ops, edit_brush_at_all,
-    edit_brushes_all, edit_fill_at_all, edit_fills_all, edit_stroke_at_all, edit_strokes_all,
-    edited_brush, gradients_in, group, insert_subtrees, local_for_world, move_by_world, outermost,
-    paint_at, paint_targets, place_at_world, recolor, repaint, reparent_preserving_world,
-    retarget_fills_all, retarget_strokes_all, set_boolean_op, set_corner_radius_all, set_fills_all,
+    bind_brush_at_all, bind_corners_ops, boolean, can_parent, colors_in, detach_brush_at_all,
+    detach_corners_ops, edit_brush_at_all, edit_brushes_all, edit_fill_at_all, edit_fills_all,
+    edit_stroke_at_all, edit_strokes_all, edited_brush, gradients_in, group, insert_subtrees,
+    keep_corner_bindings, local_for_world, move_by_world, outermost, paint_at, paint_targets,
+    place_at_world, recolor, repaint, reparent_preserving_world, retarget_fills_all,
+    retarget_strokes_all, set_boolean_op, set_brush_at_all, set_corner_radius_all, set_fills_all,
     set_opacity_all, set_strokes_all, shared_corner_radius, shared_fills, shared_over_fills,
     shared_over_strokes, shared_strokes, subtree_nodes, ungroup, valid_opacity,
 };

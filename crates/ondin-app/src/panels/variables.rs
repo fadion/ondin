@@ -119,6 +119,15 @@ pub(crate) struct Browser {
 }
 
 impl Browser {
+    /// Open variable `var`'s name for typing — after *Extract into variable…*,
+    /// which files the variable under a free name for the user to type over.
+    pub(crate) fn start_rename(&mut self, var: VarId, name: String) {
+        self.tab = Tab::Variables;
+        self.edit = Some(Edit::Name { var, text: name });
+        self.edit_focus = true;
+        self.refusal = None;
+    }
+
     /// Whether something inside the browser answers `Escape` before the browser
     /// does — a field being typed into, an open menu.
     pub(crate) fn escape(&mut self) -> bool {

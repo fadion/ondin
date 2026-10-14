@@ -630,6 +630,129 @@ fn deleting_a_mode_and_renaming_a_group() {
     );
 }
 
+/// **A radius written over a bound corner detaches only that corner**
+/// (`build::keep_corner_bindings`, D1038 (2)): written as a field writes it —
+/// every corner as drawn — a click is a no-op and a per-corner edit of one leaves
+/// its bound neighbours bound at their 0 literal; written as the Scale tool
+/// writes it — from the literals — a bound corner keeps its binding rather than
+/// turning square; and a bind, which writes the bindings itself, is left alone.
+///
+/// Flip, run: keeping a binding only for the drawn value — the second cut —
+/// fails *"a literal-built write keeps the binding"*.
+///
+/// Flips, run: the pass answering `tx` untouched, and comparing the written
+/// value with the corner's literal rather than with what it draws — the first
+/// cut — both fail *"a click through a bound field is a no-op"*, the first
+/// assertion either can reach: a click writes the drawn 4 over a literal 0, and
+/// both read that as an edit. (This doc predicted *"the edited corner detaches"*
+/// for the first; it is never reached.)
+#[test]
+fn a_radius_written_over_a_bound_corner_detaches_that_corner() {
+    let mut f = fixture();
+    let bind = Transaction(ondin_core::bind_corners_ops(
+        &f.doc,
+        f.rect,
+        [Some(f.radius); 4],
+    ));
+    let bind = ondin_core::keep_corner_bindings(&f.doc, bind);
+    f.doc.apply(&bind).unwrap();
+    assert_eq!(
+        f.doc.get(f.rect).unwrap().corner_vars(),
+        [Some(f.radius); 4],
+        "a bind is its own"
+    );
+
+    let corners = |doc: &Document| match doc.get(f.rect).unwrap().kind() {
+        NodeKind::Rect { corner_radii, .. } => *corner_radii,
+        _ => unreachable!(),
+    };
+    // **What a field writes**: all four corners as drawn — Light's 4 — with the
+    // edited one changed. A bare click writes all four unchanged.
+    let click = Transaction(vec![Operation::SetGeometry {
+        id: f.rect,
+        geometry: ondin_core::GeometryPatch::CornerRadius(4.0),
+    }]);
+    let click = ondin_core::keep_corner_bindings(&f.doc, click);
+    assert!(
+        click.changes_nothing(&f.doc),
+        "a click through a bound field is a no-op"
+    );
+    let one = Transaction(vec![Operation::SetGeometry {
+        id: f.rect,
+        geometry: ondin_core::GeometryPatch::CornerRadii(RoundedRectRadii {
+            top_left: 9.0,
+            top_right: 4.0,
+            bottom_right: 4.0,
+            bottom_left: 4.0,
+        }),
+    }]);
+    f.doc
+        .apply(&ondin_core::keep_corner_bindings(&f.doc, one))
+        .unwrap();
+    let vars = f.doc.get(f.rect).unwrap().corner_vars();
+    assert_eq!(vars[0], None, "the edited corner detaches");
+    assert_eq!(vars[1..], [Some(f.radius); 3], "its neighbours stay bound");
+    assert_eq!(
+        [corners(&f.doc).top_left, corners(&f.doc).top_right],
+        [9.0, 0.0],
+        "and keep their 0 literal"
+    );
+
+    // **A writer that built the radii from the literals** — the Scale tool's
+    // photographic scale — writes a bound corner its own 0: still bound, not
+    // turned square, while the free corner takes its scaled value.
+    let scaled = Transaction(vec![Operation::SetGeometry {
+        id: f.rect,
+        geometry: ondin_core::GeometryPatch::CornerRadii(RoundedRectRadii {
+            top_left: 18.0,
+            top_right: 0.0,
+            bottom_right: 0.0,
+            bottom_left: 0.0,
+        }),
+    }]);
+    f.doc
+        .apply(&ondin_core::keep_corner_bindings(&f.doc, scaled))
+        .unwrap();
+    let vars = f.doc.get(f.rect).unwrap().corner_vars();
+    assert_eq!(
+        vars[1..],
+        [Some(f.radius); 3],
+        "a literal-built write keeps the binding"
+    );
+    assert_eq!(corners(&f.doc).top_left, 18.0);
+}
+
+/// Binding a paint keeps its `%`; detaching it leaves the colour it drew.
+#[test]
+fn binding_a_paint_keeps_its_percent_and_detaching_keeps_its_colour() {
+    let mut f = fixture();
+    f.doc
+        .apply(&Transaction(vec![Operation::SetFills {
+            id: f.rect,
+            fills: keyed_by_position([Fill {
+                brush: RED.with_alpha(0.5).into(),
+                visible: true,
+            }]),
+        }]))
+        .unwrap();
+    let ids = [f.rect];
+    let tx = ondin_core::bind_brush_at_all(&f.doc, &ids, ondin_core::PaintTarget::Fill, 0, f.brand);
+    f.doc.apply(&tx).unwrap();
+    assert_eq!(
+        f.doc.get(f.rect).unwrap().paint().fills[0].brush,
+        BrushSource::Bound {
+            var: f.brand,
+            alpha: 0.5
+        }
+    );
+    let tx = ondin_core::detach_brush_at_all(&f.doc, &ids, ondin_core::PaintTarget::Fill, 0);
+    f.doc.apply(&tx).unwrap();
+    assert_eq!(
+        f.doc.get(f.rect).unwrap().paint().fills[0].brush,
+        BrushSource::Literal(Brush::Solid(WHITE.multiply_alpha(0.5)))
+    );
+}
+
 /// A small deterministic PRNG — `tests/resolve.rs`'s shape.
 struct Lcg(u64);
 

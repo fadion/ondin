@@ -1360,6 +1360,14 @@ pub struct OndinApp {
     /// Where the rail's swatches button was drawn last frame, directly above the
     /// hexagon (G11). `NOTHING` until the rail has drawn.
     pub(crate) var_button: egui::Rect,
+    /// The `--` list, while a bindable field is typing one or the field menu
+    /// opened it (§5.3f, D1038 B1–B4; §15 D1041).
+    pub(crate) var_complete: Option<crate::panels::binding::Complete>,
+    /// A bound field's chip being typed over (D1038 A3).
+    pub(crate) var_retype: Option<crate::panels::binding::Retype>,
+    /// A bindable field's right-click menu: the field, the point, the field's
+    /// rect the `--` list would hang under (`context-menus.md` §6.7).
+    pub(crate) field_menu: Option<(crate::panels::binding::FieldKey, egui::Pos2, egui::Rect)>,
     /// The publish dialog, while it is open (§5.3e, 2B; §15 D1015).
     pub(crate) publishing: Option<crate::kits::publish::PublishDraft>,
     /// This kit's changes since its last publish, with the session revision and
@@ -2368,6 +2376,9 @@ impl OndinApp {
             kit_button: egui::Rect::NOTHING,
             var_browser: None,
             var_button: egui::Rect::NOTHING,
+            var_complete: None,
+            var_retype: None,
+            field_menu: None,
             publishing: None,
             kit_changes: None,
             making_local: None,
@@ -2880,6 +2891,8 @@ impl eframe::App for OndinApp {
             self.picker_ui(&ctx);
             self.kit_picker_ui(&ctx);
             self.var_browser_ui(&ctx);
+            self.field_menu_ui(&ctx);
+            self.var_complete_ui(&ctx);
         }
         // 🚨 **The kit dialogs are outside the `!present` guard**, because two
         // of their doors are not hidden by present mode: `Ctrl+Alt+P` opens the
@@ -3712,6 +3725,11 @@ impl OndinApp {
         if self.present {
             self.present = false;
             self.session.info("Left present mode");
+        } else if self.field_menu.take().is_some() || self.var_complete.take().is_some() {
+            // A bindable field's menu and its `--` list (§15 D1041) float over
+            // everything, and the list's `Escape` restores what it previewed.
+            self.var_retype = None;
+            self.session.clear_gesture_preview();
         } else if self.picker.take().is_some() {
             // The picker floats over the canvas and owns no gesture, so it is
             // the outermost thing Escape can dismiss.
@@ -7642,8 +7660,12 @@ impl OndinApp {
         // document's mains (§15 D1030).
         self.kit_picker = None;
         self.kit_placing = None;
-        // The browser's edits and menus name the old document's variables.
+        // The browser's edits and menus name the old document's variables, and
+        // the binding chrome's keys its nodes (§15 D1041).
         self.var_browser = None;
+        self.var_complete = None;
+        self.var_retype = None;
+        self.field_menu = None;
         // Leaving a kit ends its link back (D1011 (7)); *Go to main in the kit*
         // sets it again after the open that cleared it.
         self.kit_return = None;
@@ -11079,7 +11101,8 @@ mod tests {
     /// fails naming `inspector.rs`. Predicted correctly.
     #[test]
     fn only_the_layers_panel_commits_without_the_committer() {
-        let panels: [(&str, &str); 12] = [
+        let panels: [(&str, &str); 13] = [
+            ("binding.rs", include_str!("panels/binding.rs")),
             ("component.rs", include_str!("panels/component.rs")),
             ("dashboard.rs", include_str!("panels/dashboard.rs")),
             ("export.rs", include_str!("panels/export.rs")),

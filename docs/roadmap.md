@@ -1603,9 +1603,9 @@ edited down to this the same day.*
 
 ## Next · Styles and variables
 
-**Ruled 2026-10-11 and 2026-10-13; step 1's core and browser built 2026-10-14** — §15 D1037 is the
-design and says whose each part is, §15 D1038 the accepted chrome and the maintainer's rulings on
-D1037's open questions, and §15 D1039 and D1040 what is built; `architecture.md` §5.3f is the section. Variables are typed
+**Ruled 2026-10-11 and 2026-10-13; step 1's core, browser and field binding built 2026-10-14** — §15
+D1037 is the design and says whose each part is, §15 D1038 the accepted chrome and the maintainer's
+rulings on D1037's open questions, and §15 D1039–D1041 what is built; `architecture.md` §5.3f is the section. Variables are typed
 (colour, number, string, boolean) with aliases and a value per mode, one mode list per document and a
 mode set per frame; a bindable field stores its binding and resolves at read; a style is one slot's
 whole set of values, read-only in the inspector and detached by any other door's edit.
@@ -1617,19 +1617,23 @@ accepted (D1038):
    built** (§15 D1039: the table, its operations and rules, the bindings on paint, a rectangle's
    corners and a frame's mode, v7, every reader resolving, the paste rule), and **so is the browser**
    (§15 D1040: the panel, `Shift+S`, the table and its in-place edits, the menus, and the delete-variable
-   and delete-mode verbs). **What is left is the inspector's half of the UI**, the browser's leftovers,
-   and what the core leaves them:
-   - the chip and its `--` list, with the list's live preview — which for a corner meets `absorb`'s
-     refusal of `SetCornerVars`, so a preview of the used kind or a patch is owed too; the field menu;
-     the swatch popup's *Variables* segment; *Extract* and its pending row; the frame's *Mode* row and
-     the canvas label's suffix;
+   and delete-mode verbs), and **so is binding a field** (§15 D1041: the chip, the `--` list, the field
+   menu, *Extract*, and the commit-time pass that detaches a radius written over a bound corner). **What
+   is left is the rest of the inspector's half**, the browser's leftovers, and what the builds leave:
+   - the swatch popup's *Variables* segment; the *Mixed* capsule for layers bound to different
+     variables (A4); B4's refusal manner in the `--` list (`--x * 2` matches nothing today); per-corner
+     chips; the cursor saying a bound field does not scrub; the frame's *Mode* row and the canvas label's
+     suffix;
+   - the `--` list's live preview **for a corner**, which meets `absorb`'s refusal of `SetCornerVars` —
+     a preview of the used kind or a patch is owed (a paint's previews);
+   - *Extract*'s pending row and dashed capsule, D1041 having built it as one transaction and a rename;
    - in the browser, a colour cell opening the colour popup beside the panel; refusals in B4's manner rather than a plain sentence; G3's
      sideways scrollbar; Alt-click on a caret, and the collapsed groups kept per document;
-   - **every write to a bound corner carrying `build::detach_corners_ops`** — the inspector's radius field
-     shows and writes the literal 0, and the canvas radius handle writes it, neither drawn;
-   - **`build::edited_brush`'s three edges**: retyping the variable's own hex or picking *Solid* on its
-     own colour keeps the binding, where D1037 and D1038 detach, and a `%` above the variable's alpha
-     clamps;
+   - **D1041's *Fix***, read and not measured: the radius field's override mark compares literals
+     only, its ↺ dropping a main's binding (`sub_mark` compares one op's value and cannot carry it);
+   - **`build::edited_brush`'s two remaining edges**: picking *Solid* on a bound paint's own colour keeps
+     the binding, where D1038 detaches, and a `%` above the variable's alpha clamps through the picker
+     and the *All* row (the bound row's own `%` and a retyped hex no longer reach it, D1041);
    - a `Path`'s per-anchor radii are not bindable — a limit of step 1, not a ruling.
 2. Number variables in layout fields, and boolean variables bound to visibility (D1038 (d)).
 3. Styles for fills, strokes and effects.
@@ -1652,15 +1656,16 @@ accepted (D1038):
   `variable::land` (§15 D1039; read in the code, not run).
 
 **Owed by the build, read and not ruled** (D1037's premises; (iv) ruled by D1038, and (i), (ii) and (v)
-built in step 1's core, §15 D1039): (iii) a right-click menu on inspector fields, which nothing has
-today — its rows now specified, `context-menus.md` §6.7; and (vi) a variable's edit is an undoable
+built in step 1's core, §15 D1039, and (iii), the field menu, by D1041): (vi) a variable's edit is an undoable
 `Operation` now, but **its preview reaches no bound node** — `absorb` no-ops the table's operations, so a
 previewed cell draws the committed value; D1038 commits a cell on `Enter`, so nothing asks for one yet.
 
 *Opened 2026-10-11, when styles and variables left §0's non-goals; the design pass and (a), (b), (c),
 (d), (f) and premise (iv) struck on 2026-10-14, ruled in §15 D1038; step 1's core and premises (i), (ii)
 and (v) struck the same day, built in §15 D1039; the browser, `Shift+S` and the delete verbs struck the
-same day, built in §15 D1040.*
+same day, built in §15 D1040; the chip, the `--` list, the field menu, *Extract*, premise (iii), the
+corner writes, the retyped-hex edge, *Extract*'s alpha, the per-corner detach and the literal-built
+writers struck the same day, built or fixed in §15 D1041.*
 
 ## Next · The polishing pass over the accepted calls
 

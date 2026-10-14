@@ -1708,8 +1708,15 @@ impl OndinApp {
             }
             _ => None,
         };
+        // **As drawn** (§15 D1041): a bound corner's literal is 0 and never drawn,
+        // so the fields read its variable's number in the mode in force.
         let corners0 = match node.kind() {
-            NodeKind::Rect { corner_radii, .. } => Some(*corner_radii),
+            NodeKind::Rect { corner_radii, .. } => Some(
+                self.session
+                    .doc
+                    .resolve_corners(id, *corner_radii)
+                    .unwrap_or(*corner_radii),
+            ),
             _ => None,
         };
         let vertices0 = match node.kind() {
@@ -3701,7 +3708,13 @@ impl OndinApp {
             let NodeKind::Rect { corner_radii, .. } = node.kind() else {
                 continue;
             };
-            let r = uniform(*corner_radii)?;
+            // As drawn, a bound corner's 0 literal aside (§15 D1041).
+            let drawn = self
+                .session
+                .doc
+                .resolve_corners(id, *corner_radii)
+                .unwrap_or(*corner_radii);
+            let r = uniform(drawn)?;
             match shared {
                 None => shared = Some(r),
                 Some(s) if (s - r).abs() < build::RADIUS_AGREEMENT => {}
@@ -5788,57 +5801,79 @@ impl OndinApp {
                     }]),
                 );
                 let Some(corners) = corners0 else { return };
-                // The single field edits all four at once, and shows the shared
-                // value — or the largest, when they differ, so dragging it from
-                // a mixed state is a sensible starting point rather than 0.
-                let shared = uniform(corners);
-                let mut r = shared.unwrap_or_else(|| largest(corners));
-                let seed = r;
-                let (rr, hit) = ui::value_field_marked(
-                    ui,
-                    egui::vec2(fw, 28.0),
-                    Prefix::Icon(icon::CORNERS_OUT),
-                    marks.radius.as_ref().map(Mark::field),
-                    &mut r,
-                    Scrub::whole(0.5).range(0.0..=f64::MAX),
-                    |d| d.custom_formatter(ui::number(2)),
-                );
-                app.reset_marked(hit, &marks.radius);
-                // ⚠️ **A field seeded from one member of a disagreeing set may not
-                // write until it has been moved** (§15 D534). `[S14.3-L1-01]`: a
-                // rect whose corners are `(10, 0, 0, 0)` shows `largest` — 10 — and
-                // a bare click, nothing typed and nothing dragged, put
-                // `CornerRadius(10)` through the valve and **flattened three corners
-                // the user never touched**, `undo_depth 0→1`.
-                //
-                // **This is `paint_row`'s `!hazy || moved` at a second field**, and
-                // it is the same accident for the same reason: the readout has to
-                // hand its control *some* number while the set disagrees, and
-                // `edit_valve` commits on the engaged→released transition a click
-                // produces without comparing anything. `largest`'s own doc says what
-                // the seed is for — *"so **dragging it** starts from the shape's own
-                // scale"* — and a click is not a drag.
-                //
-                // ⚠️ **The no-op family cannot see this one, which is why only the
-                // mixed case was ever visible.** Over an *agreeing* set the write is
-                // a genuine no-op and `Transaction::changes_nothing` (§15 D428) has
-                // absorbed it at `commit_inner` since it was written. Over a
-                // disagreeing one the transaction really does change the document,
-                // so D428 is right to let it through and the guard has to be here.
-                //
-                // **What it refuses is typing the shown number over a mixed set**,
-                // which reads as "flatten them all to this" and now does nothing.
-                // The per-corner disclosure one button to the right is that edit's
-                // door, and `paint_row` makes the identical trade at the identical
-                // seam.
-                if shared.is_some() || r != seed {
-                    app.edit_valve(
-                        &rr,
-                        Transaction(vec![Operation::SetGeometry {
-                            id,
-                            geometry: GeometryPatch::CornerRadius(r.max(0.0)),
-                        }]),
+                // **Bound, the field is a chip** (§15 D1041, D1038 A1) — or the
+                // buffer replacing it once a key has landed on it (A3).
+                let key = super::binding::FieldKey::Radius { id };
+                let retyping = app.var_retype.as_ref().filter(|r| r.key == key).cloned();
+                if let Some(var) = app.field_var(key).filter(|_| retyping.is_none()) {
+                    app.radius_chip(ui, key, var, fw);
+                } else if let Some(rt) = retyping {
+                    app.radius_retype(ui, key, rt, fw);
+                } else {
+                    // The single field edits all four at once, and shows the shared
+                    // value — or the largest, when they differ, so dragging it from
+                    // a mixed state is a sensible starting point rather than 0.
+                    let shared = uniform(corners);
+                    let mut r = shared.unwrap_or_else(|| largest(corners));
+                    let seed = r;
+                    let (rr, hit) = ui::value_field_marked(
+                        ui,
+                        egui::vec2(fw, 28.0),
+                        Prefix::Icon(icon::CORNERS_OUT),
+                        marks.radius.as_ref().map(Mark::field),
+                        &mut r,
+                        Scrub::whole(0.5).range(0.0..=f64::MAX),
+                        |d| d.custom_formatter(ui::number(2)),
                     );
+                    app.reset_marked(hit, &marks.radius);
+                    // ⚠️ **A field seeded from one member of a disagreeing set may not
+                    // write until it has been moved** (§15 D534). `[S14.3-L1-01]`: a
+                    // rect whose corners are `(10, 0, 0, 0)` shows `largest` — 10 — and
+                    // a bare click, nothing typed and nothing dragged, put
+                    // `CornerRadius(10)` through the valve and **flattened three corners
+                    // the user never touched**, `undo_depth 0→1`.
+                    //
+                    // **This is `paint_row`'s `!hazy || moved` at a second field**, and
+                    // it is the same accident for the same reason: the readout has to
+                    // hand its control *some* number while the set disagrees, and
+                    // `edit_valve` commits on the engaged→released transition a click
+                    // produces without comparing anything. `largest`'s own doc says what
+                    // the seed is for — *"so **dragging it** starts from the shape's own
+                    // scale"* — and a click is not a drag.
+                    //
+                    // ⚠️ **The no-op family cannot see this one, which is why only the
+                    // mixed case was ever visible.** Over an *agreeing* set the write is
+                    // a genuine no-op and `Transaction::changes_nothing` (§15 D428) has
+                    // absorbed it at `commit_inner` since it was written. Over a
+                    // disagreeing one the transaction really does change the document,
+                    // so D428 is right to let it through and the guard has to be here.
+                    //
+                    // **What it refuses is typing the shown number over a mixed set**,
+                    // which reads as "flatten them all to this" and now does nothing.
+                    // The per-corner disclosure one button to the right is that edit's
+                    // door, and `paint_row` makes the identical trade at the identical
+                    // seam.
+                    if shared.is_some() || r != seed {
+                        app.edit_valve(
+                            &rr,
+                            Transaction(vec![Operation::SetGeometry {
+                                id,
+                                geometry: GeometryPatch::CornerRadius(r.max(0.0)),
+                            }]),
+                        );
+                    }
+                    // `--` typed into it opens the list (B1): the field's text is the
+                    // drag value's own, kept by egui under its id while it is typed.
+                    if rr.has_focus()
+                        && let Some(text) = ui.ctx().data(|d| d.get_temp::<String>(rr.id))
+                    {
+                        app.bind_typing(ui.ctx(), key, &text, rr.rect);
+                    }
+                    if rr.secondary_clicked()
+                        && let Some(at) = rr.interact_pointer_pos()
+                    {
+                        app.field_menu = Some((key, at, rr.rect));
+                    }
                 }
                 if ui::field_button(
                     ui,
@@ -9704,7 +9739,28 @@ impl OndinApp {
                     // says "Mixed" instead, which is true of both cases.
                     match paint::kind_of(brush) {
                         _ if unknown => self.paint_hex_field(ui, id, slot, brush, true),
-                        PaintKind::Solid => self.paint_hex_field(ui, id, slot, brush, false),
+                        // **Bound, the chip replaces the hex** and the swatch beside
+                        // it shows the resolved colour (§15 D1041, D1038 A1) — until
+                        // a key typed onto it turns it back into the hex buffer.
+                        PaintKind::Solid => {
+                            let key = super::binding::FieldKey::Paint { id, slot };
+                            let typing = matches!(&self.paint_hex, Some((n, s, _)) if *n == id && *s == slot)
+                                || self.var_retype.as_ref().is_some_and(|r| r.key == key);
+                            match self.field_var(key).filter(|_| !typing) {
+                                Some(var) => {
+                                    // The row's right-hand run — the `%`, the ×
+                                    // and an instance's item slot — keeps its room.
+                                    let reserve = if item.is_some() { 106.0 } else { 82.0 };
+                                    let w = (ui.available_width() - reserve).max(40.0);
+                                    let (rect, _) = ui.allocate_exact_size(
+                                        egui::vec2(w, 28.0),
+                                        egui::Sense::hover(),
+                                    );
+                                    self.field_chip(ui, key, var, rect);
+                                }
+                                None => self.paint_hex_field(ui, id, slot, brush, false),
+                            }
+                        }
                         // **A picture gets a plain label and no hex.** The hex
                         // field is what made this reachable as a bug rather than
                         // an omission: an image classified as `Solid`, so the row
@@ -9798,7 +9854,14 @@ impl OndinApp {
                             out.remove = true;
                         }
                         let hazy = mixed.is_some_and(|m| m.alpha);
-                        let mut pct = paint::alpha_of(brush) * 100.0;
+                        // **A bound paint's `%` is its own multiplier**, not the
+                        // alpha drawn (D1038: *"the variable's colour times that
+                        // `%`"*), so it reads and writes the binding's (§15 D1041).
+                        let bound_alpha = self.field_alpha(super::binding::FieldKey::Paint { id, slot });
+                        let mut pct = match bound_alpha {
+                            Some(a) => a * 100.0,
+                            None => paint::alpha_of(brush) * 100.0,
+                        };
                         let value = egui::DragValue::new(&mut pct)
                             .speed(ui::scrub(0.5))
                             .max_decimals(0)
@@ -9872,6 +9935,11 @@ impl OndinApp {
                                         .edit_paints_all(target, move |b| paint::with_alpha(b, a));
                                     self.edit_valve(&resp, tx);
                                 }
+                            }
+                            _ if bound_alpha.is_some() => {
+                                let a = (pct / 100.0).clamp(0.0, 1.0);
+                                let tx = self.rebind_alpha_tx(id, slot, a);
+                                self.edit_valve(&resp, tx);
                             }
                             _ => {
                                 let next = paint::with_alpha(brush, pct / 100.0);
@@ -10821,22 +10889,58 @@ impl OndinApp {
         mixed: bool,
     ) {
         let current = paint::stops_of(brush)[0].1;
+        // **A bound chip typed over hands its first key here** (§15 D1041, A3):
+        // the buffer starts from that key, with the caret after it.
+        let key = super::binding::FieldKey::Paint { id, slot };
+        let retyped = self.var_retype.as_ref().is_some_and(|r| r.key == key);
+        if let Some(rt) = self.var_retype.as_mut().filter(|r| r.key == key && r.focus) {
+            rt.focus = false;
+            self.paint_hex = Some((id, slot, rt.text.clone()));
+        }
+        let bound = self.field_var(key);
         let editing = matches!(&self.paint_hex, Some((n, s, _)) if *n == id && *s == slot);
         let mut text = match &self.paint_hex {
             Some((_, _, buf)) if editing => buf.clone(),
             _ if mixed => "Mixed".to_string(),
             _ => hex_of(current),
         };
+        let edit_id = egui::Id::new(("paint-hex", id, format!("{slot:?}")));
+        // `--name` is longer than any hex; the limit holds for a colour only.
+        let limit = if text.starts_with('-') {
+            usize::MAX
+        } else {
+            ui::HEX_CHAR_LIMIT
+        };
         let resp = ui.add(
             egui::TextEdit::singleline(&mut text)
+                .id(edit_id)
                 .frame(egui::Frame::NONE)
                 .desired_width(62.0)
-                .char_limit(ui::HEX_CHAR_LIMIT)
+                .char_limit(limit)
                 .font(egui::FontId::proportional(12.0)),
         );
-        ui::select_all_on_focus(ui, &resp, &text);
+        if retyped && !resp.has_focus() && editing {
+            resp.request_focus();
+        }
+        if retyped && resp.gained_focus() {
+            self.var_retype = None;
+            super::binding::caret_to_end(ui.ctx(), edit_id, &text);
+        } else {
+            ui::select_all_on_focus(ui, &resp, &text);
+        }
         if resp.gained_focus() || resp.changed() {
             self.paint_hex = Some((id, slot, text.clone()));
+        }
+        // `--` opens the variables list under the row (B2); the field's menu is
+        // the other way in.
+        if resp.has_focus() {
+            self.bind_typing(ui.ctx(), key, &text, resp.rect);
+        }
+        if resp.secondary_clicked()
+            && let Some(at) = resp.interact_pointer_pos()
+            && !mixed
+        {
+            self.field_menu = Some((key, at, resp.rect));
         }
         // Dropping the buffer here is what strips a typed or pasted `#`: the
         // field falls back to `hex_of`, which never writes one. **On every way out
@@ -10891,9 +10995,37 @@ impl OndinApp {
             // `mixed` writes unconditionally: over a set that disagrees there is no
             // one colour to compare against, and picking all of them to one is
             // exactly the edit being asked for.
-            let unchanged = !mixed && parse_hex(&text) == parse_hex(&hex_of(current));
+            // **A hex typed over a binding is a literal, even the variable's own**
+            // (D1037: a typed literal detaches) — so a bound field is never
+            // unchanged, and it writes the literal outright rather than through
+            // `edited_brush`, whose *as drawn* reading would keep the binding for a
+            // value equal to the one drawn (§15 D1041, `arch-scribe`'s first edge).
+            let unchanged =
+                !mixed && bound.is_none() && parse_hex(&text) == parse_hex(&hex_of(current));
             if let Some([r, g, b]) = parse_hex(&text).filter(|_| !unchanged) {
                 let rgb = ondin_core::peniko::Color::from_rgba8(r, g, b, 255);
+                if bound.is_some() {
+                    let lit = rgb.with_alpha(current.components[3]);
+                    let ids = match slot {
+                        PaintSlot::Selection(..) => self.session.selection.ids().to_vec(),
+                        _ => vec![id],
+                    };
+                    let (target, index) = match slot {
+                        PaintSlot::Fill(i) => (PaintTarget::Fill, i),
+                        PaintSlot::Stroke(i) => (PaintTarget::Stroke, i),
+                        PaintSlot::Selection(t, i) => (t, i),
+                        _ => return,
+                    };
+                    let tx = ondin_core::set_brush_at_all(
+                        &self.session.doc,
+                        &ids,
+                        target,
+                        index,
+                        |_, _| lit.into(),
+                    );
+                    self.commit_edit(tx);
+                    return;
+                }
                 // **Each paint keeps its own opacity**, which is only expressible
                 // here and not through the slot: this field owns the colour and
                 // the field at the other end of the row owns the number, and over

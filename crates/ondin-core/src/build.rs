@@ -3236,6 +3236,185 @@ pub fn detach_corners_ops(doc: &Document, id: NodeId) -> Vec<Operation> {
     ]
 }
 
+/// Item `index` of every target's fill (or stroke) list, given what `brush_of`
+/// makes of it — handed the node it sits on, so a binding can resolve there.
+/// The binding verbs' one write (§15 D1041): bind, detach, and a literal typed
+/// over a chip, which has to replace the binding rather than go through
+/// [`edited_brush`]'s *as drawn* reading.
+pub fn set_brush_at_all(
+    doc: &Document,
+    ids: &[NodeId],
+    target: PaintTarget,
+    index: usize,
+    brush_of: impl Fn(NodeId, &crate::BrushSource) -> crate::BrushSource,
+) -> Transaction {
+    let mut ops = Vec::new();
+    for id in paint_targets(doc, ids) {
+        let Some(node) = doc.get(id) else { continue };
+        match target {
+            PaintTarget::Fill => {
+                let mut fills = node.paint().fills.clone();
+                let Some(f) = fills.get_mut(index) else {
+                    continue;
+                };
+                f.brush = brush_of(id, &f.brush);
+                if fills != node.paint().fills {
+                    ops.push(Operation::SetFills { id, fills });
+                }
+            }
+            PaintTarget::Stroke => {
+                let mut strokes = node.paint().strokes.clone();
+                let Some(s) = strokes.get_mut(index) else {
+                    continue;
+                };
+                s.brush = brush_of(id, &s.brush);
+                if strokes != node.paint().strokes {
+                    ops.push(Operation::SetStrokes { id, strokes });
+                }
+            }
+        }
+    }
+    Transaction(ops)
+}
+
+/// Bind item `index` of every target's list to colour variable `var` (D1038):
+/// the paint becomes the variable's colour, **keeping its own `%`** — a literal
+/// solid's alpha, a bound paint's binding alpha, full for anything else.
+pub fn bind_brush_at_all(
+    doc: &Document,
+    ids: &[NodeId],
+    target: PaintTarget,
+    index: usize,
+    var: crate::VarId,
+) -> Transaction {
+    set_brush_at_all(doc, ids, target, index, |_, b| {
+        let alpha = match b {
+            crate::BrushSource::Literal(Brush::Solid(c)) => c.components[3],
+            crate::BrushSource::Bound { alpha, .. } => *alpha,
+            crate::BrushSource::Literal(_) => 1.0,
+        };
+        crate::BrushSource::Bound { var, alpha }
+    })
+}
+
+/// Detach item `index` of every target's list: each bound paint becomes the
+/// solid it draws there (D1038's *Detach variable*).
+pub fn detach_brush_at_all(
+    doc: &Document,
+    ids: &[NodeId],
+    target: PaintTarget,
+    index: usize,
+) -> Transaction {
+    set_brush_at_all(doc, ids, target, index, |id, b| {
+        doc.resolve_brush(id, b).into_owned().into()
+    })
+}
+
+/// **A radius written over a bound corner detaches it** (D1038 (2)) — the
+/// commit-time half of the binding's rule, so no writer of a radius has to know
+/// about bindings: the inspector's field, its per-corner fields and every bulk
+/// verb write `GeometryPatch::CornerRadius` or `CornerRadii` as they did, and this
+/// adds the `SetCornerVars` that lets the written value be the one drawn.
+///
+/// 🚨 **Compared against what each corner draws, not against its literal.** The
+/// fields read the corners *as drawn* (`Document::resolve_corners`), so a
+/// per-corner edit hands all four back — the three untouched at the values their
+/// variables give them — and a bare click through a field writes what is already
+/// drawn. Compared with the literal, a bound corner's 0, every one of those read
+/// as a change and detached all four: the first cut did that, and its test wrote
+/// literals (`(9, 0, 0, 0)`), which no field does (`arch-scribe`'s reading). So a
+/// bound corner **written its drawn value stays bound**, and its literal is put
+/// back to 0 in the patch, the canonical value `bind_corners_ops` writes; one
+/// written anything else detaches to it.
+///
+/// ⚠️ **And one written its own literal stays bound too**, because some writers
+/// build the radii from the document's kind rather than from what is drawn — the
+/// Scale tool's photographic scale (`0 × s` is still 0), a per-corner override's
+/// ↺ — and compared with the drawn value alone those turned a bound corner
+/// square. The price is that a **0 typed into a field over a bound corner** is
+/// its literal and detaches nothing here; the chip's retype, which detaches
+/// first, is that value's door.
+///
+/// A transaction that sets a node's corner bindings itself — a bind, a detach —
+/// is left to say what it means.
+pub fn keep_corner_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
+    let sets_vars: FxHashSet<NodeId> =
+        tx.0.iter()
+            .filter_map(|op| match op {
+                Operation::SetCornerVars { id, .. } => Some(*id),
+                _ => None,
+            })
+            .collect();
+    let mut detached: FxHashMap<NodeId, crate::CornerVars> = FxHashMap::default();
+    for op in tx.0.iter_mut() {
+        let Operation::SetGeometry { id, geometry } = op else {
+            continue;
+        };
+        if sets_vars.contains(id) {
+            continue;
+        }
+        let Some(node) = doc.get(*id) else { continue };
+        let NodeKind::Rect { corner_radii, .. } = node.kind() else {
+            continue;
+        };
+        let bound = node.corner_vars();
+        if bound.iter().all(Option::is_none) {
+            continue;
+        }
+        let mut written = match geometry {
+            GeometryPatch::CornerRadius(r) => [*r; 4],
+            GeometryPatch::CornerRadii(r) => {
+                [r.top_left, r.top_right, r.bottom_right, r.bottom_left]
+            }
+            _ => continue,
+        };
+        let drawn = doc
+            .resolve_corners(*id, *corner_radii)
+            .unwrap_or(*corner_radii);
+        let drawn = [
+            drawn.top_left,
+            drawn.top_right,
+            drawn.bottom_right,
+            drawn.bottom_left,
+        ];
+        let literal = [
+            corner_radii.top_left,
+            corner_radii.top_right,
+            corner_radii.bottom_right,
+            corner_radii.bottom_left,
+        ];
+        let vars = detached.entry(*id).or_insert(bound);
+        for k in 0..4 {
+            if vars[k].is_none() {
+                continue;
+            }
+            // Its drawn value (a field's write), or its own literal (a writer that
+            // built the radii from the document's kind — the Scale tool's
+            // photographic scale of a 0, a per-corner ↺), leaves it bound.
+            if written[k] == drawn[k] || written[k] == literal[k] {
+                written[k] = literal[k];
+            } else {
+                vars[k] = None;
+            }
+        }
+        *geometry = GeometryPatch::CornerRadii(RoundedRectRadii {
+            top_left: written[0],
+            top_right: written[1],
+            bottom_right: written[2],
+            bottom_left: written[3],
+        });
+    }
+    let mut ids: Vec<NodeId> = detached.keys().copied().collect();
+    ids.sort();
+    for id in ids {
+        let vars = detached[&id];
+        if doc.get(id).is_some_and(|n| n.corner_vars() != vars) {
+            tx.0.push(Operation::SetCornerVars { id, vars });
+        }
+    }
+    tx
+}
+
 /// [`edit_brushes_all`] for the one item at `index` of each target's list — a row
 /// of the shared list, written in place so every target keeps its own item ids
 /// (§15 D980).

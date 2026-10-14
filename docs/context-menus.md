@@ -897,18 +897,23 @@ menu appearing over it is the kind of thing that is hard to take back once hands
 ever earns a menu it will be for guides — *Lock guides*, *Clear guides* — which is a different list
 with a different reason, and it is not reserved here.
 
-### 6.7 An inspector field — ruled 2026-10-13, not built
+### 6.7 An inspector field — ruled 2026-10-13, ~~not built~~ built 2026-10-14
 
-**A new surface**: no inspector field has a right-click menu today (`decisions.md` §15 D1037, premise
-(iii)). Specified by the *Styles and Variables* design (C1–C2), accepted with the maintainer's rulings
+**A new surface**: ~~no inspector field has a right-click menu today~~ no inspector field had a
+right-click menu before it (`decisions.md` §15 D1037, premise (iii)). ✅ **Built 2026-10-14** (§15
+D1041): `OndinApp::field_menu_ui` in `panels/binding.rs`, an `Area` of its own drawn with
+`ui::menu_frame` and `ui::menu_row` rather than through `open_context_menu`, closed by its act, a press
+outside it or `Escape`. **It is offered on a solid paint row's hex field (not on a *Mixed* row), on
+every bound field's chip, and on a single layer's corner-radius field** — the two fields step 1 binds;
+not yet on the several-selected radius field, the per-corner fields, or the other numbers below. Specified by the *Styles and Variables* design (C1–C2), accepted with the maintainer's rulings
 (§15 D1038); `architecture.md` §5.3f. It opens on a **bindable** field — §15 D1038 (7) and §5.3f list
 them; X, Y and rotation are not.
 
 | Row | Chord | Cost | |
 |---|---|---|---|
-| Bind to variable… | `--` | feature | Opens the `--` autocomplete under the field, filtered to the field's type — the route that needs no typing. When the field is bound, the current variable is highlighted. The accelerator column shows `--`, the two characters that open the same list from the keyboard, not a chord |
-| Extract into variable… | — | feature | Opens the browser on *Variables* with a pending row, the value in every mode, the name field focused; the field shows a dashed capsule until `Enter` files it or `Escape` cancels both. **Disabled when the field is bound** |
-| Detach variable | `Backspace` | feature | The field takes the value it resolved to. `Backspace` is the focused chip's key for the same verb. **Omitted when the field is not bound** (§3's exception) |
+| Bind to variable… | `--` | feature | ✅ Opens the `--` autocomplete under the field, filtered to the field's type — the route that needs no typing. When the field is bound, the current variable is highlighted. The accelerator column shows `--`, the two characters that open the same list from the keyboard, not a chord. Built with a search field of its own, the field not being typed into |
+| Extract into variable… | — | feature | ✅ Opens the browser on *Variables* with a pending row, the value in every mode, the name field focused; the field shows a dashed capsule until `Enter` files it or `Escape` cancels both. **Disabled when the field is bound**. ⚠️ **Built simpler** (§15 D1041): one transaction files the variable and binds the field, then the browser opens on its name — no pending row, no dashed capsule, and `Escape` abandons the rename alone |
+| Detach variable | `Backspace` | feature | ✅ The field takes the value it resolved to. `Backspace` is the focused chip's key for the same verb. **Omitted when the field is not bound** (§3's exception) |
 
 **In this order.** *Extract into variable…* follows §3's *state decides enabled* and is disabled on a
 bound field; *Detach variable* is §3's one exception, a row whose only purpose is to undo a

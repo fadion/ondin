@@ -345,6 +345,9 @@ pub struct DisplayNode<'a> {
     /// their variables' numbers (§15 D1058) — `None` where nothing is bound, or
     /// for [`EditorSession::committed_node`], `used`'s reason.
     drawn: Option<ondin_core::container::Display>,
+    /// Whether the layer is shown, a bound visibility resolved (§15 D1059) —
+    /// the literal for [`EditorSession::committed_node`].
+    shown: bool,
 }
 
 impl<'a> DisplayNode<'a> {
@@ -393,10 +396,10 @@ impl<'a> DisplayNode<'a> {
             .and_then(|o| o.opacity)
             .unwrap_or_else(|| self.node.opacity())
     }
+    /// Whether the layer is shown — a bound visibility resolved (§15 D1059),
+    /// the eye's state, a live preview's included.
     pub fn visible(&self) -> bool {
-        self.over
-            .and_then(|o| o.visible)
-            .unwrap_or_else(|| self.node.visible())
+        self.over.and_then(|o| o.visible).unwrap_or(self.shown)
     }
     /// The layer's insets inside its frame (§15 D871), a live inset scrub's
     /// included — **with an override behind it**, so a field being dragged reads the
@@ -699,6 +702,7 @@ impl EditorSession {
                 Some(std::borrow::Cow::Owned(d)) => Some(d),
                 _ => None,
             },
+            shown: self.doc.shown(id),
         })
     }
 
@@ -713,11 +717,13 @@ impl EditorSession {
     /// ([`Self::set_session_preview`]) rather than to the gesture in hand, and
     /// clearing that takes uncommitted text off the canvas.
     pub fn committed_node(&self, id: NodeId) -> Option<DisplayNode<'_>> {
+        let node = self.doc.get(id)?;
         Some(DisplayNode {
-            node: self.doc.get(id)?,
+            node,
             over: None,
             used: None,
             drawn: None,
+            shown: node.visible(),
         })
     }
 
@@ -1254,6 +1260,8 @@ impl EditorSession {
         // And a gap or a padding written over a bound slot the same way (§15
         // D1058), at the same place for the same reason.
         let tx = ondin_core::build::keep_spacing_bindings(&self.doc, tx);
+        // And a visibility written over a bound layer (§15 D1059).
+        let tx = ondin_core::build::keep_visible_bindings(&self.doc, tx);
         let mut tx = tx;
         // What the components owe the edit — a swap's rewrite, a main's structure
         // and fields reaching its instances, the links and variant names settled —

@@ -1132,6 +1132,7 @@ fn card_of(op: &Operation) -> Option<&'static str> {
         }
         O::SetName { .. }
         | O::SetVisible { .. }
+        | O::SetVisibleVar { .. }
         | O::SetMask { .. }
         | O::SetFillRule { .. }
         | O::SetText { .. }

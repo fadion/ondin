@@ -84,6 +84,7 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
         mode,
         corner_vars,
         spacing_vars,
+        visible_var,
     } = node;
     let id = *id;
     use Operation as O;
@@ -157,6 +158,11 @@ pub fn state_ops(node: &Node) -> Vec<Operation> {
         O::SetSpacingVars {
             id,
             vars: *spacing_vars,
+        },
+        // And a visibility's (§15 D1059), after the `SetVisible` above.
+        O::SetVisibleVar {
+            id,
+            var: *visible_var,
         },
     ];
     ops.extend(kind_ops(id, kind));

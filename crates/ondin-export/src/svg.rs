@@ -1485,7 +1485,8 @@ fn emit_node(
     report: &mut Report,
 ) {
     let Some(node) = doc.get(id) else { return };
-    if !node.visible() {
+    // Shown, a bound visibility resolved (§15 D1059).
+    if !doc.shown(id) {
         return;
     }
     // **The effect stack gets a wrapper of its own, outside everything this node
@@ -1715,7 +1716,7 @@ fn emit_node(
                 // mask would have looked like deleting the artwork. The canvas was
                 // repaired in D566 and the export was not, so the same document
                 // exported one picture and drew another.
-                MaskMode::Alpha if child_node.visible() => {
+                MaskMode::Alpha if doc.shown(*child) => {
                     // ⚠️ **The region is written, and SVG's default for it is
                     // wrong for us in exactly the way [`effect_region`]'s doc
                     // says a filter's is** (§15 D458). `<mask>` defaults to

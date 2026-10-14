@@ -1750,7 +1750,8 @@ fn replace_with_path(
             opacity: node.opacity(),
         });
     }
-    if !node.visible() {
+    // What it shows, a bound visibility resolved — the path is unbound (§15 D1059).
+    if !doc.shown(id) {
         ops.push(Operation::SetVisible {
             id: new,
             visible: false,
@@ -3650,6 +3651,91 @@ pub fn keep_spacing_bindings(doc: &Document, mut tx: Transaction) -> Transaction
         if doc.get(id).is_some_and(|n| n.spacing_vars() != vars) {
             tx.0.push(Operation::SetSpacingVars { id, vars });
         }
+    }
+    tx
+}
+
+/// Bind layer `id`'s visibility to boolean variable `var` (§15 D1059). The
+/// literal is written **true**, [`bind_corners_ops`]' canonical-literal rule —
+/// so a main and its copy bound to one variable compare equal whatever either
+/// showed before — and is never read while bound. Empty when nothing would change.
+pub fn bind_visible_ops(doc: &Document, id: NodeId, var: crate::VarId) -> Vec<Operation> {
+    let Some(node) = doc.get(id) else {
+        return Vec::new();
+    };
+    let mut ops = Vec::new();
+    if !node.visible() {
+        ops.push(Operation::SetVisible { id, visible: true });
+    }
+    if node.visible_var() != Some(var) {
+        ops.push(Operation::SetVisibleVar { id, var: Some(var) });
+    }
+    ops
+}
+
+/// Detach layer `id`'s visibility to whether it is shown (D1038's detach, §15
+/// D1059). Empty when it is not bound.
+pub fn detach_visible_ops(doc: &Document, id: NodeId) -> Vec<Operation> {
+    let Some(node) = doc.get(id) else {
+        return Vec::new();
+    };
+    if node.visible_var().is_none() {
+        return Vec::new();
+    }
+    vec![
+        Operation::SetVisible {
+            id,
+            visible: doc.shown(id),
+        },
+        Operation::SetVisibleVar { id, var: None },
+    ]
+}
+
+/// **A visibility written over a bound layer detaches it** (D1038 (2), §15
+/// D1059) — the commit-time half of the binding, so the layers panel's eye, the
+/// identity card's, *Bring back into flow*, a boolean component property and
+/// every bulk *Show*/*Hide* write `SetVisible` as they did.
+///
+/// 🚨 **One half, not [`keep_corner_bindings`]' two.** A write of what the
+/// layer shows stays bound — its literal put back — but a write of its own
+/// literal is **not** excused: the literal is the `true` [`bind_visible_ops`]
+/// writes, and a hidden bound layer brought back with `visible: true` — the eye,
+/// *Bring back into flow* — writes exactly that, so the literal half would have
+/// kept every such layer bound and hidden, the edit doing nothing. No writer
+/// here builds a visibility from the literal the way the Scale tool builds radii,
+/// which is what the second half exists for.
+///
+/// A transaction that sets a layer's binding itself — a bind, a detach, a reset
+/// — is left to say what it means.
+pub fn keep_visible_bindings(doc: &Document, mut tx: Transaction) -> Transaction {
+    let sets_var: FxHashSet<NodeId> =
+        tx.0.iter()
+            .filter_map(|op| match op {
+                Operation::SetVisibleVar { id, .. } => Some(*id),
+                _ => None,
+            })
+            .collect();
+    let mut detached: Vec<NodeId> = Vec::new();
+    for op in tx.0.iter_mut() {
+        let Operation::SetVisible { id, visible } = op else {
+            continue;
+        };
+        if sets_var.contains(id) {
+            continue;
+        }
+        let Some(node) = doc.get(*id) else { continue };
+        if node.visible_var().is_none() {
+            continue;
+        }
+        if *visible == doc.shown(*id) {
+            *visible = node.visible();
+        } else if !detached.contains(id) {
+            detached.push(*id);
+        }
+    }
+    detached.sort();
+    for id in detached {
+        tx.0.push(Operation::SetVisibleVar { id, var: None });
     }
     tx
 }

@@ -71,7 +71,8 @@ fn mode(op: &Operation) -> Mode {
         // corner's binding: overrides compare the binding (§5.3d).
         | Operation::SetMode { .. }
         | Operation::SetCornerVars { .. }
-        | Operation::SetSpacingVars { .. } => Mode::Whole,
+        | Operation::SetSpacingVars { .. }
+        | Operation::SetVisibleVar { .. } => Mode::Whole,
         Operation::SetTextStyle { .. }
         | Operation::SetParagraphStyle { .. }
         | Operation::SetBlockStyle { .. }

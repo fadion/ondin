@@ -529,7 +529,7 @@ impl RenderOverrides {
         }
         self.get(id)
             .and_then(|o| o.visible)
-            .unwrap_or_else(|| doc.get(id).is_some_and(|n| n.visible()))
+            .unwrap_or_else(|| doc.shown(id))
     }
 
     /// The world transform `id` would have, composed through any overridden
@@ -1416,6 +1416,24 @@ impl RenderOverrides {
                 Some(g) => g.visible = *visible,
                 None => self.entry(*id).visible = Some(*visible),
             },
+            // **A visibility's binding previews as what it will show** (§15
+            // D1059) — the bound variable's value in the mode in force; unbound,
+            // the literal the ops before this one left, else the document's.
+            Operation::SetVisibleVar { id, var } => {
+                if self.ghost(*id).is_none() {
+                    let shown = match var {
+                        Some(v) => match doc.resolve_var(*id, *v) {
+                            Some(ondin_core::Value::Boolean(b)) => b,
+                            _ => return None,
+                        },
+                        None => self
+                            .get(*id)
+                            .and_then(|o| o.visible)
+                            .or_else(|| doc.get(*id).map(|n| n.visible()))?,
+                    };
+                    self.entry(*id).visible = Some(shown);
+                }
+            }
             Operation::SetFills { id, fills } => {
                 let mut paint = self.current_paint(doc, *id)?;
                 paint.fills = fills.clone();
@@ -1640,6 +1658,10 @@ impl RenderOverrides {
                             },
                         );
                         self.moved.insert(n);
+                    }
+                    // A bound visibility the same way (§15 D1059).
+                    if doc.get(n).is_some_and(|node| node.visible_var().is_some()) {
+                        self.entry(n).visible = Some(doc.shown_in(&t, n));
                     }
                     // A bound gap or padding the same way, against the table with
                     // the cell changed, over the layout pending or committed

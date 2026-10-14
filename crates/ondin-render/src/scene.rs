@@ -620,12 +620,12 @@ impl MaskRun {
 /// One rule in one place rather than the same line written twice, which is how
 /// the two came to disagree in the first place.
 ///
-/// `node` is `doc.get(id)`, passed rather than looked up again because both
-/// callers already hold it.
-fn visible(ov: &RenderOverrides, node: &ondin_core::Node, id: NodeId) -> bool {
+/// The document's answer is `Document::shown`, a bound visibility resolved (§15
+/// D1059) — so a boolean variable's mode can hide a mask too.
+fn visible(ov: &RenderOverrides, doc: &Document, id: NodeId) -> bool {
     ov.get(id)
         .and_then(|o| o.visible)
-        .unwrap_or_else(|| node.visible())
+        .unwrap_or_else(|| doc.shown(id))
 }
 
 /// The outline a mask node clips with, in its **parent's** space, with any live
@@ -654,7 +654,7 @@ fn mask_geometry(
 ) -> Option<BezPath> {
     let node = doc.get(id)?;
     let over = ov.get(id);
-    if !visible(ov, node, id) {
+    if !visible(ov, doc, id) {
         return None;
     }
     // The override's, else the **used** geometry (§15 D868) — `paint_node`'s
@@ -758,7 +758,10 @@ fn paint_node<P: ScenePainter>(
     let Some(node) = doc.get(id) else { return };
     let over = ov.get(id);
 
-    if !over.and_then(|o| o.visible).unwrap_or(node.visible()) {
+    if !over
+        .and_then(|o| o.visible)
+        .unwrap_or_else(|| doc.shown(id))
+    {
         return;
     }
 
@@ -1101,7 +1104,7 @@ fn paint_node<P: ScenePainter>(
                 // icon: *"an alpha mask with **no ink** legitimately erases the
                 // run"*. A mask the user has switched off has not been asked to
                 // erase anything.
-                MaskMode::Alpha => visible(ov, node, *child).then_some(RunKind::Alpha(*child)),
+                MaskMode::Alpha => visible(ov, doc, *child).then_some(RunKind::Alpha(*child)),
             };
             continue;
         }

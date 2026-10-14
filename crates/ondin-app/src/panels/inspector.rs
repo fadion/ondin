@@ -2260,14 +2260,51 @@ impl OndinApp {
                         }]));
                     }
                     let eye = if visible0 { icon::EYE } else { icon::EYE_SLASH };
-                    if icon_button(ui, eye, 22.0, 16.0, false, true)
-                        .on_hover_text("Toggle visibility")
-                        .clicked()
-                    {
+                    // **Bound to a boolean variable, the eye sits in the capsule**
+                    // (§15 D1059) — the chip's one shape (D1038 A1's *capsule
+                    // rule*), at the eye's own size since the row has no room for
+                    // a name; the tooltip names the variable, the value and the
+                    // mode, as a chip's does. A click still toggles, which writes
+                    // past the binding and so detaches it (D1038 (2),
+                    // `keep_visible_bindings`); a right-click is the field menu
+                    // either way. The session's chrome: D1038 draws no bound eye.
+                    let key = super::binding::FieldKey::Visible { id };
+                    let resp = match self.field_var(key) {
+                        Some(var) => {
+                            let (rect, resp) = ui
+                                .allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::click());
+                            let cap =
+                                egui::Rect::from_center_size(rect.center(), egui::vec2(22.0, 18.0));
+                            let fill = if resp.hovered() { 44 } else { 28 };
+                            ui.painter().rect_filled(cap, 9, color::text_a(fill));
+                            ui.painter().text(
+                                rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                eye,
+                                theme::icon_font(14.0),
+                                color::TEXT,
+                            );
+                            let doc = &self.session.doc;
+                            let table = doc.variables();
+                            let name = table.get(var).map(|v| v.name.clone()).unwrap_or_default();
+                            let mode = doc.mode_at(id).and_then(|m| table.mode(m));
+                            let tip =
+                                super::binding::chip_tip(&name, doc.resolve_var(id, var), mode);
+                            resp.on_hover_text(format!("{tip}\nClick to toggle and detach"))
+                        }
+                        None => icon_button(ui, eye, 22.0, 16.0, false, true)
+                            .on_hover_text("Toggle visibility"),
+                    };
+                    if resp.clicked() {
                         self.commit_edit(Transaction(vec![Operation::SetVisible {
                             id,
                             visible: !visible0,
                         }]));
+                    }
+                    if resp.secondary_clicked()
+                        && let Some(at) = resp.interact_pointer_pos()
+                    {
+                        self.field_menu = Some((key, at, resp.rect));
                     }
                 });
             });
@@ -12299,7 +12336,7 @@ impl OndinApp {
                 }
                 return match self.session.doc.variables().resolve(var, mode)? {
                     ondin_core::Value::Color(c) => Some(Brush::Solid(c)),
-                    ondin_core::Value::Number(_) => None,
+                    ondin_core::Value::Number(_) | ondin_core::Value::Boolean(_) => None,
                 };
             }
             // The shared colour where the selected guides agree, and the first

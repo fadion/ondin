@@ -456,7 +456,9 @@ fn node_snapshot(
         world_bounds: res
             .world_bounds(id)
             .map(|b| [b.min_x(), b.min_y(), b.max_x(), b.max_y()].map(round4)),
-        visible: node.visible(),
+        // As drawn, the used values' rule above: a bound visibility resolved
+        // (§15 D1059).
+        visible: doc.shown(id),
         locked: node.locked(),
         proportions_locked: node.proportions_locked(),
         opacity: node.opacity(),

@@ -96,7 +96,8 @@ impl Edit {
 /// The menu open over the browser, and where.
 #[derive(Clone, Debug, PartialEq)]
 enum Menu {
-    /// The `+` button's: *Colour variable*, *Number variable*, *New mode* (G5).
+    /// The `+` button's: *Colour variable*, *Number variable*, *Boolean variable*
+    /// (§15 D1059), *New mode* (G5).
     Add,
     Var(VarId),
     Mode(ModeId),
@@ -482,6 +483,12 @@ impl OndinApp {
                                 acts.push(Act::NewVar(VarKind::Number));
                                 close = true;
                             }
+                            // Step 2's: a boolean binds a layer's visibility
+                            // (D1038 (d), §15 D1059). *String* waits for step 6.
+                            if row(ui, icon::CHECK, "Boolean variable") {
+                                acts.push(Act::NewVar(VarKind::Boolean));
+                                close = true;
+                            }
                             ui::menu_sep(ui);
                             if row(ui, icon::COLUMNS_PLUS_RIGHT, "New mode") {
                                 acts.push(Act::NewMode);
@@ -732,6 +739,7 @@ impl OndinApp {
                 let (stem, cell) = match kind {
                     VarKind::Color => ("colour", Cell::Color(Color::WHITE)),
                     VarKind::Number => ("number", Cell::Number(0.0)),
+                    VarKind::Boolean => ("boolean", Cell::Boolean(true)),
                 };
                 let taken: Vec<&str> = table.iter().map(|v| v.name.as_str()).collect();
                 let name = free_name(&taken, stem, 1);
@@ -980,6 +988,7 @@ fn value_text(v: Value) -> String {
     match v {
         Value::Color(c) => format!("#{}", ui::hex_of(c)),
         Value::Number(x) => number_text(x),
+        Value::Boolean(b) => super::binding::bool_word(b).into(),
     }
 }
 
@@ -1051,6 +1060,19 @@ fn parse_cell(
             .filter(|x| x.is_finite())
             .map(Cell::Number)
             .ok_or_else(|| "A number, or --name.".to_string()),
+        VarKind::Boolean => parse_bool(text)
+            .map(Cell::Boolean)
+            .ok_or_else(|| "True or false, or --name.".to_string()),
+    }
+}
+
+/// A boolean cell's typed value (§15 D1059): `true`/`false`, `yes`/`no`,
+/// `on`/`off` or `1`/`0`, any case.
+fn parse_bool(s: &str) -> Option<bool> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "true" | "yes" | "on" | "1" => Some(true),
+        "false" | "no" | "off" | "0" => Some(false),
+        _ => None,
     }
 }
 
@@ -1058,6 +1080,7 @@ fn kind_word(k: VarKind) -> &'static str {
     match k {
         VarKind::Color => "colour",
         VarKind::Number => "number",
+        VarKind::Boolean => "boolean",
     }
 }
 
@@ -1088,6 +1111,7 @@ fn cell_text(table: &ondin_core::Variables, cell: &Cell) -> String {
             }
         }
         Cell::Number(x) => number_text(*x),
+        Cell::Boolean(b) => super::binding::bool_word(*b).into(),
         Cell::Alias(t) => format!(
             "--{}",
             table.get(*t).map(|v| v.name.as_str()).unwrap_or_default()
@@ -1652,6 +1676,20 @@ fn var_row(
                 m.id,
                 egui::pos2(rect.right() + 20.0, cell.top() - 12.0),
             ));
+        } else if let Cell::Boolean(b) = c
+            && cell_resp.clicked()
+            && cell_resp
+                .interact_pointer_pos()
+                .is_some_and(|at| at.x < cell.left() + 6.0 + 12.0 + 4.0)
+        {
+            // **A boolean's box toggles it** (§15 D1059); the word beside it
+            // types, as a number's cell does — `--name` for an alias.
+            acts.push(Act::Cell(
+                v.id,
+                m.id,
+                super::binding::bool_word(!b).into(),
+                None,
+            ));
         } else if !colour && cell_resp.clicked() {
             acts.push(Act::StartEdit(start));
         } else if cell_resp.secondary_clicked()
@@ -1692,6 +1730,39 @@ fn draw_cell(p: &egui::Painter, table: &ondin_core::Variables, cell: egui::Rect,
                 egui::pos2(cell.left() + 6.0, y + 0.5),
                 egui::Align2::LEFT_CENTER,
                 number_text(*x),
+                font,
+                theme::text::STRONG,
+            );
+        }
+        // A boolean (§15 D1059): a 12-point box where the colour cell has its
+        // swatch, checked when true, then the word. The session's chrome — the
+        // mockup draws no boolean cell.
+        Cell::Boolean(b) => {
+            let bx = egui::Rect::from_center_size(
+                egui::pos2(cell.left() + 6.0 + 6.0, y),
+                egui::vec2(12.0, 12.0),
+            );
+            if *b {
+                p.rect_filled(bx, 3, color::text_a(200));
+                p.text(
+                    bx.center(),
+                    egui::Align2::CENTER_CENTER,
+                    icon::CHECK,
+                    theme::icon_font(10.0),
+                    color::CARD,
+                );
+            } else {
+                p.rect_stroke(
+                    bx,
+                    3,
+                    egui::Stroke::new(1.0, color::text_a(102)),
+                    egui::StrokeKind::Inside,
+                );
+            }
+            p.text(
+                egui::pos2(bx.right() + 6.0, y + 0.5),
+                egui::Align2::LEFT_CENTER,
+                super::binding::bool_word(*b),
                 font,
                 theme::text::STRONG,
             );
@@ -2259,6 +2330,40 @@ mod tests {
             fill.brush.var(),
             Some(v.id),
             "one undo restores the binding"
+        );
+    }
+
+    /// **A boolean variable** (§15 D1059): the `+` menu's *Boolean variable* files
+    /// one true in every mode; its box's click writes the word for the other
+    /// value, which lands as `false`; a typed `no` is false too, and a typed `7`
+    /// is refused with the kind's own sentence.
+    #[test]
+    fn a_boolean_variable_is_made_toggled_and_typed() {
+        let (_ctx, mut app) = app();
+        app.toggle_var_browser();
+        app.var_act(Act::NewVar(VarKind::Boolean));
+        let table = app.session.doc.variables();
+        let v = table
+            .iter()
+            .find(|v| v.kind == VarKind::Boolean)
+            .expect("a boolean variable")
+            .clone();
+        assert_eq!(v.name, "boolean 1");
+        let mode = table.modes()[0].id;
+        assert_eq!(v.cells[&mode], Cell::Boolean(true), "true to start");
+        app.var_act(Act::Cell(
+            v.id,
+            mode,
+            super::super::binding::bool_word(false).into(),
+            None,
+        ));
+        let cell = |app: &OndinApp| app.session.doc.variables().get(v.id).unwrap().cells[&mode];
+        assert_eq!(cell(&app), Cell::Boolean(false), "the box's word lands");
+        app.var_act(Act::Cell(v.id, mode, "yes".into(), None));
+        assert_eq!(cell(&app), Cell::Boolean(true));
+        assert_eq!(
+            parse_cell(app.session.doc.variables(), &v, mode, "7"),
+            Err("True or false, or --name.".to_string())
         );
     }
 

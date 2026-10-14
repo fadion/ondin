@@ -845,7 +845,7 @@ pub fn targets(
         if moving.contains(&id) || is_inside_any(doc, id, moving) {
             continue;
         }
-        if doc.get(id).is_some_and(|n| !n.visible()) {
+        if doc.get(id).is_some() && !doc.shown(id) {
             continue;
         }
         if let Some(b) = res.world_bounds(id) {

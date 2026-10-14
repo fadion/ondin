@@ -3791,7 +3791,7 @@ impl OndinApp {
             if moving.contains(&id) || crate::snap::is_inside_any(&self.session.doc, id, moving) {
                 continue;
             }
-            if self.session.doc.get(id).is_some_and(|n| !n.visible()) {
+            if self.session.doc.get(id).is_some() && !self.session.doc.shown(id) {
                 continue;
             }
             let (Some(layout), Some(world)) = (
@@ -3887,7 +3887,7 @@ impl OndinApp {
             // fully editable" already written against it (`context-menus.md` §5.9).
             // **So this predicate is deliberately narrower than it looks** — do not
             // read its single term as the whole selectability rule.
-            let selectable = self.session.doc.get(child).is_some_and(|n| n.visible());
+            let selectable = self.session.doc.shown(child);
             if inside && selectable {
                 picked.push(child);
             }

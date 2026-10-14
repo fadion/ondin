@@ -993,6 +993,150 @@ fn spacing_bindings_detach_to_what_they_draw_and_round_trip() {
     assert_eq!(spacing(&f.doc, f.frame)[3], 4.0, "the right padding too");
 }
 
+/// A boolean variable `show`: true in Light, false in Dark.
+fn show_var(f: &mut F) -> VarId {
+    let show = f.ids.mint_var();
+    f.doc
+        .apply(&Transaction(vec![Operation::AddVariable {
+            var: var(
+                show,
+                "state/show",
+                VarKind::Boolean,
+                [
+                    (f.light, Cell::Boolean(true)),
+                    (f.dark, Cell::Boolean(false)),
+                ],
+            ),
+        }]))
+        .expect("a boolean variable");
+    show
+}
+
+/// **A layer's visibility bound to a boolean variable shows by its value in
+/// the mode in force** (§15 D1059) — drawn, picked and laid out by it: in a flex
+/// row, the bound rect hidden in Dark leaves the flow and the second rect takes
+/// its place at the padding's edge; Light brings it back.
+///
+/// Flip, run: `DocView::visible` answering the literal (`n.visible()`) fails
+/// *"hidden in Dark, out of the flow"* — the literal's `true` laying it out.
+#[test]
+fn a_bound_visibility_shows_by_its_variable_in_the_mode_in_force() {
+    let mut f = fixture();
+    let second = flex_frame(&mut f);
+    let show = show_var(&mut f);
+    let ops = ondin_core::bind_visible_ops(&f.doc, f.rect, show);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    assert!(f.doc.shown(f.rect), "Light's true");
+    let x = |doc: &Document| Resolved::rebuild(doc).world_bounds(second).unwrap().min_x();
+    assert_eq!(x(&f.doc), 45.0, "beside the bound rect, gap 5");
+    f.doc
+        .apply(&Transaction(vec![Operation::SetMode {
+            id: f.frame,
+            mode: Some(f.dark),
+        }]))
+        .unwrap();
+    assert!(!f.doc.shown(f.rect), "Dark's false");
+    assert!(
+        f.doc.get(f.rect).unwrap().visible(),
+        "its literal untouched"
+    );
+    assert_eq!(x(&f.doc), 0.0, "hidden in Dark, out of the flow");
+}
+
+/// **A visibility written over a bound layer detaches it — and only a write of
+/// what it shows keeps it** (§15 D1059): one half, where corners and spacing
+/// have two. Hidden by Dark, its literal `true`: the eye writing `true` to show
+/// it detaches, landing shown.
+///
+/// Flip, run: the literal half added (`|| *visible == node.visible()`) fails
+/// *"showing a hidden bound layer detaches it"* — the write excused as the
+/// literal, the layer left bound and hidden.
+#[test]
+fn a_visibility_written_over_a_bound_layer_detaches_it() {
+    let mut f = fixture();
+    let show = show_var(&mut f);
+    let ops = ondin_core::bind_visible_ops(&f.doc, f.rect, show);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    let write = |doc: &Document, visible| {
+        ondin_core::keep_visible_bindings(
+            doc,
+            Transaction(vec![Operation::SetVisible {
+                id: f.rect,
+                visible,
+            }]),
+        )
+    };
+    let same = write(&f.doc, true);
+    assert!(
+        same.changes_nothing(&f.doc),
+        "a write of what it shows keeps the binding"
+    );
+    f.doc
+        .apply(&Transaction(vec![Operation::SetMode {
+            id: f.frame,
+            mode: Some(f.dark),
+        }]))
+        .unwrap();
+    let tx = write(&f.doc, true);
+    f.doc.apply(&tx).unwrap();
+    assert_eq!(
+        f.doc.get(f.rect).unwrap().visible_var(),
+        None,
+        "showing a hidden bound layer detaches it"
+    );
+    assert!(f.doc.shown(f.rect), "and it shows");
+}
+
+/// Detaching a visibility keeps what it showed; deleting its variable detaches
+/// it the same way; the binding and a boolean cell round-trip through a save;
+/// and a boolean binding refuses a number variable.
+#[test]
+fn a_visibility_binding_detaches_to_what_it_shows_and_round_trips() {
+    let mut f = fixture();
+    let show = show_var(&mut f);
+    f.doc
+        .apply(&Transaction(vec![Operation::SetMode {
+            id: f.frame,
+            mode: Some(f.dark),
+        }]))
+        .unwrap();
+    let ops = ondin_core::bind_visible_ops(&f.doc, f.rect, show);
+    f.doc.apply(&Transaction(ops)).unwrap();
+    let bytes = ondin_core::io::save(&f.doc).unwrap();
+    let back = ondin_core::io::load(&bytes).unwrap();
+    assert_eq!(back, f.doc, "the binding and the boolean cells round-trip");
+    assert!(
+        String::from_utf8(bytes)
+            .unwrap()
+            .contains("\"boolean\": false"),
+        "a boolean cell is written as one"
+    );
+    let before = f.doc.clone();
+    f.doc
+        .apply(&Transaction(ondin_core::detach_visible_ops(&f.doc, f.rect)))
+        .unwrap();
+    let node = f.doc.get(f.rect).unwrap();
+    assert_eq!(
+        (node.visible_var(), node.visible()),
+        (None, false),
+        "detached hidden"
+    );
+    f.doc = before;
+    let tx = Transaction(ondin_core::variable::remove_ops(&f.doc, &[show]));
+    f.doc.apply(&tx).expect("detach, then remove");
+    let node = f.doc.get(f.rect).unwrap();
+    assert_eq!(
+        (node.visible_var(), node.visible()),
+        (None, false),
+        "deleted, hidden"
+    );
+    let wrong = f.doc.apply(&Transaction(vec![Operation::SetVisibleVar {
+        id: f.rect,
+        var: Some(f.radius),
+    }]));
+    assert!(wrong.is_err(), "a number variable cannot bind visibility");
+}
+
 /// Binding a paint keeps its `%`; detaching it leaves the colour it drew.
 #[test]
 fn binding_a_paint_keeps_its_percent_and_detaching_keeps_its_colour() {
@@ -1071,13 +1215,16 @@ fn incremental_update_equals_rebuild_over_random_variable_ops() {
         let frames = [f.frame, other];
         // A flex row, so a bound gap or padding moves its items (§15 D1058).
         let second = flex_frame(&mut f);
+        // And a boolean, so a bound visibility takes an item out of the flow
+        // (§15 D1059).
+        let show = show_var(&mut f);
         let mut rects = vec![f.rect, second];
         let mut hist = ondin_core::History::new();
         let mut res = Resolved::rebuild(&f.doc);
         for step in 0..50 {
             let modes: Vec<ModeId> = f.doc.variables().modes().iter().map(|m| m.id).collect();
             let rect = rects[rng.below(rects.len())];
-            let tx = match rng.below(10) {
+            let tx = match rng.below(12) {
                 0 => {
                     let id = f.ids.mint();
                     rects.push(id);
@@ -1131,6 +1278,7 @@ fn incremental_update_equals_rebuild_over_random_variable_ops() {
                             let cell = match v.kind {
                                 VarKind::Color => Cell::Color(RED),
                                 VarKind::Number => Cell::Number(rng.below(20) as f64),
+                                VarKind::Boolean => Cell::Boolean(rng.below(2) == 0),
                             };
                             (v.id, cell)
                         })
@@ -1152,6 +1300,9 @@ fn incremental_update_equals_rebuild_over_random_variable_ops() {
                     which[rng.below(6)] = true;
                     Transaction(ondin_core::detach_spacing_ops(&f.doc, f.frame, which))
                 }
+                // Bind a rect's visibility, or detach it.
+                9 => Transaction(ondin_core::bind_visible_ops(&f.doc, rect, show)),
+                10 => Transaction(ondin_core::detach_visible_ops(&f.doc, rect)),
                 // Remove a mode (never the last), returning its frames to Inherit.
                 _ if modes.len() > 1 => {
                     let gone = modes[rng.below(modes.len())];

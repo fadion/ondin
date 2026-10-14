@@ -143,6 +143,7 @@ impl Document {
             mode: None,
             corner_vars: Default::default(),
             spacing_vars: Default::default(),
+            visible_var: None,
         };
         let mut nodes = FxHashMap::default();
         nodes.insert(root_id, root);
@@ -566,6 +567,31 @@ impl Document {
             d,
             n.spacing_vars,
         )))
+    }
+
+    /// Whether `id` is shown — its own visibility, **its boolean variable's
+    /// value in the mode in force there where it is bound** (§15 D1059), else its
+    /// literal. Not whether an ancestor hides it: this is the layer's own eye.
+    /// False for a node not in the document.
+    ///
+    /// **What every reader that draws, picks, lays out or exports asks**, never
+    /// `Node::visible`, which is the literal a binding stands in for.
+    pub fn shown(&self, id: NodeId) -> bool {
+        self.shown_in(&self.variables, id)
+    }
+
+    /// [`Self::shown`] against table `t` (§15 D1056's preview of a cell).
+    pub fn shown_in(&self, t: &crate::variable::Variables, id: NodeId) -> bool {
+        let Some(n) = self.nodes.get(&id) else {
+            return false;
+        };
+        match n.visible_var {
+            Some(v) => match self.resolve_var_in(t, id, v) {
+                Some(crate::variable::Value::Boolean(b)) => b,
+                _ => n.visible,
+            },
+            None => n.visible,
+        }
     }
 
     /// Every node whose fields read a variable — what an edit to the table
@@ -1043,6 +1069,12 @@ impl Document {
                 dirty.0.insert(*id);
                 Ok(Operation::SetSpacingVars { id: *id, vars: old })
             }
+            Operation::SetVisibleVar { id, var } => {
+                let node = self.nodes.get_mut(id).ok_or(OpError::NoSuchNode(*id))?;
+                let old = std::mem::replace(&mut node.visible_var, *var);
+                dirty.0.insert(*id);
+                Ok(Operation::SetVisibleVar { id: *id, var: old })
+            }
         }
     }
 
@@ -1287,6 +1319,7 @@ impl Document {
             mode: None,
             corner_vars: Default::default(),
             spacing_vars: Default::default(),
+            visible_var: None,
         };
         self.nodes.insert(id, node);
         self.nodes
@@ -2715,6 +2748,7 @@ pub fn remap_subtree(template: &[Node], ids: &mut IdSource) -> Option<(Vec<Node>
             mode: n.mode,
             corner_vars: n.corner_vars,
             spacing_vars: n.spacing_vars,
+            visible_var: n.visible_var,
         });
     }
     Some((out, new_root?))
@@ -2939,6 +2973,7 @@ mod tests {
             mode: None,
             corner_vars: Default::default(),
             spacing_vars: Default::default(),
+            visible_var: None,
         }
     }
 

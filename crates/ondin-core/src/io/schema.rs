@@ -352,6 +352,10 @@ pub(crate) struct NodeDto {
     /// bound. New in v8.
     #[serde(default, skip_serializing_if = "no_spacing_vars")]
     pub spacing_vars: crate::variable::SpacingVars,
+    /// The boolean variable a layer's visibility is bound to (§15 D1059),
+    /// absent when unbound. New in v8.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visible_var: Option<crate::variable::VarId>,
 }
 
 fn no_corner_vars(v: &crate::variable::CornerVars) -> bool {
@@ -457,6 +461,7 @@ impl NodeDto {
             mode: n.mode(),
             corner_vars: n.corner_vars(),
             spacing_vars: n.spacing_vars(),
+            visible_var: n.visible_var(),
         }
     }
 
@@ -570,6 +575,7 @@ impl NodeDto {
             mode: self.mode,
             corner_vars: self.corner_vars,
             spacing_vars: self.spacing_vars,
+            visible_var: self.visible_var,
         })
     }
 }

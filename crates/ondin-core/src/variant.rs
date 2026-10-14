@@ -1757,7 +1757,9 @@ pub fn counterparts(doc: &Document, root: NodeId, p: &Property) -> Vec<NodeId> {
 pub fn field_value(doc: &Document, id: NodeId, kind: PropKind) -> Option<PropValue> {
     let n = doc.get(id)?;
     match kind {
-        PropKind::Boolean => Some(PropValue::Boolean(n.visible)),
+        // Shown, a bound visibility resolved: the property is a view over the
+        // field as drawn (D1038 (d), §15 D1059).
+        PropKind::Boolean => Some(PropValue::Boolean(doc.shown(n.id))),
         PropKind::Text => match &n.kind {
             NodeKind::Text { content, .. } => Some(PropValue::Text(content.clone())),
             _ => None,
@@ -1801,7 +1803,10 @@ pub fn set_property(
                     }
                 }
                 PropValue::Boolean(v) => {
-                    if doc.get(c).is_some_and(|n| n.visible != *v) {
+                    // Against what it shows: a bound layer already showing `v`
+                    // keeps its binding, any other is written and the commit's
+                    // `keep_visible_bindings` detaches it (§15 D1059).
+                    if doc.get(c).is_some() && doc.shown(c) != *v {
                         ops.push(Operation::SetVisible { id: c, visible: *v });
                     }
                 }
@@ -2238,7 +2243,7 @@ pub fn hidden_by(doc: &Document, root: NodeId, s: &ShownNested) -> Option<String
         if n.id == root {
             break;
         }
-        if !n.visible {
+        if !doc.shown(n.id) {
             hider = Some(n.id);
         }
         at = n.parent;

@@ -1911,7 +1911,9 @@ impl OndinApp {
                 .collect(),
             None => node.children().to_vec(),
         };
-        let visible = node.visible();
+        // What the layer shows, a bound visibility resolved (§15 D1059): the eye
+        // states it, and its click writes the opposite, which detaches the binding.
+        let visible = self.session.doc.shown(id);
         let locked = node.locked();
         let name = node.name().to_string();
         let (glyph, mut glyph_col) = node_icon(node.kind());

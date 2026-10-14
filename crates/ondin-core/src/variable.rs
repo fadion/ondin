@@ -76,13 +76,15 @@ pub struct Mode {
     pub name: String,
 }
 
-/// What a variable holds. Build step 1's two; boolean and string arrive with the
-/// fields they bind to (roadmap steps 2 and 6).
+/// What a variable holds. Build step 1's two, and step 2's boolean, bound to a
+/// layer's visibility (D1038 (d), §15 D1059); string arrives with the fields it
+/// binds to (roadmap step 6).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum VarKind {
     Color,
     Number,
+    Boolean,
 }
 
 /// One variable's value in one mode.
@@ -91,6 +93,7 @@ pub enum VarKind {
 pub enum Cell {
     Color(Color),
     Number(f64),
+    Boolean(bool),
     /// Another variable of the same kind, read in the same mode (§5.3f).
     Alias(VarId),
 }
@@ -102,6 +105,7 @@ impl Cell {
         match self {
             Cell::Color(_) => Some(VarKind::Color),
             Cell::Number(_) => Some(VarKind::Number),
+            Cell::Boolean(_) => Some(VarKind::Boolean),
             Cell::Alias(_) => None,
         }
     }
@@ -110,7 +114,7 @@ impl Cell {
         match self {
             Cell::Color(c) => c.components.iter().all(|x| x.is_finite()),
             Cell::Number(n) => n.is_finite(),
-            Cell::Alias(_) => true,
+            Cell::Boolean(_) | Cell::Alias(_) => true,
         }
     }
 }
@@ -120,6 +124,18 @@ impl Cell {
 pub enum Value {
     Color(Color),
     Number(f64),
+    Boolean(bool),
+}
+
+impl From<Value> for Cell {
+    /// The cell holding `v` itself — what an alias becomes when its target goes.
+    fn from(v: Value) -> Cell {
+        match v {
+            Value::Color(c) => Cell::Color(c),
+            Value::Number(n) => Cell::Number(n),
+            Value::Boolean(b) => Cell::Boolean(b),
+        }
+    }
 }
 
 /// A variable: a name, a kind and one cell per mode.
@@ -187,6 +203,7 @@ impl Variables {
             match self.vars.get(&at)?.cells.get(&mode)? {
                 Cell::Color(c) => return Some(Value::Color(*c)),
                 Cell::Number(n) => return Some(Value::Number(*n)),
+                Cell::Boolean(b) => return Some(Value::Boolean(*b)),
                 Cell::Alias(next) => at = *next,
             }
         }
@@ -425,6 +442,10 @@ pub fn detached(doc: &crate::Document, mut node: crate::Node) -> crate::Node {
         node.display = Some(doc.spacing_drawn_in(doc.variables(), id, d, node.spacing_vars));
     }
     node.spacing_vars = Default::default();
+    if node.visible_var.is_some() {
+        node.visible = doc.shown(id);
+        node.visible_var = None;
+    }
     node.mode = None;
     node
 }
@@ -471,7 +492,8 @@ pub fn carried(doc: &crate::Document, subtrees: &[Vec<crate::Node>]) -> Carried 
             .filter_map(|f| f.brush.var())
             .chain(n.paint.strokes.iter().filter_map(|s| s.brush.var()))
             .chain(n.corner_vars.iter().flatten().copied())
-            .chain(n.spacing_vars.iter().flatten().copied());
+            .chain(n.spacing_vars.iter().flatten().copied())
+            .chain(n.visible_var);
         for v in vars {
             if out.vars.iter().any(|c| c.id == v) {
                 continue;
@@ -603,6 +625,14 @@ pub fn land(doc: &crate::Document, carried: &Carried, nodes: Vec<crate::Node>) -
                 }
                 d.set_spacing(s);
             }
+            // A visibility's binding the same way, its fallback whether the twin
+            // was shown (§15 D1059).
+            if let Some(v) = n.visible_var {
+                n.visible_var = rebind(v);
+                if n.visible_var.is_none() {
+                    n.visible = twin.map_or(n.visible, |t| t.visible);
+                }
+            }
             if let Some(m) = n.mode
                 && t.mode(m).is_none()
             {
@@ -639,6 +669,7 @@ fn reads(n: &crate::Node, vars: &[VarId]) -> bool {
         || n.paint.strokes.iter().any(|s| hit(s.brush.var()))
         || n.corner_vars.iter().any(|v| hit(*v))
         || n.spacing_vars.iter().any(|v| hit(*v))
+        || hit(n.visible_var)
 }
 
 /// The operations that delete `vars` (D1038): **every field bound to one detaches
@@ -741,16 +772,21 @@ pub fn remove_ops(doc: &crate::Document, vars: &[VarId]) -> Vec<crate::Operation
             });
             ops.push(O::SetSpacingVars { id, vars: kept });
         }
+        if n.visible_var.is_some_and(|v| vars.contains(&v)) {
+            ops.push(O::SetVisible {
+                id,
+                visible: doc.shown_in(t, id),
+            });
+            ops.push(O::SetVisibleVar { id, var: None });
+        }
     }
     for v in t.iter().filter(|v| !vars.contains(&v.id)) {
         for (mode, cell) in &v.cells {
             if let Cell::Alias(target) = cell
                 && vars.contains(target)
             {
-                let cell = match t.resolve(v.id, *mode) {
-                    Some(Value::Color(c)) => Cell::Color(c),
-                    Some(Value::Number(x)) => Cell::Number(x),
-                    None => continue,
+                let Some(cell) = t.resolve(v.id, *mode).map(Cell::from) else {
+                    continue;
                 };
                 ops.push(O::SetVariableCell {
                     id: v.id,
@@ -984,6 +1020,11 @@ pub(crate) fn check<'a>(
             .iter()
             .flatten()
             .any(|v| t.kind_of(*v) != Some(VarKind::Number))
+        {
+            return Err(VarRule::BadBinding(n.id));
+        }
+        if n.visible_var
+            .is_some_and(|v| t.kind_of(v) != Some(VarKind::Boolean))
         {
             return Err(VarRule::BadBinding(n.id));
         }

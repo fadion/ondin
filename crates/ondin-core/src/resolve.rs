@@ -94,7 +94,7 @@ fn clipped_to(b: Rect, m: Rect) -> Option<Rect> {
 /// measured box. It costs a walk of the mask's subtree, once per mask.
 fn mask_extent(doc: &Document, boxes: &FxHashMap<NodeId, Rect>, id: NodeId) -> Option<Rect> {
     let node = doc.get(id)?;
-    if !node.visible() {
+    if !doc.shown(id) {
         return None;
     }
     match node.kind() {
@@ -174,8 +174,10 @@ impl crate::container::LayoutView for DocView<'_> {
     fn insets(&self, id: NodeId) -> crate::container::Insets {
         self.0.get(id).map(|n| *n.insets()).unwrap_or_default()
     }
+    /// Shown, a bound visibility resolved (§15 D1059): a hidden item is out of
+    /// its layout's flow, so a boolean variable's mode can take one out.
     fn visible(&self, id: NodeId) -> bool {
-        self.0.get(id).is_some_and(|n| n.visible())
+        self.0.shown(id)
     }
     fn mask(&self, id: NodeId) -> bool {
         self.0.get(id).is_some_and(|n| n.mask())
@@ -1139,7 +1141,7 @@ impl Resolved {
                     .map(|n| n.children().to_vec())
                     .unwrap_or_default()
             },
-            visible_of: &|c| doc.get(c).is_some_and(|n| n.visible()),
+            visible_of: &|c| doc.shown(c),
             nested: &|c| self.boolean.get(&c).cloned(),
         })
     }
@@ -1199,7 +1201,7 @@ impl Resolved {
     /// keeps is exactly the ink it would have laid down.
     pub fn mask_path(&self, doc: &Document, id: NodeId) -> Option<BezPath> {
         let node = doc.get(id)?;
-        if !node.visible() {
+        if !doc.shown(id) {
             return None;
         }
         let own = match node.kind() {

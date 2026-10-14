@@ -228,7 +228,7 @@ pub fn local_box(doc: &Document, res: &Resolved, id: NodeId) -> Option<Rect> {
 fn mask_extent_local(doc: &Document, res: &Resolved, id: NodeId) -> Option<Rect> {
     use crate::node::NodeKind;
     let node = doc.get(id)?;
-    if !node.visible() {
+    if !doc.shown(id) {
         return None;
     }
     match node.kind() {
@@ -734,7 +734,7 @@ fn is_effectively_interactable(doc: &Document, id: NodeId) -> bool {
         let Some(node) = doc.get(c) else {
             return false;
         };
-        if !node.visible() {
+        if !doc.shown(c) {
             return false;
         }
         cursor = node.parent();

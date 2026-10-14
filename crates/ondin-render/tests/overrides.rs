@@ -4243,6 +4243,70 @@ fn a_spacing_binding_previews_as_the_layout_it_will_lay_out() {
     );
 }
 
+/// **A visibility bound to a boolean variable previews as what it will show**
+/// (§15 D1059): the `--` list's highlight on the eye, binding a shown rect to a
+/// variable that is false, drawn as overrides and as committed — then the cell
+/// flipped back to true, D1056's preview reaching a visibility.
+///
+/// Flip, run: `SetVisibleVar`'s arm leaving the visibility as it was (the
+/// override never written) fails *"bound to false: preview diverged from
+/// commit"*.
+#[test]
+fn a_visibility_binding_previews_as_what_it_will_show() {
+    use ondin_core::variable::{Cell, Mode, VarKind, Variable};
+    let mut ids = IdSource::new(0xCC);
+    let root = ids.mint();
+    let mut doc = Document::new(root);
+    let (rect, mode, var) = (ids.mint(), ids.mint_mode(), ids.mint_var());
+    doc.apply(&Transaction(vec![
+        Operation::CreateNode {
+            id: rect,
+            parent: root,
+            index: 0,
+            kind: NodeKind::Rect {
+                size: Size::new(80.0, 40.0),
+                corner_radii: RoundedRectRadii::default(),
+            },
+            transform: None,
+            name: None,
+        },
+        Operation::SetFills {
+            id: rect,
+            fills: keyed_by_position([Fill {
+                brush: Brush::Solid(Color::from_rgba8(200, 30, 30, 255)).into(),
+                visible: true,
+            }]),
+        },
+        Operation::AddMode {
+            mode: Mode {
+                id: mode,
+                name: "Default".into(),
+            },
+            index: 0,
+            cells: vec![],
+        },
+        Operation::AddVariable {
+            var: Variable {
+                id: var,
+                name: "state/open".into(),
+                kind: VarKind::Boolean,
+                cells: [(mode, Cell::Boolean(false))].into(),
+            },
+        },
+    ]))
+    .unwrap();
+    let tx = Transaction(ondin_core::bind_visible_ops(&doc, rect, var));
+    assert!(!tx.0.is_empty(), "the fixture binds something");
+    assert_preview_matches_commit(&doc, &tx, "bound to false");
+    doc.apply(&tx).unwrap();
+    let cell = Transaction(vec![Operation::SetVariableCell {
+        id: var,
+        mode,
+        cell: Cell::Boolean(true),
+    }]);
+    assert_preview_matches_commit(&doc, &cell, "its cell flipped to true");
+}
+
 /// **A variable's cell previews on everything that reads it** (§15 D1056, D1037's
 /// premise (vi)): a rect whose fill reads *accent* — an alias of *brand* — and
 /// whose corners read *radius*, previewed under a new *brand* colour and a new

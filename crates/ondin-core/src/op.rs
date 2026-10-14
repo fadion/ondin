@@ -461,6 +461,12 @@ pub enum Operation {
         id: NodeId,
         vars: crate::variable::SpacingVars,
     },
+    /// The boolean variable a layer's visibility is bound to, `None` to read its
+    /// literal (§15 D1059). Writes the binding alone.
+    SetVisibleVar {
+        id: NodeId,
+        var: Option<crate::variable::VarId>,
+    },
 }
 
 impl Operation {
@@ -523,6 +529,7 @@ impl Operation {
             | Operation::SetMode { id, .. }
             | Operation::SetCornerVars { id, .. }
             | Operation::SetSpacingVars { id, .. }
+            | Operation::SetVisibleVar { id, .. }
             | Operation::SetOrigin { id, .. } => Some(*id),
             Operation::CreateNode { .. }
             | Operation::DeleteNode { .. }
@@ -595,7 +602,8 @@ impl Operation {
             | Operation::SetProperties { id, .. }
             | Operation::SetMode { id, .. }
             | Operation::SetCornerVars { id, .. }
-            | Operation::SetSpacingVars { id, .. } => id,
+            | Operation::SetSpacingVars { id, .. }
+            | Operation::SetVisibleVar { id, .. } => id,
             _ => return None,
         };
         *id = to;
@@ -817,7 +825,8 @@ impl Operation {
             | Operation::RemoveMode { .. }
             | Operation::SetMode { .. }
             | Operation::SetCornerVars { .. }
-            | Operation::SetSpacingVars { .. } => true,
+            | Operation::SetSpacingVars { .. }
+            | Operation::SetVisibleVar { .. } => true,
         }
     }
 
@@ -885,6 +894,9 @@ impl Operation {
             }
             Operation::SetSpacingVars { id, vars } => {
                 node(id).is_some_and(|n| n.spacing_vars() == *vars)
+            }
+            Operation::SetVisibleVar { id, var } => {
+                node(id).is_some_and(|n| n.visible_var() == *var)
             }
 
             // **The index is read the way `apply` writes it** — the child is

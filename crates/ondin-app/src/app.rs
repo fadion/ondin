@@ -3357,10 +3357,11 @@ impl OndinApp {
     /// button agree.
     fn toggle_hidden(&mut self) {
         let ids = build::outermost(&self.session.doc, self.session.selection.ids());
+        // On what the layers show, a bound visibility resolved (§15 D1059).
         let visible = Self::hide_switch(
             ids.iter()
-                .filter_map(|id| self.session.doc.get(*id))
-                .map(|n| n.visible()),
+                .filter(|id| self.session.doc.get(**id).is_some())
+                .map(|id| self.session.doc.shown(*id)),
         );
         let ops: Vec<Operation> = ids
             .iter()

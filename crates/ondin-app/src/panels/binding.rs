@@ -39,6 +39,9 @@ pub(crate) enum FieldKey {
     /// is the card's first subject; the binding writes every container the card
     /// edits (`field_ids`).
     Spacing { id: NodeId, slots: u8 },
+    /// A layer's visibility — its eye in the identity card (§15 D1059), bound to
+    /// a boolean variable. Not a typed field: no `--`, no retype.
+    Visible { id: NodeId },
 }
 
 /// [`FieldKey::Spacing`]'s bits, in a `SpacingVars`' order.
@@ -62,8 +65,16 @@ impl FieldKey {
             FieldKey::Paint { id, .. }
             | FieldKey::Radius { id }
             | FieldKey::Corner { id, .. }
-            | FieldKey::Spacing { id, .. } => id,
+            | FieldKey::Spacing { id, .. }
+            | FieldKey::Visible { id } => id,
         }
+    }
+
+    /// Whether the field is one the keyboard types into — the `--` list's door
+    /// and `Backspace`'s, which the field menu names as its accelerators. The eye
+    /// is clicked, never typed (§15 D1059).
+    pub(crate) fn typed(self) -> bool {
+        !matches!(self, FieldKey::Visible { .. })
     }
 
     /// The glyph a number field's badge carries: the corners icon for all four,
@@ -78,6 +89,7 @@ impl FieldKey {
             FieldKey::Corner { slot: 2, .. } => icon::ARROW_ELBOW_RIGHT_UP,
             FieldKey::Corner { .. } => icon::ARROW_ELBOW_LEFT_UP,
             FieldKey::Radius { .. } | FieldKey::Paint { .. } => icon::CORNERS_OUT,
+            FieldKey::Visible { .. } => icon::EYE,
             FieldKey::Spacing { slots, .. } => match slots {
                 COLUMN_GAP => icon::ARROWS_OUT_LINE_HORIZONTAL,
                 ROW_GAP => icon::ARROWS_OUT_LINE_VERTICAL,
@@ -108,6 +120,7 @@ impl FieldKey {
             FieldKey::Radius { .. } | FieldKey::Corner { .. } | FieldKey::Spacing { .. } => {
                 VarKind::Number
             }
+            FieldKey::Visible { .. } => VarKind::Boolean,
         }
     }
 }
@@ -300,12 +313,18 @@ pub(crate) fn chip_tip(name: &str, value: Option<Value>, mode: Option<&Mode>) ->
     let v = match value {
         Some(Value::Color(c)) => ui::hex_of(c),
         Some(Value::Number(x)) => trim_number(x),
+        Some(Value::Boolean(b)) => bool_word(b).into(),
         None => "—".into(),
     };
     match mode {
         Some(m) => format!("{name} · {v} · {}", m.name),
         None => format!("{name} · {v}"),
     }
+}
+
+/// A boolean variable's value as the browser and the chips write it (§15 D1059).
+pub(crate) fn bool_word(b: bool) -> &'static str {
+    if b { "True" } else { "False" }
 }
 
 fn trim_number(x: f64) -> String {
@@ -441,9 +460,10 @@ impl OndinApp {
                 let all = self.container_subjects();
                 if all.contains(&id) { all } else { vec![id] }
             }
-            FieldKey::Paint { id, .. } | FieldKey::Radius { id } | FieldKey::Corner { id, .. } => {
-                vec![id]
-            }
+            FieldKey::Paint { id, .. }
+            | FieldKey::Radius { id }
+            | FieldKey::Corner { id, .. }
+            | FieldKey::Visible { id } => vec![id],
         }
     }
 
@@ -478,6 +498,7 @@ impl OndinApp {
                         .collect(),
                 )
             }
+            FieldKey::Visible { id } => Transaction(ondin_core::bind_visible_ops(doc, id, var)),
         }
     }
 
@@ -502,6 +523,7 @@ impl OndinApp {
                         .collect(),
                 )
             }
+            FieldKey::Visible { id } => Transaction(ondin_core::detach_visible_ops(doc, id)),
         }
     }
 
@@ -634,6 +656,7 @@ impl OndinApp {
                 let first = vars.next()??;
                 vars.all(|v| v == Some(first)).then_some(first)
             }
+            FieldKey::Visible { id } => doc.get(id)?.visible_var(),
         }
     }
 
@@ -671,7 +694,9 @@ impl OndinApp {
                     }
                 }
             }
-            FieldKey::Radius { .. } | FieldKey::Corner { .. } => return None,
+            FieldKey::Radius { .. } | FieldKey::Corner { .. } | FieldKey::Visible { .. } => {
+                return None;
+            }
         }
         let table = doc.variables();
         vars.sort_by(|a, b| {
@@ -848,6 +873,9 @@ impl OndinApp {
                                     VarKind::Number => {
                                         "No number variables yet — Shift+S to add one"
                                     }
+                                    VarKind::Boolean => {
+                                        "No boolean variables yet — Shift+S to add one"
+                                    }
                                 }
                             })
                             .size(11.5)
@@ -932,6 +960,7 @@ impl OndinApp {
         let stem = match key.kind() {
             VarKind::Color => "colour",
             VarKind::Number => "number",
+            VarKind::Boolean => "boolean",
         };
         let taken: Vec<&str> = table.iter().map(|v| v.name.as_str()).collect();
         let name = (1..)
@@ -978,8 +1007,11 @@ impl OndinApp {
                 ui::menu_frame(4.0).show(ui, |ui| {
                     ui.set_width(220.0 - 8.0);
                     ui.spacing_mut().item_spacing.y = 1.0;
-                    let r =
-                        ui::MenuRow::new(icon::LINK_SIMPLE, "Bind to variable…").accel(Some("--"));
+                    // The keyboard's twins only on a field the keyboard types into
+                    // — not on the eye (§15 D1059).
+                    let typed = key.typed();
+                    let r = ui::MenuRow::new(icon::LINK_SIMPLE, "Bind to variable…")
+                        .accel(typed.then_some("--"));
                     if ui::menu_row(ui, r, 26.0).clicked() {
                         act = Some(0);
                     }
@@ -991,7 +1023,7 @@ impl OndinApp {
                     // Omitted unbound — §3's one exception, a row that only undoes.
                     if bound {
                         let r = ui::MenuRow::new(icon::LINK_BREAK, "Detach variable")
-                            .accel(Some("Backspace"));
+                            .accel(typed.then_some("Backspace"));
                         if ui::menu_row(ui, r, 26.0).clicked() {
                             act = Some(2);
                         }
@@ -1137,7 +1169,7 @@ impl OndinApp {
         mut rt: Retype,
         w: f32,
     ) {
-        if matches!(key, FieldKey::Paint { .. }) {
+        if !key.typed() || matches!(key, FieldKey::Paint { .. }) {
             return;
         }
         let edit_id = egui::Id::new(("var-retype", format!("{key:?}")));
@@ -1250,7 +1282,7 @@ impl OndinApp {
                             });
                         }
                     }
-                    FieldKey::Paint { .. } => return,
+                    FieldKey::Paint { .. } | FieldKey::Visible { .. } => return,
                 }
                 self.commit_edit(Transaction(ops));
             }
@@ -1290,6 +1322,8 @@ impl OndinApp {
                 let d = doc.resolved_display(id)?;
                 Some(Cell::Number(d.spacing()[spacing_slots(slots).next()?]))
             }
+            // Whether the layer shows.
+            FieldKey::Visible { id } => Some(Cell::Boolean(doc.shown(id))),
             FieldKey::Corner { id, slot } => match self.session.resolved.used_kind(doc, id)? {
                 ondin_core::NodeKind::Rect { corner_radii, .. } => Some(Cell::Number(match slot {
                     0 => corner_radii.top_left,
@@ -1589,6 +1623,7 @@ fn list_row(
     let value = match value {
         Some(Value::Color(c)) => ui::hex_of(c),
         Some(Value::Number(n)) => trim_number(n),
+        Some(Value::Boolean(b)) => bool_word(b).into(),
         None => String::new(),
     };
     p.text(
@@ -2537,5 +2572,43 @@ mod tests {
             }
             assert_eq!(h(&ctx, &mut app), solid, "{t} is the Solid face's height");
         }
+    }
+
+    /// **The eye binds through the field menu's verbs, and its click detaches**
+    /// (§15 D1059): bound to a boolean that is false, the layer is hidden; the
+    /// eye's own write — `SetVisible` of the opposite of what it shows, through
+    /// `commit_edit` as the identity card makes it — lands the layer shown and
+    /// unbound, the commit door's `keep_visible_bindings` adding the detach; *Extract*
+    /// files a boolean of what the layer shows.
+    ///
+    /// Flip, run: `commit_inner` without its `keep_visible_bindings` line fails
+    /// *"the eye's click detaches"* — the literal's `true` written over the
+    /// binding, the layer still hidden by it.
+    #[test]
+    fn the_eye_binds_to_a_boolean_and_its_click_detaches() {
+        let (_ctx, mut app, rect, _, _) = fixture();
+        let mode = app.session.doc.variables().modes()[0].id;
+        let off = app.session.ids.mint_var();
+        assert!(app.commit_edit(Transaction(vec![Operation::AddVariable {
+            var: Variable {
+                id: off,
+                name: "state/off".into(),
+                kind: VarKind::Boolean,
+                cells: [(mode, Cell::Boolean(false))].into(),
+            },
+        }])));
+        let key = FieldKey::Visible { id: rect };
+        assert_eq!(app.field_value(key), Some(Cell::Boolean(true)));
+        app.bind_field(key, off);
+        assert_eq!(app.field_var(key), Some(off));
+        assert!(!app.session.doc.shown(rect), "hidden by its variable");
+        let shown = app.session.display_node(rect).unwrap().visible();
+        assert!(!shown, "the eye reads what the layer shows");
+        app.commit_edit(Transaction(vec![Operation::SetVisible {
+            id: rect,
+            visible: !shown,
+        }]));
+        assert_eq!(app.field_var(key), None, "the eye's click detaches");
+        assert!(app.session.doc.shown(rect), "and the layer shows");
     }
 }

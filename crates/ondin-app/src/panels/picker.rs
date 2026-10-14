@@ -22,6 +22,7 @@
 //! **click** sets neither `dragged` nor `changed`, so it commits directly; a **press**
 //! sets neither either, so the frames before the gesture travels far enough to count
 //! as a drag preview through `preview_slot` (§15 D129).
+use super::binding::FieldKey;
 use super::paint::{self, PaintKind, PaintSlot};
 use crate::app::OndinApp;
 use crate::theme::{self, color, icon};
@@ -72,6 +73,14 @@ pub struct Picker {
     /// pickers live. Every open starts beside the swatch that opened it.
     spawn: egui::Pos2,
     placed: bool,
+    /// The *Variables* face asked for over a paint that is not bound (§15 D1043).
+    /// A bound paint shows that face whatever this says — the binding is its kind.
+    pub(crate) browse: bool,
+    /// The *Variables* face's search.
+    pub(crate) search: String,
+    /// Whether the current variable's row has been scrolled into view since the
+    /// picker opened on this slot (E1: *"scrolled into view on open"*).
+    pub(crate) scrolled: bool,
 }
 impl Picker {
     pub fn new(node: NodeId, slot: PaintSlot, spawn: egui::Pos2) -> Self {
@@ -83,6 +92,9 @@ impl Picker {
             hex: None,
             spawn,
             placed: false,
+            browse: false,
+            search: String::new(),
+            scrolled: false,
         }
     }
     /// Retarget an already-open picker, keeping its position on screen.
@@ -96,6 +108,9 @@ impl Picker {
             // describes nothing here. Its key would rule it out anyway; dropping it
             // says so rather than relying on two colours differing.
             self.intent = None;
+            self.browse = false;
+            self.search.clear();
+            self.scrolled = false;
         }
     }
 }
@@ -104,9 +119,11 @@ impl Picker {
 /// The width is **pinned**, not derived from the contents. The three faces do
 /// not need the same room — radial's `CX`/`CY` pair beside the preview chip is
 /// the widest thing in the panel — and an auto-sized window would jump every
-/// time the user changed tabs. So the width is radial's requirement (a little
-/// over the design's 222) and the other two faces stretch to it.
-pub(super) const WIDTH: f32 = 240.0;
+/// time the user changed tabs. It was radial's requirement, 240 (a little over
+/// the design's 222), until a fourth tab, *Variables*, needed room for its label
+/// (§15 D1043): 272 is the width `Styles and Variables.dc.html` E1 draws the
+/// popup at, and every face stretches to it.
+pub(super) const WIDTH: f32 = 272.0;
 /// Roughly the tallest face, for placing the window clear of the screen edge.
 pub(super) const HEIGHT_HINT: f32 = 300.0;
 const PAD: f32 = 11.0;
@@ -382,34 +399,69 @@ impl OndinApp {
         // unavailable. Disabled says which it is (§9.4, the identity row's mask
         // button makes the same bargain), and the row keeps the height it has
         // everywhere else.
+        //
+        // **A slot a variable can bind carries a fourth tab, *Variables*** (§15
+        // D1043, D1038 E1): a binding is another kind of paint, so it sits with the
+        // kinds. A bound paint opens on it; leaving it for *Solid* detaches to the
+        // colour drawn, and for a gradient converts what is drawn, which detaches
+        // too — *"picking a colour on Solid while bound detaches, like any edit"*.
         const CLOSE_W: f32 = 18.0;
         const TAB_GAP: f32 = 6.0;
         let gradients = slot.takes_gradients();
+        let key = super::binding::paint_item(slot).map(|_| FieldKey::Paint { id: node, slot });
+        let bound = key.and_then(|k| self.field_var(k));
+        let browse = self.picker.as_ref().is_some_and(|p| p.browse);
+        let on_vars = key.is_some() && (bound.is_some() || browse);
+        let tabs = if key.is_some() { 4 } else { 3 };
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = TAB_GAP;
-            let selected = PaintKind::ALL.iter().position(|k| *k == kind).unwrap_or(0);
+            let selected = match on_vars {
+                true => 3,
+                false => PaintKind::ALL.iter().position(|k| *k == kind).unwrap_or(0),
+            };
             let track = inner_w - CLOSE_W - TAB_GAP;
-            let live = |i: usize| gradients || PaintKind::ALL[i] == PaintKind::Solid;
+            let live = |i: usize| i == 3 || gradients || PaintKind::ALL[i] == PaintKind::Solid;
+            let label = |i: usize| match i {
+                3 => "Variables",
+                _ => PaintKind::ALL[i].label(),
+            };
             let picked = ui::segmented_enabled(
                 ui,
                 track,
                 ui::SEGMENT_CELL_H,
-                3,
+                tabs,
                 selected,
                 live,
                 |p, i, rect, on| match live(i) {
-                    true => segment_label(p, rect, PaintKind::ALL[i].label(), on),
-                    false => ui::segment_label_disabled(p, rect, PaintKind::ALL[i].label()),
+                    true => segment_label(p, rect, label(i), on),
+                    false => ui::segment_label_disabled(p, rect, label(i)),
                 },
             );
-            if let Some(i) = picked
-                && PaintKind::ALL[i] != kind
-            {
-                let next = paint::convert(brush, PaintKind::ALL[i], box_size);
-                self.write_slot(node, slot, next);
-                if let Some(p) = &mut self.picker {
-                    p.stop = 0;
+            match picked {
+                Some(i) if i == selected => {}
+                Some(3) => {
+                    if let Some(p) = &mut self.picker {
+                        p.browse = true;
+                        p.scrolled = false;
+                    }
                 }
+                Some(i) => {
+                    if let Some(p) = &mut self.picker {
+                        p.browse = false;
+                        p.stop = 0;
+                    }
+                    let to = PaintKind::ALL[i];
+                    match (bound, key) {
+                        // Solid off a binding: the colour drawn, `%` folded in.
+                        (Some(_), Some(k)) if to == PaintKind::Solid => self.detach_field(k),
+                        _ if to != kind || bound.is_some() => {
+                            let next = paint::convert(brush, to, box_size);
+                            self.write_slot(node, slot, next);
+                        }
+                        _ => {}
+                    }
+                }
+                None => {}
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if icon_button(ui, icon::X, CLOSE_W, 14.0, false, true).clicked() {
@@ -417,6 +469,20 @@ impl OndinApp {
                 }
             });
         });
+        // The face keeps the Solid face's height (E1: *"the popup keeps its
+        // height on every tab, so nothing jumps under the pointer"*) — measured
+        // from that face when it was last drawn, the mockup's 206-point list
+        // until it has been.
+        let face_top = ui.cursor().top();
+        let solid_h = egui::Id::new("picker-solid-face-h");
+        if let (true, Some(k)) = (on_vars, key) {
+            let h = ui
+                .ctx()
+                .data(|d| d.get_temp::<f32>(solid_h))
+                .unwrap_or(ui::CONTROL_H + ui::POPOVER_SECTION_GAP + 206.0);
+            self.variables_face(ui, k, bound, inner_w, h);
+            return close;
+        }
         // Geometry controls, then the stop bar — gradients only.
         match kind {
             PaintKind::Solid => {}
@@ -452,6 +518,10 @@ impl OndinApp {
         self.hex_row(ui, node, slot, brush, index, current, inner_w);
         if kind == PaintKind::Solid {
             self.document_swatches(ui, node, slot, brush, index, current, inner_w);
+            if key.is_some() {
+                let h = ui.min_rect().bottom() - face_top;
+                ui.ctx().data_mut(|d| d.insert_temp(solid_h, h));
+            }
         }
         close
     }
@@ -2946,7 +3016,10 @@ mod text_colour_route_tests {
     /// (400, 300), (500, 344) is on the saturation/value plane. The sweep that
     /// found it also says what is *not* there: no column in x ∈ {420…600} over
     /// y ∈ [280, 800] ever moved the hue off red, so the plane is what this
-    /// reaches and the hue strip's own band is still unlocated.
+    /// reaches and the hue strip's own band is still unlocated. ⚠️ **The colour
+    /// expected is a reading too**: `152` at the picker's old 240 width, `165` once
+    /// it widened to 272 for the *Variables* tab (§15 D1043) — the same point is
+    /// further left on a wider plane, so less saturated.
     #[test]
     fn a_click_on_the_picker_writes_a_text_layers_colour() {
         let ctx = egui::Context::default();
@@ -2982,7 +3055,7 @@ mod text_colour_route_tests {
 
         assert_eq!(
             text_rgba(&app, id),
-            Some([255, 152, 152, 255]),
+            Some([255, 165, 165, 255]),
             "the click writes the colour under it"
         );
         assert_eq!(

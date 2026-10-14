@@ -864,8 +864,183 @@ pub(crate) fn caret_to_end(ctx: &egui::Context, id: egui::Id, text: &str) {
     state.store(ctx, id);
 }
 
+/// The colour picker's *Variables* face: a row's height and a group header's
+/// (D1038 E1).
+const FACE_ROW_H: f32 = 24.0;
+const FACE_HEAD_H: f32 = 20.0;
+
+impl OndinApp {
+    /// The colour picker's *Variables* face (D1038 E1, §15 D1043): a search, then
+    /// every colour variable under its group's header, each row its swatch, full
+    /// name and hex **in the layer's mode**. The current variable carries the
+    /// row tint and a check, and is scrolled into view once on open; a click on
+    /// another row binds `key` to it, keeping its `%`. `h` is the height the face
+    /// fills, the Solid face's, so the popup does not jump between tabs.
+    pub(crate) fn variables_face(
+        &mut self,
+        ui: &mut egui::Ui,
+        key: FieldKey,
+        bound: Option<VarId>,
+        w: f32,
+        h: f32,
+    ) {
+        let at = match key {
+            FieldKey::Paint { id, .. } | FieldKey::Radius { id } => id,
+        };
+        let Some(p) = self.picker.as_mut() else {
+            return;
+        };
+        let mut search = std::mem::take(&mut p.search);
+        let mut scrolled = p.scrolled;
+        ui::field_row(ui, egui::vec2(w, ui::CONTROL_H), |ui| {
+            ui.label(theme::icon_text(
+                icon::MAGNIFYING_GLASS,
+                13.0,
+                theme::text::DIM,
+            ));
+            ui.add(
+                egui::TextEdit::singleline(&mut search)
+                    .id(egui::Id::new("picker-vars-search"))
+                    .frame(egui::Frame::NONE)
+                    .desired_width(f32::INFINITY)
+                    .font(egui::FontId::proportional(11.5))
+                    .hint_text(egui::RichText::new("Search colours").size(11.5)),
+            )
+        });
+        let list_h = (h - ui::CONTROL_H - ui.spacing().item_spacing.y).max(4.0 * FACE_ROW_H);
+        let doc = &self.session.doc;
+        let table = doc.variables();
+        let list = matches(table, VarKind::Color, &search);
+        let mut chosen: Option<VarId> = None;
+        egui::ScrollArea::vertical()
+            .id_salt("picker-vars")
+            .max_height(list_h)
+            .min_scrolled_height(list_h)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 1.0;
+                if list.is_empty() {
+                    let none = match table.iter().any(|v| v.kind == VarKind::Color) {
+                        true => "No variable matches",
+                        false => "No colour variables yet — Shift+S to add one",
+                    };
+                    ui.label(egui::RichText::new(none).size(11.5).color(theme::text::DIM));
+                }
+                let mut group: Option<&str> = None;
+                for v in &list {
+                    let (g, _) = ondin_core::variable::split_name(&v.name);
+                    if group != Some(g) {
+                        group = Some(g);
+                        if !g.is_empty() {
+                            face_header(ui, g, w);
+                        }
+                    }
+                    let on = bound == Some(v.id);
+                    let resp = face_row(ui, v, doc.resolve_var(at, v.id), on, w);
+                    if on && !scrolled {
+                        resp.scroll_to_me(Some(egui::Align::Center));
+                        scrolled = true;
+                    }
+                    if resp.clicked() {
+                        chosen = Some(v.id);
+                    }
+                }
+            });
+        if let Some(p) = self.picker.as_mut() {
+            p.search = search;
+            p.scrolled = scrolled;
+        }
+        if let Some(var) = chosen.filter(|v| bound != Some(*v)) {
+            self.bind_field(key, var);
+        }
+    }
+}
+
+/// A group's header in the picker's *Variables* face: its path, uppercase and
+/// tracked, like a card's title.
+fn face_header(ui: &mut egui::Ui, group: &str, w: f32) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(w, FACE_HEAD_H), egui::Sense::hover());
+    ui.painter().text(
+        egui::pos2(rect.left() + 3.0, rect.center().y + 1.0),
+        egui::Align2::LEFT_CENTER,
+        group.to_uppercase(),
+        egui::FontId::proportional(9.5),
+        color::text_a(97),
+    );
+}
+
+/// One row of the picker's *Variables* face: swatch, full name, hex, and the
+/// check on the current variable (E1).
+fn face_row(
+    ui: &mut egui::Ui,
+    v: &Variable,
+    value: Option<Value>,
+    on: bool,
+    w: f32,
+) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, FACE_ROW_H), egui::Sense::click());
+    let p = ui.painter();
+    if on {
+        p.rect_filled(rect, 4, color::text_a(26));
+    } else if resp.hovered() {
+        p.rect_filled(rect, 4, color::text_a(15));
+    }
+    let y = rect.center().y;
+    let sw = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + 3.0 + 6.0, y),
+        egui::vec2(12.0, 12.0),
+    );
+    if let Some(Value::Color(c)) = value {
+        ui::paint_checkerboard(p, sw, 3.0);
+        p.rect_filled(sw, 3, ui::color_to_egui(c));
+    }
+    p.rect_stroke(
+        sw,
+        3,
+        egui::Stroke::new(1.0, egui::Color32::from_black_alpha(89)),
+        egui::StrokeKind::Inside,
+    );
+    let check_w = 12.0;
+    let hex = match value {
+        Some(Value::Color(c)) => ui::hex_of(c),
+        _ => String::new(),
+    };
+    let hex_right = rect.right() - 3.0 - check_w - 8.0;
+    let hex_galley = ui
+        .fonts_mut(|f| f.layout_no_wrap(hex, egui::FontId::proportional(10.5), color::text_a(102)));
+    let name_left = sw.right() + 8.0;
+    let name_right = hex_right - hex_galley.size().x - 8.0;
+    let font = egui::FontId::proportional(11.5);
+    let shown = elide_groups(ui, &v.name, &font, name_right - name_left);
+    p.text(
+        egui::pos2(name_left, y + 1.0),
+        egui::Align2::LEFT_CENTER,
+        shown,
+        font,
+        color::TEXT,
+    );
+    p.galley(
+        egui::pos2(
+            hex_right - hex_galley.size().x,
+            y - hex_galley.size().y / 2.0 + 1.0,
+        ),
+        hex_galley,
+        color::TEXT,
+    );
+    if on {
+        p.text(
+            egui::pos2(rect.right() - 3.0 - check_w / 2.0, y),
+            egui::Align2::CENTER_CENTER,
+            icon::CHECK,
+            egui::FontId::new(12.0, egui::FontFamily::Name("phosphor".into())),
+            color::text_a(204),
+        );
+    }
+    resp
+}
+
 /// A paint slot's list and index, for the slots a binding can write.
-fn paint_item(slot: PaintSlot) -> Option<(PaintTarget, usize)> {
+pub(crate) fn paint_item(slot: PaintSlot) -> Option<(PaintTarget, usize)> {
     match slot {
         PaintSlot::Fill(i) => Some((PaintTarget::Fill, i)),
         PaintSlot::Stroke(i) => Some((PaintTarget::Stroke, i)),
@@ -1191,6 +1366,143 @@ mod tests {
         ctx.memory_mut(|m| m.request_focus(id));
         let out = run(vec![egui::Event::Text("8".into())]);
         assert_eq!(out.typed.as_deref(), Some("8"));
+    }
+
+    /// Where text `s` was drawn this frame, by its galley's centre.
+    fn text_at(shapes: &[egui::epaint::ClippedShape], s: &str) -> Option<egui::Pos2> {
+        fn find(shape: &egui::Shape, s: &str) -> Option<egui::Pos2> {
+            match shape {
+                egui::Shape::Text(t) if t.galley.text() == s => {
+                    Some(t.pos + t.galley.rect.center().to_vec2())
+                }
+                egui::Shape::Vec(v) => v.iter().find_map(|x| find(x, s)),
+                _ => None,
+            }
+        }
+        shapes.iter().find_map(|c| find(&c.shape, s))
+    }
+
+    /// One frame of the picker, its shapes returned.
+    fn picker_frame(
+        ctx: &egui::Context,
+        app: &mut OndinApp,
+        events: Vec<egui::Event>,
+    ) -> Vec<egui::epaint::ClippedShape> {
+        let input = egui::RawInput {
+            events,
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1200.0, 900.0),
+            )),
+            ..Default::default()
+        };
+        ctx.run_ui(input, |_| app.picker_ui(ctx)).shapes
+    }
+
+    /// Click the text `s` the picker drew, over three frames: move, press, release.
+    fn click_text(ctx: &egui::Context, app: &mut OndinApp, s: &str) {
+        let shapes = picker_frame(ctx, app, vec![]);
+        let at = text_at(&shapes, s).unwrap_or_else(|| panic!("{s:?} is drawn"));
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        picker_frame(ctx, app, vec![egui::Event::PointerMoved(at)]);
+        picker_frame(ctx, app, vec![button(true)]);
+        picker_frame(ctx, app, vec![button(false)]);
+    }
+
+    /// **The colour picker's *Variables* tab binds, and *Solid* detaches** (D1038
+    /// E1, §15 D1043), driven through the popup's own clicks: the tab opens the
+    /// face over an unbound fill and writes nothing; a row binds the fill, keeping
+    /// its `%`; the face then stays up, the paint's kind being the binding; and
+    /// *Solid* leaves the colour drawn, `%` folded in.
+    ///
+    /// Flip, run: sending *Solid* through `write_slot` like any kind change — the
+    /// drawn colour back through `edited_brush` — fails *"Solid off a binding
+    /// detaches"* with the binding kept, which is the edge D1041 recorded.
+    #[test]
+    fn the_pickers_variables_tab_binds_and_solid_detaches() {
+        let (ctx, mut app, rect, brand, _) = fixture();
+        crate::theme::install(&ctx);
+        app.session.selection.set(vec![rect]);
+        app.picker = Some(crate::panels::picker::Picker::new(
+            rect,
+            PaintSlot::Fill(0),
+            egui::pos2(400.0, 300.0),
+        ));
+        for _ in 0..2 {
+            picker_frame(&ctx, &mut app, vec![]);
+        }
+        click_text(&ctx, &mut app, "Variables");
+        assert!(
+            app.picker.as_ref().is_some_and(|p| p.browse),
+            "the face is up"
+        );
+        assert_eq!(
+            fill0(&app, rect),
+            BrushSource::from(RED.with_alpha(0.5)),
+            "the tab alone writes nothing"
+        );
+        click_text(&ctx, &mut app, "brand/500");
+        assert_eq!(
+            fill0(&app, rect),
+            BrushSource::Bound {
+                var: brand,
+                alpha: 0.5
+            },
+            "a row binds, keeping the `%`"
+        );
+        let shapes = picker_frame(&ctx, &mut app, vec![]);
+        assert!(
+            text_at(&shapes, "BRAND").is_some(),
+            "the face stays up over the binding, under its group's header"
+        );
+        click_text(&ctx, &mut app, "Solid");
+        assert_eq!(
+            fill0(&app, rect),
+            BrushSource::from(Color::WHITE.multiply_alpha(0.5)),
+            "Solid off a binding detaches to the colour drawn"
+        );
+        assert!(app.picker.as_ref().is_some_and(|p| !p.browse));
+    }
+
+    /// A bound fill's picker opens on the *Variables* face (E1) — the binding is
+    /// the paint's kind. The last assertion is only that an effect's colour is not
+    /// a slot `paint_item` binds, which is what keeps its picker at three tabs; no
+    /// effect picker is drawn here and no tabs are counted.
+    #[test]
+    fn a_bound_fill_opens_on_the_variables_face() {
+        let (ctx, mut app, rect, brand, _) = fixture();
+        crate::theme::install(&ctx);
+        app.bind_field(
+            FieldKey::Paint {
+                id: rect,
+                slot: PaintSlot::Fill(0),
+            },
+            brand,
+        );
+        app.session.selection.set(vec![rect]);
+        app.picker = Some(crate::panels::picker::Picker::new(
+            rect,
+            PaintSlot::Fill(0),
+            egui::pos2(400.0, 300.0),
+        ));
+        let mut shapes = vec![];
+        for _ in 0..3 {
+            shapes = picker_frame(&ctx, &mut app, vec![]);
+        }
+        assert!(
+            text_at(&shapes, "Search colours").is_some(),
+            "the face is up"
+        );
+        assert!(text_at(&shapes, "brand/500").is_some());
+        assert!(
+            paint_item(PaintSlot::Effect(0)).is_none(),
+            "an effect's colour is not a bindable slot"
+        );
     }
 
     /// Long names elide from the left by whole groups, then the leaf (A5).

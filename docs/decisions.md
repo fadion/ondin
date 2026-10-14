@@ -1458,6 +1458,7 @@ for work that was already done" is itself the finding. D334's line is the model.
 - **D1058** — **Styles and variables, build step 2's first half: a container's gaps and padding bind to number variables — a sidecar of six beside the layout, resolved at read by every layout view, detached at the commit when written over; schema v8.** D1038's addition (7). `Node::spacing_vars: SpacingVars` in `Display::spacing`'s order; `SetSpacingVars`; `bind_spacing_ops` writes the bound literals 0, `detach_spacing_ops` the numbers drawn. 🚨 `LayoutView::display` a `Cow` (`Document::resolved_display`, `spacing_drawn_in`); an override's layout stored resolved. 🚨 `keep_spacing_bindings` after `keep_corner_bindings`, D1041's two halves, the literal half carrying the Container card's own writes, the flex↔grid switch and the Scale tool. `FieldKey::Spacing { id, slots }`; `radius_chip`/`radius_retype` renamed `number_chip`/`number_retype`. ~~⚠️ A partly bound field's scrub previews the variable's number and commits a detach (*Fix*).~~ Fixed in `b613a7b`: the pass's judgement is `build::kept_spacing_vars`, which `absorb`'s `SetDisplay` arm shares; the corner write's sibling, measured, fixed the same way (`kept_corner_vars`, `Document::corners_drawn_in`). ~~🚨 A resize (`Size` patch) of a rectangle with bound corners still previews them at the literal 0 — read, not reproduced (*Fix*).~~ The bound rect's resize preview, read in the code, fixed in `79ae5eb`: `SetGeometry`'s arm runs `kept_corner_vars` on any patch over bound corners. ⚠️ No canvas handle writes a gap. *(Built 2026-10-14, `34df81f`. **Keep**; the partly bound preview and the bound resize's **Resolved**. Five tests and the random incremental test's spacing ops, four flips run as reported; two preview halves since. D914 amended; `architecture.md` §5.3c, §5.3f, §5.7, §5.11, §6.2; `context-menus.md` §6.7; `roadmap.md` step 2 edited down. **Amended 2026-10-14**, `b613a7b` and `79ae5eb`)*
 - **D1059** — **Styles and variables, build step 2's second half: a layer's visibility binds to a boolean variable — a sidecar beside the literal, resolved by `Document::shown` for every reader that draws, picks, lays out or exports, detached at the commit when written over, by one half of the corners' rule.** D1038 (d). `VarKind::Boolean`, `Cell::Boolean`, `Value::Boolean`; `Node::visible_var` beside the literal `visible`; `SetVisibleVar`; schema field in the unreleased v8. `bind_visible_ops` writes the literal `true`, canonical. 🚨 `shown`/`shown_in` read by every drawing, picking, layout and export reader — a hidden bound item leaves its flow. 🚨 `keep_visible_bindings` after `keep_spacing_bindings`: written what it shows stays bound, else detaches — **no literal half**, which would keep a layer the eye shows bound and hidden. `absorb`'s `SetVisibleVar` arm and D1056's cell arm patch a bound visibility; ~~⚠️ no visibility arm marks a node moved, so the eye's `--` preview over an in-flow item does not re-lay its layout (*Fix*)~~ — corrected: `flex_relayout` lays from every overridden node, not from `moved`, so the preview already re-lays an in-flow item's siblings (measured, test added). `FieldKey::Visible`, `typed()` false; the bound eye a 22×18 capsule, the browser's boolean box — the session's chrome. 🚨 Read, not reproduced, and **fixed in `79ae5eb`**: `is_placement` omitted `SetVisibleVar`, so a main root's binding followed to every instance root (tested, flip run); the layer menu's *Show*/*Hide* label read the literal; a ghost read the literal (now `ghost_shown`, the default mode); a Boolean property's reset and drift ignored the binding; `propagate::untouched` compared no binding — the last four untested. ⚠️ Owed: ~~the Properties card's chip, the layers panel's bound mark~~ (D1060), a detach's status message. *(Built 2026-10-14, `bf347f9`. **Keep**, the one-half pass and `shown` above all; the five read defects and the stale comments **Resolved** in `79ae5eb`; the relayout *Fix* **withdrawn**, a wrong premise. Eight tests and the random incremental test's visibility ops, six flips run as reported. D1058 amended; `architecture.md` §5.3d, §5.3f, §5.7, §5.9, §5.11, §6.2; `context-menus.md` §6.7; `roadmap.md` step 2 edited down. **Amended 2026-10-14**, `79ae5eb`; **again**, the card's chip and the panel's bound eye built in D1060)*
 - **D1060** — **Styles and variables, build step 2's owed chrome: a Boolean property row over layers all bound sets its switch in a variable's capsule, A4's rule, a bound layer's eye rests in the capsule in the layers panel, and a worded row badge ends before a resting eye.** D1038 (d)'s *"the property is a view over the field (D982), so it shows the chip"*; D1038 draws neither shape, both borrowed from D1059's bound eye. `toggle_row(…, bound)`: a 38×22 capsule (`BOUND_SWITCH_PAD` 6×3), `text_a(28)`/44; drawn when every counterpart over every root is bound, to one variable or several (A4, D1045), partly bound the plain row; cached in `PropCache::chips`. Tooltip `chip_tip`, *name · Mixed* where modes part the values, or the names listed; the verb *Click to toggle and detach*, or on a *Mixed* row *Click to show all; the hidden ones detach*. The click detaches through `set_property` and `keep_visible_bindings`, no door of its own. The first cut's one-variable rule and its overstated tooltip read and fixed before commit. `layers_row`: `show_eye` also while bound, `BOUND_EYE` 22×18, no tooltip. A worded badge (*W × H*, *N variants*) drew under a resting eye — measured *40 × 40* over the eye-slash — and now ends at `eye_x − 15`. *(Built 2026-10-14, uncommitted when recorded. **Keep**; the chrome the session's, not looked at. Four tests, four flips run as reported; no test reads the tooltips. D1059 amended; `architecture.md` §5.3d, §5.3f, §9.2; `roadmap.md` step 2's owed chrome struck)*
+- **D1061** — **Styles and variables, build step 2's last item: a layer's width and height bind to number variables — a sidecar of two beside the stored size, its literal 0 as a corner's, answered resolved by every layout view and drawn from the used kind — and only a hand-set size binds.** The maintainer's ruling, 2026-10-14: *"go with your recommendation for W and H"* — literal 0 beside the binding, any resize detaches, not a hugging frame's, a text box's or a grown or stretched item's size. `SizeVars` on `Node::size_vars`, the five kinds `NodeKind::box_size` answers, Text unbindable by decision; `SetSizeVars`; `NodeDto::size_vars` in the unreleased v8, no bump. 🚨 `DocView::kind` answers `Document::resolved_kind`; `resolve::with_bound_size` gives an unlaid, unpinned bound layer a `Used` entry (D1039's sparse contract widened again). `size_axes_authored`: `%`/`fit-content`, pinned both ends, flex main with grow or basis, flex cross stretched, grid stretched with size `auto` — shrink, min and max not counted. 🚨 `keep_size_bindings` after `keep_visible_bindings`: D1041's two halves over a `Size` patch (`kept_size_vars`, shared with the preview), **and a layout half** detaching an axis an edit makes computed, to the size drawn before; `keep_insets` reads sizes after that pass. `is_slot_field` holds `SetSizeVars` (D983 (3)). Preview: `current_kind`, `apply_laid` — a bound rect previewed 0 wide beside a resize, found by a test and fixed — the cell arm and `ghost_kind`. `FieldKey::Size`, the single card only; the multi card's union W and H take none. `baked_ops` left: an extra, harmless op. ⚠️ No canvas resize of a bound layer tested; no status message on a detach; no bound-size mark in the layers panel. *(Built 2026-10-14, uncommitted when recorded. **Keep**; Text and the multi card **Intentional**. Nine tests and the random incremental test's size ops, flips as reported; a `current_kind` flip does not bite in the first render test, two defences. D1038, D1039, D1058 amended; `architecture.md` §5.3f, §5.9, §5.11, §6.2; `roadmap.md` step 2 struck)*
 
 ---
 
@@ -24583,7 +24584,8 @@ the shape D1037's *"its menu in the header, D1005's `+` the precedent"* took. (6
 detaches its users** to their values, as deleting a variable does (D1037, D979 (c)): no confirmation,
 the floating status says it, one `Ctrl+Z` restores. (7) **The bindable numbers are W, H, corner
 radius, layer opacity, stroke width, effect X, Y, blur and spread, and the layout gaps and padding.**
-**Not X, Y or rotation**: those are placement, not design values, and an instance already keeps its
+(*Narrowed for W and H by the maintainer's ruling of 2026-10-14*, D1061: only a hand-set size binds —
+not a hugging frame's, a text box's, or a flex-grown or stretched item's.) **Not X, Y or rotation**: those are placement, not design values, and an instance already keeps its
 own placement — a direct instance's never compares with its main's (§5.3d, `reset::placement_is_own`),
 and a swapped slot keeps the root's (D983 (3)).
 
@@ -24686,7 +24688,8 @@ v8's values.
 *(Designed by Claude Design and accepted by the maintainer with the rulings of 2026-10-13, every one
 the session's recommendation; (b) and (d) overrule the mockup's H2 and G5, and the field menu's
 *Detach variable* omitted when unbound overrules C1 (ruled 2026-10-14); G13's same-leaf merge the
-design's, ~~unruled~~ refused as a taken name since 2026-10-14 (D1040's amendment). **Keep.** **Not built**, record-only, no code cites this number, and the first build
+design's, ~~unruled~~ refused as a taken name since 2026-10-14 (D1040's amendment); (7)'s W and H
+narrowed to a hand-set size by the maintainer's ruling of 2026-10-14 (D1061). **Keep.** **Not built**, record-only, no code cites this number, and the first build
 commit owes the citation. D1037 amended in body and index; `architecture.md` §5.3e's kit-modes line,
 §5.3f and §5.11's v7 note amended; `shortcuts.md` §14 added; `context-menus.md` §6.7 added; `roadmap.md`
 *Next · Styles and variables* edited down — the design pass and (a), (b), (c), (d), (f) and (iv)
@@ -24747,7 +24750,8 @@ its one `Literal(T) | Bound(VarId)`**, and each says why.
   resolved radii into `Resolved`'s used kind after layout has had its say, so the outline, the SVG
   writer's `rx`, the snapshot's geometry, the hit test and the canvas's radius handles follow without a
   line of their own — and **`Used`'s sparse contract widens**: a node has an entry where layout moved or
-  sized it *or* where a corner is bound. `build::bind_corners_ops` writes a bound corner's literal **0**,
+  sized it *or* where a corner is bound — *or*, since D1061, where a width or a height is
+  (`resolve::with_bound_size`). `build::bind_corners_ops` writes a bound corner's literal **0**,
   so a main and a copy bound to one variable compare equal whatever either drew before (§5.3d compares
   the binding); `detach_corners_ops` writes the drawn radius back and clears the binding. ⚠️ **The cost
   is every reader of the *document's* kind**: it reads 0 for a bound corner. The inspector's radius field
@@ -26104,9 +26108,9 @@ caller reports it: resolving only on a radius patch fails *"a bound rect resized
 … detaches"* has no handle to happen on: no canvas gesture writes a gap or a padding, `canvas.rs`
 holding no production `SetDisplay`. And **the floating status says nothing of a detach**, here as for a
 corner — D1038 (2)'s *"the floating status says what was detached"* is unbuilt for both. **Not in this
-entry**: boolean variables bound to visibility, the rest of step 2 (D1059); and the other numbers D1038's (7)
-lists — W, H, layer opacity, stroke width, an effect's X, Y, blur and spread — bound by nothing and given
-no step by the record. Insets, grid tracks, flex grow and font size are not on that list.
+entry**: boolean variables bound to visibility, the rest of step 2 (D1059); W and H, step 2's last
+(D1061); and the other numbers D1038's (7) lists — ~~W, H,~~ layer opacity, stroke width, an effect's X,
+Y, blur and spread — bound by nothing and given no step by the record. Insets, grid tracks, flex grow and font size are not on that list.
 
 **Tests**, as the caller reports them. Core, `tests/variables.rs`:
 `a_bound_gap_and_padding_lay_out_at_the_variables_number` — flip, run: `UsedView` and `CommittedView`
@@ -26126,7 +26130,8 @@ in `b613a7b`, with the corner write's sibling; ~~***Fix*** the bound rectangle's
 Styles and variables* step 2 edited down. **Amended 2026-10-14** (`b613a7b`): the partly bound preview
 and the corner write's fixed through `kept_spacing_vars` and `kept_corner_vars`, D1041 and D1050
 amended, the roadmap's *Fix* struck; the resize read and left open. **Amended again 2026-10-14**
-(`79ae5eb`): the resize's preview fixed, its roadmap item struck)*
+(`79ae5eb`): the resize's preview fixed, its roadmap item struck. **And again**: W and H built in
+D1061)*
 
 **D1059 — Styles and variables, build step 2's second half: a layer's visibility binds to a boolean
 variable — a sidecar beside the literal, resolved by `Document::shown` for every reader that draws,
@@ -26381,6 +26386,150 @@ hidden and unbound, the same `show_eye` arm. *(Built 2026-10-14 by the session; 
 recorded. **Keep**; the two capsules the session's chrome, not looked at by the maintainer; the first
 cut's one-variable rule and its tooltip **Resolved** before commit. D1059 amended; `architecture.md`
 §5.3d, §5.3f and §9.2; `roadmap.md` *Next · Styles and variables* step 2's owed chrome struck)*
+
+**D1061 — Styles and variables, build step 2's last item: a layer's width and height bind to number
+variables — a sidecar of two beside the stored size, its literal 0 as a corner's, answered resolved by
+every layout view and drawn from the used kind — and only a hand-set size binds, an edit that makes
+an axis computed detaching it as a resize does. *Built 2026-10-14; the maintainer's ruling, the
+exclusions' reading and the chrome the session's; uncommitted when recorded.*** D1038 (7) lists W and
+H among the bindable numbers, and D1058 left them as step 2's last. The session put three questions
+— what the literal holds while bound, what a resize does, and which sizes bind at all — and
+recommended **a literal 0 beside the binding, as corners store it; any resize detaches; only a
+hand-set size is bindable** — not a hugging frame's, not a text box's automatic size, not a flex-grown
+or stretched item's. **The maintainer's ruling** (2026-10-14), accepting it verbatim: *"go with your
+recommendation for W and H"*. The precise reading of the three exclusions, below, is the session's.
+
+**Storage.** `variable::SizeVars = [Option<VarId>; 2]`, width then height, on `Node::size_vars`,
+beside the kind's stored `size` as `CornerVars` sits beside the radii. **Five kinds have a stored size
+for a binding to stand in for** — `NodeKind::box_size` and `box_size_mut`: `Artboard`, `Rect`,
+`Ellipse`, `Polygon`, `Star`. **A text box's W and H do not bind, by decision**: its size is its
+`TextSizing`'s, and `box_size` answers `None` for every `Text` — the ruling's *not a text box's auto
+size*, read by the session as the whole of Text. A path's, a boolean's and a group's W and H are
+derived boxes with no stored size behind them, and do not bind either.
+`SetSizeVars { id, vars }` writes the bindings alone — a no-op when equal, its node named at the id
+sites, propagated `Whole`, stated by `reset::state_ops`, filed under Transform by `component::card_of`.
+`build::bind_size_ops` writes a bound axis's literal **0** beside it — D1039's rule, so a main and its
+copy bound alike compare equal whatever either drew — and `detach_size_ops(doc, id, which)` writes each
+named axis back as the size it draws at. `variable::check` holds a size binding to a number variable
+**and** to a kind with a stored size (`BadBinding` otherwise); `detached`, `carried`, `land` (rebinding
+by name, else the twin's drawn size), `reads` and `remove_ops` (a `GeometryPatch::Size` of the drawn
+size and a `SetSizeVars`) take it as they take the others, and `propagate::untouched` compares it.
+
+**Schema: v8, no bump.** `NodeDto::size_vars`, skipped when neither axis is bound, joins the v8 that
+D1058 opened and D1059 joined — unreleased, v0.5.0 having shipped on 2026-10-07 at v6 — so no
+released build reads a v8 file without it. ⚠️ A local build of D1058's or D1059's commit would drop it
+in silence and draw the bound axes at 0; there is none outside the session's tree.
+
+**Resolved at read.** `Document::size_drawn_in(t, id, kind, vars)` is D1056's `_in` door — each bound
+axis its variable's number in the mode in force at `id`, floored at 0, a missing or non-number value 0,
+`vars` named so a preview can resolve a binding it has not committed — and `Document::resolved_kind(id)`
+answers a `Cow<NodeKind>`, borrowed while nothing is bound. 🚨 **`DocView::kind` answers
+`resolved_kind`**, and `UsedView` and `CommittedView` with it, so every layout pass lays a bound item at
+its number and none at its 0; `used_geometry`'s insets placement and `root_used`'s fallback start from
+it. **A bound layer neither laid out nor pinned has no `Used` entry to carry the number**, so
+`resolve::with_bound_size`, in `place_node` before `with_bound_corners` (which keeps the size it is
+handed), gives it one — **`Used`'s sparse contract widens again** (D1039 amended): an entry where layout
+moved or sized a node, where a corner is bound, or where a size is. ⚠️ **The cost is the corners':
+every reader of the document's own kind reads 0 on a bound axis.** A reader sweep found seven readers
+of the stored size outside the layout views; six now read the resolved or used kind — `keep_insets`
+(below), `text_on_new_path`'s rail (`res.used_kind`), `variant::add_variant` growing a set from its
+drawn size, the frame templates' `shared_frame_size`, `layout::specified_along`'s unit conversions (it
+takes a `&NodeKind` now), and the renderer's (below). **The seventh, `build::baked_ops`, is left**: on
+a bound layer every bake writes a `Size` patch of the drawn size, which `keep_size_bindings` judges
+written what it draws and keeps bound, the literal put back — an extra op, and harmless.
+
+**Only a hand-set size binds.** `build::size_axes_authored(view, id) -> [bool; 2]` is the ruling as
+read. An axis is **computed**, and takes no binding, when its own keyword is `%` or `fit-content` — a
+frame that hugs its layout, an item sized against its container; when insets pin it at both ends in a
+container with a box (an `Artboard`, or a `Group` with a layout), the space between being its size; on
+an in-flow flex item, the **main** axis when it grows or has a basis, the line dealing it out, and the
+**cross** axis when drawn stretched (`stretched_across`); and on an in-flow grid item, an axis
+stretched across its cell — a `stretch` keyword, or `normal` on a box that is not replaced — with its
+size `auto`. `bindable_size_axes(doc, id)` asks it of the committed document, and `bind_size_ops` binds
+no computed axis. ⚠️ **Shrink, `min-` and `max-` are not counted**: they can squeeze an authored axis,
+and the binding keeps its number while they do — the stored size is what a binding stands in for, which
+is CSS's reading of `width`. It is asked of a `LayoutView` so the commit can ask it of the tree an edit
+leaves.
+
+**The commit-time pass.** `build::keep_size_bindings`, in `commit_inner` after `keep_visible_bindings`
+— so after `keep_flex_sizes`, whose holds on a resized item are among the layout writes it reads — and
+before `propagate::owed`, so a copy follows a detach through the main's `SetSizeVars`. **D1041's two
+halves**, for a `GeometryPatch::Size` on a bound layer in a transaction that does not set its
+`SetSizeVars`: an axis written **what it draws** stays bound — a side handle or the W field writes the
+other axis as drawn — and so does one written **its own literal**, 0, which a writer building the size
+from the stored kind writes (every `GeometryPatch` but a size carries the stored size, D874); the
+literal goes back to 0 either way, and anything else detaches the axis to the size written. That is the
+ruling's *any resize detaches*, read per axis: the axis a resize moves detaches, the one it leaves keeps
+its binding. The judgement is `build::kept_size_vars(doc, id, written)`, which the preview shares —
+D1058's lesson, taken before it could be learned a second time. ⚠️ **The corners' price**: a 0 written
+over a bound axis keeps the binding; the chip's retype, which detaches first, is the door to a literal
+— and floors at 1.
+
+🚨 **And a layout half, which corners and spacing have no need of.** When the transaction writes
+`SetLayoutItem`, `SetInsets` or `Reparent` on a bound layer, or `SetDisplay` on its parent, the pass
+applies it to a scratch clone and detaches every bound axis `size_axes_authored` now calls computed — a
+keyword set to `%` or `fit-content`, a pin at the second end, growth, a basis, a stretch, a reparent
+into a layout — to the size drawn **before** the edit, which is what the axis comes back at if it is
+made hand-set again. So *only a hand-set size is bindable* holds after every edit as at the bind, and a
+commit that touches no bound layer's layout pays nothing. 🚨 **`keep_insets` now builds its `after` from
+`keep_size_bindings(tx)` and reads sizes as `after.resolved_kind`**: it runs first, and before the size
+pass a bound axis written its drawn number or its literal reads 0 off the kind, and one written past
+its variable still reads the variable — a pinned bound layer re-pinned from a size it is not drawn at.
+*Do not* "simplify" it back to applying `tx` alone.
+
+**Components.** `propagate` takes `SetSizeVars` whole, and an instance root's size is no placement
+(`propagate::is_placement`), so a main's bound W reaches its instances. **`swap::is_slot_field` holds
+`SetSizeVars` beside the `Size` patch**: a swapped slot keeps its size (D983 (3)), and the size a slot
+keeps is its literal and its variable together — a bound slot's literal alone is a 0. On an instance,
+`transform_marks`' W and H compare the binding with the literal, D1048's arrangement, the tip naming the
+main's variable, and the ↺ writes the main's `SetSizeVars` beside its size.
+
+**The preview** (§6.2). `current_kind` falls back to `doc.resolved_kind`, and `PreviewView::kind` with
+it; `absorb`'s `SetGeometry` arm resolves the patched kind with `kept_size_vars`; a new `SetSizeVars`
+arm draws the bindings it sets — the `--` list's highlight on W or H, D1050's for a corner; D1056's
+`SetVariableCell` arm resolves bound sizes against the edited table; `apply_laid`, the insets
+relayout's base and a released item read the resolved kind; and `ghost_kind` gives an Alt-drag or paste
+ghost its drawn size in the default mode, as `paint_ghost` and `ghost_shown` resolve. 🚨 **A defect
+found by a new test, and fixed**: `apply_laid` took an item the pass does not resize from the stored
+kind, so in a flex row whose first rect's width is bound, resizing the second previewed the first **0
+wide** while laying the second where the bound width puts it.
+
+**The chrome.** `binding::FieldKey::Size { id, axis }`, a number field badged by its letter, *W* or
+*H*, on **the single-layer Transform card only**. The two fields draw the chip through
+`layout::spacing_bound_ui` and take `--` and the field menu through `spacing_doors` — both `pub(super)`
+now, their docs saying W and H share them — **only where `bindable_size_axes` calls the axis hand-set**;
+a computed axis is the plain field and offers no binding. The retype writes the typed axis with the
+other at its stored literal, so the pass keeps the other bound. **The multi-selection card's W and H
+take no binding, by design**: they are the union box's (D390), which no variable stands in for.
+
+**Not built, and open.** D1038 (2)'s *"resizing a bound W"* can happen now — every resize handle writes
+a `Size` patch, and the pass detaches — **but no test drives a canvas handle on a bound layer**; the
+commit door is tested with a `Size` write. **The floating status says nothing of the detach**, as for
+every binding (D1058, D1059). The layers panel and the canvas draw no mark for a bound size.
+
+**Tests**, as the caller reports them, each flip-checked, the flip in the test's doc. Core,
+`tests/variables.rs`: `a_bound_size_is_drawn_and_laid_out_at_the_variables_number`,
+`a_size_written_over_a_bound_axis_detaches_it`,
+`an_axis_made_computed_detaches_and_a_computed_axis_does_not_bind`,
+`size_bindings_detach_to_what_they_draw_round_trip_and_fit_their_kind`, and size binds and detaches in
+`incremental_update_equals_rebuild_over_random_variable_ops`. Render, `tests/overrides.rs`, each commit
+made through `keep_size_bindings` as `commit_inner` makes it: `a_bound_size_previews_where_the_commit_draws_it`
+— flip, run: the `SetGeometry` arm resolving the node's whole binding rather than `kept_size_vars`'
+fails *"a side handle past the bound height"*. ⚠️ **`current_kind` falling back to the stored kind
+leaves that test green** — its corner write and corner bind both pass through the `SetGeometry` arm,
+whose resolve lifts the stored 0 back to the bound number: two defences for those two cases. The flip
+bites in `a_bound_item_beside_a_resize_previews_at_its_number`, where nothing in the gesture writes the
+bound layer: it, and `apply_laid`'s base back to the stored kind, each fail *"the neighbour of a bound
+item resized"*, the rect 0 wide; the cell arm without its size block fails *"the bound width's cell
+scrubbed"*; `ghost_kind` answering the stored kind fails *"an Alt-drag copy of a bound rect"*. App:
+`panels::component::tests::a_copys_detached_width_marks_w_and_its_reset_rebinds`,
+`panels::binding::tests::w_binds_a_resize_detaches_it_and_a_retype_writes_it` and
+`panels::binding::tests::a_computed_axis_takes_no_binding`. *(Built 2026-10-14 by the session on the
+maintainer's ruling of the same day; uncommitted when recorded. **Keep**, the layout half, `DocView::kind`
+answering resolved and `keep_insets` reading after the size pass above all; Text and the multi card's W
+and H **Intentional**; a squeezed axis keeping its binding *Revisit if* it misleads. D1038, D1039 and
+D1058 amended; `architecture.md` §5.3f, §5.9, §5.11 and §6.2; `roadmap.md` *Next · Styles and
+variables* step 2 struck — it owes nothing — and its open list edited)*
 
 **D980 — The five item lists carry ids, in a wrapper beside each item rather than a field inside it,
 and an instance's items follow its main's item by item. *Decided 2026-10-04 by the maintainer — per

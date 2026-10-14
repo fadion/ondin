@@ -3338,7 +3338,7 @@ and the dashboard's 1B §15 D1017).
 - **Mains made local are placed by their laid-out boxes**, a frame's too, measured on the document the
   transaction leaves, stacked down the right of the content 80 apart.
 
-### 5.3f Styles and variables (ruled 2026-10-11 and 2026-10-13; step 1 built, and step 2's gaps, padding and visibility; §15 D1037–D1060)
+### 5.3f Styles and variables (ruled 2026-10-11 and 2026-10-13; steps 1 and 2 built; §15 D1037–D1061)
 
 > **Design ahead of code, nearly all of it.** Ruled with the maintainer on 2026-10-11, in conversation,
 > on a design the session put: §15 D1037 says which part is whose. The Claude Design pass on the chrome
@@ -3358,7 +3358,8 @@ and the dashboard's 1B §15 D1017).
 > the popup's faces one height, a `Path`'s radii left unbound by decision** (2026-10-14, §15 D1057), so
 > step 1 owes nothing. **Of step 2, a container's gaps and padding bind** (2026-10-14, §15 D1058), **and
 > a layer's visibility binds to a boolean variable** (2026-10-14, §15 D1059), **its chrome on the
-Properties card and the layers panel too** (2026-10-14, §15 D1060). The
+Properties card and the layers panel too** (2026-10-14, §15 D1060), **and a layer's hand-set width
+> and height bind** (2026-10-14, §15 D1061, the maintainer's ruling), so step 2 owes nothing. The
 > build order and what is open are `roadmap.md`'s
 > *Next · Styles and variables*. The rest of this section is the design, and it is rewritten in the
 > present tense as each step lands.
@@ -3380,14 +3381,16 @@ inherit, as one undoable transaction.
 **What binds** (D1038). **Numbers**: W, H, corner radius, layer opacity, stroke width, an effect's X,
 Y, blur and spread, and the layout gaps and padding — **not X, Y or rotation**, which are placement and
 which an instance already keeps as its own (§5.3d's `reset::placement_is_own`; a swapped slot's,
-§15 D983 (3)). **Colours** bind a **whole solid paint**,
+§15 D983 (3)). **W and H bind only where the user sets them** (the maintainer's ruling, §15 D1061) —
+never a hugging frame's, a text box's, or a size a flex or grid layout deals out or stretches.
+**Colours** bind a **whole solid paint**,
 never a gradient stop — a reusable gradient is a fill style — and carry their own alpha: the fill's `%`
 stays a separate, unbindable field, and what draws is the variable's colour times it. **Booleans** bind
 visibility; **strings** bind text content and font family, with text styles. A field that is also a
 component property's needs no rule: the property is a view over the field (§5.3d).
 
 🚨 **A bindable field stores its binding and resolves it at read** (the session's, accepted): it holds
-`Literal(T) | Bound(VarId)` — ⚠️ **in five shapes, as built** (§15 D1039, D1058, D1059; *What is built*, below) — and
+`Literal(T) | Bound(VarId)` — ⚠️ **in six shapes, as built** (§15 D1039, D1058, D1059, D1061; *What is built*, below) — and
 the value it draws is found against the mode in force at that node.
 Three things follow. **Overrides compare the binding** (§5.3d): a main rebinding *brand* → *accent*
 reaches a copy still bound to *brand*, and a copy bound elsewhere keeps it as an override. **Editing a
@@ -3448,9 +3451,9 @@ would go is part of the question.
 name, a kind (`Color`, `Number` or, since §15 D1059, `Boolean`) and one `Cell` per mode, a value or an `Alias`. `Document::variables`
 reads it; `mode_at` answers the mode in force at a node — **the node itself counting** — and
 `resolve_var`, `resolve_brush`, `resolved_paint` and `resolve_corners` are the readers built on it
-(with `resolved_display`, D1058, and `shown`, D1059).
+(with `resolved_display`, D1058, `shown`, D1059, and `resolved_kind`, D1061).
 **`variable::check` is a post-condition of every transaction and a check of the loader**, which refuses
-a dangling binding rather than repairing it. The binding's five shapes:
+a dangling binding rather than repairing it. The binding's six shapes:
 
 - **Paint**: `Fill::brush` and `Stroke::brush` are `BrushSource = Literal(Brush) | Bound { var, alpha }`.
   **The `%` rides in the binding**, because a literal solid has no separate `%` — its `%` is its colour's
@@ -3493,6 +3496,20 @@ a dangling binding rather than repairing it. The binding's five shapes:
   after `keep_spacing_bindings`) by **one half only**: written what it shows, it stays bound; anything
   else detaches. The literal half is left out on purpose — it would excuse the `true` the eye and *Bring
   back into flow* write to show a hidden bound layer, keeping it bound and hidden.
+- **Width and height** (§15 D1061): `Node::size_vars: [Option<VarId>; 2]` beside the stored `size`
+  of the five kinds that have one (`NodeKind::box_size` — `Artboard`, `Rect`, `Ellipse`, `Polygon`,
+  `Star`; a text box's W and H do not bind, by decision). A bound axis's literal is written 0, and 🚨
+  **every layout view answers `LayoutView::kind` resolved** (`Document::resolved_kind`), so layout lays
+  a bound item at its number; a bound layer nothing lays out or pins gets its used kind from
+  `resolve::with_bound_size`. **Only a hand-set axis binds** (`build::size_axes_authored`): not one
+  whose keyword is `%` or `fit-content`, nor one pinned at both ends, nor a flex item's main axis with
+  growth or a basis, nor a stretched flex cross axis or grid axis sized `auto` — shrink, `min-` and
+  `max-` not counted. **`build::keep_size_bindings`**, after `keep_visible_bindings`, judges a `Size`
+  write by the corners' two halves (`build::kept_size_vars`, shared with the preview), so the axis a
+  resize moves detaches and the other stays bound — **and detaches an axis an edit makes computed**
+  (a keyword, a second pin, growth, a basis, a stretch, a reparent into a layout) to the size drawn
+  before it. `keep_insets` reads sizes from the document that pass leaves. On one layer's Transform
+  card only; the multi card's W and H are the union box's and take no binding.
 - **A frame's mode**: `Node::mode: Option<ModeId>`, `None` to inherit; set only on an `Artboard`.
 
 The operations, the save format's v7 and v8, invalidation, the paste rule and the readers are in §5.7, §5.11,
@@ -3532,8 +3549,9 @@ the box the session's chrome. ⚠️ **Not yet D1038's**: the `+` menu leaves ou
 
 **Binding a field** (§15 D1041 in full) is `panels/binding.rs`, for the two fields step 1 binds: a solid
 paint row's colour and a rectangle's corner radius, all four corners or one (`FieldKey`'s `Paint`,
-`Radius` and `Corner`) — and since step 2 a container's gaps and padding (`Spacing`, below) and a
-layer's visibility (`Visible`, below). **Bound, the field is a chip** — a
+`Radius` and `Corner`) — and since step 2 a container's gaps and padding (`Spacing`, below), a
+layer's visibility (`Visible`, below) and a layer's hand-set W and H (`Size`, below). **Bound, the
+field is a chip** — a
 20-pt capsule at the value area's width, no hue unless focused, the name elided by whole groups from the
 left, its tooltip *name · value · Mode*, a hover × detaching. Focused, **it consumes `Backspace` and
 `Delete` as the detach**, so the keymap never deletes the layer, and hands any other key back to the
@@ -3591,6 +3609,11 @@ tooltip, *name · Mixed* where modes part the values, or the variables' names li
 detaches through `keep_visible_bindings`, its tooltip saying so — on a *Mixed* row, which shows all,
 that only the hidden detach; bound on some and not others, it is the plain switch. The layers panel keeps a bound layer's eye drawn at rest in a 22×18 one, as a hidden
 layer's eye already rested, with no tooltip; a worded row badge ends before a resting eye.
+**A layer's W and H bind on the Transform card** (§15 D1061): `FieldKey::Size { id, axis }`, badged
+*W* or *H*, drawn through the Container card's `spacing_bound_ui` and `spacing_doors`, and offered only
+on an axis `build::bindable_size_axes` calls hand-set; the retype writes the typed axis, the other at
+its literal. On an instance the binding's mark joins the literal's, and the ↺ writes the main's
+`SetSizeVars` beside its size.
 
 **A frame's mode** (§15 D1042 in full) is `OndinApp::frame_mode_row`, in the identity card under the
 name row, drawn on an `Artboard` only and only in a document that has a mode: set, the mode's name
@@ -5211,6 +5234,9 @@ pub enum Operation {
     SetVisibleVar { id: NodeId, var: Option<VarId> }, // a layer's visibility binding alone, a
                                                       // boolean variable; the verb writes the
                                                       // literal `true` beside it — §15 D1059
+    SetSizeVars { id: NodeId, vars: [Option<VarId>; 2] }, // a layer's width and height bindings
+                                                      // alone; the verb writes the literals 0
+                                                      // beside it — §15 D1061
     // the variables table (§5.3f, §15 D1039) — no node named; `variable::check` after the last op:
     AddVariable { var: Variable },  RemoveVariable { id: VarId }, // each the other's inverse; a remove
                                                       // refused while anything is bound to it
@@ -5923,8 +5949,11 @@ impl Resolved {
   every text node. It is moved into a `RefCell` for the length of a pass and put back.
 - **`used` is sparse and is read only through `used_local` and `used_kind`**, which answer the node's
   own `transform()` and `kind()` wherever there is no entry — so "no entry" means "as specified"
-  everywhere, and a document with no layout and no bound corner in it holds nothing here. ⚠️ **A bound
-  corner is the one entry layout does not make** (§5.3f, §15 D1039): `resolve::with_bound_corners` puts
+  everywhere, and a document with no layout and no bound corner or size in it holds nothing here.
+  ⚠️ **Layout does not make two kinds of entry.** A bound width or height (§15 D1061): a bound layer
+  nothing lays out or pins gets one from `resolve::with_bound_size`, its kind at the variables'
+  numbers, before the corners are resolved over it. And ~~**a bound
+  corner is the one entry layout does not make**~~ a bound corner (§5.3f, §15 D1039): `resolve::with_bound_corners` puts
   the resolved radii into the used kind after layout, keeping layout's size, so every reader that
   draws, measures or hit-tests from the used kind follows a binding with no line of its own — and a
   reader of the document's kind reads the bound corner's literal, 0. ⚠️ **An edit made from the used
@@ -6648,7 +6677,8 @@ pub fn is_effectively_locked(doc: &Document, id: NodeId) -> bool;   // this node
   complaint**: a v7 reader would drop `spacing_vars` without a word and lay every bound gap and padding
   out at the 0 its literal holds. **Step 2's boolean bindings landed in the same unreleased v8** (§15
   D1059), no second bump, v8 never having shipped: `NodeDto::visible_var`, skipped when unset, and a
-  boolean cell saved as `{"boolean": true}`.
+  boolean cell saved as `{"boolean": true}`. **So did W and H's** (§15 D1061): `NodeDto::size_vars`,
+  skipped when neither axis is bound.
 
 ### 5.11a The library block (§15 D362)
 
@@ -7110,6 +7140,13 @@ pub trait ScenePainter {
   visibility arm marks a node moved, and none needs to: **`flex_relayout` lays from every node with an
   override**, not from `moved`, and `PreviewView::visible` reads the override, so hiding an in-flow item
   re-lays its siblings (§15 D1059's correction; `hiding_an_in_flow_item_through_its_binding_previews_its_siblings_moved`).
+  **A bound width or height is drawn resolved** (§15 D1061): `current_kind`, and `PreviewView::kind`
+  with it, falls back to `Document::resolved_kind`, never the stored 0; `SetGeometry`'s arm resolves a
+  written size with `build::kept_size_vars`, the commit's judgement; `SetSizeVars` is patched with the
+  bindings it sets, and `SetVariableCell`'s arm resolves bound sizes against the changed table.
+  `apply_laid`, the insets relayout's base, a released item and a ghost (`ghost_kind`, in the default
+  mode) read the resolved kind — `apply_laid` drew a bound rect 0 wide beside a resized neighbour until
+  a test found it.
 
   Empty overrides reduce the walk to the committed document exactly — the world transforms it
   composes down the tree are bit-identical to `Resolved`'s, so export is unaffected. ⚠️ **That holds
